@@ -1,5 +1,5 @@
 /**
- * @aipehub/im-slack — public surface.
+ * @gotong/im-slack — public surface.
  */
 
 export {

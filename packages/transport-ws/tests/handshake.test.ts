@@ -1,14 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import WebSocket from 'ws'
 
-import { Hub, AgentParticipant, type Task } from '@aipehub/core'
+import { Hub, AgentParticipant, type Task } from '@gotong/core'
 import {
   PROTOCOL_VERSION,
   decodeFrame,
   encodeFrame,
   type ClientFrame,
   type Frame,
-} from '@aipehub/protocol'
+} from '@gotong/protocol'
 
 import { serveWebSocket, type WebSocketTransportHandle } from '../src/index.js'
 

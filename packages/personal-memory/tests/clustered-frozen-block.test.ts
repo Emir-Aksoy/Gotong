@@ -12,8 +12,8 @@ const tiered = (id: string, tier: string, text: string, ts: number, importance?:
 describe('renderClusteredFrozenBlock', () => {
   it('emits the stable markers + heading + preamble, even when empty', () => {
     const out = renderClusteredFrozenBlock([], { label: 'butler' })
-    expect(out.startsWith('<!-- aipehub:memory:begin -->')).toBe(true)
-    expect(out.endsWith('<!-- aipehub:memory:end -->')).toBe(true)
+    expect(out.startsWith('<!-- gotong:memory:begin -->')).toBe(true)
+    expect(out.endsWith('<!-- gotong:memory:end -->')).toBe(true)
     expect(out).toContain('# Long-term memory — butler')
     expect(out).toContain('_(no memories yet)_')
   })

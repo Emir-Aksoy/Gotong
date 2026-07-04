@@ -10,7 +10,7 @@
 
 import { sign as nodeSign, verify as nodeVerify } from 'node:crypto'
 
-import type { ImMessage, ImUser } from '@aipehub/im-adapter'
+import type { ImMessage, ImUser } from '@gotong/im-adapter'
 import { describe, expect, it } from 'vitest'
 
 import { QqBridge } from '../src/bridge.js'

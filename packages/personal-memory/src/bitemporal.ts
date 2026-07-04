@@ -29,7 +29,7 @@
  * F-M3's reinforcer and E-M2's link writer.
  */
 
-import type { MemoryEntry } from '@aipehub/services-sdk'
+import type { MemoryEntry } from '@gotong/services-sdk'
 
 /** Meta key: when a fact started being true (ms epoch). Absent = "always". */
 export const META_VALID_FROM = 'validFrom'

@@ -34,7 +34,7 @@ import {
   type GrowthReportsAdminSurface,
   type Hub,
   type Space,
-} from '@aipehub/core'
+} from '@gotong/core'
 
 const log = createLogger('admin-routes')
 
@@ -100,7 +100,7 @@ export async function handleAdminRoute(
   // --- admin: workspace API-key secrets (v2.1) ---------------------------
   // Three endpoints let an admin manage workspace-level provider API
   // keys (anthropic, openai, …) through the browser. Keys are encrypted
-  // at rest with AES-256-GCM (see `@aipehub/core/secrets.ts`). The
+  // at rest with AES-256-GCM (see `@gotong/core/secrets.ts`). The
   // plaintext NEVER appears in a GET response — only the "is configured"
   // status. Listing per-agent overrides goes through the same secrets
   // file but its plaintext is set / cleared via the agent edit form.

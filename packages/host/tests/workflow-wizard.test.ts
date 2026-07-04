@@ -29,7 +29,7 @@ import {
 const CATALOG = buildComponentCatalog({
   participants: [
     { id: 'writer', kind: 'agent', capabilities: ['draft', 'revise'], description: '中文写手' },
-    { id: 'alice', kind: 'human', capabilities: ['approve', 'aipehub.human/v1'] },
+    { id: 'alice', kind: 'human', capabilities: ['approve', 'gotong.human/v1'] },
   ],
   installedMcpServers: [{ name: 'filesystem' }],
   resources: { llmKeys: [{ provider: 'deepseek', envSet: true, vaultConfigured: false }] },
@@ -39,7 +39,7 @@ const CATALOG = buildComponentCatalog({
 })
 
 const GOOD_YAML = `
-schema: aipehub.workflow/v1
+schema: gotong.workflow/v1
 workflow:
   id: demo
   trigger:

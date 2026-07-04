@@ -1,8 +1,8 @@
 #!/bin/zsh
-# 双击启动 AipeHub 联邦协作 demo
+# 双击启动 Gotong 联邦协作 demo
 # 同机起两套 hub：
-#   - 上游"大队伍" hub  :3200 web / :4200 ws  (.aipehub-upstream/)
-#   - 本地"小团队"  hub  :3300 web            (.aipehub-team/)
+#   - 上游"大队伍" hub  :3200 web / :4200 ws  (.gotong-upstream/)
+#   - 本地"小团队"  hub  :3300 web            (.gotong-team/)
 # 本地团队通过一个 TeamBridgeAgent 作为单个 agent 接入上游。
 #
 # 第一次跑会自动 pnpm install + pnpm build。Ctrl-C 停止。
@@ -15,7 +15,7 @@ export NVM_DIR="$HOME/.nvm"
 export PATH="/opt/homebrew/opt/curl/bin:/opt/homebrew/bin:$PATH"
 
 echo "============================================"
-echo "  AipeHub 联邦协作 demo — 启动中"
+echo "  Gotong 联邦协作 demo — 启动中"
 echo "============================================"
 echo "项目目录：$(pwd)"
 echo "Node    ：$(node -v 2>/dev/null || echo '未找到')"

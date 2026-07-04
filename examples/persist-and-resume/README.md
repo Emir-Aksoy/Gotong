@@ -16,7 +16,7 @@ pnpm demo:persist:sqlite:fresh
 pnpm demo:persist:sqlite:resume
 ```
 
-State lives under `examples/persist-and-resume/aipe-data/`. Delete that directory to start over.
+State lives under `examples/persist-and-resume/gotong-data/`. Delete that directory to start over.
 
 ## What this proves
 

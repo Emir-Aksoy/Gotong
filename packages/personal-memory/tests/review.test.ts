@@ -1,5 +1,5 @@
-import type { Task } from '@aipehub/core'
-import type { MemoryEntry } from '@aipehub/services-sdk'
+import type { Task } from '@gotong/core'
+import type { MemoryEntry } from '@gotong/services-sdk'
 import { describe, expect, it } from 'vitest'
 
 import {
@@ -21,7 +21,7 @@ function episodicSeed(n: number): MemoryEntry[] {
 function heartbeatTask(): Task {
   return {
     id: 'hb',
-    from: 'aipehub:heartbeat',
+    from: 'gotong:heartbeat',
     strategy: { kind: 'explicit', to: MEMORY_REVIEW_ID },
     payload: { heartbeat: true },
   }

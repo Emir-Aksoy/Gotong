@@ -28,8 +28,8 @@ import { mkdtempSync, readdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { Hub, InMemoryStorage } from '@aipehub/core'
-import { DispatchToolset, LlmAgent } from '@aipehub/llm'
+import { Hub, InMemoryStorage } from '@gotong/core'
+import { DispatchToolset, LlmAgent } from '@gotong/llm'
 
 import { makeRouter, makeCoder, stripThink, DEEPSEEK_MODEL, DEEPSEEK_BASE_URL } from './real-agents.js'
 import { createRouterProvider } from './router-provider.js'
@@ -60,7 +60,7 @@ async function main(): Promise<void> {
   console.log(`  coders : ${stub ? 'in-process stand-ins (STUB_CODERS=1)' : 'codex + deepseek-tui (各自 CLI 登录 / DEEPSEEK_API_KEY, 不注入 router key)'}`)
   console.log(`  goal   : ${goal}\n`)
 
-  const dir = mkdtempSync(join(tmpdir(), 'aipe-codex-deepseek-real-'))
+  const dir = mkdtempSync(join(tmpdir(), 'gotong-codex-deepseek-real-'))
   const ws = setupSharedWorkspace(dir)
   initGitRepo(dir) // so the real CLIs don't print `fatal: not a git repository`
   const hub = new Hub({ storage: new InMemoryStorage() })

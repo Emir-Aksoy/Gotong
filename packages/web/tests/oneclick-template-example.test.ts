@@ -15,7 +15,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { Hub, Space } from '@aipehub/core'
+import { Hub, Space } from '@gotong/core'
 
 import { serveWeb, type WebServerHandle, type WorkflowSurface } from '../src/server.js'
 import { parseTemplate } from '../src/template-manifest.js'
@@ -31,7 +31,7 @@ beforeEach(async () => {
 })
 
 describe('examples/oneclick-template/template.yaml (v5 B-M5)', () => {
-  it('parses as a valid aipehub.template/v1 manifest', () => {
+  it('parses as a valid gotong.template/v1 manifest', () => {
     const t = parseTemplate(templateText)
     expect(t.name).toBe('客服知识助手(一键模板)')
     expect(t.version).toBe(1)
@@ -56,7 +56,7 @@ describe('examples/oneclick-template/template.yaml (v5 B-M5)', () => {
   })
 
   it('imports end-to-end: agent lands, workflow imports, KB slot is reported', async () => {
-    const tmp = await mkdtemp(join(tmpdir(), 'aipehub-oneclick-'))
+    const tmp = await mkdtemp(join(tmpdir(), 'gotong-oneclick-'))
     const { space } = await Space.init(tmp, { name: 'oneclick-test' })
     const hub = new Hub({ space })
     await hub.start()

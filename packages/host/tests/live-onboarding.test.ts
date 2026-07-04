@@ -20,7 +20,7 @@
  * skip it (skipped != failed). Cost discipline mirrors live-workflow.test.ts:
  * one-token probes, a 64-token agent cap, cheap models by default (Claude
  * Haiku / gpt-4o-mini); point at DeepSeek with OPENAI_API_KEY +
- * OPENAI_BASE_URL=https://api.deepseek.com + AIPE_LIVE_OPENAI_MODEL=deepseek-chat.
+ * OPENAI_BASE_URL=https://api.deepseek.com + GOTONG_LIVE_OPENAI_MODEL=deepseek-chat.
  *
  * Deliberately NOT a hard release blocker (paid, non-deterministic third-party
  * API) — same posture as the rest of the live gate.
@@ -32,10 +32,10 @@ import { join } from 'node:path'
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
-import { Hub, Space, type TaskResult } from '@aipehub/core'
-import { LlmAgent, type LlmAgentOptions, type LlmProvider } from '@aipehub/llm'
-import { AnthropicProvider } from '@aipehub/llm-anthropic'
-import { OpenAIProvider } from '@aipehub/llm-openai'
+import { Hub, Space, type TaskResult } from '@gotong/core'
+import { LlmAgent, type LlmAgentOptions, type LlmProvider } from '@gotong/llm'
+import { AnthropicProvider } from '@gotong/llm-anthropic'
+import { OpenAIProvider } from '@gotong/llm-openai'
 
 import { testLlmKey, type LlmKeyTestInput } from '../src/llm-key-test.js'
 
@@ -56,7 +56,7 @@ function liveProvider(): { provider: LlmProvider; label: string } {
     return {
       label: 'anthropic',
       provider: new AnthropicProvider({
-        defaultModel: process.env.AIPE_LIVE_ANTHROPIC_MODEL ?? 'claude-3-5-haiku-latest',
+        defaultModel: process.env.GOTONG_LIVE_ANTHROPIC_MODEL ?? 'claude-3-5-haiku-latest',
         defaultMaxTokens: 64,
       }),
     }
@@ -64,7 +64,7 @@ function liveProvider(): { provider: LlmProvider; label: string } {
   return {
     label: 'openai',
     provider: new OpenAIProvider({
-      defaultModel: process.env.AIPE_LIVE_OPENAI_MODEL ?? 'gpt-4o-mini',
+      defaultModel: process.env.GOTONG_LIVE_OPENAI_MODEL ?? 'gpt-4o-mini',
       ...(process.env.OPENAI_BASE_URL ? { baseURL: process.env.OPENAI_BASE_URL } : {}),
     }),
   }
@@ -81,14 +81,14 @@ function realKeyTestInput(): LlmKeyTestInput {
     return {
       provider: 'anthropic',
       apiKey: process.env.ANTHROPIC_API_KEY,
-      ...(process.env.AIPE_LIVE_ANTHROPIC_MODEL ? { model: process.env.AIPE_LIVE_ANTHROPIC_MODEL } : {}),
+      ...(process.env.GOTONG_LIVE_ANTHROPIC_MODEL ? { model: process.env.GOTONG_LIVE_ANTHROPIC_MODEL } : {}),
     }
   }
   return {
     provider: 'openai',
     apiKey: process.env.OPENAI_API_KEY ?? '',
     ...(process.env.OPENAI_BASE_URL ? { baseURL: process.env.OPENAI_BASE_URL } : {}),
-    ...(process.env.AIPE_LIVE_OPENAI_MODEL ? { model: process.env.AIPE_LIVE_OPENAI_MODEL } : {}),
+    ...(process.env.GOTONG_LIVE_OPENAI_MODEL ? { model: process.env.GOTONG_LIVE_OPENAI_MODEL } : {}),
   }
 }
 
@@ -97,7 +97,7 @@ describe.skipIf(!HAS_KEY)('live onboarding — real LLM self-rescue path', () =>
   let hub: Hub
 
   beforeAll(async () => {
-    root = await mkdtemp(join(tmpdir(), 'aipe-live-onboard-'))
+    root = await mkdtemp(join(tmpdir(), 'gotong-live-onboard-'))
     const { space } = await Space.init(root, { name: 'live-onboarding' })
     hub = new Hub({ space })
     await hub.start()
@@ -154,7 +154,7 @@ describe.skipIf(!HAS_KEY)('live onboarding — real LLM self-rescue path', () =>
     // gateway; assert the rescue-path code, the common + correct case.)
     const wrong: LlmKeyTestInput = {
       ...realKeyTestInput(),
-      apiKey: 'sk-aipe-deliberately-wrong-key-000000000000',
+      apiKey: 'sk-gotong-deliberately-wrong-key-000000000000',
     }
     const verdict = await testLlmKey(wrong)
     expect(verdict.ok).toBe(false)

@@ -1,5 +1,5 @@
 /**
- * `bootstrapServices` — host-side wiring of `@aipehub/services-sdk`.
+ * `bootstrapServices` — host-side wiring of `@gotong/services-sdk`.
  *
  * What's covered:
  *
@@ -12,7 +12,7 @@
  *     plugin shows up in `errors`, the rest of the plugins still init.
  *   - Plugin init failure unregisters the plugin so agents fail loud.
  *   - `seedDefaults: false` does NOT write `plugins.json`.
- *   - `AIPE_SERVICES_NO_SEED=1` env var disables seeding.
+ *   - `GOTONG_SERVICES_NO_SEED=1` env var disables seeding.
  *   - Idempotent: re-bootstrap on an existing space picks up the
  *     manifest as-is.
  *
@@ -29,8 +29,8 @@ import { join } from 'node:path'
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { createLogger, Hub, Space } from '@aipehub/core'
-import type { Owner, ServicePlugin, TrashRef } from '@aipehub/services-sdk'
+import { createLogger, Hub, Space } from '@gotong/core'
+import type { Owner, ServicePlugin, TrashRef } from '@gotong/services-sdk'
 
 import { bootstrapServices } from '../src/services/index.js'
 
@@ -110,7 +110,7 @@ describe('bootstrapServices — fresh space', () => {
   let root: string
   let space: Space
   beforeEach(async () => {
-    root = await mkdtemp(join(tmpdir(), 'aipe-host-services-'))
+    root = await mkdtemp(join(tmpdir(), 'gotong-host-services-'))
     await rm(root, { recursive: true, force: true })
     const opened = await Space.init(root, { name: 'test' })
     space = opened.space
@@ -123,7 +123,7 @@ describe('bootstrapServices — fresh space', () => {
     const fakeMod = (n: string): unknown => ({
       default: () => makeFakePlugin({ type: 'memory', impl: n }),
     })
-    const importPackage = vi.fn(async (pkg: string) => fakeMod(pkg.replace('@aipehub/', '')))
+    const importPackage = vi.fn(async (pkg: string) => fakeMod(pkg.replace('@gotong/', '')))
     const boot = await bootstrapServices({
       space,
       logger,
@@ -132,9 +132,9 @@ describe('bootstrapServices — fresh space', () => {
     expect(boot.seeded).toBe(true)
     expect(existsSync(join(root, 'services', 'plugins.json'))).toBe(true)
     const manifest = JSON.parse(readFileSync(join(root, 'services', 'plugins.json'), 'utf8'))
-    expect(manifest.plugins).toContain('@aipehub/service-memory-file')
-    expect(manifest.plugins).toContain('@aipehub/service-artifact-file')
-    expect(manifest.plugins).toContain('@aipehub/service-datastore-sqlite')
+    expect(manifest.plugins).toContain('@gotong/service-memory-file')
+    expect(manifest.plugins).toContain('@gotong/service-artifact-file')
+    expect(manifest.plugins).toContain('@gotong/service-datastore-sqlite')
   })
 
   it('mkdirs the per-plugin data dir and passes it to plugin.init', async () => {
@@ -168,9 +168,9 @@ describe('bootstrapServices — fresh space', () => {
     expect(boot.ready).toHaveLength(0)
   })
 
-  it('honors AIPE_SERVICES_NO_SEED=1 when seedDefaults is unset', async () => {
-    const prev = process.env.AIPE_SERVICES_NO_SEED
-    process.env.AIPE_SERVICES_NO_SEED = '1'
+  it('honors GOTONG_SERVICES_NO_SEED=1 when seedDefaults is unset', async () => {
+    const prev = process.env.GOTONG_SERVICES_NO_SEED
+    process.env.GOTONG_SERVICES_NO_SEED = '1'
     try {
       const boot = await bootstrapServices({
         space,
@@ -180,8 +180,8 @@ describe('bootstrapServices — fresh space', () => {
       expect(boot.seeded).toBe(false)
       expect(existsSync(join(root, 'services', 'plugins.json'))).toBe(false)
     } finally {
-      if (prev === undefined) delete process.env.AIPE_SERVICES_NO_SEED
-      else process.env.AIPE_SERVICES_NO_SEED = prev
+      if (prev === undefined) delete process.env.GOTONG_SERVICES_NO_SEED
+      else process.env.GOTONG_SERVICES_NO_SEED = prev
     }
   })
 })
@@ -190,7 +190,7 @@ describe('bootstrapServices — failure modes', () => {
   let root: string
   let space: Space
   beforeEach(async () => {
-    root = await mkdtemp(join(tmpdir(), 'aipe-host-services-fail-'))
+    root = await mkdtemp(join(tmpdir(), 'gotong-host-services-fail-'))
     await rm(root, { recursive: true, force: true })
     const opened = await Space.init(root, { name: 'test' })
     space = opened.space
@@ -259,7 +259,7 @@ describe('HubServices — attach/detach/softDelete/restore round-trip', () => {
   let space: Space
   let hub: Hub
   beforeEach(async () => {
-    root = await mkdtemp(join(tmpdir(), 'aipe-host-services-rt-'))
+    root = await mkdtemp(join(tmpdir(), 'gotong-host-services-rt-'))
     await rm(root, { recursive: true, force: true })
     const opened = await Space.init(root, { name: 'test' })
     space = opened.space
@@ -404,7 +404,7 @@ describe('bootstrapServices — wireMethods runtime allowlist lifecycle', () => 
   let hub: Hub
 
   beforeEach(async () => {
-    tmpRoot = await mkdtemp(join(tmpdir(), 'aipehub-wireMethods-'))
+    tmpRoot = await mkdtemp(join(tmpdir(), 'gotong-wireMethods-'))
     const init = await Space.init(tmpRoot, { name: 'test' })
     hub = new Hub({ space: init.space })
     await hub.start()
@@ -417,7 +417,7 @@ describe('bootstrapServices — wireMethods runtime allowlist lifecycle', () => 
 
   it('registers wireMethods at bootstrap and unregisters them on shutdown', async () => {
     const { getServiceMethods, resetServiceMethodsForTests } = await import(
-      '@aipehub/protocol'
+      '@gotong/protocol'
     )
     // Start from a known floor — any prior test that registered wire methods
     // would leak through the process-wide singleton. The fact that we MUST

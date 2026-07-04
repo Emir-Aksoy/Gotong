@@ -1,4 +1,4 @@
-# AipeHub Wire Protocol v1.2
+# Gotong Wire Protocol v1.2
 
 The protocol that lets remote agents connect to a Hub over the network. JSON frames over WebSocket (`ws://` or `wss://`).
 
@@ -7,7 +7,7 @@ This protocol is **not** what local agents use — local agents share a process 
 ## Overview
 
 - **Topology** — Hub is the server, agents are clients. Each TCP connection can host one or more agents from the same client process.
-- **Versioning** — `protocolVersion` is SemVer-ish. Major must match. v0.1 of AipeHub ships protocol `1.0`; v0.4 bumps to `1.1` (services-over-ws, additive); v0.5 bumps to `1.2` (per-method ACL + third-party allowlist extension + audit transcript, all additive — v1.0 / v1.1 / v1.2 are mutually interoperable both directions).
+- **Versioning** — `protocolVersion` is SemVer-ish. Major must match. v0.1 of Gotong ships protocol `1.0`; v0.4 bumps to `1.1` (services-over-ws, additive); v0.5 bumps to `1.2` (per-method ACL + third-party allowlist extension + audit transcript, all additive — v1.0 / v1.1 / v1.2 are mutually interoperable both directions).
 - **Serialization** — JSON over WebSocket text frames. Each frame is a self-contained JSON object discriminated by a `type` field.
 - **Concurrency** — frames can be interleaved freely on one connection. The order of TASK delivery to a single agent is preserved by the Hub; RESULT can come back in any order.
 
@@ -111,7 +111,7 @@ Sent if HELLO is accepted. Transitions both sides to `READY`.
 }
 ```
 
-**`forbidden_agent`** (added in protocol 1.0 minor revision, v0.4 of AipeHub): the server's `authenticate` hook returned `{ ok: true, allowedAgents: [...] }` and at least one id in `HELLO.agents` was not in that allow-list. Use this to bind an API key to a fixed set of agent identities — a leaked key cannot then impersonate any other agent in the deployment. Clients should treat unknown codes as a generic auth/setup failure and surface `message` to the operator.
+**`forbidden_agent`** (added in protocol 1.0 minor revision, v0.4 of Gotong): the server's `authenticate` hook returned `{ ok: true, allowedAgents: [...] }` and at least one id in `HELLO.agents` was not in that allow-list. Use this to bind an API key to a fixed set of agent identities — a leaked key cannot then impersonate any other agent in the deployment. Clients should treat unknown codes as a generic auth/setup failure and surface `message` to the operator.
 
 ### `TASK` — server → client
 
@@ -332,12 +332,12 @@ A future protocol revision may add a `RESUME` frame with the prior `sessionId` t
 
 These are knobs read by the transport at startup. They are **not** for production tuning — they exist to help operators debug a misbehaving third-party SDK. Set them in the shell before launching the Hub.
 
-`AIPE_PROTOCOL_STRICT` has three values: unset (lax / default), `1` (strict), and `closed` (strict + reject-unknown-discriminator).
+`GOTONG_PROTOCOL_STRICT` has three values: unset (lax / default), `1` (strict), and `closed` (strict + reject-unknown-discriminator).
 
 | Variable | Effect | When to use |
 |---|---|---|
-| `AIPE_PROTOCOL_STRICT` (unset) | Inbound decoder is `decodeFrame` — envelope shape only (`{ type: string, ... }`). Cheap; the production hot path. Unknown frame types pass through (forward-compat). | Default. Production. |
-| `AIPE_PROTOCOL_STRICT=1` | Decoder becomes `decodeFrameStrict`. Every inbound frame is run through `validateFrame` in addition to the envelope shape check. Strict mode RECURSES into `TASK.task` / `RESULT.result` / `MESSAGE.msg` so missing inner fields are caught here (H14), and unknown discriminator values still pass (forward-compat). Bad frames are rejected with `bad_frame: invalid_frame: <field> must be …`. O(n) cost per message. | You're integrating a new SDK and the server keeps rejecting its frames as `bad_frame` with no useful hint. Turn this on, retry, and the `detail` field tells you which field is wrong. |
-| `AIPE_PROTOCOL_STRICT=closed` | Decoder becomes `decodeFrameClosed`. Same deep validation as `=1`, plus unknown frame `type` values are rejected with `bad_frame: invalid_frame: unknown frame type '...'`. **Breaks forward compatibility** — a v1.5 client cannot read a v2.0 frame in closed mode. | You want to fail-loud on any new frame type from a sidecar under development (e.g. the sidecar emitted `FROM_THE_FUTURE` because of a copy-paste bug and you want the server to refuse it instead of silently ignoring). Never enable in production. (H15) |
+| `GOTONG_PROTOCOL_STRICT` (unset) | Inbound decoder is `decodeFrame` — envelope shape only (`{ type: string, ... }`). Cheap; the production hot path. Unknown frame types pass through (forward-compat). | Default. Production. |
+| `GOTONG_PROTOCOL_STRICT=1` | Decoder becomes `decodeFrameStrict`. Every inbound frame is run through `validateFrame` in addition to the envelope shape check. Strict mode RECURSES into `TASK.task` / `RESULT.result` / `MESSAGE.msg` so missing inner fields are caught here (H14), and unknown discriminator values still pass (forward-compat). Bad frames are rejected with `bad_frame: invalid_frame: <field> must be …`. O(n) cost per message. | You're integrating a new SDK and the server keeps rejecting its frames as `bad_frame` with no useful hint. Turn this on, retry, and the `detail` field tells you which field is wrong. |
+| `GOTONG_PROTOCOL_STRICT=closed` | Decoder becomes `decodeFrameClosed`. Same deep validation as `=1`, plus unknown frame `type` values are rejected with `bad_frame: invalid_frame: unknown frame type '...'`. **Breaks forward compatibility** — a v1.5 client cannot read a v2.0 frame in closed mode. | You want to fail-loud on any new frame type from a sidecar under development (e.g. the sidecar emitted `FROM_THE_FUTURE` because of a copy-paste bug and you want the server to refuse it instead of silently ignoring). Never enable in production. (H15) |
 
 The decoder choice is **captured once at session construction** (H13). Toggling the env var on a running host will not affect existing sessions — restart the host to pick up a change. |

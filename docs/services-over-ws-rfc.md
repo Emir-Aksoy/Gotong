@@ -2,7 +2,7 @@
 
 > **Status**: DRAFT (awaiting sign-off on §3 ACL Model, §4 Frame schema, §6 Lifecycle)
 > **Replaces**: nothing — additive on top of wire protocol v1.0
-> **Affects**: `@aipehub/protocol`, `@aipehub/transport-ws`, `@aipehub/sdk-node`, `@aipehub/host` (server-side routing). No change to `@aipehub/core`, plugin contracts (`@aipehub/services-sdk`), or first-party plugins.
+> **Affects**: `@gotong/protocol`, `@gotong/transport-ws`, `@gotong/sdk-node`, `@gotong/host` (server-side routing). No change to `@gotong/core`, plugin contracts (`@gotong/services-sdk`), or first-party plugins.
 
 ---
 
@@ -10,7 +10,7 @@
 
 ### 1.1 The gap, in one paragraph
 
-AipeHub already supports two physical shapes of agent (in-process and
+Gotong already supports two physical shapes of agent (in-process and
 remote-over-WS) and design docs promise they're API-equivalent: "you
 can move an agent between them without changing its logic"
 (`docs/AGENT.md`). But that promise breaks the moment an agent wants
@@ -46,7 +46,7 @@ contract, no change to first-party plugins.
 - **Not a generic RPC framework**. Only the methods on the existing
   `MemoryHandle` / `ArtifactHandle` / `DatastoreHandle` contracts are
   exposed. New service types ship the same way as before (write a
-  plugin under `@aipehub/services-sdk`); no protocol change needed.
+  plugin under `@gotong/services-sdk`); no protocol change needed.
 - **Not a substitute for HELLO/admin-approval gating**. Existing
   `gating: 'admin-approval'` + `forbidden_agent` REJECT continue to
   guard who can join. Services ACL builds on top.
@@ -286,7 +286,7 @@ const serviceMethodAllowlist: Record<ServiceType, readonly string[]> = {
 ```
 
 - Methods not in this table return `unknown_method`. This bounds the attack surface.
-- Third-party service types: a plugin author may register their type via the existing `@aipehub/services-sdk` `ServiceRegistry`; the protocol pkg ships a helper `extendServiceMethodAllowlist(type, methods)` so the host bootstrap can extend the table at startup. Out of scope for v1.1 first cut — first-party plugins only.
+- Third-party service types: a plugin author may register their type via the existing `@gotong/services-sdk` `ServiceRegistry`; the protocol pkg ships a helper `extendServiceMethodAllowlist(type, methods)` so the host bootstrap can extend the table at startup. Out of scope for v1.1 first cut — first-party plugins only.
 
 ### 5.4 Owner = `agent/self` lifecycle
 
@@ -412,7 +412,7 @@ SDK cache mirrors the server cache — repeat calls for the same
 It maps 1:1: the example's `CaseMemoryFor = (caseId) => Promise<MemoryHandle>`
 becomes `caseId => this.services.memoryFor('file', {kind:'workflow-run', id:caseId})`.
 Code that uses `recordCaseConversation` / `recallCaseConversation` from
-`@aipehub/host/services` works unchanged — the helpers take a
+`@gotong/host/services` works unchanged — the helpers take a
 `MemoryHandle` and don't care whether it's in-process or WS-backed.
 
 ---
@@ -436,12 +436,12 @@ interoperable in both client/server pairings; only the new feature
 
 | Today (in-process) | After v1.1 (WS sidecar) |
 |---|---|
-| `examples/industry-consultation-deepseek/src/index.ts` — `extends LlmAgent`, manual `boot.services.attach(...)`, `hub.register(...)` | Same file becomes a **sidecar** process: `import { connect } from '@aipehub/sdk-node'` + `services: [...]` declarations in HELLO |
+| `examples/industry-consultation-deepseek/src/index.ts` — `extends LlmAgent`, manual `boot.services.attach(...)`, `hub.register(...)` | Same file becomes a **sidecar** process: `import { connect } from '@gotong/sdk-node'` + `services: [...]` declarations in HELLO |
 | Host glue (`withCaseContext` / `recordCaseConversation`) | Identical code — the helpers take a `MemoryHandle`, doesn't care if it's WS-backed |
 | `CoachAgent extends LlmAgent` | `CoachAgent extends AgentParticipant` (the SDK's class) |
 | `this.services.memory` | `this.services.memory` (same) |
 | `this.caseMemoryFor(caseId)` | `this.services.memoryFor('file', {kind:'workflow-run', id:caseId})` |
-| Run: `pnpm --filter @aipehub/example-industry-consultation-deepseek start` (in-process with host) | Run: `pnpm --filter @aipehub/example-industry-consultation-deepseek start` (sidecar — connects to `pnpm host` over `ws://`) |
+| Run: `pnpm --filter @gotong/example-industry-consultation-deepseek start` (in-process with host) | Run: `pnpm --filter @gotong/example-industry-consultation-deepseek start` (sidecar — connects to `pnpm host` over `ws://`) |
 | Requires host to import the example as a dep | **Host doesn't know the example exists.** The agent process declares its identity at HELLO; admin approves; tasks flow. |
 
 This is the "external agent standardized onboarding" goal restated:

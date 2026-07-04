@@ -2,14 +2,14 @@
 
 > ⚠️ **这是社区 / 第三方 prompt 改造集**，跟主代码同仓只为方便早期迭代。
 > 将来和 [`../`](../)（初始官方参考集）一起迁到独立仓
-> **`AipeHub/aipehub-templates`**，迁仓后再放云端 raw URL 直接给用户下载。
+> **`Gotong/gotong-templates`**，迁仓后再放云端 raw URL 直接给用户下载。
 
-这里收集**从主流开源 prompt 库改造而来**的 AipeHub agent / team 模板。
+这里收集**从主流开源 prompt 库改造而来**的 Gotong agent / team 模板。
 和 [`../agents/`](../agents/)、[`../teams/`](../teams/)（项目原创）不同：
 
 - ✅ **来源**：每个文件头部用注释标出原始仓库 URL、原作者、许可证类型
 - ✅ **许可**：只收 **CC0 / MIT / Apache-2.0** 等**明确允许商用**的，绝不收 "non-commercial only"、"research use only"、未声明许可的
-- ✅ **改造**：原 prompt 大多是"对话引导型"（带 *"my first request is..."*），改造时去掉这段，让 prompt 适应 AipeHub 的 **task-payload → TaskResult** 模式
+- ✅ **改造**：原 prompt 大多是"对话引导型"（带 *"my first request is..."*），改造时去掉这段，让 prompt 适应 Gotong 的 **task-payload → TaskResult** 模式
 - ✅ **元数据**：每个文件都补齐 `displayName` / `capabilities` / `model` / `weightDefault`，让用户**导入就能跑**
 - ✅ **聚合许可**：[`LICENSE-NOTICES.md`](./LICENSE-NOTICES.md) 列出所有来源的完整许可证条款；任何下游分发都应保留这个文件
 
@@ -31,7 +31,7 @@
 
 1. 进到 `agents/` 或 `teams/`，挑一个 `.yaml`
 2. 点 GitHub 上的 **Raw** 按钮 → 全选 + 复制
-3. 回到你的 AipeHub admin → **智能体 → 导入** → 粘贴 → 确认
+3. 回到你的 Gotong admin → **智能体 → 导入** → 粘贴 → 确认
 
 或者下载文件后用 **上传文件** 按钮。
 
@@ -55,7 +55,7 @@ community/
   teams/
     tech-content-team.yaml      # tech-writer + english-improver + prompt-engineer 协作（改造组合，仍归 CC0）
 
-  templates/                    # 整套 hub 模板（aipehub.template/v1）—— 多 agent + 工作流 + KB 引用
+  templates/                    # 整套 hub 模板（gotong.template/v1）—— 多 agent + 工作流 + KB 引用
     README.md                   # 提交流程 + 3 个「照着改」范例 + 本地校验 + 溯源（derivedFrom）
 ```
 
@@ -66,7 +66,7 @@ community/
 
 | 原 prompt 风格 | 改造后 |
 |---|---|
-| `I want you to act as X. ... My first request is "..."` | `You are X. <清晰行为指令>` ——**去掉对话引导句**，因为 AipeHub 把 `task.payload` 直接灌到 user message |
+| `I want you to act as X. ... My first request is "..."` | `You are X. <清晰行为指令>` ——**去掉对话引导句**，因为 Gotong 把 `task.payload` 直接灌到 user message |
 | 暗含多轮对话（"问我问题，等我回答"） | 改成"单次回合"指令；如果需要多轮，注释里说明用 `dispatch` 多次或者让上层应用维护上下文 |
 | 没指定输出格式 | 加一句"Reply with ... only" 或"Return as JSON with fields ..."，方便下游解析 |
 | 没指定语言 | 显式说"Reply in <英文/中文>"，避免和 task 语言串味 |

@@ -5,8 +5,8 @@ import type {
   Task,
   TaskId,
   TaskResult,
-} from '@aipehub/core'
-import type { ServerFrame } from '@aipehub/protocol'
+} from '@gotong/core'
+import type { ServerFrame } from '@gotong/protocol'
 
 interface PendingTask {
   resolve: (r: TaskResult) => void

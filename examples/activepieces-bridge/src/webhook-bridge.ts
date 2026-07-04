@@ -2,14 +2,14 @@
  * A generic inbound webhook -> Hub.dispatch bridge.
  *
  * Any automation platform that can send an HTTP POST (Activepieces, n8n, Make,
- * Zapier, a cron curl) can trigger an AipeHub workflow through this. It is the
+ * Zapier, a cron curl) can trigger an Gotong workflow through this. It is the
  * automation-side twin of the IM bridges: "HTTP in, capability dispatch out,
  * transcript on the side".
  *
  * Two trust rules make it safe to expose to an automation platform:
  *
  *   1. **Shared secret, fail-closed.** Every request must carry the operator's
- *      secret in `X-Aipe-Webhook-Secret`, compared in constant time. A blank
+ *      secret in `X-Gotong-Webhook-Secret`, compared in constant time. A blank
  *      secret is rejected at construction — there is no anonymous mode.
  *   2. **Capability-only, operator-allow-listed.** A request can only reach the
  *      capabilities the operator wired into `routes`; it can NEVER name an
@@ -47,7 +47,7 @@ export interface WebhookRoute {
 export interface WebhookBridgeOptions {
   hub: DispatchLike
   /**
-   * Shared secret the automation platform sends in `X-Aipe-Webhook-Secret`.
+   * Shared secret the automation platform sends in `X-Gotong-Webhook-Secret`.
    * Blank/whitespace throws at construction — the endpoint faces the internet,
    * so an unauthenticated mode would be a footgun.
    */
@@ -90,7 +90,7 @@ export function createWebhookBridge(opts: WebhookBridgeOptions): WebhookBridge {
 
     // Auth before route existence: don't leak which hook names exist to an
     // unauthenticated caller.
-    if (!secretMatches(headerValue(req, 'x-aipe-webhook-secret'), opts.secret)) {
+    if (!secretMatches(headerValue(req, 'x-gotong-webhook-secret'), opts.secret)) {
       return sendJson(res, 401, { ok: false, error: 'unauthorized' })
     }
 

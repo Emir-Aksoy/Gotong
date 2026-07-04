@@ -1,11 +1,11 @@
-# RAG via MCP — AipeHub Example
+# RAG via MCP — Gotong Example
 
 Demonstrates retrieval-augmented generation by wiring a knowledge MCP
-server (chroma-mcp) into an AipeHub agent.
+server (chroma-mcp) into an Gotong agent.
 
 ## How it works
 
-AipeHub does not embed vectors or call embedding APIs. Instead, each
+Gotong does not embed vectors or call embedding APIs. Instead, each
 agent declares the MCP servers it needs in its `mcpServers` config.
 The host spawns them as child processes and exposes their tools to the
 agent's LLM tool-use loop.
@@ -34,16 +34,16 @@ export DEEPSEEK_API_KEY=sk-...   # cheapest option with tool use
 # or: export OPENAI_API_KEY=sk-...
 
 # 3. Initialize a workspace and start the host
-aipehub init
-npx @aipehub/host
+gotong init
+npx @gotong/host
 
 # 4. In the admin UI → Agents tab → Import YAML
 #    Paste the contents of agents/rag-researcher.yaml
 #    The mcpServers config will auto-spawn chroma-mcp
 
 # 5. Chat with the agent:
-#    - "Please learn this: AipeHub is an agent orchestration framework..."
-#    - "What is AipeHub?"
+#    - "Please learn this: Gotong is an agent orchestration framework..."
+#    - "What is Gotong?"
 ```
 
 ## Agent config
@@ -55,7 +55,7 @@ full agent manifest. The key section:
 mcpServers:
   - name: knowledge
     command: uvx
-    args: [chroma-mcp, --persist-dir, .aipehub/knowledge/research]
+    args: [chroma-mcp, --persist-dir, .gotong/knowledge/research]
 ```
 
 This tells the host to spawn `uvx chroma-mcp` when the agent starts.

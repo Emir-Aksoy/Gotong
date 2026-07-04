@@ -1,6 +1,6 @@
 # Performance baseline
 
-This document records the pre-launch performance profile of AipeHub. It
+This document records the pre-launch performance profile of Gotong. It
 exists so that:
 
 1. **Operators can size a deployment** — "is one node enough for our
@@ -15,12 +15,12 @@ reproduce these numbers locally:
 pnpm install && pnpm -r build
 
 # Realistic small-team load: 50 workers, 100 tasks/sec, 60s
-pnpm --filter @aipehub/example-loadtest ws -- \
+pnpm --filter @gotong/example-loadtest ws -- \
   --workers 50 --duration 60s --rate 100 \
   --output runs/ws-50w-60s-100rps.json
 
 # Saturation upper bound: 50 workers, unthrottled, 10s
-pnpm --filter @aipehub/example-loadtest ws -- \
+pnpm --filter @gotong/example-loadtest ws -- \
   --workers 50 --duration 10s --concurrency 32 \
   --output runs/ws-50w-10s-sat.json
 ```
@@ -41,7 +41,7 @@ LLM agents (the harness uses an `EchoAgent` that returns synchronously).
 ## How to read this
 
 **The realistic-load row is the one to plan against.** A 50-person
-team where every person dispatches ~2 tasks/sec is — by AipeHub design
+team where every person dispatches ~2 tasks/sec is — by Gotong design
 goals (README scope: "dozens of users, single-node") — at the upper
 end of what we expect in production. At that load:
 
@@ -82,7 +82,7 @@ transcript. Three things to note:
   shipping.
 - **After any Hub-core change** to `dispatch`, `register`, or the
   capability matcher.
-- **After a transport change** (`@aipehub/transport-ws` / `@aipehub/sdk-node`).
+- **After a transport change** (`@gotong/transport-ws` / `@gotong/sdk-node`).
   The `ws` runner picks up that surface.
 
 ## What this baseline does NOT cover

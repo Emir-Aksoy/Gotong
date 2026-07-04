@@ -9,13 +9,13 @@ import type {
   LlmStopReason,
   LlmStreamChunk,
   LlmUsage,
-} from '@aipehub/llm'
+} from '@gotong/llm'
 import {
   DEFAULT_MULTIMODAL_INLINE_BYTE_CAP,
   MultimodalInlineSizeError,
   MultimodalNotSupportedError,
   extractInlineBase64Size,
-} from '@aipehub/llm'
+} from '@gotong/llm'
 
 /**
  * Construction options for {@link AnthropicProvider}.
@@ -54,7 +54,7 @@ export interface AnthropicProviderOptions {
   /**
    * Phase 9 — cap on inline base64 payload size accepted from a single
    * block. Default: `DEFAULT_MULTIMODAL_INLINE_BYTE_CAP` (1 MB). Override
-   * via env `AIPE_MULTIMODAL_MAX_INLINE_MB` is parsed by the host and
+   * via env `GOTONG_MULTIMODAL_MAX_INLINE_MB` is parsed by the host and
    * forwarded here at construction time — provider doesn't read env so
    * tests stay deterministic. Throws `MultimodalInlineSizeError` when a
    * single block exceeds the cap.

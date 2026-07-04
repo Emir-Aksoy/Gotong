@@ -146,11 +146,11 @@ describe('generateTotpSecret + otpauth URI', () => {
     const uri = buildOtpauthUri({
       secretBase32: 'MZXW6YTBOI======',
       account: 'member@team.test',
-      issuer: 'AipeHub',
+      issuer: 'Gotong',
     })
     expect(uri.startsWith('otpauth://totp/')).toBe(true)
     expect(uri).toContain('secret=MZXW6YTBOI')
-    expect(uri).toContain('issuer=AipeHub')
+    expect(uri).toContain('issuer=Gotong')
     expect(uri).toContain('digits=6')
     expect(uri).toContain('period=30')
     // We deliberately omit algorithm so apps use their SHA1 default.

@@ -2,7 +2,7 @@
 /**
  * Full HITL E2E for the personal-growth interviewer.
  *
- *   1. Lift real DeepSeek key from .aipehub-demo (programmatic, no log).
+ *   1. Lift real DeepSeek key from .gotong-demo (programmatic, no log).
  *   2. mkdir fresh space, Space.init, mint admin token.
  *   3. spawn host child process.
  *   4. POST /api/admin/bundles/import (7 agents + workflow + key).
@@ -34,8 +34,8 @@ import { spawn } from 'node:child_process'
 import { tmpdir } from 'node:os'
 import { readFileSync } from 'node:fs'
 
-const SPACE_DIR = join(tmpdir(), 'aipehub-hitl-' + Date.now())
-const DEMO_SPACE = resolve('.aipehub-demo')
+const SPACE_DIR = join(tmpdir(), 'gotong-hitl-' + Date.now())
+const DEMO_SPACE = resolve('.gotong-demo')
 const WEB_PORT = 3731
 const WS_PORT = 4731
 const BUNDLE_PATH = resolve('templates/bundles/personal-growth.yaml')
@@ -60,7 +60,7 @@ const { Space } = await import('../packages/core/dist/index.js')
 const demo = await Space.openOrInit(DEMO_SPACE, { name: 'demo' })
 const deepseekKey = await demo.space.getAgentApiKey('deepseek-writer')
 if (!deepseekKey || deepseekKey.length < 10) {
-  console.error('FATAL: no DeepSeek key in .aipehub-demo')
+  console.error('FATAL: no DeepSeek key in .gotong-demo')
   process.exit(2)
 }
 
@@ -83,9 +83,9 @@ const hostProc = spawn(
     cwd: resolve('packages/host'),
     env: {
       ...process.env,
-      AIPE_SPACE: SPACE_DIR,
-      AIPE_WEB_PORT: String(WEB_PORT),
-      AIPE_WS_PORT: String(WS_PORT),
+      GOTONG_SPACE: SPACE_DIR,
+      GOTONG_WEB_PORT: String(WEB_PORT),
+      GOTONG_WS_PORT: String(WS_PORT),
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   },

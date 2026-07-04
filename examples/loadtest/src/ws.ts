@@ -12,7 +12,7 @@
  *   - JSON encoding / decoding overhead per frame
  *   - WebSocket framing + heartbeat machinery
  *   - SDK session-state bookkeeping (pending tasks map, cancel routing)
- *   - The full agent-side `onTask` dispatch path used by `@aipehub/sdk-node`
+ *   - The full agent-side `onTask` dispatch path used by `@gotong/sdk-node`
  *
  * What this still DOESN'T add (vs production):
  *   - TCP loopback latency (negligible — same kernel) vs a real network
@@ -24,9 +24,9 @@
  * numbers in `docs/PERFORMANCE.md`.
  */
 
-import { AgentParticipant, Hub, type Task } from '@aipehub/core'
-import { connect, type Session } from '@aipehub/sdk-node'
-import { serveWebSocket, type WebSocketTransportHandle } from '@aipehub/transport-ws'
+import { AgentParticipant, Hub, type Task } from '@gotong/core'
+import { connect, type Session } from '@gotong/sdk-node'
+import { serveWebSocket, type WebSocketTransportHandle } from '@gotong/transport-ws'
 
 import {
   MemorySampler,

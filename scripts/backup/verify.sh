@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Sanity-check an AipeHub workspace directory after a restore.
+# Sanity-check an Gotong workspace directory after a restore.
 #
 # Catches the most common ways a backup goes wrong:
 #   - space.json missing or unparseable
@@ -139,7 +139,7 @@ if ls "$DIR"/identity-master.key* >/dev/null 2>&1; then
   echo "  encryption is defeated for that copy — audit your access controls."
   WARNS=$((WARNS + 1))
 else
-  echo "ℹ identity-master.key MISSING — expected. Supply it (or AIPE_MASTER_KEY) before boot."
+  echo "ℹ identity-master.key MISSING — expected. Supply it (or GOTONG_MASTER_KEY) before boot."
 fi
 
 # 8. identity.sqlite — v4 identity layer (users/sessions/vault/quota/…).

@@ -62,7 +62,7 @@ import type {
   MemoryEntry,
   MemoryHandle,
   NewMemoryEntry,
-} from '@aipehub/services-sdk'
+} from '@gotong/services-sdk'
 
 /** Who wrote a conversation entry. Open-ended on purpose — extra
  * roles (e.g. 'observer', 'qa') can land later without touching the

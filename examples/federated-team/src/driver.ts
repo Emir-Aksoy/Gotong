@@ -12,17 +12,17 @@
  * opening a browser.
  *
  * Usage:
- *   AIPE_ADMIN_TOKEN=<token from upstream> tsx src/driver.ts
+ *   GOTONG_ADMIN_TOKEN=<token from upstream> tsx src/driver.ts
  */
 
 import { setTimeout as sleep } from 'node:timers/promises'
 
-const UPSTREAM_HTTP = process.env.AIPE_UPSTREAM_HTTP ?? 'http://127.0.0.1:3200'
-const TOKEN = process.env.AIPE_ADMIN_TOKEN
-const BRIDGE_ID = process.env.AIPE_BRIDGE_ID ?? 'alice-team'
+const UPSTREAM_HTTP = process.env.GOTONG_UPSTREAM_HTTP ?? 'http://127.0.0.1:3200'
+const TOKEN = process.env.GOTONG_ADMIN_TOKEN
+const BRIDGE_ID = process.env.GOTONG_BRIDGE_ID ?? 'alice-team'
 
 if (!TOKEN) {
-  console.error('Set AIPE_ADMIN_TOKEN to the upstream admin token first.')
+  console.error('Set GOTONG_ADMIN_TOKEN to the upstream admin token first.')
   process.exit(1)
 }
 

@@ -23,7 +23,7 @@
  * channels. Bridge uses `user` field verbatim as `platformUserId`.
  */
 
-import type { ImAttachment, ImMessage, ImUser } from '@aipehub/im-adapter'
+import type { ImAttachment, ImMessage, ImUser } from '@gotong/im-adapter'
 
 import type { SlackFile, SlackMessageEvent } from './types.js'
 

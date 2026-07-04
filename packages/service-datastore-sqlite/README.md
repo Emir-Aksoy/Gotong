@@ -1,6 +1,6 @@
-# @aipehub/service-datastore-sqlite
+# @gotong/service-datastore-sqlite
 
-First-party AipeHub plugin: SQLite-backed `datastore` service.
+First-party Gotong plugin: SQLite-backed `datastore` service.
 Implements [`DatastoreHandle`](../services-sdk/src/types/datastore.ts)
 on top of one `.sqlite` file per declared datastore.
 

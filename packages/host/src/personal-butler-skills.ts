@@ -1,7 +1,7 @@
 /**
  * personal-butler-skills.ts — the host side of the master SKILL.md (MR3 §六).
  *
- * The skill machinery in `@aipehub/personal-memory` (`procedureAuthoringReviewer`
+ * The skill machinery in `@gotong/personal-memory` (`procedureAuthoringReviewer`
  * + `umbrellaReviewer`) is FS-free leaf code: it authors / merges `form:'procedure'`
  * entries in the jsonl and closes superseded ones, but never touches a markdown
  * file. This module is the projection: it rewrites `<userDir>/SKILL.md` to the
@@ -36,7 +36,7 @@
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 
-import type { Logger } from '@aipehub/core'
+import type { Logger } from '@gotong/core'
 import {
   activeProcedures,
   isUmbrella,
@@ -44,15 +44,15 @@ import {
   type MemoryReviewer,
   type ReviewContext,
   type ReviewOutcome,
-} from '@aipehub/personal-memory'
-import { ownerDir } from '@aipehub/service-memory-file'
-import type { MemoryEntry, Owner } from '@aipehub/services-sdk'
+} from '@gotong/personal-memory'
+import { ownerDir } from '@gotong/service-memory-file'
+import type { MemoryEntry, Owner } from '@gotong/services-sdk'
 
 /** Filename of the per-user master skill index, written inside the user's memory dir. */
 export const SKILL_FILE = 'SKILL.md'
 
 /** The stable machine marker that opens the file (`read` keys off it). */
-const MARKER_PREFIX = '<!-- aipehub-skill '
+const MARKER_PREFIX = '<!-- gotong-skill '
 const MARKER_SUFFIX = ' -->'
 /** Max chars of a step shown in SKILL.md (a readable index, not a dump). */
 const STEP_CLIP = 200

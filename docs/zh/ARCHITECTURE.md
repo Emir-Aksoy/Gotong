@@ -1,4 +1,4 @@
-# AipeHub 架构（v0.2）
+# Gotong 架构（v0.2）
 
 > 同步自英文版 [`docs/ARCHITECTURE.md`](../ARCHITECTURE.md) @ 2026-05-17
 
@@ -11,26 +11,26 @@
 | v0.2 | `LlmAgent` 基类 + 中立 `LlmProvider` 接口 + Anthropic / OpenAI provider —— 接入 LLM-backed agent 而不把 Hub 绑死到任何厂商 SDK |
 | v0.3 | `SqliteStorage` —— 由 SQLite (`better-sqlite3` optional peer dep) 支撑的持久化 transcript。FileStorage 仍是零依赖默认值。 |
 | v0.4 | HELLO 时按 agent 鉴权 —— `authenticate` 可以返回 `{ ok: true, allowedAgents: ['a1', 'a2'] }` 把一个 API key 绑到一组指定的 agent id。泄漏的 key 没法假冒任何其他 agent。新 `forbidden_agent` REJECT code。**向后兼容**：boolean 返回仍可用。 |
-| v0.5 | Python SDK（`python-sdk/`，PyPI 名 `aipehub`）—— 第二个语言客户端。`AgentParticipant` + `connect()` 跟 Node SDK 对齐；测试跑通 fake Hub server；`examples/remote-python` 跑 Node host + Python worker 跨语言端到端，走同一套 wire protocol。 |
-| v0.6 | CLI human adapter —— `examples/cli-human` 演示终端驱动一个 `HumanParticipant`：任务渲染到 stdout，回复通过 readline 进入（`AIPE_AUTO=1` 在 CI / 非 TTY 下跳过提示）。可作任何 UI / chat / IM adapter 基于 `human.next()` / `human.complete()` / `human.reject()` 的参考实现。 |
+| v0.5 | Python SDK（`python-sdk/`，PyPI 名 `gotong`）—— 第二个语言客户端。`AgentParticipant` + `connect()` 跟 Node SDK 对齐；测试跑通 fake Hub server；`examples/remote-python` 跑 Node host + Python worker 跨语言端到端，走同一套 wire protocol。 |
+| v0.6 | CLI human adapter —— `examples/cli-human` 演示终端驱动一个 `HumanParticipant`：任务渲染到 stdout，回复通过 readline 进入（`GOTONG_AUTO=1` 在 CI / 非 TTY 下跳过提示）。可作任何 UI / chat / IM adapter 基于 `human.next()` / `human.complete()` / `human.reject()` 的参考实现。 |
 | v0.7 | **截止时间** —— wire 类型加 `Task.deadlineMs`：已过期的任务回 `failed`，`error: 'deadline_expired'`，**永远不会**触达参与者。（最初藏在 `PriorityQueueScheduler` wrapper + `Task.priority` 后面；2026-06 审计发现零采用，把截止时间执行折进 `DefaultScheduler`，删掉了 wrapper、`schedulerFactory` seam 和 `Task.priority`。） |
 
 ## 1. 哲学
 
 **Hub 是通信空间，不是大脑**。
 
-AipeHub **不跑 LLM**。不实现 agent loop。不持有 prompt 或工具
+Gotong **不跑 LLM**。不实现 agent loop。不持有 prompt 或工具
 registry。agent 自带智能 —— 不管那智能是一次 Claude API 调用、一个
 shell 脚本，还是一个睡着的人 —— Hub 的唯一职责是**路由消息、派任务、
 持久化 transcript、发事件**。
 
 这跟 CrewAI、AutoGen、OpenBotX 这些把 agent 执行耦合进框架本身的
-框架持相反立场。AipeHub 故意低一层：它之于多参与者协作，犹如
+框架持相反立场。Gotong 故意低一层：它之于多参与者协作，犹如
 **消息中间件之于微服务**。
 
 **人类是一等参与者，不是特殊的 tool call**。
 
-大多数 agent 框架把人当作 `request_human_input` 工具。AipeHub 把
+大多数 agent 框架把人当作 `request_human_input` 工具。Gotong 把
 人当作 `Participant`，与 agent 走同一套 wire protocol —— 他们
 注册、订阅频道、收消息、接任务、发结果。**区别只在 adapter 层**：
 human adapter 后面是 UI；agent adapter 后面是代码。**Hub 不关心**。
@@ -159,8 +159,8 @@ in-flight 工作。resume 的含义见 §12。
 代码来基于 `hub.onEvent()` 构建你自己的 UI。
 
 ```ts
-import { Hub } from '@aipehub/core'
-import { serveWeb } from '@aipehub/web'
+import { Hub } from '@gotong/core'
+import { serveWeb } from '@gotong/web'
 
 const hub = new Hub()
 await hub.start()
@@ -170,7 +170,7 @@ const web = await serveWeb(hub, { port: 3000 })
 
 ## 8. 部署形态
 
-AipeHub 支持两种部署形态，**Hub API 在两者中完全一样**。本地和
+Gotong 支持两种部署形态，**Hub API 在两者中完全一样**。本地和
 远程 agent 注册进同一个 `Registry`；scheduler **不区分两者**。
 
 ### 8a. Embedded —— 一切在一个进程内
@@ -178,9 +178,9 @@ AipeHub 支持两种部署形态，**Hub API 在两者中完全一样**。本地
 **库模式**。Agent 是 in-process 对象。
 
 ```ts
-import { Hub, FileStorage } from '@aipehub/core'
+import { Hub, FileStorage } from '@gotong/core'
 
-const hub = new Hub({ storage: new FileStorage('./aipe.jsonl') })
+const hub = new Hub({ storage: new FileStorage('./gotong.jsonl') })
 await hub.start()
 hub.register(new MyAgent())
 hub.register(new MyHumanAdapter())
@@ -200,21 +200,21 @@ broadcast race、explicit dispatch **一视同仁**。
 
 ```ts
 // host 进程
-import { Hub } from '@aipehub/core'
-import { serveWebSocket } from '@aipehub/transport-ws'
+import { Hub } from '@gotong/core'
+import { serveWebSocket } from '@gotong/transport-ws'
 
 const hub = new Hub()
 await hub.start()
 const ws = await serveWebSocket(hub, {
   port: 4000,
-  authenticate: (apiKey) => apiKey === process.env.AIPE_API_KEY,
+  authenticate: (apiKey) => apiKey === process.env.GOTONG_API_KEY,
 })
 // hub.dispatch(...) 照样用 —— 远端 agent 跟本地的一模一样
 ```
 
 ```ts
 // worker 进程 —— Node SDK
-import { AgentParticipant, connect } from '@aipehub/sdk-node'
+import { AgentParticipant, connect } from '@gotong/sdk-node'
 
 class MyAgent extends AgentParticipant {
   constructor() { super({ id: 'a1', capabilities: ['draft'] }) }
@@ -224,7 +224,7 @@ class MyAgent extends AgentParticipant {
 const session = await connect({
   url: 'ws://hub.example.com:4000',
   agents: [new MyAgent()],
-  apiKey: process.env.AIPE_API_KEY,
+  apiKey: process.env.GOTONG_API_KEY,
 })
 ```
 
@@ -246,7 +246,7 @@ Hub                                         (对 LLM 一无所知)
               └── MockLlmProvider            (in-process，无网络)
 ```
 
-**中立 wire 类型**（零厂商耦合 —— 在 `@aipehub/llm`）：
+**中立 wire 类型**（零厂商耦合 —— 在 `@gotong/llm`）：
 
 ```ts
 interface LlmProvider {
@@ -286,7 +286,7 @@ interface LlmResponse {
 
 **为什么 provider 拆成单独包**。`@anthropic-ai/sdk` 和 `openai`
 都是 ~1MB+ 的 peer 依赖。多数用户只想要一家；把两家都打进一个
-`@aipehub/llm` 大包是**惩罚所有人来支持 polyglot 场景**。拆开也
+`@gotong/llm` 大包是**惩罚所有人来支持 polyglot 场景**。拆开也
 让每个 provider 独立跟自己厂商 SDK 的版本。
 
 **流式、tool call、JSON mode** **不在 v0.2 范围** —— 见 §10。
@@ -299,15 +299,15 @@ interface LlmResponse {
 
 | 特性 | 状态 | 在哪 |
 |---|---|---|
-| Python SDK | ✅ 已出（v0.5） | `python-sdk/`，PyPI 名 `aipehub` |
+| Python SDK | ✅ 已出（v0.5） | `python-sdk/`，PyPI 名 `gotong` |
 | `SqliteStorage` | ✅ 已出（v0.3） | `packages/core/src/storage/sqlite.ts`，peer dep `better-sqlite3` |
 | HELLO 按 agent 鉴权 | ✅ 已出（v0.4） | `authenticate(apiKey) → { ok, allowedAgents? }`；新 `forbidden_agent` REJECT code |
 | 截止时间 | ✅ 已出（v0.7，2026-06 折进 `DefaultScheduler`） | `Task.deadlineMs`；`error: 'deadline_expired'` |
-| Host 托管 LLM agent（无代码） | ✅ 已出（v2.1） | `@aipehub/host` 里的 `LocalAgentPool`；管理 UI 里 YAML/JSON 清单 |
-| 加密 API key 存储 | ✅ 已出（v2.1） | `<space>/secrets.enc.json` 用 AES-256-GCM；master key 文件或 `AIPE_SECRET_KEY` env |
+| Host 托管 LLM agent（无代码） | ✅ 已出（v2.1） | `@gotong/host` 里的 `LocalAgentPool`；管理 UI 里 YAML/JSON 清单 |
+| 加密 API key 存储 | ✅ 已出（v2.1） | `<space>/secrets.enc.json` 用 AES-256-GCM；master key 文件或 `GOTONG_SECRET_KEY` env |
 | 贡献评分 + 榜单 | ✅ 已出（v2.1） | `Task.weight`、`Evaluation.rating`、`hub.leaderboard(...)`、按 publisher 退出 |
-| 模板库（内建 + 社区） | ✅ 已出（v2.1） | `templates/{,community}/{agents,teams}/`；`@aipehub/web` 里的清单解析 |
-| LLM 流式 | ✅ 已出 (v3.8 / Phase 8) | `LlmProvider.stream(req)` 返回 `AsyncIterable<LlmStreamChunk>`。`LlmAgent` 按 chunk 消费;`LocalAgentPool` 把它们写入 transcript (`llm_stream_chunk`);`@aipehub/web` SSE 推到 admin UI 做打字机渲染。 |
+| 模板库（内建 + 社区） | ✅ 已出（v2.1） | `templates/{,community}/{agents,teams}/`；`@gotong/web` 里的清单解析 |
+| LLM 流式 | ✅ 已出 (v3.8 / Phase 8) | `LlmProvider.stream(req)` 返回 `AsyncIterable<LlmStreamChunk>`。`LlmAgent` 按 chunk 消费;`LocalAgentPool` 把它们写入 transcript (`llm_stream_chunk`);`@gotong/web` SSE 推到 admin UI 做打字机渲染。 |
 | **`LlmAgent` 内的 tool / function calling** | ❌ 暂无 | `LlmAgent` 透传 `task.payload`，返回 text。多轮工具循环今天还是 app code 的事。 |
 | **跨重启的 pending 任务持久化** | ❌ 暂无 | 只持久化 transcript。`SqliteStorage` 上的 pending-tasks 表草图有了，但 Hub 侧没接。见 §12。 |
 | **保留 in-flight 任务的重连** | ❌ 暂无 | 断连用 `remote_disconnect` 失败所有 outstanding 任务。wire 上保留了用之前 `sessionId` 的 `RESUME` frame，没实现。 |
@@ -381,11 +381,11 @@ examples/
   remote-python/        Node Hub + Python worker（跨语言）—— v0.5
   cli-human/            终端当 human 的 adapter；readline 驱动的批准循环 —— v0.6
 
-python-sdk/             Python SDK（PyPI 名：aipehub）—— v0.5
-  src/aipehub/
-    protocol.py         frame 常量 + 出站 builder（对齐 @aipehub/protocol）
+python-sdk/             Python SDK（PyPI 名：gotong）—— v0.5
+  src/gotong/
+    protocol.py         frame 常量 + 出站 builder（对齐 @gotong/protocol）
     agent.py            AgentParticipant —— sync 或 async handle_task
-    session.py          connect() + Session 状态机（对齐 @aipehub/sdk-node）
+    session.py          connect() + Session 状态机（对齐 @gotong/sdk-node）
   tests/                pytest-asyncio 对一个真 websockets fake-Hub 跑
 ```
 

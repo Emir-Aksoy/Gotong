@@ -1,15 +1,15 @@
 # activepieces-bridge
 
-**Inbound automation → AipeHub.** Any platform that can send an HTTP POST —
+**Inbound automation → Gotong.** Any platform that can send an HTTP POST —
 [Activepieces](https://www.activepieces.com/), n8n, Make, Zapier, or a plain
-`curl` in a cron job — triggers an AipeHub workflow through this bridge. It is
+`curl` in a cron job — triggers an Gotong workflow through this bridge. It is
 the automation-side twin of the IM bridges: *HTTP in, capability dispatch out,
 transcript on the side.*
 
 ## Run the demo
 
 ```bash
-pnpm --filter @aipehub/example-activepieces-bridge start
+pnpm --filter @gotong/example-activepieces-bridge start
 ```
 
 It boots a Hub + a `lead-intake` agent + the webhook bridge on an ephemeral
@@ -41,7 +41,7 @@ await bridge.listen(8088)          // or mount bridge.handle on your own server
 ## Two trust rules (why it's safe to expose)
 
 1. **Shared secret, fail-closed.** Every request must carry the operator's
-   secret in `X-Aipe-Webhook-Secret`, compared in constant time. A blank secret
+   secret in `X-Gotong-Webhook-Secret`, compared in constant time. A blank secret
    throws at construction — there is no anonymous mode.
 2. **Capability-only, operator-allow-listed.** A request can only reach the
    capabilities you wired into `routes`; it can **never** name an explicit
@@ -56,7 +56,7 @@ result.
 
 1. In your flow, add an **HTTP Request** action.
 2. Method `POST`, URL `https://<your-host>/hooks/new-lead`.
-3. Header `X-Aipe-Webhook-Secret: <the secret you configured>`.
+3. Header `X-Gotong-Webhook-Secret: <the secret you configured>`.
 4. Body: the JSON you want as the task payload (e.g. the trigger's lead fields).
 
 The same recipe works for n8n's *HTTP Request* node, Make's *HTTP* module, or

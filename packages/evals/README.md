@@ -1,6 +1,6 @@
-# @aipehub/evals
+# @gotong/evals
 
-Lightweight **structural** eval harness for AipeHub workflows and agent
+Lightweight **structural** eval harness for Gotong workflows and agent
 prompts. Pure functions, zero LLM calls, deterministic, microseconds per
 check — runs in CI to catch prompt regressions before they ship.
 
@@ -40,14 +40,14 @@ AI-graded evals. Structural checks are:
 - **Sufficient to catch the most common regressions** — missing
   sections, wrong markers, dropped TL;DR, banned phrases creeping back
 
-When/if AipeHub needs semantic eval (e.g. "is this advice actually
+When/if Gotong needs semantic eval (e.g. "is this advice actually
 useful?"), it goes in a separate package. This one stays focused.
 
 ## Usage
 
 ```ts
-import { checkThreeSegmentContract } from '@aipehub/evals/checkers/three-segment'
-import { checkStructure } from '@aipehub/evals/checkers/structure'
+import { checkThreeSegmentContract } from '@gotong/evals/checkers/three-segment'
+import { checkStructure } from '@gotong/evals/checkers/structure'
 
 // Example: validate a body-coach output
 const bodyCoachOutput = await readFile('fixture-body-coach-output.md', 'utf8')
@@ -91,6 +91,6 @@ packages/evals/
 
 Each checker is a pure function `check<Thing>(text, options) → { ok, violations }`.
 Add the file under `src/checkers/`, re-export from `src/index.ts`, and add
-unit tests under `tests/`. The package has no dependencies on `@aipehub/core`
+unit tests under `tests/`. The package has no dependencies on `@gotong/core`
 or any other workspace package — it's deliberately standalone so eval CI
 can run in parallel with the main build.

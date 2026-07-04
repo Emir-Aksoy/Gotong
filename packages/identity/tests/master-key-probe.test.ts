@@ -30,7 +30,7 @@ describe('probeVaultMasterKey (Route B P0-M5)', () => {
   let dbPath: string
 
   beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), 'aipe-mk-probe-'))
+    dir = mkdtempSync(join(tmpdir(), 'gotong-mk-probe-'))
     dbPath = join(dir, 'identity.sqlite')
   })
   afterEach(() => {

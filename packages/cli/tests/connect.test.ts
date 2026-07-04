@@ -17,10 +17,10 @@ import {
 import { runCli } from '../src/main.js'
 
 const CTX: ConnectContext = {
-  name: 'aipehub',
+  name: 'gotong',
   hubUrl: 'http://127.0.0.1:3000',
   token: TOKEN_PLACEHOLDER,
-  binPath: '/abs/packages/mcp-server/bin/aipehub-mcp.js',
+  binPath: '/abs/packages/mcp-server/bin/gotong-mcp.js',
 }
 
 const EXPECTED_IDS = [
@@ -45,8 +45,8 @@ describe('connect presets', () => {
       const out = preset.render(CTX)
       expect(out, preset.id).toContain(CTX.binPath)
       expect(out, preset.id).toContain(CTX.hubUrl)
-      expect(out, preset.id).toContain('AIPE_HUB_URL')
-      expect(out, preset.id).toContain('AIPE_ADMIN_TOKEN')
+      expect(out, preset.id).toContain('GOTONG_HUB_URL')
+      expect(out, preset.id).toContain('GOTONG_ADMIN_TOKEN')
       expect(out, preset.id).toContain(CTX.name)
       // header + docs footer always present
       expect(out, preset.id).toContain(preset.label)
@@ -56,18 +56,18 @@ describe('connect presets', () => {
 
   it('renders each agent in its own native format', () => {
     const r = (id: string) => findConnectPreset(id)!.render(CTX)
-    expect(r('claude-code')).toContain('claude mcp add aipehub')
-    expect(r('codex')).toContain('[mcp_servers.aipehub]')
+    expect(r('claude-code')).toContain('claude mcp add gotong')
+    expect(r('codex')).toContain('[mcp_servers.gotong]')
     expect(r('codex')).toContain('~/.codex/config.toml')
     expect(r('opencode')).toContain('"type": "local"')
     expect(r('opencode')).toContain('opencode.json')
     expect(r('antigravity')).toContain('~/.gemini/config/mcp_config.json')
     expect(r('antigravity')).toContain('"mcpServers"')
     expect(r('cursor')).toContain('~/.cursor/mcp.json')
-    expect(r('openclaw')).toContain('openclaw mcp add aipehub')
+    expect(r('openclaw')).toContain('openclaw mcp add gotong')
     expect(r('nanobot')).toContain('nanobot.yaml')
     expect(r('nanobot')).toContain('mcpServers:')
-    expect(r('hermes')).toContain('hermes mcp add aipehub')
+    expect(r('hermes')).toContain('hermes mcp add gotong')
     expect(r('hermes')).toContain('~/.hermes/config.yaml')
   })
 
@@ -91,7 +91,7 @@ describe('connect presets', () => {
     for (const preset of CONNECT_PRESETS) {
       expect(list).toContain(preset.label)
     }
-    expect(list).toContain('aipehub connect <id>')
+    expect(list).toContain('gotong connect <id>')
     expect(list).toContain(CTX.hubUrl)
   })
 })

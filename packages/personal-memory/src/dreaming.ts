@@ -42,7 +42,7 @@
  * `MemoryEntry.meta` — zero schema change.
  */
 
-import type { MemoryEntry, MemoryHandle, NewMemoryEntry } from '@aipehub/services-sdk'
+import type { MemoryEntry, MemoryHandle, NewMemoryEntry } from '@gotong/services-sdk'
 
 import {
   DEFAULT_CONSOLIDATE_SYSTEM,

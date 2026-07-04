@@ -31,8 +31,8 @@ import { join } from 'node:path'
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { Hub, Space } from '@aipehub/core'
-import { serveWeb, type WebServerHandle } from '@aipehub/web'
+import { Hub, Space } from '@gotong/core'
+import { serveWeb, type WebServerHandle } from '@gotong/web'
 
 import { createResourceAdaptationService } from '../src/resource-adaptation.js'
 import type { ResourceInventory } from '../src/resource-inventory.js'
@@ -61,7 +61,7 @@ interface Rig {
 }
 
 async function boot(): Promise<Rig> {
-  const root = await mkdtemp(join(tmpdir(), 'aipe-res-e2e-'))
+  const root = await mkdtemp(join(tmpdir(), 'gotong-res-e2e-'))
   const { space, adminToken } = await Space.init(root, { name: 'res-e2e', adminDisplayName: 'Owner' })
   if (!adminToken) throw new Error('expected admin token from Space.init')
   const hub = new Hub({ space })

@@ -7,7 +7,7 @@
  * Each training session appends one ranked entry per pillar, so the next session
  * reads where the last left off. Continuity is the whole point.
  *
- * AipeHub never stores knowledge — this is a real directory the agents read and
+ * Gotong never stores knowledge — this is a real directory the agents read and
  * write (same idea as personal-research-hub's wiki). The demo seeds a baseline
  * assessment per pillar; the drills advance it rank by rank.
  */

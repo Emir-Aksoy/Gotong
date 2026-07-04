@@ -17,7 +17,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { WebSocketServer, type WebSocket as WsType } from 'ws'
 import type { AddressInfo } from 'node:net'
 
-import { AgentParticipant, type Task } from '@aipehub/core'
+import { AgentParticipant, type Task } from '@gotong/core'
 
 import { connect, type Session } from '../src/index.js'
 

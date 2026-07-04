@@ -4,7 +4,7 @@ import { join } from 'node:path'
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { Hub, InMemoryStorage } from '@aipehub/core'
+import { Hub, InMemoryStorage } from '@gotong/core'
 import {
   WORKFLOW_SCHEMA_V1,
   WorkflowLifecycleError,
@@ -13,7 +13,7 @@ import {
   hashDefinition,
   workflowParticipantId,
   type WorkflowDefinition,
-} from '@aipehub/workflow'
+} from '@gotong/workflow'
 
 import { WorkflowVersioning } from '../src/workflow-versioning.js'
 
@@ -50,7 +50,7 @@ describe('WorkflowVersioning', () => {
   let clock: number
 
   beforeEach(async () => {
-    root = mkdtempSync(join(tmpdir(), 'aipe-wf-ver-'))
+    root = mkdtempSync(join(tmpdir(), 'gotong-wf-ver-'))
     hub = new Hub({ storage: new InMemoryStorage() })
     await hub.start()
     clock = 0

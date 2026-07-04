@@ -1,5 +1,5 @@
 """P5: pyproject.version, __init__.__version__, and the
-HELLO.client.version emitted by `aipehub.protocol.hello` must all
+HELLO.client.version emitted by `gotong.protocol.hello` must all
 match. Pre-3.1 each lived as a hand-baked literal and they drifted
 between releases.
 """
@@ -18,8 +18,8 @@ else:
     # The alias keeps the rest of this file version-agnostic.
     import tomli as tomllib  # type: ignore[no-redef,import-not-found]
 
-import aipehub
-from aipehub.protocol import hello
+import gotong
+from gotong.protocol import hello
 
 
 def _pyproject_version() -> str:
@@ -30,13 +30,13 @@ def _pyproject_version() -> str:
 
 
 def test_pyproject_and_dunder_match() -> None:
-    assert _pyproject_version() == aipehub.__version__
+    assert _pyproject_version() == gotong.__version__
 
 
 def test_hello_default_client_version_matches_dunder() -> None:
-    # No explicit client_version → builder picks up `aipehub.__version__`.
+    # No explicit client_version → builder picks up `gotong.__version__`.
     frame = hello(agents=[{"id": "a", "capabilities": []}])
-    assert frame["client"]["version"] == aipehub.__version__
+    assert frame["client"]["version"] == gotong.__version__
 
 
 def test_hello_explicit_client_version_overrides() -> None:

@@ -32,7 +32,7 @@ function terminal(runId: string, end: number, workflowId = 'wf'): RunState {
 }
 
 beforeEach(() => {
-  tmp = mkdtempSync(join(tmpdir(), 'aipehub-runcount-'))
+  tmp = mkdtempSync(join(tmpdir(), 'gotong-runcount-'))
   store = new RunStore(tmp)
   store.ensureDirs()
 })

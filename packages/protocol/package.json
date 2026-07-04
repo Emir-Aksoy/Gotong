@@ -1,12 +1,12 @@
 {
-  "name": "@aipehub/protocol",
+  "name": "@gotong/protocol",
   "version": "3.1.0",
   "type": "module",
-  "description": "AipeHub wire protocol — frame types, constants, and codec. Zero runtime.",
+  "description": "Gotong wire protocol — frame types, constants, and codec. Zero runtime.",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/Emir-Aksoy/AipeHub.git",
+    "url": "https://github.com/Emir-Aksoy/Gotong.git",
     "directory": "packages/protocol"
   },
   "publishConfig": {

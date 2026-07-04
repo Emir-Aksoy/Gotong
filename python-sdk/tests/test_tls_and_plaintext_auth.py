@@ -31,8 +31,8 @@ from typing import Any
 
 import pytest
 
-from aipehub import AgentParticipant, connect
-from aipehub.session import Session, _is_loopback_host
+from gotong import AgentParticipant, connect
+from gotong.session import Session, _is_loopback_host
 
 from .conftest import FakeHub, serve_hub
 
@@ -170,7 +170,7 @@ class TestH10ApiKeyPlaintextRefusal:
         # The opt-out path MUST log a WARN so the unsafe choice
         # surfaces in operator logs (silently honouring an unsafe
         # flag would defeat the audit trail).
-        caplog.set_level(logging.WARNING, logger="aipehub.session")
+        caplog.set_level(logging.WARNING, logger="gotong.session")
         try:
             await asyncio.wait_for(
                 connect(
@@ -228,9 +228,9 @@ class TestC3SslOptionSurface:
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         # Monkey-patch ``websockets.connect`` as seen by
-        # ``aipehub.session`` and capture the kwargs each call gets.
+        # ``gotong.session`` and capture the kwargs each call gets.
         # When ``ssl`` is supplied, it MUST appear in the call.
-        import aipehub.session as session_mod
+        import gotong.session as session_mod
 
         captured: list[dict[str, Any]] = []
         real_connect = session_mod.websockets.connect
@@ -277,7 +277,7 @@ class TestC3SslOptionSurface:
         # inject ``ssl=None`` — some websockets versions reject
         # ``ssl=None`` on ``ws://``. Better to omit the kwarg
         # entirely.
-        import aipehub.session as session_mod
+        import gotong.session as session_mod
 
         captured: list[dict[str, Any]] = []
         real_connect = session_mod.websockets.connect

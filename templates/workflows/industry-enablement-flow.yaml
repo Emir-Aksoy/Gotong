@@ -1,7 +1,7 @@
 # =============================================================================
 # Workflow: 传统行业 AI 赋能梳理（全流程）
 # Companion team: templates/teams/traditional-industry-ai-enablement.yaml
-# Schema: aipehub.workflow/v1
+# Schema: gotong.workflow/v1
 #
 # 用户把自己的行业 / 岗位 / 痛点丢进来 →
 #   diagnose         先反问 4-7 个具体问题，把工作场景摸清楚
@@ -34,7 +34,7 @@
 # 留给后续 PR。
 # =============================================================================
 
-schema: aipehub.workflow/v1
+schema: gotong.workflow/v1
 
 workflow:
   id: industry-enablement-flow

@@ -8,7 +8,7 @@
  *
  * Design boundaries:
  *
- *   - **No dependency on `@aipehub/host` or `@aipehub/services-sdk`.** The
+ *   - **No dependency on `@gotong/host` or `@gotong/services-sdk`.** The
  *     router talks to the host's services layer through a narrow
  *     `ServiceCallGateway` interface defined in `./server.ts`. Tests
  *     supply a fake gateway; production wires `HubServices` as the
@@ -28,7 +28,7 @@
  * See `docs/services-over-ws-rfc.md` for the design rationale.
  */
 
-import type { ParticipantId } from '@aipehub/core'
+import type { ParticipantId } from '@gotong/core'
 import {
   getServiceMethods,
   isServiceMethodAllowed,
@@ -38,7 +38,7 @@ import {
   type ServiceOwnerPattern,
   type ServiceResultFrame,
   type ServiceUseDecl,
-} from '@aipehub/protocol'
+} from '@gotong/protocol'
 
 import type { ServiceCallGateway } from './server.js'
 

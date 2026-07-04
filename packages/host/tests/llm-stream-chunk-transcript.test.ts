@@ -27,12 +27,12 @@ import { join } from 'node:path'
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { Hub, Space, type Task, type TranscriptEntry } from '@aipehub/core'
+import { Hub, Space, type Task, type TranscriptEntry } from '@gotong/core'
 import {
   LlmAgent,
   MockLlmProvider,
   type LlmStreamChunk,
-} from '@aipehub/llm'
+} from '@gotong/llm'
 
 interface Bench {
   root: string
@@ -41,7 +41,7 @@ interface Bench {
 }
 
 async function boot(): Promise<Bench> {
-  const root = await mkdtemp(join(tmpdir(), 'aipe-stream-transcript-'))
+  const root = await mkdtemp(join(tmpdir(), 'gotong-stream-transcript-'))
   const { space } = await Space.init(root, { name: 'stream-transcript-test' })
   const hub = new Hub({ space })
   await hub.start()

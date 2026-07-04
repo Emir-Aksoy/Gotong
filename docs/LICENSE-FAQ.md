@@ -3,7 +3,7 @@
 <!-- doc-version: 1.0 -->
 > **Doc version 1.0** · English (authoritative source) · Updated 2026-06-27 · Translations: [中文](zh/LICENSE-FAQ.md) · [日本語](ja/LICENSE-FAQ.md) · [Русский](ru/LICENSE-FAQ.md) · [Français](fr/LICENSE-FAQ.md) · [Español](es/LICENSE-FAQ.md) · [한국어](ko/LICENSE-FAQ.md). If a translation conflicts with this English version, the English version governs.
 
-> **AipeHub as a whole is licensed under the [MIT License](../LICENSE).**
+> **Gotong as a whole is licensed under the [MIT License](../LICENSE).**
 > This page answers the common "may I / must I / what should I watch
 > for" questions in FAQ form. It is not legal advice — for real
 > corporate compliance work, talk to your own counsel.
@@ -12,17 +12,17 @@
 
 ---
 
-## 1. Can I embed AipeHub in my closed-source product / SaaS / internal tool?
+## 1. Can I embed Gotong in my closed-source product / SaaS / internal tool?
 
 **Yes.** MIT is among the most permissive OSS licenses. It allows:
 
-- ✅ Commercial use, including repackaging all of AipeHub and selling it
-- ✅ Modifying the source, renaming it (though if you rename, please say "based on AipeHub")
+- ✅ Commercial use, including repackaging all of Gotong and selling it
+- ✅ Modifying the source, renaming it (though if you rename, please say "based on Gotong")
 - ✅ Closed-source derivatives — your changes do **not** have to be open-sourced
-- ✅ Pulling `@aipehub/core` into a closed-source SaaS as an npm dependency
+- ✅ Pulling `@gotong/core` into a closed-source SaaS as an npm dependency
 
 **The only hard requirement**: keep the LICENSE file + copyright
-notice (listing AipeHub on your product's NOTICE /
+notice (listing Gotong on your product's NOTICE /
 Third-Party-Licenses page is enough).
 
 ---
@@ -81,16 +81,16 @@ but you may **not delete the original MIT text**:
   proprietary / something you wrote yourself
 - ✅ You can put your own copyright in your own LICENSE file
 - ⚠️ But you **must keep, somewhere** (e.g. NOTICE.md or
-  THIRD-PARTY.md), AipeHub's original MIT text + upstream copyright line
-- ❌ You may **not** claim "AipeHub is our original work" — that's
+  THIRD-PARTY.md), Gotong's original MIT text + upstream copyright line
+- ❌ You may **not** claim "Gotong is our original work" — that's
   fraud, regardless of the license
 
 ---
 
 ## 5. I imported a private prompt a coworker wrote with GPT as an agent — any license risk?
 
-**None on the AipeHub side.** Prompts you or your company write are
-your company's own assets; AipeHub is just the runtime container.
+**None on the Gotong side.** Prompts you or your company write are
+your company's own assets; Gotong is just the runtime container.
 You should however confirm:
 
 - Whether your coworker's GPT output complies with OpenAI's terms of
@@ -99,28 +99,28 @@ You should however confirm:
 - If the prompt **quotes** someone else's code / article excerpts,
   whether that quotation's own license allows it
 
-Neither is something the AipeHub project governs — MIT licenses the
+Neither is something the Gotong project governs — MIT licenses the
 software itself, not the content you generate with it.
 
 ---
 
-## 6. I'm deploying AipeHub inside a customer's intranet — what license files do I hand over?
+## 6. I'm deploying Gotong inside a customer's intranet — what license files do I hand over?
 
 At minimum:
 
-- The `LICENSE` file from the AipeHub repo root
+- The `LICENSE` file from the Gotong repo root
 - If you use `templates/community/`: bring `LICENSE-NOTICES.md` along too
-- If you embed the `@aipehub/core` npm package: the package ships its
+- If you embed the `@gotong/core` npm package: the package ships its
   own license on install; downstream redistribution just needs to keep
-  `node_modules/@aipehub/*/LICENSE` undeleted
+  `node_modules/@gotong/*/LICENSE` undeleted
 
 A common pattern is a "Third-Party Licenses" page in your product
-listing every upstream OSS license text. Add AipeHub's MIT there and
+listing every upstream OSS license text. Add Gotong's MIT there and
 you're done.
 
 ---
 
-## 7. Do AipeHub's runtime dependencies contain GPL/AGPL-style copyleft?
+## 7. Do Gotong's runtime dependencies contain GPL/AGPL-style copyleft?
 
 Currently no. The main dependencies:
 
@@ -140,7 +140,7 @@ downstream flexibility.
 
 ---
 
-## 8. Is AipeHub's wire protocol part of the license?
+## 8. Is Gotong's wire protocol part of the license?
 
 No. The JSON frame format described in `docs/PROTOCOL.md` is a
 **de-facto spec** — anyone may implement their own hub server or SDK
@@ -159,7 +159,7 @@ the license would allow it.
 
 ---
 
-## 10. Can my company fork AipeHub internally without open-sourcing the fork?
+## 10. Can my company fork Gotong internally without open-sourcing the fork?
 
 **Absolutely.** MIT does not propagate. You may:
 
@@ -167,7 +167,7 @@ the license would allow it.
 - Rename the fork and deploy it privately for customers
 - Sell the fork's build artifacts as a closed-source binary
 
-As long as **the final deliverable keeps AipeHub's original MIT
+As long as **the final deliverable keeps Gotong's original MIT
 license somewhere** (typically an "open-source notices" page), you're
 all set.
 

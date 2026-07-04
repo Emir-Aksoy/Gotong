@@ -1,4 +1,4 @@
-/* AipeHub admin — MCP integration tab (#2-M4).
+/* Gotong admin — MCP integration tab (#2-M4).
  *
  * Hub-level MCP server registry. Install an external MCP server here and
  * any agent that opts in by name (`useMcpServers`, set on its Edit form)
@@ -9,10 +9,10 @@
  * Factory mirrors services.js: createMcp() closes over its own little
  * state bag and returns just the entry points main.js wires (refreshMcp +
  * the form submit + the transport-field toggle). Shared helpers come off
- * the window.AipeHub namespace that app-core.js installs.
+ * the window.Gotong namespace that app-core.js installs.
  */
 
-const { t, escapeHtml, fetchJson } = window.AipeHub
+const { t, escapeHtml, fetchJson } = window.Gotong
 
 export function createMcp() {
   const mcp = {

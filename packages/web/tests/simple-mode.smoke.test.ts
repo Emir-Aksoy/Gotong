@@ -4,7 +4,7 @@
  * # Why this exists
  *
  * Simple mode lives entirely in the SPA tab router: a per-device localStorage
- * flag (`aipe_simple_mode`) that trims the admin shell to a curated subset
+ * flag (`gotong_simple_mode`) that trims the admin shell to a curated subset
  * (overview / agents / workflows / tasks / usage) and tucks the advanced tabs
  * (federation / SSO / quotas / …) away. It grants NO capability — the server
  * still enforces every route — so the only thing to verify is the client wiring:
@@ -114,7 +114,7 @@ function bootApp(opts: { role?: string; simpleMode?: '1' | '0' | null; hash?: st
   const body = richEl({ hidden: false })
 
   const store = new Map<string, string>()
-  if (opts.simpleMode != null) store.set('aipe_simple_mode', opts.simpleMode)
+  if (opts.simpleMode != null) store.set('gotong_simple_mode', opts.simpleMode)
 
   const location = { hash: opts.hash ?? '', href: '' }
 
@@ -134,7 +134,7 @@ function bootApp(opts: { role?: string; simpleMode?: '1' | '0' | null; hash?: st
 
   const ctx: Record<string, unknown> = {
     window: {
-      AipeHub: {
+      Gotong: {
         t: {} as Record<string, unknown>,
         onLangChange: () => {},
         installWorkflowAssist: () => ({ open() {}, close() {}, submit() {}, save() {} }),
@@ -242,13 +242,13 @@ describe('static/app.js — ⑤-M1 simple mode smoke', () => {
     // flip ON
     app.checkbox.checked = true
     onChange()
-    expect(app.store.get('aipe_simple_mode')).toBe('1')
+    expect(app.store.get('gotong_simple_mode')).toBe('1')
     expect(app.body.dataset.simpleMode).toBe('1')
 
     // flip OFF — body flag removed (delete, not empty string) and persisted
     app.checkbox.checked = false
     onChange()
-    expect(app.store.get('aipe_simple_mode')).toBe('0')
+    expect(app.store.get('gotong_simple_mode')).toBe('0')
     expect(app.body.dataset.simpleMode).toBeUndefined()
   })
 })

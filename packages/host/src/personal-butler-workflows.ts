@@ -26,7 +26,7 @@
  * member's own `userId` server-side and dropped from the copyable inputs, so the
  * butler can never run a workflow on another member's behalf. This is a small,
  * pure mirror (with a pinning test) rather than a shared import because `web`
- * deliberately takes no `@aipehub/workflow` runtime dep — keep the two in sync.
+ * deliberately takes no `@gotong/workflow` runtime dep — keep the two in sync.
  *
  * Host-only: it needs the host workflow surface (`list()`, satisfied by
  * `WorkflowController`) + `hub.dispatch`. Per-user — the router builds one butler
@@ -37,7 +37,7 @@ import type {
   LlmAgentToolset,
   LlmToolCallResult,
   LlmToolDefinition,
-} from '@aipehub/llm'
+} from '@gotong/llm'
 
 /**
  * Least-privilege default role for a butler-initiated run. A workflow that

@@ -5,8 +5,8 @@
  * Regenerate the two public template files from
  * `scripts/personal-growth-prompts.mjs` (single source of truth):
  *
- *   templates/teams/personal-growth-team.yaml      (aipehub.team/v1)
- *   templates/bundles/personal-growth.yaml         (aipehub.bundle/v1)
+ *   templates/teams/personal-growth-team.yaml      (gotong.team/v1)
+ *   templates/bundles/personal-growth.yaml         (gotong.bundle/v1)
  *
  * Run after editing prompts or agent shape:
  *   node scripts/build-personal-growth-templates.mjs
@@ -18,7 +18,7 @@
 import { writeFileSync, readFileSync, mkdirSync } from 'node:fs'
 import { resolve, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
-// `yaml` is a dep of @aipehub/web in the workspace; scripts/ has no
+// `yaml` is a dep of @gotong/web in the workspace; scripts/ has no
 // package.json so resolve via the web package's node_modules.
 import { stringify as stringifyYaml } from '../packages/web/node_modules/yaml/dist/index.js'
 
@@ -51,7 +51,7 @@ const BANNER = `# ────────────────────�
 `
 
 const HEAD_COMMENT = `# 个人成长团队（7 位教练）
-# Schema: aipehub.team/v1
+# Schema: gotong.team/v1
 # Companion workflow: templates/workflows/personal-growth-flow.yaml
 # Or use the bundle (team + workflow + UI hints in one file):
 #   templates/bundles/personal-growth.yaml
@@ -102,7 +102,7 @@ function agentDict(a) {
 }
 
 const teamDoc = {
-  schema: 'aipehub.team/v1',
+  schema: 'gotong.team/v1',
   team: {
     name: TEAM_NAME,
     description: TEAM_DESCRIPTION,
@@ -135,7 +135,7 @@ if (!workflowDoc || !workflowDoc.workflow) {
 }
 
 const bundleDoc = {
-  schema: 'aipehub.bundle/v1',
+  schema: 'gotong.bundle/v1',
   bundle: {
     name: '个人成长(7 教练 + 12 周墙上计划)',
     description: `把 templates/teams/personal-growth-team.yaml + templates/workflows/personal-growth-flow.yaml 合一次 import。
@@ -163,7 +163,7 @@ const BUNDLE_BANNER = `# ──────────────────�
 `
 
 const BUNDLE_DOC_COMMENT = `# 个人成长 bundle (1 团队 + 1 工作流 + UI 引导)
-# Schema: aipehub.bundle/v1
+# Schema: gotong.bundle/v1
 #
 # 怎么用:
 #   1. 在 admin UI 上点"导入团队"按钮(工作流 tab)

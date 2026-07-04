@@ -61,7 +61,7 @@ const REQUIRED = [
 function stripKeys(env) {
   const clone = {}
   for (const [k, v] of Object.entries(env)) {
-    if (/API_KEY|^OPENAI_|^ANTHROPIC_|^DEEPSEEK_|^AIPE_LIVE_/.test(k)) continue
+    if (/API_KEY|^OPENAI_|^ANTHROPIC_|^DEEPSEEK_|^GOTONG_LIVE_/.test(k)) continue
     clone[k] = v
   }
   return clone
@@ -89,7 +89,7 @@ function runDemo() {
   })
 }
 
-console.log('AipeHub 首个结果自检 — TTFR 承重门 (`pnpm demo`, 零 key)\n')
+console.log('Gotong 首个结果自检 — TTFR 承重门 (`pnpm demo`, 零 key)\n')
 const res = await runDemo()
 
 const problems = []

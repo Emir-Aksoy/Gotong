@@ -1,5 +1,5 @@
 /**
- * @aipehub/im-discord — public surface.
+ * @gotong/im-discord — public surface.
  */
 
 export { DiscordBridge, type DiscordBridgeOptions } from './bridge.js'

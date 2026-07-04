@@ -282,7 +282,7 @@ jobs:
           file: ./Dockerfile
           push: false
           load: true
-          tags: aipehub/host:ci
+          tags: gotong/host:ci
           # Use the inline cache so back-to-back PRs reuse the npm install
           # layer when the lockfile hasn't moved.
           cache-from: type=gha
@@ -306,19 +306,19 @@ jobs:
           # documented production env actually boots. /healthz is a GET so
           # the Host check (state-changing requests only) never blocks it.
           docker run -d \
-            --name aipehub-ci \
+            --name gotong-ci \
             -p 13000:3000 \
             -p 14000:4000 \
-            -e AIPE_ALLOWED_HOSTS=127.0.0.1:13000,localhost:3000 \
-            -e AIPE_COOKIE_SECURE=1 \
-            aipehub/host:ci
+            -e GOTONG_ALLOWED_HOSTS=127.0.0.1:13000,localhost:3000 \
+            -e GOTONG_COOKIE_SECURE=1 \
+            gotong/host:ci
           # The image declares a HEALTHCHECK with 15s start-period; give
           # it 30s to settle, then poll /healthz directly.
           rc=1
           for i in $(seq 1 20); do
             if curl -fsS http://127.0.0.1:13000/healthz >/dev/null 2>&1; then
               echo "✓ /healthz responded after $((i * 2))s"
-              docker logs aipehub-ci 2>&1 | head -40
+              docker logs gotong-ci 2>&1 | head -40
               rc=0
               break
             fi
@@ -327,14 +327,14 @@ jobs:
           if [ "$rc" -ne 0 ]; then
             echo "✗ /healthz never responded — diagnostics follow"
             echo "--- docker ps -a (state + exit code) ---"
-            docker ps -a --filter name=aipehub-ci \
+            docker ps -a --filter name=gotong-ci \
               --format 'table {{.Status}}\t{{.RunningFor}}\t{{.Names}}'
             echo "--- docker inspect (state.error / oom / exit) ---"
-            docker inspect aipehub-ci --format '{{json .State}}' | head -3 || true
+            docker inspect gotong-ci --format '{{json .State}}' | head -3 || true
             echo "--- docker logs (full) ---"
-            docker logs aipehub-ci 2>&1 || true
+            docker logs gotong-ci 2>&1 || true
           fi
-          docker rm -f aipehub-ci >/dev/null 2>&1 || true
+          docker rm -f gotong-ci >/dev/null 2>&1 || true
           exit "$rc"
 
   # ---------------------------------------------------------------------------

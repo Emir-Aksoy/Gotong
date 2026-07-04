@@ -1,16 +1,16 @@
-# Obsidian vault as a knowledge base — AipeHub Example
+# Obsidian vault as a knowledge base — Gotong Example
 
-Wire your personal [Obsidian](https://obsidian.md) vault into an AipeHub agent
+Wire your personal [Obsidian](https://obsidian.md) vault into an Gotong agent
 so it can search and read your notes — via the
 [`mcp-obsidian`](https://github.com/MarkusPfundstein/mcp-obsidian) MCP server.
 
 ## How it works
 
-AipeHub does not read your vault or store its contents. The agent declares the
+Gotong does not read your vault or store its contents. The agent declares the
 MCP server in its `mcpServers` config; the host spawns it as a child process
 and exposes its tools to the agent's LLM tool-use loop. `mcp-obsidian` talks to
 the **Local REST API** Obsidian community plugin — so the vault, the plugin,
-and the API key all stay outside AipeHub.
+and the API key all stay outside Gotong.
 
 ```
   User question
@@ -37,14 +37,14 @@ export ANTHROPIC_API_KEY=sk-ant-...     # the agent's own LLM key
 # Optional (defaults shown): export OBSIDIAN_HOST=127.0.0.1 OBSIDIAN_PORT=27124
 
 # 4. Initialize a workspace and start the host
-aipehub init
-npx @aipehub/host
+gotong init
+npx @gotong/host
 
 # 5. Admin UI → Agents tab → Import YAML → paste agents/obsidian-researcher.yaml
 #    The mcpServers config auto-spawns `uvx mcp-obsidian` alongside the agent.
 
 # 6. Chat with the agent:
-#    - "What did I note about the AipeHub roadmap?"
+#    - "What did I note about the Gotong roadmap?"
 #    - "Find my notes mentioning Elasticsearch and summarize them."
 ```
 
@@ -86,7 +86,7 @@ see `docs/zh/KB-CONNECTORS.md`).
 
 - **The vault leaves your machine only as far as the MCP server.** `mcp-obsidian`
   runs locally and reads the vault through the Local REST API plugin over
-  `https://127.0.0.1`. Nothing is uploaded to AipeHub.
+  `https://127.0.0.1`. Nothing is uploaded to Gotong.
 - **The API key is a credential.** `${OBSIDIAN_API_KEY}` is resolved from the
   host environment (or the encrypted vault) — never hard-code it in the YAML.
 - **Write tools are powerful.** `delete_file` / `patch_content` mutate your
@@ -100,4 +100,4 @@ see `docs/zh/KB-CONNECTORS.md`).
 - [`examples/elasticsearch-kb/`](../elasticsearch-kb/) — the same pattern for an
   Elasticsearch index.
 - [`docs/zh/RAG-VIA-MCP.md`](../../docs/zh/RAG-VIA-MCP.md) — vector-RAG via MCP
-  (the original "AipeHub doesn't store knowledge" worked example).
+  (the original "Gotong doesn't store knowledge" worked example).

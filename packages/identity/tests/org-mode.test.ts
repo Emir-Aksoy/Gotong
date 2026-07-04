@@ -28,7 +28,7 @@ describe('IdentityStore.org_meta + org_mode (Phase 7 M4)', () => {
   let store: IdentityStore
 
   beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), 'aipehub-org-mode-'))
+    dir = mkdtempSync(join(tmpdir(), 'gotong-org-mode-'))
     store = openIdentityStore({
       dbPath: join(dir, 'identity.sqlite'),
       masterKey: randomBytes(MASTER_KEY_LEN_BYTES),

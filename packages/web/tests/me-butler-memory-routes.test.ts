@@ -17,8 +17,8 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { Hub, Space } from '@aipehub/core'
-import { openIdentityStore, type IdentityStore } from '@aipehub/identity'
+import { Hub, Space } from '@gotong/core'
+import { openIdentityStore, type IdentityStore } from '@gotong/identity'
 
 import { serveWeb, type WebServerHandle } from '../src/server.js'
 import type {
@@ -79,7 +79,7 @@ interface Boot {
 
 async function boot(opts: { withSurface?: boolean } = {}): Promise<Boot> {
   const withSurface = opts.withSurface ?? true
-  const tmp = await mkdtemp(join(tmpdir(), 'aipehub-me-butler-'))
+  const tmp = await mkdtemp(join(tmpdir(), 'gotong-me-butler-'))
   const init = await Space.init(tmp, { name: 'me-butler-test' })
   const space = init.space
   const hub = new Hub({ space })

@@ -1,13 +1,13 @@
-# @aipehub/protocol
+# @gotong/protocol
 
-Wire-protocol types and JSON codec for [AipeHub](https://github.com/Emir-Aksoy/AipeHub). Zero runtime — everything here is `interface`s and tiny `encode` / `decode` helpers.
+Wire-protocol types and JSON codec for [Gotong](https://github.com/Emir-Aksoy/Gotong). Zero runtime — everything here is `interface`s and tiny `encode` / `decode` helpers.
 
-If you're building a Hub-side transport or a non-Node SDK in TypeScript, this is the package to depend on. The full spec lives in [docs/PROTOCOL.md](https://github.com/Emir-Aksoy/AipeHub/blob/main/docs/PROTOCOL.md).
+If you're building a Hub-side transport or a non-Node SDK in TypeScript, this is the package to depend on. The full spec lives in [docs/PROTOCOL.md](https://github.com/Emir-Aksoy/Gotong/blob/main/docs/PROTOCOL.md).
 
 ## Install
 
 ```bash
-pnpm add @aipehub/protocol
+pnpm add @gotong/protocol
 ```
 
 ## Use
@@ -19,7 +19,7 @@ import {
   encodeFrame,
   type ClientFrame,
   type ServerFrame,
-} from '@aipehub/protocol'
+} from '@gotong/protocol'
 
 const hello: ClientFrame = {
   type: 'HELLO',

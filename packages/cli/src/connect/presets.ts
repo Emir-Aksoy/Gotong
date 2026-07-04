@@ -1,11 +1,11 @@
 /**
- * Quick-connect presets — the single source of truth for `aipehub
+ * Quick-connect presets — the single source of truth for `gotong
  * connect <agent>`.
  *
  * Every mainstream coding agent in 2026 is an MCP client (or MCP host):
  * Claude Code, Codex, OpenCode, Antigravity, Cursor, OpenClaw, nanobot,
- * Hermes. So "接入 AipeHub" for the whole category is ONE move — point
- * the agent's MCP config at `@aipehub/mcp-server`, which is itself a
+ * Hermes. So "接入 Gotong" for the whole category is ONE move — point
+ * the agent's MCP config at `@gotong/mcp-server`, which is itself a
  * thin client of the Hub's admin HTTP API (see packages/mcp-server).
  *
  * What differs per agent is only the wrapper format: a `claude mcp add`
@@ -13,11 +13,11 @@
  * payload underneath is always the same:
  *
  *     command: node
- *     args:    [<abs path to packages/mcp-server/bin/aipehub-mcp.js>]
- *     env:     AIPE_HUB_URL, AIPE_ADMIN_TOKEN
+ *     args:    [<abs path to packages/mcp-server/bin/gotong-mcp.js>]
+ *     env:     GOTONG_HUB_URL, GOTONG_ADMIN_TOKEN
  *
- * (`@aipehub/mcp-server` is not on npm yet, so we spawn it by absolute
- * path with `node` rather than `npx -y @aipehub/mcp-server` — matches
+ * (`@gotong/mcp-server` is not on npm yet, so we spawn it by absolute
+ * path with `node` rather than `npx -y @gotong/mcp-server` — matches
  * the caveat in docs/zh/MCP.md.)
  *
  * This module is PURE: it renders strings from a `ConnectContext`. All
@@ -25,13 +25,13 @@
  * the rendering is trivially unit-testable.
  *
  * Inbound only. This covers the "入站" axis of the agent-adapter
- * contract (agent → AipeHub via MCP). Driving these agents FROM the hub
+ * contract (agent → Gotong via MCP). Driving these agents FROM the hub
  * ("出站" / shell-out adapter) is a separate deliverable — see
  * docs/zh/AGENT-ADAPTER-CONTRACT.md.
  */
 
 /** Default MCP server name as the agent will register it. */
-export const DEFAULT_NAME = 'aipehub'
+export const DEFAULT_NAME = 'gotong'
 
 /** Default Hub admin HTTP base URL (single host, loopback). */
 export const DEFAULT_HUB_URL = 'http://127.0.0.1:3000'
@@ -43,7 +43,7 @@ export const DEFAULT_HUB_URL = 'http://127.0.0.1:3000'
 export const TOKEN_PLACEHOLDER = '<YOUR_ADMIN_TOKEN>'
 
 /** Shown when the mcp-server bin can't be located on disk. */
-export const BIN_PLACEHOLDER = '/ABS/PATH/TO/AipeHub/packages/mcp-server/bin/aipehub-mcp.js'
+export const BIN_PLACEHOLDER = '/ABS/PATH/TO/Gotong/packages/mcp-server/bin/gotong-mcp.js'
 
 /** Everything a preset needs to render a copy-paste connect block. */
 export interface ConnectContext {
@@ -53,7 +53,7 @@ export interface ConnectContext {
   hubUrl: string
   /** Admin bearer token, or {@link TOKEN_PLACEHOLDER}. */
   token: string
-  /** Absolute path to `aipehub-mcp.js`, or {@link BIN_PLACEHOLDER}. */
+  /** Absolute path to `gotong-mcp.js`, or {@link BIN_PLACEHOLDER}. */
   binPath: string
 }
 
@@ -93,7 +93,7 @@ function toPreset(d: PresetDef): AgentConnectPreset {
     docsUrl: d.docsUrl,
     render(ctx: ConnectContext): string {
       return (
-        `AipeHub 快捷接入 · ${d.label}（${d.vendor}）\n` +
+        `Gotong 快捷接入 · ${d.label}（${d.vendor}）\n` +
         `${RULE}\n\n` +
         `${d.body(ctx).trim()}\n\n` +
         `文档：${d.docsUrl}\n`
@@ -113,8 +113,8 @@ function jsonServerEntry(ctx: ConnectContext, pad: string): string {
     `${p2}"command": "node",\n` +
     `${p2}"args": ["${ctx.binPath}"],\n` +
     `${p2}"env": {\n` +
-    `${p3}"AIPE_HUB_URL": "${ctx.hubUrl}",\n` +
-    `${p3}"AIPE_ADMIN_TOKEN": "${ctx.token}"\n` +
+    `${p3}"GOTONG_HUB_URL": "${ctx.hubUrl}",\n` +
+    `${p3}"GOTONG_ADMIN_TOKEN": "${ctx.token}"\n` +
     `${p2}}\n` +
     `${pad}}`
   )
@@ -129,8 +129,8 @@ function yamlServerEntry(ctx: ConnectContext, pad: string): string {
     `${p2}args:\n` +
     `${p2}  - ${ctx.binPath}\n` +
     `${p2}env:\n` +
-    `${p2}  AIPE_HUB_URL: ${ctx.hubUrl}\n` +
-    `${p2}  AIPE_ADMIN_TOKEN: ${ctx.token}`
+    `${p2}  GOTONG_HUB_URL: ${ctx.hubUrl}\n` +
+    `${p2}  GOTONG_ADMIN_TOKEN: ${ctx.token}`
   )
 }
 
@@ -144,8 +144,8 @@ export const CONNECT_PRESETS: readonly AgentConnectPreset[] = [
     body: (ctx) =>
       `方式 A — 一行命令（推荐）：\n` +
       `  claude mcp add ${ctx.name} \\\n` +
-      `    -e AIPE_HUB_URL=${ctx.hubUrl} \\\n` +
-      `    -e AIPE_ADMIN_TOKEN=${ctx.token} \\\n` +
+      `    -e GOTONG_HUB_URL=${ctx.hubUrl} \\\n` +
+      `    -e GOTONG_ADMIN_TOKEN=${ctx.token} \\\n` +
       `    -- node ${ctx.binPath}\n\n` +
       `方式 B — 写入 ~/.claude.json 顶层 "mcpServers"：\n` +
       `  "mcpServers": {\n` +
@@ -163,7 +163,7 @@ export const CONNECT_PRESETS: readonly AgentConnectPreset[] = [
       `  [mcp_servers.${ctx.name}]\n` +
       `  command = "node"\n` +
       `  args = ["${ctx.binPath}"]\n` +
-      `  env = { AIPE_HUB_URL = "${ctx.hubUrl}", AIPE_ADMIN_TOKEN = "${ctx.token}" }\n\n` +
+      `  env = { GOTONG_HUB_URL = "${ctx.hubUrl}", GOTONG_ADMIN_TOKEN = "${ctx.token}" }\n\n` +
       `验证：codex 启动后 /mcp 应列出 "${ctx.name}" 的工具。`,
   }),
   toPreset({
@@ -182,8 +182,8 @@ export const CONNECT_PRESETS: readonly AgentConnectPreset[] = [
       `        "command": ["node", "${ctx.binPath}"],\n` +
       `        "enabled": true,\n` +
       `        "environment": {\n` +
-      `          "AIPE_HUB_URL": "${ctx.hubUrl}",\n` +
-      `          "AIPE_ADMIN_TOKEN": "${ctx.token}"\n` +
+      `          "GOTONG_HUB_URL": "${ctx.hubUrl}",\n` +
+      `          "GOTONG_ADMIN_TOKEN": "${ctx.token}"\n` +
       `        }\n` +
       `      }\n` +
       `    }\n` +
@@ -228,8 +228,8 @@ export const CONNECT_PRESETS: readonly AgentConnectPreset[] = [
       `  openclaw mcp add ${ctx.name} \\\n` +
       `    --command node \\\n` +
       `    --arg ${ctx.binPath} \\\n` +
-      `    --env AIPE_HUB_URL=${ctx.hubUrl} \\\n` +
-      `    --env AIPE_ADMIN_TOKEN=${ctx.token}\n\n` +
+      `    --env GOTONG_HUB_URL=${ctx.hubUrl} \\\n` +
+      `    --env GOTONG_ADMIN_TOKEN=${ctx.token}\n\n` +
       `方式 B — 写入 ~/.openclaw/openclaw.json：\n` +
       `  {\n` +
       `    "mcp": {\n` +
@@ -238,7 +238,7 @@ export const CONNECT_PRESETS: readonly AgentConnectPreset[] = [
       `      }\n` +
       `    }\n` +
       `  }\n\n` +
-      `说明：OpenClaw 本身是网关/编排器；接 AipeHub 后其 runtime 可消费 hub 的工具。`,
+      `说明：OpenClaw 本身是网关/编排器；接 Gotong 后其 runtime 可消费 hub 的工具。`,
   }),
   toPreset({
     id: 'nanobot',
@@ -284,10 +284,10 @@ export function renderConnectList(ctx: ConnectContext): string {
     (p) => `  ${p.id.padEnd(idW)}  ${p.label}（${p.vendor}）— ${p.summary}`,
   ).join('\n')
   return (
-    `AipeHub 快捷接入 — 支持的 agent（都是 MCP 客户端，统一接 @aipehub/mcp-server）\n` +
+    `Gotong 快捷接入 — 支持的 agent（都是 MCP 客户端，统一接 @gotong/mcp-server）\n` +
     `${RULE}\n` +
     `${rows}\n\n` +
-    `用法：aipehub connect <id> [--hub=URL] [--token=TOKEN] [--name=NAME] [--bin=PATH]\n` +
+    `用法：gotong connect <id> [--hub=URL] [--token=TOKEN] [--name=NAME] [--bin=PATH]\n` +
     `当前：hub=${ctx.hubUrl}  name=${ctx.name}\n` +
     `      bin=${ctx.binPath}\n`
   )

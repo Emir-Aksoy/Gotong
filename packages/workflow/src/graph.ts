@@ -28,7 +28,7 @@
  * the pure projection leaves `crossHub` undefined for the host to stamp.
  */
 
-import type { DispatchStrategy } from '@aipehub/core'
+import type { DispatchStrategy } from '@gotong/core'
 
 import type { WorkflowDefinition } from './types.js'
 import { collectRefHeads } from './resolver.js'

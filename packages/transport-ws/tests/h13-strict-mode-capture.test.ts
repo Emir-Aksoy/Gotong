@@ -1,10 +1,10 @@
 /**
- * H13 regression — `AIPE_PROTOCOL_STRICT` is captured ONCE at session
+ * H13 regression — `GOTONG_PROTOCOL_STRICT` is captured ONCE at session
  * construction, not re-read per-frame.
  *
  * Pre-3.4 the inbound hot path did:
  *
- *     const decode = process.env.AIPE_PROTOCOL_STRICT === '1'
+ *     const decode = process.env.GOTONG_PROTOCOL_STRICT === '1'
  *       ? decodeFrameStrict
  *       : decodeFrame
  *
@@ -30,11 +30,11 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import WebSocket from 'ws'
 
-import { Hub } from '@aipehub/core'
+import { Hub } from '@gotong/core'
 
 import { serveWebSocket, type WebSocketTransportHandle } from '../src/index.js'
 
-const originalEnv = process.env.AIPE_PROTOCOL_STRICT
+const originalEnv = process.env.GOTONG_PROTOCOL_STRICT
 
 let handle: WebSocketTransportHandle | null = null
 let hub: Hub
@@ -42,7 +42,7 @@ let hub: Hub
 beforeEach(async () => {
   hub = Hub.inMemory()
   await hub.start()
-  delete process.env.AIPE_PROTOCOL_STRICT
+  delete process.env.GOTONG_PROTOCOL_STRICT
 })
 
 afterEach(async () => {
@@ -50,9 +50,9 @@ afterEach(async () => {
   handle = null
   await hub.stop()
   if (originalEnv === undefined) {
-    delete process.env.AIPE_PROTOCOL_STRICT
+    delete process.env.GOTONG_PROTOCOL_STRICT
   } else {
-    process.env.AIPE_PROTOCOL_STRICT = originalEnv
+    process.env.GOTONG_PROTOCOL_STRICT = originalEnv
   }
 })
 
@@ -106,7 +106,7 @@ function sendOneFrameAndCapture(
   })
 }
 
-describe('H13 — AIPE_PROTOCOL_STRICT captured once at session construction', () => {
+describe('H13 — GOTONG_PROTOCOL_STRICT captured once at session construction', () => {
   it('session handles malformed frames cleanly with env UNSET at startup', async () => {
     // Server starts with the env UNSET → sessions capture
     // strictMode=false. Whatever the env gets flipped to AFTER
@@ -115,7 +115,7 @@ describe('H13 — AIPE_PROTOCOL_STRICT captured once at session construction', (
     // ERROR response.
     const url = await startServer()
     // Operator flips the env after the server is already running.
-    process.env.AIPE_PROTOCOL_STRICT = '1'
+    process.env.GOTONG_PROTOCOL_STRICT = '1'
 
     const result = await sendOneFrameAndCapture(url, 'not-json')
     expect(result.gotResponse).toBe(true)
@@ -123,10 +123,10 @@ describe('H13 — AIPE_PROTOCOL_STRICT captured once at session construction', (
   })
 
   it('session handles malformed frames cleanly with env SET at startup', async () => {
-    process.env.AIPE_PROTOCOL_STRICT = '1'
+    process.env.GOTONG_PROTOCOL_STRICT = '1'
     const url = await startServer()
     // Operator unsets after server started.
-    delete process.env.AIPE_PROTOCOL_STRICT
+    delete process.env.GOTONG_PROTOCOL_STRICT
 
     const result = await sendOneFrameAndCapture(url, 'not-json')
     expect(result.gotResponse).toBe(true)
@@ -139,7 +139,7 @@ describe('H13 — AIPE_PROTOCOL_STRICT captured once at session construction', (
     // both produce a clean `bad_frame` response.
     const url = await startServer()
     const r1 = await sendOneFrameAndCapture(url, 'not-json')
-    process.env.AIPE_PROTOCOL_STRICT = '1'
+    process.env.GOTONG_PROTOCOL_STRICT = '1'
     const r2 = await sendOneFrameAndCapture(url, 'not-json')
     expect(r1.gotResponse).toBe(true)
     expect(r2.gotResponse).toBe(true)
@@ -148,7 +148,7 @@ describe('H13 — AIPE_PROTOCOL_STRICT captured once at session construction', (
   it('source has no per-frame process.env read (textual guard)', async () => {
     // Hard guard: a future regression could re-introduce the
     // env-per-frame read. Grep the source to make sure no
-    // `process.env.AIPE_PROTOCOL_STRICT` shows up inside
+    // `process.env.GOTONG_PROTOCOL_STRICT` shows up inside
     // `onMessage` (i.e. anywhere downstream of the constructor).
     //
     // Batch 6 (H15) refactored the boolean capture into a tri-state
@@ -163,13 +163,13 @@ describe('H13 — AIPE_PROTOCOL_STRICT captured once at session construction', (
     // pre-3.4 boolean form (`this.strictMode = process.env...`) or
     // the v3.4 tri-state form (`this.decode = pickDecoder(process.env...)`).
     expect(src).toMatch(
-      /(this\.strictMode\s*=\s*process\.env\.AIPE_PROTOCOL_STRICT|this\.decode\s*=\s*pickDecoder\(process\.env\.AIPE_PROTOCOL_STRICT)/,
+      /(this\.strictMode\s*=\s*process\.env\.GOTONG_PROTOCOL_STRICT|this\.decode\s*=\s*pickDecoder\(process\.env\.GOTONG_PROTOCOL_STRICT)/,
     )
     // And `onMessage` (or anywhere else) must NOT read the env
     // again.
     const onMessageIdx = src.indexOf('private async onMessage')
     expect(onMessageIdx).toBeGreaterThan(0)
     const onMessageSlice = src.slice(onMessageIdx)
-    expect(onMessageSlice).not.toMatch(/process\.env\.AIPE_PROTOCOL_STRICT/)
+    expect(onMessageSlice).not.toMatch(/process\.env\.GOTONG_PROTOCOL_STRICT/)
   })
 })

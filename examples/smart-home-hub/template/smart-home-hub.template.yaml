@@ -1,10 +1,10 @@
-# 智能家居 (小米经 Home Assistant) — 可载入模板 (aipehub.template/v1)
+# 智能家居 (小米经 Home Assistant) — 可载入模板 (gotong.template/v1)
 #
 # 一个**小而完整**的智能家居 hub:一个家居管家 (home-steward) 经 Home Assistant 控制
 # 你的小米设备, 跑一条「晚安例程」—— 可逆动作 (关灯、空调切睡眠) 直接做, 不可逆的
 # 物理/安防动作 (锁门、布防) 经住户确认后才执行。
 #
-# ── 设备怎么进来 (米家 → Home Assistant → AipeHub) ───────────────────────────────
+# ── 设备怎么进来 (米家 → Home Assistant → Gotong) ───────────────────────────────
 #   小米设备 ──(官方 ha_xiaomi_home 集成)──▶ Home Assistant ──(HA MCP Server 集成)──▶
 #   一个 MCP server ──▶ home-steward 的 tool-use 循环。
 # 也就是说:**凡是能进 Home Assistant 的设备, 就能连这个 hub** —— 不止小米, 也包括
@@ -27,7 +27,7 @@
 #     -H 'content-type: application/json' \
 #     -d "$(jq -Rs '{template: .}' examples/smart-home-hub/template/smart-home-hub.template.yaml)" \
 #     http://127.0.0.1:8745/api/admin/templates/import
-schema: aipehub.template/v1
+schema: gotong.template/v1
 template:
   name: 智能家居(小米 / Home Assistant)
   description: |-
@@ -83,7 +83,7 @@ template:
 
   # ── 1 条声明式工作流:晚安例程 ─────────────────────────────────────────────────
   # 导入时 parseTemplate 会把这个内层 block 重新序列化成完整 workflow yaml 交给 runtime
-  # 校验 + 注册。surface.me 让住户能在 /me 一键跑; human: 安防确认步派到 aipehub.human/v1
+  # 校验 + 注册。surface.me 让住户能在 /me 一键跑; human: 安防确认步派到 gotong.human/v1
   # → host 收件箱 broker 挂起, 住户批了才跑 secure (Phase 16)。
   workflows:
     - id: home-goodnight

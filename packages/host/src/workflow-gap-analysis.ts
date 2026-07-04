@@ -23,7 +23,7 @@
  * 纯函数、零 LLM、零 I/O——与 RES-M2 提议引擎、WIZ-M1 目录同形态。
  */
 
-import type { DispatchSpec, WorkflowDefinition } from '@aipehub/workflow'
+import type { DispatchSpec, WorkflowDefinition } from '@gotong/workflow'
 
 import type { ComponentEntry } from './component-catalog.js'
 

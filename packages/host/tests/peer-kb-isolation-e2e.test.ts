@@ -31,13 +31,13 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { Hub, createInprocHubLinkPair, installPeerLink } from '@aipehub/core'
+import { Hub, createInprocHubLinkPair, installPeerLink } from '@gotong/core'
 import {
   MASTER_KEY_LEN_BYTES,
   openIdentityStore,
   type IdentityStore,
   type PeerRegistration,
-} from '@aipehub/identity'
+} from '@gotong/identity'
 
 import { gateKnowledgeBaseRpc, type RpcResponder } from '../src/peer-kb-gate.js'
 import { MCP_PROXY_METHODS } from '../src/mcp-proxy.js'
@@ -73,7 +73,7 @@ describe('v5 C-M1 — callable-KB contracts are isolated across peers', () => {
   let tmp: string
 
   beforeEach(async () => {
-    tmp = await mkdtemp(join(tmpdir(), 'aipe-peer-kb-iso-'))
+    tmp = await mkdtemp(join(tmpdir(), 'gotong-peer-kb-iso-'))
     store = openIdentityStore({
       dbPath: join(tmp, 'identity.sqlite'),
       masterKey: randomBytes(MASTER_KEY_LEN_BYTES),

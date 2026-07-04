@@ -34,8 +34,8 @@ import {
   installPeerLink,
   type HubLink,
   type Task,
-} from '@aipehub/core'
-import { acceptHubLinks, connectHubLink } from '@aipehub/transport-ws'
+} from '@gotong/core'
+import { acceptHubLinks, connectHubLink } from '@gotong/transport-ws'
 
 import { FixedWindowLimiter } from '../src/peer-registry.js'
 import { gateKnowledgeBaseRpc, type RpcResponder } from '../src/peer-kb-gate.js'

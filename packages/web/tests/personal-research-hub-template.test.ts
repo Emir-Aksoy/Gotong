@@ -21,7 +21,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { Hub, Space } from '@aipehub/core'
+import { Hub, Space } from '@gotong/core'
 
 import { serveWeb, type WebServerHandle, type WorkflowSurface } from '../src/server.js'
 import { parseTemplate } from '../src/template-manifest.js'
@@ -40,7 +40,7 @@ beforeEach(async () => {
 })
 
 describe('examples/personal-research-hub/template (CR2)', () => {
-  it('parses as a valid aipehub.template/v1 manifest', () => {
+  it('parses as a valid gotong.template/v1 manifest', () => {
     const t = parseTemplate(templateText)
     expect(t.name).toBe('个人研究中枢(Karpathy 知识库循环)')
     expect(t.version).toBe(1)
@@ -82,7 +82,7 @@ describe('examples/personal-research-hub/template (CR2)', () => {
   })
 
   it('imports end-to-end: the whole team lands, KB slot is reported', async () => {
-    const tmp = await mkdtemp(join(tmpdir(), 'aipehub-prh-'))
+    const tmp = await mkdtemp(join(tmpdir(), 'gotong-prh-'))
     const { space } = await Space.init(tmp, { name: 'prh-test' })
     const hub = new Hub({ space })
     await hub.start()

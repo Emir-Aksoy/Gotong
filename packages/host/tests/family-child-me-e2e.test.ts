@@ -35,9 +35,9 @@ import { fileURLToPath } from 'node:url'
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { AgentParticipant, Hub, Space, type Task } from '@aipehub/core'
-import { serveWeb, type WebServerHandle } from '@aipehub/web'
-import { openIdentityStore, type IdentityStore } from '@aipehub/identity'
+import { AgentParticipant, Hub, Space, type Task } from '@gotong/core'
+import { serveWeb, type WebServerHandle } from '@gotong/web'
+import { openIdentityStore, type IdentityStore } from '@gotong/identity'
 
 import { WorkflowController } from '../src/workflow-controller.js'
 
@@ -88,7 +88,7 @@ async function waitFor(pred: () => boolean, timeoutMs = 3000): Promise<void> {
 }
 
 async function boot(): Promise<Rig> {
-  const root = await mkdtemp(join(tmpdir(), 'aipe-family-child-me-'))
+  const root = await mkdtemp(join(tmpdir(), 'gotong-family-child-me-'))
   const { space, adminToken } = await Space.init(root, {
     name: 'family-child',
     adminDisplayName: 'Owner',

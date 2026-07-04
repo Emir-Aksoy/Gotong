@@ -13,7 +13,7 @@ import type {
   MemoryKind,
   MemoryQuery,
   NewMemoryEntry,
-} from '@aipehub/services-sdk'
+} from '@gotong/services-sdk'
 
 export interface DemoMemory extends MemoryHandle {
   /** Snapshot of everything stored — for assertions only. */

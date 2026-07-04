@@ -1,6 +1,6 @@
 # remote-python
 
-Two-process demo: an **AipeHub Hub running in Node** (TypeScript) talks to **a Python agent** over the wire protocol. Same scenario as `examples/remote-agent`, except the worker is in Python instead of TypeScript.
+Two-process demo: an **Gotong Hub running in Node** (TypeScript) talks to **a Python agent** over the wire protocol. Same scenario as `examples/remote-agent`, except the worker is in Python instead of TypeScript.
 
 ## Run
 

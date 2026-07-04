@@ -1,5 +1,5 @@
 /**
- * Host wiring for `@aipehub/hub-steward` — the "管家" (hub steward).
+ * Host wiring for `@gotong/hub-steward` — the "管家" (hub steward).
  *
  * Spawns ONE persistent `HubStewardAgent` on the hub at boot
  * (id=`hub-steward`, capability=`hub:steward`) and exposes a `HubStewardSurface`
@@ -29,10 +29,10 @@
 
 import { randomUUID } from 'node:crypto'
 
-import type { Hub, Logger } from '@aipehub/core'
-import { MockLlmProvider, readMultimodalInlineCapFromEnv, type LlmProvider } from '@aipehub/llm'
-import { AnthropicProvider } from '@aipehub/llm-anthropic'
-import { OpenAIProvider } from '@aipehub/llm-openai'
+import type { Hub, Logger } from '@gotong/core'
+import { MockLlmProvider, readMultimodalInlineCapFromEnv, type LlmProvider } from '@gotong/llm'
+import { AnthropicProvider } from '@gotong/llm-anthropic'
+import { OpenAIProvider } from '@gotong/llm-openai'
 import {
   HubStewardAgent,
   HUB_STEWARD_CAPABILITY,
@@ -54,9 +54,9 @@ import {
   type StewardTurn,
   type StewardTurnInput,
   type StewardTurnResult,
-} from '@aipehub/hub-steward'
+} from '@gotong/hub-steward'
 
-import type { InboxStore } from '@aipehub/inbox'
+import type { InboxStore } from '@gotong/inbox'
 
 import type { OrgApiPool } from './org-api-pool.js'
 import type { HostMeAgentService } from './me-agent-service.js'
@@ -105,8 +105,8 @@ export const DEFAULT_STEWARD_IDS: StewardServiceIds = {
 export const OPERATOR_STEWARD_IDS: StewardServiceIds = {
   agentId: 'hub-steward-operator',
   capability: 'hub:steward:operator',
-  brokerId: 'aipehub:steward-exec:operator',
-  brokerCapability: 'aipehub.steward.exec.operator/v1',
+  brokerId: 'gotong:steward-exec:operator',
+  brokerCapability: 'gotong.steward.exec.operator/v1',
 }
 
 /** Concrete provider choice for the host-built-in steward. */
@@ -312,23 +312,23 @@ export interface HubStewardSurface {
 
 /**
  * Read env vars and pick a config. Returns null when the operator explicitly
- * disabled the steward via `AIPE_STEWARD_DISABLED=1`.
+ * disabled the steward via `GOTONG_STEWARD_DISABLED=1`.
  *
- *   AIPE_STEWARD_PROVIDER    'anthropic' (default) | 'openai' | 'mock'
- *   AIPE_STEWARD_MODEL       provider-specific model id (optional)
- *   AIPE_STEWARD_MAX_TOKENS  integer (optional, default 2048)
- *   AIPE_STEWARD_DISABLED    '1' / 'true' → skip registration entirely
+ *   GOTONG_STEWARD_PROVIDER    'anthropic' (default) | 'openai' | 'mock'
+ *   GOTONG_STEWARD_MODEL       provider-specific model id (optional)
+ *   GOTONG_STEWARD_MAX_TOKENS  integer (optional, default 2048)
+ *   GOTONG_STEWARD_DISABLED    '1' / 'true' → skip registration entirely
  */
 export function resolveStewardConfig(): HubStewardAgentConfig | null {
-  const disabled = process.env.AIPE_STEWARD_DISABLED
+  const disabled = process.env.GOTONG_STEWARD_DISABLED
   if (disabled === '1' || disabled === 'true') return null
 
-  const raw = process.env.AIPE_STEWARD_PROVIDER ?? 'anthropic'
+  const raw = process.env.GOTONG_STEWARD_PROVIDER ?? 'anthropic'
   const provider: StewardProviderKind =
     raw === 'openai' ? 'openai' : raw === 'mock' ? 'mock' : 'anthropic'
 
-  const model = process.env.AIPE_STEWARD_MODEL
-  const maxTokensRaw = process.env.AIPE_STEWARD_MAX_TOKENS
+  const model = process.env.GOTONG_STEWARD_MODEL
+  const maxTokensRaw = process.env.GOTONG_STEWARD_MAX_TOKENS
   let maxTokens: number | undefined
   if (maxTokensRaw !== undefined) {
     const n = Number(maxTokensRaw)
@@ -374,13 +374,13 @@ function buildStewardProvider(kind: StewardProviderKind, apiKey: string | undefi
         textChunkCount: 6,
         reply: () =>
           [
-            'Mock steward — set AIPE_STEWARD_PROVIDER=anthropic or openai for real planning.',
+            'Mock steward — set GOTONG_STEWARD_PROVIDER=anthropic or openai for real planning.',
             '',
             '```json',
             '{',
             '  "reply": "我在 mock 模式下运行——接一个真 provider 我才能真正帮你建/改助手和工作流。",',
             '  "actions": [',
-            '    { "kind": "inspect", "answer": "Mock mode: wire AIPE_STEWARD_PROVIDER to anthropic or openai." }',
+            '    { "kind": "inspect", "answer": "Mock mode: wire GOTONG_STEWARD_PROVIDER to anthropic or openai." }',
             '  ]',
             '}',
             '```',

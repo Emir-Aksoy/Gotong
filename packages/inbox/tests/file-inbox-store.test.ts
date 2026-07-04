@@ -26,7 +26,7 @@ describe('FileInboxStore', () => {
   let store: FileInboxStore
 
   beforeEach(() => {
-    root = mkdtempSync(join(tmpdir(), 'aipe-inbox-'))
+    root = mkdtempSync(join(tmpdir(), 'gotong-inbox-'))
     store = new FileInboxStore(root)
     store.ensureDirs()
   })

@@ -49,7 +49,7 @@ describe('sanitisePath', () => {
 })
 
 describe('resolveOwnerPath', () => {
-  const rootDir = resolve('/tmp/aipe-art-paths-test')
+  const rootDir = resolve('/tmp/gotong-art-paths-test')
 
   it('stays inside the owner directory', () => {
     const full = resolveOwnerPath(rootDir, owner, 'reports/q1.md')

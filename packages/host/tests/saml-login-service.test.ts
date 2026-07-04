@@ -17,14 +17,14 @@
 
 import { describe, it, expect, beforeEach } from 'vitest'
 
-import { openIdentityStore, IdentityStore } from '@aipehub/identity'
+import { openIdentityStore, IdentityStore } from '@gotong/identity'
 import {
   SamlError,
   type AuthnRequestInput,
   type AuthnRequestResult,
   type SamlAssertionResult,
   type ValidateSamlResponseInput,
-} from '@aipehub/saml'
+} from '@gotong/saml'
 import { SamlLoginService, type SamlProtocol } from '../src/saml-login-service.js'
 
 const IDP_ENTITY = 'https://idp.test/entity'

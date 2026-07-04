@@ -1,4 +1,4 @@
-# AipeHub load test
+# Gotong load test
 
 Internal performance harness — designed to catch dispatch regressions and
 to give operators a ballpark of how many concurrent agents one Hub can
@@ -26,17 +26,17 @@ scheduling regression in the Hub core, `inproc` isolates the variable.
 pnpm -r build
 
 # Headline baseline: 50 workers, 60 seconds, WebSocket transport
-pnpm --filter @aipehub/example-loadtest ws -- \
+pnpm --filter @gotong/example-loadtest ws -- \
   --workers 50 --duration 60s \
   --output runs/ws-50w-60s.json
 
 # Spot-check inproc upper bound
-pnpm --filter @aipehub/example-loadtest inproc -- \
+pnpm --filter @gotong/example-loadtest inproc -- \
   --workers 50 --duration 60s \
   --output runs/inproc-50w-60s.json
 
 # Stitch both into a markdown report
-pnpm --filter @aipehub/example-loadtest report -- runs/*.json > /tmp/report.md
+pnpm --filter @gotong/example-loadtest report -- runs/*.json > /tmp/report.md
 ```
 
 ## Flags
@@ -61,13 +61,13 @@ climb.
   ~25 % p99 increase deserves a follow-up.
 - **After a Hub-core change** that touches `dispatch`, `register`, or
   the capability matcher.
-- **After a transport change** (`@aipehub/transport-ws` /
-  `@aipehub/sdk-node`) — the `ws` runner picks up that surface.
+- **After a transport change** (`@gotong/transport-ws` /
+  `@gotong/sdk-node`) — the `ws` runner picks up that surface.
 
 ## What this harness DOES NOT cover
 
 - **LLM-backed agents.** `EchoAgent` returns synchronously. Real LLM
-  agents are bounded by network + provider latency, not by AipeHub.
+  agents are bounded by network + provider latency, not by Gotong.
 - **Long-tail GC behaviour.** A 60 s run won't surface a leak that takes
   hours to show up. For that, bump `--duration 30m` and watch the
   `rssGrowthMb` field in the report.

@@ -1,5 +1,5 @@
 {
-  "project": "AipeHub",
+  "project": "Gotong",
   "workspace": "/Users/emiraksoy/Desktop/AipeHub",
   "head": {
     "shortSha": "823c49a",
@@ -14,11 +14,11 @@
     {
       "id": "P1-protocol-core-dependency",
       "severity": "P1",
-      "title": "@aipehub/protocol depends on @aipehub/core",
+      "title": "@gotong/protocol depends on @gotong/core",
       "evidence": [
         "packages/protocol/package.json declares description: Zero runtime",
-        "packages/protocol/package.json dependencies includes @aipehub/core",
-        "packages/protocol/src/frames.ts imports wire types from @aipehub/core"
+        "packages/protocol/package.json dependencies includes @gotong/core",
+        "packages/protocol/src/frames.ts imports wire types from @gotong/core"
       ],
       "impact": "Protocol is no longer the lowest-level wire contract and pulls core into lightweight protocol consumers.",
       "recommendation": "Move wire primitives into protocol or a shared zero-runtime types package; remove protocol -> core dependency."
@@ -39,14 +39,14 @@
     {
       "id": "P2-workflow-llm-boundary",
       "severity": "P2",
-      "title": "@aipehub/workflow includes LLM authoring",
+      "title": "@gotong/workflow includes LLM authoring",
       "evidence": [
-        "packages/workflow/package.json depends on @aipehub/llm",
+        "packages/workflow/package.json depends on @gotong/llm",
         "packages/workflow/src/index.ts exports WorkflowAssistantAgent",
         "packages/workflow/src/assistant.ts implements natural-language -> YAML agent"
       ],
       "impact": "Workflow runner package is no longer just schema / runner / validator.",
-      "recommendation": "Move WorkflowAssistantAgent into @aipehub/workflow-assistant or host/web integration package."
+      "recommendation": "Move WorkflowAssistantAgent into @gotong/workflow-assistant or host/web integration package."
     },
     {
       "id": "P2-workflow-assistant-success-semantics",
@@ -64,7 +64,7 @@
       "severity": "P2",
       "title": "pnpm test:python fails without implicit import setup",
       "evidence": [
-        "pnpm test:python fails with ModuleNotFoundError: No module named 'aipehub'",
+        "pnpm test:python fails with ModuleNotFoundError: No module named 'gotong'",
         "PYTHONPATH=src .venv/bin/python -m pytest -q passes with 57 tests"
       ],
       "impact": "Root quality gate is not reproducible on current workspace state.",
@@ -97,7 +97,7 @@
     "pythonRootScript": {
       "command": "pnpm test:python",
       "result": "failed",
-      "error": "ModuleNotFoundError: No module named 'aipehub'"
+      "error": "ModuleNotFoundError: No module named 'gotong'"
     },
     "pythonDirect": {
       "command": "cd python-sdk && PYTHONPATH=src .venv/bin/python -m pytest -q",

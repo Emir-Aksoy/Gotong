@@ -1,7 +1,7 @@
-# @aipehub/im-slack
+# @gotong/im-slack
 
 A Slack bot bridge implemented against
-[`@aipehub/im-adapter`](../im-adapter)'s `ImBridge` interface, over the
+[`@gotong/im-adapter`](../im-adapter)'s `ImBridge` interface, over the
 **official Socket Mode** transport.
 
 Socket Mode is Slack's outbound-WebSocket transport: the app dials OUT,
@@ -21,8 +21,8 @@ Two tokens (don't mix them up):
 ## What you get
 
 ```ts
-import { SlackBridge } from '@aipehub/im-slack'
-import { parseImCommand } from '@aipehub/im-adapter'
+import { SlackBridge } from '@gotong/im-slack'
+import { parseImCommand } from '@gotong/im-adapter'
 
 const bridge = new SlackBridge({
   token: process.env.SLACK_BOT_TOKEN!,        // xoxb-...
@@ -189,12 +189,12 @@ events_api dispatch、botUserId capture、dedup by event_id、anti-loop
 start/stop 生命周期、sendMessage REST shape。
 
 ```bash
-pnpm --filter @aipehub/im-slack test
+pnpm --filter @gotong/im-slack test
 ```
 
 ## host 接线
 
-`startImBridges()`（`@aipehub/host`）按 env 起桥：
-`AIPE_SLACK_APP_TOKEN` (`xapp-`) + `AIPE_SLACK_BOT_TOKEN` (`xoxb-`)
+`startImBridges()`（`@gotong/host`）按 env 起桥：
+`GOTONG_SLACK_APP_TOKEN` (`xapp-`) + `GOTONG_SLACK_BOT_TOKEN` (`xoxb-`)
 齐则构造、push 进 `bridges` 数组（router `handleImMessage` 零改）。
 See `docs/zh/IM-OFFICIAL-REARCH.md` for the official-transport rework.

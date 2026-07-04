@@ -39,25 +39,25 @@
  * Run:
  *
  *   # Real DeepSeek (cheapest, ~$0.0001 per run):
- *   pnpm --filter @aipehub/example-workflow-assistant start
+ *   pnpm --filter @gotong/example-workflow-assistant start
  *
  *   # Anthropic:
- *   AIPE_DEMO_PROVIDER=anthropic ANTHROPIC_API_KEY=sk-ant-... \
- *     pnpm --filter @aipehub/example-workflow-assistant start
+ *   GOTONG_DEMO_PROVIDER=anthropic ANTHROPIC_API_KEY=sk-ant-... \
+ *     pnpm --filter @gotong/example-workflow-assistant start
  *
  *   # OpenAI:
- *   AIPE_DEMO_PROVIDER=openai OPENAI_API_KEY=sk-... \
- *     pnpm --filter @aipehub/example-workflow-assistant start
+ *   GOTONG_DEMO_PROVIDER=openai OPENAI_API_KEY=sk-... \
+ *     pnpm --filter @gotong/example-workflow-assistant start
  *
  *   # Mock (no network, no keys, deterministic):
- *   pnpm --filter @aipehub/example-workflow-assistant start:mock
+ *   pnpm --filter @gotong/example-workflow-assistant start:mock
  */
 
-import { Hub } from '@aipehub/core'
-import { MockLlmProvider, type LlmProvider } from '@aipehub/llm'
-import { AnthropicProvider } from '@aipehub/llm-anthropic'
-import { OpenAIProvider } from '@aipehub/llm-openai'
-import { parseWorkflow } from '@aipehub/workflow'
+import { Hub } from '@gotong/core'
+import { MockLlmProvider, type LlmProvider } from '@gotong/llm'
+import { AnthropicProvider } from '@gotong/llm-anthropic'
+import { OpenAIProvider } from '@gotong/llm-openai'
+import { parseWorkflow } from '@gotong/workflow'
 import {
   inventoryFromContextHints,
   loadBundledExamples,
@@ -66,7 +66,7 @@ import {
   WorkflowAssistantAgent,
   type WorkflowAssistantOutput,
   type WorkflowAssistantPayload,
-} from '@aipehub/workflow-assistant'
+} from '@gotong/workflow-assistant'
 
 // ---------------------------------------------------------------------------
 // Provider selection
@@ -83,7 +83,7 @@ function parseArgs(): { provider: ProviderKind } {
       return { provider: v }
     }
   }
-  const env = process.env.AIPE_DEMO_PROVIDER?.toLowerCase()
+  const env = process.env.GOTONG_DEMO_PROVIDER?.toLowerCase()
   if (env === 'mock' || env === 'deepseek' || env === 'anthropic' || env === 'openai') {
     return { provider: env }
   }
@@ -96,10 +96,10 @@ function buildProvider(kind: ProviderKind): { provider: LlmProvider; model: stri
       // Deterministic 2-step workflow that satisfies the demo inventory
       // — exercises the deepCheck=ok path without an LLM call.
       const reply = [
-        'Mock provider — set AIPE_DEMO_PROVIDER=deepseek (or anthropic/openai) for real output.',
+        'Mock provider — set GOTONG_DEMO_PROVIDER=deepseek (or anthropic/openai) for real output.',
         '',
         '```yaml',
-        'schema: aipehub.workflow/v1',
+        'schema: gotong.workflow/v1',
         'workflow:',
         '  id: demo-mock-flow',
         '  name: Mock demo flow',
@@ -126,7 +126,7 @@ function buildProvider(kind: ProviderKind): { provider: LlmProvider; model: stri
         console.error('[workflow-assistant] DEEPSEEK_API_KEY missing — pass --provider mock to run offline.')
         process.exit(2)
       }
-      const model = process.env.AIPE_DEMO_MODEL ?? 'deepseek-v4-flash'
+      const model = process.env.GOTONG_DEMO_MODEL ?? 'deepseek-v4-flash'
       return {
         provider: new OpenAIProvider({
           apiKey,
@@ -143,7 +143,7 @@ function buildProvider(kind: ProviderKind): { provider: LlmProvider; model: stri
         console.error('[workflow-assistant] ANTHROPIC_API_KEY missing — pass --provider mock to run offline.')
         process.exit(2)
       }
-      const model = process.env.AIPE_DEMO_MODEL ?? 'claude-3-5-haiku-latest'
+      const model = process.env.GOTONG_DEMO_MODEL ?? 'claude-3-5-haiku-latest'
       return { provider: new AnthropicProvider({ apiKey }), model }
     }
     case 'openai': {
@@ -152,7 +152,7 @@ function buildProvider(kind: ProviderKind): { provider: LlmProvider; model: stri
         console.error('[workflow-assistant] OPENAI_API_KEY missing — pass --provider mock to run offline.')
         process.exit(2)
       }
-      const model = process.env.AIPE_DEMO_MODEL ?? 'gpt-4o-mini'
+      const model = process.env.GOTONG_DEMO_MODEL ?? 'gpt-4o-mini'
       return { provider: new OpenAIProvider({ apiKey, defaultModel: model }), model }
     }
   }
@@ -316,7 +316,7 @@ async function main(): Promise<void> {
   // dispatching — useful for SDK consumers / batch validation.
   console.log('\n' + '─'.repeat(72))
   console.log('▶ scenario: standalone helper (verdictForYamlWithDeepCheck)')
-  const handCrafted = `schema: aipehub.workflow/v1
+  const handCrafted = `schema: gotong.workflow/v1
 workflow:
   id: news-digest
   trigger:

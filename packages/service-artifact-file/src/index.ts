@@ -1,5 +1,5 @@
 /**
- * `@aipehub/service-artifact-file`
+ * `@gotong/service-artifact-file`
  *
  * First-party `artifact:file` plugin. Default export is a factory
  * (per services-sdk loader convention).

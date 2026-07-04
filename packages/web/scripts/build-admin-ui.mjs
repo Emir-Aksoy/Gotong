@@ -5,7 +5,7 @@
 // static/admin.js. P3 (admin UI split) moves the source under admin-src/
 // as ES modules and lets esbuild stitch them back into one IIFE file so
 // the runtime story is unchanged — app.js still injects a single
-// <script src="/admin.js">, window.AipeHub coordination still works, and
+// <script src="/admin.js">, window.Gotong coordination still works, and
 // the single-file binary still embeds one admin.js via static-assets.ts.
 //
 // IIFE (not ESM) output: admin.js loads as a classic <script>, not

@@ -3,7 +3,7 @@
 > 同步自英文版 [`docs/SIDECAR.md`](../SIDECAR.md) @ 2026-05-17
 
 这是"第一天"实用指南：把你已经写好的 agent（TypeScript 或 Python）
-接到一个已存在的 AipeHub Hub 上，**不动 Hub 的 `node_modules`、
+接到一个已存在的 Gotong Hub 上，**不动 Hub 的 `node_modules`、
 也不动 YAML 清单**。这个契约从 wire protocol **v1.1** 起就稳定了
 （也就是加入 Hub Services over WebSocket 的那个版本）。
 
@@ -39,7 +39,7 @@ TypeScript SDK 只暴露一个 `connect()`。其他都是你自己的代码。
 把下面这段粘到一个新文件里，指向跑着的 Hub，你就有了一个能干活的 agent。
 
 ```ts
-import { AgentParticipant, connect, type Task } from '@aipehub/sdk-node'
+import { AgentParticipant, connect, type Task } from '@gotong/sdk-node'
 
 class Greeter extends AgentParticipant {
   constructor() { super({ id: 'greeter', capabilities: ['greet'] }) }
@@ -52,7 +52,7 @@ await connect({ url: 'ws://127.0.0.1:4000', agents: [new Greeter()] })
 console.log('online')
 ```
 
-还没装就 `pnpm add @aipehub/sdk-node`。Python 是镜像写法，见
+还没装就 `pnpm add @gotong/sdk-node`。Python 是镜像写法，见
 [`AGENT.md` § Option B](./AGENT.md#option-b--python)。
 
 Hub **不需要**给你的 agent 配 yaml 条目。**HELLO 帧就是清单**。
@@ -66,7 +66,7 @@ Hub **不需要**给你的 agent 配 yaml 条目。**HELLO 帧就是清单**。
 调用它的 handle。
 
 ```ts
-import { AgentParticipant, connect, type ServiceClient, type Task } from '@aipehub/sdk-node'
+import { AgentParticipant, connect, type ServiceClient, type Task } from '@gotong/sdk-node'
 
 class CoachAgent extends AgentParticipant {
   services?: ServiceClient   // connect() 之后填充
@@ -139,13 +139,13 @@ class CoachAgent extends LlmAgent {
 
 原样搬到新文件 `sidecar-coach/src/index.ts`。**类本身不用变**
 —— `LlmAgent` 两种形态都能用。唯一的约束是它的依赖：不能 import
-`@aipehub/host` 里的东西，因为 sidecar 进程里没有 host。
+`@gotong/host` 里的东西，因为 sidecar 进程里没有 host。
 
 ### Step 2 —— 用 SDK 的 `AgentParticipant`
 
 如果你的 agent 已经继承了 `LlmAgent`，继续继承 —— `LlmAgent` 在
-`@aipehub/llm`，sidecar 安全。如果你继承的是 host 的内部类
-（比如 `LocalAgentPool` 的 spawn shape），降到 `@aipehub/sdk-node`
+`@gotong/llm`，sidecar 安全。如果你继承的是 host 的内部类
+（比如 `LocalAgentPool` 的 spawn shape），降到 `@gotong/sdk-node`
 的 `AgentParticipant`，用显式 `provider` 和 `services` 字段把行为
 重建一遍。
 
@@ -157,7 +157,7 @@ in-process 版本通过 `LocalAgentPool` 解析 agent yaml 的 `uses:` 块
 
 ```ts
 const session = await connect({
-  url: process.env.AIPEHUB_URL ?? 'ws://127.0.0.1:4000',
+  url: process.env.GOTONG_URL ?? 'ws://127.0.0.1:4000',
   agents: [coach],
   services: [
     { type: 'memory', impl: 'file', owner: { kind: 'agent',       id: 'self' } },

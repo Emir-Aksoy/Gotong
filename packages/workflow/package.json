@@ -1,12 +1,12 @@
 {
-  "name": "@aipehub/workflow",
+  "name": "@gotong/workflow",
   "version": "1.1.0",
   "type": "module",
-  "description": "AipeHub workflow runner — pluggable, file-first multi-step orchestration that lives outside the Hub core.",
+  "description": "Gotong workflow runner — pluggable, file-first multi-step orchestration that lives outside the Hub core.",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/Emir-Aksoy/AipeHub.git",
+    "url": "https://github.com/Emir-Aksoy/Gotong.git",
     "directory": "packages/workflow"
   },
   "publishConfig": {
@@ -33,7 +33,7 @@
     "prepack": "tsc -p tsconfig.json"
   },
   "dependencies": {
-    "@aipehub/core": "workspace:*",
+    "@gotong/core": "workspace:*",
     "yaml": "^2.5.0"
   },
   "devDependencies": {

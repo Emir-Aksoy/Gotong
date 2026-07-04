@@ -3,7 +3,7 @@
 <!-- doc-version: 1.0 -->
 > **Version du document 1.0** · Traduction française · Mis à jour le 2026-06-27 · Source faisant autorité : [English](../LICENSE-FAQ.md). En cas de divergence entre la traduction et la version anglaise, la version anglaise prévaut.
 
-> **AipeHub dans son ensemble est sous licence [MIT](../../LICENSE).**
+> **Gotong dans son ensemble est sous licence [MIT](../../LICENSE).**
 > Cette page répond aux questions courantes « puis-je / dois-je / à quoi
 > faire attention » sous forme de FAQ. Ce n'est pas un conseil juridique —
 > pour un vrai travail de conformité en entreprise, consultez votre propre
@@ -13,17 +13,17 @@
 
 ---
 
-## 1. Puis-je intégrer AipeHub dans mon produit à source fermée / SaaS / outil interne ?
+## 1. Puis-je intégrer Gotong dans mon produit à source fermée / SaaS / outil interne ?
 
 **Oui.** MIT est parmi les licences OSS les plus permissives. Elle autorise :
 
-- ✅ L'usage commercial, y compris le repackaging intégral d'AipeHub et sa vente
-- ✅ La modification du source, le renommage (si vous renommez, veuillez mentionner « basé sur AipeHub »)
+- ✅ L'usage commercial, y compris le repackaging intégral d'Gotong et sa vente
+- ✅ La modification du source, le renommage (si vous renommez, veuillez mentionner « basé sur Gotong »)
 - ✅ Les dérivés à source fermée — vos modifications **n'ont pas** à être open-sourcées
-- ✅ L'inclusion de `@aipehub/core` dans un SaaS à source fermée comme dépendance npm
+- ✅ L'inclusion de `@gotong/core` dans un SaaS à source fermée comme dépendance npm
 
 **La seule exigence impérative** : conserver le fichier LICENSE + la notice de copyright
-(lister AipeHub sur la page NOTICE / Third-Party-Licenses de votre produit suffit).
+(lister Gotong sur la page NOTICE / Third-Party-Licenses de votre produit suffit).
 
 ---
 
@@ -80,16 +80,16 @@ mais vous **ne pouvez pas supprimer le texte MIT d'origine** :
   propriétaire / quelque chose que vous avez écrit vous-même
 - ✅ Vous pouvez mettre votre propre copyright dans votre propre fichier LICENSE
 - ⚠️ Mais vous **devez conserver, quelque part** (p.ex. NOTICE.md ou
-  THIRD-PARTY.md), le texte MIT original d'AipeHub + la ligne de copyright en amont
-- ❌ Vous **ne pouvez pas** prétendre « AipeHub est notre œuvre originale » — c'est
+  THIRD-PARTY.md), le texte MIT original d'Gotong + la ligne de copyright en amont
+- ❌ Vous **ne pouvez pas** prétendre « Gotong est notre œuvre originale » — c'est
   une fraude, quelle que soit la licence
 
 ---
 
 ## 5. J'ai importé un prompt privé qu'un collègue a écrit avec GPT comme agent — y a-t-il un risque de licence ?
 
-**Aucun du côté d'AipeHub.** Les prompts que vous ou votre entreprise écrivez sont
-les propres actifs de votre entreprise ; AipeHub n'est que le conteneur d'exécution.
+**Aucun du côté d'Gotong.** Les prompts que vous ou votre entreprise écrivez sont
+les propres actifs de votre entreprise ; Gotong n'est que le conteneur d'exécution.
 Vous devriez cependant vérifier :
 
 - Si la production GPT de votre collègue est conforme aux conditions d'utilisation
@@ -98,27 +98,27 @@ Vous devriez cependant vérifier :
 - Si le prompt **cite** les extraits de code / articles de quelqu'un d'autre, si la
   licence de cette citation propre le permet
 
-Aucun de ces points n'est régi par le projet AipeHub — MIT licence le logiciel
+Aucun de ces points n'est régi par le projet Gotong — MIT licence le logiciel
 lui-même, pas le contenu que vous générez avec.
 
 ---
 
-## 6. Je déploie AipeHub dans l'intranet d'un client — quels fichiers de licence dois-je lui remettre ?
+## 6. Je déploie Gotong dans l'intranet d'un client — quels fichiers de licence dois-je lui remettre ?
 
 Au minimum :
 
-- Le fichier `LICENSE` à la racine du dépôt AipeHub
+- Le fichier `LICENSE` à la racine du dépôt Gotong
 - Si vous utilisez `templates/community/` : apportez également `LICENSE-NOTICES.md`
-- Si vous intégrez le package npm `@aipehub/core` : le package livre sa propre licence
+- Si vous intégrez le package npm `@gotong/core` : le package livre sa propre licence
   à l'installation ; la redistribution en aval doit juste conserver
-  `node_modules/@aipehub/*/LICENSE` non supprimé
+  `node_modules/@gotong/*/LICENSE` non supprimé
 
 Un schéma courant est une page « Licences tierces » dans votre produit listant chaque
-texte de licence OSS en amont. Ajoutez-y le MIT d'AipeHub et vous êtes prêt.
+texte de licence OSS en amont. Ajoutez-y le MIT d'Gotong et vous êtes prêt.
 
 ---
 
-## 7. Les dépendances d'exécution d'AipeHub contiennent-elles du copyleft GPL/AGPL ?
+## 7. Les dépendances d'exécution d'Gotong contiennent-elles du copyleft GPL/AGPL ?
 
 Actuellement non. Les principales dépendances :
 
@@ -138,7 +138,7 @@ préserver la flexibilité en aval.
 
 ---
 
-## 8. Le protocole wire d'AipeHub fait-il partie de la licence ?
+## 8. Le protocole wire d'Gotong fait-il partie de la licence ?
 
 Non. Le format de trame JSON décrit dans `docs/PROTOCOL.md` est une **spécification
 de facto** — n'importe qui peut implémenter son propre serveur de hub ou SDK **sans
@@ -156,7 +156,7 @@ une issue publique n'est **pas acceptable** — même si la licence le permettra
 
 ---
 
-## 10. Mon entreprise peut-elle forker AipeHub en interne sans open-sourcer le fork ?
+## 10. Mon entreprise peut-elle forker Gotong en interne sans open-sourcer le fork ?
 
 **Absolument.** MIT ne se propage pas. Vous pouvez :
 
@@ -164,7 +164,7 @@ une issue publique n'est **pas acceptable** — même si la licence le permettra
 - Renommer le fork et le déployer en privé pour les clients
 - Vendre les artefacts de build du fork comme binaire à source fermée
 
-Tant que **le livrable final conserve quelque part la licence MIT originale d'AipeHub**
+Tant que **le livrable final conserve quelque part la licence MIT originale d'Gotong**
 (typiquement une page « notices open source »), vous êtes prêt.
 
 ---

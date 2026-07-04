@@ -48,7 +48,7 @@ import {
   type Task,
   type TaskResult,
   type TranscriptEntry,
-} from '@aipehub/core'
+} from '@gotong/core'
 
 // --- In-memory suspended-task store ----------------------------------------
 
@@ -179,7 +179,7 @@ async function runSweep(hub: Hub): Promise<number> {
 // --- main -------------------------------------------------------------------
 
 async function main(): Promise<void> {
-  console.log('\n=== AipeHub demo: long-running-agent (Phase 11) ===\n')
+  console.log('\n=== Gotong demo: long-running-agent (Phase 11) ===\n')
 
   const hub = Hub.inMemory({
     // Phase 11 M2 — when the agent throws SuspendTaskError the
@@ -219,7 +219,7 @@ async function main(): Promise<void> {
   console.log(`  [system] parked ${parked.size} task(s); waiting for sweep…\n`)
 
   // Pretend the host's sweep loop runs every 200 ms. In a real host
-  // this is the AIPE_RESUME_SWEEP_MS setInterval (default 30 s).
+  // this is the GOTONG_RESUME_SWEEP_MS setInterval (default 30 s).
   let resumed = 0
   for (let tick = 0; tick < 20 && resumed === 0; tick++) {
     await new Promise((r) => setTimeout(r, 200))

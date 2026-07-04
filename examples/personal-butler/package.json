@@ -1,5 +1,5 @@
 {
-  "name": "@aipehub/example-personal-butler",
+  "name": "@gotong/example-personal-butler",
   "version": "0.0.0",
   "type": "module",
   "private": true,
@@ -9,10 +9,10 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@aipehub/core": "workspace:*",
-    "@aipehub/llm": "workspace:*",
-    "@aipehub/personal-memory": "workspace:*",
-    "@aipehub/personal-butler": "workspace:*",
-    "@aipehub/services-sdk": "workspace:*"
+    "@gotong/core": "workspace:*",
+    "@gotong/llm": "workspace:*",
+    "@gotong/personal-memory": "workspace:*",
+    "@gotong/personal-butler": "workspace:*",
+    "@gotong/services-sdk": "workspace:*"
   }
 }

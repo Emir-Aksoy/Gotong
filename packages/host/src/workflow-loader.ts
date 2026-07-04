@@ -1,5 +1,5 @@
 /**
- * `workflow-loader` — scans a directory for `aipehub.workflow/v1` files and
+ * `workflow-loader` — scans a directory for `gotong.workflow/v1` files and
  * parses each one into a `WorkflowDefinition`. It does NOT register runners:
  * since Phase 15 the `WorkflowVersioning` service is the single authority that
  * adopts a definition (allocating its revision + lifecycle record) and registers
@@ -26,12 +26,12 @@ import { existsSync } from 'node:fs'
 import { readFile, readdir } from 'node:fs/promises'
 import { join } from 'node:path'
 
-import type { ParticipantId } from '@aipehub/core'
+import type { ParticipantId } from '@gotong/core'
 import {
   parseWorkflow,
   workflowParticipantId,
   type WorkflowDefinition,
-} from '@aipehub/workflow'
+} from '@gotong/workflow'
 import { assertNoSelfTriggerCycle } from './workflow-guards.js'
 
 export interface LoadedWorkflow {

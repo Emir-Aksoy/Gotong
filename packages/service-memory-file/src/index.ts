@@ -1,5 +1,5 @@
 /**
- * `@aipehub/service-memory-file`
+ * `@gotong/service-memory-file`
  *
  * First-party `memory:file` ServicePlugin. Default export is a
  * factory matching the loader convention (see
@@ -8,7 +8,7 @@
  *
  * Named exports expose the class + helpers for tests and direct use:
  *
- *   import { MemoryFilePlugin } from '@aipehub/service-memory-file'
+ *   import { MemoryFilePlugin } from '@gotong/service-memory-file'
  *   const plugin = new MemoryFilePlugin()
  */
 

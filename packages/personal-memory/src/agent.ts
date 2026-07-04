@@ -25,15 +25,15 @@
  * misconfiguration and throws at construction.
  */
 
-import type { Task } from '@aipehub/core'
+import type { Task } from '@gotong/core'
 import {
   ComposedToolset,
   LlmAgent,
   type LlmAgentOptions,
   type LlmAgentToolset,
   type LlmRequest,
-} from '@aipehub/llm'
-import type { MemoryHandle, MemoryKind } from '@aipehub/services-sdk'
+} from '@gotong/llm'
+import type { MemoryHandle, MemoryKind } from '@gotong/services-sdk'
 
 import {
   buildTurnCapture,

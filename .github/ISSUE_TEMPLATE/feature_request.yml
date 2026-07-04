@@ -6,7 +6,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        AipeHub deliberately keeps the Hub small — see [`CONTRIBUTING.md`](../blob/main/CONTRIBUTING.md) ("Ground rules"). Feature requests that put LLM calls / agent loops / business rules inside the Hub will be redirected toward an external participant.
+        Gotong deliberately keeps the Hub small — see [`CONTRIBUTING.md`](../blob/main/CONTRIBUTING.md) ("Ground rules"). Feature requests that put LLM calls / agent loops / business rules inside the Hub will be redirected toward an external participant.
   - type: textarea
     id: problem
     attributes:
@@ -35,11 +35,11 @@ body:
         - "Hub core (routing / scheduler / transcript)"
         - "Wire protocol (`docs/PROTOCOL.md`)"
         - "Admin / worker web UI"
-        - "Node SDK (`@aipehub/sdk-node`)"
-        - "Python SDK (`aipehub`)"
-        - "Host binary (`@aipehub/host`)"
+        - "Node SDK (`@gotong/sdk-node`)"
+        - "Python SDK (`gotong`)"
+        - "Host binary (`@gotong/host`)"
         - "LLM providers / templates"
-        - "MCP bridge (`@aipehub/mcp-server`)"
+        - "MCP bridge (`@gotong/mcp-server`)"
         - "Documentation"
         - "Not sure"
   - type: checkboxes

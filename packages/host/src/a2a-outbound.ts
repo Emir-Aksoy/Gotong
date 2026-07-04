@@ -1,7 +1,7 @@
 /**
  * a2a-outbound.ts — Route B P1-M11b, store-driven outbound A2A agent wiring.
  *
- * Replaces the Phase 18 C-M4 `AIPE_A2A_AGENTS` env blob: outbound A2A agents
+ * Replaces the Phase 18 C-M4 `GOTONG_A2A_AGENTS` env blob: outbound A2A agents
  * now live in identity (`a2a_outbound_agents`, M11a) and are materialised onto
  * the hub from there — at boot AND at runtime when an admin edits one (the same
  * "config changes take effect without a restart" seam the MCP registry uses).
@@ -14,10 +14,10 @@
  * operator hasn't provisioned its secret yet.
  */
 
-import { A2aRemoteParticipant } from '@aipehub/a2a'
-import type { Hub, Logger, ParticipantId } from '@aipehub/core'
-import type { A2aOutboundAgent } from '@aipehub/identity'
-import type { InboxStore } from '@aipehub/inbox'
+import { A2aRemoteParticipant } from '@gotong/a2a'
+import type { Hub, Logger, ParticipantId } from '@gotong/core'
+import type { A2aOutboundAgent } from '@gotong/identity'
+import type { InboxStore } from '@gotong/inbox'
 
 import { ApprovalGatedParticipant } from './outbound-approval.js'
 import { FixedWindowLimiter } from './peer-registry.js'
@@ -56,7 +56,7 @@ export interface A2aOutboundManagerOptions {
   /**
    * Item 2 — window for the per-agent OUTBOUND quota counter
    * (`outboundQuotaBudget` sends per window). Default 60_000. Main.ts passes
-   * `AIPE_A2A_OUTBOUND_QUOTA_WINDOW_MS`; tests inject a small value.
+   * `GOTONG_A2A_OUTBOUND_QUOTA_WINDOW_MS`; tests inject a small value.
    */
   quotaWindowMs?: number
   /**

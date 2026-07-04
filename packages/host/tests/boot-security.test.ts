@@ -74,7 +74,7 @@ describe('auditBootSecurity (Route B P0-M6)', () => {
     expect(v.map((x) => x.code)).toEqual(['host_check_disabled_while_exposed'])
   })
 
-  it('AIPE_ALLOW_INSECURE downgrades fatals to warnings (still reported)', () => {
+  it('GOTONG_ALLOW_INSECURE downgrades fatals to warnings (still reported)', () => {
     const v = auditBootSecurity(exposed({ allowInsecure: true }))
     expect(v.length).toBe(2)
     expect(v.every((x) => x.severity === 'warn')).toBe(true)
@@ -87,7 +87,7 @@ describe('formatBootSecurityReport (Route B P0-M6)', () => {
     expect(report).toContain('FATAL')
     expect(report).toContain('host_check_disabled_while_exposed')
     expect(report).toContain('cookie_insecure_while_exposed')
-    expect(report).toContain('AIPE_ALLOW_INSECURE')
+    expect(report).toContain('GOTONG_ALLOW_INSECURE')
   })
 
   it('warning report omits the escape-hatch instruction', () => {
@@ -95,6 +95,6 @@ describe('formatBootSecurityReport (Route B P0-M6)', () => {
       fatal: false,
     })
     expect(report).toContain('WARNING')
-    expect(report).not.toContain('set AIPE_ALLOW_INSECURE=1 to downgrade')
+    expect(report).not.toContain('set GOTONG_ALLOW_INSECURE=1 to downgrade')
   })
 })

@@ -18,9 +18,9 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { randomBytes } from 'node:crypto'
 
-import { Hub, Space } from '@aipehub/core'
-import { openIdentityStore, type IdentityStore, MASTER_KEY_LEN_BYTES } from '@aipehub/identity'
-import { base32Decode, totpCodeAt } from '@aipehub/identity'
+import { Hub, Space } from '@gotong/core'
+import { openIdentityStore, type IdentityStore, MASTER_KEY_LEN_BYTES } from '@gotong/identity'
+import { base32Decode, totpCodeAt } from '@gotong/identity'
 
 import { serveWeb, type WebServerHandle } from '../src/server.js'
 
@@ -45,7 +45,7 @@ function liveCode(secret: string, offsetSeconds = 0): string {
 
 async function boot(opts: { masterKey?: boolean } = {}): Promise<Boot> {
   const withKey = opts.masterKey ?? true
-  const tmp = await mkdtemp(join(tmpdir(), 'aipehub-totp-me-'))
+  const tmp = await mkdtemp(join(tmpdir(), 'gotong-totp-me-'))
   const init = await Space.init(tmp, { name: 'totp-me-test' })
   const hub = new Hub({ space: init.space })
   await hub.start()
@@ -72,7 +72,7 @@ async function boot(opts: { masterKey?: boolean } = {}): Promise<Boot> {
     identity,
     server,
     baseUrl: server.url,
-    cookie: `aipehub_identity=${sess.token}`,
+    cookie: `gotong_identity=${sess.token}`,
   }
 }
 
@@ -115,7 +115,7 @@ describe('/api/me/totp — member MFA self-service (P1-M3e)', () => {
     expect(j.ok).toBe(true)
     expect(j.secretBase32).toMatch(/^[A-Z2-7]+=*$/u)
     expect(j.otpauthUri).toContain('otpauth://totp/')
-    expect(j.otpauthUri).toContain('issuer=AipeHub')
+    expect(j.otpauthUri).toContain('issuer=Gotong')
     expect(await state()).toBe('pending')
   })
 

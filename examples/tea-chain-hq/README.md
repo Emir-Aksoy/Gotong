@@ -50,7 +50,7 @@
 | 交付物 | 是什么 | 跑 |
 |---|---|---|
 | **可跑 demo** | 两个 in-proc hub(总部 + 门店),内联出站审批闸 + 两步恢复,确定性自断言 | `pnpm demo:tea-chain-hq` |
-| **可载入模板** | 总部一侧的 `aipehub.template/v1`(1 agent + 1 跨组织工作流 + KB 槽位) | `pnpm demo:tea-chain-hq:template` |
+| **可载入模板** | 总部一侧的 `gotong.template/v1`(1 agent + 1 跨组织工作流 + KB 槽位) | `pnpm demo:tea-chain-hq:template` |
 
 ## ★ 模版和框架是分离关系(本案例的教学点,同 tea-supply-link)★
 
@@ -98,7 +98,7 @@ agent、下发工作流、连锁运营手册 KB 槽位、一次性 key 提示。
 
 ## 为什么 host-free(同 tea-supply-link / cross-hub-workflow 先例)
 
-这个 demo 只依赖 `@aipehub/core` + `@aipehub/workflow` + `@aipehub/inbox`,把宿主机的两个
+这个 demo 只依赖 `@gotong/core` + `@gotong/workflow` + `@gotong/inbox`,把宿主机的两个
 组件**内联成可见的 ~40 行**,让机制不被埋在 host 二进制里:
 
 - `OutboundApprovalGate` = `packages/host/src/outbound-approval.ts` 的最小镜像
@@ -107,7 +107,7 @@ agent、下发工作流、连锁运营手册 KB 槽位、一次性 key 提示。
   两步恢复的手写镜像(**子闸严格先于父 workflow**)。生产里它由 `/me` 收件箱点一下批准触发。
 
 真正的跨 hub 链路是真的:`createInprocHubLinkPair` + `installPeerLink`(都来自
-`@aipehub/core`),两个真 `Hub`,真 `parseWorkflow` + `WorkflowRunner`。
+`@gotong/core`),两个真 `Hub`,真 `parseWorkflow` + `WorkflowRunner`。
 
 ## 文件
 
@@ -127,7 +127,7 @@ agent、下发工作流、连锁运营手册 KB 槽位、一次性 key 提示。
 | `resolveApproval` 两步恢复 | `host/src/inbox-service.ts` `HostInboxService.resolve` + `/me` 收件箱点批准 |
 | `parked` Map(suspendNotifier) | identity `suspended_tasks` 表 + resume sweep |
 | `remoteCapabilities` / `outboundCaps` 手动穿线 | `host/src/peer-registry.ts` 从 per-link 信任契约自动穿(admin「联邦」tab 编辑) |
-| `ShopStandin`(另一个 hub) | 加盟门店自己的 AipeHub,服务 `shop.apply-directive`(可以是 LlmAgent、CLI、或又一条工作流) |
+| `ShopStandin`(另一个 hub) | 加盟门店自己的 Gotong,服务 `shop.apply-directive`(可以是 LlmAgent、CLI、或又一条工作流) |
 
 ## 三层链条:本案例与 tea-supply-link 的对比
 

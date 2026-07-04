@@ -19,21 +19,21 @@
  *   - `startImBridges` returns undefined with no token, so an existing
  *     deployment is byte-for-byte unaffected (the env gate works).
  *
- * When the operator later supplies a real `AIPE_TELEGRAM_BOT_TOKEN`,
+ * When the operator later supplies a real `GOTONG_TELEGRAM_BOT_TOKEN`,
  * the only thing that changes is FakeBridge → TelegramBridge; this exact
  * router path is what runs.
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { AgentParticipant, Hub, type Logger, type Task } from '@aipehub/core'
-import { openIdentityStore, type IdentityStore } from '@aipehub/identity'
+import { AgentParticipant, Hub, type Logger, type Task } from '@gotong/core'
+import { openIdentityStore, type IdentityStore } from '@gotong/identity'
 import type {
   ImAttachment,
   ImBridge,
   ImMessage,
   ImUser,
-} from '@aipehub/im-adapter'
+} from '@gotong/im-adapter'
 
 import {
   handleImMessage,
@@ -52,7 +52,7 @@ const silentLogger: Logger = {
 
 // ---------------------------------------------------------------------------
 // Hermetic in-memory bridge — the same `ImBridge` contract the six real
-// `@aipehub/im-*` bridges implement, minus the network.
+// `@gotong/im-*` bridges implement, minus the network.
 // ---------------------------------------------------------------------------
 
 class FakeBridge implements ImBridge {
@@ -155,7 +155,7 @@ describe('GO-LIVE T1 — IM bridge fold (hermetic)', () => {
   it('walks the full member lifecycle and attributes dispatch to the bound user', async () => {
     // 1. /help works before binding — anyone can read it.
     await bridge.inject(imMsg('/help'))
-    expect(last(bridge).text).toContain('AipeHub IM bridge')
+    expect(last(bridge).text).toContain('Gotong IM bridge')
     expect(seenTasks).toHaveLength(0)
 
     // 2. free-text before binding → nudge, no dispatch.
@@ -205,16 +205,16 @@ describe('GO-LIVE T1 — env gate (zero behaviour change when unset)', () => {
   // block saves + clears all four platforms (not just Telegram) and
   // restores them after — the QQ-in test below also sets some of these.
   const KEYS = [
-    'AIPE_TELEGRAM_BOT_TOKEN',
-    'AIPE_QQ_BOT_APPID',
-    'AIPE_QQ_BOT_SECRET',
-    'AIPE_QQ_WEBHOOK_PORT',
-    'AIPE_QQ_WEBHOOK_HOST',
-    'AIPE_QQ_WEBHOOK_PATH',
-    'AIPE_LARK_APP_ID',
-    'AIPE_LARK_APP_SECRET',
-    'AIPE_SLACK_APP_TOKEN',
-    'AIPE_SLACK_BOT_TOKEN',
+    'GOTONG_TELEGRAM_BOT_TOKEN',
+    'GOTONG_QQ_BOT_APPID',
+    'GOTONG_QQ_BOT_SECRET',
+    'GOTONG_QQ_WEBHOOK_PORT',
+    'GOTONG_QQ_WEBHOOK_HOST',
+    'GOTONG_QQ_WEBHOOK_PATH',
+    'GOTONG_LARK_APP_ID',
+    'GOTONG_LARK_APP_SECRET',
+    'GOTONG_SLACK_APP_TOKEN',
+    'GOTONG_SLACK_BOT_TOKEN',
   ]
   const saved: Record<string, string | undefined> = {}
 
@@ -245,13 +245,13 @@ describe('GO-LIVE T1 — env gate (zero behaviour change when unset)', () => {
   })
 
   it('env-gates QQ in independently of Telegram (official inbound webhook)', async () => {
-    // QQ's official Bot API is webhook-only; AIPE_QQ_WEBHOOK_PORT=0
+    // QQ's official Bot API is webhook-only; GOTONG_QQ_WEBHOOK_PORT=0
     // disables the bridge's built-in listener so the test stays hermetic
     // (no socket bound, no network) while still proving the env gate wires
     // the QQ bridge into the shared `bridges` array with Telegram unset.
-    process.env.AIPE_QQ_BOT_APPID = '102000000'
-    process.env.AIPE_QQ_BOT_SECRET = 'test-secret-deadbeef'
-    process.env.AIPE_QQ_WEBHOOK_PORT = '0'
+    process.env.GOTONG_QQ_BOT_APPID = '102000000'
+    process.env.GOTONG_QQ_BOT_SECRET = 'test-secret-deadbeef'
+    process.env.GOTONG_QQ_WEBHOOK_PORT = '0'
 
     const hub = Hub.inMemory()
     await hub.start()

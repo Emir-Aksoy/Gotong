@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
-import { Hub } from '@aipehub/core'
-import { EMPTY_SERVICE_CTX, type ServiceCtx } from '@aipehub/services-sdk'
+import { Hub } from '@gotong/core'
+import { EMPTY_SERVICE_CTX, type ServiceCtx } from '@gotong/services-sdk'
 import {
   LlmAgent,
   MockLlmProvider,
@@ -347,7 +347,7 @@ describe('LlmAgent — subclass hooks', () => {
     })
 
     class MyAgent extends LlmAgent {
-      protected override buildRequest(task: import('@aipehub/core').Task) {
+      protected override buildRequest(task: import('@gotong/core').Task) {
         const base = super.buildRequest(task)
         return { ...base, system: 'INJECTED SYSTEM' }
       }
@@ -518,7 +518,7 @@ describe('LlmAgent — services ctx injection (PR-6)', () => {
     } as unknown as NonNullable<ServiceCtx['memory']>
 
     class CoachAgent extends LlmAgent {
-      protected override async handleTask(task: import('@aipehub/core').Task) {
+      protected override async handleTask(task: import('@gotong/core').Task) {
         // Recall before invoking — proves the subclass can read services.
         const items = (await this.services.memory?.recall({ query: '' })) ?? []
         const base = this.buildRequest(task)
@@ -550,7 +550,7 @@ describe('LlmAgent — services ctx injection (PR-6)', () => {
 describe('LlmAgent — tool-use loop (v0.3)', () => {
   /**
    * Trivial in-memory toolset that satisfies `LlmAgentToolset` without
-   * pulling in @aipehub/mcp-client. Lets us assert the loop's wiring
+   * pulling in @gotong/mcp-client. Lets us assert the loop's wiring
    * without spawning a child process or mocking the MCP SDK.
    */
   function makeFakeToolset(opts: {

@@ -2,7 +2,7 @@
  * Phase 15 M6 — workflow lifecycle HTTP route tests.
  *
  * The host injects a duck-typed `WorkflowSurface` (the `WorkflowController`).
- * These tests stub it so the web package stays decoupled from `@aipehub/workflow`
+ * These tests stub it so the web package stays decoupled from `@gotong/workflow`
  * — they assert the routes (a) forward to the right surface method with the
  * acting admin stamped as `by`, (b) parse the publish/rollback bodies, and
  * (c) map the surface's duck-typed error `code` to the right HTTP status.
@@ -19,7 +19,7 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { Hub, Space } from '@aipehub/core'
+import { Hub, Space } from '@gotong/core'
 
 import {
   serveWeb,
@@ -154,7 +154,7 @@ async function boot(
   opts: { withWorkflows?: boolean; audit?: AuditCapture } = {},
 ): Promise<BootResult> {
   const withWorkflows = opts.withWorkflows ?? true
-  const tmp = await mkdtemp(join(tmpdir(), 'aipehub-web-wflc-'))
+  const tmp = await mkdtemp(join(tmpdir(), 'gotong-web-wflc-'))
   const init = await Space.init(tmp, { name: 'wflc-test' })
   const hub = new Hub({ space: init.space })
   await hub.start()
@@ -375,7 +375,7 @@ describe('workflow lifecycle audit (P2-M2)', () => {
     const r = await fetch(`${b.baseUrl}/api/admin/workflows/import`, {
       method: 'POST',
       headers: { authorization: `Bearer ${b.adminToken}`, 'content-type': 'text/plain' },
-      body: 'schema: aipehub.workflow/v1',
+      body: 'schema: gotong.workflow/v1',
     })
     expect(r.status).toBe(200)
     expect(audit.rows.map((x) => x.action)).toEqual(['workflow_import'])

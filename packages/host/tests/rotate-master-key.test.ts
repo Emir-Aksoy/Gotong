@@ -4,7 +4,7 @@ import { join } from 'node:path'
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { openIdentityStore } from '@aipehub/identity'
+import { openIdentityStore } from '@gotong/identity'
 
 import {
   IDENTITY_DB_FILENAME,
@@ -30,7 +30,7 @@ let keyFile: string
 let dbPath: string
 
 beforeEach(() => {
-  dir = mkdtempSync(join(tmpdir(), 'aipe-rotcli-'))
+  dir = mkdtempSync(join(tmpdir(), 'gotong-rotcli-'))
   keyFile = join(dir, MASTER_KEY_FILENAME)
   dbPath = join(dir, IDENTITY_DB_FILENAME)
 })

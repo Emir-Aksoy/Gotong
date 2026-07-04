@@ -6,7 +6,7 @@
 //
 //   1. Symlink pre-staging — an attacker on a shared host creates
 //      `<root>/runtime/secret.key` as a symbolic link to a victim's
-//      file BEFORE the victim runs `aipehub-host`. Without this check
+//      file BEFORE the victim runs `gotong-host`. Without this check
 //      our `writeFile(secret.key, …)` would follow the symlink and
 //      overwrite the victim's file with random key material — a
 //      cheap DoS / data corruption.
@@ -34,7 +34,7 @@ describe.skipIf(!POSIX)('Space — filesystem safety checks (H7)', () => {
   let scratch: string
 
   beforeEach(async () => {
-    scratch = await mkdtemp(join(tmpdir(), 'aipehub-h7-'))
+    scratch = await mkdtemp(join(tmpdir(), 'gotong-h7-'))
   })
 
   afterEach(async () => {

@@ -17,7 +17,7 @@
  *   - consolidation: what gets promoted vs dropped (the tier work).
  */
 
-import type { MemoryEntry } from '@aipehub/services-sdk'
+import type { MemoryEntry } from '@gotong/services-sdk'
 
 export type Importance = 1 | 2 | 3 | 4 | 5
 

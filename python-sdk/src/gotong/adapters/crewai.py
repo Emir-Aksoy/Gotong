@@ -1,7 +1,7 @@
-"""Expose a CrewAI crew as an AipeHub Participant.
+"""Expose a CrewAI crew as an Gotong Participant.
 
 Same seam as the LangGraph adapter: a CrewAI ``Crew`` orchestrates a team of
-role-playing agents *inside* one process; AipeHub routes a Task to whichever
+role-playing agents *inside* one process; Gotong routes a Task to whichever
 participant serves a capability and writes a transcript. This adapter lets a
 crew join a Hub as one agent, with ``crewai`` kept as an optional peer
 dependency — it is never imported here. The crew is duck-typed on
@@ -28,7 +28,7 @@ class _Crew(Protocol):
     def kickoff(self, inputs: Any = ..., /, *args: Any, **kwargs: Any) -> Any: ...
 
 
-# Map an AipeHub Task to the crew's kickoff inputs, and the crew's output back
+# Map an Gotong Task to the crew's kickoff inputs, and the crew's output back
 # to the Task output. Default inputs = the payload (CrewAI interpolates it into
 # task descriptions); default output extracts ``.raw`` — see _default_from_output.
 InputMapper = Callable[[Task], Any]
@@ -50,7 +50,7 @@ def _default_from_output(output: Any) -> Any:
 
 
 class CrewParticipant(AgentParticipant):
-    """An AipeHub agent backed by a CrewAI crew.
+    """An Gotong agent backed by a CrewAI crew.
 
     Prefer the ``crewai_participant`` factory; this class is exported for
     ``isinstance`` checks and subclassing.
@@ -89,13 +89,13 @@ def crewai_participant(
     to_inputs: InputMapper | None = None,
     from_output: OutputMapper | None = None,
 ) -> CrewParticipant:
-    """Wrap a CrewAI ``Crew`` as an AipeHub ``AgentParticipant``.
+    """Wrap a CrewAI ``Crew`` as an Gotong ``AgentParticipant``.
 
     Example::
 
         from crewai import Crew
-        from aipehub import connect
-        from aipehub.adapters import crewai_participant
+        from gotong import connect
+        from gotong.adapters import crewai_participant
 
         crew = Crew(agents=[...], tasks=[...])
         agent = crewai_participant(

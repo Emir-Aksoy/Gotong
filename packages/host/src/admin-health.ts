@@ -22,7 +22,7 @@
  * Deliberately NOT included: a runtime web-port probe. Post-boot the host is
  * itself listening on that port, so the probe would always report "in use" and
  * scare the admin about a non-problem. The genuine pre-flight port check lives
- * in `aipehub doctor` (③), where the host is NOT yet bound.
+ * in `gotong doctor` (③), where the host is NOT yet bound.
  *
  * The aggregation lives host-side (it already has `space.agents()`, the key
  * probe, the MCP registry, and the space path) and is injected into `serveWeb`

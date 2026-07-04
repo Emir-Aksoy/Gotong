@@ -1,8 +1,8 @@
 {
-  "name": "@aipehub/inbox",
+  "name": "@gotong/inbox",
   "version": "0.1.0",
   "type": "module",
-  "description": "AipeHub member task inbox — file-first InboxStore + HumanInboxParticipant broker that turns a workflow's human-in-the-loop step into a parked Task a person resolves from /me.",
+  "description": "Gotong member task inbox — file-first InboxStore + HumanInboxParticipant broker that turns a workflow's human-in-the-loop step into a parked Task a person resolves from /me.",
   "license": "MIT",
   "private": true,
   "main": "./dist/index.js",
@@ -25,7 +25,7 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "@aipehub/core": "workspace:*"
+    "@gotong/core": "workspace:*"
   },
   "devDependencies": {
     "vitest": "^3.2.4"

@@ -1,6 +1,6 @@
-# @aipehub/service-artifact-file
+# @gotong/service-artifact-file
 
-First-party AipeHub plugin: file-backed `artifact` service.
+First-party Gotong plugin: file-backed `artifact` service.
 Implements [`ArtifactHandle`](../services-sdk/src/types/artifact.ts) —
 agents `write` / `read` / `list` / `exists` / `remove` typed files
 in per-owner directories with path-traversal protection.

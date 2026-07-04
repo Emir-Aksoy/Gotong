@@ -1,5 +1,5 @@
 /**
- * Smoke-test the public re-exports. `@aipehub/llm`'s surface is small
+ * Smoke-test the public re-exports. `@gotong/llm`'s surface is small
  * but provider packages and downstream consumers deep-import these
  * symbols — a dropped re-export silently breaks builds.
  */
@@ -8,7 +8,7 @@ import { describe, expect, it } from 'vitest'
 
 import * as llm from '../src/index.js'
 
-describe('@aipehub/llm public surface', () => {
+describe('@gotong/llm public surface', () => {
   it('exports LlmAgent class', () => {
     expect(typeof llm.LlmAgent).toBe('function')
   })
@@ -17,8 +17,8 @@ describe('@aipehub/llm public surface', () => {
     expect(typeof llm.MockLlmProvider).toBe('function')
   })
 
-  it('LlmAgent is a subclass of @aipehub/core AgentParticipant', async () => {
-    const { AgentParticipant } = await import('@aipehub/core')
+  it('LlmAgent is a subclass of @gotong/core AgentParticipant', async () => {
+    const { AgentParticipant } = await import('@gotong/core')
     expect(llm.LlmAgent.prototype).toBeInstanceOf(AgentParticipant)
   })
 

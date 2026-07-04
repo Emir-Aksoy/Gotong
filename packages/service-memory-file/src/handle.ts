@@ -22,7 +22,7 @@ import {
   stat,
   writeFile,
 } from 'node:fs/promises'
-import type { Logger } from '@aipehub/core'
+import type { Logger } from '@gotong/core'
 import type {
   MemoryEntry,
   MemoryHandle,
@@ -30,7 +30,7 @@ import type {
   MemoryQuery,
   NewMemoryEntry,
   Owner,
-} from '@aipehub/services-sdk'
+} from '@gotong/services-sdk'
 
 import type { MemoryFileConfig } from './config.js'
 import { generateEntryId } from './id.js'

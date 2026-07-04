@@ -11,7 +11,7 @@
 
 ## 一句话
 
-AipeHub 当 **OpenID Connect Relying Party (RP)**: 把外部 IdP (Google /
+Gotong 当 **OpenID Connect Relying Party (RP)**: 把外部 IdP (Google /
 Entra / Authentik / Keycloak …) 断言的 `(issuer, sub)` 映射到一个**已存在**
 的本地用户, 铸出**和密码登录完全一样**的 `ses_` 会话。登录页多了「用 X 登录」
 按钮, owner 在「SSO」标签页注册它信任的 IdP。**框架不跑 OAuth 服务器, 只做 RP**。
@@ -31,7 +31,7 @@ Entra / Authentik / Keycloak …) 断言的 `(issuer, sub)` 映射到一个**已
 
 ### D-3 — 自建 session, 不做 per-request token 透传 (M4a 拍板)
 
-AipeHub 早有完整 `Session` 模型 (`ses_` 前缀, 7 天 cookie, MFA 闸都铸它)。OIDC
+Gotong 早有完整 `Session` 模型 (`ses_` 前缀, 7 天 cookie, MFA 闸都铸它)。OIDC
 登录成功后**只 bootstrap 这个 session**, 不把 IdP 的 access_token 当请求级凭证
 往后透传。理由: ① 一种会话格式、一处改; ② IdP token 生命周期/刷新与本地会话解
 耦; ③ 进门后所有授权走本地 RBAC, 与 IdP 无关。照 MFA 闸「密码对了再铸 session」
@@ -82,7 +82,7 @@ token refresh / 单点登出 (SLO) / group→role 映射 (见 §六 推迟)。
 ## 四、数据流 — 一次浏览器 SSO 往返
 
 ```
- 浏览器                      AipeHub (RP)                         外部 IdP
+ 浏览器                      Gotong (RP)                         外部 IdP
    │                            │                                   │
    │ 1. GET /login 页           │                                   │
    │   renderSsoButtons()       │                                   │
@@ -175,7 +175,7 @@ token refresh / 单点登出 (SLO) / group→role 映射 (见 §六 推迟)。
 - group / role claim → 本地 RBAC 角色映射 (本版只认「已存在用户」, 角色还是本地管)。
 - 一个用户多邮箱 / 多 IdP 同邮箱的合并策略 (本版一邮箱一用户)。
 - dynamic client registration / IdP 元数据自动刷新 (本版 discovery 一次性)。
-- 出站 (AipeHub 当 IdP 给别人) — 不在 RP 范围, A2A/federation 是另一套信任。
+- 出站 (Gotong 当 IdP 给别人) — 不在 RP 范围, A2A/federation 是另一套信任。
 
 ---
 

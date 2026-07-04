@@ -9,7 +9,7 @@
  * Usage in a plugin's test file:
  *
  *   import { describe } from 'vitest'
- *   import { runPluginContract } from '@aipehub/services-sdk/testing'
+ *   import { runPluginContract } from '@gotong/services-sdk/testing'
  *   import { MemoryFilePlugin } from '../src/index.js'
  *
  *   describe('contract: memory-file', () => {
@@ -32,7 +32,7 @@ import { tmpdir } from 'node:os'
 
 import type { ServicePlugin } from './plugin.js'
 import type { Owner } from './owner.js'
-import { createLogger } from '@aipehub/core'
+import { createLogger } from '@gotong/core'
 
 export interface PluginContractCase<TConfig, THandle> {
   /** Plugin under test. A fresh instance per `describe` block. */
@@ -67,7 +67,7 @@ export function runPluginContract<TConfig, THandle>(
   const logger = createLogger('contract-test', { disabled: true })
 
   beforeAll(async () => {
-    rootDir = await mkdtemp(join(tmpdir(), 'aipe-svc-contract-'))
+    rootDir = await mkdtemp(join(tmpdir(), 'gotong-svc-contract-'))
     config = await cs.plugin.validateConfig(cs.sampleConfig)
     await cs.plugin.init({
       rootDir,

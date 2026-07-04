@@ -3,7 +3,7 @@
  *   POST /api/admin/templates/export → { ok, template }
  *
  * The route pulls agent config from the Space and workflow structure from the
- * host's authored-YAML reader, renders an aipehub.template/v1 manifest, and
+ * host's authored-YAML reader, renders an gotong.template/v1 manifest, and
  * runs it back through parseTemplate as an integrity gate. It must: require
  * admin; refuse to silently drop unexportable resources (404); never leak
  * personnel / secrets; and 400 on a structurally-bad export.
@@ -14,12 +14,12 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { Hub, Space } from '@aipehub/core'
+import { Hub, Space } from '@gotong/core'
 
 import { serveWeb, type WebServerHandle, type WorkflowSurface } from '../src/server.js'
 import { decryptJson, type EncryptedBlob } from '../src/template-crypto.js'
 
-const WF_YAML = `schema: aipehub.workflow/v1
+const WF_YAML = `schema: gotong.workflow/v1
 workflow:
   id: ticket-flow
   trigger:
@@ -48,7 +48,7 @@ interface Boot {
 let b: Boot
 
 beforeEach(async () => {
-  const tmp = await mkdtemp(join(tmpdir(), 'aipehub-tmpl-export-'))
+  const tmp = await mkdtemp(join(tmpdir(), 'gotong-tmpl-export-'))
   const init = await Space.init(tmp, { name: 'tmpl-export-test' })
   const space = init.space
   const hub = new Hub({ space })
@@ -136,7 +136,7 @@ describe('POST /api/admin/templates/export (v5 B-M2)', () => {
     expect(r.status).toBe(200)
     expect(r.json.ok).toBe(true)
     const tpl = r.json.template
-    expect(tpl.schema).toBe('aipehub.template/v1')
+    expect(tpl.schema).toBe('gotong.template/v1')
     expect(tpl.template.name).toBe('客服模板')
     expect(tpl.template.agents).toHaveLength(1)
     expect(tpl.template.agents[0].id).toBe('support-agent')

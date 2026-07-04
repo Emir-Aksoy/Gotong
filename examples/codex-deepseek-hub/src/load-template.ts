@@ -48,7 +48,7 @@ interface LoadedTemplate {
 }
 
 function main(): void {
-  console.log('\n=== AipeHub case: codex-deepseek-hub — load the template ===\n')
+  console.log('\n=== Gotong case: codex-deepseek-hub — load the template ===\n')
 
   // --- [1] LOAD: the config is a FILE, parsed live (not a built-in literal) ---
   section('[1] load the config from a FILE')
@@ -96,7 +96,7 @@ function main(): void {
   // content ships separately as the vault.
   const mentor = agents.find((a) => a.id === 'pairing-mentor')
   const kb = kbs.find((k) => k.name === 'coder_pairing_methodology')
-  if (doc.schema !== 'aipehub.template/v1') throw new Error('expected schema aipehub.template/v1')
+  if (doc.schema !== 'gotong.template/v1') throw new Error('expected schema gotong.template/v1')
   if (!mentor) throw new Error('expected a pairing-mentor agent in the loaded template')
   if (!kb?.presetData?.ref) throw new Error('expected the KB slot to carry a presetData POINTER')
   if (notes.length === 0) throw new Error('expected the methodology vault to ship content')

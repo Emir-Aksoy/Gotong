@@ -12,7 +12,7 @@
  * Auto-seeding (RFC §18 question 4 = "auto-seed first-party"): when
  * `plugins.json` is absent and `seedDefaults` is true, the loader
  * writes a fresh manifest containing the three first-party packages.
- * `AIPE_SERVICES_NO_SEED=1` disables this.
+ * `GOTONG_SERVICES_NO_SEED=1` disables this.
  */
 
 import { readFile, writeFile, mkdir } from 'node:fs/promises'
@@ -24,9 +24,9 @@ import { ServiceRegistry } from './registry.js'
 
 /** Packages auto-seeded into `plugins.json` on first run. */
 export const DEFAULT_FIRST_PARTY_PLUGINS: readonly string[] = [
-  '@aipehub/service-memory-file',
-  '@aipehub/service-artifact-file',
-  '@aipehub/service-datastore-sqlite',
+  '@gotong/service-memory-file',
+  '@gotong/service-artifact-file',
+  '@gotong/service-datastore-sqlite',
 ]
 
 export interface LoadPluginsOpts {
@@ -36,14 +36,14 @@ export interface LoadPluginsOpts {
   registry: ServiceRegistry
   /**
    * Auto-seed manifest with first-party plugins when the file is
-   * absent. Default true. Disabled by `AIPE_SERVICES_NO_SEED=1`.
+   * absent. Default true. Disabled by `GOTONG_SERVICES_NO_SEED=1`.
    */
   seedDefaults?: boolean
   /**
    * Override the package list written when seeding. Defaults to
    * `DEFAULT_FIRST_PARTY_PLUGINS`. Hosts use this to exclude packages
    * that won't load in their environment — e.g. the single-file binary
-   * build cannot load `@aipehub/service-datastore-sqlite` because
+   * build cannot load `@gotong/service-datastore-sqlite` because
    * `better-sqlite3`'s native binding can't be embedded, so the host
    * passes a list without it, sparing operators a spurious warning on
    * every first run.
@@ -226,5 +226,5 @@ async function defaultImporter(pkg: string): Promise<unknown> {
 }
 
 function defaultSeedFromEnv(): boolean {
-  return process.env.AIPE_SERVICES_NO_SEED !== '1'
+  return process.env.GOTONG_SERVICES_NO_SEED !== '1'
 }

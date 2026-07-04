@@ -30,8 +30,8 @@ import {
   createInprocHubLinkPair,
   installPeerLink,
   type Task,
-} from '@aipehub/core'
-import { WorkflowRunner, parseWorkflow } from '@aipehub/workflow'
+} from '@gotong/core'
+import { WorkflowRunner, parseWorkflow } from '@gotong/workflow'
 
 /** Remote agent: records every task that actually crossed the link to it. */
 class RecordingAgent extends AgentParticipant {
@@ -78,7 +78,7 @@ describe('v5 C-M2 — workflow node-level I/O authorization over a clamped link'
 
   it('refuses the pii node but lets the public node of the SAME workflow cross', async () => {
     const wf = parseWorkflow(`
-schema: aipehub.workflow/v1
+schema: gotong.workflow/v1
 workflow:
   id: mixed-io
   trigger: { capability: run-mixed }
@@ -114,7 +114,7 @@ workflow:
 
   it('lets an all-public workflow cross entirely (clamp is class-specific)', async () => {
     const wf = parseWorkflow(`
-schema: aipehub.workflow/v1
+schema: gotong.workflow/v1
 workflow:
   id: all-public
   trigger: { capability: run-public }

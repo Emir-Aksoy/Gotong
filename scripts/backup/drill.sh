@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# AipeHub disaster-recovery DRILL — prove a backup actually restores.
+# Gotong disaster-recovery DRILL — prove a backup actually restores.
 #
 # A backup you've never restored is a hope, not a backup. This script turns the
 # manual drill in docs/OPERATIONS.md into one repeatable command you can run on
@@ -13,7 +13,7 @@
 # day you need it.
 #
 # Read-only on the source: backup.sh only reads, and restore/verify happen in a
-# scratch dir — safe to point at a LIVE `.aipehub/` on a running host.
+# scratch dir — safe to point at a LIVE `.gotong/` on a running host.
 #
 # Node-less by design (pure bash + tar + jq), so it runs on a bare recovery box.
 # The one step it can't cover without Node is actually BOOTING the restored
@@ -57,7 +57,7 @@ if [ -z "$SRC" ]; then
   exit 1
 fi
 if [ ! -f "$SRC/space.json" ]; then
-  echo "✖ not an AipeHub workspace (no space.json): $SRC" >&2
+  echo "✖ not an Gotong workspace (no space.json): $SRC" >&2
   exit 2
 fi
 if ! command -v jq >/dev/null 2>&1; then
@@ -67,7 +67,7 @@ fi
 
 # Scratch area. mktemp unless the operator pinned one with --workdir.
 if [ -z "$WORKDIR" ]; then
-  WORKDIR="$(mktemp -d "${TMPDIR:-/tmp}/aipehub-drill.XXXXXX")"
+  WORKDIR="$(mktemp -d "${TMPDIR:-/tmp}/gotong-drill.XXXXXX")"
 fi
 BACKUP_DIR="$WORKDIR/backup"
 RESTORE_DIR="$WORKDIR/restored"

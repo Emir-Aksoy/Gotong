@@ -49,10 +49,10 @@ host 二进制里。生产里它们是真的 host 组件：
 | `OutboundApprovalGate` | `host/src/outbound-approval.ts` 的 `ApprovalGatedParticipant`（经 `installPeerLink({ wrapOutbound })` 装上） |
 | `resolveApproval` 两步恢复 | `host/src/inbox-service.ts` 的 `HostInboxService.resolve` |
 | 手动 `parked` Map | identity 的 `suspended_tasks` 表（`suspendNotifier`） |
-| 固定 `PEER_TOKEN` 常量 | `aipehub mint-peer-token` 铸 256-bit token + per-link 信任契约 |
+| 固定 `PEER_TOKEN` 常量 | `gotong mint-peer-token` 铸 256-bit token + per-link 信任契约 |
 | owner 在代码里批 | owner 在 `/me` 收件箱点「批准」 |
 
-`connectHubLink` / `acceptHubLinks` / `bearerAuth` 用的就是生产同一套 `@aipehub/transport-ws`
+`connectHubLink` / `acceptHubLinks` / `bearerAuth` 用的就是生产同一套 `@gotong/transport-ws`
 传输——`peer-registry.ts` 的 reconcile tick 在真机上拨的也是这几个函数。
 
 ## 两机落地

@@ -3,9 +3,9 @@ import { access, mkdtemp, readFile, rm, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 
-import { createLogger } from '@aipehub/core'
-import { TrashRestoreConflictError, ownerKey } from '@aipehub/services-sdk'
-import type { Owner } from '@aipehub/services-sdk'
+import { createLogger } from '@gotong/core'
+import { TrashRestoreConflictError, ownerKey } from '@gotong/services-sdk'
+import type { Owner } from '@gotong/services-sdk'
 import { MemoryFilePlugin } from '../src/plugin.js'
 import { kindFile, ownerDir, trashEntryDir, trashMetaFile } from '../src/paths.js'
 
@@ -16,7 +16,7 @@ let plugin: MemoryFilePlugin
 const owner: Owner = { kind: 'agent', id: 'writer-zh' }
 
 beforeEach(async () => {
-  rootDir = await mkdtemp(join(tmpdir(), 'aipe-mem-plugin-'))
+  rootDir = await mkdtemp(join(tmpdir(), 'gotong-mem-plugin-'))
   plugin = new MemoryFilePlugin()
   await plugin.init({
     rootDir, logger,

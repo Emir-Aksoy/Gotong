@@ -2,7 +2,7 @@
 
 > 单一入口:这 5 个 `examples/` 案例不是「片段」,而是**能搬走的完整 hub**。每个都带
 > 一个**确定性可跑 demo**(无需 API key,`pnpm` 一行跑通自断言)和一个**可载入模板**
-> (`aipehub.template/v1`,一个文件装走 agent + 工作流 + KB 接线)。本文帮你 ① 选一个、
+> (`gotong.template/v1`,一个文件装走 agent + 工作流 + KB 接线)。本文帮你 ① 选一个、
 > ② 先跑确定性 demo 看清骨架、③ 接真 LLM(DeepSeek)+ 真知识库(Obsidian)上线。
 >
 > 北极星:**框架永不跑 LLM**。这些 hub 里所有 LLM 决策都在 agent(参与者)手里,Hub 只
@@ -125,7 +125,7 @@ curl -X POST -H "Authorization: Bearer <admin-token>" \
 | `POST /api/admin/templates/import` 落 agent + 注册工作流 + 上报 KB | ✅ 已测 | 同上防腐门:真 `Space`+`Hub`+`serveWeb`+真 import 路由,断言 200 + agent 落库 + 工作流逐条注册 |
 | `human:` 挂起 → `/me` 收件箱 → 两步恢复 | ✅ 已测 | `pnpm demo:cafe-ops` / `demo:warband-club`(HITL 段);host `inbox-e2e` 无漂移验收门 |
 | 真 provider tool-use 往返 + 整栈工作流 live | ✅ 已测(独立 live 门) | [`V6-ROUTE-B-P1-M13-LIVE-GATE.md`](./ledger/V6-ROUTE-B-P1-M13-LIVE-GATE.md)(夜间/手动 CI,key 从 secrets,缺 key 跳过) |
-| **你的模板 + 你的 DeepSeek key 真跑出答案** | ⏳ 需你的 key | 步骤 1–4;`AIPE_ASSISTANT_PROVIDER` 等 env 见各 example README |
+| **你的模板 + 你的 DeepSeek key 真跑出答案** | ⏳ 需你的 key | 步骤 1–4;`GOTONG_ASSISTANT_PROVIDER` 等 env 见各 example README |
 | **你的 Obsidian vault 真被检索** | ⏳ 需你的 vault | 步骤 2;Local REST API 插件 + `mcp-obsidian` |
 
 也就是说:**搬过去、导进去、注册成功、HITL 挂起恢复 —— 全都是测过的;接上你的 key 和 vault 出真答案
@@ -222,7 +222,7 @@ demo 里把 mock provider 换成一个**情境感知的 `LlmProvider`**:它从 p
 |---|---|
 | 知识库连接器(Obsidian / Elasticsearch / 向量 RAG,全走 MCP)+ 读写治理 | [`KB-CONNECTORS.md`](KB-CONNECTORS.md) |
 | RAG 向量检索 via MCP(框架不存知识,`mcpServers` 完整 schema) | [`RAG-VIA-MCP.md`](RAG-VIA-MCP.md) |
-| 一键模板格式(`aipehub.template/v1`,一个文件装走一整套架构) | [`V5-B-FINAL.md`](./ledger/V5-B-FINAL.md) |
+| 一键模板格式(`gotong.template/v1`,一个文件装走一整套架构) | [`V5-B-FINAL.md`](./ledger/V5-B-FINAL.md) |
 | 成员任务 inbox(`human:` HITL 工作流步骤) | [`V4-PHASE16-FINAL.md`](./ledger/V4-PHASE16-FINAL.md) |
 | `/me` 成员工作台(我的 AI 桌面) | [`V4-PHASE19-P1-FINAL.md`](./ledger/V4-PHASE19-P1-FINAL.md) |
 | 真 LLM 冒烟门进 CI(provider 往返 + 整栈工作流 live) | [`V6-ROUTE-B-P1-M13-LIVE-GATE.md`](./ledger/V6-ROUTE-B-P1-M13-LIVE-GATE.md) |

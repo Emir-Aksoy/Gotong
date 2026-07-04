@@ -17,15 +17,15 @@ import { join } from 'node:path'
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import type { Logger } from '@aipehub/core'
+import type { Logger } from '@gotong/core'
 import {
   MemoryReviewParticipant,
   MemoryToolset,
   dreamingReviewer,
   lexicalRetriever,
   queryDiversityOf,
-} from '@aipehub/personal-memory'
-import type { MemoryEntry } from '@aipehub/services-sdk'
+} from '@gotong/personal-memory'
+import type { MemoryEntry } from '@gotong/services-sdk'
 
 import { HostButlerMemoryService } from '../src/butler-memory-service.js'
 import { openButlerDreamDiary } from '../src/personal-butler-dreams.js'

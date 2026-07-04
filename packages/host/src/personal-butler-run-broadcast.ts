@@ -42,9 +42,9 @@
 import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
-import type { Logger } from '@aipehub/core'
-import type { LlmAgentToolset, LlmToolCallResult, LlmToolDefinition } from '@aipehub/llm'
-import { ownerDir } from '@aipehub/service-memory-file'
+import type { Logger } from '@gotong/core'
+import type { LlmAgentToolset, LlmToolCallResult, LlmToolDefinition } from '@gotong/llm'
+import { ownerDir } from '@gotong/service-memory-file'
 
 import type { ButlerRunSurface, ButlerRunView } from './personal-butler-observe.js'
 

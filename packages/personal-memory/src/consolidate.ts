@@ -5,7 +5,7 @@
  * # Why this exists
  *
  * Capture (M2) writes every turn to `episodic`. Left alone that grows without
- * bound. `@aipehub/memory-file`'s only defense is a crude byte-cap that *halves
+ * bound. `@gotong/memory-file`'s only defense is a crude byte-cap that *halves
  * and drops* old entries — losing information blind. M3 replaces that with
  * **intelligent** bounding: an LLM distills the old episodic backlog into one
  * readable curated profile (MEMORY.md / USER.md style), then the folded
@@ -21,7 +21,7 @@
  * # Forced overflow (Hermes 模式)
  *
  * Hermes errors on an over-limit memory write to force the agent to trim *that
- * turn*. AipeHub's curation runs off the hot path (on the heartbeat, D5), so
+ * turn*. Gotong's curation runs off the hot path (on the heartbeat, D5), so
  * the analogous force is here: if the distilled profile still exceeds
  * `profileHardCap`, `consolidate` asks the summarizer once more to compress
  * it; if it *still* can't fit, it **throws** `PersonalMemoryError(
@@ -38,7 +38,7 @@
  * verified opt-in with a real key — design §十 risks).
  */
 
-import type { MemoryEntry, MemoryHandle, NewMemoryEntry } from '@aipehub/services-sdk'
+import type { MemoryEntry, MemoryHandle, NewMemoryEntry } from '@gotong/services-sdk'
 
 import { PersonalMemoryError } from './errors.js'
 import type { MemoryReviewer, ReviewContext, ReviewOutcome } from './review.js'
@@ -59,7 +59,7 @@ const META_CONSOLIDATED_AT = 'consolidatedAt'
 
 /**
  * Caller-supplied LLM summarizer. Gets a `system` + `user` prompt, returns the
- * raw curated text. Keeps this module free of any `@aipehub/llm` import.
+ * raw curated text. Keeps this module free of any `@gotong/llm` import.
  */
 export type MemorySummarizer = (input: {
   readonly system: string

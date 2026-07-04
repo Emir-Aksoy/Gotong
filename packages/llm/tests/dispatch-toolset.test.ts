@@ -3,7 +3,7 @@ import type {
   DispatchStrategy,
   ParticipantId,
   TaskResult,
-} from '@aipehub/core'
+} from '@gotong/core'
 import {
   DispatchToolset,
   type DispatchSurface,

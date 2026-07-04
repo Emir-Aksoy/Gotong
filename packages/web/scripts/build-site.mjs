@@ -2,7 +2,7 @@
 // Generate the community storefront — a static landing page + template gallery
 // + citation leaderboard — into the repo-root `site/` directory.
 //
-// Why (pre-launch checklist item 7): AipeHub's whole design stance is "the hub
+// Why (pre-launch checklist item 7): Gotong's whole design stance is "the hub
 // is dumb / the framework doesn't run an LLM / state is files / credentials stay
 // local / federation is peer-to-peer". That means the COMMUNITY needs zero
 // compute to run. GitHub already hosts the substance (a template is just a
@@ -116,7 +116,7 @@ export function assignSlugs(sources) {
 export function extractTemplate(rawText, relPath, origin, slug) {
   const doc = parseYaml(rawText)
   if (!doc || typeof doc !== 'object') throw new Error(`${relPath}: not an object`)
-  if (doc.schema !== 'aipehub.template/v1') throw new Error(`${relPath}: wrong schema ${doc.schema}`)
+  if (doc.schema !== 'gotong.template/v1') throw new Error(`${relPath}: wrong schema ${doc.schema}`)
   const t = doc.template
   if (!t || typeof t !== 'object') throw new Error(`${relPath}: missing template block`)
   if (typeof t.name !== 'string' || t.name.trim().length === 0) {
@@ -177,7 +177,7 @@ export function buildModel(templates) {
   return { templates: enriched, leaderboard, unresolved }
 }
 
-const REPO_URL = 'https://github.com/Emir-Aksoy/AipeHub'
+const REPO_URL = 'https://github.com/Emir-Aksoy/Gotong'
 
 function originBadge(origin) {
   return origin === 'flagship'
@@ -262,7 +262,7 @@ ${cards(community)}
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>AipeHub — 可信的 AI 工作底座 · 模板画廊</title>
+<title>Gotong — 可信的 AI 工作底座 · 模板画廊</title>
 <meta name="description" content="本地、可治理、人在环里的 AI 工作底座。一键装一整套：智能体 + 工作流 + 知识库槽位。">
 <style>
   :root {
@@ -327,9 +327,9 @@ ${cards(community)}
 <body>
 <header class="hero">
   <div class="wrap">
-    <p class="tag">AI + Person + Hub</p>
+    <p class="tag">gotong-royong · 全村互助，一起扛活</p>
     <h1>可以放心交给 AI 的事，<br>交给一个<span class="accent">你自己的</span> hub。</h1>
-    <p class="lead">AipeHub 是一个本地优先、可治理、人始终在环里的 AI 工作底座。框架自己不跑大模型 ——
+    <p class="lead">Gotong 是一个本地优先、可治理、人始终在环里的 AI 工作底座。框架自己不跑大模型 ——
       它只路由消息、派任务、写下可审计的轨迹；决策权永远在参与者（你的 agent、你、或外部服务）手里。
       凭证留在本机，状态都是磁盘文件，跨组织协作点对点。所以家、家人、钱这类事，它配得上你的信任。</p>
     <div class="pillars">
@@ -385,8 +385,8 @@ ${leaderboardHtml(model.leaderboard)}
  * order + no timestamp keeps it diff-friendly. */
 export function renderTemplatesJson(model) {
   const payload = {
-    schema: 'aipehub.site/v1',
-    note: 'Derived from validated aipehub.template/v1 manifests by scripts/build-site.mjs. Deterministic, no timestamp.',
+    schema: 'gotong.site/v1',
+    note: 'Derived from validated gotong.template/v1 manifests by scripts/build-site.mjs. Deterministic, no timestamp.',
     templateCount: model.templates.length,
     templates: model.templates.map((t) => ({
       slug: t.slug,

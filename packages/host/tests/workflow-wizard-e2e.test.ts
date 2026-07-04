@@ -42,14 +42,14 @@ import { join } from 'node:path'
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { Hub, HumanParticipant, InMemoryStorage } from '@aipehub/core'
-import { MockLlmProvider, type LlmRequest } from '@aipehub/llm'
-import { openIdentityStore, type IdentityStore } from '@aipehub/identity'
+import { Hub, HumanParticipant, InMemoryStorage } from '@gotong/core'
+import { MockLlmProvider, type LlmRequest } from '@gotong/llm'
+import { openIdentityStore, type IdentityStore } from '@gotong/identity'
 import {
   WorkflowAssistantAgent,
   WORKFLOW_ASSISTANT_CAPABILITY,
   type WorkflowAssistantOutput,
-} from '@aipehub/workflow-assistant'
+} from '@gotong/workflow-assistant'
 
 import { WorkflowController } from '../src/workflow-controller.js'
 import { MeWorkflowCreateService } from '../src/me-workflow-create-service.js'
@@ -60,7 +60,7 @@ import type { WizardAssistView } from '../src/workflow-wizard.js'
 // --- scenario YAMLs (real text → real parseWorkflow downstream) --------------
 
 const GREEN_YAML = [
-  'schema: aipehub.workflow/v1',
+  'schema: gotong.workflow/v1',
   'workflow:',
   '  id: morning-digest',
   '  trigger:',
@@ -79,7 +79,7 @@ const GREEN_YAML = [
 // gather references the LATER step's output → forward_ref (a HARD violation the
 // machine must fix; the repair loop's instruction tells it to).
 const REPAIR_BROKEN = [
-  'schema: aipehub.workflow/v1',
+  'schema: gotong.workflow/v1',
   'workflow:',
   '  id: repair-flow',
   '  trigger:',
@@ -96,7 +96,7 @@ const REPAIR_BROKEN = [
 ].join('\n')
 
 const REPAIR_FIXED = [
-  'schema: aipehub.workflow/v1',
+  'schema: gotong.workflow/v1',
   'workflow:',
   '  id: repair-flow',
   '  trigger:',
@@ -116,7 +116,7 @@ const REPAIR_FIXED = [
 // card `legal-pack` provides an agent covering it — a GAP with an install
 // proposal, not a repairable error.
 const GAP_YAML = [
-  'schema: aipehub.workflow/v1',
+  'schema: gotong.workflow/v1',
   'workflow:',
   '  id: contract-review',
   '  trigger:',
@@ -180,7 +180,7 @@ interface Rig {
 }
 
 async function boot(): Promise<Rig> {
-  const tmp = await mkdtemp(join(tmpdir(), 'aipe-wizard-e2e-'))
+  const tmp = await mkdtemp(join(tmpdir(), 'gotong-wizard-e2e-'))
   const hub = new Hub({ storage: new InMemoryStorage() })
   await hub.start()
 

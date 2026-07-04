@@ -33,13 +33,13 @@ pnpm test:python
 1. 创建临时 Space。
 2. 打开 IdentityStore，bootstrap owner，设置 password。
 3. 启动 `serveWeb({ identity })`。
-4. `POST /api/admin/identity/login` 成功拿到 `aipehub_identity`。
+4. `POST /api/admin/identity/login` 成功拿到 `gotong_identity`。
 5. 只带该 cookie 调 `GET /api/admin/agents`。
 
 输出:
 
 ```json
-{"loginStatus":200,"cookiePrefix":"aipehub_identity=","agentsStatus":401,"agentsBody":"{\"error\":\"admin auth required\"}"}
+{"loginStatus":200,"cookiePrefix":"gotong_identity=","agentsStatus":401,"agentsBody":"{\"error\":\"admin auth required\"}"}
 ```
 
 解释: 这证明当前 v4 登录面和 operational admin API 之间没有真正统一。

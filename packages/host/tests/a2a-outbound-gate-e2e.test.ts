@@ -31,8 +31,8 @@ import { join } from 'node:path'
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { AgentParticipant, Hub, InMemoryStorage, type Logger, type Task } from '@aipehub/core'
-import { openIdentityStore, type IdentityStore } from '@aipehub/identity'
+import { AgentParticipant, Hub, InMemoryStorage, type Logger, type Task } from '@gotong/core'
+import { openIdentityStore, type IdentityStore } from '@gotong/identity'
 
 import { A2aServer } from '../src/a2a-server.js'
 import { A2aOutboundManager } from '../src/a2a-outbound.js'
@@ -73,7 +73,7 @@ function textOf(payload: unknown): string {
 function workflowYaml(reviewDataClasses?: readonly string[]): string {
   const dc = reviewDataClasses ? `\n        dataClasses: [${reviewDataClasses.join(', ')}]` : ''
   return `
-schema: aipehub.workflow/v1
+schema: gotong.workflow/v1
 workflow:
   id: ${WORKFLOW_ID}
   name: a2a outbound gate flow

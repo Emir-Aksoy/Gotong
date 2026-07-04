@@ -8,7 +8,7 @@
 # Tweak `args: [.,/path/to/your/repo]` to whatever directory the agent
 # should be allowed to read. Use multiple entries to let the same
 # agent read several roots (the toolset namespaces them by `name:`).
-schema: aipehub.agent/v1
+schema: gotong.agent/v1
 
 agent:
   id: repo-reader

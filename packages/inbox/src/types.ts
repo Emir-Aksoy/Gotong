@@ -1,7 +1,7 @@
 /**
- * Core types for `@aipehub/inbox` — the member task inbox.
+ * Core types for `@gotong/inbox` — the member task inbox.
  *
- * A workflow (or any agent) dispatches a Task to the `aipehub.human/v1`
+ * A workflow (or any agent) dispatches a Task to the `gotong.human/v1`
  * capability with a {@link HumanTaskPayload}. The `HumanInboxParticipant`
  * broker records an {@link InboxItem} and suspends the task. The assigned
  * member sees the item in their `/me` inbox, submits an {@link InboxDecision},
@@ -31,7 +31,7 @@ export interface InboxEditField {
 }
 
 /**
- * The payload a workflow / agent dispatches to `aipehub.human/v1`. The
+ * The payload a workflow / agent dispatches to `gotong.human/v1`. The
  * `human:` step sugar (workflow schema) and a raw dispatch both produce this
  * shape; the broker validates it in `handleTask`.
  */

@@ -50,7 +50,7 @@ function installFetch(impl: typeof globalThis.fetch): void {
 // =========================================================================
 
 describe('redactToken', () => {
-  const TOKEN = 'aipe-admin-tok-very-secret-12345'
+  const TOKEN = 'gotong-admin-tok-very-secret-12345'
 
   it('replaces the literal token wherever it appears', () => {
     const input = `failed to call api: Bearer ${TOKEN} got 401`
@@ -100,7 +100,7 @@ describe('redactToken', () => {
 // =========================================================================
 
 describe('redactError', () => {
-  const TOKEN = 'aipe-admin-tok-deadbeef'
+  const TOKEN = 'gotong-admin-tok-deadbeef'
 
   it('rebuilds an Error with the token stripped from message AND stack', () => {
     const err = new TypeError(`request failed (Bearer ${TOKEN})`)

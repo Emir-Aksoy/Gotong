@@ -2,7 +2,7 @@
  * v5 B — the full export → transport → import-activate round-trip.
  *
  * This is the "one file, activate to use" closed loop the user asked for: a hub
- * is fully described by ONE aipehub.template/v1 file; carry that file to a fresh
+ * is fully described by ONE gotong.template/v1 file; carry that file to a fresh
  * hub and importing it reconstitutes an equivalent hub.
  *
  * The two existing template tests each cover only HALF of this:
@@ -29,11 +29,11 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { Hub, Space } from '@aipehub/core'
+import { Hub, Space } from '@gotong/core'
 
 import { serveWeb, type WebServerHandle, type WorkflowSurface } from '../src/server.js'
 
-const WF_YAML = `schema: aipehub.workflow/v1
+const WF_YAML = `schema: gotong.workflow/v1
 workflow:
   id: ticket-flow
   trigger:
@@ -54,7 +54,7 @@ interface BootedHub {
 }
 
 async function bootHub(name: string, workflows: WorkflowSurface): Promise<BootedHub> {
-  const tmp = await mkdtemp(join(tmpdir(), `aipehub-roundtrip-${name}-`))
+  const tmp = await mkdtemp(join(tmpdir(), `gotong-roundtrip-${name}-`))
   const init = await Space.init(tmp, { name: `roundtrip-${name}` })
   const space = init.space
   const hub = new Hub({ space })
@@ -137,10 +137,10 @@ describe('template export → transport → import-activate round-trip (v5 B)', 
 
     // 2) TRANSPORT — serialize to ONE file, save it to disk, read it back. This
     // is literally "导出 → 传输": a single artifact the operator carries to B.
-    const filePath = join(A.tmp, 'support.aipehub.template.json')
+    const filePath = join(A.tmp, 'support.gotong.template.json')
     await writeFile(filePath, JSON.stringify(expJson.template, null, 2), 'utf8')
     const oneFile = await readFile(filePath, 'utf8')
-    expect(oneFile).toContain('aipehub.template/v1')
+    expect(oneFile).toContain('gotong.template/v1')
     // The literal secret stayed home; only a ${PLACEHOLDER} reference travels.
     expect(oneFile).not.toContain('sk-LITERAL')
     expect(oneFile).toContain('${KB_TOKEN}')

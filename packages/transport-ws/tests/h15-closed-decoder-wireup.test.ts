@@ -1,5 +1,5 @@
 /**
- * H15 wire-up regression — `AIPE_PROTOCOL_STRICT` env value picks the
+ * H15 wire-up regression — `GOTONG_PROTOCOL_STRICT` env value picks the
  * decoder at session construction. Three valid values:
  *
  *   unset / anything else → decodeFrame      (lax envelope only)
@@ -18,7 +18,7 @@ import {
   decodeFrame,
   decodeFrameClosed,
   decodeFrameStrict,
-} from '@aipehub/protocol'
+} from '@gotong/protocol'
 
 import { pickDecoder } from '../src/session.js'
 
@@ -28,14 +28,14 @@ describe('H15 — pickDecoder decision table', () => {
   })
 
   it('returns decodeFrame for the empty string', () => {
-    // An empty `AIPE_PROTOCOL_STRICT=` in a shell exports `''`. Treat
+    // An empty `GOTONG_PROTOCOL_STRICT=` in a shell exports `''`. Treat
     // that the same as unset — it's clearly not the intent to enable
     // strict mode.
     expect(pickDecoder('')).toBe(decodeFrame)
   })
 
   it('returns decodeFrame for "0" (people misremember the API)', () => {
-    // Common mistake: setting `AIPE_PROTOCOL_STRICT=0` thinking it's
+    // Common mistake: setting `GOTONG_PROTOCOL_STRICT=0` thinking it's
     // a boolean. The contract is strict-on-1, not boolean. Falls
     // through to lax.
     expect(pickDecoder('0')).toBe(decodeFrame)

@@ -6,7 +6,7 @@
  * server attached. When dispatched a task it uses its tool-use loop to call HA
  * tools (HassTurnOff / HassClimateSetTemperature / lock.lock / alarm arm) which
  * HA in turn routes to your **Xiaomi devices** through the official ha_xiaomi_home
- * integration (米家设备 → Home Assistant → HA MCP Server → AipeHub).
+ * integration (米家设备 → Home Assistant → HA MCP Server → Gotong).
  *
  * Here we substitute a deterministic stand-in that serves the SAME capabilities
  * against a tiny in-memory device table — so the demo runs with no API key, no
@@ -19,11 +19,11 @@
  * fires directly; a physical / security action (lock the door, arm the alarm) is
  * held behind a `human:` confirmation — because locking up is not free to undo
  * (it can lock someone out), and arming/disarming is a security decision. That is
- * the AipeHub governance thesis applied to a home: 提议直接做的可逆动作, 人确认
+ * the Gotong governance thesis applied to a home: 提议直接做的可逆动作, 人确认
  * 不可逆的物理动作.
  */
 
-import { AgentParticipant, type Task } from '@aipehub/core'
+import { AgentParticipant, type Task } from '@gotong/core'
 
 /** A Xiaomi device as it appears in Home Assistant (entity_id + a little state). */
 type Device =

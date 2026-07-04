@@ -1,4 +1,4 @@
-# 战斗修士锻炼 — 可载入模板 (aipehub.template/v1)
+# 战斗修士锻炼 — 可载入模板 (gotong.template/v1)
 #
 # battle-monk-training 的「修士团」做成一个**可载入文件**(不是内置 TS):
 #   4 个托管 LLM agent  +  1 个可寻址知识库槽位(你的修士档案 Codex / mcp-obsidian)。
@@ -20,7 +20,7 @@
 #     -H 'content-type: application/json' \
 #     -d "$(jq -Rs '{template: .}' examples/battle-monk-training/template/battle-monk-training.template.yaml)" \
 #     http://127.0.0.1:8745/api/admin/templates/import
-schema: aipehub.template/v1
+schema: gotong.template/v1
 template:
   name: 战斗修士锻炼(身-心-学三柱)
   description: |-

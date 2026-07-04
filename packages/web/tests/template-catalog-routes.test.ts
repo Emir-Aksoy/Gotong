@@ -17,7 +17,7 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { Hub, Space } from '@aipehub/core'
+import { Hub, Space } from '@gotong/core'
 
 import { serveWeb, type WebServerHandle } from '../src/server.js'
 import { parseTemplate } from '../src/template-manifest.js'
@@ -41,7 +41,7 @@ let server: WebServerHandle
 let token: string
 
 beforeEach(async () => {
-  tmp = await mkdtemp(join(tmpdir(), 'aipehub-catalog-'))
+  tmp = await mkdtemp(join(tmpdir(), 'gotong-catalog-'))
   const { space } = await Space.init(tmp, { name: 'catalog-test' })
   hub = new Hub({ space })
   await hub.start()
@@ -106,7 +106,7 @@ describe('template gallery catalog routes (G-M2)', () => {
     expect(body.id).toBe('cafe-ops')
     // The yaml is the real manifest — it parses through the install parser.
     const parsed = parseTemplate(body.yaml)
-    expect(parsed.schema).toBe('aipehub.template/v1')
+    expect(parsed.schema).toBe('gotong.template/v1')
     expect(parsed.name).toBe('门店运营(奶茶 / 咖啡店)')
   })
 

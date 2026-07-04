@@ -23,9 +23,9 @@
  * gate, and ACP helper already write their own.
  */
 
-import type { Task, TaskResult } from '@aipehub/core'
-import { readButlerGateState } from '@aipehub/personal-butler'
-import type { InboxItem } from '@aipehub/inbox'
+import type { Task, TaskResult } from '@gotong/core'
+import { readButlerGateState } from '@gotong/personal-butler'
+import type { InboxItem } from '@gotong/inbox'
 
 export interface ButlerApprovalItemOptions {
   /**

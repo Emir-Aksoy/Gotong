@@ -2,7 +2,7 @@
 # Workflow: 传统行业 AI 转型咨询全流程
 # （含 AI evaluator + 资深顾问 HITL approve + 案主插话）
 # Companion team: templates/teams/industry-consultation-team.yaml
-# Schema: aipehub.workflow/v1
+# Schema: gotong.workflow/v1
 #
 # v2 增强：相对 v1 的"五步全自动"，本工作流加了：
 #   - v2.2  Hub Services（memory + artifact + datastore）
@@ -60,7 +60,7 @@
 #   artifact，agent 用自己的 services 句柄做。
 # =============================================================================
 
-schema: aipehub.workflow/v1
+schema: gotong.workflow/v1
 
 workflow:
   id: industry-consultation-flow

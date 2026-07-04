@@ -23,7 +23,7 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { Hub, Space } from '@aipehub/core'
+import { Hub, Space } from '@gotong/core'
 
 import { serveWeb, type WebServerHandle } from '../src/server.js'
 
@@ -35,7 +35,7 @@ interface Booted {
 }
 
 async function boot(opts: { readinessGate?: { isReady: () => boolean } } = {}): Promise<Booted> {
-  const tmp = await mkdtemp(join(tmpdir(), 'aipehub-web-health-'))
+  const tmp = await mkdtemp(join(tmpdir(), 'gotong-web-health-'))
   const init = await Space.init(tmp, { name: 'health-test' })
   const hub = new Hub({ space: init.space })
   await hub.start()

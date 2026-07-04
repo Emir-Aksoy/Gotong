@@ -1,8 +1,8 @@
 {
-  "name": "@aipehub/im-telegram",
+  "name": "@gotong/im-telegram",
   "version": "0.1.0",
   "type": "module",
-  "description": "AipeHub IM bridge for Telegram — implements ImBridge via Bot API long-polling. No external Telegram SDK (uses fetch).",
+  "description": "Gotong IM bridge for Telegram — implements ImBridge via Bot API long-polling. No external Telegram SDK (uses fetch).",
   "license": "MIT",
   "private": true,
   "main": "./dist/index.js",
@@ -25,7 +25,7 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "@aipehub/im-adapter": "workspace:*"
+    "@gotong/im-adapter": "workspace:*"
   },
   "devDependencies": {
     "vitest": "^3.2.4"

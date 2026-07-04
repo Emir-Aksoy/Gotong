@@ -21,7 +21,7 @@ from unittest.mock import patch
 
 import pytest
 
-from aipehub.services import _rand_id
+from gotong.services import _rand_id
 
 
 # =============================================================================
@@ -60,7 +60,7 @@ class TestH8CallIdEntropy:
     def test_uses_secrets_module(self) -> None:
         # Positive assertion: the new path goes through `secrets`.
         # Patching `secrets.token_hex` lets us see the call.
-        with patch("aipehub.services.secrets.token_hex", return_value="cafebabe1234") as mock_th:
+        with patch("gotong.services.secrets.token_hex", return_value="cafebabe1234") as mock_th:
             out = _rand_id()
             mock_th.assert_called_once_with(6)
             assert out == "cafebabe1234"
@@ -94,8 +94,8 @@ def _make_session() -> Any:
     we exercise here (`_spawn_background`, `_send_service_call`,
     `_background_tasks`) are state-only and don't need a live socket.
     """
-    from aipehub import AgentParticipant
-    from aipehub.session import Session
+    from gotong import AgentParticipant
+    from gotong.session import Session
 
     return Session(
         url="ws://127.0.0.1:0",  # loopback so the H10 check doesn't fire

@@ -3,7 +3,7 @@
  *
  * An outbound A2A agent is a LOCAL participant that, when a matching capability
  * is dispatched, forwards the task to an external agent's A2A `message/send`.
- * Phase 18 C-M4 configured these from the `AIPE_A2A_AGENTS` env blob (no UI, no
+ * Phase 18 C-M4 configured these from the `GOTONG_A2A_AGENTS` env blob (no UI, no
  * persistence); M11 moves them into identity (`a2a_outbound_agents`) so an admin
  * can CRUD them and edits take effect on the running hub without a restart.
  *
@@ -12,7 +12,7 @@
  *   PATCH  /api/admin/a2a-agents/:id    targeted update (id immutable)
  *   DELETE /api/admin/a2a-agents/:id    remove + unregister from the hub
  *
- * Backed by a host-injected surface (web has no @aipehub/identity dep). Absent
+ * Backed by a host-injected surface (web has no @gotong/identity dep). Absent
  * (no identity store) → every route 503s.
  *
  * Unlike OIDC there is NO secret to hide: `tokenEnv` is the NAME of the env var
@@ -24,8 +24,8 @@
  */
 
 import type { IncomingMessage, ServerResponse } from 'node:http'
-import type { AdminRecord } from '@aipehub/core'
-import { createLogger } from '@aipehub/core'
+import type { AdminRecord } from '@gotong/core'
+import { createLogger } from '@gotong/core'
 
 import { readJsonBody, sendJson } from './http-helpers.js'
 

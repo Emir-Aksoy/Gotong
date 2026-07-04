@@ -28,17 +28,17 @@
  * worth it for S3-M1; a future milestone could add a bounded retry.
  */
 
-import { AgentParticipant, SuspendTaskError, type ParticipantId, type Task } from '@aipehub/core'
+import { AgentParticipant, SuspendTaskError, type ParticipantId, type Task } from '@gotong/core'
 
 /** Fixed capability a `set_reminder` tool (or any agent) dispatches to. */
-export const REMINDER_CAPABILITY = 'aipehub.reminder/v1'
+export const REMINDER_CAPABILITY = 'gotong.reminder/v1'
 
 /**
  * Fixed participant id the host registers the broker under. Fixed (not generated)
  * so the resume sweep's `hub.resumeTask(REMINDER_PARTICIPANT_ID, …)` finds it after
  * a restart — mirroring `HUMAN_INBOX_PARTICIPANT_ID`.
  */
-export const REMINDER_PARTICIPANT_ID = 'aipehub:reminder'
+export const REMINDER_PARTICIPANT_ID = 'gotong:reminder'
 
 /** How far ahead a reminder may be scheduled. ~1 year + a day of slack. */
 export const REMINDER_MAX_WINDOW_MS = 366 * 24 * 60 * 60 * 1000
@@ -70,7 +70,7 @@ export class ReminderError extends Error {
   }
 }
 
-/** The dispatched `aipehub.reminder/v1` payload. */
+/** The dispatched `gotong.reminder/v1` payload. */
 export interface ReminderTaskPayload {
   /** The member to remind — force-set to their own id by the `set_reminder` tool. */
   userId: string

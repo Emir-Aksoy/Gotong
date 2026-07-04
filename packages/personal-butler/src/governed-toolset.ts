@@ -21,14 +21,14 @@
  * `callTool` on resume once approved.
  *
  * No host / identity dependency — the classifier and executor are injected
- * callbacks (same discipline as `MemorySummarizer` in `@aipehub/personal-memory`).
+ * callbacks (same discipline as `MemorySummarizer` in `@gotong/personal-memory`).
  */
 
 import type {
   LlmAgentToolset,
   LlmToolCallResult,
   LlmToolDefinition,
-} from '@aipehub/llm'
+} from '@gotong/llm'
 
 import { ButlerError } from './errors.js'
 

@@ -23,21 +23,21 @@ import {
   writeFile,
 } from 'node:fs/promises'
 import { dirname, join, relative } from 'node:path'
-import type { Logger } from '@aipehub/core'
+import type { Logger } from '@gotong/core'
 import type {
   Owner,
   ServiceInitCtx,
   ServicePlugin,
   ServiceSnapshot,
   TrashRef,
-} from '@aipehub/services-sdk'
+} from '@gotong/services-sdk'
 import {
   assertSafeOwnerId,
   makeTrashRef,
   ownerKey,
   PREVIEW_MAX_BYTES,
   TrashRestoreConflictError,
-} from '@aipehub/services-sdk'
+} from '@gotong/services-sdk'
 
 import { type ArtifactFileConfig, validateArtifactFileConfig } from './config.js'
 import { ArtifactFileHandle } from './handle.js'

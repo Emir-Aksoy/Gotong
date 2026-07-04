@@ -9,7 +9,7 @@
  * reuses the SAME duck-typed `MeHubStewardSurface` — the host wires a SECOND
  * steward service here (the operator one: `OPERATOR_STEWARD_IDS`, a site-wide
  * agent executor + a grant-free workflow editor), so the web layer keeps ZERO
- * runtime dep on `@aipehub/hub-steward` and the action it forwards is `unknown`
+ * runtime dep on `@gotong/hub-steward` and the action it forwards is `unknown`
  * (the HOST surface validates + re-classifies + re-tiers it; web never trusts a
  * client-supplied tier).
  *
@@ -27,7 +27,7 @@
  */
 
 import type { IncomingMessage, ServerResponse } from 'node:http'
-import type { AdminRecord } from '@aipehub/core'
+import type { AdminRecord } from '@gotong/core'
 import { readJsonBody, sendJson } from './http-helpers.js'
 import { coerceStewardHistory, type MeHubStewardSurface } from './me-routes.js'
 

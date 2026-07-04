@@ -1,4 +1,4 @@
-# AipeHub liveness monitor
+# Gotong liveness monitor
 
 External watchdog that probes the host's `/healthz` from cron and pushes a
 Feishu alert when the box goes **down** or **recovers**. It closes the
@@ -10,7 +10,7 @@ can still alert when the host itself is too dead to alert on its own behalf.
 
 ## Why external, not the in-process alert path
 
-AipeHub *does* have an in-process alert delivery path (peer-summary
+Gotong *does* have an in-process alert delivery path (peer-summary
 firings). But that path dies with the host — exactly when you most need a
 page. A liveness watchdog must run in a **separate process**, driven by
 cron. This is the one alert that can't be host-internal.
@@ -50,55 +50,55 @@ The two script files (`healthcheck.sh` + `feishu-app-send.mjs`) live **outside**
 `app/` so a `git pull` / re-rsync of the source tree can't clobber them:
 
 ```bash
-mkdir -p ~/aipehub/monitor
-cp ~/aipehub/app/scripts/monitor/healthcheck.sh   ~/aipehub/monitor/
-cp ~/aipehub/app/scripts/monitor/feishu-app-send.mjs ~/aipehub/monitor/
-chmod +x ~/aipehub/monitor/healthcheck.sh
+mkdir -p ~/gotong/monitor
+cp ~/gotong/app/scripts/monitor/healthcheck.sh   ~/gotong/monitor/
+cp ~/gotong/app/scripts/monitor/feishu-app-send.mjs ~/gotong/monitor/
+chmod +x ~/gotong/monitor/healthcheck.sh
 ```
 
 ### Option A — Feishu app bot (this deployment)
 
-Reuses the IM bridge's app (App ID / App Secret already in `~/aipehub/aipehub.env`)
+Reuses the IM bridge's app (App ID / App Secret already in `~/gotong/gotong.env`)
 and DMs the bound owner. No new bot, no console scope change — only `im:message`.
 
-Thin cron wrapper `~/aipehub/healthcheck-cron.sh` (mirrors `backup-cron.sh`).
-It reads the two app creds out of `aipehub.env` with `grep` (no `source` — the
+Thin cron wrapper `~/gotong/healthcheck-cron.sh` (mirrors `backup-cron.sh`).
+It reads the two app creds out of `gotong.env` with `grep` (no `source` — the
 env file has values with spaces) and pages an `open_id` (the owner's Feishu id,
 read once from `im_bindings`):
 
 ```bash
 #!/usr/bin/env bash
 export NODE_BIN=/usr/local/bin/node
-export AIPE_LARK_APP_ID="$(grep -E '^AIPE_LARK_APP_ID=' "$HOME/aipehub/aipehub.env" | head -1 | cut -d= -f2-)"
-export AIPE_LARK_APP_SECRET="$(grep -E '^AIPE_LARK_APP_SECRET=' "$HOME/aipehub/aipehub.env" | head -1 | cut -d= -f2-)"
+export GOTONG_LARK_APP_ID="$(grep -E '^GOTONG_LARK_APP_ID=' "$HOME/gotong/gotong.env" | head -1 | cut -d= -f2-)"
+export GOTONG_LARK_APP_SECRET="$(grep -E '^GOTONG_LARK_APP_SECRET=' "$HOME/gotong/gotong.env" | head -1 | cut -d= -f2-)"
 export FEISHU_ALERT_RECEIVE_ID="ou_xxxxxxxx"      # the bound owner's open_id
 export FEISHU_ALERT_RECEIVE_ID_TYPE=open_id
-export AIPE_WEB_PORT=3000
-export HEALTHCHECK_LABEL=aipehub-prod
-exec "$HOME/aipehub/monitor/healthcheck.sh" "$HOME/aipehub/monitor-state"
+export GOTONG_WEB_PORT=3000
+export HEALTHCHECK_LABEL=gotong-prod
+exec "$HOME/gotong/monitor/healthcheck.sh" "$HOME/gotong/monitor-state"
 ```
-`chmod +x ~/aipehub/healthcheck-cron.sh`
+`chmod +x ~/gotong/healthcheck-cron.sh`
 
 To find the owner's `open_id` (it's the Feishu `platform_user_id` of the bound
 member):
 
 ```bash
-sqlite3 ~/aipehub/data/identity.sqlite \
+sqlite3 ~/gotong/data/identity.sqlite \
   "SELECT platform_user_id FROM im_bindings WHERE platform='lark' LIMIT 1;"
 ```
 
 ### Option B — Feishu custom-bot webhook (if your tenant allows custom bots)
 
 ```bash
-install -m 600 /dev/stdin ~/aipehub/feishu-alert-webhook.txt <<<'https://open.feishu.cn/open-apis/bot/v2/hook/XXXX'
+install -m 600 /dev/stdin ~/gotong/feishu-alert-webhook.txt <<<'https://open.feishu.cn/open-apis/bot/v2/hook/XXXX'
 ```
-…then in the wrapper `export FEISHU_WEBHOOK_FILE="$HOME/aipehub/feishu-alert-webhook.txt"`
+…then in the wrapper `export FEISHU_WEBHOOK_FILE="$HOME/gotong/feishu-alert-webhook.txt"`
 instead of the app-bot vars.
 
 ### Cron entry — every 3 minutes
 
 ```cron
-*/3 * * * * /home/ubuntu/aipehub/healthcheck-cron.sh >> /home/ubuntu/aipehub/monitor-state/cron.log 2>&1
+*/3 * * * * /home/ubuntu/gotong/healthcheck-cron.sh >> /home/ubuntu/gotong/monitor-state/cron.log 2>&1
 ```
 
 ### Smoke test (don't touch the real service)
@@ -108,18 +108,18 @@ Run the wrapper against a **dead port** with a **separate** state dir so the rea
 
 ```bash
 HEALTHCHECK_URL=http://127.0.0.1:59999/healthz HEALTHCHECK_RETRIES=1 \
-  bash -c 'source <(grep -E "^export" ~/aipehub/healthcheck-cron.sh | sed "s#monitor-state#monitor-state-test#"); \
-           ~/aipehub/monitor/healthcheck.sh ~/aipehub/monitor-state-test'
+  bash -c 'source <(grep -E "^export" ~/gotong/healthcheck-cron.sh | sed "s#monitor-state#monitor-state-test#"); \
+           ~/gotong/monitor/healthcheck.sh ~/gotong/monitor-state-test'
 ```
 
-A steady-state run (`~/aipehub/healthcheck-cron.sh` while the host is up) is
+A steady-state run (`~/gotong/healthcheck-cron.sh` while the host is up) is
 silent and exits 0.
 
 ## Tuning (env vars)
 
 | var | default | meaning |
 |---|---|---|
-| `HEALTHCHECK_URL` | `http://127.0.0.1:${AIPE_WEB_PORT:-3000}/healthz` | full probe URL |
+| `HEALTHCHECK_URL` | `http://127.0.0.1:${GOTONG_WEB_PORT:-3000}/healthz` | full probe URL |
 | `HEALTHCHECK_TIMEOUT` | `5` | per-try seconds |
 | `HEALTHCHECK_RETRIES` | `3` | tries before declaring down |
 | `HEALTHCHECK_RETRY_SLEEP` | `3` | seconds between tries |

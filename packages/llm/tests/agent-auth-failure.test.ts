@@ -14,7 +14,7 @@
  */
 
 import { describe, it, expect } from 'vitest'
-import { Hub, type Task } from '@aipehub/core'
+import { Hub, type Task } from '@gotong/core'
 import {
   LlmAgent,
   type LlmProvider,

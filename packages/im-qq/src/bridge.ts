@@ -23,7 +23,7 @@
  *
  * The HTTP server is OPTIONAL — set `webhookPort: 0` and the host drives
  * `handleRawRequest(rawBody, headers)` from its own HTTP layer (e.g. a
- * reverse-proxied `@aipehub/web` route). The raw body MUST be the
+ * reverse-proxied `@gotong/web` route). The raw body MUST be the
  * unmodified bytes QQ sent — the op:0 signature is over `timestamp +
  * rawBody`, so a re-stringify of parsed JSON breaks it.
  *
@@ -54,7 +54,7 @@ import type {
   ImBridge,
   ImMessage,
   ImUser,
-} from '@aipehub/im-adapter'
+} from '@gotong/im-adapter'
 
 import {
   createQqClient,

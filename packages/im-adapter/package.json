@@ -1,8 +1,8 @@
 {
-  "name": "@aipehub/im-adapter",
+  "name": "@gotong/im-adapter",
   "version": "0.1.0",
   "type": "module",
-  "description": "AipeHub IM bridge SDK — abstract ImBridge interface + command parser + BindingResolver contract that concrete bridges (@aipehub/im-telegram, @aipehub/im-matrix, etc.) build on top of.",
+  "description": "Gotong IM bridge SDK — abstract ImBridge interface + command parser + BindingResolver contract that concrete bridges (@gotong/im-telegram, @gotong/im-matrix, etc.) build on top of.",
   "license": "MIT",
   "private": true,
   "main": "./dist/index.js",

@@ -33,15 +33,15 @@ import { join } from 'node:path'
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { Hub, InMemoryStorage, type Logger } from '@aipehub/core'
-import { openIdentityStore, type IdentityStore } from '@aipehub/identity'
-import { FileInboxStore } from '@aipehub/inbox'
-import { consolidate } from '@aipehub/personal-memory'
+import { Hub, InMemoryStorage, type Logger } from '@gotong/core'
+import { openIdentityStore, type IdentityStore } from '@gotong/identity'
+import { FileInboxStore } from '@gotong/inbox'
+import { consolidate } from '@gotong/personal-memory'
 import {
   BUTLER_NEVER_RESUME_AT,
   GovernedActionToolset,
   PersonalButlerAgent,
-} from '@aipehub/personal-butler'
+} from '@gotong/personal-butler'
 import type {
   LlmAgentToolset,
   LlmMessage,
@@ -50,8 +50,8 @@ import type {
   LlmStreamChunk,
   LlmToolCallResult,
   LlmToolDefinition,
-} from '@aipehub/llm'
-import type { MemoryHandle } from '@aipehub/services-sdk'
+} from '@gotong/llm'
+import type { MemoryHandle } from '@gotong/services-sdk'
 
 import { butlerApprovalItemFor } from '../src/personal-butler-escalation.js'
 import { openButlerMemory } from '../src/personal-butler-memory.js'

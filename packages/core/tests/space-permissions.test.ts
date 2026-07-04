@@ -36,7 +36,7 @@ describe.skipIf(!POSIX)('Space — file permission hardening (C4 + H6)', () => {
   let root: string
 
   beforeEach(async () => {
-    root = await mkdtemp(join(tmpdir(), 'aipehub-perm-'))
+    root = await mkdtemp(join(tmpdir(), 'gotong-perm-'))
     // mkdtemp hands back an existing dir; remove and let init recreate
     await rm(root, { recursive: true, force: true })
   })

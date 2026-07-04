@@ -13,7 +13,7 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { Hub, Space } from '@aipehub/core'
+import { Hub, Space } from '@gotong/core'
 
 import {
   serveWeb,
@@ -50,7 +50,7 @@ function snap(over: Partial<ResInventorySnapshot> = {}): ResInventorySnapshot {
 
 async function boot(opts: { wired?: boolean } = {}): Promise<Boot> {
   const wired = opts.wired ?? true
-  const tmp = await mkdtemp(join(tmpdir(), 'aipehub-web-admin-resources-'))
+  const tmp = await mkdtemp(join(tmpdir(), 'gotong-web-admin-resources-'))
   const init = await Space.init(tmp, { name: 'admin-resources-route-test' })
   const hub = new Hub({ space: init.space })
   await hub.start()

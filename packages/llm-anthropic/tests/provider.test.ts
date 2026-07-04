@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { drainStream, type LlmRequest, type LlmStreamChunk } from '@aipehub/llm'
+import { drainStream, type LlmRequest, type LlmStreamChunk } from '@gotong/llm'
 
 import { AnthropicProvider } from '../src/index.js'
 
@@ -802,7 +802,7 @@ describe('AnthropicProvider — tool-use translation', () => {
             {
               type: 'tool_result',
               toolUseId: 'toolu_01abc',
-              content: '# AipeHub\n…',
+              content: '# Gotong\n…',
             },
           ],
         },
@@ -831,7 +831,7 @@ describe('AnthropicProvider — tool-use translation', () => {
           {
             type: 'tool_result',
             tool_use_id: 'toolu_01abc',
-            content: '# AipeHub\n…',
+            content: '# Gotong\n…',
           },
         ],
       },

@@ -1,4 +1,4 @@
-schema: aipehub.workflow/v1
+schema: gotong.workflow/v1
 workflow:
   id: child-guided-lesson
   name: 跟 AI 导师学一课 (跨组织)

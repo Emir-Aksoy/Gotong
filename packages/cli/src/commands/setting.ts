@@ -1,17 +1,17 @@
 /**
- * `aipehub setting [<subcommand> [args]]` — the unified deterministic (NON-AI)
+ * `gotong setting [<subcommand> [args]]` — the unified deterministic (NON-AI)
  * operations console, CLI face. One namespace stitching the whole lifecycle:
  * cold-start → crash-rescue (restore / rotate-master-key) → re-read definitions
  * (status / check) → other config management (list / inventory / fix-dirs).
  *
  * Two faces in one command:
  *
- *   - `aipehub setting <subcmd>`   one-shot — run a single ops command and exit.
- *   - `aipehub setting`            interactive sub-shell — read a line, run it,
+ *   - `gotong setting <subcmd>`   one-shot — run a single ops command and exit.
+ *   - `gotong setting`            interactive sub-shell — read a line, run it,
  *                                  repeat, until `exit`.
  *
  * Like `start` / `check`, the deterministic engine lives in the SEPARATE
- * `@aipehub/host` package (it needs `validateWorkspace`, the Space layout, the
+ * `@gotong/host` package (it needs `validateWorkspace`, the Space layout, the
  * backup scripts), so the tiny CLI does NOT depend on it. `setting` resolves the
  * host LAZILY and drives its non-booting `./ops` subpath (mirrors `check.ts`).
  *
@@ -39,18 +39,18 @@ import { start } from './start.js'
 import { makeReadlineIo } from './repl.js'
 import type { ReplIo } from '../repl/loop.js'
 
-const HOST_PKG = '@aipehub/host'
+const HOST_PKG = '@gotong/host'
 // A variable, not a string literal, on purpose: tsc only resolves
 // `import("literal")` at build time, so this dynamic import does NOT make
-// `@aipehub/host` a build-time dependency of the CLI (same trick as `start`).
-const OPS_PKG = '@aipehub/host/ops'
+// `@gotong/host` a build-time dependency of the CLI (same trick as `start`).
+const OPS_PKG = '@gotong/host/ops'
 
 // The destructive-offline trio. Named here (not derived from the catalog) so the
 // dispatcher routes them to the CLI-only adapter BEFORE they could ever reach
 // `runOpsCommand` (which would throw `OpsTierError` for them anyway).
 const DESTRUCTIVE = new Set(['cold-start', 'restore', 'rotate-master-key'])
 
-// ── Structural mirrors of the `@aipehub/host/ops` surface ────────────────────
+// ── Structural mirrors of the `@gotong/host/ops` surface ────────────────────
 // Declared locally (NOT imported from the host) so the CLI keeps zero host
 // build-time dependency. Only the slice `setting` actually consumes.
 
@@ -91,7 +91,7 @@ const CLI_CALLER: OpsCallerLite = { surface: 'cli', allowConfigWrite: true }
 // ── Injectable seams so both faces + every branch are testable hermetically ──
 
 export interface SettingDeps {
-  /** Probe whether `@aipehub/host` is installed (its entry path/URL, or null). */
+  /** Probe whether `@gotong/host` is installed (its entry path/URL, or null). */
   resolveHost?: () => string | null
   /** Import the host's non-booting `./ops` module. */
   importOps?: () => Promise<OpsModule>
@@ -107,7 +107,7 @@ export interface SettingDeps {
   confirm?: (question: string) => Promise<boolean>
   /** Interactive IO for the sub-shell (defaults to readline). Injected in tests. */
   io?: ReplIo
-  /** Env to read AIPE_SPACE / AIPE_* from (defaults to `process.env`). */
+  /** Env to read GOTONG_SPACE / GOTONG_* from (defaults to `process.env`). */
   env?: Record<string, string | undefined>
   /** stdout writer (defaults to `process.stdout.write`). */
   out?: (line: string) => void
@@ -132,7 +132,7 @@ interface SettingCtx {
 
 function makeCtx(deps: SettingDeps): SettingCtx {
   const env = deps.env ?? (process.env as Record<string, string | undefined>)
-  const spaceDir = env.AIPE_SPACE ?? '.aipehub'
+  const spaceDir = env.GOTONG_SPACE ?? '.gotong'
   return {
     out: deps.out ?? ((l: string) => { process.stdout.write(l) }),
     err: deps.err ?? ((l: string) => { console.error(l) }),
@@ -182,7 +182,7 @@ export async function setting(args: readonly string[], deps: SettingDeps = {}): 
   }
 
   const [sub, ...rest] = args
-  // Bare `aipehub setting` → interactive sub-shell.
+  // Bare `gotong setting` → interactive sub-shell.
   if (!sub) return runSettingShell(deps)
 
   switch (sub) {
@@ -215,7 +215,7 @@ async function loadOps(ctx: SettingCtx): Promise<OpsModule | null> {
   } catch (e) {
     // Resolve said present but the import failed (corrupt install / partial
     // build). Treat as absent rather than crash with a stack trace.
-    ctx.err(`[aipehub setting] could not load @aipehub/host/ops: ${e instanceof Error ? e.message : String(e)}`)
+    ctx.err(`[gotong setting] could not load @gotong/host/ops: ${e instanceof Error ? e.message : String(e)}`)
     printHostAbsent(ctx.err)
     return null
   }
@@ -230,7 +230,7 @@ async function runOnlineOps(id: string, args: readonly string[], ctx: SettingCtx
     ctx.out(result.lines.join('\n') + '\n')
     return 0
   } catch (e) {
-    ctx.err(`[aipehub setting] ${e instanceof Error ? e.message : String(e)}`)
+    ctx.err(`[gotong setting] ${e instanceof Error ? e.message : String(e)}`)
     return 1
   }
 }
@@ -241,7 +241,7 @@ async function runOnlineOps(id: string, args: readonly string[], ctx: SettingCtx
 // hub is down. Each asks for confirmation first (— `--yes` to skip).
 // ───────────────────────────────────────────────────────────────────────────
 
-/** Resolve the installed `@aipehub/host` package root from its `.` entry URL/path. */
+/** Resolve the installed `@gotong/host` package root from its `.` entry URL/path. */
 function hostRootFrom(entry: string): string {
   // The `.` export resolves to `<root>/dist/index.js`; root is two dirs up.
   // Done with string ops on the resolved spec so it works for both a file URL
@@ -277,9 +277,9 @@ async function runColdStart(args: readonly string[], ctx: SettingCtx): Promise<n
 
   if (!clean && !force) {
     ctx.err('')
-    ctx.err('[aipehub setting cold-start] pre-flight found problems (doctor or check failed).')
+    ctx.err('[gotong setting cold-start] pre-flight found problems (doctor or check failed).')
     ctx.err('  Fix them, or re-run with --force to boot anyway:')
-    ctx.err('      aipehub setting cold-start --force')
+    ctx.err('      gotong setting cold-start --force')
     return 1
   }
   if (!clean && force) {
@@ -297,7 +297,7 @@ async function runRestore(args: readonly string[], ctx: SettingCtx): Promise<num
   const backup = positional[0]
   const target = positional[1]
   if (!backup || !target) {
-    ctx.err('usage: aipehub setting restore <backup-file.tar.gz> <target-dir> [--force] [--yes]')
+    ctx.err('usage: gotong setting restore <backup-file.tar.gz> <target-dir> [--force] [--yes]')
     return 2
   }
 
@@ -325,12 +325,12 @@ async function runRotateMasterKey(args: readonly string[], ctx: SettingCtx): Pro
     return 1
   }
   // Delegate to the host's own `rotate-master-key` subcommand (it reads
-  // AIPE_SPACE / AIPE_MASTER_KEY_* from the env, exactly like boot). Spawning the
+  // GOTONG_SPACE / GOTONG_MASTER_KEY_* from the env, exactly like boot). Spawning the
   // host bin runs that subcommand WITHOUT booting the server (main.ts forks on
   // ARGV[0]). The new key is never printed — it stays the host's concern.
-  const bin = `${hostRootFrom(entry)}/bin/aipehub-host.js`
+  const bin = `${hostRootFrom(entry)}/bin/gotong-host.js`
 
-  ctx.out(`about to ROTATE the identity-vault master key (KEK) for AIPE_SPACE='${ctx.spaceDir}'.\n`)
+  ctx.out(`about to ROTATE the identity-vault master key (KEK) for GOTONG_SPACE='${ctx.spaceDir}'.\n`)
   ctx.out('the OLD key stops working; a running host adopts the new key on its next restart. local-file provider only.\n')
   if (!assumeYes && !(await ctx.confirm('rotate the master key now? [y/N] '))) {
     ctx.out('aborted — the key was not rotated.\n')
@@ -379,7 +379,7 @@ export async function runSettingShell(deps: SettingDeps = {}): Promise<number> {
       if (DESTRUCTIVE.has(parsed.id)) {
         io.write(
           `'${parsed.id}' is destructive — run it directly so it can confirm safely:\n` +
-            `    aipehub setting ${parsed.id}\n`,
+            `    gotong setting ${parsed.id}\n`,
         )
         continue
       }
@@ -406,7 +406,7 @@ function shellBanner(ops: OpsModule): string {
     .map((c) => c.id)
     .join(', ')
   return [
-    'AipeHub setting console — deterministic ops, no LLM.',
+    'Gotong setting console — deterministic ops, no LLM.',
     `Online commands: ${runnable}.  Type \`help\` for the full list, \`exit\` to quit.`,
     '',
     '',
@@ -422,8 +422,8 @@ function shellHelp(ops: OpsModule): string {
     if (!inShell) {
       lines.push(
         c.tier === 'destructive-offline'
-          ? `      → run directly: aipehub setting ${c.id}`
-          : `      → owner-only (web admin / CLI): aipehub setting ${c.id}`,
+          ? `      → run directly: gotong setting ${c.id}`
+          : `      → owner-only (web admin / CLI): gotong setting ${c.id}`,
       )
     }
   }
@@ -440,7 +440,7 @@ async function defaultRunProcess(cmd: string, args: readonly string[]): Promise<
   return new Promise<number>((resolve) => {
     const child = spawn(cmd, args as string[], { stdio: 'inherit' })
     child.on('error', (e: Error) => {
-      console.error(`[aipehub setting] failed to launch ${cmd}: ${e.message}`)
+      console.error(`[gotong setting] failed to launch ${cmd}: ${e.message}`)
       resolve(1)
     })
     child.on('close', (code: number | null) => resolve(code ?? 0))
@@ -462,26 +462,26 @@ async function defaultConfirm(question: string): Promise<boolean> {
 }
 
 function printHostAbsent(err: (line: string) => void): void {
-  err('[aipehub setting] @aipehub/host is not installed.')
+  err('[gotong setting] @gotong/host is not installed.')
   err('')
   err('  `setting` drives the host\'s own deterministic ops engine, which ships')
-  err('  in the SEPARATE @aipehub/host package. Install it once:')
+  err('  in the SEPARATE @gotong/host package. Install it once:')
   err('')
-  err('      npm i -g @aipehub/host        # then: aipehub setting status')
+  err('      npm i -g @gotong/host        # then: gotong setting status')
   err('')
   err('  …or just run the host directly (it does the same boot-time checks):')
   err('')
-  err('      npx @aipehub/host')
+  err('      npx @gotong/host')
   err('')
 }
 
-const SETTING_HELP = `aipehub setting [<subcommand> [args]]
+const SETTING_HELP = `gotong setting [<subcommand> [args]]
 
 The unified deterministic (NON-AI) operations console. One namespace over the
 whole lifecycle — cold-start, crash-rescue, re-read definitions, config check.
 With NO subcommand it opens an interactive sub-shell.
 
-The ops engine ships in the SEPARATE @aipehub/host package; \`setting\` resolves
+The ops engine ships in the SEPARATE @gotong/host package; \`setting\` resolves
 it lazily and drives its non-booting ./ops entry, so the host must be installed.
 
 Online commands (safe everywhere — also reachable from the admin web UI):
@@ -501,16 +501,16 @@ run, so the web/IM surfaces physically can't). Each confirms first; --yes skips:
                        verify.sh). Stop the hub first.
   rotate-master-key    Rotate the identity-vault master key (local-file provider).
 
-Configuration is read from the same AIPE_* env the host reads (AIPE_SPACE,
-default .aipehub). Exit code 0 on success, non-zero on failure or a declined
+Configuration is read from the same GOTONG_* env the host reads (GOTONG_SPACE,
+default .gotong). Exit code 0 on success, non-zero on failure or a declined
 confirmation.
 
 Examples:
-  aipehub setting status
-  aipehub setting check --strict
-  aipehub setting                       # interactive sub-shell
-  aipehub setting restore aipehub-prod-20260626T101530Z.tar.gz /opt/aipehub --yes
-  aipehub setting rotate-master-key
+  gotong setting status
+  gotong setting check --strict
+  gotong setting                       # interactive sub-shell
+  gotong setting restore gotong-prod-20260626T101530Z.tar.gz /opt/gotong --yes
+  gotong setting rotate-master-key
 `
 
 export { SETTING_HELP }

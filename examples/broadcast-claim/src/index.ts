@@ -12,7 +12,7 @@ import {
   type Task,
   type TaskId,
   type TranscriptEntry,
-} from '@aipehub/core'
+} from '@gotong/core'
 
 type ReviewPayload = { draft: string }
 type ReviewOutput = { note: string; respondedInMs: number }
@@ -52,7 +52,7 @@ async function main(): Promise<void> {
   hub.register(new ReviewerAgent('reviewer-medium', 300))
   hub.register(new ReviewerAgent('reviewer-slow', 500))
 
-  console.log('\n=== AipeHub demo: broadcast claim ===\n')
+  console.log('\n=== Gotong demo: broadcast claim ===\n')
 
   // `from: 'system'` is fine — `from` is a free-form string, not a participant lookup.
   const result = await hub.dispatch({

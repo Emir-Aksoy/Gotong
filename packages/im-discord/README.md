@@ -1,17 +1,17 @@
-# @aipehub/im-discord
+# @gotong/im-discord
 
-Phase 12 M5 — fourth concrete `ImBridge` for AipeHub.
+Phase 12 M5 — fourth concrete `ImBridge` for Gotong.
 
 A Discord Bot bridge implemented against
-[`@aipehub/im-adapter`](../im-adapter)'s `ImBridge` interface.
+[`@gotong/im-adapter`](../im-adapter)'s `ImBridge` interface.
 WebSocket Gateway v10 + REST; no `discord.js` dependency (`fetch` +
 injectable `WebSocket`); ~700 lines of implementation.
 
 ## What you get
 
 ```ts
-import { DiscordBridge } from '@aipehub/im-discord'
-import { parseImCommand } from '@aipehub/im-adapter'
+import { DiscordBridge } from '@gotong/im-discord'
+import { parseImCommand } from '@gotong/im-adapter'
 
 const bridge = new DiscordBridge({
   token: process.env.DISCORD_BOT_TOKEN!,
@@ -152,7 +152,7 @@ Discord 没有 "DM by user id" 捷径：
 - **出向附件 / embed / component**. `sendMessage` 带 attachments 会触发
   `onError` 但 text 仍发出，跟 Telegram M2 / Matrix M3 / Lark M4 一致。
 - **Voice / video gateway**.
-- **Sharding**. 单 shard 撑 2500 个 guild — AipeHub 用例够了。
+- **Sharding**. 单 shard 撑 2500 个 guild — Gotong 用例够了。
 - **Compression / zstd**. 原始 JSON 帧；省了 ~50% 带宽换的不是我们要的。
 - **Identify rate limit 跟踪**. 单 bot 远在 1000/天 上限内；
   靠 `session_start_limit` header + 5s identify 退避。
@@ -166,7 +166,7 @@ unification / 204 处理)；`tests/bridge.test.ts` 用 `FakeWebSocket` +
 派发、anti-loop、系统消息过滤、致命 close code 不重连、sendMessage REST shape。
 
 ```bash
-pnpm --filter @aipehub/im-discord test
+pnpm --filter @gotong/im-discord test
 ```
 
 ## Status

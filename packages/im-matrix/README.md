@@ -1,9 +1,9 @@
-# @aipehub/im-matrix
+# @gotong/im-matrix
 
-Phase 12 M3 — second concrete `ImBridge` for AipeHub.
+Phase 12 M3 — second concrete `ImBridge` for Gotong.
 
 A Matrix bot bridge implemented against
-[`@aipehub/im-adapter`](../im-adapter)'s `ImBridge` interface.
+[`@gotong/im-adapter`](../im-adapter)'s `ImBridge` interface.
 Sync long-poll mode; no `matrix-bot-sdk` dependency (just `fetch`);
 ~450 lines of implementation.
 
@@ -13,11 +13,11 @@ Telegram, Slack, Discord, Lark are each a single corporate API.
 **Matrix is the only protocol-level federated IM on the IM bridge
 roadmap** — and that's the point.
 
-AipeHub already federates between hubs via peer tokens. Matrix
+Gotong already federates between hubs via peer tokens. Matrix
 federates between homeservers natively. The two graphs compose:
 
 ```
-   AipeHub hub A ─── peer token ─── AipeHub hub B
+   Gotong hub A ─── peer token ─── Gotong hub B
         │                                  │
    Matrix bot                          Matrix bot
         │                                  │
@@ -28,8 +28,8 @@ federates between homeservers natively. The two graphs compose:
 
 Neither side needs the other to centralise: an `@alice@matrix.org`
 user can reach the bot on `kde.org` via Matrix federation, even
-though her homeserver has no AipeHub knowledge — and the bot can
-forward her message to a peer AipeHub hub via the AipeHub
+though her homeserver has no Gotong knowledge — and the bot can
+forward her message to a peer Gotong hub via the Gotong
 federation token, even though that hub has no Matrix knowledge.
 
 Two distinct federation graphs, composed cleanly. That's the
@@ -53,8 +53,8 @@ won't change.
 ## Quick start
 
 ```ts
-import { MatrixBridge } from '@aipehub/im-matrix'
-import { parseImCommand } from '@aipehub/im-adapter'
+import { MatrixBridge } from '@gotong/im-matrix'
+import { parseImCommand } from '@gotong/im-adapter'
 
 const bridge = new MatrixBridge({
   homeserverUrl: process.env.MATRIX_HOMESERVER_URL!,  // e.g. 'https://matrix.org'
@@ -89,11 +89,11 @@ await bridge.stop()
 ## Getting an access token
 
 The bridge expects a long-lived access token from a regular user
-account (typically named `@aipe_bot:yourserver.org`). One-shot
+account (typically named `@gotong_bot:yourserver.org`). One-shot
 acquisition:
 
 ```bash
-curl -X POST -d '{"type":"m.login.password","user":"aipe_bot","password":"…"}' \
+curl -X POST -d '{"type":"m.login.password","user":"gotong_bot","password":"…"}' \
   https://your-homeserver.example/_matrix/client/v3/login
 ```
 
@@ -122,7 +122,7 @@ most messages don't need them and the cost compounds in larger rooms.
 Downstream code that needs the bytes:
 
 ```ts
-import { parseMxcUri } from '@aipehub/im-matrix'
+import { parseMxcUri } from '@gotong/im-matrix'
 
 const { serverName, mediaId } = parseMxcUri(attachment.url)!
 // Matrix v1.11+: authenticated media download

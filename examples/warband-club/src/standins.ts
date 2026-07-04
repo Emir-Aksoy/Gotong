@@ -16,7 +16,7 @@
 import { readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
-import { AgentParticipant, type Task } from '@aipehub/core'
+import { AgentParticipant, type Task } from '@gotong/core'
 
 /** Slug a title into a filesystem-safe base (ascii kept, everything else → '-'). */
 function slug(title: string, fallback: string): string {

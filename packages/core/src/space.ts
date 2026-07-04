@@ -22,7 +22,7 @@ export type SpaceUnsafeCode =
  *
  *   1. Symlink pre-staging — attacker on a shared host creates
  *      `<root>/runtime/secret.key` as a symbolic link to a victim's
- *      file BEFORE the victim runs `aipehub-host`. Without this check
+ *      file BEFORE the victim runs `gotong-host`. Without this check
  *      our `writeFile(secret.key, …)` would follow the symlink and
  *      overwrite the victim's file with random key material.
  *
@@ -84,10 +84,10 @@ import { DEFAULT_TENANT } from './tenant.js'
 import type { ParticipantId } from './types.js'
 
 /**
- * Space — the on-disk truth of an AipeHub workspace (v2.0).
+ * Space — the on-disk truth of an Gotong workspace (v2.0).
  *
  * Everything that used to live in process memory or browser storage is now
- * a file under a `.aipehub/`-style directory. Restart the host, switch
+ * a file under a `.gotong/`-style directory. Restart the host, switch
  * machines, hand the directory to a teammate — same state shows up.
  *
  * Layout:
@@ -126,7 +126,7 @@ export class Space {
      * Hub-level MCP server registry (`mcp-servers.json`). A named set of
      * MCP servers installed once at hub scope; agents opt into them by
      * name via `ManagedAgentSpec.useMcpServers` (the `uses:`-for-services
-     * analogue). File-first so `cp -r .aipehub` carries the installed
+     * analogue). File-first so `cp -r .gotong` carries the installed
      * integrations with the room.
      */
     mcpServers: '',
@@ -224,7 +224,7 @@ export class Space {
    *
    *   - `workspace_not_directory` — the root exists but isn't a
    *     directory. Most likely an operator typo (e.g.
-   *     `AIPE_SPACE=/some/file.json`); fail loud.
+   *     `GOTONG_SPACE=/some/file.json`); fail loud.
    *
    * No-op on Windows (NTFS ACLs are the trust boundary, not POSIX
    * mode bits / uid). Tolerates ENOENT on individual files — many of
@@ -261,7 +261,7 @@ export class Space {
         throw new SpaceUnsafeError(
           `refusing to open workspace: '${path}' is owned by uid ${stat.uid}, ` +
             `but this process is running as uid ${expectedUid}. ` +
-            `The workspace must be owned by the user that runs aipehub-host.`,
+            `The workspace must be owned by the user that runs gotong-host.`,
           'workspace_wrong_owner',
           path,
         )
@@ -1201,7 +1201,7 @@ export interface ManagedAgentSpec {
    * (admin / lifecycle / restart / test-connection all unchanged), gaining a
    * per-user memory routed by `task.origin.userId`.
    *
-   * The host can also default this ON for the chat agent via `AIPE_BUTLER`, so
+   * The host can also default this ON for the chat agent via `GOTONG_BUTLER`, so
    * a typical single-bot deployment needs no per-agent flag. Absent → host
    * default (zero behaviour change for a non-chat agent either way).
    */
@@ -1234,7 +1234,7 @@ export interface HeartbeatSpec {
   enabled: boolean
   /**
    * Wake cadence in milliseconds. The host clamps this up to a floor
-   * (`AIPE_HEARTBEAT_MIN_MS`, default 60_000) so a typo can't spin the
+   * (`GOTONG_HEARTBEAT_MIN_MS`, default 60_000) so a typo can't spin the
    * agent every millisecond. OpenClaw's default cadence is 30 minutes.
    */
   intervalMs: number
@@ -1249,7 +1249,7 @@ export interface HeartbeatSpec {
 
 /**
  * One entry under `ManagedAgentSpec.mcpServers`. A stripped-down,
- * yaml-friendly view of `@aipehub/mcp-client`'s `McpServerConfig` —
+ * yaml-friendly view of `@gotong/mcp-client`'s `McpServerConfig` —
  * fields are mapped to a resolved `McpServerConfig` at spawn time
  * inside `LocalAgentPool` (`resolveMcpServerConfig`).
  *
@@ -1360,7 +1360,7 @@ export interface HubMcpServerRecord {
 
 /**
  * One entry under `ManagedAgentSpec.uses`. Plain JS interface so
- * `@aipehub/core` doesn't take a runtime dep on `@aipehub/services-sdk`
+ * `@gotong/core` doesn't take a runtime dep on `@gotong/services-sdk`
  * (the SDK lives "downstream" of core in the workspace graph — see
  * docs/services-rfc.md §14 for the cycle-avoidance discussion).
  *
@@ -1415,7 +1415,7 @@ export interface PersistedPendingApp {
  * Lifecycle hooks the Web layer calls when an admin creates / edits /
  * removes a managed agent through the HTTP API. The host implements
  * this interface via its `AgentSupervisor`; the Web layer talks to that
- * interface, so `@aipehub/web` never has to import `@aipehub/llm-*`
+ * interface, so `@gotong/web` never has to import `@gotong/llm-*`
  * directly. Pass an implementation on `serveWeb({ lifecycle })`.
  *
  * Implementations should be **idempotent**: `start` on an already-running

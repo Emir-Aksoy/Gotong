@@ -1,12 +1,12 @@
 {
-  "name": "@aipehub/service-artifact-file",
+  "name": "@gotong/service-artifact-file",
   "version": "1.0.0",
   "type": "module",
-  "description": "AipeHub artifact service — file-backed implementation. Stores markdown / json / binary artifacts under per-owner directories with path-traversal protection.",
+  "description": "Gotong artifact service — file-backed implementation. Stores markdown / json / binary artifacts under per-owner directories with path-traversal protection.",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/Emir-Aksoy/AipeHub.git",
+    "url": "https://github.com/Emir-Aksoy/Gotong.git",
     "directory": "packages/service-artifact-file"
   },
   "publishConfig": {
@@ -33,8 +33,8 @@
     "prepack": "tsc -p tsconfig.json"
   },
   "dependencies": {
-    "@aipehub/services-sdk": "workspace:*",
-    "@aipehub/core": "workspace:*"
+    "@gotong/services-sdk": "workspace:*",
+    "@gotong/core": "workspace:*"
   },
   "devDependencies": {
     "vitest": "^3.2.4"

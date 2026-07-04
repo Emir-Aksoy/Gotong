@@ -132,7 +132,7 @@ GET https://registry.modelcontextprotocol.io/v0/servers?search=<关键词>&curso
 
 ### 交付 3 — 架构师优先推荐可装配组件(喂 dead seam)
 
-工作流架构师(`@aipehub/workflow-assistant` 的 `WorkflowAssistantAgent`,
+工作流架构师(`@gotong/workflow-assistant` 的 `WorkflowAssistantAgent`,
 cap `workflow:assist`)早就**完整消费**一条 `contextHints.mcpServers?: string[]`
 输入 —— `renderUserMessage()` 会把它渲染成 prompt 里的「Available MCP servers:」
 清单。但这条 seam 从 Phase 13 起**从没人喂**。MCD-M4 把它接活:
@@ -165,7 +165,7 @@ cap `workflow:assist`)早就**完整消费**一条 `contextHints.mcpServers?: st
 - **目录在 hub 装,架构师优先用已装**:安装是 admin 的事(`POST /api/admin/mcp-servers`);
   成员只在架构师里**用**已装的组件,不自己装(MCP 是 admin 管的资源)。
 - **跨 hub 两层闸不变**:联邦时,某 hub 装的 MCP server 提供给 peer 仍过两层 ——
-  MCP server 自身的 ACL + AipeHub 的 per-link KB allowlist(C-M1 `gateKnowledgeBaseRpc`)。
+  MCP server 自身的 ACL + Gotong 的 per-link KB allowlist(C-M1 `gateKnowledgeBaseRpc`)。
   目录不改这套。
 - **诚实失败**:catalog 路由逐条 try/catch(理论上常量不会炸);fetch / filesystem
   这类宽能力连接器卡片显式标 caveat。装 discovery 连接器后**不会自动建** agent,

@@ -1,5 +1,5 @@
 {
-  "name": "@aipehub/example-acp-coding-bridge",
+  "name": "@gotong/example-acp-coding-bridge",
   "version": "0.0.0",
   "type": "module",
   "private": true,
@@ -10,7 +10,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@aipehub/acp-agent": "workspace:*",
-    "@aipehub/core": "workspace:*"
+    "@gotong/acp-agent": "workspace:*",
+    "@gotong/core": "workspace:*"
   }
 }

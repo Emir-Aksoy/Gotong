@@ -35,8 +35,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { Hub, InMemoryStorage, type TaskId } from '@aipehub/core'
-import { CliParticipant, dangerousCommandGate, type CliChunk } from '@aipehub/cli-agent'
+import { Hub, InMemoryStorage, type TaskId } from '@gotong/core'
+import { CliParticipant, dangerousCommandGate, type CliChunk } from '@gotong/cli-agent'
 
 import { setupSharedWorkspace, initGitRepo, type SharedWorkspace } from './workspace.js'
 import { setupConsultBoard, readAllDiagnoses, boardCardInstruction } from './consult-board.js'
@@ -91,7 +91,7 @@ async function main(): Promise<void> {
     `  agents : ${stub ? 'in-process stand-ins (default — set CONSULT_REAL=1 for real CLIs)' : 'claude-code + codex (各自 CLI 登录, 不注入 key)'}`,
   )
 
-  const dir = mkdtempSync(join(tmpdir(), 'aipe-consult-real-'))
+  const dir = mkdtempSync(join(tmpdir(), 'gotong-consult-real-'))
   const ws = setupSharedWorkspace(dir)
   initGitRepo(dir) // so the real CLIs don't print `fatal: not a git repository`
   // Seed the REAL bug + REAL failing test the panel reads.

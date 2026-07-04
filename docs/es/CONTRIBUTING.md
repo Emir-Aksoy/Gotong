@@ -1,4 +1,4 @@
-# Contribuir a AipeHub
+# Contribuir a Gotong
 
 <!-- doc-version: 1.0 -->
 > **Versión del documento 1.0** · Traducción al español · Actualizado el 2026-06-27 · Fuente autorizada: [English](../../CONTRIBUTING.md). Si la traducción entra en conflicto con la versión en inglés, prevalece la versión en inglés.
@@ -9,7 +9,7 @@ Gracias por considerar una contribución — y nos referimos a todo tipo de cont
 
 - **Sé amable.** Trata a cualquiera en el rastreador de issues / PRs de la manera en que querrías que un ingeniero senior te tratara en un mal día.
 - **PRs pequeños.** Los cambios independientes se envían más rápido que los mega-PRs. Si una función se divide limpiamente, envía las partes por separado.
-- **El Hub se mantiene tonto.** La idea de diseño completa de AipeHub es que el Hub enruta / persiste y no posee lógica de agente. Los parches que metan llamadas LLM, bucles de agentes o reglas de negocio en el Hub serán redirigidos.
+- **El Hub se mantiene tonto.** La idea de diseño completa de Gotong es que el Hub enruta / persiste y no posee lógica de agente. Los parches que metan llamadas LLM, bucles de agentes o reglas de negocio en el Hub serán redirigidos.
 - **El protocolo wire tiene versiones.** Cualquier cosa que cambie las formas de mensajes a nivel de protocolo pasa por `docs/PROTOCOL.md` y un incremento de versión de protocolo. Los cambios solo locales no.
 - **Sin dependencias sorpresa.** Añadir una dependencia en tiempo de ejecución (especialmente las nativas) es una decisión real — abre un issue primero.
 
@@ -17,8 +17,8 @@ Gracias por considerar una contribución — y nos referimos a todo tipo de cont
 
 ```bash
 # haz fork en GitHub, luego:
-git clone git@github.com:<tú>/AipeHub.git
-cd AipeHub
+git clone git@github.com:<tú>/Gotong.git
+cd Gotong
 pnpm install
 pnpm build
 
@@ -65,7 +65,7 @@ Si quieres una tarea de inicio con poco contexto, busca issues etiquetados con `
 
 ## Contribuir una plantilla
 
-No tienes que escribir TypeScript para contribuir. AipeHub incluye **plantillas** — YAML autocontenido que alguien importa para obtener un hub funcional (agentes + flujos de trabajo + referencias de bases de conocimiento, nunca secretos ni contenido de conocimiento).
+No tienes que escribir TypeScript para contribuir. Gotong incluye **plantillas** — YAML autocontenido que alguien importa para obtener un hub funcional (agentes + flujos de trabajo + referencias de bases de conocimiento, nunca secretos ni contenido de conocimiento).
 
 - Un solo prompt adaptado → [`templates/community/`](../../templates/community/).
 - Un hub importable completo (multi-agente + flujos de trabajo) → [`templates/community/templates/`](../../templates/community/templates/) — ese README recorre el flujo de 5 pasos: copia un ejemplo insignia, adáptalo, declara la procedencia (`derivedFrom`), valida localmente con `pnpm check:templates`, abre un PR.
@@ -80,7 +80,7 @@ tu idioma, eso es una contribución de primera clase — no una categoría secun
 - **Abre un pull request en [`CONTRIBUTORS.md`](../../CONTRIBUTORS.md)** añadiendo
   una fila para ti mismo (o para otra persona). Enlaza el artefacto en la
   descripción del PR para que un maintainer pueda verlo.
-- **Si tu material es un vídeo, tutorial o charla que enseña AipeHub bien**,
+- **Si tu material es un vídeo, tutorial o charla que enseña Gotong bien**,
   también puede ser curado en [`LEARN.md`](../../LEARN.md) — el escaparate al
   que se dirige a los nuevos usuarios. Pide que sea añadido en el mismo PR.
 

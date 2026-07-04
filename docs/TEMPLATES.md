@@ -4,20 +4,20 @@
 >
 > The **initial reference set** is in [`templates/`](../templates/) of
 > the main repo. Once the project stabilises, the **public template
-> library** will be split into its own repository — **`AipeHub/aipehub-templates`**.
+> library** will be split into its own repository — **`Gotong/gotong-templates`**.
 > Community PRs will go there; the main repo will keep only a small
 > "frozen for CI" subset so the parser tests have something to run.
 >
 > Until that split happens, PR into the main repo's `templates/` is
 > still accepted — we'll migrate everything wholesale when we move.
 
-AipeHub ships a small reference set of **standard agent and team
+Gotong ships a small reference set of **standard agent and team
 templates** in [`templates/`](../templates/). Anyone can pull one
 through the admin UI, and anyone can PR new ones.
 
 There are two parallel sets:
 
-- [`templates/agents/`](../templates/agents/) + [`templates/teams/`](../templates/teams/) — **project-original**, written for AipeHub from scratch. Same MIT license as the project.
+- [`templates/agents/`](../templates/agents/) + [`templates/teams/`](../templates/teams/) — **project-original**, written for Gotong from scratch. Same MIT license as the project.
 - [`templates/community/`](../templates/community/) — **adapted from third-party prompt libraries** ([`awesome-chatgpt-prompts`](https://github.com/f/awesome-chatgpt-prompts) (CC0) and [`awesome-chatgpt-prompts-zh`](https://github.com/PlexPt/awesome-chatgpt-prompts-zh) (MIT)). Each file's header records upstream source + license; [`templates/community/LICENSE-NOTICES.md`](../templates/community/LICENSE-NOTICES.md) aggregates the third-party licenses verbatim. Both license families allow commercial use. We rejected upstream sources marked "non-commercial", "research only", or unlicensed.
 
 This doc covers:
@@ -42,18 +42,18 @@ Every manifest starts with a `schema` line identifying the version and
 shape:
 
 ```yaml
-schema: aipehub.agent/v1    # single agent
+schema: gotong.agent/v1    # single agent
 # or
-schema: aipehub.team/v1     # multiple agents bundled
+schema: gotong.team/v1     # multiple agents bundled
 ```
 
 Unknown schemas are rejected with a clear error message. We'll bump to
 `/v2` when we make a breaking change.
 
-### Single-agent (`aipehub.agent/v1`)
+### Single-agent (`gotong.agent/v1`)
 
 ```yaml
-schema: aipehub.agent/v1
+schema: gotong.agent/v1
 agent:
   id: writer-zh                  # required, unique in the space
   displayName: 中文写作助手       # optional, shown next to the id in the UI
@@ -68,10 +68,10 @@ agent:
     - no preamble.
 ```
 
-### Team (`aipehub.team/v1`)
+### Team (`gotong.team/v1`)
 
 ```yaml
-schema: aipehub.team/v1
+schema: gotong.team/v1
 team:
   name: 中文编辑团队              # optional
   description: 写作 + 审稿        # optional
@@ -210,7 +210,7 @@ merged:
   DEPRECATED: see <new-id>` to the top, keep the file 30 days, then
   delete. Old imports are unaffected — the persisted record is on the
   user's disk.
-- **Breaking the manifest schema** means bumping `aipehub.agent/v2` —
+- **Breaking the manifest schema** means bumping `gotong.agent/v2` —
   the parser will keep accepting `/v1` for at least one minor release.
 
 ---
@@ -221,7 +221,7 @@ merged:
   every spawn — easy to grep on boot to verify your `agents.json` is
   intact.
 - `agents.json` is plain JSON; nothing stops you from `git`-tracking
-  your space's `agents.json` separately from the AipeHub repo, so your
+  your space's `agents.json` separately from the Gotong repo, so your
   team's curated agent set survives across machine moves.
 - For tests / CI you can pre-seed `agents.json` before starting the
   host — the supervisor will replay it like any other boot.

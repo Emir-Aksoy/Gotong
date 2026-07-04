@@ -20,7 +20,7 @@ import { fileURLToPath } from 'node:url'
 
 import { parse as parseYaml } from 'yaml'
 
-import { Hub, Space } from '@aipehub/core'
+import { Hub, Space } from '@gotong/core'
 
 import { serveWeb, type WebServerHandle, type WorkflowSurface } from '../src/server.js'
 import { parseTemplate } from '../src/template-manifest.js'
@@ -45,7 +45,7 @@ beforeEach(async () => {
 })
 
 describe('examples/morning-brief-hub/template (LIFE-L2①)', () => {
-  it('parses as a valid aipehub.template/v1 manifest', () => {
+  it('parses as a valid gotong.template/v1 manifest', () => {
     const t = parseTemplate(templateText)
     expect(t.name).toBe('我的晨报(定时工作流)')
     expect(t.version).toBe(1)
@@ -56,7 +56,7 @@ describe('examples/morning-brief-hub/template (LIFE-L2①)', () => {
   })
 
   it('imports end-to-end: agent lands, ONE workflow yaml reaches the runtime with the member gate open', async () => {
-    const tmp = await mkdtemp(join(tmpdir(), 'aipehub-mbh-'))
+    const tmp = await mkdtemp(join(tmpdir(), 'gotong-mbh-'))
     const { space } = await Space.init(tmp, { name: 'mbh-test' })
     const hub = new Hub({ space })
     await hub.start()
@@ -95,7 +95,7 @@ describe('examples/morning-brief-hub/template (LIFE-L2①)', () => {
           surface?: { me?: { enabled?: boolean; user_scope_field?: string } }
         }
       }
-      expect(wf.schema).toBe('aipehub.workflow/v1')
+      expect(wf.schema).toBe('gotong.workflow/v1')
       expect(wf.workflow.id).toBe('morning-brief')
       expect(wf.workflow.trigger.capability).toBe('brief.request')
       expect(wf.workflow.surface?.me).toMatchObject({

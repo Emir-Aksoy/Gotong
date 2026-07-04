@@ -19,9 +19,9 @@
  * carries its in-flight loop state on the suspend, not in memory.
  */
 
-import type { Logger } from '@aipehub/core'
-import { MemoryFileHandle, type MemoryFileConfig } from '@aipehub/service-memory-file'
-import type { MemoryHandle, Owner } from '@aipehub/services-sdk'
+import type { Logger } from '@gotong/core'
+import { MemoryFileHandle, type MemoryFileConfig } from '@gotong/service-memory-file'
+import type { MemoryHandle, Owner } from '@gotong/services-sdk'
 
 /** Default memory kinds for a butler: captured turns + the distilled profile. */
 export const BUTLER_MEMORY_KINDS: MemoryFileConfig['kinds'] = ['episodic', 'semantic']

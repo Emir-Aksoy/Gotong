@@ -1,13 +1,13 @@
 /**
  * End-to-end smoke for the host services boot with the real
- * `@aipehub/service-memory-file` plugin.
+ * `@gotong/service-memory-file` plugin.
  *
  * Why a separate file from `services-bootstrap.test.ts`:
  *   - the fake-plugin tests over there verify shape + error-handling
  *     in isolation — they pass even if the SDK changes its plugin
  *     shape because every test plugin is custom-built.
  *   - this file proves the **wiring is real**: a host that imports
- *     `@aipehub/service-memory-file` through dynamic import gets a
+ *     `@gotong/service-memory-file` through dynamic import gets a
  *     working `MemoryHandle` back from `services.attach`. If we ever
  *     break the loader/factory convention, this file is the one that
  *     fails first.
@@ -24,8 +24,8 @@ import { join } from 'node:path'
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { createLogger, Hub, Space } from '@aipehub/core'
-import type { MemoryHandle, Owner } from '@aipehub/services-sdk'
+import { createLogger, Hub, Space } from '@gotong/core'
+import type { MemoryHandle, Owner } from '@gotong/services-sdk'
 
 import { bootstrapServices } from '../src/services/index.js'
 
@@ -36,7 +36,7 @@ describe('services e2e — real memory-file plugin', () => {
   let space: Space
   let hub: Hub
   beforeEach(async () => {
-    root = await mkdtemp(join(tmpdir(), 'aipe-host-services-e2e-'))
+    root = await mkdtemp(join(tmpdir(), 'gotong-host-services-e2e-'))
     await rm(root, { recursive: true, force: true })
     const opened = await Space.init(root, { name: 'test' })
     space = opened.space
@@ -47,7 +47,7 @@ describe('services e2e — real memory-file plugin', () => {
     // wiring proof. PR-13's end-to-end suite covers the full triad.
     await writeFile(
       join(space.paths.services, 'plugins.json'),
-      JSON.stringify({ plugins: ['@aipehub/service-memory-file'] }, null, 2) + '\n',
+      JSON.stringify({ plugins: ['@gotong/service-memory-file'] }, null, 2) + '\n',
       'utf8',
     )
   })

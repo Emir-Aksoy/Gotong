@@ -389,7 +389,7 @@ hub.feedback.myInbound({ taskRunId: 'xxx' })
   - 他加入了某个写作团队 → 在 teamHub.example.org 拉一条边
 
 执行:
-  $ aipehub link add wss://teamhub.example.org --as-id 'xiaoming-personal'
+  $ gotong link add wss://teamhub.example.org --as-id 'xiaoming-personal'
 
 效果:
   personalHub ←──── HubLink ────► teamHub
@@ -487,7 +487,7 @@ T7:  hubB 的 outbound.jsonl 追加 {type:'read', entryId, at:T7}
 
 ## 8. 不在本设计内的事(明确排除)
 
-- **Discovery / DHT**:hub 怎么找到别的 hub?**不解决** — 用户自己 `aipehub link add wss://...`。"自由扩展"的代价就是用户负责连边
+- **Discovery / DHT**:hub 怎么找到别的 hub?**不解决** — 用户自己 `gotong link add wss://...`。"自由扩展"的代价就是用户负责连边
 - **多跳路由**:已说明 §2.3,故意保守
 - **强一致性**:整个系统是 eventually consistent,不追求 CAP 中的 C
 - **拜占庭容错**:假设连进来的 peer 是用户认可的,不防恶意

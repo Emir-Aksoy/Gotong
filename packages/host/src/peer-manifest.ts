@@ -25,7 +25,7 @@
  * UNauthenticated A2A endpoint).
  */
 
-import type { HubLink, Participant, ParticipantId } from '@aipehub/core'
+import type { HubLink, Participant, ParticipantId } from '@gotong/core'
 
 /** Wire method names for the peer capability manifest (shared producer/consumer). */
 export const PEER_MANIFEST_METHODS = {
@@ -35,7 +35,7 @@ export const PEER_MANIFEST_METHODS = {
 /**
  * The manifest schema version. Bumps when `PeerManifest` changes shape so a
  * consumer can reason about an older peer's reply. Independent of the A2A
- * protocol version — this is the AipeHub mesh's own discovery contract.
+ * protocol version — this is the Gotong mesh's own discovery contract.
  *
  * `'2'` (Phase 19 P4-M3): `capabilities` became rich descriptors
  * (`PeerCapability[]`) instead of bare `string[]`. The consumer normalises

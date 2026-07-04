@@ -9,7 +9,7 @@
  * Auth (its OWN bearer domain — NOT the browser admin session / CSRF model,
  * which is why server.ts routes `/a2a` before the CSRF gate and outside
  * requireAdmin):
- *   - caller sends `X-Aipe-Peer-Id: <their hub id>` + `Authorization: Bearer
+ *   - caller sends `X-Gotong-Peer-Id: <their hub id>` + `Authorization: Bearer
  *     <pre-shared peer token>`,
  *   - we resolve the EXPECTED token for that peer from the vault and compare
  *     constant-time. Fail → 401, fail-closed (unknown peer, disabled peer, no
@@ -30,8 +30,8 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { timingSafeEqual } from 'node:crypto'
 
-import type { Hub, PeerLinkAcl, Task, TaskResult } from '@aipehub/core'
-import { evaluateInboundAcl } from '@aipehub/core'
+import type { Hub, PeerLinkAcl, Task, TaskResult } from '@gotong/core'
+import { evaluateInboundAcl } from '@gotong/core'
 import {
   A2A_ERROR,
   A2A_METHOD_MESSAGE_SEND,
@@ -45,7 +45,7 @@ import {
   type A2AMessage,
   type A2AResponse,
   type A2ATask,
-} from '@aipehub/a2a'
+} from '@gotong/a2a'
 
 interface A2aLogger {
   warn(msg: string, data?: Record<string, unknown>): void
@@ -160,7 +160,7 @@ export class A2aServer {
     }
 
     // --- auth (own bearer domain) ----------------------------------------
-    const peerId = readHeader(req, 'x-aipe-peer-id')
+    const peerId = readHeader(req, 'x-gotong-peer-id')
     const bearer = readBearer(req)
     if (!peerId || !bearer) {
       writeJson(res, 401, { error: 'unauthorized' })

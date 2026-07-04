@@ -29,13 +29,13 @@ import { join } from 'node:path'
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import type { Hub, TaskResult } from '@aipehub/core'
+import type { Hub, TaskResult } from '@gotong/core'
 import type {
   ImBindingResolver,
   ImBridge,
   ImMessage,
   ImUser,
-} from '@aipehub/im-adapter'
+} from '@gotong/im-adapter'
 
 import {
   ButlerReachableRegistry,
@@ -139,7 +139,7 @@ describe('F1 — butler outbound-push foundation', () => {
   let dir: string
 
   beforeEach(async () => {
-    dir = await mkdtemp(join(tmpdir(), 'aipe-butler-reachable-'))
+    dir = await mkdtemp(join(tmpdir(), 'gotong-butler-reachable-'))
   })
   afterEach(async () => {
     await rm(dir, { recursive: true, force: true })

@@ -1,11 +1,11 @@
-"""AipeHub Python SDK.
+"""Gotong Python SDK.
 
-Connect Python agents to an AipeHub Hub over WebSocket.
+Connect Python agents to an Gotong Hub over WebSocket.
 
 Quick start::
 
     import asyncio
-    from aipehub import AgentParticipant, connect
+    from gotong import AgentParticipant, connect
 
     class WriterAgent(AgentParticipant):
         def __init__(self) -> None:

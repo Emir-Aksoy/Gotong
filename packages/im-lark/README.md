@@ -1,7 +1,7 @@
-# @aipehub/im-lark
+# @gotong/im-lark
 
 A Lark / Feishu Open Platform Bot bridge implemented against
-[`@aipehub/im-adapter`](../im-adapter)'s `ImBridge` interface.
+[`@gotong/im-adapter`](../im-adapter)'s `ImBridge` interface.
 
 Inbound runs over the **official long connection**
 (`@larksuiteoapi/node-sdk` `WSClient` + `EventDispatcher`) — the bridge
@@ -19,8 +19,8 @@ long connection.
 ## What you get
 
 ```ts
-import { LarkBridge } from '@aipehub/im-lark'
-import { parseImCommand } from '@aipehub/im-adapter'
+import { LarkBridge } from '@gotong/im-lark'
+import { parseImCommand } from '@gotong/im-adapter'
 
 const bridge = new LarkBridge({
   appId: process.env.LARK_APP_ID!,
@@ -114,7 +114,7 @@ SDK 负责 socket、重连、事件分帧；bridge 只剩三件事：**去重、
 预下载。下游需要时：
 
 ```ts
-import { parseLarkUri } from '@aipehub/im-lark'
+import { parseLarkUri } from '@gotong/im-lark'
 
 const parsed = parseLarkUri(att.url)!
 const endpoint = parsed.kind === 'image' ? 'images' : 'files'

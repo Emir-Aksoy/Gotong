@@ -25,7 +25,7 @@ import {
   type AdminRecord,
   type Task,
   type WorkerRecord,
-} from '@aipehub/core'
+} from '@gotong/core'
 
 import { serveWeb, type WebServerHandle } from '../src/server.js'
 
@@ -43,7 +43,7 @@ interface BootResult {
 }
 
 async function boot(opts: { trustProxy?: boolean } = {}): Promise<BootResult> {
-  const tmp = await mkdtemp(join(tmpdir(), 'aipehub-web-auth-'))
+  const tmp = await mkdtemp(join(tmpdir(), 'gotong-web-auth-'))
   const init = await Space.init(tmp, { name: 'auth-test' })
   const space = init.space
   const hub = new Hub({ space })
@@ -64,13 +64,13 @@ async function boot(opts: { trustProxy?: boolean } = {}): Promise<BootResult> {
   // mints internally, just bypassed here so tests don't need to call it.
   const workerSid = 'w-test-sid-' + Math.random().toString(36).slice(2)
   await space.addWorkerSession(workerSid, worker.id)
-  const workerCookie = `aipehub_worker=${workerSid}`
+  const workerCookie = `gotong_worker=${workerSid}`
 
   // Admin session cookie — token-login produces a session row; mint it
   // directly here for the same reason.
   const adminSid = 'a-test-sid-' + Math.random().toString(36).slice(2)
   await space.addAdminSession(adminSid, admin.id)
-  const adminCookie = `aipehub_admin=${adminSid}`
+  const adminCookie = `gotong_admin=${adminSid}`
 
   const server = await serveWeb(hub, {
     host: '127.0.0.1',
@@ -269,7 +269,7 @@ describe('S1: /api/tasks/:id/complete requires assignee or admin', () => {
     const { worker: other } = await b.hub.space!.createWorker('other-worker', [])
     const otherSid = 'o-' + Math.random().toString(36).slice(2)
     await b.hub.space!.addWorkerSession(otherSid, other.id)
-    const otherCookie = `aipehub_worker=${otherSid}`
+    const otherCookie = `gotong_worker=${otherSid}`
     const task = await dispatchTaskToWorker(b)
     const r = await fetch(`${b.baseUrl}/api/tasks/${task.id}/complete`, {
       method: 'POST',
@@ -319,7 +319,7 @@ describe('S4: /admin?token rejects session fixation', () => {
       redirect: 'manual',
     })
     expect(r.status).toBe(302)
-    expect(r.headers.get('set-cookie') ?? '').toMatch(/aipehub_admin=/)
+    expect(r.headers.get('set-cookie') ?? '').toMatch(/gotong_admin=/)
   })
 })
 

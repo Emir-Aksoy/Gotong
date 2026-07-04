@@ -2,9 +2,9 @@
 # Upstream:   Fatih Kadir Akın & contributors
 # License:    CC0 1.0 Universal (Public Domain) — see ../LICENSE-NOTICES.md §1
 # Adapted:    2026-05-12 — removed conversational opener ("my first command is pwd");
-#             reworded for AipeHub task-payload model; added explicit output-only
+#             reworded for Gotong task-payload model; added explicit output-only
 #             instruction; tuned capabilities, model, and default weight.
-schema: aipehub.agent/v1
+schema: gotong.agent/v1
 agent:
   id: linux-terminal
   displayName: Linux 终端模拟器

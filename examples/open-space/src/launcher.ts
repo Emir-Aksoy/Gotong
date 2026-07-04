@@ -16,7 +16,7 @@ import { fileURLToPath } from 'node:url'
 const here = dirname(fileURLToPath(import.meta.url))
 
 async function main(): Promise<void> {
-  console.log('=== AipeHub Open Space demo ===\n')
+  console.log('=== Gotong Open Space demo ===\n')
 
   const host = spawn('tsx', [join(here, 'host.ts')], {
     stdio: 'inherit',

@@ -12,7 +12,7 @@
  * Pure — no host / hub state beyond the small `ctx` the host supplies.
  */
 
-import { agentPrincipal, authorizeAgentAction, type AgentHumanConfirmAction } from '@aipehub/identity'
+import { agentPrincipal, authorizeAgentAction, type AgentHumanConfirmAction } from '@gotong/identity'
 
 import type { StewardAction, StewardActionTier } from './types.js'
 

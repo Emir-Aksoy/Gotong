@@ -1,7 +1,7 @@
 # v4 Phase 19 / P5 — 生态接入与行业模板（FINAL）
 
 > 接续 P1（`/me` 成员工作台）/ P2（workflow 治理）/ P3（生产安全运维）/ P4（联邦信任契约）。
-> P5 是 Phase 19 的最后一段：把 AipeHub 从「能自洽运转」推到「**接得上别人的生态、装得下行业的活**」。
+> P5 是 Phase 19 的最后一段：把 Gotong 从「能自洽运转」推到「**接得上别人的生态、装得下行业的活**」。
 > 全程纯本地 `main`，一里程碑一小 commit，未 push。
 >
 > Last updated: 2026-06-01
@@ -29,12 +29,12 @@
 
 ### P5-M1 — LangGraph participant adapter（`448a4fa`）
 
-`python-sdk/src/aipehub/adapters/langgraph.py`：把一个编译好的 LangGraph graph 包成
+`python-sdk/src/gotong/adapters/langgraph.py`：把一个编译好的 LangGraph graph 包成
 `AgentParticipant`。graph 是**鸭子类型**——任何有 `.invoke(state)` 的对象都行，有
 `.ainvoke` 时优先用它，同步 graph 丢到线程池跑（不阻塞 event loop、不拖垮同连接的其他
 agent）。`langgraph` 是 **peer dependency**：导入 adapter 永不把它拉进来，所以核心 SDK
 安装保持轻、adapter 单测对着一行 fake graph 跑（CI 不装 langgraph）。`to_state` /
-`from_state` 映射 AipeHub task ↔ graph 的 state dict，默认透传 payload、返回整个 final
+`from_state` 映射 Gotong task ↔ graph 的 state dict，默认透传 payload、返回整个 final
 state。+7 pytest。
 
 ### P5-M2 — CrewAI participant adapter（`f420e1c`）
@@ -49,7 +49,7 @@ state。+7 pytest。
 `examples/activepieces-bridge/`：任何能 POST JSON 的平台（Activepieces / n8n / Make /
 Zapier / cron curl）经 `createWebhookBridge` 触发 hub 工作流——IM 桥的自动化版孪生
 （HTTP 进，capability dispatch 出，transcript 旁记）。两条信任规则让它敢对外暴露：
-① **共享密钥 fail-closed**（`X-Aipe-Webhook-Secret` 常量时间比，空密钥构造期就抛，无匿名
+① **共享密钥 fail-closed**（`X-Gotong-Webhook-Secret` 常量时间比，空密钥构造期就抛，无匿名
 模式）；② **capability-only + operator 白名单**（请求只能命中 `routes` 里声明的
 capability，永远点不到具体 agent，body 只当 payload——跟 A2A server 同一条规则：调用方
 选「做什么」，运营方定「谁能做」）。HITL 挂起的任务回 `202 Accepted`。demo 自断言
@@ -63,7 +63,7 @@ capability，永远点不到具体 agent，body 只当 payload——跟 A2A serv
 job 此刻已 durable 在服务端）→ 轮询 `get_result_maybe` 直到完成。durable job 自身逻辑失败
 （`success:false`）变 failed task；提交/轮询传输错也 fail。Hub 保持「路由器 + system of
 record」，重活 / 长任务 / 不能丢进度的执行放进为它而生的引擎（重试 / 步级 checkpoint / 活过
-AipeHub 重启）。同 `submit→poll` 形状套 Temporal / Inngest / 队列 worker——换两个 URL。
+Gotong 重启）。同 `submit→poll` 形状套 Temporal / Inngest / 队列 worker——换两个 URL。
 token 由 caller 传（env/vault），`fetchImpl` 可注入。demo 跑 fake Windmill（2 次轮询才
 完成，逼出 poll loop），自断言 ok + failed。
 
@@ -119,7 +119,7 @@ bundle。
 
 1. **adapter 鸭子类型 + peer dependency**：LangGraph/CrewAI 永不被 adapter 导入，框架由
    用户自己装。好处：核心 SDK 安装轻、单测对 fake 跑（CI 零框架依赖）、版本解耦。这是
-   AipeHub 一贯姿态（a2a 的 `fetchImpl`、im 的 `FakeBridge` 同源）。
+   Gotong 一贯姿态（a2a 的 `fetchImpl`、im 的 `FakeBridge` 同源）。
 
 2. **桥两个方向各一**：M3 入站（外部 automation → hub）、M4 出站（hub → 外部 durable
    engine）。入站的安全重心是「敢暴露」（共享密钥 fail-closed + capability-only），出站的

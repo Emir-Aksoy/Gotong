@@ -21,9 +21,9 @@
 //   - Return a stable machine `code`; the web/UI maps it to localized
 //     human words. Keeps this module i18n-free and web zero-LLM-dep.
 
-import { AnthropicProvider } from '@aipehub/llm-anthropic'
-import { OpenAIProvider } from '@aipehub/llm-openai'
-import type { LlmProvider } from '@aipehub/llm'
+import { AnthropicProvider } from '@gotong/llm-anthropic'
+import { OpenAIProvider } from '@gotong/llm-openai'
+import type { LlmProvider } from '@gotong/llm'
 
 /** Stable, UI-mappable outcome codes. `ok:true` carries none of these. */
 export type LlmKeyTestCode =

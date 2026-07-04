@@ -15,7 +15,7 @@
  *   - Capture the response (here: stdin via readline).
  *   - Call `human.complete()` / `human.reject()`.
  *
- * Auto-mode (for CI / non-TTY shells): set `AIPE_AUTO=1` to skip the prompt
+ * Auto-mode (for CI / non-TTY shells): set `GOTONG_AUTO=1` to skip the prompt
  * and auto-approve each draft with "ok".
  */
 
@@ -27,10 +27,10 @@ import {
   HumanParticipant,
   type Task,
   type TranscriptEntry,
-} from '@aipehub/core'
-import { LlmAgent, MockLlmProvider } from '@aipehub/llm'
+} from '@gotong/core'
+import { LlmAgent, MockLlmProvider } from '@gotong/llm'
 
-const AUTO = process.env.AIPE_AUTO === '1' || !input.isTTY
+const AUTO = process.env.GOTONG_AUTO === '1' || !input.isTTY
 
 interface ApprovalPayload {
   draft: string
@@ -109,7 +109,7 @@ async function runCliLoop(you: HumanParticipant, signal: AbortSignal): Promise<v
       console.log('└────────────────────────────────────────────────────────────')
 
       if (AUTO) {
-        console.log('  (AIPE_AUTO=1) auto-approving with "ok"')
+        console.log('  (GOTONG_AUTO=1) auto-approving with "ok"')
         you.complete(task.id, { approved: true, comment: 'ok' })
         continue
       }
@@ -166,9 +166,9 @@ async function main(): Promise<void> {
   const ac = new AbortController()
   const loop = runCliLoop(you, ac.signal)
 
-  console.log('\n=== AipeHub demo: CLI human-in-the-loop ===')
+  console.log('\n=== Gotong demo: CLI human-in-the-loop ===')
   console.log(AUTO
-    ? '(non-TTY / AIPE_AUTO=1 — drafts will be auto-approved)\n'
+    ? '(non-TTY / GOTONG_AUTO=1 — drafts will be auto-approved)\n'
     : '(type the response when prompted; Enter to approve, "r <reason>" to reject)\n')
 
   const topics = ['why TypeScript', 'remote agents', 'humans as participants']

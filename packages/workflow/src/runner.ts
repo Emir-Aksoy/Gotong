@@ -27,7 +27,7 @@ import {
   type Task,
   type TaskId,
   type TaskResult,
-} from '@aipehub/core'
+} from '@gotong/core'
 
 import { WorkflowRevisionError } from './lifecycle.js'
 import { parsePredicate, type CompiledPredicate } from './predicate.js'
@@ -51,14 +51,14 @@ import {
  * "Park forever" sentinel — the resume sweep never reaches it, so the run
  * stays suspended until an EXPLICIT event resumes it (an inbox resolve's
  * two-step recovery, or the boot-time `resumeRunningRuns` reconcile).
- * Mirrors `@aipehub/inbox`'s `NEVER_RESUME_AT`; duplicated as a local
- * constant rather than taking a cross-package dep (same as `@aipehub/cli-agent`).
+ * Mirrors `@gotong/inbox`'s `NEVER_RESUME_AT`; duplicated as a local
+ * constant rather than taking a cross-package dep (same as `@gotong/cli-agent`).
  */
 const NEVER_RESUME_AT = 9_999_999_999_000
 
 /**
  * The minimal Hub surface the runner needs. Defined locally so the
- * `@aipehub/workflow` package doesn't import the full Hub class type
+ * `@gotong/workflow` package doesn't import the full Hub class type
  * (and so tests can pass a stub).
  *
  * `origin` (B2.2.2) is the same shape as `core/types.ts` `TaskOrigin`

@@ -44,12 +44,12 @@ describe('IdentityStore — peer summary alert channels (v5 Stream F day-3)', ()
       id: 'chan-1',
       kind: 'webhook',
       url: 'http://localhost:9000/alerts',
-      headerEnv: 'AIPE_ALERT_WEBHOOK_TOKEN',
+      headerEnv: 'GOTONG_ALERT_WEBHOOK_TOKEN',
       label: 'ops slack',
       enabled: false,
     })
     expect(c.id).toBe('chan-1')
-    expect(c.headerEnv).toBe('AIPE_ALERT_WEBHOOK_TOKEN')
+    expect(c.headerEnv).toBe('GOTONG_ALERT_WEBHOOK_TOKEN')
     expect(c.label).toBe('ops slack')
     expect(c.enabled).toBe(false)
   })

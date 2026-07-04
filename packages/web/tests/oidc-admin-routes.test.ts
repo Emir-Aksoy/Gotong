@@ -13,7 +13,7 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { Hub, Space } from '@aipehub/core'
+import { Hub, Space } from '@gotong/core'
 
 import {
   serveWeb,
@@ -53,7 +53,7 @@ function view(over: Partial<OidcProviderView> = {}): OidcProviderView {
 
 async function boot(opts: { wired?: boolean } = {}): Promise<Boot> {
   const wired = opts.wired ?? true
-  const tmp = await mkdtemp(join(tmpdir(), 'aipehub-web-oidc-admin-'))
+  const tmp = await mkdtemp(join(tmpdir(), 'gotong-web-oidc-admin-'))
   const init = await Space.init(tmp, { name: 'oidc-admin-route-test' })
   const hub = new Hub({ space: init.space })
   await hub.start()

@@ -1,4 +1,4 @@
-# Aperçu d'AipeHub · Carte en 5 minutes
+# Aperçu d'Gotong · Carte en 5 minutes
 
 <!-- doc-version: 1.0 -->
 > **Version du document 1.0** · Traduction française · Mis à jour le 2026-06-27 · Source faisant autorité : [English](../OVERVIEW.md). En cas de divergence entre la traduction et la version anglaise, la version anglaise prévaut.
@@ -6,7 +6,7 @@
 > Vous cherchez la version chinoise ? → [`docs/zh/OVERVIEW.md`](../zh/OVERVIEW.md)
 >
 > Ceci est la **carte en une page** du projet. À la fin, vous saurez ce qu'est
-> AipeHub, ce qui se passe sous quoi, comment les participants se branchent, d'où
+> Gotong, ce qui se passe sous quoi, comment les participants se branchent, d'où
 > viennent les modèles, comment quelques personnes collaborent ensemble, et comment
 > les organisations fédèrent sans abandonner leurs clés. Chaque section se termine
 > par un lien → vers la prochaine lecture quand vous voulez aller plus loin.
@@ -15,7 +15,7 @@
 
 ## En une phrase
 
-**AipeHub** est un **espace de collaboration auto-hébergé pour TypeScript et
+**Gotong** est un **espace de collaboration auto-hébergé pour TypeScript et
 Python** : les personnes et les agents IA partagent une « salle », et un Hub
 délibérément simple répartit les tâches, collecte les résultats et enregistre
 l'ensemble de l'exécution.
@@ -29,7 +29,7 @@ fédérer **sans remettre leurs clés, leurs données ou leur facturation**.
 ## Ce qu'il est — et ce sous quoi il se trouve
 
 La plupart des projets « agent » sont un agent, ou un framework pour écrire la
-boucle d'un agent (LangGraph, CrewAI, AutoGen). AipeHub n'est **ni l'un ni
+boucle d'un agent (LangGraph, CrewAI, AutoGen). Gotong n'est **ni l'un ni
 l'autre** — c'est la couche dans laquelle ils se branchent. Un graphe LangGraph,
 un crew CrewAI, un agent de codage CLI (Claude Code, Codex), un agent A2A externe,
 et un humain rejoignent tous la même salle en tant que même `Participant`. Le Hub
@@ -51,7 +51,7 @@ Trois choses en font plus qu'un bus de messages :
   facturation restent chacun chez soi ; ce qui franchit la ligne est contraint par
   un **contrat de confiance par lien**.
 
-Cette combinaison — pas un seul protocole intelligent — est ce qu'est AipeHub.
+Cette combinaison — pas un seul protocole intelligent — est ce qu'est Gotong.
 C'est le premier substrat à mettre l'égalité humain-agent, la fédération
 inter-organisations gouvernée, et la souveraineté auto-hébergée dans un seul
 package exécutable, axé sur les fichiers.
@@ -62,7 +62,7 @@ package exécutable, axé sur les fichiers.
 
 ```
         ┌──────────────────────────────────────────────────────────┐
-        │                       One Space (.aipehub/)              │
+        │                       One Space (.gotong/)              │
         │  ─────────────────────────────────────────────────────── │
         │                                                          │
         │   👤 admin       👤 worker      👤 worker                │
@@ -85,9 +85,9 @@ package exécutable, axé sur les fichiers.
         └──────────────────────────────────────────────────────────┘
                                   ↑
                           all state is files
-                       (.aipehub/transcript.jsonl
-                        .aipehub/agents.json
-                        .aipehub/secrets.enc.json …)
+                       (.gotong/transcript.jsonl
+                        .gotong/agents.json
+                        .gotong/secrets.enc.json …)
 ```
 
 …et les trois colonnes montrées ne sont que des exemples. Le même slot `Participant`
@@ -97,9 +97,9 @@ transparents pour le planificateur.
 
 ---
 
-## Les quatre bords — comment AipeHub se connecte au monde
+## Les quatre bords — comment Gotong se connecte au monde
 
-AipeHub atteint le reste de l'écosystème par quatre bords. Il **parle des protocoles
+Gotong atteint le reste de l'écosystème par quatre bords. Il **parle des protocoles
 ouverts là où ils existent** — il ne les réinvente pas :
 
 | Bord | Protocole | Direction | Ce qu'il transporte |
@@ -107,9 +107,9 @@ ouverts là où ils existent** — il ne les réinvente pas :
 | Outils & données | **MCP** | les deux | Les agents appellent des outils MCP externes ; les clients externes (Claude Desktop, Cursor) pilotent le Hub. |
 | Agent ↔ agent | **A2A** | les deux | Un `message/send` entrant devient une répartition ; un appel sortant pilote un agent A2A distant. |
 | Agents de codage | **ACP** | sortant | Le Hub lance et maintient une session avec Claude Code / Codex et le pilote tour par tour. |
-| Hub ↔ hub | **HubLink** | les deux | Le lien de fédération propre d'AipeHub entre deux hubs — où vivent les contrats de confiance par lien, le transfert de tâches inter-organisations, et les portes d'approbation. |
+| Hub ↔ hub | **HubLink** | les deux | Le lien de fédération propre d'Gotong entre deux hubs — où vivent les contrats de confiance par lien, le transfert de tâches inter-organisations, et les portes d'approbation. |
 
-Les trois premiers sont des standards de l'écosystème qu'AipeHub implémente.
+Les trois premiers sont des standards de l'écosystème qu'Gotong implémente.
 HubLink est la seule pièce qu'il possède — **pas** comme un format wire intelligent
 (c'est WebSocket + bearer token + JSON-RPC en dessous) mais comme le **contrat pour
 ce que deux hubs gouvernés échangent** : un manifeste de capacités, le transfert de
@@ -144,7 +144,7 @@ licences en amont (CC0 / MIT), toutes compatibles avec MIT et **toutes permettan
 un usage commercial**.
 
 FAQ complète dans [`LICENSE-FAQ.md`](../LICENSE-FAQ.md) — elle répond aux questions
-typiques : « Puis-je intégrer AipeHub dans mon propre produit à source fermée ? / Dois-je
+typiques : « Puis-je intégrer Gotong dans mon propre produit à source fermée ? / Dois-je
 attribuer ces modèles lorsque je les utilise commercialement ? / Puis-je changer la
 LICENCE et reconditionner ? »
 
@@ -219,7 +219,7 @@ des licences tierces se trouve dans
 
 ## Quelques personnes dans une salle
 
-AipeHub modélise une « équipe » comme **une salle** = un répertoire `.aipehub/`.
+Gotong modélise une « équipe » comme **une salle** = un répertoire `.gotong/`.
 Trois niveaux de rôles :
 
 | Rôle | URL | Ce que vous pouvez faire dans cette salle |
@@ -268,12 +268,12 @@ Trois niveaux de rôles :
 
 ### Une salle, plusieurs rôles (= la section ci-dessus)
 
-Tout le monde est dans le même répertoire `.aipehub/`, le même processus hub. C'est
+Tout le monde est dans le même répertoire `.gotong/`, le même processus hub. C'est
 la valeur par défaut.
 
 ### Plusieurs salles, fédérées (= vraie inter-organisations)
 
-Chaque org gère son propre hub indépendant (son propre `.aipehub/`, ses propres
+Chaque org gère son propre hub indépendant (son propre `.gotong/`, ses propres
 personnes et agents, **ses propres clés API et sa propre facturation**). Deux hubs
 se connectent via **HubLink**, et ce que l'un peut demander à l'autre est fixé par
 un **contrat de confiance par lien** :

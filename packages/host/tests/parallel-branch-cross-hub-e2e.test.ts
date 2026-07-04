@@ -42,9 +42,9 @@ import {
   installPeerLink,
   type HubLink,
   type Task,
-} from '@aipehub/core'
-import { openIdentityStore, type IdentityStore } from '@aipehub/identity'
-import { FileInboxStore } from '@aipehub/inbox'
+} from '@gotong/core'
+import { openIdentityStore, type IdentityStore } from '@gotong/identity'
+import { FileInboxStore } from '@gotong/inbox'
 
 import { WorkflowController } from '../src/workflow-controller.js'
 import { HostInboxService } from '../src/inbox-service.js'
@@ -60,7 +60,7 @@ const LOCAL_CAP = 'local-archive'
 // ordinary `{kind:capability}` dispatches — it has no idea one of them is
 // remote; routing + the federation gates handle the boundary per branch.
 const WORKFLOW_YAML = `
-schema: aipehub.workflow/v1
+schema: gotong.workflow/v1
 workflow:
   id: par-cross-hub-flow
   name: parallel cross-hub fan-out
@@ -194,7 +194,7 @@ describe('PB-M4 — parallel branches: per-branch cross-hub attribution end-to-e
     linkToHubB = a
   }
 
-  async function fireTrigger(doc: string): Promise<import('@aipehub/core').TaskResult> {
+  async function fireTrigger(doc: string): Promise<import('@gotong/core').TaskResult> {
     return hubA.dispatch({
       from: 'admin',
       strategy: { kind: 'capability', capabilities: ['px:start'] },

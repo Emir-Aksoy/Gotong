@@ -23,13 +23,13 @@
  * builds one per `origin.userId`, scoped to that member's namespace.
  */
 
-import type { Logger } from '@aipehub/core'
+import type { Logger } from '@gotong/core'
 import type {
   LlmAgentToolset,
   LlmProvider,
   LlmToolCallResult,
   LlmToolDefinition,
-} from '@aipehub/llm'
+} from '@gotong/llm'
 
 import { butlerSummarizer, runButlerMaintenanceOnce } from './personal-butler-maintenance.js'
 

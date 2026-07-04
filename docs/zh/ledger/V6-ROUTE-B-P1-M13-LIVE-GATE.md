@@ -76,7 +76,7 @@ Anthropic 走 `tool_result` block、OpenAI 走独立 `role:'tool'` 消息, 是**
 
 ### 模型与端点全 env 可覆盖, 默认最便宜 (M13a/M13b)
 
-`AIPE_LIVE_ANTHROPIC_MODEL` / `AIPE_LIVE_OPENAI_MODEL` + `OPENAI_BASE_URL`。
+`GOTONG_LIVE_ANTHROPIC_MODEL` / `GOTONG_LIVE_OPENAI_MODEL` + `OPENAI_BASE_URL`。
 provider 说 OpenAI 协议, 所以最省的路径是把它指向 DeepSeek (`OPENAI_API_KEY`=
 deepseek key + `OPENAI_BASE_URL=https://api.deepseek.com` + 模型 `deepseek-chat`)。
 两个 key 都配时 host workflow 测优先 Anthropic Haiku。
@@ -138,7 +138,7 @@ live.yml  ──setup-workspace + pnpm -r build──▶  dist 就绪
 - **加 CI secret**: 仓库 Settings → Secrets and variables → Actions → 加
   `ANTHROPIC_API_KEY` 和/或 `OPENAI_API_KEY` (DeepSeek 则 `OPENAI_API_KEY`=
   deepseek key + 加 `OPENAI_BASE_URL` secret = `https://api.deepseek.com`)。
-  模型覆盖用 **Variables** (非 secret): `AIPE_LIVE_OPENAI_MODEL=deepseek-chat`。
+  模型覆盖用 **Variables** (非 secret): `GOTONG_LIVE_OPENAI_MODEL=deepseek-chat`。
 - **不配也行**: 没 secret 时夜间门全跳过保持绿 —— 它只在你想要真实信号时才需要 key。
 - **成本**: 每次 ~5 个 tiny 调用, 默认 Haiku/gpt-4o-mini/deepseek-chat + 小 token
   上限, 一次运行成本约几分钱级。`schedule` 一天一次。

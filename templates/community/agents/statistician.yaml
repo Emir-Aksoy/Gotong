@@ -5,7 +5,7 @@
 #             as statistician" into a single-turn "answer this stats question"
 #             advisor with explicit assumption-stating discipline; added
 #             "show your assumptions" rule.
-schema: aipehub.agent/v1
+schema: gotong.agent/v1
 agent:
   id: statistician
   displayName: 统计与数据解读

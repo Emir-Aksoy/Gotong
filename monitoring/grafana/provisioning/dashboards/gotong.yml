@@ -1,9 +1,9 @@
-# Grafana dashboard provisioning — auto-loads the AipeHub overview dashboard
-# from /var/lib/grafana/dashboards (the compose stack mounts aipehub-overview.json
+# Grafana dashboard provisioning — auto-loads the Gotong overview dashboard
+# from /var/lib/grafana/dashboards (the compose stack mounts gotong-overview.json
 # there). No manual "Import → upload JSON" step needed.
 apiVersion: 1
 providers:
-  - name: AipeHub
+  - name: Gotong
     type: file
     disableDeletion: false
     allowUiUpdates: true

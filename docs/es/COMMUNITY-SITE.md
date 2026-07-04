@@ -9,7 +9,7 @@
 
 ## 1. Por qué "cero cómputo"
 
-La postura de diseño completa de AipeHub es **el hub no ejecuta el LLM en sí / el estado son todos archivos de disco / las credenciales se quedan en tu máquina / la federación es punto a punto**. Siguiendo esa postura hasta el final, **la infraestructura de la comunidad tampoco necesita un servidor**:
+La postura de diseño completa de Gotong es **el hub no ejecuta el LLM en sí / el estado son todos archivos de disco / las credenciales se quedan en tu máquina / la federación es punto a punto**. Siguiendo esa postura hasta el final, **la infraestructura de la comunidad tampoco necesita un servidor**:
 
 - **GitHub ya alberga la sustancia** — una plantilla es un archivo, una entrega es un PR.
 - **Lo único que falta es una tienda** — y la tienda de un proyecto file-first es en sí misma un conjunto de archivos estáticos.
@@ -17,7 +17,7 @@ La postura de diseño completa de AipeHub es **el hub no ejecuta el LLM en sí /
 Entonces esta tienda = un generador + los archivos estáticos que produce. El generador es [`packages/web/scripts/build-site.mjs`](../../packages/web/scripts/build-site.mjs), que produce `site/` (raíz del repositorio, ignorado por git):
 
 - `index.html` — un único archivo autocontenido (sin framework, sin runtime, CSS en línea): el hero de la narrativa de confianza + una cuadrícula de tarjetas de galería de plantillas + la tabla de clasificación de citas.
-- `templates.json` — un feed legible por máquina `aipehub.site/v1` (la tienda también es datos, file-first).
+- `templates.json` — un feed legible por máquina `gotong.site/v1` (la tienda también es datos, file-first).
 
 Deja caer `site/` en cualquier nivel gratuito de GitHub Pages / Cloudflare Pages / Netlify y la tienda estará en vivo a **$0**. La caja de Tencent Cloud 2c2G sigue inactiva como respaldo.
 

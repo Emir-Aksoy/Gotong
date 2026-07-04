@@ -20,9 +20,9 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { Hub, Space, type Task } from '@aipehub/core'
-import { AgentParticipant, connect, ServiceCallError, type Session, type ServiceClient } from '@aipehub/sdk-node'
-import { serveWebSocket, type WebSocketTransportHandle } from '@aipehub/transport-ws'
+import { Hub, Space, type Task } from '@gotong/core'
+import { AgentParticipant, connect, ServiceCallError, type Session, type ServiceClient } from '@gotong/sdk-node'
+import { serveWebSocket, type WebSocketTransportHandle } from '@gotong/transport-ws'
 
 import { bootstrapServices, type HubServices } from '../src/services/index.js'
 
@@ -58,13 +58,13 @@ describe('audit: HELLO.services in PendingApplication + service_call transcript'
   let ws: WebSocketTransportHandle
 
   beforeEach(async () => {
-    tmpRoot = await mkdtemp(join(tmpdir(), 'aipehub-audit-'))
+    tmpRoot = await mkdtemp(join(tmpdir(), 'gotong-audit-'))
     const init = await Space.init(tmpRoot, { name: 'test' })
     hub = new Hub({ space: init.space })
     await hub.start()
     await writeFile(
       join(init.space.paths.services, 'plugins.json'),
-      JSON.stringify({ plugins: ['@aipehub/service-memory-file'] }),
+      JSON.stringify({ plugins: ['@gotong/service-memory-file'] }),
       'utf8',
     )
     const boot = await bootstrapServices({ space: init.space, hub })

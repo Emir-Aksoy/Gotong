@@ -11,12 +11,12 @@
 
 ## 〇、一句话 + 定位
 
-- 这是 **AipeHub 框架之上的「管家智能体」**的记忆增强，**不是框架本身**（[[butler-is-agent-not-framework]]）。
+- 这是 **Gotong 框架之上的「管家智能体」**的记忆增强，**不是框架本身**（[[butler-is-agent-not-framework]]）。
   对比时比的是「我们这个管家的记忆」对「OpenClaw / Hermes 这类智能体的记忆」，不是框架对框架。
 - 四件事**几乎全是把已有零件接成新故事**：C/D/E/F/G 长期记忆 + 心跳（Stream D）+
   `MemoryRetriever` seam + `patchMeta` 写缝 + `composeReviewers` 心跳 pass 框架，地基正好够用。
 - **零 schema 改**（全住 `MemoryEntry.meta` 自由字段 / 衍生文件）、**core/protocol/identity/
-  workflow-runner 零改**、bulk 落 `@aipehub/personal-memory` 叶包、接线在 `examples/personal-butler`、
+  workflow-runner 零改**、bulk 落 `@gotong/personal-memory` 叶包、接线在 `examples/personal-butler`、
   `/me` 只读投影在 host，**example-first**（管家 fold 进 host main.ts 仍推迟）。
 
 ---

@@ -38,10 +38,10 @@ import {
   type InstalledPeerLink,
   type Task,
   type TaskResult,
-} from '@aipehub/core'
-import { acceptHubLinks, connectHubLink } from '@aipehub/transport-ws'
-import { openIdentityStore, type IdentityStore } from '@aipehub/identity'
-import { FileInboxStore, NEVER_RESUME_AT } from '@aipehub/inbox'
+} from '@gotong/core'
+import { acceptHubLinks, connectHubLink } from '@gotong/transport-ws'
+import { openIdentityStore, type IdentityStore } from '@gotong/identity'
+import { FileInboxStore, NEVER_RESUME_AT } from '@gotong/inbox'
 
 import { WorkflowController } from '../src/workflow-controller.js'
 import { HostInboxService } from '../src/inbox-service.js'
@@ -57,7 +57,7 @@ const drain = async () => {
 }
 
 const WORKFLOW_YAML = `
-schema: aipehub.workflow/v1
+schema: gotong.workflow/v1
 workflow:
   id: cross-hub-flow
   name: cross-hub orchestration

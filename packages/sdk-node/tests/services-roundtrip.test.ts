@@ -11,13 +11,13 @@
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { Hub } from '@aipehub/core'
+import { Hub } from '@gotong/core'
 import {
   serveWebSocket,
   type ServiceCallGateway,
   type WebSocketTransportHandle,
-} from '@aipehub/transport-ws'
-import type { ServiceOwner } from '@aipehub/protocol'
+} from '@gotong/transport-ws'
+import type { ServiceOwner } from '@gotong/protocol'
 
 import { AgentParticipant, connect, type Session } from '../src/index.js'
 

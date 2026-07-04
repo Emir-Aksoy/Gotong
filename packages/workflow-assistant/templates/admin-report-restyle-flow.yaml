@@ -3,7 +3,7 @@
 # /templates/workflows/admin-report-restyle-flow.yaml (manually).
 # If you change this file or the canonical one, update both.
 
-schema: aipehub.workflow/v1
+schema: gotong.workflow/v1
 
 workflow:
   id: admin-report-restyle-flow

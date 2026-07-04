@@ -31,7 +31,7 @@ const cap = await detectFsJail({ noCache: true })
 
 // One throwaway base under HOME; `root` is the only allowed-writable dir, `denied`
 // is a sibling under HOME (read-only under the jail). Cleaned up in afterAll.
-const base = mkdtempSync(join(homedir(), '.aipehub-jail-real-'))
+const base = mkdtempSync(join(homedir(), '.gotong-jail-real-'))
 const root = join(base, 'root')
 mkdirSync(root)
 const okPath = join(root, 'ok.txt')

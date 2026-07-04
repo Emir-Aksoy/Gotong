@@ -2,7 +2,7 @@
  * `FakeBridge` — an in-memory `ImBridge` for demos and unit tests.
  *
  * Copied verbatim from `examples/im-steward-bridge/src/fake-bridge.ts` (itself a copy of
- * `examples/im-bridge-host/src/fake-bridge.ts`). Real bridges (`@aipehub/im-telegram`, …)
+ * `examples/im-bridge-host/src/fake-bridge.ts`). Real bridges (`@gotong/im-telegram`, …)
  * talk to actual IM platforms; that's overkill for showing how the family oversight router
  * glues everything together. `FakeBridge` lets the example script inject inbound messages by
  * calling `inject(msg)` and observe outbound replies via `outbound`.
@@ -12,7 +12,7 @@
  * point of an example-first bridge.
  */
 
-import type { ImAttachment, ImBridge, ImMessage, ImUser } from '@aipehub/im-adapter'
+import type { ImAttachment, ImBridge, ImMessage, ImUser } from '@gotong/im-adapter'
 
 export interface FakeBridgeOutbound {
   to: ImUser

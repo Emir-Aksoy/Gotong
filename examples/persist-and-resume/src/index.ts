@@ -23,10 +23,10 @@ import {
   type Storage,
   type Task,
   type TranscriptEntry,
-} from '@aipehub/core'
+} from '@gotong/core'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
-const DATA_DIR = join(HERE, '..', 'aipe-data')
+const DATA_DIR = join(HERE, '..', 'gotong-data')
 const FILE_PATH = join(DATA_DIR, 'transcript.jsonl')
 const SQLITE_PATH = join(DATA_DIR, 'transcript.db')
 

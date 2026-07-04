@@ -2,7 +2,7 @@
 
 > 5 个[上手案例 hub](../../docs/zh/HANDS-ON-HUBS.md) 之一(3 个人 + 2 组织)—— 对照总览 + 真 DeepSeek/Obsidian 上线指南见该索引。
 
-> AipeHub **能承担的一个案例**(不是框架功能,代码全在 `examples/`)。一个**个人
+> Gotong **能承担的一个案例**(不是框架功能,代码全在 `examples/`)。一个**个人
 > 成长 hub**:督修(路由 LLM)**结合修士今日的处境**(时间 / 精力 / 伤病 / 专攻),把
 > 今日操练**合适地**派给三柱 —— **肉身 / 心志 / 学识** —— 而不是不顾状态把三柱全压
 > 上;每柱把状态写进一个持久的修士档案 **Codex**(Obsidian-style vault)。冷峻、不留
@@ -86,7 +86,7 @@ pnpm demo:battle-monk-training:template   # 载入「修士团」模板 + 预览
 ## 可载入「修士团」模板
 
 这个案例的修士团是一个**可载入文件**,不是写死在 `index.ts` 里的 TS 字面量 ——
-`template/battle-monk-training.template.yaml`(`aipehub.template/v1`)。它声明:
+`template/battle-monk-training.template.yaml`(`gotong.template/v1`)。它声明:
 
 - **4 个托管 LLM agent**:`preceptor`(督修 / 路由)+ `body-drill` / `mind-forge` /
   `lore-scribe`(三柱),四个都挂 `mcp-obsidian` 接到你的修士档案 Codex,各带冷峻
@@ -95,7 +95,7 @@ pnpm demo:battle-monk-training:template   # 载入「修士团」模板 + 预览
   `presetData` 是一个指向种子档案快照的**指针**。
 
 ```
-  template/battle-monk-training.template.yaml   (aipehub.template/v1 — 可载入)
+  template/battle-monk-training.template.yaml   (gotong.template/v1 — 可载入)
   ├─ agents:          preceptor / body-drill / mind-forge / lore-scribe ──┐ 各挂 obsidian
   │                                                                       │  → 读档案、给指令、写回
   ├─ knowledgeBases:  acolyte_codex ── mcp-obsidian (你的 Obsidian Codex)
@@ -165,7 +165,7 @@ curl -X POST -H "Authorization: Bearer <admin-token>" \
 - `examples/personal-coding-hub/` —— 第一个上手案例(路由 LLM 管 Claude Code + Codex)。
 - `examples/obsidian-kb/` —— Obsidian vault 当知识库(`mcp-obsidian`)的最小样例;本
   case 的 Codex 复用同一套 Local REST API 接线。
-- `examples/oneclick-template/` —— `aipehub.template/v1` 可载入模板格式的范本。
+- `examples/oneclick-template/` —— `gotong.template/v1` 可载入模板格式的范本。
 - `examples/architect-team/` —— 路由 LLM 派子 agent 的 `DispatchToolset` 原型。
 - `docs/zh/KB-CONNECTORS.md` —— 知识库连接器 + 读写治理 + 跨 hub 两层闸 + 模板带引用
   不带内容。

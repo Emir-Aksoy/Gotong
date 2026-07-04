@@ -19,7 +19,7 @@
 
 import { describe, it, expect } from 'vitest'
 
-import { Hub, InMemoryStorage, type Task, type TaskResult } from '@aipehub/core'
+import { Hub, InMemoryStorage, type Task, type TaskResult } from '@gotong/core'
 
 import {
   ReminderParticipant,

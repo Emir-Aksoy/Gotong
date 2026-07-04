@@ -30,10 +30,10 @@
  * DeepSeek) and examples/obsidian-kb/agents/obsidian-researcher.yaml (mcp-obsidian wiring).
  */
 
-import type { Task } from '@aipehub/core'
-import { LlmAgent, type LlmRequest, type LlmResponse, type LlmTaskOutput } from '@aipehub/llm'
-import { OpenAIProvider } from '@aipehub/llm-openai'
-import { McpToolset } from '@aipehub/mcp-client'
+import type { Task } from '@gotong/core'
+import { LlmAgent, type LlmRequest, type LlmResponse, type LlmTaskOutput } from '@gotong/llm'
+import { OpenAIProvider } from '@gotong/llm-openai'
+import { McpToolset } from '@gotong/mcp-client'
 
 import type { Lesson } from './participants.js'
 import {

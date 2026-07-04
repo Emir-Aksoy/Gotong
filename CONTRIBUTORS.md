@@ -3,7 +3,7 @@
 <!-- doc-version: 1.0 -->
 > **Doc version 1.0** · English (authoritative source) · Updated 2026-06-27 · Translations: [中文](docs/zh/CONTRIBUTORS.md) · [日本語](docs/ja/CONTRIBUTORS.md) · [Русский](docs/ru/CONTRIBUTORS.md) · [Français](docs/fr/CONTRIBUTORS.md) · [Español](docs/es/CONTRIBUTORS.md) · [한국어](docs/ko/CONTRIBUTORS.md). If a translation conflicts with this English version, the English version governs.
 
-This file records the people who build AipeHub — and **every kind of
+This file records the people who build Gotong — and **every kind of
 contribution counts, big or small, not only code.** Writing the tutorial that
 finally makes federation click, giving the talk that brings fifty people to the
 project, translating the docs into a language the core team doesn't speak,
@@ -64,7 +64,7 @@ point of pillar ⑤ is that they are not a lesser column.
    see [`GOVERNANCE.md`](GOVERNANCE.md#how-a-change-lands)). No bot, no ceremony.
 
 If your contribution is a piece of **learning material** — a video, tutorial, or
-talk that teaches AipeHub well — it can *also* be curated into
+talk that teaches Gotong well — it can *also* be curated into
 [`LEARN.md`](LEARN.md), the showcase newcomers are pointed to. Being recorded
 here and being curated there are two different acts of recognition; a great
 tutorial earns both.

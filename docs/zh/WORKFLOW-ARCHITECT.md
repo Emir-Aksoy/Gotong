@@ -41,10 +41,10 @@
 | Make「Maia」 | ✓ | 弱 | **强（可视化是卖点）** | 无 |
 | Zapier Agents | ✓ | 弱 | 线性 | 无 |
 | Flowise / Langflow / Dify / Gumloop | 部分 | ✗ | 画布（人手搭） | 无 |
-| **AipeHub 工作流架构师** | ✓ | **✓（深浅可调）** | ✓（YAML 的纯投影） | **✓（deepCheck 抓编造 capability）** |
+| **Gotong 工作流架构师** | ✓ | **✓（深浅可调）** | ✓（YAML 的纯投影） | **✓（deepCheck 抓编造 capability）** |
 
 **结论：没人把「NL→声明式 YAML + 可调深度讲解 + 绑定的流程图 + 结构深检」
-打包成一个 agent 工件。** AipeHub 的差异点正是这一组合：
+打包成一个 agent 工件。** Gotong 的差异点正是这一组合：
 
 1. **YAML 是版本化 / 治理的根**（Phase 15）—— 生成的不是黑盒画布，而是
    可 diff、可发布、run 钉修订防漂移的声明式文件。
@@ -91,7 +91,7 @@
 ### 2.3 diagram —— 把它画出来（工作流图片介绍）
 
 `draftStatus === 'valid'` 时，agent 附 `graph = projectWorkflowGraph(parsed)`
-（`@aipehub/workflow` 的纯函数，无 LLM，两模式都附）。图是数据
+（`@gotong/workflow` 的纯函数，无 LLM，两模式都附）。图是数据
 （`WorkflowGraphView = {workflowId, nodes, edges}`）—— 前端用共享渲染器
 `static/workflow-graph.js` 把它内联成 SVG（本身即可下载的矢量图）。
 **host 零渲染负担**，守「不降性能」。
@@ -232,11 +232,11 @@ web me-routes 72；典型零回归。
 # 启用（默认；需 ANTHROPIC_API_KEY / OPENAI_API_KEY，或 vault 里有对应 entry）
 # 缺 key → 跳过注册 → assist/create/explain 路由返 503（UI 提示去配 key）
 
-AIPE_ASSISTANT_PROVIDER=anthropic   # 默认 | openai | mock
-AIPE_ASSISTANT_MODEL=...            # 可选，provider-specific model id
-AIPE_ASSISTANT_MAX_TOKENS=4096      # 可选，默认 4096（一份工作流草稿够用）
-AIPE_ASSISTANT_DISABLED=1           # 显式整体关闭
-AIPE_ASSISTANT_NO_EXAMPLES=1        # 关掉 few-shot examples
+GOTONG_ASSISTANT_PROVIDER=anthropic   # 默认 | openai | mock
+GOTONG_ASSISTANT_MODEL=...            # 可选，provider-specific model id
+GOTONG_ASSISTANT_MAX_TOKENS=4096      # 可选，默认 4096（一份工作流草稿够用）
+GOTONG_ASSISTANT_DISABLED=1           # 显式整体关闭
+GOTONG_ASSISTANT_NO_EXAMPLES=1        # 关掉 few-shot examples
 ```
 
 DeepSeek 等：用 OpenAI provider + baseURL，见 `examples/workflow-assistant` 写法。

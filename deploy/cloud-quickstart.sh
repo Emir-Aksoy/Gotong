@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
 #
-# cloud-quickstart.sh — provision an AipeHub host on a fresh Ubuntu/Debian VPS.
+# cloud-quickstart.sh — provision an Gotong host on a fresh Ubuntu/Debian VPS.
 #
 # One command turns a FRESH box into a running systemd service: fetch the code
 # (--clone; the repo is public) → install Node + pnpm → build → create the
-# service user + data dir → drop in /etc/aipehub.env (from deploy/.env.cloud) →
+# service user + data dir → drop in /etc/gotong.env (from deploy/.env.cloud) →
 # install the systemd unit that MIRRORS docs/zh/DEPLOY.md §C.4 verbatim. It
 # then prints the safe last mile.
 #
 #   # bare VPS, no checkout needed — THE one-liner:
-#   curl -fsSL https://raw.githubusercontent.com/Emir-Aksoy/AipeHub/main/deploy/cloud-quickstart.sh \
+#   curl -fsSL https://raw.githubusercontent.com/Emir-Aksoy/Gotong/main/deploy/cloud-quickstart.sh \
 #     | sudo bash -s -- --clone
 #
 #   sudo bash deploy/cloud-quickstart.sh              # from a checkout you put there
@@ -19,7 +19,7 @@
 #
 # ── What it deliberately does NOT do ──────────────────────────────────────────
 #
-#   • It does NOT auto-expose an unconfigured box. /etc/aipehub.env ships with
+#   • It does NOT auto-expose an unconfigured box. /etc/gotong.env ships with
 #     the domain / master key / allowlist BLANK — starting before you fill them
 #     would be insecure. So provisioning stops one step short: it tells you to
 #     edit the env file and run scripts/cloud-harden.sh, then start. `--start`
@@ -28,7 +28,7 @@
 #     refuses a non-git, non-empty $PREFIX — your local edits are never
 #     silently destroyed; pass --source to build from your own checkout.
 #
-# It reads NO credentials and writes NO secrets of its own — /etc/aipehub.env is
+# It reads NO credentials and writes NO secrets of its own — /etc/gotong.env is
 # a TEMPLATE with blank token/key fields you fill in afterward (from a systemd
 # secret, never committed). Companion: scripts/cloud-harden.sh (perimeter check
 # before you expose the box) and docs/zh/GO-LIVE.md (the full runbook).
@@ -38,13 +38,13 @@
 set -euo pipefail
 
 # ── defaults (override via flags) ─────────────────────────────────────────────
-PREFIX="/opt/aipehub"          # where the built checkout lives (WorkingDirectory)
-SPACE="/srv/aipehub-data"      # AIPE_SPACE — the persistent data dir (ReadWritePaths)
-ENV_FILE="/etc/aipehub.env"    # systemd EnvironmentFile
-SERVICE_USER="aipehub"
+PREFIX="/opt/gotong"          # where the built checkout lives (WorkingDirectory)
+SPACE="/srv/gotong-data"      # GOTONG_SPACE — the persistent data dir (ReadWritePaths)
+ENV_FILE="/etc/gotong.env"    # systemd EnvironmentFile
+SERVICE_USER="gotong"
 NODE_MAJOR="20"                # repo engines: node >=20 (LTS)
 SOURCE_DIR=""                  # checkout to build from (default: this script's repo)
-REPO_URL="https://github.com/Emir-Aksoy/AipeHub.git"
+REPO_URL="https://github.com/Emir-Aksoy/Gotong.git"
 DO_CLONE=""                    # --clone: fetch the public repo into $PREFIX first
 CLONE_REF="main"
 DRY_RUN=""
@@ -101,7 +101,7 @@ if [ -z "$SOURCE_DIR" ]; then
   done
 fi
 if [ -z "$DO_CLONE" ] && { [ -z "$SOURCE_DIR" ] || [ ! -f "$SOURCE_DIR/pnpm-workspace.yaml" ]; }; then
-  echo "✖ no AipeHub checkout found." >&2
+  echo "✖ no Gotong checkout found." >&2
   echo "  Easiest: re-run with --clone (the repo is public; it fetches ${CLONE_REF} for you)," >&2
   echo "  or put a checkout on this box and pass --source=/path/to/checkout." >&2
   exit 3
@@ -123,10 +123,10 @@ if [ -z "$DRY_RUN" ] && [ "$(id -u)" -ne 0 ]; then
   exit 2
 fi
 
-echo "── AipeHub cloud quickstart ──"
+echo "── Gotong cloud quickstart ──"
 echo "source   : $SOURCE_DIR${DO_CLONE:+  (--clone ${CLONE_REF} from ${REPO_URL})}"
 echo "prefix   : $PREFIX        (WorkingDirectory / built code)"
-echo "space    : $SPACE   (AIPE_SPACE / persistent data)"
+echo "space    : $SPACE   (GOTONG_SPACE / persistent data)"
 echo "env file : $ENV_FILE"
 echo "user     : $SERVICE_USER"
 [ -n "$DRY_RUN" ] && echo "mode     : DRY-RUN (nothing will change)"
@@ -204,7 +204,7 @@ if [ "$SOURCE_DIR" != "$PREFIX" ]; then
   if command -v rsync >/dev/null 2>&1; then
     # exclude the install + git history + any local data dir; we reinstall fresh.
     run rsync -a --delete \
-      --exclude node_modules --exclude .git --exclude data --exclude .aipehub \
+      --exclude node_modules --exclude .git --exclude data --exclude .gotong \
       "$SOURCE_DIR"/ "$PREFIX"/
   else
     run cp -a "$SOURCE_DIR/." "$PREFIX/"
@@ -216,7 +216,7 @@ fi
 run bash -c "cd '$PREFIX' && pnpm install --frozen-lockfile && pnpm build"
 run chown -R "$SERVICE_USER:$SERVICE_USER" "$PREFIX"
 
-# ── 5. /etc/aipehub.env (never clobber: it may hold the operator's secrets) ────
+# ── 5. /etc/gotong.env (never clobber: it may hold the operator's secrets) ────
 echo "[5/6] $ENV_FILE"
 if [ -f "$ENV_FILE" ]; then
   note "  $ENV_FILE already exists — leaving it untouched (your filled-in values are safe)"
@@ -228,10 +228,10 @@ else
 fi
 
 # ── 6. systemd unit (mirrors docs/zh/DEPLOY.md §C.4, with paths substituted) ───
-echo "[6/6] systemd unit /etc/systemd/system/aipehub.service"
+echo "[6/6] systemd unit /etc/systemd/system/gotong.service"
 UNIT="$(cat <<UNIT
 [Unit]
-Description=AipeHub host
+Description=Gotong host
 After=network-online.target
 Wants=network-online.target
 
@@ -261,22 +261,22 @@ WantedBy=multi-user.target
 UNIT
 )"
 if [ -n "$DRY_RUN" ]; then
-  echo "  + write /etc/systemd/system/aipehub.service:"
+  echo "  + write /etc/systemd/system/gotong.service:"
   printf '%s\n' "$UNIT" | sed 's/^/      | /'
 else
-  printf '%s\n' "$UNIT" > /etc/systemd/system/aipehub.service
-  echo "  + wrote /etc/systemd/system/aipehub.service"
+  printf '%s\n' "$UNIT" > /etc/systemd/system/gotong.service
+  echo "  + wrote /etc/systemd/system/gotong.service"
 fi
 run systemctl daemon-reload
-run systemctl enable aipehub
+run systemctl enable gotong
 
 # ── start (opt-in) or print the safe last mile ────────────────────────────────
 echo
 if [ -n "$DO_START" ]; then
   echo "── starting (--start) ──"
-  run systemctl restart aipehub
+  run systemctl restart gotong
   note "Watch for the one-time admin URL:"
-  note "  sudo journalctl -u aipehub -f"
+  note "  sudo journalctl -u gotong -f"
 else
   cat <<NEXT
 ✓ Provisioned. Before exposing this box, the safe last mile:
@@ -291,8 +291,8 @@ else
        docs/zh/DEPLOY.md §C.5 (Caddyfile) · §C.6 (ufw)
 
   4. Start it + grab the one-time admin URL from the log:
-       sudo systemctl enable --now aipehub
-       sudo journalctl -u aipehub -f
+       sudo systemctl enable --now gotong
+       sudo journalctl -u gotong -f
 
   Full runbook (topology, IP-exposure risks, IM member onboarding):
     docs/zh/GO-LIVE.md

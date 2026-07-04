@@ -27,7 +27,7 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { Hub, Space } from '@aipehub/core'
+import { Hub, Space } from '@gotong/core'
 
 import {
   serveWeb,
@@ -83,7 +83,7 @@ function tierError(code: string, message: string): Error {
 
 async function boot(opts: { wired?: boolean } = {}): Promise<Boot> {
   const wired = opts.wired ?? true
-  const tmp = await mkdtemp(join(tmpdir(), 'aipehub-web-setting-'))
+  const tmp = await mkdtemp(join(tmpdir(), 'gotong-web-setting-'))
   const init = await Space.init(tmp, { name: 'setting-route-test' })
   const hub = new Hub({ space: init.space })
   await hub.start()

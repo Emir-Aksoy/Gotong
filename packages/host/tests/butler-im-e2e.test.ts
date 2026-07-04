@@ -41,11 +41,11 @@ import { join } from 'node:path'
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { Hub, InMemoryStorage, type Logger } from '@aipehub/core'
-import { openIdentityStore, type IdentityStore } from '@aipehub/identity'
-import { FileInboxStore } from '@aipehub/inbox'
-import { PersonalButlerAgent } from '@aipehub/personal-butler'
-import type { LlmProvider, LlmRequest, LlmStreamChunk } from '@aipehub/llm'
+import { Hub, InMemoryStorage, type Logger } from '@gotong/core'
+import { openIdentityStore, type IdentityStore } from '@gotong/identity'
+import { FileInboxStore } from '@gotong/inbox'
+import { PersonalButlerAgent } from '@gotong/personal-butler'
+import type { LlmProvider, LlmRequest, LlmStreamChunk } from '@gotong/llm'
 
 import { butlerApprovalItemFor } from '../src/personal-butler-escalation.js'
 import { openButlerMemory } from '../src/personal-butler-memory.js'

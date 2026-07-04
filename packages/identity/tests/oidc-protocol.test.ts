@@ -32,7 +32,7 @@ import {
 } from '../src/oidc.js'
 
 const ISS = 'https://idp.example.com'
-const AUD = 'aipehub-client-id'
+const AUD = 'gotong-client-id'
 const NONCE = 'nonce-abc123'
 const NOW = 1_700_000_000
 const KID = 'test-key-1'

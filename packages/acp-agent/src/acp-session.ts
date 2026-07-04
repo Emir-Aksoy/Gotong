@@ -30,7 +30,7 @@
 
 import { spawn, type ChildProcess } from 'node:child_process'
 
-import { wrapWithFsJail, type FsJailSpec } from '@aipehub/core'
+import { wrapWithFsJail, type FsJailSpec } from '@gotong/core'
 
 import {
   AcpConnection,

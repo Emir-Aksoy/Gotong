@@ -1,5 +1,5 @@
 /**
- * AipeHub structured logger.
+ * Gotong structured logger.
  *
  * One-line JSON output by default (suitable for `grep` / `jq` / Loki /
  * ELK / Datadog ingest); a "pretty" mode formats human-readably for
@@ -13,11 +13,11 @@
  *
  * Env vars:
  *
- *   AIPE_LOG_LEVEL     — silent | trace | debug | info | warn | error | fatal
+ *   GOTONG_LOG_LEVEL     — silent | trace | debug | info | warn | error | fatal
  *                        (default: 'info')
- *   AIPE_LOG_FORMAT    — json | pretty
+ *   GOTONG_LOG_FORMAT    — json | pretty
  *                        (default: 'pretty' if stdout is a TTY, else 'json')
- *   AIPE_LOG_DISABLED  — '1' to suppress all output (escape hatch; takes
+ *   GOTONG_LOG_DISABLED  — '1' to suppress all output (escape hatch; takes
  *                        precedence over LEVEL/FORMAT)
  *
  * Why not pino: pino is great, but the project ethos is "write a small
@@ -64,15 +64,15 @@ export interface Logger {
 }
 
 export interface LoggerOptions {
-  /** Minimum level to emit. Default: env `AIPE_LOG_LEVEL` or `'info'`. */
+  /** Minimum level to emit. Default: env `GOTONG_LOG_LEVEL` or `'info'`. */
   level?: LogLevel
   /**
-   * Output format. Default: env `AIPE_LOG_FORMAT`; if unset, `'pretty'`
+   * Output format. Default: env `GOTONG_LOG_FORMAT`; if unset, `'pretty'`
    * when stdout is a TTY, else `'json'`.
    */
   format?: 'json' | 'pretty'
   /**
-   * Hard-off switch. Default: env `AIPE_LOG_DISABLED === '1'`. When
+   * Hard-off switch. Default: env `GOTONG_LOG_DISABLED === '1'`. When
    * `true`, no line is emitted regardless of level.
    */
   disabled?: boolean
@@ -115,8 +115,8 @@ function resolveOpts(opts: LoggerOptions): ResolvedOpts {
   // TTY check is best-effort — guarded so this also works in browsers
   // and weird sandboxes that don't expose process.stdout.
   const isTTY = !!(typeof process !== 'undefined' && (process as { stdout?: { isTTY?: boolean } }).stdout?.isTTY)
-  const envLevel = (env('AIPE_LOG_LEVEL') ?? '').toLowerCase()
-  const envFormat = (env('AIPE_LOG_FORMAT') ?? '').toLowerCase()
+  const envLevel = (env('GOTONG_LOG_LEVEL') ?? '').toLowerCase()
+  const envFormat = (env('GOTONG_LOG_FORMAT') ?? '').toLowerCase()
   const level: LogLevel =
     opts.level ??
     (envLevel in LEVEL_RANKS ? (envLevel as LogLevel) : 'info')
@@ -125,7 +125,7 @@ function resolveOpts(opts: LoggerOptions): ResolvedOpts {
     (envFormat === 'json' ? 'json'
       : envFormat === 'pretty' ? 'pretty'
       : (isTTY ? 'pretty' : 'json'))
-  const disabled = opts.disabled ?? (env('AIPE_LOG_DISABLED') === '1')
+  const disabled = opts.disabled ?? (env('GOTONG_LOG_DISABLED') === '1')
   return {
     level,
     format,

@@ -1,5 +1,5 @@
 # 中文摘要助手 — 单 agent 模板
-schema: aipehub.agent/v1
+schema: gotong.agent/v1
 
 agent:
   id: summarizer-zh

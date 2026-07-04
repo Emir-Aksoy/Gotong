@@ -1,21 +1,21 @@
 /**
- * Phase 19 P5-M3 — Activepieces (automation) -> AipeHub webhook bridge demo.
+ * Phase 19 P5-M3 — Activepieces (automation) -> Gotong webhook bridge demo.
  *
  * An automation platform fires an HTTP webhook when something happens (a new
  * CRM lead lands, a form is submitted, a cron tick); this bridge turns that
- * POST into a `Hub.dispatch` so an AipeHub agent/workflow handles it.
+ * POST into a `Hub.dispatch` so an Gotong agent/workflow handles it.
  *
  * The demo is self-contained and self-asserting — it runs the bridge over
  * loopback and plays the part of Activepieces with `fetch`, so it doubles as a
- * smoke test (`pnpm --filter @aipehub/example-activepieces-bridge start`
+ * smoke test (`pnpm --filter @gotong/example-activepieces-bridge start`
  * exits 0 on success, throws otherwise). No network, no Activepieces account.
  *
  * To wire a REAL Activepieces flow: add an "HTTP Request" action (method POST,
- * URL `https://<your-host>/hooks/new-lead`, header `X-Aipe-Webhook-Secret:
+ * URL `https://<your-host>/hooks/new-lead`, header `X-Gotong-Webhook-Secret:
  * <secret>`, body = the lead JSON). See README.md.
  */
 
-import { AgentParticipant, Hub, type Task } from '@aipehub/core'
+import { AgentParticipant, Hub, type Task } from '@gotong/core'
 import type { Server } from 'node:http'
 import { strict as assert } from 'node:assert'
 
@@ -42,7 +42,7 @@ async function post(url: string, body: unknown, secret?: string): Promise<{ stat
     method: 'POST',
     headers: {
       'content-type': 'application/json',
-      ...(secret ? { 'x-aipe-webhook-secret': secret } : {}),
+      ...(secret ? { 'x-gotong-webhook-secret': secret } : {}),
     },
     body: JSON.stringify(body),
   })
@@ -50,7 +50,7 @@ async function post(url: string, body: unknown, secret?: string): Promise<{ stat
 }
 
 async function main(): Promise<void> {
-  console.log('\n=== AipeHub demo: activepieces-bridge (Phase 19 P5-M3) ===\n')
+  console.log('\n=== Gotong demo: activepieces-bridge (Phase 19 P5-M3) ===\n')
 
   const hub = Hub.inMemory()
   await hub.start()

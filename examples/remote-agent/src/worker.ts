@@ -3,7 +3,7 @@
  * remote agents, and runs until the host closes the session.
  */
 
-import { AgentParticipant, connect, type Task } from '@aipehub/sdk-node'
+import { AgentParticipant, connect, type Task } from '@gotong/sdk-node'
 
 class WriterAgent extends AgentParticipant {
   constructor() {

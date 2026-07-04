@@ -27,7 +27,7 @@ import {
   type ParticipantId,
   type Task,
   type TaskId,
-} from '@aipehub/core'
+} from '@gotong/core'
 
 import {
   ACP_NEVER_RESUME_AT,

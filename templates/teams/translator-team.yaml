@@ -3,7 +3,7 @@
 # 派发示例：
 #   capability=translate → translator-zh-en 一稿翻译
 #   capability=proofread → proofreader 找翻译里的错
-schema: aipehub.team/v1
+schema: gotong.team/v1
 
 team:
   name: 翻译团队

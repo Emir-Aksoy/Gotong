@@ -6,7 +6,7 @@
  * and forwards its public vault methods verbatim, so callers see no API
  * change — `store.createVaultEntry(...)` etc. still work. VaultStore is an
  * internal collaborator (not exported from the package index); the single
- * public surface of @aipehub/identity stays IdentityStore.
+ * public surface of @gotong/identity stays IdentityStore.
  *
  * Design notes:
  *   - Distinct from `credentials` (one-way hashed login material).

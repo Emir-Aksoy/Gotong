@@ -13,7 +13,7 @@
  * coordinator on DeepSeek + mcp-obsidian). Here we substitute deterministic
  * stand-ins that serve the SAME capabilities with real, assertable logic — so the
  * demo runs with no API key and the hub wiring is identical to production. The
- * shop lives on a SEPARATE hub; in production that's a franchisee's own AipeHub,
+ * shop lives on a SEPARATE hub; in production that's a franchisee's own Gotong,
  * reached over a federation link (the link is runtime peer config, never part of
  * the template — that's the whole point of this example).
  *
@@ -23,7 +23,7 @@
  * shop owns its current prices; HQ proposes, the shop applies and reports back).
  */
 
-import { AgentParticipant, type Task } from '@aipehub/core'
+import { AgentParticipant, type Task } from '@gotong/core'
 
 // --- the directive that flows HQ → shop -----------------------------------------
 

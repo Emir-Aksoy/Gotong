@@ -18,8 +18,8 @@
 
 import { describe, expect, it } from 'vitest'
 
-import { parseWorkflow, projectWorkflowGraph } from '@aipehub/workflow'
-import type { WorkflowAssistantOutput, WorkflowDetailLevel } from '@aipehub/workflow-assistant'
+import { parseWorkflow, projectWorkflowGraph } from '@gotong/workflow'
+import type { WorkflowAssistantOutput, WorkflowDetailLevel } from '@gotong/workflow-assistant'
 
 import {
   MeWorkflowCreateService,
@@ -48,7 +48,7 @@ function yamlStep(s: StepSpec): string {
 
 function yamlWf(opts: { id?: string; trigger?: string; steps: StepSpec[] }): string {
   return [
-    'schema: aipehub.workflow/v1',
+    'schema: gotong.workflow/v1',
     'workflow:',
     `  id: ${opts.id ?? 'my-flow'}`,
     '  trigger:',

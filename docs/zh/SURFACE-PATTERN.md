@@ -12,18 +12,18 @@
 
 ## 承重事实：web 不依赖 host
 
-`@aipehub/web` 的运行时依赖只有三个：
+`@gotong/web` 的运行时依赖只有三个：
 
 ```jsonc
 // packages/web/package.json
 "dependencies": {
-  "@aipehub/core":     "workspace:*",
-  "@aipehub/protocol": "workspace:*",
+  "@gotong/core":     "workspace:*",
+  "@gotong/protocol": "workspace:*",
   "yaml":              "^2.6.0"
 }
 ```
 
-**没有 `@aipehub/host`**——deps 里没有，devDeps 里也没有。可 `web` 却调得到工作流
+**没有 `@gotong/host`**——deps 里没有，devDeps 里也没有。可 `web` 却调得到工作流
 架构师、上传、setting 运维台、收件箱、管家记忆…几十块只住在 host 里的能力。这不矛盾：
 这些能力**不是被 import 进来的，是被注入进来的**。`web/src/server.ts` 里出现了 131 处
 `Surface`——全是**只 import 类型**（`import type`），运行时一个 host 符号都不碰。
@@ -79,7 +79,7 @@ const web = await serveWeb(hub, {
 
 > 两种子形态、同一个模式：多数 surface 由 host 定义、web 经 `ServeWebOpts` 消费（如
 > `WorkflowAssistSurface`）；少数由 web 定义、host `import type` 后实现（如
-> `UploadSurface`，host 写 `import type { UploadSurface } from '@aipehub/web'`）。**类型
+> `UploadSurface`，host 写 `import type { UploadSurface } from '@gotong/web'`）。**类型
 > 走哪个方向不重要，重要的是跨缝只走类型、实现靠注入。**
 
 ---

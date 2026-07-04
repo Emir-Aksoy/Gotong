@@ -26,8 +26,8 @@ import { join } from 'node:path'
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { createLogger, Hub, Space } from '@aipehub/core'
-import { serveWeb, type WebServerHandle } from '@aipehub/web'
+import { createLogger, Hub, Space } from '@gotong/core'
+import { serveWeb, type WebServerHandle } from '@gotong/web'
 import { bootstrapServices, type HubServices } from '../src/services/index.js'
 
 const logger = createLogger('services-admin-test', { disabled: true })
@@ -44,7 +44,7 @@ interface TestRig {
 }
 
 async function bootRig(opts: { withServices: boolean } = { withServices: true }): Promise<TestRig> {
-  const root = await mkdtemp(join(tmpdir(), 'aipe-host-admin-'))
+  const root = await mkdtemp(join(tmpdir(), 'gotong-host-admin-'))
   await rm(root, { recursive: true, force: true })
   const { space, adminToken } = await Space.init(root, {
     name: 'test',
@@ -58,7 +58,7 @@ async function bootRig(opts: { withServices: boolean } = { withServices: true })
   if (opts.withServices) {
     await writeFile(
       join(space.paths.services, 'plugins.json'),
-      JSON.stringify({ plugins: ['@aipehub/service-memory-file'] }, null, 2) + '\n',
+      JSON.stringify({ plugins: ['@gotong/service-memory-file'] }, null, 2) + '\n',
       'utf8',
     )
     const boot = await bootstrapServices({ space, hub, logger })

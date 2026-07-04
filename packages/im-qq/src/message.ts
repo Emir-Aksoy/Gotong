@@ -16,7 +16,7 @@
  * surface-specific openid, then the raw `id`.
  */
 
-import type { ImMessage, ImUser } from '@aipehub/im-adapter'
+import type { ImMessage, ImUser } from '@gotong/im-adapter'
 
 import {
   QQ_OP_DISPATCH,

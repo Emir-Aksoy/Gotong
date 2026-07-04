@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# AipeHub liveness monitor — probe /healthz, alert on state change.
+# Gotong liveness monitor — probe /healthz, alert on state change.
 #
 # Run this from cron on the host box (every few minutes). It is the
 # external watchdog that closes the "no-one notices the host died" gap:
@@ -12,7 +12,7 @@
 #
 # Design choices:
 #
-#   - EXTERNAL, not host-internal. AipeHub has an in-process alert delivery
+#   - EXTERNAL, not host-internal. Gotong has an in-process alert delivery
 #     path (peer-summary firings), but that path dies with the host. A
 #     watchdog must live in a separate process, driven by cron, or it can't
 #     report the one failure that matters most: the host being down.
@@ -47,14 +47,14 @@
 #   ./healthcheck.sh <state-dir>
 #
 # All tuning is via environment variables (12-factor, cron-friendly):
-#   HEALTHCHECK_URL          full probe URL   (default http://127.0.0.1:${AIPE_WEB_PORT:-3000}/healthz)
+#   HEALTHCHECK_URL          full probe URL   (default http://127.0.0.1:${GOTONG_WEB_PORT:-3000}/healthz)
 #   HEALTHCHECK_TIMEOUT      per-try seconds  (default 5)
 #   HEALTHCHECK_RETRIES      tries before down(default 3)
 #   HEALTHCHECK_RETRY_SLEEP  seconds between  (default 3)
 #   HEALTHCHECK_LABEL        name shown in the alert (default: `hostname`)
 #   --- mode 1: Feishu app bot (preferred when there's no custom-bot webhook) ---
-#   AIPE_LARK_APP_ID         Feishu app id     (the same app the IM bridge uses)
-#   AIPE_LARK_APP_SECRET     Feishu app secret (read by the node helper only)
+#   GOTONG_LARK_APP_ID         Feishu app id     (the same app the IM bridge uses)
+#   GOTONG_LARK_APP_SECRET     Feishu app secret (read by the node helper only)
 #   FEISHU_ALERT_RECEIVE_ID  who to page: an open_id (ou_…) or a chat_id (oc_…)
 #   FEISHU_ALERT_RECEIVE_ID_TYPE  open_id (default) | chat_id | user_id | email
 #   NODE_BIN                 node binary for the helper       (default `node`)
@@ -78,7 +78,7 @@ usage() {
   cat <<EOF >&2
 Usage: $(basename "$0") <state-dir>
 
-  <state-dir>   Writable dir for the down-marker + log (e.g. ~/aipehub/monitor-state).
+  <state-dir>   Writable dir for the down-marker + log (e.g. ~/gotong/monitor-state).
                 Created if missing.
 
 Configuration is via env vars — see the header of this script.
@@ -91,11 +91,11 @@ EOF
 [ "$#" -eq 1 ] || usage
 STATE_DIR="$1"
 
-URL="${HEALTHCHECK_URL:-http://127.0.0.1:${AIPE_WEB_PORT:-3000}/healthz}"
+URL="${HEALTHCHECK_URL:-http://127.0.0.1:${GOTONG_WEB_PORT:-3000}/healthz}"
 TIMEOUT="${HEALTHCHECK_TIMEOUT:-5}"
 RETRIES="${HEALTHCHECK_RETRIES:-3}"
 RETRY_SLEEP="${HEALTHCHECK_RETRY_SLEEP:-3}"
-LABEL="${HEALTHCHECK_LABEL:-$(hostname 2>/dev/null || echo aipehub-host)}"
+LABEL="${HEALTHCHECK_LABEL:-$(hostname 2>/dev/null || echo gotong-host)}"
 
 mkdir -p "$STATE_DIR"
 MARKER="$STATE_DIR/.down"
@@ -132,7 +132,7 @@ APP_SENDER="${FEISHU_APP_SENDER:-$(cd "$(dirname "$0")" && pwd)/feishu-app-send.
 
 try_app_bot() {
   local text="$1"
-  [ -n "${AIPE_LARK_APP_ID:-}" ] && [ -n "${AIPE_LARK_APP_SECRET:-}" ] \
+  [ -n "${GOTONG_LARK_APP_ID:-}" ] && [ -n "${GOTONG_LARK_APP_SECRET:-}" ] \
     && [ -n "${FEISHU_ALERT_RECEIVE_ID:-}" ] && [ -f "$APP_SENDER" ] || return 1
   if printf '%s' "$text" | "$NODE_BIN" "$APP_SENDER" >/dev/null 2>&1; then
     log "alert delivered via Feishu app bot (im/v1/messages)"
@@ -193,7 +193,7 @@ if probe_up; then
   # and clear the marker. Otherwise stay quiet (steady-state healthy).
   if [ -f "$MARKER" ]; then
     log "RECOVERED: $LABEL /healthz is answering again"
-    send_alert "[AipeHub] $LABEL RECOVERED — /healthz is answering again at $(now)."
+    send_alert "[Gotong] $LABEL RECOVERED — /healthz is answering again at $(now)."
     rm -f "$MARKER"
   fi
   exit 0
@@ -204,7 +204,7 @@ else
     log "still DOWN: $LABEL /healthz unreachable (already alerted)"
   else
     log "DOWN: $LABEL /healthz unreachable after $RETRIES tries"
-    send_alert "[AipeHub] $LABEL DOWN — /healthz unreachable after $RETRIES tries at $(now). Check: systemctl status aipehub; journalctl -u aipehub -n 50; df -h."
+    send_alert "[Gotong] $LABEL DOWN — /healthz unreachable after $RETRIES tries at $(now). Check: systemctl status gotong; journalctl -u gotong -n 50; df -h."
     : > "$MARKER"
   fi
   exit 2

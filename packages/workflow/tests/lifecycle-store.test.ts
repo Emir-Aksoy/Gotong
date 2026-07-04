@@ -25,7 +25,7 @@ describe('FileLifecycleStore', () => {
   let store: FileLifecycleStore
 
   beforeEach(() => {
-    root = mkdtempSync(join(tmpdir(), 'aipe-lc-'))
+    root = mkdtempSync(join(tmpdir(), 'gotong-lc-'))
     store = new FileLifecycleStore(root)
     store.ensureDirs()
   })
@@ -57,7 +57,7 @@ describe('FileLifecycleStore', () => {
   })
 
   it('list is [] before anything is written', async () => {
-    const empty = new FileLifecycleStore(mkdtempSync(join(tmpdir(), 'aipe-lc-empty-')))
+    const empty = new FileLifecycleStore(mkdtempSync(join(tmpdir(), 'gotong-lc-empty-')))
     expect(await empty.list()).toEqual([])
   })
 

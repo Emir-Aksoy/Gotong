@@ -11,8 +11,8 @@
  * state — so there is no double-wrapping on resume.
  */
 
-import { type Task } from '@aipehub/core'
-import { CliParticipant, payloadToText } from '@aipehub/cli-agent'
+import { type Task } from '@gotong/core'
+import { CliParticipant, payloadToText } from '@gotong/cli-agent'
 
 import { withSharedContext } from './workspace.js'
 

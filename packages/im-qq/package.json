@@ -1,8 +1,8 @@
 {
-  "name": "@aipehub/im-qq",
+  "name": "@gotong/im-qq",
   "version": "0.1.0",
   "type": "module",
-  "description": "AipeHub IM bridge for QQ via the OFFICIAL Bot API (bot.q.qq.com) — implements ImBridge over the sanctioned HTTP webhook + Ed25519 callback validation. AppID/ClientSecret bot; no SDK dep (fetch + node:crypto). Inbound webhook needs a public domain + TLS (reverse proxy). Group/C2C are passive-reply only — no proactive push.",
+  "description": "Gotong IM bridge for QQ via the OFFICIAL Bot API (bot.q.qq.com) — implements ImBridge over the sanctioned HTTP webhook + Ed25519 callback validation. AppID/ClientSecret bot; no SDK dep (fetch + node:crypto). Inbound webhook needs a public domain + TLS (reverse proxy). Group/C2C are passive-reply only — no proactive push.",
   "license": "MIT",
   "private": true,
   "main": "./dist/index.js",
@@ -25,7 +25,7 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "@aipehub/im-adapter": "workspace:*"
+    "@gotong/im-adapter": "workspace:*"
   },
   "devDependencies": {
     "vitest": "^3.2.4"

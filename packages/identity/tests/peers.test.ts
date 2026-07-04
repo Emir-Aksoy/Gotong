@@ -49,7 +49,7 @@ describe('IdentityStore — peers (D1)', () => {
   let tmp: string
 
   beforeEach(async () => {
-    tmp = await mkdtemp(join(tmpdir(), 'aipe-id-peers-'))
+    tmp = await mkdtemp(join(tmpdir(), 'gotong-id-peers-'))
     store = openIdentityStore({
       dbPath: join(tmp, 'identity.sqlite'),
       masterKey: randomBytes(MASTER_KEY_LEN_BYTES),
@@ -66,12 +66,12 @@ describe('IdentityStore — peers (D1)', () => {
     it('creates the row and vault entry in one transaction', () => {
       const p = store.addPeer({
         peerId: 'hub_acme',
-        endpointUrl: 'wss://acme.example/aipe',
+        endpointUrl: 'wss://acme.example/gotong',
         label: 'Acme org',
         peerToken: 'shared-secret-128-bit-token',
       })
       expect(p.peerId).toBe('hub_acme')
-      expect(p.endpointUrl).toBe('wss://acme.example/aipe')
+      expect(p.endpointUrl).toBe('wss://acme.example/gotong')
       expect(p.label).toBe('Acme org')
       expect(p.enabled).toBe(true)
       expect(p.vaultEntryId).toMatch(/.+/)
@@ -218,8 +218,8 @@ describe('IdentityStore — peers (D1)', () => {
     })
 
     it('endpointUrl update (LB cutover)', () => {
-      const u = store.updatePeer(id, { endpointUrl: 'wss://new.example/aipe' })
-      expect(u.endpointUrl).toBe('wss://new.example/aipe')
+      const u = store.updatePeer(id, { endpointUrl: 'wss://new.example/gotong' })
+      expect(u.endpointUrl).toBe('wss://new.example/gotong')
     })
 
     it('peerToken rotation: new vault entry, old revoked, getPeerToken returns fresh', () => {
@@ -393,7 +393,7 @@ describe('IdentityStore — peers (D1)', () => {
     })
 
     it('corrupt acl_json degrades to null instead of throwing', async () => {
-      const tmp2 = await mkdtemp(join(tmpdir(), 'aipe-id-peers-corrupt-'))
+      const tmp2 = await mkdtemp(join(tmpdir(), 'gotong-id-peers-corrupt-'))
       const path = join(tmp2, 'identity.sqlite')
       const mk = randomBytes(MASTER_KEY_LEN_BYTES)
       const s1 = openIdentityStore({ dbPath: path, masterKey: mk })
@@ -416,7 +416,7 @@ describe('IdentityStore — peers (D1)', () => {
     })
 
     it('a legacy-shaped row (no policy columns) reads back as v12 defaults', async () => {
-      const tmp2 = await mkdtemp(join(tmpdir(), 'aipe-id-peers-legacy-'))
+      const tmp2 = await mkdtemp(join(tmpdir(), 'gotong-id-peers-legacy-'))
       const path = join(tmp2, 'identity.sqlite')
       const mk = randomBytes(MASTER_KEY_LEN_BYTES)
       // First open runs migrations (incl. v12 ADD COLUMN ... DEFAULT).
@@ -459,7 +459,7 @@ describe('IdentityStore — peers (D1)', () => {
       rawJson: string,
       seed: Parameters<IdentityStore['addPeer']>[0],
     ): Promise<PeerRegistration> {
-      const tmp2 = await mkdtemp(join(tmpdir(), 'aipe-id-peers-l13-'))
+      const tmp2 = await mkdtemp(join(tmpdir(), 'gotong-id-peers-l13-'))
       const path = join(tmp2, 'identity.sqlite')
       const mk = randomBytes(MASTER_KEY_LEN_BYTES)
       const s1 = openIdentityStore({ dbPath: path, masterKey: mk })
@@ -546,7 +546,7 @@ describe('IdentityStore — peers (D1)', () => {
     })
 
     it('multiple corrupt columns all appear in the trail', async () => {
-      const tmp2 = await mkdtemp(join(tmpdir(), 'aipe-id-peers-l13-multi-'))
+      const tmp2 = await mkdtemp(join(tmpdir(), 'gotong-id-peers-l13-multi-'))
       const path = join(tmp2, 'identity.sqlite')
       const mk = randomBytes(MASTER_KEY_LEN_BYTES)
       const s1 = openIdentityStore({ dbPath: path, masterKey: mk })

@@ -10,7 +10,7 @@ import type {
   ParticipantId,
   Task,
   TaskResult,
-} from '@aipehub/core'
+} from '@gotong/core'
 
 import {
   RunStore,
@@ -88,7 +88,7 @@ beforeEach(() => {
 describe('WorkflowRunner — id and capabilities', () => {
   it('exposes the right participant id and capability', () => {
     const def: WorkflowDefinition = {
-      schema: 'aipehub.workflow/v1',
+      schema: 'gotong.workflow/v1',
       id: 'editorial',
       trigger: { capability: 'run-editorial' },
       steps: [
@@ -114,7 +114,7 @@ describe('WorkflowRunner — id and capabilities', () => {
 describe('WorkflowRunner — sequential execution', () => {
   it('runs two steps and threads $ref values', async () => {
     const yaml = `
-schema: aipehub.workflow/v1
+schema: gotong.workflow/v1
 workflow:
   id: editorial
   trigger: { capability: run-editorial }
@@ -159,7 +159,7 @@ workflow:
 
   it('defaults final output to last step output when `workflow.output` is omitted', async () => {
     const def: WorkflowDefinition = {
-      schema: 'aipehub.workflow/v1',
+      schema: 'gotong.workflow/v1',
       id: 'tail',
       trigger: { capability: 'go' },
       steps: [
@@ -184,7 +184,7 @@ workflow:
 describe('WorkflowRunner — parallel step', () => {
   it('runs branches concurrently and exposes a {branchId: output} record', async () => {
     const yaml = `
-schema: aipehub.workflow/v1
+schema: gotong.workflow/v1
 workflow:
   id: fanout
   trigger: { capability: fanout-start }
@@ -230,7 +230,7 @@ workflow:
 describe('WorkflowRunner — failure handling', () => {
   it('halts and returns failure when a step fails with default policy', async () => {
     const def: WorkflowDefinition = {
-      schema: 'aipehub.workflow/v1',
+      schema: 'gotong.workflow/v1',
       id: 'tail',
       trigger: { capability: 'go' },
       steps: [
@@ -264,7 +264,7 @@ describe('WorkflowRunner — failure handling', () => {
 
   it("'continue' policy at the workflow level keeps going past failures", async () => {
     const def: WorkflowDefinition = {
-      schema: 'aipehub.workflow/v1',
+      schema: 'gotong.workflow/v1',
       id: 'cleanup',
       trigger: { capability: 'go' },
       steps: [
@@ -298,7 +298,7 @@ describe('WorkflowRunner — failure handling', () => {
 
   it("'retry' step policy retries up to `max` times before giving up", async () => {
     const def: WorkflowDefinition = {
-      schema: 'aipehub.workflow/v1',
+      schema: 'gotong.workflow/v1',
       id: 'r',
       trigger: { capability: 'go' },
       steps: [
@@ -332,7 +332,7 @@ describe('WorkflowRunner — failure handling', () => {
     // and its output could be clobbered by a flaky re-run. The retry must touch
     // only the branches that failed last attempt.
     const yaml = `
-schema: aipehub.workflow/v1
+schema: gotong.workflow/v1
 workflow:
   id: fanout-retry
   trigger: { capability: go }
@@ -397,7 +397,7 @@ describe('WorkflowRunner — file-first persistence', () => {
 
   it('writes a RunState file under <space>/workflows/runs/<runId>.json', async () => {
     const def: WorkflowDefinition = {
-      schema: 'aipehub.workflow/v1',
+      schema: 'gotong.workflow/v1',
       id: 'persist-test',
       trigger: { capability: 'go' },
       steps: [
@@ -438,7 +438,7 @@ describe('WorkflowRunner — file-first persistence', () => {
 
   it('records executedBy on a step from the resolved TaskResult.by (G day-3)', async () => {
     const def: WorkflowDefinition = {
-      schema: 'aipehub.workflow/v1',
+      schema: 'gotong.workflow/v1',
       id: 'exec-by-test',
       trigger: { capability: 'go' },
       steps: [
@@ -470,7 +470,7 @@ describe('WorkflowRunner — file-first persistence', () => {
 
   it('records peerTaskId on a cross-hub step from TaskResult.peerTaskId (G day-5)', async () => {
     const def: WorkflowDefinition = {
-      schema: 'aipehub.workflow/v1',
+      schema: 'gotong.workflow/v1',
       id: 'peer-task-id-test',
       trigger: { capability: 'go' },
       steps: [
@@ -506,7 +506,7 @@ describe('WorkflowRunner — file-first persistence', () => {
 
   it('leaves peerTaskId absent for a same-hub step (ok without peerTaskId)', async () => {
     const def: WorkflowDefinition = {
-      schema: 'aipehub.workflow/v1',
+      schema: 'gotong.workflow/v1',
       id: 'same-hub-test',
       trigger: { capability: 'go' },
       steps: [
@@ -541,7 +541,7 @@ describe('WorkflowRunner — file-first persistence', () => {
     // can't describe a fan-out — and only the cross-hub branch carries a peer
     // handle, so the host can later resolve THAT branch's off-hub transcript.
     const yaml = `
-schema: aipehub.workflow/v1
+schema: gotong.workflow/v1
 workflow:
   id: parallel-branch-exec
   trigger: { capability: go }
@@ -586,7 +586,7 @@ workflow:
 
   it('persists a failed run with the failure reason on disk', async () => {
     const def: WorkflowDefinition = {
-      schema: 'aipehub.workflow/v1',
+      schema: 'gotong.workflow/v1',
       id: 'persist-fail',
       trigger: { capability: 'go' },
       steps: [
@@ -622,7 +622,7 @@ workflow:
 
   it('listRunIds reflects what landed on disk', async () => {
     const def: WorkflowDefinition = {
-      schema: 'aipehub.workflow/v1',
+      schema: 'gotong.workflow/v1',
       id: 'multi',
       trigger: { capability: 'go' },
       steps: [
@@ -655,7 +655,7 @@ workflow:
 describe('WorkflowRunner — conditional branches (when)', () => {
   it('skips a step whose `when` evaluates to false; downstream refs see undefined', async () => {
     const yaml = `
-schema: aipehub.workflow/v1
+schema: gotong.workflow/v1
 workflow:
   id: cond
   trigger: { capability: go }
@@ -706,7 +706,7 @@ workflow:
 
   it('runs the step when `when` is true', async () => {
     const yaml = `
-schema: aipehub.workflow/v1
+schema: gotong.workflow/v1
 workflow:
   id: cond2
   trigger: { capability: go }
@@ -729,7 +729,7 @@ workflow:
 
   it('skips a parallel step when its `when` is false', async () => {
     const yaml = `
-schema: aipehub.workflow/v1
+schema: gotong.workflow/v1
 workflow:
   id: cond-parallel
   trigger: { capability: go }
@@ -763,7 +763,7 @@ workflow:
 
   it('schema rejects an invalid `when` predicate at parse time', () => {
     const yaml = `
-schema: aipehub.workflow/v1
+schema: gotong.workflow/v1
 workflow:
   id: bad-when
   trigger: { capability: go }
@@ -781,7 +781,7 @@ workflow:
     // `$step.field` referring to a parallel step's branches table — that's
     // a runtime error from `lookupRef`, not a missing key.
     const yaml = `
-schema: aipehub.workflow/v1
+schema: gotong.workflow/v1
 workflow:
   id: badref
   trigger: { capability: go }
@@ -814,7 +814,7 @@ describe('WorkflowRunner — resume from disk (v0.3)', () => {
   // Same three-step workflow used by all resume tests. `mid` is the
   // step that's marked still-running on disk when the host crashed.
   const RESUMABLE_YAML = `
-schema: aipehub.workflow/v1
+schema: gotong.workflow/v1
 workflow:
   id: three-step
   trigger: { capability: go }
@@ -909,7 +909,7 @@ workflow:
   })
 
   it('writes the resumed state back to disk on each step', async () => {
-    const tmp = mkdtempSync(join(tmpdir(), 'aipehub-resume-'))
+    const tmp = mkdtempSync(join(tmpdir(), 'gotong-resume-'))
     try {
       const def = parseWorkflow(RESUMABLE_YAML)
       const store = new RunStore(tmp)
@@ -971,7 +971,7 @@ describe('WorkflowRunner — branch-level `when` (P2)', () => {
   // Each test builds the same fan-out: two branches a + b, each
   // gated by a different `when` reading from $trigger.payload.
   const FANOUT_YAML = `
-schema: aipehub.workflow/v1
+schema: gotong.workflow/v1
 workflow:
   id: fanout-when
   trigger: { capability: go }
@@ -1018,7 +1018,7 @@ workflow:
   })
 
   it('skipped branches do not appear in subTaskIds (no Hub dispatch happened)', async () => {
-    const tmp = mkdtempSync(join(tmpdir(), 'aipehub-branch-when-'))
+    const tmp = mkdtempSync(join(tmpdir(), 'gotong-branch-when-'))
     try {
       const def = parseWorkflow(FANOUT_YAML)
       const store = new RunStore(tmp)
@@ -1043,7 +1043,7 @@ workflow:
 
   it('a parent-step `when: false` short-circuits before branch predicates evaluate', async () => {
     const yaml = `
-schema: aipehub.workflow/v1
+schema: gotong.workflow/v1
 workflow:
   id: fanout-gated
   trigger: { capability: go }
@@ -1077,7 +1077,7 @@ workflow:
     // trigger. Use a ref into a parallel step's branches map which is
     // an actual lookupRef error.
     const yaml = `
-schema: aipehub.workflow/v1
+schema: gotong.workflow/v1
 workflow:
   id: branch-when-error
   trigger: { capability: go }
@@ -1117,7 +1117,7 @@ workflow:
 
   it('schema rejects an invalid branch-level `when` at parse time', () => {
     const yaml = `
-schema: aipehub.workflow/v1
+schema: gotong.workflow/v1
 workflow:
   id: bad-branch-when
   trigger: { capability: go }
@@ -1143,7 +1143,7 @@ workflow:
     // were gated by step 'a::b' branch 'c''s `when`. The nested stepId→branchId
     // map keys them apart. (ID_RE permits ':' incl. '::', so this is reachable.)
     const yaml = `
-schema: aipehub.workflow/v1
+schema: gotong.workflow/v1
 workflow:
   id: branch-key-collision
   trigger: { capability: go }
@@ -1224,7 +1224,7 @@ describe('WorkflowRunner — origin transit (B2.2.2)', () => {
 
   it('stamps origin on every inner dispatch when the triggering task carries one', async () => {
     const yaml = `
-schema: aipehub.workflow/v1
+schema: gotong.workflow/v1
 workflow:
   id: editorial
   trigger: { capability: run-editorial }
@@ -1255,7 +1255,7 @@ workflow:
 
   it('omits origin on inner dispatches when the triggering task has none', async () => {
     const yaml = `
-schema: aipehub.workflow/v1
+schema: gotong.workflow/v1
 workflow:
   id: editorial
   trigger: { capability: run-editorial }
@@ -1278,7 +1278,7 @@ workflow:
 
   it('persists origin into RunState; resume re-uses it on remaining steps', async () => {
     const yaml = `
-schema: aipehub.workflow/v1
+schema: gotong.workflow/v1
 workflow:
   id: editorial
   trigger: { capability: run-editorial }
@@ -1293,7 +1293,7 @@ workflow:
         payload: { draft: $draft.output }
 `
     const def = parseWorkflow(yaml)
-    const dir = mkdtempSync(join(tmpdir(), 'aipehub-wf-origin-resume-'))
+    const dir = mkdtempSync(join(tmpdir(), 'gotong-wf-origin-resume-'))
     try {
       const runStore = new RunStore(dir)
 
@@ -1354,7 +1354,7 @@ workflow:
 describe('WorkflowRunner — dispatch ancestry', () => {
   it('extends the triggering task ancestry onto every inner dispatch', async () => {
     const yaml = `
-schema: aipehub.workflow/v1
+schema: gotong.workflow/v1
 workflow:
   id: editorial
   trigger: { capability: run-editorial }
@@ -1385,7 +1385,7 @@ workflow:
 describe('WorkflowRunner — suspended child tasks', () => {
   it('parks the workflow and resumes from the suspended child result', async () => {
     const yaml = `
-schema: aipehub.workflow/v1
+schema: gotong.workflow/v1
 workflow:
   id: editorial
   trigger: { capability: run-editorial }
@@ -1458,7 +1458,7 @@ workflow:
     // would re-enter on a tight loop forever. It must park far out instead and
     // wait for an explicit resume.
     const yaml = `
-schema: aipehub.workflow/v1
+schema: gotong.workflow/v1
 workflow:
   id: editorial
   trigger: { capability: run-editorial }
@@ -1518,7 +1518,7 @@ describe('WorkflowRunner — revision binding (Phase 15)', () => {
     payload: unknown,
   ): WorkflowDefinition {
     return {
-      schema: 'aipehub.workflow/v1',
+      schema: 'gotong.workflow/v1',
       id,
       trigger: { capability: triggerCap },
       steps: [
@@ -1569,7 +1569,7 @@ describe('WorkflowRunner — revision binding (Phase 15)', () => {
     c.strategy.kind === 'capability' ? c.strategy.capabilities[0] : undefined
 
   it('a new run stamps definitionRevision from resolver.current()', async () => {
-    const tmp = mkdtempSync(join(tmpdir(), 'aipehub-rev-stamp-'))
+    const tmp = mkdtempSync(join(tmpdir(), 'gotong-rev-stamp-'))
     try {
       const def = oneStepDef('wf', 'go', 'do', 'p')
       const store = new RunStore(tmp)
@@ -1591,7 +1591,7 @@ describe('WorkflowRunner — revision binding (Phase 15)', () => {
   })
 
   it('a runner with no resolver stamps revision 1 (single-revision back-compat)', async () => {
-    const tmp = mkdtempSync(join(tmpdir(), 'aipehub-rev-default-'))
+    const tmp = mkdtempSync(join(tmpdir(), 'gotong-rev-default-'))
     try {
       const def = oneStepDef('wf', 'go', 'do', 'p')
       const store = new RunStore(tmp)
@@ -1696,7 +1696,7 @@ describe('WorkflowRunner — revision binding (Phase 15)', () => {
 describe('WorkflowRunner — node-level data classes (v5 C-M2)', () => {
   it('stamps a node-declared dataClasses onto the dispatch', async () => {
     const def: WorkflowDefinition = {
-      schema: 'aipehub.workflow/v1',
+      schema: 'gotong.workflow/v1',
       id: 'io-auth',
       trigger: { capability: 'run-io' },
       steps: [
@@ -1720,7 +1720,7 @@ describe('WorkflowRunner — node-level data classes (v5 C-M2)', () => {
 
   it('per-node — different nodes carry different (or no) data classes', async () => {
     const yaml = `
-schema: aipehub.workflow/v1
+schema: gotong.workflow/v1
 workflow:
   id: io-auth-multi
   trigger: { capability: run-io }

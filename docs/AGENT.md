@@ -1,13 +1,13 @@
 # Connecting an agent
 
 An agent is any program that wants to receive tasks and post results
-into a Hub. AipeHub supports two physical shapes:
+into a Hub. Gotong supports two physical shapes:
 
 1. **In-process agents** — your program embeds the Hub itself (`new Hub({ space })`),
    and you `hub.register(new MyAgent())`. Fastest, no network.
 2. **Remote agents** — your program runs anywhere on the network and
-   connects to a Hub's WebSocket port using `@aipehub/sdk-node` (TS/JS)
-   or `aipehub` (Python). Same API surface as in-process.
+   connects to a Hub's WebSocket port using `@gotong/sdk-node` (TS/JS)
+   or `gotong` (Python). Same API surface as in-process.
 
 Both shapes implement the same `Participant` contract, so you can move
 an agent between them without changing its logic.
@@ -23,14 +23,14 @@ the snippets in the top-level `README.md`.
 Install the SDK:
 
 ```bash
-npm install @aipehub/sdk-node
-# or pnpm add @aipehub/sdk-node
+npm install @gotong/sdk-node
+# or pnpm add @gotong/sdk-node
 ```
 
 A minimal agent:
 
 ```ts
-import { AgentParticipant, connect, type Task } from '@aipehub/sdk-node'
+import { AgentParticipant, connect, type Task } from '@gotong/sdk-node'
 
 class GreeterAgent extends AgentParticipant {
   constructor() {
@@ -125,10 +125,10 @@ class WriterAgent extends AgentParticipant {
 Remote agents can drive Hub Services with the **same TypeScript surface** as in-process LlmAgent. Declare what you need in `connect()`; read it on the returned `Session` and stash it on your agent.
 
 ```ts
-import { AgentParticipant, connect, type Task } from '@aipehub/sdk-node'
+import { AgentParticipant, connect, type Task } from '@gotong/sdk-node'
 
 class CoachAgent extends AgentParticipant {
-  services?: import('@aipehub/sdk-node').ServiceClient
+  services?: import('@gotong/sdk-node').ServiceClient
 
   constructor() {
     super({ id: 'coach', capabilities: ['draft'] })
@@ -174,7 +174,7 @@ ACL is **declarative**: bad ACL = bad HELLO. Admins reviewing the application (u
 Error handling on the SDK side surfaces as a `ServiceCallError` with `error.code` from the wire enum:
 
 ```ts
-import { ServiceCallError } from '@aipehub/sdk-node'
+import { ServiceCallError } from '@gotong/sdk-node'
 
 try {
   await this.services!.memory!.recall({})
@@ -205,13 +205,13 @@ addressed to the channels it's subscribed to.
 Install:
 
 ```bash
-pip install aipehub
+pip install gotong
 ```
 
 Equivalent agent:
 
 ```python
-from aipehub import AgentParticipant, connect
+from gotong import AgentParticipant, connect
 
 class Greeter(AgentParticipant):
     id = "greeter"
@@ -231,7 +231,7 @@ import asyncio
 asyncio.run(main())
 ```
 
-The Python SDK is API-compatible with `@aipehub/sdk-node` at the wire
+The Python SDK is API-compatible with `@gotong/sdk-node` at the wire
 level — same `HELLO` / `WELCOME` / `TASK` / `RESULT` shapes, same
 auto-reconnect behaviour, same cancellation semantics.
 
@@ -291,8 +291,8 @@ no pending state; agents join immediately.
 
 ## Building federated agents — a Hub as an agent
 
-If you want a *team* (a small AipeHub) to appear as one agent on a
-bigger AipeHub, use `TeamBridgeAgent` from `@aipehub/sdk-node`. See
+If you want a *team* (a small Gotong) to appear as one agent on a
+bigger Gotong, use `TeamBridgeAgent` from `@gotong/sdk-node`. See
 `docs/FEDERATION.md` for the full walkthrough and runnable demo
 (`pnpm demo:federated-team`).
 
@@ -325,7 +325,7 @@ default.
 
 ## Capability conventions
 
-Capabilities are free-form strings; AipeHub doesn't have a built-in
+Capabilities are free-form strings; Gotong doesn't have a built-in
 taxonomy. A few practical tips:
 
 - Keep them short and verb-like: `draft`, `review`, `translate`, `code`.

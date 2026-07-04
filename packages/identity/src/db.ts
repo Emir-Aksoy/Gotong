@@ -1,7 +1,7 @@
 /**
- * better-sqlite3 thin wrapper for @aipehub/identity.
+ * better-sqlite3 thin wrapper for @gotong/identity.
  *
- * Mirrors the loader strategy used in `@aipehub/service-datastore-sqlite`:
+ * Mirrors the loader strategy used in `@gotong/service-datastore-sqlite`:
  * `createRequire` so we can synchronously load the native CJS binding
  * from an ESM module without an `await import` hop. better-sqlite3 is
  * declared as a peer dependency — install fails loudly when missing.
@@ -51,7 +51,7 @@ export function openDb(path: string): SqliteDb {
   } catch (err) {
     const cause = err instanceof Error ? err.message : String(err)
     throw new Error(
-      `@aipehub/identity requires the 'better-sqlite3' peer dependency.\n  ${cause}`,
+      `@gotong/identity requires the 'better-sqlite3' peer dependency.\n  ${cause}`,
     )
   }
   if (path !== ':memory:') {

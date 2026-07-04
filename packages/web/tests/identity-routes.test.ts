@@ -27,8 +27,8 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { Hub, Space, type AdminRecord } from '@aipehub/core'
-import { openIdentityStore, type IdentityStore } from '@aipehub/identity'
+import { Hub, Space, type AdminRecord } from '@gotong/core'
+import { openIdentityStore, type IdentityStore } from '@gotong/identity'
 
 import { serveWeb, type WebServerHandle } from '../src/server.js'
 
@@ -44,7 +44,7 @@ interface BootResult {
   adminCookie: string
   ownerUserId: string | null
   /**
-   * v4 session cookie value (`aipehub_identity=<token>`) for the owner
+   * v4 session cookie value (`gotong_identity=<token>`) for the owner
    * minted in boot(). Empty when withIdentity is false. Use this on
    * every fetch against `/api/admin/identity/*` to satisfy the owner gate.
    */
@@ -58,7 +58,7 @@ async function boot(
   } = {},
 ): Promise<BootResult> {
   const withIdentity = opts.withIdentity ?? true
-  const tmp = await mkdtemp(join(tmpdir(), 'aipehub-web-identity-'))
+  const tmp = await mkdtemp(join(tmpdir(), 'gotong-web-identity-'))
   const init = await Space.init(tmp, { name: 'identity-test' })
   const space = init.space
   const hub = new Hub({ space })
@@ -67,7 +67,7 @@ async function boot(
   const { admin, token: adminToken } = await space.createAdmin('TestAdmin')
   const adminSid = 'a-test-sid-' + Math.random().toString(36).slice(2)
   await space.addAdminSession(adminSid, admin.id)
-  const adminCookie = `aipehub_admin=${adminSid}`
+  const adminCookie = `gotong_admin=${adminSid}`
 
   let identity: IdentityStore | undefined
   let ownerUserId: string | null = null
@@ -89,7 +89,7 @@ async function boot(
         email: 'admin@local',
         password: 'test-owner-password',
       })
-      ownerCookie = `aipehub_identity=${sess.token}`
+      ownerCookie = `gotong_identity=${sess.token}`
     }
   }
 
@@ -190,8 +190,8 @@ describe('/api/admin/identity/* — owner gate', () => {
     })
     expect(loginRes.status).toBe(200)
     const setCookie = loginRes.headers.get('set-cookie')
-    expect(setCookie).toMatch(/^aipehub_identity=/)
-    const sessCookie = setCookie!.split(';')[0]! // "aipehub_identity=ses_..."
+    expect(setCookie).toMatch(/^gotong_identity=/)
+    const sessCookie = setCookie!.split(';')[0]! // "gotong_identity=ses_..."
 
     // Use the v4 cookie to hit an owner-only route.
     const listRes = await fetch(`${b.baseUrl}/api/admin/identity/users`, {
@@ -248,7 +248,7 @@ describe('login / logout / me', () => {
     })
     expect(r.status).toBe(200)
     const setCookie = r.headers.get('set-cookie')
-    expect(setCookie).toContain('aipehub_identity=')
+    expect(setCookie).toContain('gotong_identity=')
     expect(setCookie).toContain('Max-Age=0')
   })
 
@@ -1091,7 +1091,7 @@ describe('/api/invites/:token/accept — anonymous accept', () => {
 
     // Cookie header should be present.
     const sc = acc.headers.get('set-cookie') || ''
-    expect(sc).toContain('aipehub_identity=')
+    expect(sc).toContain('gotong_identity=')
     expect(sc).toContain('HttpOnly')
 
     // Take the cookie and hit /me — should report the new user.

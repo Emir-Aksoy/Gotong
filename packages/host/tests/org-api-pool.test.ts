@@ -18,7 +18,7 @@ import {
   IdentityStore,
   MASTER_KEY_LEN_BYTES,
   openIdentityStore,
-} from '@aipehub/identity'
+} from '@gotong/identity'
 
 import { OrgApiPool, QuotaExceededError } from '../src/org-api-pool.js'
 
@@ -28,7 +28,7 @@ describe('OrgApiPool', () => {
   let pool: OrgApiPool
 
   beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), 'aipehub-orgpool-'))
+    dir = mkdtempSync(join(tmpdir(), 'gotong-orgpool-'))
     identity = openIdentityStore({
       dbPath: join(dir, 'identity.sqlite'),
       masterKey: randomBytes(MASTER_KEY_LEN_BYTES),
@@ -327,7 +327,7 @@ describe('OrgApiPool — multi-org scoping (Phase 6 #3)', () => {
   let identity: IdentityStore
 
   beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), 'aipehub-orgpool-multiorg-'))
+    dir = mkdtempSync(join(tmpdir(), 'gotong-orgpool-multiorg-'))
     identity = openIdentityStore({
       dbPath: join(dir, 'id.sqlite'),
       masterKey: randomBytes(MASTER_KEY_LEN_BYTES),
@@ -497,7 +497,7 @@ describe('OrgApiPool.makeLlmQuotaGate (B2.2)', () => {
   let userId: string
 
   beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), 'aipehub-orgpool-gate-'))
+    dir = mkdtempSync(join(tmpdir(), 'gotong-orgpool-gate-'))
     identity = openIdentityStore({
       dbPath: join(dir, 'identity.sqlite'),
       masterKey: randomBytes(MASTER_KEY_LEN_BYTES),

@@ -10,7 +10,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { WebSocketServer } from 'ws'
 
-import type { FeedbackEntry, HubLink } from '@aipehub/core'
+import type { FeedbackEntry, HubLink } from '@gotong/core'
 
 import { acceptHubLinks, connectHubLink } from '../src/hub-link.js'
 

@@ -3,7 +3,7 @@
 "use strict";
 (() => {
   // admin-src/services.js
-  var { t, escapeHtml, fetchJson, formatBytes } = window.AipeHub;
+  var { t, escapeHtml, fetchJson, formatBytes } = window.Gotong;
   function createServices(ma) {
     const svc2 = {
       plugins: [],
@@ -251,7 +251,7 @@
   }
 
   // admin-src/mcp.js
-  var { t: t2, escapeHtml: escapeHtml2, fetchJson: fetchJson2 } = window.AipeHub;
+  var { t: t2, escapeHtml: escapeHtml2, fetchJson: fetchJson2 } = window.Gotong;
   function createMcp() {
     const mcp = {
       servers: [],
@@ -521,7 +521,7 @@
   }
 
   // admin-src/managed-agents.js
-  var { t: t3, escapeHtml: escapeHtml3, fetchJson: fetchJson3 } = window.AipeHub;
+  var { t: t3, escapeHtml: escapeHtml3, fetchJson: fetchJson3 } = window.Gotong;
   function createManagedAgents({ ma, openBundleImportModal }) {
     let dom = null;
     function setDom(d) {
@@ -858,7 +858,7 @@
         });
         renderQuickChatReply(r?.result);
       } catch (err) {
-        const d = window.AipeHub.describeError(err && err.message ? err.message : String(err));
+        const d = window.Gotong.describeError(err && err.message ? err.message : String(err));
         dom.maQcStatus.textContent = t3.quickChatFailed(d.fix ? `${d.text} ${d.fix}` : d.text);
         dom.maQcStatus.classList.remove("ok");
         dom.maQcStatus.classList.add("err");
@@ -892,7 +892,7 @@
         return;
       }
       const raw = result.kind === "ok" ? out && typeof out.text === "string" ? out.text : "" : result.error || result.reason || result.kind || "";
-      const d = window.AipeHub.describeError(raw);
+      const d = window.Gotong.describeError(raw);
       const friendly = d.fix ? `${d.text} ${d.fix}` : d.text;
       if (dom.maQcReply) {
         dom.maQcReply.hidden = true;
@@ -987,7 +987,7 @@
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ provider, apiKey, model, baseURL })
         });
-        const d = window.AipeHub.describeKeyTest(verdict);
+        const d = window.Gotong.describeKeyTest(verdict);
         dom.maTestMsg.textContent = d.text;
         dom.maTestMsg.classList.add(d.level === "ok" ? "ok" : "err");
       } catch (err) {
@@ -1385,7 +1385,7 @@
   }
 
   // admin-src/workflows.js
-  var { t: t4, escapeHtml: escapeHtml4 } = window.AipeHub;
+  var { t: t4, escapeHtml: escapeHtml4 } = window.Gotong;
   function createWorkflows({ wf }) {
     let dom = null;
     function setDom(d) {
@@ -1811,7 +1811,7 @@
           return;
         }
         if (dom.wfGraphBody) {
-          const G = window.AipeHubWorkflowGraph;
+          const G = window.GotongWorkflowGraph;
           dom.wfGraphBody.innerHTML = `<div class="wf-graph-scroll">${G.renderWorkflowGraphSvg(graph, { t: t4, escapeHtml: escapeHtml4 })}</div>` + G.graphLegend({ t: t4, escapeHtml: escapeHtml4 });
         }
       } catch (err) {
@@ -2237,7 +2237,7 @@
       }, WF_RUN_POLL_MS);
     }
     function friendlyError(raw) {
-      const d = window.AipeHub.describeError(raw);
+      const d = window.Gotong.describeError(raw);
       const fix = d.fix ? ` <span class="wf-err-fix">${escapeHtml4(d.fix)}</span>` : "";
       const keyBtn = d.fixIsKey ? ` <button type="button" class="ma-chat-fix-btn" data-act="goto-key">${escapeHtml4(t4.meChatGoAddKey)}</button>` : "";
       const rawBlock = raw ? `<details class="wf-err-raw"><summary>${escapeHtml4(t4.workflowRunErrorRaw)}</summary><pre class="wf-pre">${escapeHtml4(String(raw))}</pre></details>` : "";
@@ -2402,7 +2402,7 @@
       applyContribToggleState,
       attachCapChips,
       gotoTab
-    } = window.AipeHub;
+    } = window.Gotong;
     const ma = {
       agents: [],
       providers: [],
@@ -3165,7 +3165,7 @@
         console.warn("refreshGrowthReports:", err);
       }
     }
-    const START_HERE_DISMISS_KEY = "aipe_start_here_dismissed";
+    const START_HERE_DISMISS_KEY = "gotong_start_here_dismissed";
     let startHereSettled = false;
     function startHereDismissed() {
       try {
@@ -3897,8 +3897,8 @@
       } else if (f.type === "file") {
         const accept = Array.isArray(f.accept) && f.accept.length > 0 ? ` accept="${escapeHtml5(f.accept.join(","))}"` : "";
         const sizeHint = typeof f.maxSizeMb === "number" ? `<small class="hint">${escapeHtml5(t5.admMaxSize(f.maxSizeMb))}</small>` : "";
-        control = `<input type="file" id="${id}" data-aipe-file="1"${accept} />
-        <span class="aipe-file-status" data-aipe-file-status="${id}" style="font-size:0.85em;color:#666;margin-left:0.5em;"></span>
+        control = `<input type="file" id="${id}" data-gotong-file="1"${accept} />
+        <span class="gotong-file-status" data-gotong-file-status="${id}" style="font-size:0.85em;color:#666;margin-left:0.5em;"></span>
         ${sizeHint}`;
       } else {
         control = `<input type="text" id="${id}"${ph} value="${defaultV}" />`;
@@ -3941,7 +3941,7 @@
               return;
             }
             const statusEl = document.querySelector(
-              `[data-aipe-file-status="wf-start-field-${cssEscape(f.id)}"]`
+              `[data-gotong-file-status="wf-start-field-${cssEscape(f.id)}"]`
             );
             if (statusEl) statusEl.textContent = t5.admUploading;
             try {
@@ -4284,12 +4284,12 @@
         const r = await fetch(`/api/admin/workflows/${encodeURIComponent(id)}/source`);
         const j = await r.json().catch(() => ({}));
         if (!r.ok || !j.ok || typeof j.yaml !== "string") {
-          alert((window.AipeHub?.t?.wfaArchExplainLoadFailed || "Failed to load workflow") + (j.error ? `: ${j.error}` : ""));
+          alert((window.Gotong?.t?.wfaArchExplainLoadFailed || "Failed to load workflow") + (j.error ? `: ${j.error}` : ""));
           return;
         }
         wfAssist.open({ mode: "explain", subjectYaml: j.yaml, subjectId: id });
       } catch (err) {
-        alert((window.AipeHub?.t?.wfaArchExplainLoadFailed || "Failed to load workflow") + `: ${err.message || err}`);
+        alert((window.Gotong?.t?.wfaArchExplainLoadFailed || "Failed to load workflow") + `: ${err.message || err}`);
       }
     }
     function renderKnownRoster() {
@@ -4404,7 +4404,7 @@
       resolveDom();
       managedAgents.setDom(dom);
       workflows.setDom(dom);
-      wfAssist = window.AipeHub && window.AipeHub.installWorkflowAssist ? window.AipeHub.installWorkflowAssist({
+      wfAssist = window.Gotong && window.Gotong.installWorkflowAssist ? window.Gotong.installWorkflowAssist({
         dom,
         state,
         ma,
@@ -4416,7 +4416,7 @@
         refreshWorkflows: () => workflows.refreshWorkflows()
       }) : null;
       updateDispatchVisibility();
-      window.addEventListener("aipehub:tabchange", (e) => {
+      window.addEventListener("gotong:tabchange", (e) => {
         if (e.detail?.name === "workflows") refreshGrowthReports().catch(() => {
         });
         if (e.detail?.name === "mcp") mcp.refreshMcp().catch((err) => console.warn("mcp refresh failed:", err));
@@ -4711,7 +4711,7 @@
         if (dom.grReportModal && !dom.grReportModal.hidden) closeGrowthReport();
       });
       try {
-        if (dom.disclaimerModal && !localStorage.getItem("aipehub_disclaimer_v1")) {
+        if (dom.disclaimerModal && !localStorage.getItem("gotong_disclaimer_v1")) {
           dom.disclaimerModal.hidden = false;
         }
       } catch (err) {
@@ -4719,7 +4719,7 @@
       }
       dom.disclaimerAccept?.addEventListener("click", () => {
         try {
-          localStorage.setItem("aipehub_disclaimer_v1", String(Date.now()));
+          localStorage.setItem("gotong_disclaimer_v1", String(Date.now()));
         } catch {
         }
         if (dom.disclaimerModal) dom.disclaimerModal.hidden = true;

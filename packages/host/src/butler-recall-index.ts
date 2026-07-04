@@ -1,7 +1,7 @@
 /**
  * butler-recall-index.ts — the host side of the default-recall index (MR1).
  *
- * The leaf (`@aipehub/personal-memory` `InvertedIndex` / `invertedIndexRetriever`)
+ * The leaf (`@gotong/personal-memory` `InvertedIndex` / `invertedIndexRetriever`)
  * is the pure algorithm: it spans the WHOLE store so a relevant fact older than
  * `lexicalRetriever`'s recency window still becomes a candidate. But the leaf is
  * stateless about freshness — it just ranks whatever index you hand it. This
@@ -36,7 +36,7 @@
 import { readFile, rename, stat, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
-import type { Logger } from '@aipehub/core'
+import type { Logger } from '@gotong/core'
 import {
   InvertedIndex,
   buildInvertedIndex,
@@ -44,9 +44,9 @@ import {
   type InvertedIndexSnapshot,
   type MemoryRetriever,
   type RetrieverOptions,
-} from '@aipehub/personal-memory'
-import { kindFile, ownerDir } from '@aipehub/service-memory-file'
-import type { MemoryEntry, MemoryKind, Owner } from '@aipehub/services-sdk'
+} from '@gotong/personal-memory'
+import { kindFile, ownerDir } from '@gotong/service-memory-file'
+import type { MemoryEntry, MemoryKind, Owner } from '@gotong/services-sdk'
 
 import { BUTLER_MEMORY_KINDS } from './personal-butler-memory.js'
 

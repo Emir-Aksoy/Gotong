@@ -42,7 +42,7 @@ function terminal(runId: string, end: number, status: RunState['status'] = 'done
 }
 
 beforeEach(() => {
-  tmp = mkdtempSync(join(tmpdir(), 'aipehub-runarchive-'))
+  tmp = mkdtempSync(join(tmpdir(), 'gotong-runarchive-'))
   store = new RunStore(tmp)
   store.ensureDirs()
 })

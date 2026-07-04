@@ -10,7 +10,7 @@ pnpm demo:web
 
 Open `http://localhost:3000`. The launcher prints the admin URL **once** on first run — save it; subsequent boots only show `/admin`.
 
-The space lives in `.aipehub-web-demo/`. Override with `AIPE_SPACE=/tmp/foo` if you want.
+The space lives in `.gotong-web-demo/`. Override with `GOTONG_SPACE=/tmp/foo` if you want.
 
 ## Scenario
 
@@ -22,7 +22,7 @@ The space lives in `.aipehub-web-demo/`. Override with `AIPE_SPACE=/tmp/foo` if 
 
 ## What this proves
 
-- **`@aipehub/web` is embeddable** — `serveWeb(hub, opts)` is the only line that wires the UI to your Hub. No separate front-end build, no SPA bundling.
+- **`@gotong/web` is embeddable** — `serveWeb(hub, opts)` is the only line that wires the UI to your Hub. No separate front-end build, no SPA bundling.
 - **HumanParticipant via the web UI** — same `Participant` contract as the CLI-human or SDK paths, just driven from a browser.
 - **File-first state**: refresh the page, restart the process, your worker identity sticks because the HttpOnly cookie maps to `<space>/workers.json`.
 

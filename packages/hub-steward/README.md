@@ -1,8 +1,8 @@
-# @aipehub/hub-steward — the hub steward (管家)
+# @gotong/hub-steward — the hub steward (管家)
 
 An **LlmAgent** that lets a member manage **their own** hub resources by talking
 to it in plain language — the OpenClaw / Hermes "tell it and it configures things"
-experience, made safe by AipeHub's North Star.
+experience, made safe by Gotong's North Star.
 
 ```
 member 大白话指令
@@ -23,7 +23,7 @@ host classify (server-authoritative)
   `StewardProposal`, `ClassifiedProposal`). Pure data, no runtime deps.
 - `classify.ts` — `classifyStewardAction(action, ctx)`: the server-authoritative,
   conservative risk tiering where the two hard constraints live. Reuses
-  `authorizeAgentAction` (`@aipehub/identity`) as a forward-looking backstop for
+  `authorizeAgentAction` (`@gotong/identity`) as a forward-looking backstop for
   the highest-blast-radius verbs.
 - `prompt.ts` — the system prompt + `parseStewardProposal`: the LLM-reply →
   `StewardProposal` pipeline. A **security boundary** — only well-formed actions
@@ -42,4 +42,4 @@ steward also cannot exceed what the member could do by hand: execution reuses th
 member services, which carry the `resource_grants` RBAC + member limits.
 
 > Host wiring (the plan / apply orchestration + the approval broker) lives in
-> `@aipehub/host`; this package is just the agent + the shared vocabulary.
+> `@gotong/host`; this package is just the agent + the shared vocabulary.

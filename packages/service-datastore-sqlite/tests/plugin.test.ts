@@ -3,9 +3,9 @@ import { access, mkdtemp, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 
-import { createLogger } from '@aipehub/core'
-import { TrashRestoreConflictError } from '@aipehub/services-sdk'
-import type { Owner } from '@aipehub/services-sdk'
+import { createLogger } from '@gotong/core'
+import { TrashRestoreConflictError } from '@gotong/services-sdk'
+import type { Owner } from '@gotong/services-sdk'
 import { DatastoreSqlitePlugin } from '../src/plugin.js'
 import { ownerDir, trashEntryDir, trashMetaFile } from '../src/paths.js'
 
@@ -16,7 +16,7 @@ let plugin: DatastoreSqlitePlugin
 const owner: Owner = { kind: 'agent', id: 'industry-coach' }
 
 beforeEach(async () => {
-  rootDir = await mkdtemp(join(tmpdir(), 'aipe-ds-plugin-'))
+  rootDir = await mkdtemp(join(tmpdir(), 'gotong-ds-plugin-'))
   plugin = new DatastoreSqlitePlugin()
   await plugin.init({
     rootDir, logger,

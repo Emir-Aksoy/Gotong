@@ -28,8 +28,8 @@ import { mkdtempSync, rmSync, readFileSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { Hub, InMemoryStorage, type Task } from '@aipehub/core'
-import { payloadToText, dangerousCommandGate } from '@aipehub/cli-agent'
+import { Hub, InMemoryStorage, type Task } from '@gotong/core'
+import { payloadToText, dangerousCommandGate } from '@gotong/cli-agent'
 
 import { SharedWorkspaceCli } from './shared-workspace-cli.js'
 import { setupSharedWorkspace, type SharedWorkspace } from './workspace.js'
@@ -114,7 +114,7 @@ const SCENARIOS: FlowScenario[] = [
 ]
 
 async function main(): Promise<void> {
-  console.log('\n=== AipeHub case: personal-coding-hub — 会诊触发 (consult, wired into the flow) ===')
+  console.log('\n=== Gotong case: personal-coding-hub — 会诊触发 (consult, wired into the flow) ===')
   console.log('  显式「会诊」或测试失败 → 发起会诊 → 找真实根因 → 交回 coder 修 → 测试通过。\n')
 
   // parseConsultRequest coverage (pure, cheap) — the explicit trigger detector.
@@ -132,7 +132,7 @@ async function main(): Promise<void> {
 }
 
 async function runScenario(s: FlowScenario): Promise<void> {
-  const dir = mkdtempSync(join(tmpdir(), 'aipe-consult-flow-'))
+  const dir = mkdtempSync(join(tmpdir(), 'gotong-consult-flow-'))
   const ws = setupSharedWorkspace(dir)
   const board = setupConsultBoard(ws.dir)
   const hub = new Hub({ storage: new InMemoryStorage() })

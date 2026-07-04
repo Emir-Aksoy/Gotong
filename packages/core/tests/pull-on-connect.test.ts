@@ -216,7 +216,7 @@ describe('installPeerLink integrates pull-on-attach', () => {
     const { join } = await import('node:path')
     const { Space } = await import('../src/space.js')
 
-    const dir = mkdtempSync(join(tmpdir(), 'aipehub-m6-test-'))
+    const dir = mkdtempSync(join(tmpdir(), 'gotong-m6-test-'))
     try {
       const { space } = await Space.openOrInit(dir, { name: 'm6-test' })
       const hub = new Hub({ space })

@@ -42,7 +42,7 @@
  * `GovernedActionToolset` — no new machinery.
  */
 
-import type { MemoryEntry } from '@aipehub/services-sdk'
+import type { MemoryEntry } from '@gotong/services-sdk'
 
 import { closedMeta, isActive, META_SUPERSEDES } from './bitemporal.js'
 import { defaultLinkScorer, linksOf, mergeLinks, META_LINKS } from './links.js'

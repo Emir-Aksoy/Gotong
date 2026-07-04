@@ -1,12 +1,12 @@
 {
-  "name": "@aipehub/cli",
+  "name": "@gotong/cli",
   "version": "1.0.0",
   "type": "module",
-  "description": "AipeHub CLI — bootstrap sidecar agents, ping a hub, inspect services. Zero install needed beyond `npx @aipehub/cli`.",
+  "description": "Gotong CLI — bootstrap sidecar agents, ping a hub, inspect services. Zero install needed beyond `npx @gotong/cli`.",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/Emir-Aksoy/AipeHub.git",
+    "url": "https://github.com/Emir-Aksoy/Gotong.git",
     "directory": "packages/cli"
   },
   "publishConfig": {
@@ -15,7 +15,7 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "bin": {
-    "aipehub": "./bin/aipehub.js"
+    "gotong": "./bin/gotong.js"
   },
   "exports": {
     ".": {
@@ -38,8 +38,8 @@
     "prepack": "tsc -p tsconfig.json"
   },
   "dependencies": {
-    "@aipehub/core": "workspace:*",
-    "@aipehub/protocol": "workspace:*"
+    "@gotong/core": "workspace:*",
+    "@gotong/protocol": "workspace:*"
   },
   "devDependencies": {
     "vitest": "^3.2.4",

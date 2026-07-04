@@ -127,9 +127,9 @@ describe('createResourceInventoryService — localEndpoints (RES-M1)', () => {
     expect(called).toBe(false)
   })
 
-  it('AIPE_RES_ENDPOINTS env extends the default probe list', async () => {
+  it('GOTONG_RES_ENDPOINTS env extends the default probe list', async () => {
     const inv = await svc({
-      env: { AIPE_RES_ENDPOINTS: 'LM Studio=http://127.0.0.1:1234/v1/models,bad-no-url' },
+      env: { GOTONG_RES_ENDPOINTS: 'LM Studio=http://127.0.0.1:1234/v1/models,bad-no-url' },
       // localEndpoints undefined → falls back to Ollama default ∪ env list
       localEndpoints: undefined,
       fetchImpl: (async () => new Response(null, { status: 200 })) as unknown as typeof fetch,

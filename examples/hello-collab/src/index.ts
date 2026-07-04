@@ -1,5 +1,5 @@
 /**
- * hello-collab — the minimum demo that proves the AipeHub abstraction holds.
+ * hello-collab — the minimum demo that proves the Gotong abstraction holds.
  *
  * Scenario:
  *   1. A WriterAgent drafts a short writeup on a topic.
@@ -22,7 +22,7 @@ import {
   HumanParticipant,
   type Task,
   type TranscriptEntry,
-} from '@aipehub/core'
+} from '@gotong/core'
 
 // --- payload shapes (just for clarity in this demo) -------------------------
 
@@ -107,7 +107,7 @@ async function main(): Promise<void> {
   // We don't await aliceLoop; it lives until process exit.
   void aliceLoop
 
-  console.log('\n=== AipeHub demo: collaborative writeup ===\n')
+  console.log('\n=== Gotong demo: collaborative writeup ===\n')
 
   // 1. capability dispatch -> WriterAgent
   const draftRes = await hub.dispatch({

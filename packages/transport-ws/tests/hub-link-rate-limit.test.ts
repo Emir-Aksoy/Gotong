@@ -149,7 +149,7 @@ describe('acceptHubLinks — onConnectionAttempt (Phase 6 #12)', () => {
 // real client. Without trustProxy=true, every peer buckets under
 // the same loopback IP — one rude peer starves all others (or
 // every peer shares the 60/60s budget). The fix mirrors
-// @aipehub/web's clientIp helper: trustProxy → use first XFF entry.
+// @gotong/web's clientIp helper: trustProxy → use first XFF entry.
 describe('acceptHubLinks — trustProxy + X-Forwarded-For (Audit #142)', () => {
   let bench: Bench
   afterEach(async () => { if (bench) await bench.stop() })

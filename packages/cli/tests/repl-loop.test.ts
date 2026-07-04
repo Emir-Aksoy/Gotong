@@ -3,12 +3,12 @@
  *
  * We drive `runReplLoop` with a `ScriptedIo` (an in-memory queue of
  * "lines to read" + a buffer of "everything written") against a real
- * in-memory `Hub` from `@aipehub/core`. That covers parsing, dispatch
+ * in-memory `Hub` from `@gotong/core`. That covers parsing, dispatch
  * routing, error handling, transcript rendering — all the wiring —
  * without spawning a child process or touching real stdin/stdout.
  */
 
-import { AgentParticipant, type Task } from '@aipehub/core'
+import { AgentParticipant, type Task } from '@gotong/core'
 import { afterEach, describe, expect, it } from 'vitest'
 
 import { createReplHub, ReplEchoAgent, type ReplHubHandle } from '../src/repl/bootstrap.js'

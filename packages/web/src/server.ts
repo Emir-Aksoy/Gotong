@@ -23,7 +23,7 @@ import {
   type Space,
   type TaskId,
   type WorkerRecord,
-} from '@aipehub/core'
+} from '@gotong/core'
 import { HttpStats, renderMetrics } from './metrics.js'
 import {
   collectBusinessMetrics,
@@ -157,7 +157,7 @@ export type {
 } from './mcp-routes.js'
 
 /**
- * Reference web UI for AipeHub (v2.0 — file-first).
+ * Reference web UI for Gotong (v2.0 — file-first).
  *
  * The whole admin / worker story is anchored to the Hub's Space:
  *
@@ -188,8 +188,8 @@ export type {
 // serveStatic / serveAppHtml) moved to ./static-routes.js (#19 megalith
 // split). Imported below.
 
-const ADMIN_COOKIE = 'aipehub_admin'
-const WORKER_COOKIE = 'aipehub_worker'
+const ADMIN_COOKIE = 'gotong_admin'
+const WORKER_COOKIE = 'gotong_worker'
 const COOKIE_MAX_AGE_S = 7 * 24 * 3600
 
 export interface WebServerOptions {
@@ -295,7 +295,7 @@ export interface WebServerOptions {
   reconcileHeartbeats?: () => Promise<void>
   /**
    * Optional workflow controller. The host wires this to
-   * `@aipehub/workflow` so the admin UI can list / import workflows
+   * `@gotong/workflow` so the admin UI can list / import workflows
    * without the Web package taking a runtime dep on the workflow
    * runner. When absent, the workflow API endpoints return 404.
    */
@@ -377,7 +377,7 @@ export interface WebServerOptions {
    * `hubServices.asAdminSurface()` here. When absent, all
    * `/api/admin/services/...` endpoints return 503 so the admin UI
    * can hide the tab cleanly. Web has no runtime dep on
-   * `@aipehub/services-sdk` — the surface is plain types in `@aipehub/core`.
+   * `@gotong/services-sdk` — the surface is plain types in `@gotong/core`.
    */
   services?: ServicesAdminSurface
   /**
@@ -386,14 +386,14 @@ export interface WebServerOptions {
    * the personal-growth team. When absent, the two
    * `/api/admin/growth-reports*` endpoints return 503 so the admin
    * UI can hide the panel. Web has no runtime dep on the host —
-   * the surface is plain types in `@aipehub/core`.
+   * the surface is plain types in `@gotong/core`.
    */
   growthReports?: GrowthReportsAdminSurface
   /**
    * Phase 16 — optional member task inbox surface. The host wires a
    * `HostInboxService` here. When absent, `GET /api/me/inbox` returns an
    * empty list and `POST /api/me/inbox/:id/resolve` returns 503. Web has no
-   * runtime dep on `@aipehub/inbox` — `InboxSurface` is a duck type.
+   * runtime dep on `@gotong/inbox` — `InboxSurface` is a duck type.
    */
   inbox?: InboxSurface
   /**
@@ -422,7 +422,7 @@ export interface WebServerOptions {
    * SW-M6 — optional hub steward ("管家") surface. The host wires a
    * `HostStewardService` here. When absent, `POST /api/me/steward/plan` and
    * `/apply` return 503 so the member UI can hide the "管家" chat panel. Web has
-   * no runtime dep on `@aipehub/hub-steward` — `MeHubStewardSurface` is a duck
+   * no runtime dep on `@gotong/hub-steward` — `MeHubStewardSurface` is a duck
    * type, and the action it forwards is `unknown` (the host validates it).
    */
   hubSteward?: MeHubStewardSurface
@@ -458,11 +458,11 @@ export interface WebServerOptions {
    * Optional v4 identity store. When set, `/api/admin/identity/*`
    * endpoints become live; without it those routes return 503 so the
    * admin UI can hide the user-management tab. Web takes no runtime
-   * dep on `@aipehub/identity` — `IdentitySurface` is a structural
+   * dep on `@gotong/identity` — `IdentitySurface` is a structural
    * type in `./identity-routes`, satisfied by `IdentityStore` from
    * the package.
    *
-   * The v4 IdentityStore session cookie (`aipehub_identity`) is also
+   * The v4 IdentityStore session cookie (`gotong_identity`) is also
    * accepted by `requireAdmin` as a fallback when no v3 cookie /
    * Bearer is present — this lets users who logged in via the v4
    * surface reach v3 admin endpoints with the same browser session.
@@ -507,8 +507,8 @@ export interface WebServerOptions {
    * downstream.
    *
    * Why a host injection rather than Web wiring the artifact plugin
-   * itself: Web has no dep on `@aipehub/services-sdk` or any plugin
-   * impl, by design (`@aipehub/web` is "the HTTP/SPA shell, no plugin
+   * itself: Web has no dep on `@gotong/services-sdk` or any plugin
+   * impl, by design (`@gotong/web` is "the HTTP/SPA shell, no plugin
    * surface"). The host owns the lifecycle of plugins, including the
    * system-uploads handle, and surfaces a narrow `put(...)` to Web.
    *
@@ -600,7 +600,7 @@ export interface WebServerOptions {
    * Route B P1-M11c — host-injected outbound A2A agent registry (admin CRUD).
    * When wired, `/api/admin/a2a-agents[/:id]` lets an admin register the external
    * A2A agents this hub forwards capability dispatches to (replacing the Phase 18
-   * `AIPE_A2A_AGENTS` env blob). Absent (no identity store) → those routes 503.
+   * `GOTONG_A2A_AGENTS` env blob). Absent (no identity store) → those routes 503.
    * Like SAML there is no secret in the view: `tokenEnv` is the env-var NAME the
    * bearer is read from, and the view also carries host-joined runtime liveness.
    */
@@ -638,7 +638,7 @@ export interface WebServerOptions {
    * session or a machine-admin token (which would widen the admin surface).
    * Fail-closed: when this is `undefined` the route 404s — an unconfigured
    * deployment exposes no anonymous metrics endpoint. The host sources it
-   * from `AIPE_METRICS_TOKEN` (empty/unset → undefined).
+   * from `GOTONG_METRICS_TOKEN` (empty/unset → undefined).
    */
   metricsToken?: string
 }
@@ -658,7 +658,7 @@ export interface AgentCardSurface {
  * Phase 18 C-M3 — host-injected inbound A2A server. When wired, `POST /a2a`
  * (and `/a2a/message`) accepts an A2A `message/send` JSON-RPC call, dispatches
  * it into the Hub by capability, and replies with the result. It owns its OWN
- * bearer-auth domain (X-Aipe-Peer-Id + peer token), so the route sits OUTSIDE
+ * bearer-auth domain (X-Gotong-Peer-Id + peer token), so the route sits OUTSIDE
  * the admin session / CSRF model. When absent, those routes 404. The host
  * implements it over hub + identity (see `packages/host/src/a2a-server.ts`).
  */
@@ -715,8 +715,8 @@ export interface UploadSurface {
 /**
  * Public surface the Web layer talks to when answering workflow API
  * calls. Implemented by the host (`packages/host/src/workflow-controller.ts`)
- * — kept as a duck-typed interface here so `@aipehub/web` does not pull
- * `@aipehub/workflow` into its dependency closure.
+ * — kept as a duck-typed interface here so `@gotong/web` does not pull
+ * `@gotong/workflow` into its dependency closure.
  */
 export interface WorkflowSurface {
   list(): Promise<WorkflowSummary[]>
@@ -956,11 +956,11 @@ export interface ResourceAdaptationSurface {
  * Phase 13 M3 — host-injected workflow assistant surface. Wraps a
  * registered `WorkflowAssistantAgent` so the Web layer can answer
  * `POST /api/admin/workflows/assist` without taking a runtime dep on
- * `@aipehub/workflow-assistant` / `@aipehub/llm`. Same posture as
+ * `@gotong/workflow-assistant` / `@gotong/llm`. Same posture as
  * `WorkflowSurface` above.
  *
  * Absent when:
- *   - operator set `AIPE_ASSISTANT_DISABLED=1`, OR
+ *   - operator set `GOTONG_ASSISTANT_DISABLED=1`, OR
  *   - the host couldn't resolve an LLM API key for the configured
  *     provider (no org-pool entry, no env fallback).
  * In either case, the route responds 503 and the admin UI hides the
@@ -988,7 +988,7 @@ export interface WorkflowAssistSurface {
 }
 
 /**
- * ease-of-use ① — structural mirror of `@aipehub/host`'s `LlmKeyTestSurface`.
+ * ease-of-use ① — structural mirror of `@gotong/host`'s `LlmKeyTestSurface`.
  * Kept as a duck-typed duplicate so Web stays free of any host/llm runtime
  * dependency (same posture as `WorkflowAssistSurface`). The host wires the
  * real probe; Web only forwards the typed JSON back to the browser.
@@ -1002,7 +1002,7 @@ export interface LlmKeyTestSurface {
   }): Promise<LlmKeyTestResult>
 }
 
-/** Mirror of `@aipehub/host`'s `LlmKeyTestResult`. */
+/** Mirror of `@gotong/host`'s `LlmKeyTestResult`. */
 export interface LlmKeyTestResult {
   ok: boolean
   model: string
@@ -1014,7 +1014,7 @@ export interface LlmKeyTestResult {
 }
 
 /**
- * Mirror of `@aipehub/workflow-assistant`'s `WorkflowAssistantPayload.contextHints`.
+ * Mirror of `@gotong/workflow-assistant`'s `WorkflowAssistantPayload.contextHints`.
  * Kept as a structural duplicate so Web has zero workflow-assistant dep.
  */
 export interface WorkflowAssistContextHints {
@@ -1028,7 +1028,7 @@ export interface WorkflowAssistContextHints {
 }
 
 /**
- * Mirror of `@aipehub/workflow-assistant`'s `WorkflowAssistantOutput`. The
+ * Mirror of `@gotong/workflow-assistant`'s `WorkflowAssistantOutput`. The
  * Web layer returns these fields verbatim in the assist route's JSON body
  * (under `{ ok: true, ...result }`).
  */
@@ -1044,7 +1044,7 @@ export interface WorkflowAssistResult {
    * Phase 13 M4 — deep structural check result. Present iff the host's
    * assist surface ran the check (host only runs it when the request
    * carried `contextHints` AND the YAML parsed cleanly). Mirrors
-   * `WorkflowStructureCheckResult` from `@aipehub/evals` — kept as a
+   * `WorkflowStructureCheckResult` from `@gotong/evals` — kept as a
    * duck-typed structural copy so the web layer has zero evals dep.
    */
   deepCheck?: WorkflowDeepCheckResult
@@ -1058,13 +1058,13 @@ export interface WorkflowAssistResult {
   graph?: WorkflowGraphView
 }
 
-/** Mirror of `WorkflowStructureCheckResult` (see `@aipehub/evals`). */
+/** Mirror of `WorkflowStructureCheckResult` (see `@gotong/evals`). */
 export interface WorkflowDeepCheckResult {
   ok: boolean
   violations: ReadonlyArray<WorkflowDeepCheckViolation>
 }
 
-/** Mirror of `WorkflowStructureViolation` (see `@aipehub/evals`). */
+/** Mirror of `WorkflowStructureViolation` (see `@gotong/evals`). */
 export interface WorkflowDeepCheckViolation {
   kind:
     | 'unknown_agent'
@@ -1087,13 +1087,13 @@ export interface WorkflowSummary {
    * Optional dispatch-form field schema (v2.4). When present, the
    * admin UI renders a workflow-specific dispatch form (one input
    * per field) instead of the generic JSON textarea. Shape mirrors
-   * `PayloadFieldSpec` in `@aipehub/workflow`'s types — kept as
+   * `PayloadFieldSpec` in `@gotong/workflow`'s types — kept as
    * `unknown` here to avoid a runtime dep on the workflow package.
    */
   payloadSchema?: unknown
   /**
    * Phase 14 — pass-through of the workflow's `surface.me` block when
-   * present. Structurally mirrors `MeSurfaceSpec` in `@aipehub/workflow`
+   * present. Structurally mirrors `MeSurfaceSpec` in `@gotong/workflow`
    * (kept `unknown` to avoid a runtime dep). `me-routes.ts` reads it to
    * derive the member-facing `/me` catalog.
    */
@@ -1101,7 +1101,7 @@ export interface WorkflowSummary {
   /**
    * Phase 19 P5 — pass-through of the workflow's `governance` block when
    * present. Structurally mirrors `WorkflowGovernanceSpec` in
-   * `@aipehub/workflow` (kept `unknown` to avoid a runtime dep). The admin
+   * `@gotong/workflow` (kept `unknown` to avoid a runtime dep). The admin
    * UI renders it as a risk summary before import/publish.
    */
   governance?: unknown
@@ -1145,7 +1145,7 @@ export interface CrossHubStepView {
 }
 
 // --- DAG viz — read-only graph mirror types --------------------------------
-// Structural duplicates of `@aipehub/workflow`'s `WorkflowGraphView` family, so
+// Structural duplicates of `@gotong/workflow`'s `WorkflowGraphView` family, so
 // the Web layer can type the surface + echo the JSON verbatim without a runtime
 // dep on the workflow package. The `graph` route returns these fields as-is.
 
@@ -1189,7 +1189,7 @@ export interface WorkflowGraphEdge {
 }
 
 // --- Phase 15 — lifecycle mirror types -------------------------------------
-// Structural duplicates of `@aipehub/workflow`'s lifecycle shapes, so the Web
+// Structural duplicates of `@gotong/workflow`'s lifecycle shapes, so the Web
 // layer can type the surface + echo the JSON without a runtime dep. Kept loose
 // (`action` / `legalActions` as strings) — the routes only forward these.
 
@@ -1232,7 +1232,7 @@ export interface WorkflowLifecycleView {
 
 /**
  * Slim projection of a workflow run for the admin "run history" list.
- * Structurally compatible with `@aipehub/workflow`'s `RunSummary` type
+ * Structurally compatible with `@gotong/workflow`'s `RunSummary` type
  * but duplicated here so the Web layer stays decoupled from the
  * workflow runtime.
  */
@@ -1268,7 +1268,7 @@ export function serveWeb(hub: Hub, opts: WebServerOptions = {}): Promise<WebServ
   if (!hub.space) {
     return Promise.reject(
       new Error(
-        '@aipehub/web v2.0 requires hub.space — construct the Hub with `new Hub({ space })`. The in-memory path was removed; use Space.openOrInit(dir, ...) first.',
+        '@gotong/web v2.0 requires hub.space — construct the Hub with `new Hub({ space })`. The in-memory path was removed; use Space.openOrInit(dir, ...) first.',
       ),
     )
   }
@@ -1594,7 +1594,7 @@ export const DEFAULT_RATE_LIMITER_MAX_KEYS = 10_000
  * See AUDIT-v3.3.md findings H19 and H21.
  *
  * @internal exported for direct unit tests; not re-exported from
- *   `@aipehub/web`'s package surface.
+ *   `@gotong/web`'s package surface.
  */
 export class RateLimiter {
   private hits = new Map<string, number[]>()
@@ -1766,7 +1766,7 @@ async function handle(
 
   // --- Inbound A2A (Phase 18 C-M3) --------------------------------------
   // BEFORE the CSRF gate and OUTSIDE requireAdmin: A2A is its own bearer-auth
-  // domain (X-Aipe-Peer-Id + peer token), not a browser session, so the CSRF
+  // domain (X-Gotong-Peer-Id + peer token), not a browser session, so the CSRF
   // Origin check (which a server-to-server caller can't satisfy) must not run.
   // The host A2aServer owns all auth + dispatch; 404 when not wired.
   if (path === '/a2a' || path === '/a2a/message') {
@@ -1802,7 +1802,7 @@ async function handle(
   // BEFORE the CSRF gate and OUTSIDE requireAdmin: a Prometheus scraper is a
   // server-to-server client with no browser session, so it satisfies neither
   // the admin cookie nor the CSRF Origin check. This route has its own
-  // bearer-token domain (AIPE_METRICS_TOKEN), letting an operator scrape the
+  // bearer-token domain (GOTONG_METRICS_TOKEN), letting an operator scrape the
   // SAME body as /api/admin/metrics WITHOUT minting a machine admin (which
   // would widen the admin surface to a scraper credential).
   //
@@ -2024,7 +2024,7 @@ async function handle(
       const v4Cookie = readCookie(req, IDENTITY_COOKIE)
       if (!v4Cookie) {
         res.writeHead(401, { 'content-type': 'text/html; charset=utf-8' })
-        res.end('<!doctype html><meta charset=utf-8><title>AipeHub admin</title><body style="font-family:sans-serif;max-width:30rem;margin:6rem auto;color:#333"><h1>401 — admin token required</h1><p>Open this page with <code>?token=YOUR_TOKEN</code> appended, or sign in at <a href="/">/</a>.</p></body>')
+        res.end('<!doctype html><meta charset=utf-8><title>Gotong admin</title><body style="font-family:sans-serif;max-width:30rem;margin:6rem auto;color:#333"><h1>401 — admin token required</h1><p>Open this page with <code>?token=YOUR_TOKEN</code> appended, or sign in at <a href="/">/</a>.</p></body>')
         return
       }
     }
@@ -2291,7 +2291,7 @@ async function handle(
   }
   if (path.startsWith('/api/admin/workflows')) {
     // P2-M5b — workflow RBAC is ON only when the identity store actually
-    // carries the grant methods (a current @aipehub/identity); otherwise the
+    // carries the grant methods (a current @gotong/identity); otherwise the
     // routes see `grants: undefined` and skip RBAC (back-compat). The web
     // IdentitySurface intentionally doesn't model identity's full API, so we
     // runtime-check + cast rather than widen the structural type.
@@ -3279,7 +3279,7 @@ function findHumanWithPending(hub: Hub, taskId: TaskId): HumanParticipant | unde
 // agents-routes.ts / uploads-routes.ts (P3 audit cleanup).
 
 /**
- * Translate a `@aipehub/services-sdk` typed error to an HTTP status.
+ * Translate a `@gotong/services-sdk` typed error to an HTTP status.
  * The web layer doesn't import the sdk's errors (it stays decoupled
  * from the services package). We pattern-match on the error name —
  * those names are stable string constants set in the sdk's

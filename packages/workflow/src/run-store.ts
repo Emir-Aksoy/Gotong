@@ -3,10 +3,10 @@
  *
  * Layout (under the space root, alongside `transcript.jsonl` and friends):
  *
- *   .aipehub/
+ *   .gotong/
  *     workflows/
  *       definitions/             — optional: workflow defs that auto-load on host start
- *         editorial-flow.yaml    — content matches `aipehub.workflow/v1` schema
+ *         editorial-flow.yaml    — content matches `gotong.workflow/v1` schema
  *         …
  *       runs/                    — one JSON per run, written atomically
  *         <runId>.json
@@ -17,7 +17,7 @@
  *                                  / metrics walk, so they stay O(tail)
  *
  * Why files, not memory:
- *   - Stays consistent with AipeHub's v2.0 "file-first" promise. Drop the
+ *   - Stays consistent with Gotong's v2.0 "file-first" promise. Drop the
  *     directory → drop the workflow state. Copy it → hand it off.
  *   - Lets an operator inspect a half-run workflow with `jq` / `cat`.
  *   - Sets up v0.2 resume (scan the runs/ dir on startup, restart anything
@@ -92,7 +92,7 @@ export interface RunStatusCounts {
 }
 
 /**
- * RunStore — owns the on-disk shape of `.aipehub/workflows/`.
+ * RunStore — owns the on-disk shape of `.gotong/workflows/`.
  */
 export class RunStore {
   readonly root: string
@@ -101,7 +101,7 @@ export class RunStore {
   readonly archiveDir: string
 
   /**
-   * @param spaceRoot The space root directory (e.g. `.aipehub`).
+   * @param spaceRoot The space root directory (e.g. `.gotong`).
    *                  The store appends `workflows/runs/` etc. underneath.
    */
   constructor(spaceRoot: string) {
@@ -227,7 +227,7 @@ export class RunStore {
       try {
         state = await this.read(id)
       } catch (err) {
-        console.error(`[aipehub-workflow] skipping unreadable run ${id}: ${err instanceof Error ? err.message : String(err)}`)
+        console.error(`[gotong-workflow] skipping unreadable run ${id}: ${err instanceof Error ? err.message : String(err)}`)
         continue
       }
       if (!state) continue
@@ -271,7 +271,7 @@ export class RunStore {
         state = await this.read(id)
       } catch (err) {
         console.error(
-          `[aipehub-workflow] countRuns: skipping unreadable run ${id}: ${err instanceof Error ? err.message : String(err)}`,
+          `[gotong-workflow] countRuns: skipping unreadable run ${id}: ${err instanceof Error ? err.message : String(err)}`,
         )
         continue
       }
@@ -321,7 +321,7 @@ export class RunStore {
         state = await this.read(id)
       } catch (err) {
         console.error(
-          `[aipehub-workflow] archiveRuns: skipping unreadable run ${id}: ${err instanceof Error ? err.message : String(err)}`,
+          `[gotong-workflow] archiveRuns: skipping unreadable run ${id}: ${err instanceof Error ? err.message : String(err)}`,
         )
         continue
       }

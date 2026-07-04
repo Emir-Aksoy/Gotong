@@ -122,7 +122,7 @@ export interface Principal { kind: PrincipalKind; id: string }
   vault 一行不改，统一词汇通过桥进出。`agent` 主体故意在 `toVaultOwner` 抛错——vault
   今天没有 agent owner kind，把它当合法静默写进去比报错更糟（agent 凭证归属是 Stream A）。
 
-从 `@aipehub/identity` 导出（type + 值两组）。
+从 `@gotong/identity` 导出（type + 值两组）。
 
 ---
 

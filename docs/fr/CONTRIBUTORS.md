@@ -3,7 +3,7 @@
 <!-- doc-version: 1.0 -->
 > **Version du document 1.0** · Traduction française · Mis à jour le 2026-06-27 · Source faisant autorité : [English](../../CONTRIBUTORS.md). En cas de divergence entre la traduction et la version anglaise, la version anglaise prévaut.
 
-Ce fichier recense les personnes qui construisent AipeHub — et **chaque type de
+Ce fichier recense les personnes qui construisent Gotong — et **chaque type de
 contribution compte, grande ou petite, pas seulement le code.** Écrire le tutoriel
 qui fait enfin comprendre la fédération, donner la conférence qui amène cinquante
 personnes au projet, traduire la documentation dans une langue que l'équipe centrale
@@ -68,7 +68,7 @@ inférieure.
    bot, pas de cérémonie.
 
 Si votre contribution est un **matériel d'apprentissage** — une vidéo, un tutoriel ou
-une conférence qui enseigne bien AipeHub — il peut *aussi* être mis en valeur dans
+une conférence qui enseigne bien Gotong — il peut *aussi* être mis en valeur dans
 [`LEARN.md`](LEARN.md), la vitrine vers laquelle les nouveaux sont orientés. Être
 enregistré ici et être mis en valeur là-bas sont deux actes de reconnaissance distincts ;
 un excellent tutoriel mérite les deux.

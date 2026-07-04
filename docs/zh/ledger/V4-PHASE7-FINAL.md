@@ -64,7 +64,7 @@
 - bootstrap 写默认 `org_mode='personal'`
 - 自动 promote (3 处触发): `createInvitation` / `createUser>1` /
   `acceptInvitation`
-- host main.ts 读 env `AIPE_MODE=personal | team` pin
+- host main.ts 读 env `GOTONG_MODE=personal | team` pin
 
 ### M5 — SPA 首屏分流 (web UI)
 - 新 endpoint `GET /api/me/mode` → `{ mode, canUpgrade }`
@@ -211,9 +211,9 @@ pnpm -r build
 pnpm -r test
 
 # 单包
-pnpm --filter @aipehub/identity test
-pnpm --filter @aipehub/host test
-pnpm --filter @aipehub/web test
+pnpm --filter @gotong/identity test
+pnpm --filter @gotong/host test
+pnpm --filter @gotong/web test
 
 # 个人模式 smoke
 docker compose up

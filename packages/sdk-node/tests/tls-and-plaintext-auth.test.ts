@@ -29,7 +29,7 @@
 
 import { describe, expect, it } from 'vitest'
 
-import { AgentParticipant, type Task } from '@aipehub/core'
+import { AgentParticipant, type Task } from '@gotong/core'
 
 import { connect } from '../src/index.js'
 import { isLoopbackHost, type ConnectOptions } from '../src/session.js'
@@ -110,7 +110,7 @@ describe('H10 — apiKey over plaintext ws:// to remote', () => {
   it('does NOT throw the H10 error on ws:// + apiKey + loopback (dev workflow)', async () => {
     // No server listening on port 1 — connect() will fail with a
     // socket/timeout error eventually. But the failure must NOT be
-    // H10: that would break the default `aipehub ping` template.
+    // H10: that would break the default `gotong ping` template.
     let err: Error | undefined
     try {
       await connect({

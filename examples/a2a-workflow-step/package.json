@@ -1,5 +1,5 @@
 {
-  "name": "@aipehub/example-a2a-workflow-step",
+  "name": "@gotong/example-a2a-workflow-step",
   "version": "0.0.0",
   "type": "module",
   "private": true,
@@ -9,8 +9,8 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@aipehub/core": "workspace:*",
-    "@aipehub/workflow": "workspace:*",
-    "@aipehub/a2a": "workspace:*"
+    "@gotong/core": "workspace:*",
+    "@gotong/workflow": "workspace:*",
+    "@gotong/a2a": "workspace:*"
   }
 }

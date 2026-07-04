@@ -15,7 +15,7 @@
  * off-whitelist topic", so this milestone can focus on closing the parent's approval loop
  * over IM: notify → approve/reject (IM or /me) → push the result back. One concern at a time.
  *
- * The same flow works against the 6 real `@aipehub/im-*` bridges — swap `FakeBridge` for
+ * The same flow works against the 6 real `@gotong/im-*` bridges — swap `FakeBridge` for
  * `new TelegramBridge({ token })` and point the port at the host's real inbox surface. The
  * router, the binding flow, and the push-back are unchanged.
  *
@@ -26,9 +26,9 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { openIdentityStore } from '@aipehub/identity'
-import type { ImMessage, ImUser } from '@aipehub/im-adapter'
-import { FileInboxStore } from '@aipehub/inbox'
+import { openIdentityStore } from '@gotong/identity'
+import type { ImMessage, ImUser } from '@gotong/im-adapter'
+import { FileInboxStore } from '@gotong/inbox'
 
 import { FakeBridge } from './im-oversight/fake-bridge.js'
 import { makeIdentityImBindingResolver } from './im-oversight/identity-resolver.js'
@@ -47,7 +47,7 @@ function assert(cond: boolean, msg: string): void {
 async function main(): Promise<void> {
   console.log('\n=== family-learning-hub — 家长端 IM 监督桥 (C-M2) ===\n')
 
-  const tmpRoot = mkdtempSync(join(tmpdir(), 'aipehub-family-im-'))
+  const tmpRoot = mkdtempSync(join(tmpdir(), 'gotong-family-im-'))
   const identity = openIdentityStore({ dbPath: ':memory:' })
   try {
     // -- 1. Identity: two SOVEREIGN parents, each guarding their own child. --

@@ -20,7 +20,7 @@
  * fetch it on demand.
  */
 
-import type { ImAttachment, ImMessage, ImUser } from '@aipehub/im-adapter'
+import type { ImAttachment, ImMessage, ImUser } from '@gotong/im-adapter'
 
 import type { MatrixMessageContent, MatrixRoomEvent } from './types.js'
 

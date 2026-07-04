@@ -51,7 +51,7 @@ describe('parseImCommand', () => {
   })
 
   it('strips bot-mention suffix from verb', () => {
-    expect(parseImCommand('/bind@MyAipeBot 123456')).toEqual({
+    expect(parseImCommand('/bind@MyGotongBot 123456')).toEqual({
       kind: 'bind',
       code: '123456',
     })

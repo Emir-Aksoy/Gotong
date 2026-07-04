@@ -1,6 +1,6 @@
-# @aipehub/a2a
+# @gotong/a2a
 
-Agent2Agent (A2A) interop primitives for AipeHub — the **blocking
+Agent2Agent (A2A) interop primitives for Gotong — the **blocking
 `message/send`** subset of [A2A 0.2.5](https://a2a-protocol.org), shared by
 both directions of a federation edge:
 
@@ -19,10 +19,10 @@ all `false` to stay honest about that.
 ## `a2aSend`
 
 ```ts
-import { a2aSend } from '@aipehub/a2a'
+import { a2aSend } from '@gotong/a2a'
 
 const reply = await a2aSend('https://hub.example.com/a2a', token, 'hello', {
-  peerId: 'my-hub',        // AipeHub→AipeHub: adds X-Aipe-Peer-Id
+  peerId: 'my-hub',        // Gotong→Gotong: adds X-Gotong-Peer-Id
   fetchImpl: myFetch,      // inject for tests / non-global fetch
 })
 ```
@@ -32,6 +32,6 @@ transport error, non-2xx, non-JSON body, or a JSON-RPC error result.
 
 ## Why a separate package
 
-Same rationale as `@aipehub/inbox`: a tiny, focused contract that both the host
+Same rationale as `@gotong/inbox`: a tiny, focused contract that both the host
 (server side) and the participant (client side) depend on, without either
 reaching into the other.

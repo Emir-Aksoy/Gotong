@@ -33,7 +33,7 @@ import { fileURLToPath } from 'node:url'
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { Hub, Space, type Logger, type Participant, type Task, type TaskResult } from '@aipehub/core'
+import { Hub, Space, type Logger, type Participant, type Task, type TaskResult } from '@gotong/core'
 
 import { runBroadcastMessage } from '../src/personal-butler-run-broadcast.js'
 import { WorkflowController } from '../src/workflow-controller.js'
@@ -103,7 +103,7 @@ describe('LIFE-L2① — morning-brief schedule loop e2e (real controller + hub 
   let composed: Array<Record<string, unknown>>
 
   beforeEach(async () => {
-    root = await mkdtemp(join(tmpdir(), 'aipe-morning-brief-'))
+    root = await mkdtemp(join(tmpdir(), 'gotong-morning-brief-'))
     const { space } = await Space.init(root, { name: 'morning-brief-e2e' })
     hub = new Hub({ space })
     await hub.start()

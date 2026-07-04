@@ -21,9 +21,9 @@
  * own, so there is no double-write).
  */
 
-import type { Task } from '@aipehub/core'
-import { readAcpCheckpointState, type AcpCheckpointState } from '@aipehub/acp-agent'
-import type { InboxItem } from '@aipehub/inbox'
+import type { Task } from '@gotong/core'
+import { readAcpCheckpointState, type AcpCheckpointState } from '@gotong/acp-agent'
+import type { InboxItem } from '@gotong/inbox'
 
 export interface AcpApprovalItemOptions {
   /** The user who must approve the action (conventionally the org owner). */

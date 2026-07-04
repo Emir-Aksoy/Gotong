@@ -1,4 +1,4 @@
-"""LangGraph adapter — a compiled graph becomes an AipeHub participant.
+"""LangGraph adapter — a compiled graph becomes an Gotong participant.
 
 We never import langgraph: the adapter is duck-typed, so a fake object with
 ``invoke`` / ``ainvoke`` exercises every path. Tests drive ``on_task`` directly
@@ -8,8 +8,8 @@ state mapping + error semantics.
 
 from __future__ import annotations
 
-from aipehub import AgentParticipant
-from aipehub.adapters import LangGraphParticipant, langgraph_participant
+from gotong import AgentParticipant
+from gotong.adapters import LangGraphParticipant, langgraph_participant
 
 
 class FakeSyncGraph:

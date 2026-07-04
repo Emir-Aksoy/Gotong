@@ -1,5 +1,5 @@
 /**
- * MCP tool registry for the AipeHub bridge. Every tool is a thin
+ * MCP tool registry for the Gotong bridge. Every tool is a thin
  * translation: take typed input → call HubClient → render the response
  * back into the MCP `content: [{type: 'text', text: ...}]` shape.
  *

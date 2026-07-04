@@ -13,7 +13,7 @@ import { fileURLToPath } from 'node:url'
 const here = dirname(fileURLToPath(import.meta.url))
 
 async function main(): Promise<void> {
-  console.log('=== AipeHub remote-agent demo ===\n')
+  console.log('=== Gotong remote-agent demo ===\n')
 
   const host = spawn('tsx', [join(here, 'host.ts')], {
     stdio: 'inherit',

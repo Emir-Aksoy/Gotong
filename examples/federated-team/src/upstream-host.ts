@@ -7,14 +7,14 @@
  *
  *   web : 3200
  *   ws  : 4200
- *   space dir: .aipehub-upstream
+ *   space dir: .gotong-upstream
  */
 
-import { Hub, Space, type TranscriptEntry } from '@aipehub/core'
-import { serveWebSocket } from '@aipehub/transport-ws'
-import { serveWeb } from '@aipehub/web'
+import { Hub, Space, type TranscriptEntry } from '@gotong/core'
+import { serveWebSocket } from '@gotong/transport-ws'
+import { serveWeb } from '@gotong/web'
 
-const SPACE_DIR = process.env.AIPE_UPSTREAM_SPACE ?? '.aipehub-upstream'
+const SPACE_DIR = process.env.GOTONG_UPSTREAM_SPACE ?? '.gotong-upstream'
 
 async function main(): Promise<void> {
   const { space, adminToken } = await Space.openOrInit(SPACE_DIR, {

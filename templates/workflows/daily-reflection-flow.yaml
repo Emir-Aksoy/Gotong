@@ -1,6 +1,6 @@
 # =============================================================================
 # Workflow: 每日反思(member-facing 示例)
-# Schema: aipehub.workflow/v1
+# Schema: gotong.workflow/v1
 #
 # 一个最小的「成员工作台」示例:任何登录用户都能从 /me 直接跑,
 # 写下今天的 3 段话,一位反思教练把它读回来、点出一个模式。
@@ -18,7 +18,7 @@
 # 派(/me dispatch 是 fire-and-forget),只是没人接。
 # =============================================================================
 
-schema: aipehub.workflow/v1
+schema: gotong.workflow/v1
 
 workflow:
   id: daily-reflection-flow

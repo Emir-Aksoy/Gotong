@@ -1,5 +1,5 @@
 /**
- * Phase 19 P5-M4 — AipeHub -> Windmill (durable workflow) bridge demo.
+ * Phase 19 P5-M4 — Gotong -> Windmill (durable workflow) bridge demo.
  *
  * The Hub dispatches a task to a `WindmillParticipant`; the participant hands
  * the work to a durable external engine, which persists the job and runs it
@@ -12,7 +12,7 @@
  * finishes). `start` exits 0 on success — no Windmill account, no network.
  */
 
-import { AgentParticipant, Hub } from '@aipehub/core'
+import { AgentParticipant, Hub } from '@gotong/core'
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import { strict as assert } from 'node:assert'
 
@@ -71,7 +71,7 @@ class NoteAgent extends AgentParticipant {
 }
 
 async function main(): Promise<void> {
-  console.log('\n=== AipeHub demo: windmill-bridge (Phase 19 P5-M4) ===\n')
+  console.log('\n=== Gotong demo: windmill-bridge (Phase 19 P5-M4) ===\n')
 
   const wm = fakeWindmill()
   await new Promise<void>((resolve) => wm.listen(0, '127.0.0.1', () => resolve()))

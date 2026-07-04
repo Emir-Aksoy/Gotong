@@ -48,7 +48,7 @@ import {
   installPeerLink,
   type HubLink,
   type Task,
-} from '@aipehub/core'
+} from '@gotong/core'
 
 import { WorkflowController } from '../src/workflow-controller.js'
 import { PeerTranscriptHost, denyPeerTranscriptRpc } from '../src/peer-transcript.js'
@@ -59,7 +59,7 @@ const PEER_CAP = 'contract-review'
 // ordinary `{kind:capability}` dispatch — cross-hub orchestration is just
 // capability dispatch where the capability lives on a peer.
 const WORKFLOW_YAML = `
-schema: aipehub.workflow/v1
+schema: gotong.workflow/v1
 workflow:
   id: cross-hub-flow
   name: cross-hub orchestration

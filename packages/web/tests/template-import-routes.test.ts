@@ -14,7 +14,7 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { Hub, Space } from '@aipehub/core'
+import { Hub, Space } from '@gotong/core'
 
 import { serveWeb, type WebServerHandle, type WorkflowSurface } from '../src/server.js'
 import { encryptJson } from '../src/template-crypto.js'
@@ -31,7 +31,7 @@ interface Boot {
 let b: Boot
 
 beforeEach(async () => {
-  const tmp = await mkdtemp(join(tmpdir(), 'aipehub-tmpl-import-'))
+  const tmp = await mkdtemp(join(tmpdir(), 'gotong-tmpl-import-'))
   const init = await Space.init(tmp, { name: 'tmpl-import-test' })
   const space = init.space
   const hub = new Hub({ space })
@@ -88,7 +88,7 @@ function agentBlock(over: Record<string, unknown> = {}): Record<string, unknown>
 }
 
 function templateText(t: Record<string, unknown>): string {
-  return JSON.stringify({ schema: 'aipehub.template/v1', template: t })
+  return JSON.stringify({ schema: 'gotong.template/v1', template: t })
 }
 
 describe('POST /api/admin/templates/import (v5 B-M4)', () => {
@@ -166,7 +166,7 @@ describe('POST /api/admin/templates/import (v5 B-M4)', () => {
   function encryptedTemplate(sidecar: unknown): { text: string; key: string } {
     const { blob, keyB64 } = encryptJson(sidecar)
     const text = JSON.stringify({
-      schema: 'aipehub.template/v1',
+      schema: 'gotong.template/v1',
       template: {
         name: 'with-secrets',
         version: 1,

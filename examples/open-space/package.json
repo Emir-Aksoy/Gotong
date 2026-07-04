@@ -1,5 +1,5 @@
 {
-  "name": "@aipehub/example-open-space",
+  "name": "@gotong/example-open-space",
   "version": "0.0.0",
   "type": "module",
   "private": true,
@@ -11,9 +11,9 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@aipehub/core": "workspace:*",
-    "@aipehub/transport-ws": "workspace:*",
-    "@aipehub/sdk-node": "workspace:*",
-    "@aipehub/web": "workspace:*"
+    "@gotong/core": "workspace:*",
+    "@gotong/transport-ws": "workspace:*",
+    "@gotong/sdk-node": "workspace:*",
+    "@gotong/web": "workspace:*"
   }
 }

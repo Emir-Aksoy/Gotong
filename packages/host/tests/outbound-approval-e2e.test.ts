@@ -31,9 +31,9 @@ import {
   createInprocHubLinkPair,
   installPeerLink,
   type Task,
-} from '@aipehub/core'
-import { openIdentityStore, type IdentityStore } from '@aipehub/identity'
-import { FileInboxStore, NEVER_RESUME_AT } from '@aipehub/inbox'
+} from '@gotong/core'
+import { openIdentityStore, type IdentityStore } from '@gotong/identity'
+import { FileInboxStore, NEVER_RESUME_AT } from '@gotong/inbox'
 
 import { ApprovalGatedParticipant } from '../src/outbound-approval.js'
 import { HostInboxService } from '../src/inbox-service.js'
@@ -116,7 +116,7 @@ describe('Phase 18 B-M3b — outbound approval gate acceptance gate', () => {
     rmSync(tmp, { recursive: true, force: true })
   })
 
-  async function dispatchGated(): Promise<import('@aipehub/core').TaskResult> {
+  async function dispatchGated(): Promise<import('@gotong/core').TaskResult> {
     return hubA.dispatch({
       from: 'admin',
       strategy: { kind: 'capability', capabilities: [CAP] },

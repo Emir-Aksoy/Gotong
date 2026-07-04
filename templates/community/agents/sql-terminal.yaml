@@ -5,7 +5,7 @@
 #             schema (Products / Users / Orders / Suppliers) inline so user
 #             doesn't need to re-explain on every dispatch; tuned for
 #             task-payload model.
-schema: aipehub.agent/v1
+schema: gotong.agent/v1
 agent:
   id: sql-terminal
   displayName: SQL 终端模拟器

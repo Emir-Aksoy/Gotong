@@ -1,6 +1,6 @@
 # Cross-org federation — two-machine operator runbook
 
-> Connect two AipeHub hosts **on different machines** (org A and
+> Connect two Gotong hosts **on different machines** (org A and
 > org B) over a real WebSocket so that one hub's workflows can
 > orchestrate the other hub's capabilities — while **credentials /
 > data / billing stay with their own org**. This is the go-live
@@ -32,7 +32,7 @@
    record points at the WebSocket endpoint where the **other** hub is
    reachable (`wss://partner.example.com:4000`, or behind a reverse
    proxy `wss://…/`). The federation port is shared with remote
-   agents on the same `AIPE_WS_PORT` (default 4000) — the HELLO frame
+   agents on the same `GOTONG_WS_PORT` (default 4000) — the HELLO frame
    demultiplexes itself.
 
 3. **The framework does not make trust decisions for you.** The link
@@ -61,8 +61,8 @@
 
 On each of the two machines:
 
-- A production host running (`aipehub-host`, the bin of
-  `@aipehub/host`; in the source repo use `pnpm host`), **with an
+- A production host running (`gotong-host`, the bin of
+  `@gotong/host`; in the source repo use `pnpm host`), **with an
   identity store wired** (federation records live in identity's
   `peers` table + vault). How to start a local production host with
   identity: see [`zh/DEPLOY.md`](zh/DEPLOY.md).
@@ -72,22 +72,22 @@ On each of the two machines:
   endpoint and vice versa (both directions — federation is symmetric).
 - **TLS strongly recommended**: use `wss://` across the public
   internet (a reverse proxy — Caddy / nginx — terminates TLS and
-  forwards to the local `AIPE_WS_PORT`). Plaintext `ws://` only on a
+  forwards to the local `GOTONG_WS_PORT`). Plaintext `ws://` only on a
   trusted LAN / same-machine demos.
 
-Relevant environment variables (host side, read by `aipehub-host`):
+Relevant environment variables (host side, read by `gotong-host`):
 
 | Env | Default | Effect |
 |---|---|---|
-| `AIPE_HOST` | `127.0.0.1` | Bind address for the HTTP and ws servers. For public exposure set `0.0.0.0` or a specific interface (better: let only the reverse proxy reach the box and keep the hub bound to `127.0.0.1`). |
-| `AIPE_WS_PORT` | `4000` | WebSocket port — **shared by remote agents and inbound peer HELLOs**. This is the port the other side's `endpointUrl` must point at. |
-| `AIPE_WEB_PORT` | `3000` | Admin UI + API (where the owner configures peers and approves outbound). Do **not** use this port as a peer endpoint. |
-| `AIPE_PEERS_DISABLED` | (unset) | Set `1` to turn federation off entirely (no outbound dialing, no inbound accepts). |
-| `AIPE_PEER_POLL_MS` | `5000` | Outbound dial/reconnect tick (ms). Peer-record changes take effect at the next tick at the latest. |
-| `AIPE_TRUST_PROXY` | (unset) | Set `1` to let inbound rate limiting read `X-Forwarded-For` — **only when the hub really sits behind a reverse proxy**. |
-| `AIPE_PEER_INBOUND_RATE_MAX` | `60` | Max HELLOs per IP per window (anti token brute-force). |
-| `AIPE_PEER_INBOUND_RATE_WINDOW_MS` | `60000` | The window (ms) for the limit above. |
-| `AIPE_PEER_LINK_QUOTA_WINDOW_MS` | `60000` | Counting window (ms) for the per-link inbound quota; the budget itself is the peer record's `perLinkQuotaBudget`. |
+| `GOTONG_HOST` | `127.0.0.1` | Bind address for the HTTP and ws servers. For public exposure set `0.0.0.0` or a specific interface (better: let only the reverse proxy reach the box and keep the hub bound to `127.0.0.1`). |
+| `GOTONG_WS_PORT` | `4000` | WebSocket port — **shared by remote agents and inbound peer HELLOs**. This is the port the other side's `endpointUrl` must point at. |
+| `GOTONG_WEB_PORT` | `3000` | Admin UI + API (where the owner configures peers and approves outbound). Do **not** use this port as a peer endpoint. |
+| `GOTONG_PEERS_DISABLED` | (unset) | Set `1` to turn federation off entirely (no outbound dialing, no inbound accepts). |
+| `GOTONG_PEER_POLL_MS` | `5000` | Outbound dial/reconnect tick (ms). Peer-record changes take effect at the next tick at the latest. |
+| `GOTONG_TRUST_PROXY` | (unset) | Set `1` to let inbound rate limiting read `X-Forwarded-For` — **only when the hub really sits behind a reverse proxy**. |
+| `GOTONG_PEER_INBOUND_RATE_MAX` | `60` | Max HELLOs per IP per window (anti token brute-force). |
+| `GOTONG_PEER_INBOUND_RATE_WINDOW_MS` | `60000` | The window (ms) for the limit above. |
+| `GOTONG_PEER_LINK_QUOTA_WINDOW_MS` | `60000` | Counting window (ms) for the per-link inbound quota; the budget itself is the peer record's `perLinkQuotaBudget`. |
 
 ---
 
@@ -101,7 +101,7 @@ registration actions mirror each other — marked "machine A" /
 ### Step 1 — mint the token (on machine A, once)
 
 ```bash
-aipehub mint-peer-token --peer-id=org-b --endpoint=wss://hub-b.example.com:4000
+gotong mint-peer-token --peer-id=org-b --endpoint=wss://hub-b.example.com:4000
 ```
 
 - Output: **one line, a 256-bit base64url token** on **stdout**
@@ -120,11 +120,11 @@ aipehub mint-peer-token --peer-id=org-b --endpoint=wss://hub-b.example.com:4000
 
 ### Step 2 — expose the ws endpoint (both machines)
 
-Make sure the other side can dial your `AIPE_WS_PORT`:
+Make sure the other side can dial your `GOTONG_WS_PORT`:
 
 - Production: a reverse proxy terminates TLS for
   `wss://hub-a.example.com/` → forwards to local `127.0.0.1:4000`,
-  with `AIPE_TRUST_PROXY=1` set.
+  with `GOTONG_TRUST_PROXY=1` set.
 - Firewall: allow the other side's source IP to that port.
 - Self-check: from the other machine,
   `curl -i http://<your-ws-host>:4000/` (or `wscat`) connecting at
@@ -191,7 +191,7 @@ of them are per-link and never bleed across links.**
 | `outboundCaps` | `string[]` \| `null` | **Outbound** capability allowlist. `null` = **nothing leaves** (fail-closed); `[]` equally locked. Listed capabilities are both **advertised** to this side's workflows (routable to the peer) and **authorized** to leave — advertisement = authorization. |
 | `requireApprovalOutbound` | `boolean` | On an outbound hit, the task **parks into the owner's `/me` inbox**; only an approval lets it actually cross the socket. Turn this on for anything sensitive. |
 | `allowedDataClasses` | `string[]` \| `null` | Data classes an outbound task may carry. `null` = all allowed; `[]` = locked. Judged at the outbound gate against each node's `dataClasses`. |
-| `perLinkQuotaBudget` | `number` \| `null` | **Inbound** task cap per `AIPE_PEER_LINK_QUOTA_WINDOW_MS` window. `null` = unlimited. Over budget fails closed. |
+| `perLinkQuotaBudget` | `number` \| `null` | **Inbound** task cap per `GOTONG_PEER_LINK_QUOTA_WINDOW_MS` window. `null` = unlimited. Over budget fails closed. |
 | `allowedKnowledgeBases` | `string[]` \| `null` | Allowlist of shared KBs (MCP server names) the peer may call. `null` = anything shared is callable; `[]` = locked. |
 | `revocationState` | `'active'` \| `'revoked'` | Revocation switch. Setting `revoked` → tears down the link + rejects inbound + refuses at the wire layer — all three gates drop. It is **never** silently cleared to null. |
 | `shareSummary` | `boolean` | Opt-in to share a **privacy-safe counts summary** (assets/activity/health — never raw rows) with the peer's control plane via the `peer.summary` RPC. Off by default. |
@@ -222,7 +222,7 @@ Import a workflow on org A where one step dispatches a capability
 ordinary capability dispatch:
 
 ```yaml
-schema: aipehub.workflow/v1
+schema: gotong.workflow/v1
 workflow:
   id: cross-org-contract-review
   trigger: { capability: legal:start }
@@ -281,7 +281,7 @@ on the socket, the local archive step never executes.
       the vault on write and never echoed back; rotate by PATCHing a
       new value.
 - [ ] **`wss://` only** across the public internet; behind a reverse
-      proxy set `AIPE_TRUST_PROXY=1` and scope the firewall by source
+      proxy set `GOTONG_TRUST_PROXY=1` and scope the firewall by source
       IP.
 - [ ] **Minimize `outboundCaps`** — list only what you actually use;
       `null`/`[]` = locked.
@@ -292,7 +292,7 @@ on the socket, the local archive step never executes.
 - [ ] **`perLinkQuotaBudget`** caps inbound so a peer can't flood
       you.
 - [ ] Don't raise the inbound rate limit
-      `AIPE_PEER_INBOUND_RATE_MAX` too far (the default 60/minute is
+      `GOTONG_PEER_INBOUND_RATE_MAX` too far (the default 60/minute is
       enough against brute force).
 - [ ] On incident or end of partnership: set the peer's
       `revocationState` to `revoked` (all three gates drop), or
@@ -307,13 +307,13 @@ on the socket, the local archive step never executes.
 
 | Symptom | Likely cause / fix |
 |---|---|
-| `GET …/peers` keeps showing `connected: false`, `backoffAttempts` climbing | Endpoint unreachable: verify `endpointUrl` (the other side's ws host + `AIPE_WS_PORT`), firewall, TLS certificate. From your machine `curl`/`wscat` the other endpoint to verify the network. |
+| `GET …/peers` keeps showing `connected: false`, `backoffAttempts` climbing | Endpoint unreachable: verify `endpointUrl` (the other side's ws host + `GOTONG_WS_PORT`), firewall, TLS certificate. From your machine `curl`/`wscat` the other endpoint to verify the network. |
 | Handshake closed, logs say `closed during handshake` / `peer_disconnected` | **Token mismatch** (the two sides don't hold the same string) or `expectedPeerId` mismatch. Note: the rejecting side **does not return the failure reason** (anti-enumeration) — the dialing side only sees "link closed". Check the **accepting** side's logs for the precise reason. Re-align the token (Steps 1/3). |
 | Workflow step reports `no_participant` / never routes to the peer | Org B isn't advertising the capability: check that B actually serves it, and that A's `outboundCaps` lists it (advertisement = authorization — if unlisted it is neither advertised nor authorized). Retry after `peer-manifests/refresh`. |
 | Outbound fails with `outbound_capability_denied:<cap>` | The capability is missing from A's `outboundCaps` allowlist — add it (Step 4). |
-| Inbound rejected, the peer reports quota | `perLinkQuotaBudget` hit: raise the budget or widen `AIPE_PEER_LINK_QUOTA_WINDOW_MS`. |
+| Inbound rejected, the peer reports quota | `perLinkQuotaBudget` hit: raise the budget or widen `GOTONG_PEER_LINK_QUOTA_WINDOW_MS`. |
 | Run sits parked forever | Almost certainly the outbound approval gate waiting on a human: the owner should visit the `/me` inbox (Step 7). The amber "awaiting your approval" badge + deep link in the admin run detail jumps straight there. |
-| Peer-record change has no effect | Outbound dialing ticks every `AIPE_PEER_POLL_MS` (default 5 s); takes effect by the next tick at the latest. Revocation / contract changes propagate immediately through all three install points. |
+| Peer-record change has no effect | Outbound dialing ticks every `GOTONG_PEER_POLL_MS` (default 5 s); takes effect by the next tick at the latest. Revocation / contract changes propagate immediately through all three install points. |
 
 ---
 

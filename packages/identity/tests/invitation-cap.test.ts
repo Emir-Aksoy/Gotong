@@ -4,7 +4,7 @@
  *
  * Coverage:
  *   - cap default = 1000 (no env)
- *   - cap honored from AIPE_MAX_PENDING_INVITES env
+ *   - cap honored from GOTONG_MAX_PENDING_INVITES env
  *   - createInvitation succeeds at cap-1, throws at cap
  *   - revokeInvitation frees a slot (cap counts active-pending only)
  *   - accepted invites don't count
@@ -30,10 +30,10 @@ import {
 describe('IdentityStore.createInvitation — hard cap (Phase 6 #9)', () => {
   let dir: string
   let store: IdentityStore
-  const origEnv = process.env.AIPE_MAX_PENDING_INVITES
+  const origEnv = process.env.GOTONG_MAX_PENDING_INVITES
 
   beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), 'aipehub-invite-cap-'))
+    dir = mkdtempSync(join(tmpdir(), 'gotong-invite-cap-'))
     store = openIdentityStore({
       dbPath: join(dir, 'identity.sqlite'),
       masterKey: randomBytes(MASTER_KEY_LEN_BYTES),
@@ -42,8 +42,8 @@ describe('IdentityStore.createInvitation — hard cap (Phase 6 #9)', () => {
   afterEach(() => {
     store.close()
     rmSync(dir, { recursive: true, force: true })
-    if (origEnv === undefined) delete process.env.AIPE_MAX_PENDING_INVITES
-    else process.env.AIPE_MAX_PENDING_INVITES = origEnv
+    if (origEnv === undefined) delete process.env.GOTONG_MAX_PENDING_INVITES
+    else process.env.GOTONG_MAX_PENDING_INVITES = origEnv
   })
 
   it('countActivePendingInvitations starts at 0', () => {
@@ -60,8 +60,8 @@ describe('IdentityStore.createInvitation — hard cap (Phase 6 #9)', () => {
     expect(store.countActivePendingInvitations()).toBe(0)
   })
 
-  it('cap honored from AIPE_MAX_PENDING_INVITES env', () => {
-    process.env.AIPE_MAX_PENDING_INVITES = '3'
+  it('cap honored from GOTONG_MAX_PENDING_INVITES env', () => {
+    process.env.GOTONG_MAX_PENDING_INVITES = '3'
     store.createInvitation({ email: 'one@t.test' })
     store.createInvitation({ email: 'two@t.test' })
     store.createInvitation({ email: 'three@t.test' })
@@ -78,7 +78,7 @@ describe('IdentityStore.createInvitation — hard cap (Phase 6 #9)', () => {
   })
 
   it('invalid env values fall back to default 1000', () => {
-    process.env.AIPE_MAX_PENDING_INVITES = 'not-a-number'
+    process.env.GOTONG_MAX_PENDING_INVITES = 'not-a-number'
     // No cap hit at 5 invites — default is still 1000.
     for (let i = 0; i < 5; i++) {
       store.createInvitation({ email: `nan${i}@t.test` })
@@ -87,7 +87,7 @@ describe('IdentityStore.createInvitation — hard cap (Phase 6 #9)', () => {
   })
 
   it('zero env value also falls back to default 1000', () => {
-    process.env.AIPE_MAX_PENDING_INVITES = '0'
+    process.env.GOTONG_MAX_PENDING_INVITES = '0'
     // Sanity: zero would mean "no invites allowed at all" — we treat
     // it as misconfiguration and use the default.
     expect(() =>
@@ -96,14 +96,14 @@ describe('IdentityStore.createInvitation — hard cap (Phase 6 #9)', () => {
   })
 
   it('negative env value also falls back to default 1000', () => {
-    process.env.AIPE_MAX_PENDING_INVITES = '-5'
+    process.env.GOTONG_MAX_PENDING_INVITES = '-5'
     expect(() =>
       store.createInvitation({ email: 'neg@t.test' }),
     ).not.toThrow()
   })
 
   it('revoking a pending invite frees a slot under the cap', () => {
-    process.env.AIPE_MAX_PENDING_INVITES = '2'
+    process.env.GOTONG_MAX_PENDING_INVITES = '2'
     const a = store.createInvitation({ email: 'fillA@t.test' })
     store.createInvitation({ email: 'fillB@t.test' })
     // Cap reached.
@@ -118,7 +118,7 @@ describe('IdentityStore.createInvitation — hard cap (Phase 6 #9)', () => {
   })
 
   it('cap message includes current/limit ratio', () => {
-    process.env.AIPE_MAX_PENDING_INVITES = '2'
+    process.env.GOTONG_MAX_PENDING_INVITES = '2'
     store.createInvitation({ email: 'msg1@t.test' })
     store.createInvitation({ email: 'msg2@t.test' })
     try {
@@ -164,7 +164,7 @@ describe('IdentityStore.createInvitation — hard cap (Phase 6 #9)', () => {
   })
 
   it('expired-but-not-revoked invites do NOT count toward the cap', () => {
-    process.env.AIPE_MAX_PENDING_INVITES = '2'
+    process.env.GOTONG_MAX_PENDING_INVITES = '2'
     // Mint with a 1ms TTL; after a tick, the row is computed-expired
     // even though status='pending' in the table. The cap predicate
     // (`expires_at >= now`) skips it.

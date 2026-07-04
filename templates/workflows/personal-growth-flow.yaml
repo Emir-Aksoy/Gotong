@@ -1,7 +1,7 @@
 # =============================================================================
 # Workflow: 个人成长发展路径（实战级）
 # Companion team: templates/teams/personal-growth-team.yaml
-# Schema: aipehub.workflow/v1
+# Schema: gotong.workflow/v1
 #
 # 这条工作流帮一个具体的人把接下来 3-12 个月的发展路径想清楚。
 # 不替代医生 / 心理咨询师 / 财务顾问 / 关系治疗师 —— 触及红旗会主动
@@ -54,7 +54,7 @@
 #   - workflow mcp_servers 字段挂 brave-search 或本地知识库 MCP server
 # =============================================================================
 
-schema: aipehub.workflow/v1
+schema: gotong.workflow/v1
 
 workflow:
   id: personal-growth-flow

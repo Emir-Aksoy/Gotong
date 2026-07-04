@@ -1,13 +1,13 @@
-# 部署视角 · `AIPE_PROFILE`
+# 部署视角 · `GOTONG_PROFILE`
 
-> 一句话：AipeHub 真正的分界是**「hub 内 vs 跨 hub」**，不是「个人 vs 组织」。
-> `AIPE_PROFILE` 只是让入口先讲哪一套心智——它是**呈现视角，不是行为开关**。
+> 一句话：Gotong 真正的分界是**「hub 内 vs 跨 hub」**，不是「个人 vs 组织」。
+> `GOTONG_PROFILE` 只是让入口先讲哪一套心智——它是**呈现视角，不是行为开关**。
 
 ---
 
 ## 为什么要这个
 
-「个人版 vs 企业版」是别的产品的分法。在 AipeHub 里，节点单位是 **hub**：
+「个人版 vs 企业版」是别的产品的分法。在 Gotong 里，节点单位是 **hub**：
 
 - **一个人 + 自己的 agent = 主权 hub**（sovereign hub）——主权在你手里，凭证只在本机；
 - **一簇 agent 也能组成非主权 hub**（主权在外部）；
@@ -17,13 +17,13 @@
 还是**多个 hub 相连**的事」。**团队和组织其实都归「跨 hub」**——它们只是 hub 数量更多、
 边界更多，不是另一个物种。
 
-`AIPE_PROFILE` 把这个分界摆到首屏，让新用户不用先读完架构文档就知道自己站在哪一档。
+`GOTONG_PROFILE` 把这个分界摆到首屏，让新用户不用先读完架构文档就知道自己站在哪一档。
 
 ---
 
 ## 两档 + 默认
 
-| `AIPE_PROFILE` | 视角 | 入口先展示什么 | 深读 |
+| `GOTONG_PROFILE` | 视角 | 入口先展示什么 | 深读 |
 |---|---|---|---|
 | `hub` | **hub 内（单节点）** | 个人管家 · 模板画廊一键装 · hub 内工作流 · `/me` 收件箱 · MCP 连接器 | [`HANDS-ON-HUBS.md`](HANDS-ON-HUBS.md) |
 | `federation` | **跨 hub（多节点相连）** | peer 注册与信任契约 · 跨 hub 工作流编排 · 出站 A2A · 联邦能力 manifest · 两机操作员 runbook | [`FEDERATION-RUNBOOK.md`](FEDERATION-RUNBOOK.md) |
@@ -32,9 +32,9 @@
 设置方式就是一个环境变量：
 
 ```bash
-AIPE_PROFILE=hub         aipehub start      # 先看 hub 内
-AIPE_PROFILE=federation  aipehub start      # 先看跨 hub
-aipehub start                               # 不设 = 今天的样子
+GOTONG_PROFILE=hub         gotong start      # 先看 hub 内
+GOTONG_PROFILE=federation  gotong start      # 先看跨 hub
+gotong start                               # 不设 = 今天的样子
 ```
 
 大小写、首尾空格、下划线都不敏感（`Single_Node`、`CROSS_HUB` 都认）。几个常见同义词
@@ -45,7 +45,7 @@ aipehub start                               # 不设 = 今天的样子
 启动时（`hub`/`federation` 档）会在「host ready」摘要后多印一小段双语视角：
 
 ```text
-=== AipeHub host ready ===
+=== Gotong host ready ===
 ...
 HostCheck : disabled (loopback only is safe)
 
@@ -56,13 +56,13 @@ HostCheck : disabled (loopback only is safe)
   读 / read:  docs/zh/FEDERATION-RUNBOOK.md
 ```
 
-不设 `AIPE_PROFILE` 时这一段**完全不出现**——`HostCheck` 之后直接是设置向导横幅，和以前一模一样。
+不设 `GOTONG_PROFILE` 时这一段**完全不出现**——`HostCheck` 之后直接是设置向导横幅，和以前一模一样。
 
 ---
 
 ## 一条硬边界：视角 ≠ 行为分叉
 
-**`AIPE_PROFILE` 不启用、也不禁用任何代码路径。** 联邦相关代码（peer registry、
+**`GOTONG_PROFILE` 不启用、也不禁用任何代码路径。** 联邦相关代码（peer registry、
 出站 A2A、HubLink）在 `hub` 档下照常运行；单 hub 的一切在 `federation` 档下也照常运行。
 profile 只决定**先展示什么、文档先读哪**，不碰运行时。
 

@@ -1,9 +1,9 @@
 /**
- * Public surface of @aipehub/services-sdk.
+ * Public surface of @gotong/services-sdk.
  *
  * Two entry points:
- *   - `@aipehub/services-sdk`         (this file)  — runtime
- *   - `@aipehub/services-sdk/testing` (testing.ts) — shared contract suite
+ *   - `@gotong/services-sdk`         (this file)  — runtime
+ *   - `@gotong/services-sdk/testing` (testing.ts) — shared contract suite
  *
  * The split keeps `vitest` out of the runtime dep graph: hosts don't
  * need a test runner installed just to load plugins.

@@ -1,6 +1,6 @@
 # =============================================================================
 # Workflow: 合同审阅 + 法务复核 (contract review with human sign-off)
-# Schema: aipehub.workflow/v1
+# Schema: gotong.workflow/v1
 #
 # 行业模板 #1 (Phase 19 P5-M5). 演示 P5 想讲的「AI 起草 + 人拍板」闭环:
 #   1) AI 抽取合同关键条款 / 义务 / 期限
@@ -20,7 +20,7 @@
 #   contract-memo (任意 LlmAgent 即可; 见 examples/ 里的 provider 接线)。
 # =============================================================================
 
-schema: aipehub.workflow/v1
+schema: gotong.workflow/v1
 
 workflow:
   id: contract-review-flow

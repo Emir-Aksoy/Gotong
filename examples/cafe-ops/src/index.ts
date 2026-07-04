@@ -33,9 +33,9 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { Hub, InMemoryStorage, type ParticipantId, type Task, type TaskResult } from '@aipehub/core'
-import { FileInboxStore, HumanInboxParticipant, type InboxDecision } from '@aipehub/inbox'
-import { parseWorkflow, WorkflowRunner } from '@aipehub/workflow'
+import { Hub, InMemoryStorage, type ParticipantId, type Task, type TaskResult } from '@gotong/core'
+import { FileInboxStore, HumanInboxParticipant, type InboxDecision } from '@gotong/inbox'
+import { parseWorkflow, WorkflowRunner } from '@gotong/workflow'
 
 import { OvertimePolicyStandin, TrainPositionStandin } from './standins.js'
 
@@ -49,9 +49,9 @@ interface ParkedRow {
 }
 
 async function main(): Promise<void> {
-  console.log('\n=== AipeHub case: cafe-ops — an organization hub (奶茶 / 咖啡店门店运营) ===\n')
+  console.log('\n=== Gotong case: cafe-ops — an organization hub (奶茶 / 咖啡店门店运营) ===\n')
 
-  const tmp = mkdtempSync(join(tmpdir(), 'aipehub-cafe-ops-'))
+  const tmp = mkdtempSync(join(tmpdir(), 'gotong-cafe-ops-'))
   const parked = new Map<string, ParkedRow>()
   const inbox = new FileInboxStore(tmp)
   inbox.ensureDirs()
@@ -67,7 +67,7 @@ async function main(): Promise<void> {
   })
   await hub.start()
 
-  // The human-inbox broker (serves `aipehub.human/v1`) + the deterministic
+  // The human-inbox broker (serves `gotong.human/v1`) + the deterministic
   // worker stand-ins (serve cafe.train-position / overtime-policy / schedule-draft).
   hub.register(new HumanInboxParticipant({ store: inbox }))
   hub.register(new TrainPositionStandin())

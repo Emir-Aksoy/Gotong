@@ -20,9 +20,9 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { Hub, Space, type Task } from '@aipehub/core'
-import { AgentParticipant, connect, type Session, type ServiceClient } from '@aipehub/sdk-node'
-import { serveWebSocket, type WebSocketTransportHandle } from '@aipehub/transport-ws'
+import { Hub, Space, type Task } from '@gotong/core'
+import { AgentParticipant, connect, type Session, type ServiceClient } from '@gotong/sdk-node'
+import { serveWebSocket, type WebSocketTransportHandle } from '@gotong/transport-ws'
 
 import { bootstrapServices, type HubServices } from '../src/services/index.js'
 
@@ -53,7 +53,7 @@ describe('integration: services over ws (protocol v1.1)', () => {
   let ws: WebSocketTransportHandle
 
   beforeEach(async () => {
-    tmpRoot = await mkdtemp(join(tmpdir(), 'aipehub-ws-svc-'))
+    tmpRoot = await mkdtemp(join(tmpdir(), 'gotong-ws-svc-'))
     const init = await Space.init(tmpRoot, { name: 'test' })
     space = init.space
     hub = new Hub({ space })
@@ -61,7 +61,7 @@ describe('integration: services over ws (protocol v1.1)', () => {
     // Enable just memory:file — keeps the test free of sqlite native bindings.
     await writeFile(
       join(space.paths.services, 'plugins.json'),
-      JSON.stringify({ plugins: ['@aipehub/service-memory-file'] }),
+      JSON.stringify({ plugins: ['@gotong/service-memory-file'] }),
       'utf8',
     )
     const boot = await bootstrapServices({ space, hub })
@@ -149,7 +149,7 @@ describe('integration: services over ws (protocol v1.1)', () => {
   })
 
   it('forbidden_owner when agent declared only its own scope but tries case-scope', async () => {
-    const { ServiceCallError } = await import('@aipehub/sdk-node')
+    const { ServiceCallError } = await import('@gotong/sdk-node')
     const agent = new CaseAgent('only-self')
     const session: Session = await connect({
       url: ws.url,

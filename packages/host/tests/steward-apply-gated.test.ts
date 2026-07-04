@@ -33,9 +33,9 @@ import { join } from 'node:path'
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { Hub, Space, createLogger, type Task } from '@aipehub/core'
-import { MockLlmProvider } from '@aipehub/llm'
-import { FileInboxStore, NEVER_RESUME_AT } from '@aipehub/inbox'
+import { Hub, Space, createLogger, type Task } from '@gotong/core'
+import { MockLlmProvider } from '@gotong/llm'
+import { FileInboxStore, NEVER_RESUME_AT } from '@gotong/inbox'
 
 import {
   createHubStewardService,
@@ -98,7 +98,7 @@ function fakeWorkflowEditor(calls: { edited: Array<{ workflowId: string }> }): S
         ok: true,
         state: 'published',
         applied: 'published',
-        yaml: 'schema: aipehub.workflow/v1\nid: xhub-wf\n',
+        yaml: 'schema: gotong.workflow/v1\nid: xhub-wf\n',
         explanation: '改好了。',
         boundary: { trigger: 'chat', egress: [] },
       }
@@ -129,7 +129,7 @@ interface Bench {
  *                  the no-broker `needs_approval` degradation.
  */
 async function boot(withInbox = true): Promise<Bench> {
-  const root = await mkdtemp(join(tmpdir(), 'aipe-steward-gated-'))
+  const root = await mkdtemp(join(tmpdir(), 'gotong-steward-gated-'))
 
   // Production-shaped suspend persistence: the scheduler calls this when the
   // broker throws SuspendTaskError. Mirror the host's notifier (taskId-keyed row

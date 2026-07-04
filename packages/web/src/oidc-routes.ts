@@ -19,7 +19,7 @@
  * screen to surface. `/providers` is read by JS, so it speaks JSON.
  *
  * All OIDC detail lives behind the host-injected `OidcLoginSurface`; web has no
- * compile-time dep on @aipehub/identity or the host OIDC client. When the host
+ * compile-time dep on @gotong/identity or the host OIDC client. When the host
  * wired no providers the surface is absent → `/providers` returns an empty list
  * (no SSO configured is the honest truth, not an error).
  */

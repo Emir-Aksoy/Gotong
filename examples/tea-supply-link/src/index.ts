@@ -54,9 +54,9 @@ import {
   type ParticipantId,
   type Task,
   type TaskResult,
-} from '@aipehub/core'
-import { FileInboxStore, NEVER_RESUME_AT, type InboxDecision, type InboxItem } from '@aipehub/inbox'
-import { parseWorkflow, WorkflowRunner } from '@aipehub/workflow'
+} from '@gotong/core'
+import { FileInboxStore, NEVER_RESUME_AT, type InboxDecision, type InboxItem } from '@gotong/inbox'
+import { parseWorkflow, WorkflowRunner } from '@gotong/workflow'
 
 import { ShopDeskStandin, SupplierStandin } from './standins.js'
 
@@ -146,9 +146,9 @@ class OutboundApprovalGate {
 }
 
 async function main(): Promise<void> {
-  console.log('\n=== AipeHub case: tea-supply-link — 奶茶店 ↔ 供货商 (跨组织供货链接) ===\n')
+  console.log('\n=== Gotong case: tea-supply-link — 奶茶店 ↔ 供货商 (跨组织供货链接) ===\n')
 
-  const tmp = mkdtempSync(join(tmpdir(), 'aipehub-tea-supply-'))
+  const tmp = mkdtempSync(join(tmpdir(), 'gotong-tea-supply-'))
   const parked = new Map<string, ParkedRow>()
   const inbox = new FileInboxStore(tmp)
   inbox.ensureDirs()

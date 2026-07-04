@@ -1,5 +1,5 @@
 /**
- * Typed errors for `@aipehub/personal-butler`.
+ * Typed errors for `@gotong/personal-butler`.
  *
  * Project rule (CLAUDE.md §4.2): throw a typed error with a code, not a bare
  * `Error`. Callers switch on `.code` rather than string-matching a message.

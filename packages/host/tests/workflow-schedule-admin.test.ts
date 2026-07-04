@@ -19,7 +19,7 @@ import { join } from 'node:path'
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import type { Logger } from '@aipehub/core'
+import type { Logger } from '@gotong/core'
 
 import type { ButlerWorkflowSummary } from '../src/personal-butler-workflows.js'
 import { createWorkflowScheduleAdminSurface } from '../src/workflow-schedule-admin.js'
@@ -80,7 +80,7 @@ const row = (over?: Record<string, unknown>) => ({
 describe('workflow-schedule admin surface', () => {
   let dir: string
   beforeEach(async () => {
-    dir = await mkdtemp(join(tmpdir(), 'aipe-wfsched-admin-'))
+    dir = await mkdtemp(join(tmpdir(), 'gotong-wfsched-admin-'))
   })
   afterEach(async () => {
     await rm(dir, { recursive: true, force: true })

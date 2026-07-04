@@ -33,7 +33,7 @@ import {
   SuspendTaskError,
   type ParticipantId,
   type Task,
-} from '@aipehub/core'
+} from '@gotong/core'
 
 import { a2aGetTask, a2aSend, a2aSendRaw } from './client.js'
 import { isA2ATask, isTerminalTaskState, messageText, type A2ATask } from './types.js'
@@ -60,7 +60,7 @@ export interface A2aRemoteParticipantOptions {
   /** Bearer token presented to the remote. */
   token: string
   /**
-   * AipeHub-to-AipeHub only: OUR peer id, sent as `X-Aipe-Peer-Id`. Omit for a
+   * Gotong-to-Gotong only: OUR peer id, sent as `X-Gotong-Peer-Id`. Omit for a
    * generic external A2A agent.
    */
   peerId?: string

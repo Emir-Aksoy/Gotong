@@ -1,4 +1,4 @@
-/* AipeHub admin console — workflow AI assistant module (Phase 13 M3/M4 + streaming follow-up).
+/* Gotong admin console — workflow AI assistant module (Phase 13 M3/M4 + streaming follow-up).
  *
  * Extracted from admin.js (P3 audit cleanup — admin.js was 3641 lines)
  * to give the assist dialog its own cohesive home. The whole block —
@@ -9,11 +9,11 @@
  *
  * # Coupling shape
  *
- * Static admin scripts share one window.AipeHub namespace and run inside
+ * Static admin scripts share one window.Gotong namespace and run inside
  * sibling IIFEs (admin.js is the host; this file extends it). We export
  * a single factory:
  *
- *   window.AipeHub.installWorkflowAssist({ dom, state, ma, wf,
+ *   window.Gotong.installWorkflowAssist({ dom, state, ma, wf,
  *                                           refreshWorkflows, fetch })
  *     → { open, close, submit, save }
  *
@@ -35,11 +35,11 @@
     const { dom, state, ma, wf, mcp, refreshWorkflows } = deps
     const fetchFn = deps.fetch || window.fetch.bind(window)
 
-    // window.AipeHub is fully populated by the time install() runs (app-core.js
+    // window.Gotong is fully populated by the time install() runs (app-core.js
     // ran first). AH.t is a LIVE getter returning the currently-active dict —
     // read t().<key> at CALL TIME inside every render/message function so each
     // fresh action paints in the current language.
-    const AH = window.AipeHub
+    const AH = window.Gotong
     function t() {
       return AH.t
     }
@@ -97,7 +97,7 @@
       const wrap = dom.wfAssistGraphWrap
       const body = dom.wfAssistGraphBody
       const dl = dom.wfAssistGraphDownload
-      const G = window.AipeHubWorkflowGraph
+      const G = window.GotongWorkflowGraph
       if (!wrap || !body) return
       if (!graph || !G) {
         wrap.hidden = true
@@ -199,7 +199,7 @@
     }
 
     // Phase 13 M4 — short human label for each deep-check violation kind.
-    // Comes from `WorkflowStructureViolationKind` in @aipehub/evals.
+    // Comes from `WorkflowStructureViolationKind` in @gotong/evals.
     function deepCheckKindLabel(kind) {
       switch (kind) {
         case 'unknown_agent':
@@ -484,6 +484,6 @@
     return { open, close, submit, save }
   }
 
-  window.AipeHub = window.AipeHub || {}
-  window.AipeHub.installWorkflowAssist = install
+  window.Gotong = window.Gotong || {}
+  window.Gotong.installWorkflowAssist = install
 })()

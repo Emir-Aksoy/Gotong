@@ -1,5 +1,5 @@
 /**
- * `aipehub connect [agent]` — print the exact MCP quick-connect config
+ * `gotong connect [agent]` — print the exact MCP quick-connect config
  * for a mainstream coding agent (Claude Code, Codex, OpenCode,
  * Antigravity, Cursor, OpenClaw, nanobot, Hermes).
  *
@@ -50,7 +50,7 @@ export function connect(args: readonly string[]): number {
   const ctx: ConnectContext = {
     name: flags.name ?? DEFAULT_NAME,
     // Hub URL is not a secret — env is a convenient default.
-    hubUrl: flags.hub ?? process.env.AIPE_HUB_URL ?? DEFAULT_HUB_URL,
+    hubUrl: flags.hub ?? process.env.GOTONG_HUB_URL ?? DEFAULT_HUB_URL,
     // Token IS a secret — never auto-inline from env into terminal
     // output. The user opts in explicitly with --token.
     token: flags.token ?? TOKEN_PLACEHOLDER,
@@ -60,13 +60,13 @@ export function connect(args: readonly string[]): number {
   if (!bin.resolved) {
     console.error(
       `[connect] 未找到 mcp-server bin，配置里用了占位符。\n` +
-        `          请加 --bin=/abs/path/to/packages/mcp-server/bin/aipehub-mcp.js`,
+        `          请加 --bin=/abs/path/to/packages/mcp-server/bin/gotong-mcp.js`,
     )
   }
   if (ctx.token === TOKEN_PLACEHOLDER) {
-    const envHint = process.env.AIPE_ADMIN_TOKEN
-      ? '（检测到 $AIPE_ADMIN_TOKEN，可加 --token="$AIPE_ADMIN_TOKEN" 直接填入）'
-      : '（admin token 在 aipehub init 时生成，或在 admin UI 设置里查看）'
+    const envHint = process.env.GOTONG_ADMIN_TOKEN
+      ? '（检测到 $GOTONG_ADMIN_TOKEN，可加 --token="$GOTONG_ADMIN_TOKEN" 直接填入）'
+      : '（admin token 在 gotong init 时生成，或在 admin UI 设置里查看）'
     console.error(`[connect] 未提供 --token，配置里用了占位符 ${TOKEN_PLACEHOLDER}${envHint}`)
   }
 
@@ -116,7 +116,7 @@ function parseArgs(args: readonly string[]): ConnectFlags | null {
 }
 
 /**
- * Locate `packages/mcp-server/bin/aipehub-mcp.js`. Tries, in order: an
+ * Locate `packages/mcp-server/bin/gotong-mcp.js`. Tries, in order: an
  * explicit --bin, the sibling package relative to this module (works in
  * a monorepo checkout, src or dist), the cwd's packages/ dir, and the
  * cwd's node_modules. Falls back to a clearly-fake placeholder so the
@@ -127,9 +127,9 @@ function resolveBinPath(override?: string): { path: string; resolved: boolean } 
     return { path: isAbsolute(override) ? override : resolvePath(process.cwd(), override), resolved: true }
   }
   const candidates = [
-    fileURLToPath(new URL('../../../mcp-server/bin/aipehub-mcp.js', import.meta.url)),
-    join(process.cwd(), 'packages', 'mcp-server', 'bin', 'aipehub-mcp.js'),
-    join(process.cwd(), 'node_modules', '@aipehub', 'mcp-server', 'bin', 'aipehub-mcp.js'),
+    fileURLToPath(new URL('../../../mcp-server/bin/gotong-mcp.js', import.meta.url)),
+    join(process.cwd(), 'packages', 'mcp-server', 'bin', 'gotong-mcp.js'),
+    join(process.cwd(), 'node_modules', '@gotong', 'mcp-server', 'bin', 'gotong-mcp.js'),
   ]
   for (const candidate of candidates) {
     try {

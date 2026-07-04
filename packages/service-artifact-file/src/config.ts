@@ -1,5 +1,5 @@
 /**
- * Config for `@aipehub/service-artifact-file`.
+ * Config for `@gotong/service-artifact-file`.
  *
  * yaml shape:
  *
@@ -18,7 +18,7 @@
  * already resolved scope before the plugin sees the config).
  */
 
-import { ServiceConfigError } from '@aipehub/services-sdk'
+import { ServiceConfigError } from '@gotong/services-sdk'
 
 export interface ArtifactFileConfig {
   /** Logical display name shown in admin UI. Defaults to 'default'. */

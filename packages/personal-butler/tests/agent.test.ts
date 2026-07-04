@@ -7,7 +7,7 @@
  * approve runs the deferred action, deny / no-decision fails closed.
  */
 
-import { SuspendTaskError, type Task } from '@aipehub/core'
+import { SuspendTaskError, type Task } from '@gotong/core'
 import type {
   LlmAgentToolset,
   LlmProvider,
@@ -15,8 +15,8 @@ import type {
   LlmStreamChunk,
   LlmToolCallResult,
   LlmToolDefinition,
-} from '@aipehub/llm'
-import type { MemoryEntry, MemoryHandle, MemoryKind, MemoryQuery, NewMemoryEntry } from '@aipehub/services-sdk'
+} from '@gotong/llm'
+import type { MemoryEntry, MemoryHandle, MemoryKind, MemoryQuery, NewMemoryEntry } from '@gotong/services-sdk'
 import { describe, expect, it } from 'vitest'
 
 import {

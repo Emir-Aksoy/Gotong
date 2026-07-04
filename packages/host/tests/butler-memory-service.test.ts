@@ -13,7 +13,7 @@ import { join } from 'node:path'
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import type { Logger } from '@aipehub/core'
+import type { Logger } from '@gotong/core'
 
 import { HostButlerMemoryService } from '../src/butler-memory-service.js'
 import { openButlerMemory } from '../src/personal-butler-memory.js'

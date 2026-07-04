@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 
-import { SuspendTaskError, type Task, type TaskId, type TaskResult } from '@aipehub/core'
+import { SuspendTaskError, type Task, type TaskId, type TaskResult } from '@gotong/core'
 
 import { AcpParticipant } from '../src/acp-participant.js'
 import { ACP_NEVER_RESUME_AT, type AcpCheckpointState } from '../src/acp-checkpoint.js'

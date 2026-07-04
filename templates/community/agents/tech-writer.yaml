@@ -3,9 +3,9 @@
 # License:    CC0 1.0 Universal (Public Domain) — see ../LICENSE-NOTICES.md §1
 # Adapted:    2026-05-12 — removed example app-install steps from prompt body
 #             (those belong in the task payload, not the system prompt);
-#             added screenshot-marker convention; tuned for AipeHub draft
+#             added screenshot-marker convention; tuned for Gotong draft
 #             single-turn model.
-schema: aipehub.agent/v1
+schema: gotong.agent/v1
 agent:
   id: tech-writer
   displayName: 英文技术作者

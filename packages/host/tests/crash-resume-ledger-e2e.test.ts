@@ -37,18 +37,18 @@ import { join } from 'node:path'
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { Hub, Space, SuspendTaskError, type Task } from '@aipehub/core'
+import { Hub, Space, SuspendTaskError, type Task } from '@gotong/core'
 import {
   LlmAgent,
   MockLlmProvider,
   type LlmUsage,
   type LlmUsageSinkMeta,
-} from '@aipehub/llm'
+} from '@gotong/llm'
 import {
   MASTER_KEY_LEN_BYTES,
   openIdentityStore,
   type IdentityStore,
-} from '@aipehub/identity'
+} from '@gotong/identity'
 
 import { DEFAULT_PRICING, estimateCostMicros } from '../src/pricing.js'
 
@@ -89,7 +89,7 @@ describe('Route B P0-M5 — crash/restart + ledger no-double-charge acceptance g
   let liveId: IdentityStore
 
   beforeEach(async () => {
-    root = await mkdtemp(join(tmpdir(), 'aipe-crash-resume-e2e-'))
+    root = await mkdtemp(join(tmpdir(), 'gotong-crash-resume-e2e-'))
     await rm(root, { recursive: true, force: true })
     dbPath = join(root, 'identity.sqlite')
     masterKey = randomBytes(MASTER_KEY_LEN_BYTES)

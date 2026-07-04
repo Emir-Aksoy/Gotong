@@ -1,4 +1,4 @@
-# 我的晨报 — 定时工作流开箱包 (aipehub.template/v1)
+# 我的晨报 — 定时工作流开箱包 (gotong.template/v1)
 #
 # LIFE-L2①:「让 hub 每天替我干活」的第一个开箱案例。装走的是能干活的骨架:
 #   - 1 个托管 LLM agent (brief-writer 晨报员), 服务 brief.compose 能力;
@@ -28,7 +28,7 @@
 #     -H 'content-type: application/json' \
 #     -d "$(jq -Rs '{template: .}' examples/morning-brief-hub/template/morning-brief-hub.template.yaml)" \
 #     http://127.0.0.1:8745/api/admin/templates/import
-schema: aipehub.template/v1
+schema: gotong.template/v1
 template:
   name: 我的晨报(定时工作流)
   description: |-

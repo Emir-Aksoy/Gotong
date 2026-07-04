@@ -39,7 +39,7 @@ describe('FileRevisionStore', () => {
   let store: FileRevisionStore
 
   beforeEach(() => {
-    root = mkdtempSync(join(tmpdir(), 'aipe-rev-'))
+    root = mkdtempSync(join(tmpdir(), 'gotong-rev-'))
     store = new FileRevisionStore(root)
     store.ensureDirs()
   })

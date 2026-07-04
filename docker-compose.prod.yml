@@ -1,4 +1,4 @@
-# Production blueprint — AipeHub host behind a Caddy TLS terminator.
+# Production blueprint — Gotong host behind a Caddy TLS terminator.
 #
 # This file is **opinionated**: it picks Caddy over nginx because Caddy
 # auto-provisions Let's Encrypt certs and reloads them in-place, and
@@ -10,31 +10,31 @@
 # Before first run set these env vars (or put them in a `.env` file next
 # to this compose file — `docker compose` reads it automatically):
 #
-#   AIPE_DOMAIN          public hostname, e.g. hub.example.com
-#   AIPE_WS_DOMAIN       optional separate ws hostname; defaults to the same
+#   GOTONG_DOMAIN          public hostname, e.g. hub.example.com
+#   GOTONG_WS_DOMAIN       optional separate ws hostname; defaults to the same
 #   ACME_EMAIL           contact email for Let's Encrypt registration
-#   AIPE_SECRET_KEY      optional KMS-fetched master key (32 random bytes
+#   GOTONG_SECRET_KEY      optional KMS-fetched master key (32 random bytes
 #                        base64); leave unset to let the host generate
 #                        one in ./data/runtime/secret.key
 #
 # Boot:
 #
 #   docker compose -f docker-compose.prod.yml up -d
-#   docker compose -f docker-compose.prod.yml logs -f aipehub
+#   docker compose -f docker-compose.prod.yml logs -f gotong
 #       └─ logs mask the admin token; for the first login read the
 #          one-shot URL from the data volume instead:
-#          docker compose -f docker-compose.prod.yml exec aipehub \
+#          docker compose -f docker-compose.prod.yml exec gotong \
 #            cat /data/runtime/admin-link.txt
 #
 # Backups: the `data` volume is the entire source of truth (transcript,
 # agents, secrets). The included `backup` service tars it once a day to
-# `./backups/aipehub-YYYY-MM-DD.tar.gz` with 14 days of retention. Replace
+# `./backups/gotong-YYYY-MM-DD.tar.gz` with 14 days of retention. Replace
 # the destination with a real off-host store (S3 / B2 / restic) in real
 # deployments — keeping backups on the same VM as the data is necessary
 # but not sufficient.
 #
 # What this is NOT:
-#   - A multi-instance HA setup. AipeHub v3 host is single-instance by
+#   - A multi-instance HA setup. Gotong v3 host is single-instance by
 #     design (the `space/` directory is the lock); for HA you need
 #     external coordination + a shared filesystem. See docs/DEPLOY.md
 #     §"Distribution" for the discussion.
@@ -42,13 +42,13 @@
 #     optional SQLite for the datastore plugin. No Postgres / Redis.
 
 services:
-  # --- AipeHub host ---------------------------------------------------------
-  aipehub:
+  # --- Gotong host ---------------------------------------------------------
+  gotong:
     build:
       context: .
       dockerfile: Dockerfile
-    image: aipehub/host:prod
-    container_name: aipehub-host
+    image: gotong/host:prod
+    container_name: gotong-host
     restart: unless-stopped
 
     # Bind to loopback only — Caddy is the only thing that should reach
@@ -58,34 +58,34 @@ services:
       - "127.0.0.1:4000:4000"
 
     volumes:
-      - aipehub-data:/data
+      - gotong-data:/data
       # tmpfs for the runtime cache so the root fs can be read-only
       # (see read_only: true below). The host writes ./runtime/secret.key
       # inside /data which IS writable, so the cache is the only thing
       # that needs an extra tmpfs.
 
     environment:
-      AIPE_SPACE: /data
-      AIPE_HOST: 0.0.0.0
-      AIPE_WEB_PORT: "3000"
-      AIPE_WS_PORT: "4000"
+      GOTONG_SPACE: /data
+      GOTONG_HOST: 0.0.0.0
+      GOTONG_WEB_PORT: "3000"
+      GOTONG_WS_PORT: "4000"
       # Production MUST require admin approval — `open` lets anyone
       # claiming any agent id register.
-      AIPE_GATING: admin-approval
+      GOTONG_GATING: admin-approval
       # Cookies served over HTTPS only. Caddy terminates TLS so the
       # browser sees https://; the host sees http:// internally.
-      AIPE_COOKIE_SECURE: "1"
+      GOTONG_COOKIE_SECURE: "1"
       # CSRF defence: writes must originate from one of these Host
       # headers. Without this any port-reachable peer can POST to
       # /api/admin/dispatch — fine for localhost, lethal in prod.
-      AIPE_ALLOWED_HOSTS: "${AIPE_DOMAIN},${AIPE_WS_DOMAIN:-${AIPE_DOMAIN}}"
+      GOTONG_ALLOWED_HOSTS: "${GOTONG_DOMAIN},${GOTONG_WS_DOMAIN:-${GOTONG_DOMAIN}}"
       # Trust XFF from Caddy (single, controlled proxy). With this on,
       # per-IP rate limiting keys on the real client IP rather than
       # Caddy's container IP.
-      AIPE_TRUST_PROXY: "1"
+      GOTONG_TRUST_PROXY: "1"
       # Optional: KMS-mounted master key. If unset, the host falls back
       # to ./data/runtime/secret.key (chmod 600).
-      AIPE_SECRET_KEY: "${AIPE_SECRET_KEY:-}"
+      GOTONG_SECRET_KEY: "${GOTONG_SECRET_KEY:-}"
       # Optional managed-agent LLM keys. The admin UI lets you override
       # per-agent, but baking process-wide defaults here is convenient.
       ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY:-}"
@@ -93,7 +93,7 @@ services:
       # Dev tool — set to "1" to enable per-frame protocol validation.
       # Costs O(n) per inbound frame; leave off in prod unless
       # debugging a misbehaving third-party SDK.
-      AIPE_PROTOCOL_STRICT: "0"
+      GOTONG_PROTOCOL_STRICT: "0"
 
     # Operational hardening — none of this is strictly required for
     # the host to run, but each line is a real attack-surface reduction.
@@ -115,7 +115,7 @@ services:
         - CMD
         - node
         - -e
-        - "fetch('http://127.0.0.1:'+process.env.AIPE_WEB_PORT+'/readyz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+        - "fetch('http://127.0.0.1:'+process.env.GOTONG_WEB_PORT+'/readyz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
       interval: 30s
       timeout: 5s
       start_period: 30s
@@ -130,10 +130,10 @@ services:
   # --- Caddy reverse proxy + TLS terminator --------------------------------
   caddy:
     image: caddy:2-alpine
-    container_name: aipehub-caddy
+    container_name: gotong-caddy
     restart: unless-stopped
     depends_on:
-      - aipehub
+      - gotong
     # Public ports — the only thing the internet sees.
     ports:
       - "80:80"
@@ -144,23 +144,23 @@ services:
       - caddy-data:/data
       - caddy-config:/config
     environment:
-      AIPE_DOMAIN: "${AIPE_DOMAIN}"
-      AIPE_WS_DOMAIN: "${AIPE_WS_DOMAIN:-${AIPE_DOMAIN}}"
+      GOTONG_DOMAIN: "${GOTONG_DOMAIN}"
+      GOTONG_WS_DOMAIN: "${GOTONG_WS_DOMAIN:-${GOTONG_DOMAIN}}"
       ACME_EMAIL: "${ACME_EMAIL}"
 
   # --- Daily backup --------------------------------------------------------
-  # Runs once per 24h. Tars the `aipehub-data` named volume to a
+  # Runs once per 24h. Tars the `gotong-data` named volume to a
   # date-stamped file on the host. Replace the inner `tar` command with
   # `restic backup …` or `rclone copy …` once you have a real off-host
   # destination; this default just keeps a local rotation.
   backup:
     image: alpine:3.20
-    container_name: aipehub-backup
+    container_name: gotong-backup
     restart: unless-stopped
     depends_on:
-      - aipehub
+      - gotong
     volumes:
-      - aipehub-data:/data:ro
+      - gotong-data:/data:ro
       - ./backups:/backups
     entrypoint:
       - sh
@@ -170,7 +170,7 @@ services:
         echo "[backup] daily loop starting; destination=/backups"
         while true; do
           stamp=$$(date -u +%Y-%m-%d)
-          out="/backups/aipehub-$$stamp.tar.gz"
+          out="/backups/gotong-$$stamp.tar.gz"
           if [ ! -f "$$out" ]; then
             echo "[backup] writing $$out"
             tar -C /data -czf "$$out.tmp" .
@@ -178,11 +178,11 @@ services:
           fi
           # Trim anything older than 14 days. `-mtime +14` semantics
           # vary across find implementations; busybox find supports it.
-          find /backups -name 'aipehub-*.tar.gz' -mtime +14 -delete || true
+          find /backups -name 'gotong-*.tar.gz' -mtime +14 -delete || true
           sleep 86400
         done
 
 volumes:
-  aipehub-data:
+  gotong-data:
   caddy-data:
   caddy-config:

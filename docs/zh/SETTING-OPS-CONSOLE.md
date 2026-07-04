@@ -11,15 +11,15 @@
 
 ## 一、它是什么 / 不是什么
 
-确定性运维能力**早就全有, 但散成互不相干的入口**: `aipehub doctor`(启动前体检) /
-`aipehub check`(定义语法校验) / boot 横幅(坏定义跳过提示)——没有一条线把
+确定性运维能力**早就全有, 但散成互不相干的入口**: `gotong doctor`(启动前体检) /
+`gotong check`(定义语法校验) / boot 横幅(坏定义跳过提示)——没有一条线把
 「冷启动 → 崩溃救援 → 新读取定义检测 → 其他配置管理」串起来, 也没有统一的网页/IM 入口。
 
-`setting` 控制台把这些**聚合**进一个命名空间, 经**一个确定性 ops-core**(`@aipehub/host` 的
+`setting` 控制台把这些**聚合**进一个命名空间, 经**一个确定性 ops-core**(`@gotong/host` 的
 `packages/host/src/ops-core.ts`, 零 LLM)铺到**三个入口**: CLI / 服务器本地网页 / IM 命令模式。
 
 - **是**: 单一真相(ops-core)+ 三个薄适配器。跟已 ship 两次的同一套路 ——
-  VALID 定义校验(`@aipehub/host/check`)/ 管家(`HubStewardSurface` 三 transport)。
+  VALID 定义校验(`@gotong/host/check`)/ 管家(`HubStewardSurface` 三 transport)。
 - **不是**: 通用运行时热重载子系统。host 仍只读 `process.env` + `pricing.json`, 配置写只
   写「下次启动会读的文件」, **全程诚实标注「重启后生效」**, 不发明热重载。
 
@@ -63,12 +63,12 @@ CLI/web/IM 全部漏斗到这一个 `runOpsCommand`。所以 web/IM **逻辑上*
 | id | tier | 干什么 |
 |---|---|---|
 | `status` | read | hub 此刻在哪 —— 定义计数 + 配置体检结论 +(hub 在跑时)实时健康 |
-| `check` | read | 确定性 配置 + 工作流 + agent 校验(同 `aipehub check` / boot 那批) |
+| `check` | read | 确定性 配置 + 工作流 + agent 校验(同 `gotong check` / boot 那批) |
 | `list` | read | 每条 setting 命令 + 它的 tier + 能在哪跑 |
 | `inventory` | read | 备份目录里的恢复候选(只读列, 最新在前) |
 | `config` | read | 托管 env 旋钮 + 密钥 env 变量(只显示 已设/未设)+ pricing 覆盖状态 |
 | `fix-dirs` | safe-mutate | 确保工作区目录存在(`mkdir -p`; 幂等可逆) |
-| `config-set` | config-write | 在 `<space>/aipehub.env` 写一个白名单非密钥 env 旋钮(重启生效) |
+| `config-set` | config-write | 在 `<space>/gotong.env` 写一个白名单非密钥 env 旋钮(重启生效) |
 | `config-price` | config-write | 在 `<space>/pricing.json` upsert 一个模型价格(落盘前校验, 重启生效) |
 | `cold-start` | destructive-offline | 预检 → 校验定义 → 启动 host。**CLI-only** |
 | `restore` | destructive-offline | 把备份 tar 解进全新工作区(跑 verify.sh)。**CLI-only** |
@@ -107,20 +107,20 @@ CLI/web/IM 全部漏斗到这一个 `runOpsCommand`。所以 web/IM **逻辑上*
 ## 五、config-write 的 grounded 范围(严守诚实边界)
 
 事实核查: host **没有**通用运行时可热改的 `config.json`。配置只有三处 —— ① env-driven
-(`process.env.AIPE_*`, 启动时读, host **不**自己读 `.env`)② `<AIPE_SPACE>/pricing.json`
+(`process.env.GOTONG_*`, 启动时读, host **不**自己读 `.env`)② `<GOTONG_SPACE>/pricing.json`
 (host 真读的唯一配置文件)③ `org_mode`(identity 持久, 已有升级流)。据此 config-write
 **严格限定**为(owner-gated + 校验 + 审计, CLI + web, **不**上 IM):
 
-### 5.1 托管 env 文件 `<AIPE_SPACE>/aipehub.env`(`config-set`)
+### 5.1 托管 env 文件 `<GOTONG_SPACE>/gotong.env`(`config-set`)
 
 给**非密钥**确定性 env 旋钮的**白名单**写器。每写**写前**确定性校验, 落盘, 审计。
 
 | 旋钮 | 校验 | 默认 |
 |---|---|---|
-| `AIPE_MODE` | 必须 `personal` 或 `team` | `personal`(未设→自动检测) |
-| `AIPE_WEB_PORT` | 整数 1–65535 | `3000` |
-| `AIPE_WS_PORT` | 整数 1–65535 | `4000` |
-| `AIPE_OPEN_BROWSER` | 闭集 `0/1/true/false/on/off/yes/no/auto` | `auto` |
+| `GOTONG_MODE` | 必须 `personal` 或 `team` | `personal`(未设→自动检测) |
+| `GOTONG_WEB_PORT` | 整数 1–65535 | `3000` |
+| `GOTONG_WS_PORT` | 整数 1–65535 | `4000` |
+| `GOTONG_OPEN_BROWSER` | 闭集 `0/1/true/false/on/off/yes/no/auto` | `auto` |
 
 **密钥硬排除**: `isSecretKey()` 拒任何 `*_TOKEN` / `*_SECRET` / `*_KEY` / `*_PASSWORD` 结尾,
 或含 `MASTER_KEY` / `PASSWORD` 的键 —— 返回 `secret_key_refused`, **不写不审计成功**。
@@ -133,7 +133,7 @@ host 真读的那一个配置文件。写前确定性校验形状(畸形→拒, 
 
 ### 5.3 effective-config 只读视图(`config`)
 
-不在白名单的 env(令牌/区间等)只**读**: 一组 `SECRET_ENV_VARS`(`AIPE_MASTER_KEY` /
+不在白名单的 env(令牌/区间等)只**读**: 一组 `SECRET_ENV_VARS`(`GOTONG_MASTER_KEY` /
 `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / `DEEPSEEK_API_KEY` / 各 IM 桥 token…)只显示
 **已设 / 未设**, 绝不回显明文。配 `generateEnvTemplate()` 生成一份校验过的 env 模板供
 operator 手动应用(不静默改 live systemd)。
@@ -150,11 +150,11 @@ sink 缺席→写仍发生, 不审计(全离线 CLI 无 identity store 的情形
 
 ## 六、三个入口
 
-### 6.1 CLI —— `aipehub setting`
+### 6.1 CLI —— `gotong setting`
 
 ```
-aipehub setting <subcmd>          一发即走 —— 跑一条 ops 命令然后退出
-aipehub setting                   裸命令 → 进交互式子 shell(复用 ReplIo + SIGINT→AbortController)
+gotong setting <subcmd>          一发即走 —— 跑一条 ops 命令然后退出
+gotong setting                   裸命令 → 进交互式子 shell(复用 ReplIo + SIGINT→AbortController)
 ```
 
 - read: `setting status|check|config|list|inventory`
@@ -165,7 +165,7 @@ aipehub setting                   裸命令 → 进交互式子 shell(复用 Rep
   - `setting restore <file> <target> [--force] [--yes]` —— `execFile bash restore.sh`。
   - `setting rotate-master-key` —— 委托 host 自己的 `rotate-master-key` 子命令。
 
-CLI 走**变量动态 import** `@aipehub/host/ops`(逐字镜像 `check.ts` host-absent 分支),
+CLI 走**变量动态 import** `@gotong/host/ops`(逐字镜像 `check.ts` host-absent 分支),
 保持 cli 零 host 构建期依赖; host 不在场→印安装提示返非零。
 
 ### 6.2 服务器本地网页 —— admin「运维 / 设置」tab
@@ -199,7 +199,7 @@ env-gate 跑着的飞书 / Telegram 桥直接多一个 `/setting` 命令, 登录
 
 ---
 
-## 七、运维须知 —— launcher / systemd source `aipehub.env`
+## 七、运维须知 —— launcher / systemd source `gotong.env`
 
 config-write 写的是 host 下次启动会读的文件。要让它**生效**, host 启动前得有人 source 它。
 **host 自己仍只读 `process.env`**(boot 读路径逐字节不变)—— 这层 source 跟 systemd 的
@@ -207,13 +207,13 @@ config-write 写的是 host 下次启动会读的文件。要让它**生效**, h
 
 ### 7.1 便携 launcher(已接线)
 
-`deploy/AipeHub.command`(macOS 双击)+ `deploy/AipeHub.sh`(Linux/通用)在算出 `AIPE_SPACE`
-后、`exec` host 前, source `<space>/aipehub.env`:
+`deploy/Gotong.command`(macOS 双击)+ `deploy/Gotong.sh`(Linux/通用)在算出 `GOTONG_SPACE`
+后、`exec` host 前, source `<space>/gotong.env`:
 
 ```bash
 source_managed_env() {
   local space="$1"
-  local envfile="$space/aipehub.env"
+  local envfile="$space/gotong.env"
   [ -f "$envfile" ] || return 0     # 文件不存在 = no-op(零行为变化)
   set -a; . "$envfile"; set +a
 }
@@ -224,18 +224,18 @@ source_managed_env() {
 
 ### 7.2 systemd(云端)
 
-`/etc/systemd/system/aipehub.service` 的 `[Service]` 段加一行, 让 host 启动前 source 它:
+`/etc/systemd/system/gotong.service` 的 `[Service]` 段加一行, 让 host 启动前 source 它:
 
 ```ini
 [Service]
-EnvironmentFile=-/var/lib/aipehub/.aipehub/aipehub.env   # 路径 = <AIPE_SPACE>/aipehub.env; 前缀 - = 文件缺失不报错
-ExecStart=/usr/bin/node /opt/aipehub/dist/main.js
+EnvironmentFile=-/var/lib/gotong/.gotong/gotong.env   # 路径 = <GOTONG_SPACE>/gotong.env; 前缀 - = 文件缺失不报错
+ExecStart=/usr/bin/node /opt/gotong/dist/main.js
 ```
 
-> ⚠️ **密钥不进这个文件**。`config-set` 白名单按构造拒一切密钥键 —— `aipehub.env` 只装
-> `AIPE_MODE` / `AIPE_WEB_PORT` / `AIPE_WS_PORT` / `AIPE_OPEN_BROWSER` 这类非密钥旋钮。
-> `AIPE_MASTER_KEY` 和各 provider/IM token 仍走 systemd secret(`systemd-creds` /
-> `Environment=` 注入)/ vault, **别**写进 `aipehub.env` 明文、**别**提交 git。详见
+> ⚠️ **密钥不进这个文件**。`config-set` 白名单按构造拒一切密钥键 —— `gotong.env` 只装
+> `GOTONG_MODE` / `GOTONG_WEB_PORT` / `GOTONG_WS_PORT` / `GOTONG_OPEN_BROWSER` 这类非密钥旋钮。
+> `GOTONG_MASTER_KEY` 和各 provider/IM token 仍走 systemd secret(`systemd-creds` /
+> `Environment=` 注入)/ vault, **别**写进 `gotong.env` 明文、**别**提交 git。详见
 > [`GO-LIVE.md`](GO-LIVE.md) §C 与 [`DEPLOY.md`](DEPLOY.md) §C.4。
 
 ---
@@ -245,7 +245,7 @@ ExecStart=/usr/bin/node /opt/aipehub/dist/main.js
 1. 破坏性 / config-write 在 IM 上**执行**(物理 + 安全双拒, 永不上 IM)。
 2. 通用运行时**热重载**配置子系统(host 仍只读 env + pricing.json, 本轮只做「写下次启动会读的文件」)。
 3. `org_mode` 切换经 setting(沿用既有「升级到团队」流, 不重造)。
-4. IM 命令模式升格独立 `@aipehub/im-ops-router` 包(D2 选生产加性, 第二个 caller 再升)。
+4. IM 命令模式升格独立 `@gotong/im-ops-router` 包(D2 选生产加性, 第二个 caller 再升)。
 5. 凭证 / 安全配置写经 setting(永远走既有 vault / rotate-master-key 专用流, 白名单硬拒)。
 
 ---
@@ -254,13 +254,13 @@ ExecStart=/usr/bin/node /opt/aipehub/dist/main.js
 
 | M | 做了什么 | 验收门 |
 |---|---|---|
-| M1 | ops-core 模块 + `@aipehub/host/ops` 子路径(承重) | `ops-core.test.ts` —— tier chokepoint + read 透传 + `fixMissingDirs` 注入式纯测 |
-| M2 | CLI `aipehub setting` + 子 shell + 破坏性 CLI-only | `setting.test.ts` —— dispatch 路由 / host-absent 提示 / 脚本化 ReplIo / 破坏性要确认拒则零跑 |
+| M1 | ops-core 模块 + `@gotong/host/ops` 子路径(承重) | `ops-core.test.ts` —— tier chokepoint + read 透传 + `fixMissingDirs` 注入式纯测 |
+| M2 | CLI `gotong setting` + 子 shell + 破坏性 CLI-only | `setting.test.ts` —— dispatch 路由 / host-absent 提示 / 脚本化 ReplIo / 破坏性要确认拒则零跑 |
 | M3 | config-write core(owner-gated + 审计 + 校验) | `ops-config-write.test.ts` —— 合法落盘+审计 / 畸形+密钥键拒 / pricing 写前拒 / 视图脱敏 |
 | M4 | Web `SettingOpsSurface` + `/api/admin/setting/*` + admin tab | `setting-route.test.ts` —— 401/503/200 + **断言无破坏性路由** |
 | M5 | IM 加性 `/setting` 命令模式(owner/operator 闸) | `setting-im-e2e.test.ts` —— hermetic FakeBridge, 进/拒/exit/help 字节不变 |
 | M6 | 物理边界 + config-write E2E(承重 #2) | `setting-ops-boundary-e2e.test.ts` —— 真 restore 只经 CLI + 三面 read 一致 + config-write 三面边界 |
-| M7 | launcher source env + 收口文档 + 登记 + 回归 | launcher dry-run smoke(`AIPE_LAUNCH_DRY_RUN=1`)+ `pnpm -r build` + host/web/cli vitest 全绿 |
+| M7 | launcher source env + 收口文档 + 登记 + 回归 | launcher dry-run smoke(`GOTONG_LAUNCH_DRY_RUN=1`)+ `pnpm -r build` + host/web/cli vitest 全绿 |
 
 ---
 

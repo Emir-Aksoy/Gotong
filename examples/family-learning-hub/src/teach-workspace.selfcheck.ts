@@ -8,7 +8,7 @@
  *      an insight (evidence) — not a per-lesson journal;
  *   ④ RESOURCES.md / GLOSSARY.md ACCUMULATE across lessons and DEDUP (re-teaching never grows them).
  *
- * Run:  pnpm --filter @aipehub/example-family-learning-hub teach-workspace:selfcheck
+ * Run:  pnpm --filter @gotong/example-family-learning-hub teach-workspace:selfcheck
  */
 
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
@@ -55,7 +55,7 @@ function lessonFor(
 
 console.log('\n=== family-learning-hub · /teach workspace selfcheck ===\n')
 
-const root = mkdtempSync(join(tmpdir(), 'aipehub-fl-teach-ws-'))
+const root = mkdtempSync(join(tmpdir(), 'gotong-fl-teach-ws-'))
 const container = join(root, 'learning-records')
 const LEARNER = 'kid'
 const TOPIC = '分数运算'

@@ -6,7 +6,7 @@ End-to-end "传统行业咨询管线" (5-step industry consultation pipeline) ru
 
 ```bash
 echo 'DEEPSEEK_API_KEY=sk-...' > .env.local   # at the repo root
-pnpm --filter @aipehub/example-industry-consultation-deepseek start
+pnpm --filter @gotong/example-industry-consultation-deepseek start
 ```
 
 The `start` script wires `tsx --env-file=../../.env.local` so the key is sourced automatically.

@@ -14,7 +14,7 @@
 
 import { describe, expect, it } from 'vitest'
 
-import type { TaskResult } from '@aipehub/core'
+import type { TaskResult } from '@gotong/core'
 
 import {
   buildButlerAskAgentToolset,

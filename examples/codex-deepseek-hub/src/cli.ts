@@ -31,7 +31,7 @@ import { existsSync, mkdtempSync, readdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 
-import { Hub, InMemoryStorage } from '@aipehub/core'
+import { Hub, InMemoryStorage } from '@gotong/core'
 
 import { makeRouter, makeCoder, stripThink, ROUTER_ID, DEEPSEEK_MODEL, DEEPSEEK_BASE_URL } from './real-agents.js'
 import { setupSharedWorkspace, readProgress, initGitRepo, type SharedWorkspace } from './workspace.js'
@@ -83,7 +83,7 @@ function prepareWorkspace(cwdArg?: string): { ws: SharedWorkspace; ephemeral: bo
     }
     return { ws: setupSharedWorkspace(dir, { overwrite: false }), ephemeral: false }
   }
-  const dir = mkdtempSync(join(tmpdir(), 'aipe-codex-deepseek-cli-'))
+  const dir = mkdtempSync(join(tmpdir(), 'gotong-codex-deepseek-cli-'))
   const ws = setupSharedWorkspace(dir)
   initGitRepo(dir)
   return { ws, ephemeral: true }

@@ -19,19 +19,19 @@ hub-b / mathbot  (LlmAgent tool-use loop)
 
 The proxy classes used here (`McpProxyHost`, `RemoteMcpToolset`,
 `fetchPeerSharedMcp`) are the **real host implementation**, imported via
-`@aipehub/host/mcp-proxy` — no reimplementation, no drift from production.
+`@gotong/host/mcp-proxy` — no reimplementation, no drift from production.
 
 ## Run
 
 Examples resolve workspace deps from their built `dist/`, so build the deps
-first (in particular `@aipehub/host`, whose `./mcp-proxy` subpath this
+first (in particular `@gotong/host`, whose `./mcp-proxy` subpath this
 example imports):
 
 ```sh
 pnpm -C packages/core build
 pnpm -C packages/llm build
 pnpm -C packages/host build
-pnpm --filter @aipehub/example-cross-hub-mcp start
+pnpm --filter @gotong/example-cross-hub-mcp start
 ```
 
 No API keys, no subprocess, no network — the demo uses `MockLlmProvider`

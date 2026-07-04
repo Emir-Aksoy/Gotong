@@ -29,8 +29,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Readable } from 'node:stream'
 
-import { Hub, Space } from '@aipehub/core'
-import { MASTER_KEY_LEN_BYTES, openIdentityStore, type IdentityStore } from '@aipehub/identity'
+import { Hub, Space } from '@gotong/core'
+import { MASTER_KEY_LEN_BYTES, openIdentityStore, type IdentityStore } from '@gotong/identity'
 
 import { serveWeb, type WebServerHandle } from '../src/server.js'
 import { handleSetupRoute, type SetupRoutesCtx } from '../src/setup-routes.js'
@@ -58,7 +58,7 @@ async function boot(opts: {
   }
 } = {}): Promise<BootResult> {
   const withIdentity = opts.withIdentity ?? true
-  const tmp = await mkdtemp(join(tmpdir(), 'aipehub-web-setup-'))
+  const tmp = await mkdtemp(join(tmpdir(), 'gotong-web-setup-'))
   const init = await Space.init(tmp, { name: 'setup-test' })
   const space = init.space
   const hub = new Hub({ space })
@@ -621,7 +621,7 @@ describe('GET / (root) during first-run bootstrap', () => {
     const b = await boot()
     try {
       let html = await (await fetch(`${b.baseUrl}/`)).text()
-      expect(html).toContain('name="x-aipehub-bootstrap" content="1"')
+      expect(html).toContain('name="x-gotong-bootstrap" content="1"')
 
       // Finish setup, sign in, refetch the SPA with the session cookie —
       // the hint must be gone so a signed-in boot on a completed host never
@@ -641,7 +641,7 @@ describe('GET / (root) during first-run bootstrap', () => {
       expect(sessCookie).not.toBe('')
       html = await (await fetch(`${b.baseUrl}/`, { headers: { cookie: sessCookie } })).text()
       expect(isAppShell(html)).toBe(true)
-      expect(html).toContain('name="x-aipehub-bootstrap" content=""')
+      expect(html).toContain('name="x-gotong-bootstrap" content=""')
     } finally { await teardown(b) }
   })
 })
@@ -670,7 +670,7 @@ describe('operator-session anchor (non-loopback setup writes)', () => {
 
   /** Identity-only fixture — no Hub, no web server; we call the handler. */
   async function directIdentity(): Promise<DirectCtx> {
-    const tmp = await mkdtemp(join(tmpdir(), 'aipehub-setup-direct-'))
+    const tmp = await mkdtemp(join(tmpdir(), 'gotong-setup-direct-'))
     const init = await Space.init(tmp, { name: 'setup-direct' })
     const { token: adminToken } = await init.space.createAdmin('DirectAdmin')
     const identity = openIdentityStore({

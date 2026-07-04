@@ -1,8 +1,8 @@
 {
-  "name": "@aipehub/im-lark",
+  "name": "@gotong/im-lark",
   "version": "0.1.0",
   "type": "module",
-  "description": "AipeHub IM bridge for Lark / Feishu — implements ImBridge over the OFFICIAL long connection (@larksuiteoapi/node-sdk WSClient). Outbound, works behind NAT (no public webhook). Sends still go through the REST client (fetch). Card-button callbacks are not delivered over the long connection.",
+  "description": "Gotong IM bridge for Lark / Feishu — implements ImBridge over the OFFICIAL long connection (@larksuiteoapi/node-sdk WSClient). Outbound, works behind NAT (no public webhook). Sends still go through the REST client (fetch). Card-button callbacks are not delivered over the long connection.",
   "license": "MIT",
   "private": true,
   "main": "./dist/index.js",
@@ -25,7 +25,7 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "@aipehub/im-adapter": "workspace:*",
+    "@gotong/im-adapter": "workspace:*",
     "@larksuiteoapi/node-sdk": "^1.67.0"
   },
   "devDependencies": {

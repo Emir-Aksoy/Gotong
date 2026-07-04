@@ -43,10 +43,10 @@ import {
   createInprocHubLinkPair,
   installPeerLink,
   type Task,
-} from '@aipehub/core'
-import { openIdentityStore, type IdentityStore } from '@aipehub/identity'
-import { FileInboxStore, NEVER_RESUME_AT } from '@aipehub/inbox'
-import { workflowParticipantId } from '@aipehub/workflow'
+} from '@gotong/core'
+import { openIdentityStore, type IdentityStore } from '@gotong/identity'
+import { FileInboxStore, NEVER_RESUME_AT } from '@gotong/inbox'
+import { workflowParticipantId } from '@gotong/workflow'
 
 import { WorkflowController } from '../src/workflow-controller.js'
 import { HostInboxService } from '../src/inbox-service.js'
@@ -59,7 +59,7 @@ const PEER_CAP = 'contract-review'
 // ordinary `{kind:capability}` dispatch — it has no idea the capability is
 // remote; the hub's routing + the federation gates handle the boundary.
 const WORKFLOW_YAML = `
-schema: aipehub.workflow/v1
+schema: gotong.workflow/v1
 workflow:
   id: cross-hub-flow
   name: cross-hub orchestration
@@ -175,7 +175,7 @@ describe('v5 Stream G-M2 — cross-hub workflow orchestration via the outbound a
     installPeerLink({ hub: hubB, link: b, selfHubId: 'orgB' })
   }
 
-  async function fireTrigger(doc: string): Promise<import('@aipehub/core').TaskResult> {
+  async function fireTrigger(doc: string): Promise<import('@gotong/core').TaskResult> {
     return hubA.dispatch({
       from: 'admin',
       strategy: { kind: 'capability', capabilities: ['cx:start'] },

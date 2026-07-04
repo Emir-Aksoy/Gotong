@@ -36,7 +36,7 @@
 # 所有 system prompt 都用中文。Provider 默认 anthropic + opus-4-7。
 # 想省钱：把所有 model 改成 claude-sonnet-4-6 即可。
 
-schema: aipehub.team/v1
+schema: gotong.team/v1
 
 team:
   name: 行政任务编排团队
@@ -202,7 +202,7 @@ team:
         贴 `availableWorkers` 和 `availableAgentCapabilities`）。
 
         你输出**一组 dispatch 指令**，让 admin 可以**逐条粘贴**
-        到 AipeHub 的"派发"面板。
+        到 Gotong 的"派发"面板。
 
         输出严格 JSON（数组）：
         [

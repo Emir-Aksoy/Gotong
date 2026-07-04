@@ -2,7 +2,7 @@
 
 本目录（`templates/community/`）收录的 agent / team 模板**改造自下列第三方 prompt 库**。每个改造文件头部的 `# Source` / `# License` 注释指向其原始来源；下面是各来源完整的许可声明，按要求集中保留。
 
-下游再分发本目录内容时（无论是 fork 主仓、迁到独立模板仓 `AipeHub/aipehub-templates`、还是放到云端 CDN 给用户直接下载）**请保留本文件**。
+下游再分发本目录内容时（无论是 fork 主仓、迁到独立模板仓 `Gotong/gotong-templates`、还是放到云端 CDN 给用户直接下载）**请保留本文件**。
 
 ---
 
@@ -15,7 +15,7 @@
 
 > "Prompt content and data" 在该仓库内被作者明确 **dedicated to the public domain under CC0 1.0**。这意味着：
 >
-> - ✅ **可商用** —— 包括把改造结果集成进 AipeHub 这种 MIT 软件并商业部署
+> - ✅ **可商用** —— 包括把改造结果集成进 Gotong 这种 MIT 软件并商业部署
 > - ✅ **可任意修改** —— 改 prompt 文字、改格式、合并、拆分都行
 > - ✅ **无需署名** —— CC0 法律上 *waive 了所有权利*；我们的来源标注是出于**礼貌**，不是义务
 > - ✅ **可再许可** —— 改造后的产物可以放到任何许可下（我们保持 MIT + CC0 标注）
@@ -86,13 +86,13 @@ MIT 允许商用 + 修改，但**要求保留 copyright notice + license 文本*
 
 - 改造文件**头部注释**保留 `# Source` + `# License: MIT` + `# Copyright (c) 2023 PlexPt`
 - **本文件**集中保留 MIT 完整全文
-- AipeHub 主项目本身也是 MIT，许可证兼容
+- Gotong 主项目本身也是 MIT，许可证兼容
 
 ---
 
-## 3. 关于 AipeHub 自身（包括本目录的改造劳动）
+## 3. 关于 Gotong 自身（包括本目录的改造劳动）
 
-AipeHub 主仓和本目录中**我们的改造劳动**（重组结构、AipeHub-specific 字段、capabilities 设计、模型选择、weightDefault、目录组织）按 **MIT License** 发布。完整文本见仓根 [`LICENSE`](../../LICENSE)。
+Gotong 主仓和本目录中**我们的改造劳动**（重组结构、Gotong-specific 字段、capabilities 设计、模型选择、weightDefault、目录组织）按 **MIT License** 发布。完整文本见仓根 [`LICENSE`](../../LICENSE)。
 
 ## 4. 不收什么
 

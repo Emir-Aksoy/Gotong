@@ -12,7 +12,7 @@
  *   - the real `WorkflowController` driving an attributed LLM call so the
  *     ledger row gets user / org / workflow / agent / model attribution,
  *   - the real `estimateCostMicros` pricing the recorded tokens,
- *   - the real `@aipehub/web` export columns + CSV/JSONL formatters.
+ *   - the real `@gotong/web` export columns + CSV/JSONL formatters.
  *
  * Two gates:
  *   1. An attributed workflow → LLM call writes ONE priced ledger row;
@@ -32,24 +32,24 @@ import { join } from 'node:path'
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { Hub, Space, type AgentRecord, type Task } from '@aipehub/core'
+import { Hub, Space, type AgentRecord, type Task } from '@gotong/core'
 import {
   LlmAgent,
   MockLlmProvider,
   type LlmUsage,
   type LlmUsageSinkMeta,
-} from '@aipehub/llm'
+} from '@gotong/llm'
 import {
   MASTER_KEY_LEN_BYTES,
   openIdentityStore,
   type IdentityStore,
-} from '@aipehub/identity'
+} from '@gotong/identity'
 import {
   LEDGER_COLUMNS,
   toCsv,
   toJsonl,
   type UsageLedgerEntryDTO,
-} from '@aipehub/web'
+} from '@gotong/web'
 
 import { LocalAgentPool } from '../src/local-agent-pool.js'
 import { WorkflowController } from '../src/workflow-controller.js'
@@ -61,7 +61,7 @@ import { OrgApiPool } from '../src/org-api-pool.js'
 // appends `{ by: 'workflow:usage-e2e-wf' }` to the step's ancestry, so the
 // LLM call lands fully attributed.
 const WORKFLOW_YAML = `
-schema: aipehub.workflow/v1
+schema: gotong.workflow/v1
 workflow:
   id: usage-e2e-wf
   name: usage e2e
@@ -80,7 +80,7 @@ describe('Phase 17 — usage/cost ledger end-to-end acceptance gate', () => {
   let identity: IdentityStore
 
   beforeEach(async () => {
-    root = await mkdtemp(join(tmpdir(), 'aipe-usage-e2e-'))
+    root = await mkdtemp(join(tmpdir(), 'gotong-usage-e2e-'))
     await rm(root, { recursive: true, force: true })
     const opened = await Space.init(root, { name: 'test' })
     space = opened.space

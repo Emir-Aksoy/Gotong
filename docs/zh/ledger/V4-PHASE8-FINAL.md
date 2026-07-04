@@ -121,7 +121,7 @@ DashScope / Moonshot / Zhipu / Ollama / vLLM (全部 OpenAI-compat).
 retry loop** — 字节已经在 stream 后没法安全重放, 由 LlmAgent 把 transient
 error 转 failed TaskResult.
 
-两 provider 都 native 后, M1 的 `completeAsStream()` shim 在 `@aipehub/llm`
+两 provider 都 native 后, M1 的 `completeAsStream()` shim 在 `@gotong/llm`
 types + index 中无 caller, 顺手删.
 
 测试增量: 10 个 (provider.test.ts), 覆盖纯文本顺序、finish_reason+usage
@@ -193,7 +193,7 @@ fallback 仍通过 (仅刷新了 comment).
 
 接线两处:
 - **`packages/core/src/types.ts`**: discriminated variant 加入 TranscriptEntry.
-  `chunk` 类型故意是 `unknown` — 把 `@aipehub/llm` 拉进 `@aipehub/core`
+  `chunk` 类型故意是 `unknown` — 把 `@gotong/llm` 拉进 `@gotong/core`
   作硬依赖会反转现有依赖方向. Shape contract 在 `LlmStreamChunk`,
   host translator + web SSE forwarder 都按这个 honor.
 - **`packages/host/src/local-agent-pool.ts`**: spawn 时把
@@ -451,11 +451,11 @@ pnpm -r build
 pnpm -r test
 
 # Phase 8 关键包
-pnpm --filter @aipehub/llm test
-pnpm --filter @aipehub/llm-anthropic test
-pnpm --filter @aipehub/llm-openai test
-pnpm --filter @aipehub/host test
-pnpm --filter @aipehub/web test
+pnpm --filter @gotong/llm test
+pnpm --filter @gotong/llm-anthropic test
+pnpm --filter @gotong/llm-openai test
+pnpm --filter @gotong/host test
+pnpm --filter @gotong/web test
 
 # 端到端 stream smoke
 docker compose up

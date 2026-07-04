@@ -8,7 +8,7 @@
 # Last regenerated: 2026-05-24T03:40:58.259Z
 # ─────────────────────────────────────────────────────────────────────────────
 # 个人成长团队（7 位教练）
-# Schema: aipehub.team/v1
+# Schema: gotong.team/v1
 # Companion workflow: templates/workflows/personal-growth-flow.yaml
 # Or use the bundle (team + workflow + UI hints in one file):
 #   templates/bundles/personal-growth.yaml
@@ -39,7 +39,7 @@
 #   capability=analyze-body           单独跑身体维度
 #   ...其他 capability 见各 agent 的 capabilities 字段
 
-schema: aipehub.team/v1
+schema: gotong.team/v1
 team:
   name: 个人成长团队
   description: |-

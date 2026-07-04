@@ -2,16 +2,16 @@
  * /api/admin/identity/* — v4 user-management routes.
  *
  * Layered on `IdentitySurface` (a structural projection of
- * @aipehub/identity's IdentityStore, defined in server.ts). The host
+ * @gotong/identity's IdentityStore, defined in server.ts). The host
  * wires the real `IdentityStore` instance into `serveWeb({ identity })`
  * and structural typing lets it slot in without the web package
- * taking a runtime dep on @aipehub/identity.
+ * taking a runtime dep on @gotong/identity.
  *
  * # Auth gates
  *
  * Every route requires **owner** role on the host's organisation.
  * Owner is established by a v4 IdentityStore session cookie
- * (`aipehub_identity`) OR a v4 Bearer api_key / admin_token whose
+ * (`gotong_identity`) OR a v4 Bearer api_key / admin_token whose
  * resolved role is `owner`. The legacy v3 admin path (Space.admins
  * cookie / `/admin?token=...` URL) was removed in A2.2 — host-level
  * admin routes (agents, secrets, workflows) still accept v3 admin
@@ -55,12 +55,12 @@ import {
 } from './usage-routes.js'
 
 // Audit #155 — the reputation snapshot row shape is owned by
-// @aipehub/core (where the EWMA store lives). Web extends rather than
+// @gotong/core (where the EWMA store lives). Web extends rather than
 // re-declares so a new field in core flows through automatically.
-import type { PeerReputation } from '@aipehub/core'
+import type { PeerReputation } from '@gotong/core'
 
 // ---------------------------------------------------------------------------
-// Structural projection of @aipehub/identity. Web depends on these
+// Structural projection of @gotong/identity. Web depends on these
 // types, NOT on the package. The host passes its real IdentityStore;
 // structural typing lets it slot in.
 // ---------------------------------------------------------------------------
@@ -95,7 +95,7 @@ export interface IdentitySessionDTO {
 export interface IdentityCredentialDTO {
   id: string
   userId: string
-  // Mirrors @aipehub/identity CredentialKind. 'oidc' (Route B P1-M4a) and
+  // Mirrors @gotong/identity CredentialKind. 'oidc' (Route B P1-M4a) and
   // 'saml' (P1-M5b) are external-IdP links with no replayable secret — listed
   // like any other credential so a member/admin can see & revoke their SSO
   // connections.
@@ -106,7 +106,7 @@ export interface IdentityCredentialDTO {
   lastUsedAt: number | null
 }
 
-// V4-AUDIT-06: structural projection of @aipehub/identity's
+// V4-AUDIT-06: structural projection of @gotong/identity's
 // AuditLogEntry / AuditActorSource. Kept here so web stays decoupled.
 // FED-M4: `'federated'` added for actions triggered by federated tasks
 // (Task.origin set); writer is expected to stash origin in metadata.
@@ -134,7 +134,7 @@ export interface IdentityAuditLogEntryDTO {
   success: boolean
 }
 
-// Phase 3 — invitation flow. Structural projection of @aipehub/identity's
+// Phase 3 — invitation flow. Structural projection of @gotong/identity's
 // Invitation + InvitationStatus, kept here so web stays decoupled.
 export type IdentityInvitationStatus =
   | 'pending'
@@ -144,7 +144,7 @@ export type IdentityInvitationStatus =
 
 /**
  * D1 — peer registry DTO. Mirrors `PeerRegistration` from
- * `@aipehub/identity` structurally; web never imports the package
+ * `@gotong/identity` structurally; web never imports the package
  * directly, so we declare the shape here.
  */
 // Phase 18 B-M1/B-M2 — per-peer cross-org policy (duck-typed mirrors of
@@ -202,14 +202,14 @@ export interface IdentityOrgQuotaDTO {
 }
 
 // Phase 6 #1 — peer reputation read-only dashboard projection. The
-// reputation store lives in `@aipehub/core` (hub.reputation) and is NOT
+// reputation store lives in `@gotong/core` (hub.reputation) and is NOT
 // part of IdentitySurface — it's injected via `HandleIdentityRouteCtx`
 // from the host, same pattern as `peerRegistry`. The DTO is enriched
 // with an optional `label` joined from the identity peers table when
 // available; pure feedback-driven peers (no peers-row) just show the
 // peerHubId.
 /**
- * Audit #155 — the snapshot shape comes from `@aipehub/core`'s
+ * Audit #155 — the snapshot shape comes from `@gotong/core`'s
  * `PeerReputation`; we only ADD `label` (joined from identity.peers
  * for display). Extending instead of re-declaring means future core
  * additions (eg. trend, variance) appear here automatically with
@@ -347,7 +347,7 @@ export interface IdentitySurface {
   // V4-AUDIT-06 — audit log surface. Both methods are optional on the
   // structural type so older host wirings (an IdentityStore that
   // predates the migration) still typecheck. In practice the host
-  // either has a current `@aipehub/identity` (both methods present)
+  // either has a current `@gotong/identity` (both methods present)
   // or doesn't wire `identity` at all (the route stays 503).
   writeAuditLog?(input: {
     action: string
@@ -364,7 +364,7 @@ export interface IdentitySurface {
     limit?: number
     offset?: number
     action?: string
-    // P2-M3 — generic audit filters (mirror @aipehub/identity's
+    // P2-M3 — generic audit filters (mirror @gotong/identity's
     // ListAuditLogQuery). Used by the workflow-audit view to pull all five
     // workflow actions in a bounded time window, scoped to one workflowId.
     actions?: string[]
@@ -463,7 +463,7 @@ export interface IdentitySurface {
 }
 
 /** The vault-row fields the setup wizard reads — a structural subset of the
- *  identity store's `VaultEntry`, so web needn't import @aipehub/identity. */
+ *  identity store's `VaultEntry`, so web needn't import @gotong/identity. */
 export interface VaultEntryLike {
   id: string
   metadata: Record<string, unknown> | null
@@ -475,7 +475,7 @@ export interface VaultEntryLike {
 // what stays here is the identity-specific cookie construction.
 // ---------------------------------------------------------------------------
 
-export const IDENTITY_COOKIE = 'aipehub_identity'
+export const IDENTITY_COOKIE = 'gotong_identity'
 const COOKIE_MAX_AGE_S = 60 * 60 * 24 * 7 // 7 days; mirrors IdentityStore default TTL
 
 // Exported so the OIDC login routes (oidc-routes.ts) mint the SAME identity
@@ -493,7 +493,7 @@ function expireIdentityCookie(secure: boolean): string {
 
 // ---------------------------------------------------------------------------
 // IdentityError mapping. Web has no compile-time access to the class
-// (no import of @aipehub/identity) so we check structurally on the
+// (no import of @gotong/identity) so we check structurally on the
 // `code` field which is stable contract.
 // ---------------------------------------------------------------------------
 
@@ -1508,7 +1508,7 @@ async function handleCreateInvite(
     if (ec?.code === 'invitations_limit_exceeded') {
       tryAudit(ctx, v4, {
         // Audit #148: use the named constant (mirrored from
-        // `@aipehub/identity` AUDIT_ACTIONS.INVITE_CREATE_BLOCKED)
+        // `@gotong/identity` AUDIT_ACTIONS.INVITE_CREATE_BLOCKED)
         // instead of a magic string. Web doesn't import the identity
         // package at runtime (structural projection only — see top of
         // file), so the constant lives here and drift is caught by
@@ -1528,9 +1528,9 @@ async function handleCreateInvite(
 }
 
 /**
- * Audit #148 — mirrored from `@aipehub/identity` AUDIT_ACTIONS.
+ * Audit #148 — mirrored from `@gotong/identity` AUDIT_ACTIONS.
  *
- * Web is structurally decoupled from `@aipehub/identity` (it's a
+ * Web is structurally decoupled from `@gotong/identity` (it's a
  * devDependency only, used in tests). Constants we need at runtime get
  * mirrored here as `as const` literals. Drift between this file and
  * the source-of-truth in `packages/identity/src/types.ts` is caught
@@ -1985,7 +1985,7 @@ function handleAuditExport(
 
 /**
  * The five workflow lifecycle actions. Mirrors `AUDIT_ACTIONS.WORKFLOW_*`
- * from `@aipehub/identity` as string literals (web has no identity runtime
+ * from `@gotong/identity` as string literals (web has no identity runtime
  * dep — same pattern as the audit-vocab mirrors elsewhere in this file).
  */
 const WORKFLOW_AUDIT_ACTIONS: readonly string[] = [

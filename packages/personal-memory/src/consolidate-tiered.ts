@@ -19,7 +19,7 @@
  * `tieredReviewer` wires both onto the heartbeat (Stream D) the same way
  * `consolidateReviewer` wires the flat path.
  *
- * Like `consolidate`, this never imports `@aipehub/llm`: it takes a
+ * Like `consolidate`, this never imports `@gotong/llm`: it takes a
  * {@link MemorySummarizer} callback, so it is trivially testable with a
  * deterministic fake that returns the routing JSON / profile text.
  *
@@ -58,7 +58,7 @@ import {
   type TierConfig,
 } from './tiers.js'
 
-import type { MemoryEntry, MemoryHandle, NewMemoryEntry } from '@aipehub/services-sdk'
+import type { MemoryEntry, MemoryHandle, NewMemoryEntry } from '@gotong/services-sdk'
 
 const META_CONSOLIDATED_AT = 'consolidatedAt'
 const RECALL_WINDOW = 200

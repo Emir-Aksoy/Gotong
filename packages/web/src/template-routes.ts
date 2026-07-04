@@ -29,8 +29,8 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { parse as parseYaml } from 'yaml'
 
-import type { AdminRecord } from '@aipehub/core'
-import { createLogger } from '@aipehub/core'
+import type { AdminRecord } from '@gotong/core'
+import { createLogger } from '@gotong/core'
 
 import { BUILTIN_TEMPLATES } from './builtin-templates.js'
 import { readJsonBody, sendJson } from './http-helpers.js'
@@ -102,7 +102,7 @@ export interface TemplateRoutesCtx {
 const EXPORT_PATH = '/api/admin/templates/export'
 
 // ── Track G: template gallery (one-click install of shipped templates) ───────
-// The gallery surfaces the curated `aipehub.template/v1` manifests embedded at
+// The gallery surfaces the curated `gotong.template/v1` manifests embedded at
 // build time (src/builtin-templates.ts, single source of truth in examples/).
 // `catalog` lists each one's INSTALL PREVIEW (what agents/workflows/KBs it would
 // land); `catalog/:id` returns the raw yaml the frontend POSTs to the existing
@@ -381,7 +381,7 @@ function toStringArray(raw: unknown): string[] | null {
   return out
 }
 
-/** Pull the inner `workflow:` block out of an authored aipehub.workflow/v1 doc. */
+/** Pull the inner `workflow:` block out of an authored gotong.workflow/v1 doc. */
 function unwrapWorkflow(text: string): Record<string, unknown> | null {
   // parseYaml handles JSON too (YAML ⊇ JSON), so this covers both authored forms.
   let doc: unknown

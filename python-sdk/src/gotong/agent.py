@@ -1,6 +1,6 @@
-"""Base class for Python agents that participate in an AipeHub Hub.
+"""Base class for Python agents that participate in an Gotong Hub.
 
-Mirrors @aipehub/sdk-node's ``AgentParticipant``: subclass it, override
+Mirrors @gotong/sdk-node's ``AgentParticipant``: subclass it, override
 ``handle_task`` (and optionally ``handle_message`` / ``on_task_cancelled``),
 register it through ``connect(agents=[...])``. The SDK runs ``handle_task``
 on the asyncio event loop; you can ``async def`` or ``def`` it — sync

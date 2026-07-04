@@ -9,7 +9,7 @@
  *   - per row: enable / disable, rotate token, remove
  *
  * The shared bearer token is symmetric — mint it once with
- * `aipehub mint-peer-token` (M7a) and register the SAME string on both
+ * `gotong mint-peer-token` (M7a) and register the SAME string on both
  * hubs. It is a SECRET: stored vault-encrypted, never returned by the
  * list route, so this panel never displays it (write-only — type it in
  * to set / rotate, never read back).
@@ -26,10 +26,10 @@
 ;(function () {
   'use strict'
 
-  // i18n — read the live dict off window.AipeHub at call time (app-core.js runs
-  // synchronously before this panel is injected, so AipeHub is always defined).
+  // i18n — read the live dict off window.Gotong at call time (app-core.js runs
+  // synchronously before this panel is injected, so Gotong is always defined).
   // `t()` returns the current-language dict; re-render on language change.
-  const AH = window.AipeHub
+  const AH = window.Gotong
   function t() { return AH.t }
 
   const API = '/api/admin/identity/peers'
@@ -147,7 +147,7 @@
     for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i)
     return new TextDecoder().decode(bytes)
   }
-  // 256-bit random token, same strength as `aipehub mint-peer-token`.
+  // 256-bit random token, same strength as `gotong mint-peer-token`.
   function genPairToken() {
     const bytes = new Uint8Array(32)
     ;(window.crypto || window.msCrypto).getRandomValues(bytes)
@@ -347,7 +347,7 @@
       '  <div class="pa-field"><label>Endpoint URL' +
       '    <input id="pa-endpoint" type="text" required placeholder="wss://partner/federation" /></label></div>' +
       '  <div class="pa-field"><label>Peer Token (bearer)' +
-      '    <input id="pa-token" type="password" required placeholder="aipehub mint-peer-token" /></label></div>' +
+      '    <input id="pa-token" type="password" required placeholder="gotong mint-peer-token" /></label></div>' +
       '  <div class="pa-field"><label>' + escHtml(d.padmLabelOptional) +
       '    <input id="pa-label" type="text" placeholder="' + escHtml(d.padmLabelPlaceholder) + '" /></label></div>' +
       '  <div class="pa-field"><label>' + escHtml(d.padmKind) +

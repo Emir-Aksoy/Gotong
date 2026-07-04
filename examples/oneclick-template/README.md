@@ -4,15 +4,15 @@ v5 Stream B「模板系统」的端到端样例。**一个文件**(`template.yam
 架构 —— 1 个客服 agent + 1 个工单工作流 + 1 个可寻址知识库槽位 —— 导入后填一次
 API key 就能跑。
 
-模板(`aipehub.template/v1`)是 AipeHub 里「搬走一整套架构」的分享单元:它是
-`aipehub.bundle/v1`(1 团队 + 1 工作流)的超集,能带 N 个 agent、N 个工作流、
+模板(`gotong.template/v1`)是 Gotong 里「搬走一整套架构」的分享单元:它是
+`gotong.bundle/v1`(1 团队 + 1 工作流)的超集,能带 N 个 agent、N 个工作流、
 N 个可寻址知识库,以及一份可选的、加密的敏感边车。
 
 ## 这个模板里有什么
 
 ```
   ┌─────────────────────────────────────────────────────────┐
-  │  template.yaml  (aipehub.template/v1)                    │
+  │  template.yaml  (gotong.template/v1)                    │
   │                                                          │
   │   agents:        support-agent  ──┐                      │
   │                                   │ 自带 mcpServers       │
@@ -30,8 +30,8 @@ N 个可寻址知识库,以及一份可选的、加密的敏感边车。
 
 ```bash
 # 1. 起一个 host(个人模式默认)
-aipehub init
-npx @aipehub/host
+gotong init
+npx @gotong/host
 # 控制台会打印 admin URL,里面带 ?token=<admin-token>
 
 # 2. 导入这个模板(admin UI →「工作流 / Agents」→ 导入,或用 curl)
@@ -45,7 +45,7 @@ export DEEPSEEK_API_KEY=sk-...
 
 # 4. （可选)按 presetData 指针拉取脱敏样例 KB,解压到 chroma-mcp 的 --persist-dir
 #    curl -L https://example.com/company-kb-seed.tar.zst | tar --zstd -xf - \
-#      -C .aipehub/knowledge/company-kb
+#      -C .gotong/knowledge/company-kb
 
 # 5. 在工作流面板点「开始」跑 ticket-flow,payload: { "q": "退货政策是什么?" }
 ```

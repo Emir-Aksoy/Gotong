@@ -2,7 +2,7 @@
  * `PersonalButlerAgent` — the resident butler.
  *
  * A `MemoryAugmentedAgent` (frozen-block memory + turn capture, from
- * `@aipehub/personal-memory`) with ONE addition: a bounded tool-loop whose
+ * `@gotong/personal-memory`) with ONE addition: a bounded tool-loop whose
  * SENSITIVE tool calls are approval-gated (decision D2). Everything else —
  * memory, capture, suspend/resume working memory, usage sink — is inherited.
  *
@@ -10,7 +10,7 @@
  * separate "propose → apply" engine, the butler runs ONE tool-loop where the
  * dangerous tools simply park the task (`SuspendTaskError` → `/me` inbox) until
  * a human approves. Benign tools (recall / dispatch / workflow-start / mcp) run
- * inline. This is the same mechanism `@aipehub/acp-agent`'s permission gate uses,
+ * inline. This is the same mechanism `@gotong/acp-agent`'s permission gate uses,
  * adapted from a live subprocess to a re-runnable conversation.
  *
  * Why override `runToolLoop` (rather than seam into the base loop): the base
@@ -21,7 +21,7 @@
  * this package; the shared base loop is untouched.
  */
 
-import { SuspendTaskError, isSuspendTaskError, type Task } from '@aipehub/core'
+import { SuspendTaskError, isSuspendTaskError, type Task } from '@gotong/core'
 import {
   ComposedToolset,
   type LlmAgentToolset,
@@ -31,12 +31,12 @@ import {
   type LlmResponse,
   type LlmToolResultBlock,
   type LlmToolUseBlock,
-} from '@aipehub/llm'
+} from '@gotong/llm'
 import {
   DEFAULT_TIERS,
   MemoryAugmentedAgent,
   type MemoryAugmentedAgentOptions,
-} from '@aipehub/personal-memory'
+} from '@gotong/personal-memory'
 
 import {
   BUTLER_NEVER_RESUME_AT,

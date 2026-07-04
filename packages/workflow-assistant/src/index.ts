@@ -1,13 +1,13 @@
 /**
- * Public API for `@aipehub/workflow-assistant`.
+ * Public API for `@gotong/workflow-assistant`.
  *
  * Phase 13 M1 — AI-assisted workflow authoring. Wraps an LlmAgent that
  * turns a natural-language description into a draft
- * `aipehub.workflow/v1` YAML, self-validates it via `parseWorkflow`,
+ * `gotong.workflow/v1` YAML, self-validates it via `parseWorkflow`,
  * and reports a `draftStatus` verdict ('valid' | 'no_yaml' | 'invalid').
  *
- * Lives in a separate package from `@aipehub/workflow` so the runner
- * itself doesn't acquire a runtime dependency on `@aipehub/llm` —
+ * Lives in a separate package from `@gotong/workflow` so the runner
+ * itself doesn't acquire a runtime dependency on `@gotong/llm` —
  * non-AI workflow consumers (host bootstrap, sidecars, evals) keep
  * a lean dep graph.
  */
@@ -38,13 +38,13 @@ export type {
 } from './assistant.js'
 
 // Architect evolution — re-export the DAG graph shape so callers that
-// consume `output.graph` can type it without a separate `@aipehub/workflow`
+// consume `output.graph` can type it without a separate `@gotong/workflow`
 // import. (web duck-types its own copy; host already depends on workflow.)
 export type {
   WorkflowGraphView,
   WorkflowGraphNode,
   WorkflowGraphEdge,
-} from '@aipehub/workflow'
+} from '@gotong/workflow'
 
 // Phase 13 follow-up — few-shot example loader. Bundled templates ship
 // inside the package's `templates/` dir; callers can also supply their
@@ -55,10 +55,10 @@ export {
 } from './examples-loader.js'
 
 // Phase 13 M4 — re-export the deep-check shapes so callers don't need
-// a separate `@aipehub/evals` import just to type the deepCheck field.
+// a separate `@gotong/evals` import just to type the deepCheck field.
 export type {
   WorkflowInventory,
   WorkflowStructureCheckResult,
   WorkflowStructureViolation,
   WorkflowStructureViolationKind,
-} from '@aipehub/evals/checkers/workflow-structure'
+} from '@gotong/evals/checkers/workflow-structure'

@@ -1,4 +1,4 @@
-schema: aipehub.workflow/v1
+schema: gotong.workflow/v1
 workflow:
   id: a2a-translate-and-file
   name: translate via external A2A agent, then file

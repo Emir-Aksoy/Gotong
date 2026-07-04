@@ -10,8 +10,8 @@
 
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { sendJson } from './http-helpers.js'
-import type { AdminRecord, ParticipantId } from '@aipehub/core'
-import { createLogger } from '@aipehub/core'
+import type { AdminRecord, ParticipantId } from '@gotong/core'
+import { createLogger } from '@gotong/core'
 
 const log = createLogger('uploads-routes')
 

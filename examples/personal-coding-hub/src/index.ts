@@ -1,5 +1,5 @@
 /**
- * personal-coding-hub — a case AipeHub can carry: one router LLM actively manages
+ * personal-coding-hub — a case Gotong can carry: one router LLM actively manages
  * Claude Code + Codex, routing the RIGHT agents for each goal, and the two share
  * project-level files.
  *
@@ -29,9 +29,9 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { Hub, InMemoryStorage, type Task, type TaskId } from '@aipehub/core'
-import { DispatchToolset, LlmAgent } from '@aipehub/llm'
-import { dangerousCommandGate } from '@aipehub/cli-agent'
+import { Hub, InMemoryStorage, type Task, type TaskId } from '@gotong/core'
+import { DispatchToolset, LlmAgent } from '@gotong/llm'
+import { dangerousCommandGate } from '@gotong/cli-agent'
 
 import { setupSharedWorkspace, readProgress, type SharedWorkspace } from './workspace.js'
 import { SharedWorkspaceCli } from './shared-workspace-cli.js'
@@ -147,7 +147,7 @@ const SCENARIOS: RoutingScenario[] = [
 ]
 
 async function main(): Promise<void> {
-  console.log('\n=== AipeHub case: personal-coding-hub ===')
+  console.log('\n=== Gotong case: personal-coding-hub ===')
   console.log('  路由结合「任务分析 × 用户的安排」合理分派编码 agent —— 不是固定 claude-code → codex。\n')
 
   for (const s of SCENARIOS) await runRouting(s)
@@ -162,7 +162,7 @@ async function main(): Promise<void> {
 
 /** Run one routing scenario in its own repo + hub, assert the dispatched set. */
 async function runRouting(s: RoutingScenario): Promise<void> {
-  const dir = mkdtempSync(join(tmpdir(), 'aipe-coding-hub-'))
+  const dir = mkdtempSync(join(tmpdir(), 'gotong-coding-hub-'))
   const ws = setupSharedWorkspace(dir)
 
   // 用大白话改总分工层: apply the natural-language edit, persist it to a policy
@@ -225,7 +225,7 @@ async function runRouting(s: RoutingScenario): Promise<void> {
 
 /** The safety gate: a destructive task parks before spawning and fails closed. */
 async function runActionGate(): Promise<void> {
-  const dir = mkdtempSync(join(tmpdir(), 'aipe-coding-hub-'))
+  const dir = mkdtempSync(join(tmpdir(), 'gotong-coding-hub-'))
   const ws = setupSharedWorkspace(dir)
   const parked = new Map<TaskId, { task: Task; state: unknown }>()
   const hub = new Hub({

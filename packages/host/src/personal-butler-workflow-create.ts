@@ -33,7 +33,7 @@
  * the tool passes THAT member's id so the draft is owned by (and scoped to) them.
  */
 
-import { GovernedActionToolset } from '@aipehub/personal-butler'
+import { GovernedActionToolset } from '@gotong/personal-butler'
 
 import type { MeWorkflowCreateResult } from './me-workflow-create-service.js'
 

@@ -11,7 +11,7 @@
  * consolidation in production. The MR-series built the whole distillation engine
  * (`tieredReviewer`) and the 6h-maintenance idiom (`statusProjectingReviewer`),
  * but only the `examples/personal-butler` demo and the §九 承重门 ever fired
- * them. BF-M8 folds that maintenance into `aipehub start`.
+ * them. BF-M8 folds that maintenance into `gotong start`.
  *
  * # What one tick does, per member
  *
@@ -54,15 +54,15 @@
 import { readdir } from 'node:fs/promises'
 import { join } from 'node:path'
 
-import type { Logger } from '@aipehub/core'
-import { drainStream, type LlmProvider } from '@aipehub/llm'
+import type { Logger } from '@gotong/core'
+import { drainStream, type LlmProvider } from '@gotong/llm'
 import {
   tieredReviewer,
   type MemoryReviewer,
   type MemorySummarizer,
   type TierConfig,
-} from '@aipehub/personal-memory'
-import type { MemoryHandle } from '@aipehub/services-sdk'
+} from '@gotong/personal-memory'
+import type { MemoryHandle } from '@gotong/services-sdk'
 
 import { openButlerMemory } from './personal-butler-memory.js'
 import {
@@ -79,8 +79,8 @@ const DEFAULT_RECALL_K = 200
 
 /**
  * Adapt an `LlmProvider` into the `MemorySummarizer` the distillation engine
- * wants — a `{system,user}` → text call. Keeps `@aipehub/personal-memory` free
- * of any `@aipehub/llm` import (the summarizer type is intentionally provider-
+ * wants — a `{system,user}` → text call. Keeps `@gotong/personal-memory` free
+ * of any `@gotong/llm` import (the summarizer type is intentionally provider-
  * agnostic); this is the one host seam that binds the two.
  */
 export function butlerSummarizer(

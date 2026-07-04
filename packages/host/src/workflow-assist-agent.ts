@@ -1,5 +1,5 @@
 /**
- * Host wiring for `@aipehub/workflow-assistant` — Phase 13 M3.
+ * Host wiring for `@gotong/workflow-assistant` — Phase 13 M3.
  *
  * Spawns ONE persistent `WorkflowAssistantAgent` on the hub at boot
  * (id=`workflow-assistant`, capability=`workflow:assist`), and exposes
@@ -8,7 +8,7 @@
  *
  * Why a host-built-in agent (not in `agents.json`):
  *   - The assistant is a host-level admin tool, not a user-authored
- *     agent. Auto-registering it lets `aipehub repl` / admin UI work
+ *     agent. Auto-registering it lets `gotong repl` / admin UI work
  *     out of the box, no manual setup.
  *   - When no LLM API key is available (no org-pool key, no env), we
  *     skip registration and Web responds 503. The host boots fine
@@ -19,7 +19,7 @@
  *   1. OrgApiPool (if wired) — picks any active vault entry for the provider
  *   2. host env (ANTHROPIC_API_KEY / OPENAI_API_KEY)
  * `openai-compatible` (S1-M4) skips both tiers: each baseURL is a different
- * vendor, so its key comes ONLY from the env var AIPE_ASSISTANT_API_KEY_ENV
+ * vendor, so its key comes ONLY from the env var GOTONG_ASSISTANT_API_KEY_ENV
  * names (pointer-not-key, the tokenEnv discipline).
  * No key → return `null` from `createWorkflowAssistAgent`, log a warning;
  * caller leaves `workflowAssist` unset on the Web ctx.
@@ -37,10 +37,10 @@
 
 import { randomUUID } from 'node:crypto'
 
-import type { Hub, Logger, ParticipantId } from '@aipehub/core'
-import { MockLlmProvider, readMultimodalInlineCapFromEnv, type LlmProvider } from '@aipehub/llm'
-import { AnthropicProvider } from '@aipehub/llm-anthropic'
-import { OpenAIProvider } from '@aipehub/llm-openai'
+import type { Hub, Logger, ParticipantId } from '@gotong/core'
+import { MockLlmProvider, readMultimodalInlineCapFromEnv, type LlmProvider } from '@gotong/llm'
+import { AnthropicProvider } from '@gotong/llm-anthropic'
+import { OpenAIProvider } from '@gotong/llm-openai'
 import {
   WorkflowAssistantAgent,
   WORKFLOW_ASSISTANT_CAPABILITY,
@@ -48,7 +48,7 @@ import {
   loadBundledExamples,
   type WorkflowAssistantOutput,
   type WorkflowAssistantPayload,
-} from '@aipehub/workflow-assistant'
+} from '@gotong/workflow-assistant'
 
 import type { OrgApiPool } from './org-api-pool.js'
 
@@ -127,26 +127,26 @@ export interface WorkflowAssistSurface {
 
 /**
  * Read env vars and pick a config. Returns null when the operator
- * explicitly disabled the assistant via `AIPE_ASSISTANT_DISABLED=1`.
+ * explicitly disabled the assistant via `GOTONG_ASSISTANT_DISABLED=1`.
  *
- *   AIPE_ASSISTANT_PROVIDER  'anthropic' (default) | 'openai' | 'openai-compatible' | 'mock'
- *   AIPE_ASSISTANT_MODEL     provider-specific model id (optional; strongly
+ *   GOTONG_ASSISTANT_PROVIDER  'anthropic' (default) | 'openai' | 'openai-compatible' | 'mock'
+ *   GOTONG_ASSISTANT_MODEL     provider-specific model id (optional; strongly
  *                            recommended for openai-compatible — the OpenAI
  *                            default model won't exist on another vendor)
- *   AIPE_ASSISTANT_MAX_TOKENS  integer (optional, default 4096)
- *   AIPE_ASSISTANT_BASE_URL  openai-compatible only — the vendor endpoint
+ *   GOTONG_ASSISTANT_MAX_TOKENS  integer (optional, default 4096)
+ *   GOTONG_ASSISTANT_BASE_URL  openai-compatible only — the vendor endpoint
  *                            (e.g. https://api.deepseek.com/v1)
- *   AIPE_ASSISTANT_API_KEY_ENV openai-compatible only — NAME of the env var
+ *   GOTONG_ASSISTANT_API_KEY_ENV openai-compatible only — NAME of the env var
  *                            holding that vendor's key (never the key itself)
- *   AIPE_ASSISTANT_DISABLED  '1' / 'true' → skip registration entirely
- *   AIPE_ASSISTANT_NO_EXAMPLES '1' / 'true' → skip few-shot examples
+ *   GOTONG_ASSISTANT_DISABLED  '1' / 'true' → skip registration entirely
+ *   GOTONG_ASSISTANT_NO_EXAMPLES '1' / 'true' → skip few-shot examples
  *                              (consumed in createWorkflowAssistAgent, not here)
  */
 export function resolveWorkflowAssistConfig(): WorkflowAssistAgentConfig | null {
-  const disabled = process.env.AIPE_ASSISTANT_DISABLED
+  const disabled = process.env.GOTONG_ASSISTANT_DISABLED
   if (disabled === '1' || disabled === 'true') return null
 
-  const raw = process.env.AIPE_ASSISTANT_PROVIDER ?? 'anthropic'
+  const raw = process.env.GOTONG_ASSISTANT_PROVIDER ?? 'anthropic'
   const provider: WorkflowAssistProviderKind =
     raw === 'openai'
       ? 'openai'
@@ -156,8 +156,8 @@ export function resolveWorkflowAssistConfig(): WorkflowAssistAgentConfig | null 
           ? 'mock'
           : 'anthropic'
 
-  const model = process.env.AIPE_ASSISTANT_MODEL
-  const maxTokensRaw = process.env.AIPE_ASSISTANT_MAX_TOKENS
+  const model = process.env.GOTONG_ASSISTANT_MODEL
+  const maxTokensRaw = process.env.GOTONG_ASSISTANT_MAX_TOKENS
   let maxTokens: number | undefined
   if (maxTokensRaw !== undefined) {
     const n = Number(maxTokensRaw)
@@ -168,8 +168,8 @@ export function resolveWorkflowAssistConfig(): WorkflowAssistAgentConfig | null 
   if (model) cfg.model = model
   if (maxTokens !== undefined) cfg.maxTokens = maxTokens
   if (provider === 'openai-compatible') {
-    const baseURL = process.env.AIPE_ASSISTANT_BASE_URL?.trim()
-    const apiKeyEnv = process.env.AIPE_ASSISTANT_API_KEY_ENV?.trim()
+    const baseURL = process.env.GOTONG_ASSISTANT_BASE_URL?.trim()
+    const apiKeyEnv = process.env.GOTONG_ASSISTANT_API_KEY_ENV?.trim()
     if (baseURL) cfg.baseURL = baseURL
     if (apiKeyEnv) cfg.apiKeyEnv = apiKeyEnv
   }
@@ -222,7 +222,7 @@ function buildAssistProvider(
       // skeleton workflow so the editor pipeline (parseWorkflow →
       // draftStatus) can be exercised without burning real LLM quota.
       // The skeleton is intentionally valid against
-      // aipehub.workflow/v1 so the round-trip happy path
+      // gotong.workflow/v1 so the round-trip happy path
       // (draftStatus === 'valid') stays exercisable in mock mode.
       return new MockLlmProvider({
         // Phase 13 follow-up — split the reply into 8 chunks so admin
@@ -233,10 +233,10 @@ function buildAssistProvider(
         textChunkCount: 8,
         reply: () =>
           [
-            'Mock assistant — replace `AIPE_ASSISTANT_PROVIDER=mock` with `anthropic` or `openai` for real generation.',
+            'Mock assistant — replace `GOTONG_ASSISTANT_PROVIDER=mock` with `anthropic` or `openai` for real generation.',
             '',
             '```yaml',
-            'schema: aipehub.workflow/v1',
+            'schema: gotong.workflow/v1',
             'workflow:',
             '  id: assistant-mock-draft',
             '  name: Mock-generated draft',
@@ -273,12 +273,12 @@ function buildAssistProvider(
       // agent row (local-agent-pool.ts buildProvider), env-driven here.
       if (!config.baseURL) {
         throw new Error(
-          "WorkflowAssistantAgent provider 'openai-compatible' needs AIPE_ASSISTANT_BASE_URL — point it at an OpenAI-compatible /v1 endpoint",
+          "WorkflowAssistantAgent provider 'openai-compatible' needs GOTONG_ASSISTANT_BASE_URL — point it at an OpenAI-compatible /v1 endpoint",
         )
       }
       if (!apiKey) {
         throw new Error(
-          "WorkflowAssistantAgent provider 'openai-compatible' needs a key — set AIPE_ASSISTANT_API_KEY_ENV to the NAME of the env var holding it",
+          "WorkflowAssistantAgent provider 'openai-compatible' needs a key — set GOTONG_ASSISTANT_API_KEY_ENV to the NAME of the env var holding it",
         )
       }
       // Truthful provider name in logs/ledger: the vendor host, not 'openai'.
@@ -322,7 +322,7 @@ export function createWorkflowAssistAgent(deps: {
     logger.warn('workflow-assistant: no API key resolved — skipping registration', {
       provider: config.provider,
       ...(config.provider === 'openai-compatible'
-        ? { hint: 'set AIPE_ASSISTANT_API_KEY_ENV to the NAME of the env var holding the vendor key' }
+        ? { hint: 'set GOTONG_ASSISTANT_API_KEY_ENV to the NAME of the env var holding the vendor key' }
         : {}),
     })
     return null
@@ -333,7 +333,7 @@ export function createWorkflowAssistAgent(deps: {
   // explicit model every assist call would 404 confusingly. Warn, don't block:
   // some endpoints (Ollama with a configured default) do work model-less.
   if (config.provider === 'openai-compatible' && !config.model) {
-    logger.warn('workflow-assistant: openai-compatible without AIPE_ASSISTANT_MODEL — the OpenAI default model likely does not exist on this endpoint')
+    logger.warn('workflow-assistant: openai-compatible without GOTONG_ASSISTANT_MODEL — the OpenAI default model likely does not exist on this endpoint')
   }
 
   let provider: LlmProvider
@@ -357,9 +357,9 @@ export function createWorkflowAssistAgent(deps: {
   // templates) gives the LLM concrete patterns to imitate (parallel
   // branches, $-refs, output composition) and noticeably improves
   // happy-path latency and accuracy. Opt out with
-  // AIPE_ASSISTANT_NO_EXAMPLES=1 if you want to A/B against the
+  // GOTONG_ASSISTANT_NO_EXAMPLES=1 if you want to A/B against the
   // schema-doc-only baseline, or pinch tokens on a tight budget.
-  const noExamples = process.env.AIPE_ASSISTANT_NO_EXAMPLES
+  const noExamples = process.env.GOTONG_ASSISTANT_NO_EXAMPLES
   if (noExamples !== '1' && noExamples !== 'true') {
     const examples = loadBundledExamples()
     if (examples.length > 0) {

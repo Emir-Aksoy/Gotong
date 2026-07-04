@@ -1,5 +1,5 @@
 {
-  "name": "@aipehub/example-cross-hub-mcp",
+  "name": "@gotong/example-cross-hub-mcp",
   "version": "0.0.0",
   "type": "module",
   "private": true,
@@ -9,8 +9,8 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@aipehub/core": "workspace:*",
-    "@aipehub/llm": "workspace:*",
-    "@aipehub/host": "workspace:*"
+    "@gotong/core": "workspace:*",
+    "@gotong/llm": "workspace:*",
+    "@gotong/host": "workspace:*"
   }
 }

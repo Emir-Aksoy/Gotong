@@ -1,92 +1,92 @@
 /**
- * Production AipeHub host binary.
+ * Production Gotong host binary.
  *
  * Reads its configuration from environment variables (12-factor style) so
  * the same image / build can be promoted from staging to production via
  * environment alone. No demo agent is registered; no test traffic is
- * generated. All state lives in the directory pointed at by AIPE_SPACE.
+ * generated. All state lives in the directory pointed at by GOTONG_SPACE.
  *
  * Environment:
  *
- *   AIPE_SPACE              directory to open / init. Default `.aipehub`.
- *   AIPE_HOST               bind address (default 127.0.0.1 — pair with a
+ *   GOTONG_SPACE              directory to open / init. Default `.gotong`.
+ *   GOTONG_HOST               bind address (default 127.0.0.1 — pair with a
  *                           reverse proxy that terminates TLS).
- *   AIPE_WEB_PORT           default 3000.
- *   AIPE_WS_PORT            default 4000.
- *   AIPE_GATING             'open' | 'admin-approval' (default 'admin-approval')
- *   AIPE_COOKIE_SECURE      '1' to add the Secure + SameSite=Strict cookie
+ *   GOTONG_WEB_PORT           default 3000.
+ *   GOTONG_WS_PORT            default 4000.
+ *   GOTONG_GATING             'open' | 'admin-approval' (default 'admin-approval')
+ *   GOTONG_COOKIE_SECURE      '1' to add the Secure + SameSite=Strict cookie
  *                           flags. Required behind HTTPS. Default '0'.
- *   AIPE_ALLOWED_HOSTS      Comma-separated list of host[:port] values
+ *   GOTONG_ALLOWED_HOSTS      Comma-separated list of host[:port] values
  *                           accepted on Host: and Origin: for state-changing
  *                           requests. Example "hub.example.com". Empty
  *                           disables the check (only safe on loopback).
- *   AIPE_ALLOW_INSECURE     '1' to downgrade the boot security self-check
+ *   GOTONG_ALLOW_INSECURE     '1' to downgrade the boot security self-check
  *                           (Route B P0-M6) from fail-closed to a warning.
  *                           Only for a network-exposed host whose reverse
  *                           proxy already validates Host and terminates TLS.
- *   AIPE_ADMIN_RATE_MAX     admin login attempts allowed per IP per window
+ *   GOTONG_ADMIN_RATE_MAX     admin login attempts allowed per IP per window
  *                           (default 10; 0 disables).
- *   AIPE_ADMIN_RATE_SEC     window for the rate limit in seconds (default 60).
- *   AIPE_DEFAULT_LANG       'zh' | 'en' (default 'zh')
- *   AIPE_HEARTBEAT_MS       transport heartbeat interval (default 30000)
- *   AIPE_SPACE_NAME         label written into space.json on first init
- *   AIPE_ADMIN_DISPLAY_NAME first admin's display name (default 'Operator')
- *   AIPE_WORKFLOWS_DIR      directory of workflow YAML/JSON files to
+ *   GOTONG_ADMIN_RATE_SEC     window for the rate limit in seconds (default 60).
+ *   GOTONG_DEFAULT_LANG       'zh' | 'en' (default 'zh')
+ *   GOTONG_HEARTBEAT_MS       transport heartbeat interval (default 30000)
+ *   GOTONG_SPACE_NAME         label written into space.json on first init
+ *   GOTONG_ADMIN_DISPLAY_NAME first admin's display name (default 'Operator')
+ *   GOTONG_WORKFLOWS_DIR      directory of workflow YAML/JSON files to
  *                           auto-load on boot. Default
- *                           `<AIPE_SPACE>/workflows/definitions`. Each
+ *                           `<GOTONG_SPACE>/workflows/definitions`. Each
  *                           parseable file becomes a registered
  *                           `WorkflowRunner` participant; failed files
  *                           are logged and skipped.
  *
  *   --- transcript retention (Route B P0-M2; OFF by default) ---
  *
- *   AIPE_TRANSCRIPT_KEEP_SEGMENTS  keep this many newest sealed transcript
+ *   GOTONG_TRANSCRIPT_KEEP_SEGMENTS  keep this many newest sealed transcript
  *                           segments in the boot load path; archive older
- *                           ones into `<AIPE_SPACE>/archive/`. Bounds boot
+ *                           ones into `<GOTONG_SPACE>/archive/`. Bounds boot
  *                           load to O(tail). Unset ⇒ no archiving.
- *   AIPE_TRANSCRIPT_ARCHIVE_DAYS   archive sealed segments whose newest
+ *   GOTONG_TRANSCRIPT_ARCHIVE_DAYS   archive sealed segments whose newest
  *                           entry is older than this many days. May be
  *                           combined with KEEP_SEGMENTS (both must hold).
  *                           Archived bytes stay on disk for audit/export;
  *                           a malformed value fails the boot loudly.
- *   AIPE_RUN_KEEP           keep this many newest TERMINAL workflow runs on
+ *   GOTONG_RUN_KEEP           keep this many newest TERMINAL workflow runs on
  *                           the active scan path; archive older ones into
  *                           `workflows/runs/archive/`. Bounds boot-resume /
  *                           run-history / metrics scans to O(tail). A
  *                           `running` run is never archived. Unset ⇒ off.
- *   AIPE_RUN_ARCHIVE_DAYS   archive terminal runs that ended more than this
- *                           many days ago. May be combined with AIPE_RUN_KEEP
+ *   GOTONG_RUN_ARCHIVE_DAYS   archive terminal runs that ended more than this
+ *                           many days ago. May be combined with GOTONG_RUN_KEEP
  *                           (both must hold). Archived runs stay reachable for
  *                           audit; a malformed value fails the boot loudly.
- *   AIPE_LEDGER_KEEP_DAYS   prune usage-ledger (billing) rows older than this
+ *   GOTONG_LEDGER_KEEP_DAYS   prune usage-ledger (billing) rows older than this
  *                           many days at boot, bounding the append-only ledger.
  *                           The retained window stays exportable (Phase 17
  *                           CSV/JSONL). Unset ⇒ off; a malformed value fails
  *                           the boot loudly. Sibling knobs with the same
  *                           semantics for the other append-only tables:
- *   AIPE_AUDIT_KEEP_DAYS            audit_log
- *   AIPE_PEER_SUMMARY_KEEP_DAYS     peer_summary_snapshots (trend history)
- *   AIPE_ALERT_FIRINGS_KEEP_DAYS    peer_summary_alert_firings (resolved only;
+ *   GOTONG_AUDIT_KEEP_DAYS            audit_log
+ *   GOTONG_PEER_SUMMARY_KEEP_DAYS     peer_summary_snapshots (trend history)
+ *   GOTONG_ALERT_FIRINGS_KEEP_DAYS    peer_summary_alert_firings (resolved only;
  *                                   open firings are never pruned)
  *
- *   --- structured logging (default ON, see @aipehub/core/logger) ---
+ *   --- structured logging (default ON, see @gotong/core/logger) ---
  *
- *   AIPE_LOG_LEVEL          'silent' | 'trace' | 'debug' | 'info' | 'warn'
+ *   GOTONG_LOG_LEVEL          'silent' | 'trace' | 'debug' | 'info' | 'warn'
  *                           | 'error' | 'fatal'  (default 'info')
- *   AIPE_LOG_FORMAT         'json' | 'pretty'  (default: 'pretty' when
+ *   GOTONG_LOG_FORMAT         'json' | 'pretty'  (default: 'pretty' when
  *                           stdout is a TTY, else 'json' for machine
  *                           consumption / log shippers)
- *   AIPE_LOG_DISABLED       '1' to suppress all log output. Takes
+ *   GOTONG_LOG_DISABLED       '1' to suppress all log output. Takes
  *                           precedence over LEVEL and FORMAT.
  *
  * On first launch the space dir is created and a one-time admin URL is
- * written to `<AIPE_SPACE>/runtime/admin-link.txt` (mode 0o600). The
+ * written to `<GOTONG_SPACE>/runtime/admin-link.txt` (mode 0o600). The
  * boot banner on stdout tells the operator where to read it. Writing
  * the URL to a file — instead of `console.log`-ing it — keeps the
  * plaintext token out of `journalctl`, `docker logs`, `pm2 logs`, and
  * any other log shipper that captures process stdout. Anyone who can
  * read the workspace directory can already mint a fresh admin via
- * `aipehub-host mint-admin-token`; this just removes the easy log-mining
+ * `gotong-host mint-admin-token`; this just removes the easy log-mining
  * shortcut. See AUDIT-v3.3.md finding H20.
  *
  * On subsequent launches the printout shows just the /admin entry —
@@ -99,7 +99,7 @@
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
-import { Hub, Space, createLogger, type Logger, type McpServerSpec, type Participant, type RemoteHubViaLink, type SpaceConfig, type Task, type TranscriptEntry } from '@aipehub/core'
+import { Hub, Space, createLogger, type Logger, type McpServerSpec, type Participant, type RemoteHubViaLink, type SpaceConfig, type Task, type TranscriptEntry } from '@gotong/core'
 import {
   AUDIT_ACTIONS,
   openIdentityStore,
@@ -110,7 +110,7 @@ import {
   type PeerRegistration,
   type A2aOutboundAgent,
   type AcpOutboundAgent,
-} from '@aipehub/identity'
+} from '@gotong/identity'
 
 import { OrgApiPool } from './org-api-pool.js'
 
@@ -133,7 +133,7 @@ import { writeAdminLinkFile } from './admin-link.js'
 import { friendlyBootError } from './boot-error.js'
 
 const log = createLogger('host')
-import { serveWebSocket } from '@aipehub/transport-ws'
+import { serveWebSocket } from '@gotong/transport-ws'
 import { PeerRegistry, buildPeerTokenResolver } from './peer-registry.js'
 import { A2aServer } from './a2a-server.js'
 import { A2aOutboundManager } from './a2a-outbound.js'
@@ -143,7 +143,7 @@ import { startImBridges, type ImBridgesHandle } from './im-bridge.js'
 import { OidcClient } from './oidc-client.js'
 import { OidcLoginService } from './oidc-login-service.js'
 import { SamlLoginService } from './saml-login-service.js'
-import { buildSpMetadata, SamlError } from '@aipehub/saml'
+import { buildSpMetadata, SamlError } from '@gotong/saml'
 import {
   serveWeb,
   buildTemplateCatalog,
@@ -157,7 +157,7 @@ import {
   type A2aAgentView,
   type AcpAgentAdminSurface,
   type AcpAgentView,
-} from '@aipehub/web'
+} from '@gotong/web'
 
 /**
  * Phase 18 B-M3 — resolve the org owner's user id (the default approver for
@@ -172,7 +172,7 @@ function findOwnerUserId(identity: IdentityStore): string | null {
   return null
 }
 
-// Route B P1-M11b — outbound A2A agents moved from the `AIPE_A2A_AGENTS` env
+// Route B P1-M11b — outbound A2A agents moved from the `GOTONG_A2A_AGENTS` env
 // blob to identity-backed config (`a2a_outbound_agents`, M11a) materialised by
 // `A2aOutboundManager`. Same source-of-truth model as peers / OIDC / SAML
 // (store + admin API, no env), so they persist and are admin-editable. The
@@ -250,7 +250,7 @@ import {
 import { armButlerSweeps } from './personal-butler-sweeps.js'
 import { createWorkflowScheduleAdminSurface } from './workflow-schedule-admin.js'
 import { WorkflowScheduleSweeper } from './workflow-schedule-sweeper.js'
-import { PersonalButlerAgent } from '@aipehub/personal-butler'
+import { PersonalButlerAgent } from '@gotong/personal-butler'
 import { HostMeImService } from './me-im-service.js'
 import { ApprovalGatedParticipant } from './outbound-approval.js'
 import {
@@ -262,7 +262,7 @@ import {
   classifyHeartbeatResult,
   type HeartbeatAgentConfig,
 } from './heartbeat.js'
-import { FileInboxStore, HumanInboxParticipant, HUMAN_CAPABILITY } from '@aipehub/inbox'
+import { FileInboxStore, HumanInboxParticipant, HUMAN_CAPABILITY } from '@gotong/inbox'
 import {
   createWorkflowAssistAgent,
   resolveWorkflowAssistConfig,
@@ -310,15 +310,15 @@ import {
   type ButlerWizardSource,
 } from './personal-butler-workflow-wizard.js'
 import { ReminderParticipant } from './reminder-participant.js'
-import type { LlmProvider } from '@aipehub/llm'
+import type { LlmProvider } from '@gotong/llm'
 import { HostOperatorAgentService } from './operator-agent-service.js'
 import { OperatorWorkflowEditService } from './operator-workflow-edit-service.js'
 import { operatorStewardWorkflowDirectory } from './operator-workflow-directory.js'
 import { HostStewardSensitiveExecutors } from './steward-sensitive.js'
-import { buildOperatorStewardSystemPrompt } from '@aipehub/hub-steward'
+import { buildOperatorStewardSystemPrompt } from '@gotong/hub-steward'
 
 // CLI flags handled before any work — keep these cheap and side-effect free
-// so `npx @aipehub/host --help` exits in milliseconds without trying to
+// so `npx @gotong/host --help` exits in milliseconds without trying to
 // open a workspace dir on disk.
 const ARGV = process.argv.slice(2)
 
@@ -331,18 +331,18 @@ if (ARGV.includes('--version') || ARGV.includes('-V')) {
   process.exit(0)
 }
 
-// Subcommand: `aipehub-host mint-admin-token [displayName]`
-// Mints a fresh admin against the AIPE_SPACE workspace WITHOUT starting
+// Subcommand: `gotong-host mint-admin-token [displayName]`
+// Mints a fresh admin against the GOTONG_SPACE workspace WITHOUT starting
 // the Hub / listeners. Use when the first-run admin URL got lost
 // (window closed, .command script went away, scrollback gone). Reads
-// AIPE_SPACE / AIPE_HOST / AIPE_WEB_PORT / AIPE_COOKIE_SECURE from the
+// GOTONG_SPACE / GOTONG_HOST / GOTONG_WEB_PORT / GOTONG_COOKIE_SECURE from the
 // environment so the printed URL matches your deployment.
 if (ARGV[0] === 'mint-admin-token') {
   await mintAdminTokenCmd(ARGV[1])
   process.exit(0)
 }
 
-// Subcommand: `aipehub-host rotate-master-key` (Route B P0-M4d)
+// Subcommand: `gotong-host rotate-master-key` (Route B P0-M4d)
 // Rotates the identity vault master key (KEK) without starting the Hub.
 // Envelope encryption (M4b) makes this O(1): the single data key is
 // re-wrapped under a freshly generated key, secret rows are untouched.
@@ -354,7 +354,7 @@ if (ARGV[0] === 'rotate-master-key') {
 
 function pkgVersion(): string {
   // Prefer reading from disk so an in-place upgrade (`npm install -g
-  // @aipehub/host@new` without restarting tsc) reflects in --version.
+  // @gotong/host@new` without restarting tsc) reflects in --version.
   // Fall through to BAKED_VERSION when the disk read fails — in the
   // bun --compile single-file binary, package.json isn't on the
   // embedded /$bunfs/ virtual filesystem, so readFileSync throws
@@ -369,23 +369,23 @@ function pkgVersion(): string {
 }
 
 /**
- * `aipehub-host mint-admin-token [displayName]` — emergency recovery
- * when the first-run admin URL was lost. Reads AIPE_SPACE from the env
- * exactly like the main path so the same `.aipehub` directory is
+ * `gotong-host mint-admin-token [displayName]` — emergency recovery
+ * when the first-run admin URL was lost. Reads GOTONG_SPACE from the env
+ * exactly like the main path so the same `.gotong` directory is
  * reached. Does NOT start the Hub or open any listeners; only creates
  * a new admin row in admins.json and prints the URL (token shown
  * exactly once, matching createAdmin's contract).
  *
- * The printed URL uses AIPE_HOST + AIPE_WEB_PORT + AIPE_COOKIE_SECURE
+ * The printed URL uses GOTONG_HOST + GOTONG_WEB_PORT + GOTONG_COOKIE_SECURE
  * so what gets printed actually points at where the running host
  * would serve. Behind a reverse proxy you'll have to substitute the
  * external hostname yourself — same caveat as the first-run print.
  */
 async function mintAdminTokenCmd(displayNameArg: string | undefined): Promise<void> {
-  const dir = env('AIPE_SPACE', '.aipehub')!
+  const dir = env('GOTONG_SPACE', '.gotong')!
   const displayName = displayNameArg && displayNameArg.length > 0
     ? displayNameArg
-    : env('AIPE_ADMIN_DISPLAY_NAME', 'Recovered Operator')!
+    : env('GOTONG_ADMIN_DISPLAY_NAME', 'Recovered Operator')!
 
   let space: Space
   try {
@@ -395,17 +395,17 @@ async function mintAdminTokenCmd(displayNameArg: string | undefined): Promise<vo
       `error: could not open space '${dir}': ${
         err instanceof Error ? err.message : String(err)
       }\n` +
-        `hint: AIPE_SPACE must point at an already-initialised workspace.\n` +
-        `      Run \`aipehub-host\` (or your launcher) once to create it first.\n`,
+        `hint: GOTONG_SPACE must point at an already-initialised workspace.\n` +
+        `      Run \`gotong-host\` (or your launcher) once to create it first.\n`,
     )
     process.exit(2)
   }
 
   const { admin, token } = await space.createAdmin(displayName)
 
-  const host = env('AIPE_HOST', '127.0.0.1')!
-  const port = envInt('AIPE_WEB_PORT', 3000)
-  const proto = envBool('AIPE_COOKIE_SECURE', false) ? 'https' : 'http'
+  const host = env('GOTONG_HOST', '127.0.0.1')!
+  const port = envInt('GOTONG_WEB_PORT', 3000)
+  const proto = envBool('GOTONG_COOKIE_SECURE', false) ? 'https' : 'http'
   const adminUrl = `${proto}://${host}:${port}/admin?token=${token}`
 
   // Write the URL to runtime/admin-link.txt (0o600) instead of stdout.
@@ -431,10 +431,10 @@ async function mintAdminTokenCmd(displayNameArg: string | undefined): Promise<vo
 }
 
 /**
- * `aipehub-host rotate-master-key` (Route B P0-M4d) — rotate the identity
+ * `gotong-host rotate-master-key` (Route B P0-M4d) — rotate the identity
  * vault master key (KEK) for a local-file workspace without starting the Hub.
  *
- * Reads AIPE_SPACE / AIPE_MASTER_KEY_PROVIDER / AIPE_MASTER_KEY exactly like the
+ * Reads GOTONG_SPACE / GOTONG_MASTER_KEY_PROVIDER / GOTONG_MASTER_KEY exactly like the
  * boot path, so it loads the SAME current key, then generates a fresh random
  * key, re-wraps the data key in the DB under it (O(1) — secret rows untouched,
  * M4b/M4c), and persists the new key to `<space>/identity-master.key`. The new
@@ -447,13 +447,13 @@ async function mintAdminTokenCmd(displayNameArg: string | undefined): Promise<vo
  * half-rotates.
  */
 function rotateMasterKeyCmd(): void {
-  const dir = env('AIPE_SPACE', '.aipehub')!
+  const dir = env('GOTONG_SPACE', '.gotong')!
   let result: { keyFilePath: string }
   try {
     result = rotateMasterKey({
       spaceDir: dir,
-      providerKind: env('AIPE_MASTER_KEY_PROVIDER'),
-      envKeyMaterial: env('AIPE_MASTER_KEY'),
+      providerKind: env('GOTONG_MASTER_KEY_PROVIDER'),
+      envKeyMaterial: env('GOTONG_MASTER_KEY'),
       envKeyEncoding: 'hex',
     })
   } catch (err) {
@@ -461,7 +461,7 @@ function rotateMasterKeyCmd(): void {
       `error: master key rotation failed: ${
         err instanceof Error ? err.message : String(err)
       }\n` +
-        `hint: AIPE_SPACE must point at an initialised workspace whose current\n` +
+        `hint: GOTONG_SPACE must point at an initialised workspace whose current\n` +
         `      key still loads; rotation only supports the local-file provider.\n`,
     )
     process.exit(2)
@@ -481,13 +481,13 @@ function rotateMasterKeyCmd(): void {
 
 function printUsage(): void {
   process.stdout.write(`Usage:
-  aipehub-host                            run the host (env-driven)
-  aipehub-host mint-admin-token [name]    add a fresh admin (recovery)
-  aipehub-host rotate-master-key          rotate the vault master key (KEK)
-  aipehub-host --version | -V             print version + exit
-  aipehub-host --help    | -h             this message + exit
+  gotong-host                            run the host (env-driven)
+  gotong-host mint-admin-token [name]    add a fresh admin (recovery)
+  gotong-host rotate-master-key          rotate the vault master key (KEK)
+  gotong-host --version | -V             print version + exit
+  gotong-host --help    | -h             this message + exit
 
-Production AipeHub host. Reads all configuration from environment
+Production Gotong host. Reads all configuration from environment
 variables (12-factor style). No CLI flags drive runtime behavior — set
 the env, run the command. The same binary works for local dev, LAN
 deployments, and public VPS behind Caddy / nginx.
@@ -496,98 +496,98 @@ SUBCOMMANDS
 
   mint-admin-token [displayName]
       Recover when the first-run admin URL got lost (.command window
-      closed, scrollback gone, etc). Opens AIPE_SPACE without starting
+      closed, scrollback gone, etc). Opens GOTONG_SPACE without starting
       any listeners, creates a fresh admin in admins.json, prints the
       one-time login URL, and exits. Existing admins are unaffected.
-      Default displayName: AIPE_ADMIN_DISPLAY_NAME, else 'Recovered Operator'.
-      Exits with status 2 if AIPE_SPACE does not point at an
+      Default displayName: GOTONG_ADMIN_DISPLAY_NAME, else 'Recovered Operator'.
+      Exits with status 2 if GOTONG_SPACE does not point at an
       initialised workspace.
 
   rotate-master-key
       Rotate the identity vault master key (KEK) without starting the
-      Hub. Loads the current key (AIPE_MASTER_KEY_PROVIDER / AIPE_MASTER_KEY),
+      Hub. Loads the current key (GOTONG_MASTER_KEY_PROVIDER / GOTONG_MASTER_KEY),
       generates a fresh random key, re-wraps the data key under it in O(1)
       (secrets are NOT re-encrypted), and writes the new key to
-      <AIPE_SPACE>/identity-master.key (mode 0600, never printed). The OLD
+      <GOTONG_SPACE>/identity-master.key (mode 0600, never printed). The OLD
       key stops working; a running host adopts the new key on next restart.
       local-file provider only — env / kms keys are rotated out of band.
       Exits with status 2 on failure (never half-rotates).
 
 ENVIRONMENT
-  AIPE_SPACE              workspace directory (default: .aipehub)
-  AIPE_HOST               bind address (default: 127.0.0.1)
-  AIPE_WEB_PORT           HTTP port (default: 3000)
-  AIPE_WS_PORT            WebSocket port for remote agents (default: 4000)
-  AIPE_GATING             'open' | 'admin-approval' (default: admin-approval)
-  AIPE_COOKIE_SECURE      '1' to set Secure + SameSite=Strict (default: 0)
-  AIPE_ALLOWED_HOSTS      comma list — enforce Host: / Origin: on state-changing requests
-  AIPE_ALLOW_INSECURE     '1' to downgrade the exposed-host boot self-check to a warning
-  AIPE_ADMIN_RATE_MAX     admin login attempts per IP per window (default: 10)
-  AIPE_ADMIN_RATE_SEC     rate-limit window in seconds (default: 60)
-  AIPE_DEFAULT_LANG       'zh' | 'en' (default: zh)
-  AIPE_HEARTBEAT_MS       transport heartbeat ms (default: 30000)
-  AIPE_SPACE_NAME         label for space.json on first init (default: AipeHub)
-  AIPE_ADMIN_DISPLAY_NAME first admin's display name (default: Operator)
-  AIPE_WORKFLOWS_DIR      directory of *.yaml/*.json workflow files to
+  GOTONG_SPACE              workspace directory (default: .gotong)
+  GOTONG_HOST               bind address (default: 127.0.0.1)
+  GOTONG_WEB_PORT           HTTP port (default: 3000)
+  GOTONG_WS_PORT            WebSocket port for remote agents (default: 4000)
+  GOTONG_GATING             'open' | 'admin-approval' (default: admin-approval)
+  GOTONG_COOKIE_SECURE      '1' to set Secure + SameSite=Strict (default: 0)
+  GOTONG_ALLOWED_HOSTS      comma list — enforce Host: / Origin: on state-changing requests
+  GOTONG_ALLOW_INSECURE     '1' to downgrade the exposed-host boot self-check to a warning
+  GOTONG_ADMIN_RATE_MAX     admin login attempts per IP per window (default: 10)
+  GOTONG_ADMIN_RATE_SEC     rate-limit window in seconds (default: 60)
+  GOTONG_DEFAULT_LANG       'zh' | 'en' (default: zh)
+  GOTONG_HEARTBEAT_MS       transport heartbeat ms (default: 30000)
+  GOTONG_SPACE_NAME         label for space.json on first init (default: Gotong)
+  GOTONG_ADMIN_DISPLAY_NAME first admin's display name (default: Operator)
+  GOTONG_WORKFLOWS_DIR      directory of *.yaml/*.json workflow files to
                           auto-load on boot
-                          (default: <AIPE_SPACE>/workflows/definitions)
+                          (default: <GOTONG_SPACE>/workflows/definitions)
 
-  AIPE_TRANSCRIPT_KEEP_SEGMENTS  keep N newest sealed transcript segments in
+  GOTONG_TRANSCRIPT_KEEP_SEGMENTS  keep N newest sealed transcript segments in
                           the boot load path; archive older into archive/
                           (bounds boot load to O(tail); unset = no archiving)
-  AIPE_TRANSCRIPT_ARCHIVE_DAYS   archive sealed segments older than N days
+  GOTONG_TRANSCRIPT_ARCHIVE_DAYS   archive sealed segments older than N days
                           (may combine with KEEP_SEGMENTS; archived bytes
                           stay on disk for audit; malformed value fails boot)
-  AIPE_RUN_KEEP           keep N newest TERMINAL workflow runs on the active
+  GOTONG_RUN_KEEP           keep N newest TERMINAL workflow runs on the active
                           scan path; archive older into runs/archive/ (bounds
                           boot-resume/history/metrics to O(tail); running runs
                           never archived; unset = off)
-  AIPE_RUN_ARCHIVE_DAYS   archive terminal runs that ended more than N days ago
-                          (may combine with AIPE_RUN_KEEP; archived runs stay
+  GOTONG_RUN_ARCHIVE_DAYS   archive terminal runs that ended more than N days ago
+                          (may combine with GOTONG_RUN_KEEP; archived runs stay
                           reachable for audit; malformed value fails boot)
-  AIPE_LEDGER_KEEP_DAYS   prune usage-ledger (billing) rows older than N days at
+  GOTONG_LEDGER_KEEP_DAYS   prune usage-ledger (billing) rows older than N days at
                           boot (retained window stays exportable; unset = off;
                           malformed value fails boot). Sibling knobs, same
-                          semantics: AIPE_AUDIT_KEEP_DAYS (audit_log),
-                          AIPE_PEER_SUMMARY_KEEP_DAYS (peer_summary_snapshots),
-                          AIPE_ALERT_FIRINGS_KEEP_DAYS (resolved alert firings;
+                          semantics: GOTONG_AUDIT_KEEP_DAYS (audit_log),
+                          GOTONG_PEER_SUMMARY_KEEP_DAYS (peer_summary_snapshots),
+                          GOTONG_ALERT_FIRINGS_KEEP_DAYS (resolved alert firings;
                           open firings are never pruned)
 
-  AIPE_ASSISTANT_PROVIDER 'anthropic' (default) | 'openai' | 'mock' —
+  GOTONG_ASSISTANT_PROVIDER 'anthropic' (default) | 'openai' | 'mock' —
                           provider for the host-built-in WorkflowAssistantAgent
                           (Phase 13 M3). Skip registration when no key
                           available; admin UI's AI button hides via 503.
-  AIPE_ASSISTANT_MODEL    optional provider-specific model id for the assistant
-  AIPE_ASSISTANT_MAX_TOKENS  integer cap on assist response tokens (default 4096)
-  AIPE_ASSISTANT_DISABLED '1' | 'true' → don't register the assistant at all
+  GOTONG_ASSISTANT_MODEL    optional provider-specific model id for the assistant
+  GOTONG_ASSISTANT_MAX_TOKENS  integer cap on assist response tokens (default 4096)
+  GOTONG_ASSISTANT_DISABLED '1' | 'true' → don't register the assistant at all
 
-  AIPE_SECRET_KEY         optional master key for the workspace secrets file
+  GOTONG_SECRET_KEY         optional master key for the workspace secrets file
                           (64 hex chars; overrides on-disk runtime/secret.key)
-  AIPE_MASTER_KEY_PROVIDER  identity vault master key source:
-                          'local-file' (default, <AIPE_SPACE>/identity-master.key)
-                          | 'env' (inject via AIPE_MASTER_KEY, no disk)
+  GOTONG_MASTER_KEY_PROVIDER  identity vault master key source:
+                          'local-file' (default, <GOTONG_SPACE>/identity-master.key)
+                          | 'env' (inject via GOTONG_MASTER_KEY, no disk)
                           | 'kms-stub' (reserved seam, fails closed)
-  AIPE_MASTER_KEY         identity vault master key as 64 hex chars; required
-                          when AIPE_MASTER_KEY_PROVIDER=env
+  GOTONG_MASTER_KEY         identity vault master key as 64 hex chars; required
+                          when GOTONG_MASTER_KEY_PROVIDER=env
   ANTHROPIC_API_KEY       fallback Anthropic key for managed LLM agents
   OPENAI_API_KEY          fallback OpenAI key for managed LLM agents
 
 EXAMPLES
-  # Local one-liner (creates ./.aipehub on first run, prints admin URL)
-  npx @aipehub/host
+  # Local one-liner (creates ./.gotong on first run, prints admin URL)
+  npx @gotong/host
 
   # Custom workspace and ports
-  AIPE_SPACE=/srv/aipehub AIPE_WEB_PORT=3030 npx @aipehub/host
+  GOTONG_SPACE=/srv/gotong GOTONG_WEB_PORT=3030 npx @gotong/host
 
   # Public deployment behind a TLS-terminating reverse proxy
-  AIPE_HOST=127.0.0.1 \\
-  AIPE_COOKIE_SECURE=1 \\
-  AIPE_ALLOWED_HOSTS=hub.example.com,hub-ws.example.com \\
-  npx @aipehub/host
+  GOTONG_HOST=127.0.0.1 \\
+  GOTONG_COOKIE_SECURE=1 \\
+  GOTONG_ALLOWED_HOSTS=hub.example.com,hub-ws.example.com \\
+  npx @gotong/host
 
 DOCS
-  https://github.com/Emir-Aksoy/AipeHub/blob/main/docs/OVERVIEW.md
-  https://github.com/Emir-Aksoy/AipeHub/blob/main/docs/DEPLOY.md
+  https://github.com/Emir-Aksoy/Gotong/blob/main/docs/OVERVIEW.md
+  https://github.com/Emir-Aksoy/Gotong/blob/main/docs/DEPLOY.md
 `)
 }
 
@@ -620,40 +620,40 @@ function envList(name: string): string[] | undefined {
 }
 
 async function main(): Promise<void> {
-  const SPACE_DIR = env('AIPE_SPACE', '.aipehub')!
+  const SPACE_DIR = env('GOTONG_SPACE', '.gotong')!
 
   // Build the SpaceConfig overrides from env. Anything unset falls back to
   // the values already on disk (or DEFAULT_CONFIG on first init).
   const configOverride: Partial<SpaceConfig> = {}
-  if (env('AIPE_HOST') !== undefined) configOverride.host = env('AIPE_HOST')!
-  if (env('AIPE_WEB_PORT') !== undefined) configOverride.webPort = envInt('AIPE_WEB_PORT', 3000)
-  if (env('AIPE_WS_PORT') !== undefined) configOverride.wsPort = envInt('AIPE_WS_PORT', 4000)
-  if (env('AIPE_GATING') !== undefined) {
-    const g = env('AIPE_GATING')!
+  if (env('GOTONG_HOST') !== undefined) configOverride.host = env('GOTONG_HOST')!
+  if (env('GOTONG_WEB_PORT') !== undefined) configOverride.webPort = envInt('GOTONG_WEB_PORT', 3000)
+  if (env('GOTONG_WS_PORT') !== undefined) configOverride.wsPort = envInt('GOTONG_WS_PORT', 4000)
+  if (env('GOTONG_GATING') !== undefined) {
+    const g = env('GOTONG_GATING')!
     if (g !== 'open' && g !== 'admin-approval') {
-      throw new Error(`AIPE_GATING must be 'open' or 'admin-approval'; got '${g}'`)
+      throw new Error(`GOTONG_GATING must be 'open' or 'admin-approval'; got '${g}'`)
     }
     configOverride.gating = g
   }
-  if (env('AIPE_COOKIE_SECURE') !== undefined) configOverride.cookieSecure = envBool('AIPE_COOKIE_SECURE', false)
-  if (env('AIPE_DEFAULT_LANG') !== undefined) {
-    const l = env('AIPE_DEFAULT_LANG')!
+  if (env('GOTONG_COOKIE_SECURE') !== undefined) configOverride.cookieSecure = envBool('GOTONG_COOKIE_SECURE', false)
+  if (env('GOTONG_DEFAULT_LANG') !== undefined) {
+    const l = env('GOTONG_DEFAULT_LANG')!
     if (l !== 'zh' && l !== 'en') {
-      throw new Error(`AIPE_DEFAULT_LANG must be 'zh' or 'en'; got '${l}'`)
+      throw new Error(`GOTONG_DEFAULT_LANG must be 'zh' or 'en'; got '${l}'`)
     }
     configOverride.defaultLang = l
   }
-  if (env('AIPE_HEARTBEAT_MS') !== undefined) {
-    configOverride.heartbeatIntervalMs = envInt('AIPE_HEARTBEAT_MS', 30_000)
+  if (env('GOTONG_HEARTBEAT_MS') !== undefined) {
+    configOverride.heartbeatIntervalMs = envInt('GOTONG_HEARTBEAT_MS', 30_000)
   }
 
   const { space, adminToken } = await Space.openOrInit(SPACE_DIR, {
-    name: env('AIPE_SPACE_NAME', 'AipeHub')!,
-    adminDisplayName: env('AIPE_ADMIN_DISPLAY_NAME', 'Operator')!,
+    name: env('GOTONG_SPACE_NAME', 'Gotong')!,
+    adminDisplayName: env('GOTONG_ADMIN_DISPLAY_NAME', 'Operator')!,
     config: configOverride,
   })
 
-  // On every boot, re-apply env config so AIPE_* always wins over what's on
+  // On every boot, re-apply env config so GOTONG_* always wins over what's on
   // disk (matches "12-factor: config flows from the environment").
   if (Object.keys(configOverride).length > 0) {
     await space.updateConfig(configOverride)
@@ -664,13 +664,13 @@ async function main(): Promise<void> {
   // as possible (config resolved, before any socket is opened or identity is
   // touched) so an exposed-but-undefended host never reaches the listen call.
   // Loopback deployments (the default) produce zero violations → no-op.
-  const allowedHosts = envList('AIPE_ALLOWED_HOSTS')
+  const allowedHosts = envList('GOTONG_ALLOWED_HOSTS')
   {
     const secViolations = auditBootSecurity({
       host: config.host,
       cookieSecure: config.cookieSecure,
       allowedHosts,
-      allowInsecure: envBool('AIPE_ALLOW_INSECURE', false),
+      allowInsecure: envBool('GOTONG_ALLOW_INSECURE', false),
     })
     for (const v of secViolations) {
       if (v.severity === 'warn') {
@@ -692,7 +692,7 @@ async function main(): Promise<void> {
   //
   // A2.2 — bootstrap no longer migrates the v3 admin token; the v4
   // surface is the documented login path. The first operator gets a
-  // password via the (C1) setup wizard, OR via the `aipehub-host
+  // password via the (C1) setup wizard, OR via the `gotong-host
   // mint-admin-token` subcommand as an emergency fallback.
   //
   // Bootstrap is idempotent: on every subsequent boot it returns
@@ -710,7 +710,7 @@ async function main(): Promise<void> {
     // local-file only; best-effort (a failure here must not block boot — the
     // normal path still fails loudly if the key genuinely can't open the vault).
     try {
-      const rec = recoverMasterKeyRotation(SPACE_DIR, env('AIPE_MASTER_KEY_PROVIDER'))
+      const rec = recoverMasterKeyRotation(SPACE_DIR, env('GOTONG_MASTER_KEY_PROVIDER'))
       if (rec.action !== 'none') {
         log.info('identity: master key rotation recovery', { action: rec.action, reason: rec.reason })
       }
@@ -721,13 +721,13 @@ async function main(): Promise<void> {
     // pluggable provider. Default `local-file` creates the 0600 key file
     // on first run (a wrong-length pre-existing key throws — a stale key
     // means existing vault rows can't decrypt, so fail loudly). Set
-    // AIPE_MASTER_KEY_PROVIDER=env + AIPE_MASTER_KEY (64 hex) to inject the
+    // GOTONG_MASTER_KEY_PROVIDER=env + GOTONG_MASTER_KEY (64 hex) to inject the
     // key from a secret manager without touching disk; =kms-stub is a
     // reserved seam that fails closed.
     const masterKeyProvider = resolveMasterKeyProvider({
-      kind: env('AIPE_MASTER_KEY_PROVIDER'),
+      kind: env('GOTONG_MASTER_KEY_PROVIDER'),
       localFilePath: join(SPACE_DIR, 'identity-master.key'),
-      envKeyMaterial: env('AIPE_MASTER_KEY'),
+      envKeyMaterial: env('GOTONG_MASTER_KEY'),
       envKeyEncoding: 'hex',
     })
     // describe() is log-safe (source label only, never key bytes).
@@ -738,8 +738,8 @@ async function main(): Promise<void> {
       masterKey,
     })
     const ib = identity.bootstrap({
-      ownerEmail: env('AIPE_OWNER_EMAIL', 'admin@local')!,
-      ownerDisplayName: env('AIPE_ADMIN_DISPLAY_NAME', 'Operator')!,
+      ownerEmail: env('GOTONG_OWNER_EMAIL', 'admin@local')!,
+      ownerDisplayName: env('GOTONG_ADMIN_DISPLAY_NAME', 'Operator')!,
     })
     if (ib.bootstrapped) {
       log.info('identity: bootstrapped owner', { userId: ib.ownerUserId })
@@ -748,19 +748,19 @@ async function main(): Promise<void> {
         users: identity.countUsers(),
       })
     }
-    // Phase 7 M4 — env override for org mode. Without AIPE_MODE the
+    // Phase 7 M4 — env override for org mode. Without GOTONG_MODE the
     // store auto-detects (personal when single-user, team otherwise)
-    // and auto-promotes on 2nd user or first invitation. AIPE_MODE
+    // and auto-promotes on 2nd user or first invitation. GOTONG_MODE
     // pins a specific value, useful for:
     //   - team deployments that don't want the auto-detect ever firing
     //   - personal hubs that want to stay personal even after testing
     //     invitations
-    const modeOverride = process.env.AIPE_MODE
+    const modeOverride = process.env.GOTONG_MODE
     if (modeOverride === 'personal' || modeOverride === 'team') {
       identity.setOrgMode(modeOverride)
-      log.info('identity: org_mode pinned from AIPE_MODE', { mode: modeOverride })
+      log.info('identity: org_mode pinned from GOTONG_MODE', { mode: modeOverride })
     } else if (modeOverride !== undefined && modeOverride !== '') {
-      log.warn('identity: AIPE_MODE invalid, ignored', {
+      log.warn('identity: GOTONG_MODE invalid, ignored', {
         value: modeOverride,
         expected: "'personal' | 'team'",
       })
@@ -791,11 +791,11 @@ async function main(): Promise<void> {
   let usageSweepTimer: NodeJS.Timeout | undefined
   let orgQuotaSweepTimer: NodeJS.Timeout | undefined
   // v5 Stream F day-3 — control-plane alert delivery sweep. OPT-IN: fires every
-  // AIPE_PEER_SUMMARY_ALERT_SWEEP_MS (0 / unset = off) to edge-trigger breaches
+  // GOTONG_PEER_SUMMARY_ALERT_SWEEP_MS (0 / unset = off) to edge-trigger breaches
   // into firings + POST webhooks. Off by default — point-in-time evaluation in
   // the admin UI is unchanged; proactive delivery is a deliberate enable.
   let alertSweepTimer: NodeJS.Timeout | undefined
-  // Phase 11 M3 — resume sweep. Fires every AIPE_RESUME_SWEEP_MS
+  // Phase 11 M3 — resume sweep. Fires every GOTONG_RESUME_SWEEP_MS
   // (default 30 s); each tick reads due rows from suspended_tasks
   // and re-dispatches them via Hub.resumeTask.
   let resumeSweepTimer: NodeJS.Timeout | undefined
@@ -1002,7 +1002,7 @@ async function main(): Promise<void> {
     process.stdout.write(`[hub][seq=${String(e.seq).padStart(2, '0')}] ${describe(e)}\n`)
   })
 
-  // Phase 11 M3 — resume sweep. Every AIPE_RESUME_SWEEP_MS (default
+  // Phase 11 M3 — resume sweep. Every GOTONG_RESUME_SWEEP_MS (default
   // 30_000 ms; clamped to [1_000, 600_000]) scan suspended_tasks
   // for rows where resume_at <= now, re-enter each via
   // `hub.resumeTask`, then conditionally remove the row (kept on
@@ -1014,7 +1014,7 @@ async function main(): Promise<void> {
   // remained.
   if (identity) {
     const swept = identity
-    const rawInterval = Number(process.env.AIPE_RESUME_SWEEP_MS ?? '30000')
+    const rawInterval = Number(process.env.GOTONG_RESUME_SWEEP_MS ?? '30000')
     const sweepIntervalMs = Number.isFinite(rawInterval) && rawInterval >= 1_000
       ? Math.min(rawInterval, 600_000)
       : 30_000
@@ -1024,7 +1024,7 @@ async function main(): Promise<void> {
     // minutes), since reclaiming a still-running resume risks an at-least-once
     // re-run. Default 10 min; floored at 2 sweep intervals so a claim is never
     // reclaimed before the next tick even runs; clamped to [1 min, 1 h].
-    const rawClaimTtl = Number(process.env.AIPE_RESUME_CLAIM_TTL_MS ?? '600000')
+    const rawClaimTtl = Number(process.env.GOTONG_RESUME_CLAIM_TTL_MS ?? '600000')
     const claimTtlMs = Math.min(
       Math.max(
         Number.isFinite(rawClaimTtl) && rawClaimTtl > 0 ? rawClaimTtl : 600_000,
@@ -1130,7 +1130,7 @@ async function main(): Promise<void> {
   let reconcileHeartbeats: (() => Promise<void>) | undefined
   if (identity) {
     const heartbeatStore = identity
-    const minRaw = Number(process.env.AIPE_HEARTBEAT_MIN_MS ?? '')
+    const minRaw = Number(process.env.GOTONG_HEARTBEAT_MIN_MS ?? '')
     const heartbeatMinMs =
       Number.isFinite(minRaw) && minRaw >= 0 ? minRaw : DEFAULT_HEARTBEAT_MIN_MS
     const listEnabledHeartbeats = async (): Promise<HeartbeatAgentConfig[]> => {
@@ -1228,7 +1228,7 @@ async function main(): Promise<void> {
   let sweeper: LifecycleSweeper | undefined
   try {
     // In `bun --compile` single-file binary mode, omit
-    // `@aipehub/service-datastore-sqlite` from the auto-seeded
+    // `@gotong/service-datastore-sqlite` from the auto-seeded
     // plugins.json so operators don't see a spurious "failed to load"
     // warning on every first run — `better-sqlite3`'s native bindings
     // can't be embedded by the bundler. npm / docker / source runs
@@ -1274,7 +1274,7 @@ async function main(): Promise<void> {
   // failed to bootstrap, agents without `uses:` still spawn normally;
   // agents with `uses:` fail loudly with a clear log line.
   // Phase 17 — effective model price table for the usage/cost ledger.
-  // Defaults built-in; an operator drops `<AIPE_SPACE>/pricing.json` to
+  // Defaults built-in; an operator drops `<GOTONG_SPACE>/pricing.json` to
   // override per-model. A malformed file throws here (fail loud at boot
   // rather than silently bill at the wrong rate).
   const pricingTable = loadPricingTable(join(SPACE_DIR, 'pricing.json'))
@@ -1307,21 +1307,21 @@ async function main(): Promise<void> {
   // OWN memory namespace. This is what makes the IM bot REMEMBER each member
   // across sessions — the headline reason for the fold-in.
   //
-  // ON by default (`AIPE_BUTLER` ∈ {0,false,off,no} turns it OFF; a per-agent
+  // ON by default (`GOTONG_BUTLER` ∈ {0,false,off,no} turns it OFF; a per-agent
   // `managed.butler: false` opts a single row out). It gains cross-session memory +
   // the benign tools the row already had (run inline), plus — when the member
   // services exist — the BF-M7 governed action set (create / edit / delete the
   // member's own agent + edit their own workflow), each APPROVAL-GATED to the
-  // member's /me inbox (`AIPE_BUTLER_GOVERNED` off ⇒ back to pure-memory). Memory
+  // member's /me inbox (`GOTONG_BUTLER_GOVERNED` off ⇒ back to pure-memory). Memory
   // lives under the SAME `<space>/butler/memory` subtree the /me privacy view reads
   // (below), so "what the butler remembers" and "what a member can erase" are one
   // and the same bytes.
   const butlerMemoryRoot = join(space.root, 'butler', 'memory')
-  const butlerEnv = (process.env.AIPE_BUTLER ?? '').trim().toLowerCase()
+  const butlerEnv = (process.env.GOTONG_BUTLER ?? '').trim().toLowerCase()
   const butlerDefaultOn = !['0', 'false', 'off', 'no'].includes(butlerEnv)
   // BF-M7 — the governed action set (create / edit / delete a member's own agent +
   // edit their own workflow), each APPROVAL-GATED to the member's /me inbox. ON by
-  // default; opt out with AIPE_BUTLER_GOVERNED ∈ {0,false,off,no}. Wired only when
+  // default; opt out with GOTONG_BUTLER_GOVERNED ∈ {0,false,off,no}. Wired only when
   // the member services exist — the executors are the SAME `HostMeAgentService` /
   // `MeWorkflowEditService` the /me hub-steward uses, so the butler is structurally
   // incapable of exceeding what the member could do by hand (RBAC + the WFEDIT
@@ -1329,7 +1329,7 @@ async function main(): Promise<void> {
   // forward-declared `let`s (the peerRegistryRef pattern) read at butler-build time
   // — safe because a per-user butler is built LAZILY on that member's first task,
   // well after boot. Absent refs (no identity / no workflowAssist) ⇒ pure-memory.
-  const butlerGovernedEnv = (process.env.AIPE_BUTLER_GOVERNED ?? '').trim().toLowerCase()
+  const butlerGovernedEnv = (process.env.GOTONG_BUTLER_GOVERNED ?? '').trim().toLowerCase()
   const butlerGovernedOn = !['0', 'false', 'off', 'no'].includes(butlerGovernedEnv)
   let butlerGovernedAgentsRef: StewardAgentDirectory | undefined
   let butlerGovernedWorkflowEditorRef: StewardWorkflowEditor | undefined
@@ -1385,39 +1385,39 @@ async function main(): Promise<void> {
   // BF-M8 — the background memory-maintenance sweep: per member, on a 6h cadence,
   // consolidate captured episodic into the curated semantic profile (蒸馏) and
   // record it to STATUS.md (/me's "上次维护" line). ON by default whenever the
-  // butler is on; opt out with AIPE_BUTLER_MAINTENANCE ∈ {0,false,off,no}. Cadence
-  // via AIPE_BUTLER_MAINTENANCE_MS (clamped [1min, 24h]). Constructed after the
+  // butler is on; opt out with GOTONG_BUTLER_MAINTENANCE ∈ {0,false,off,no}. Cadence
+  // via GOTONG_BUTLER_MAINTENANCE_MS (clamped [1min, 24h]). Constructed after the
   // agent pool exists (it borrows the pool's provider-resolution); see below.
-  const butlerMaintenanceEnv = (process.env.AIPE_BUTLER_MAINTENANCE ?? '').trim().toLowerCase()
+  const butlerMaintenanceEnv = (process.env.GOTONG_BUTLER_MAINTENANCE ?? '').trim().toLowerCase()
   const butlerMaintenanceOn =
     butlerDefaultOn && !['0', 'false', 'off', 'no'].includes(butlerMaintenanceEnv)
   const butlerMaintenanceMs = Math.min(
     24 * 60 * 60 * 1000,
-    Math.max(60_000, Number(process.env.AIPE_BUTLER_MAINTENANCE_MS) || BUTLER_MAINTENANCE_INTERVAL_MS),
+    Math.max(60_000, Number(process.env.GOTONG_BUTLER_MAINTENANCE_MS) || BUTLER_MAINTENANCE_INTERVAL_MS),
   )
   // S3-M2 — the proactive daily-brief sweep: per member, on a ~15min poll, send a
   // short morning brief IF they opted in (via `set_daily_brief`). ON whenever the
-  // butler is on; opt out with AIPE_BUTLER_PROACTIVE ∈ {0,false,off,no}. The FEATURE
+  // butler is on; opt out with GOTONG_BUTLER_PROACTIVE ∈ {0,false,off,no}. The FEATURE
   // is still DEFAULT-OFF per member — the sweep does nothing until a member writes a
-  // `proactive.json`. Cadence via AIPE_BUTLER_PROACTIVE_MS (clamped [5min, 1h]).
-  const butlerProactiveEnv = (process.env.AIPE_BUTLER_PROACTIVE ?? '').trim().toLowerCase()
+  // `proactive.json`. Cadence via GOTONG_BUTLER_PROACTIVE_MS (clamped [5min, 1h]).
+  const butlerProactiveEnv = (process.env.GOTONG_BUTLER_PROACTIVE ?? '').trim().toLowerCase()
   const butlerProactiveOn =
     butlerDefaultOn && !['0', 'false', 'off', 'no'].includes(butlerProactiveEnv)
   const butlerProactiveMs = Math.min(
     60 * 60 * 1000,
-    Math.max(5 * 60 * 1000, Number(process.env.AIPE_BUTLER_PROACTIVE_MS) || BUTLER_PROACTIVE_INTERVAL_MS),
+    Math.max(5 * 60 * 1000, Number(process.env.GOTONG_BUTLER_PROACTIVE_MS) || BUTLER_PROACTIVE_INTERVAL_MS),
   )
   // BE-M5 — proactively tell a member when a run THEY started finishes. Like the
   // daily brief it rides a per-user poll (the `ButlerRunBroadcastSweeper` below) and
   // the FEATURE is DEFAULT-OFF per member (nothing fires until they `set_run_broadcast`
-  // on). ON whenever the butler is on; opt out with AIPE_BUTLER_RUN_BROADCAST ∈
-  // {0,false,off,no}. Cadence via AIPE_BUTLER_RUN_BROADCAST_MS (clamped [1min, 1h]).
-  const butlerRunBroadcastEnv = (process.env.AIPE_BUTLER_RUN_BROADCAST ?? '').trim().toLowerCase()
+  // on). ON whenever the butler is on; opt out with GOTONG_BUTLER_RUN_BROADCAST ∈
+  // {0,false,off,no}. Cadence via GOTONG_BUTLER_RUN_BROADCAST_MS (clamped [1min, 1h]).
+  const butlerRunBroadcastEnv = (process.env.GOTONG_BUTLER_RUN_BROADCAST ?? '').trim().toLowerCase()
   const butlerRunBroadcastOn =
     butlerDefaultOn && !['0', 'false', 'off', 'no'].includes(butlerRunBroadcastEnv)
   const butlerRunBroadcastMs = Math.min(
     60 * 60 * 1000,
-    Math.max(60_000, Number(process.env.AIPE_BUTLER_RUN_BROADCAST_MS) || BUTLER_RUN_BROADCAST_INTERVAL_MS),
+    Math.max(60_000, Number(process.env.GOTONG_BUTLER_RUN_BROADCAST_MS) || BUTLER_RUN_BROADCAST_INTERVAL_MS),
   )
   const butlerFactory: ButlerFactory = (base, mcp) => {
     // S1-M2 — split the row's attached MCP (notes / calendar / …) into a benign
@@ -1656,7 +1656,7 @@ async function main(): Promise<void> {
   // key added after boot is picked up) and walks the per-user namespaces under
   // `<space>/butler/memory/user/*`, distilling each member's captured episodic
   // into their curated profile + writing STATUS.md. Off when the butler is off
-  // or `AIPE_BUTLER_MAINTENANCE` opts out. First tick lands one interval in — a
+  // or `GOTONG_BUTLER_MAINTENANCE` opts out. First tick lands one interval in — a
   // 6h job must not re-fire on every restart.
   let butlerMaintenanceSweeper: ButlerMaintenanceSweeper | undefined
   if (butlerMaintenanceOn) {
@@ -1686,7 +1686,7 @@ async function main(): Promise<void> {
   // never blocks host boot. The loader only parses; the controller adopts
   // each definition through the versioning service, which registers the
   // resolver-backed runner (Phase 15).
-  const workflowsDir = env('AIPE_WORKFLOWS_DIR', join(SPACE_DIR, 'workflows', 'definitions'))!
+  const workflowsDir = env('GOTONG_WORKFLOWS_DIR', join(SPACE_DIR, 'workflows', 'definitions'))!
   const workflowReport = await loadWorkflows({ dir: workflowsDir })
   const wfMsg = formatLoadReport(workflowReport)
   if (wfMsg) log.info('workflow loader', { report: wfMsg })
@@ -1696,17 +1696,17 @@ async function main(): Promise<void> {
   // and the agent pool already SKIPS a row it can't spawn, but both degrade
   // SILENTLY — one typo buries a workflow/agent behind a single quiet log line.
   // Surface them together in ONE loud banner so the operator sees, at boot,
-  // exactly which files won't load. Reuses the SAME validators `aipehub check`
+  // exactly which files won't load. Reuses the SAME validators `gotong check`
   // runs (the loader's own report + checkAgentsFile), so a clean boot means what
   // the CLI means — no second source of truth. The config 体检 is enforced
   // separately above by `auditBootSecurity` (fail-closed on its fatals), so this
   // banner is definitions-only.
   //
   // Posture is the operator's locked decision: default = warn loud + keep
-  // serving (one bad file must never take down a live hub); AIPE_STRICT_DEFINITIONS
+  // serving (one bad file must never take down a live hub); GOTONG_STRICT_DEFINITIONS
   // = refuse to start (CI / strict deploys) by exiting BEFORE the web server binds.
   // Note: a wholly malformed agents.json (not a bad row) already throws inside the
-  // agent pool above; `aipehub check` is the friendly pre-boot tool for that case.
+  // agent pool above; `gotong check` is the friendly pre-boot tool for that case.
   const agentsCheck = await checkAgentsFile(join(SPACE_DIR, 'agents.json'))
   const defns: WorkspaceCheckReport = definitionsReport(workflowReport, agentsCheck)
   if (defns.errors > 0) {
@@ -1715,21 +1715,21 @@ async function main(): Promise<void> {
       workflowsBad: defns.workflows.bad,
       agentsBad: defns.agents.bad,
     })
-    if (envBool('AIPE_STRICT_DEFINITIONS', false)) {
-      console.error('\n=== AipeHub 定义校验失败 / definition check failed ===')
+    if (envBool('GOTONG_STRICT_DEFINITIONS', false)) {
+      console.error('\n=== Gotong 定义校验失败 / definition check failed ===')
       console.error(banner)
       console.error(
-        `\nFATAL: AIPE_STRICT_DEFINITIONS is set and ${defns.errors} definition file(s)/row(s) are broken — refusing to start.\n` +
-          `       Fix the files above (or run \`aipehub check\`), or unset\n` +
-          `       AIPE_STRICT_DEFINITIONS to start anyway (the broken ones are skipped).\n`,
+        `\nFATAL: GOTONG_STRICT_DEFINITIONS is set and ${defns.errors} definition file(s)/row(s) are broken — refusing to start.\n` +
+          `       Fix the files above (or run \`gotong check\`), or unset\n` +
+          `       GOTONG_STRICT_DEFINITIONS to start anyway (the broken ones are skipped).\n`,
       )
       process.exit(1)
     }
-    console.warn('\n=== AipeHub 定义校验警告 / definition check warning ===')
+    console.warn('\n=== Gotong 定义校验警告 / definition check warning ===')
     console.warn(banner)
     console.warn(
       `\n⚠ The ${defns.errors} broken definition(s) above were SKIPPED — the hub is\n` +
-        `  starting WITHOUT them. Fix them and restart, or set AIPE_STRICT_DEFINITIONS=1\n` +
+        `  starting WITHOUT them. Fix them and restart, or set GOTONG_STRICT_DEFINITIONS=1\n` +
         `  to refuse to start on a broken file.\n`,
     )
   }
@@ -1860,7 +1860,7 @@ async function main(): Promise<void> {
 
   // Boot-time retention for the identity store's append-only tables
   // (usage_ledger / audit_log / peer_summary_snapshots /
-  // peer_summary_alert_firings — one AIPE_*_KEEP_DAYS knob each, all OFF by
+  // peer_summary_alert_firings — one GOTONG_*_KEEP_DAYS knob each, all OFF by
   // default). Parse runs before the identity guard so a malformed env fails
   // the boot loudly even on a degraded (no-identity) host; the prunes are
   // best-effort per table and skipped without an identity store. Every
@@ -1883,7 +1883,7 @@ async function main(): Promise<void> {
   // `WorkflowAssistantAgent` on the hub (cap=`workflow:assist`) and
   // exposes a duck-typed surface for the Web layer's
   // `POST /api/admin/workflows/assist` route. Returns null (and the
-  // route stays 503) when AIPE_ASSISTANT_DISABLED=1 or no LLM API key
+  // route stays 503) when GOTONG_ASSISTANT_DISABLED=1 or no LLM API key
   // can be resolved for the configured provider — non-AI hosts pay zero
   // boot cost beyond the env probe.
   const assistConfig = resolveWorkflowAssistConfig()
@@ -1946,8 +1946,8 @@ async function main(): Promise<void> {
       : null
 
   // allowedHosts is resolved earlier (Route B P0-M6 boot self-check).
-  const adminRateMax = envInt('AIPE_ADMIN_RATE_MAX', 10)
-  const adminRateSec = envInt('AIPE_ADMIN_RATE_SEC', 60)
+  const adminRateMax = envInt('GOTONG_ADMIN_RATE_MAX', 10)
+  const adminRateSec = envInt('GOTONG_ADMIN_RATE_SEC', 60)
 
   const ws = await serveWebSocket(hub, {
     host: config.host,
@@ -1964,11 +1964,11 @@ async function main(): Promise<void> {
     ...(services ? { services } : {}),
   })
 
-  // D1 — Peer Registry. Polls identity.peers every AIPE_PEER_POLL_MS
+  // D1 — Peer Registry. Polls identity.peers every GOTONG_PEER_POLL_MS
   // (default 5s) and reconciles outbound HubLinks; shares ws.server
   // for inbound peer HELLO acceptance. Disabled when identity is
   // unwired (federation requires v4 identity) OR when the operator
-  // explicitly skipped it via AIPE_PEERS_DISABLED=1.
+  // explicitly skipped it via GOTONG_PEERS_DISABLED=1.
   let peerRegistry: PeerRegistry | undefined
   // #2-M3 — cross-hub MCP proxy (provider side). Lazily connects shared
   // servers on first peer call; credentials resolve here, never cross the
@@ -2006,27 +2006,27 @@ async function main(): Promise<void> {
       if (item) await store.write(item)
     }
   }
-  if (identity && process.env.AIPE_PEERS_DISABLED !== '1') {
+  if (identity && process.env.GOTONG_PEERS_DISABLED !== '1') {
     const spaceMeta = await space.meta()
     const selfHubId = spaceMeta.hubId ?? 'self'
-    const pollMs = envInt('AIPE_PEER_POLL_MS', 5_000)
-    const inboundToken = process.env.AIPE_PEER_INBOUND_TOKEN
+    const pollMs = envInt('GOTONG_PEER_POLL_MS', 5_000)
+    const inboundToken = process.env.GOTONG_PEER_INBOUND_TOKEN
     // Audit #142 — single source of truth for "is this host behind a
     // reverse proxy".
-    const trustProxy = envBool('AIPE_TRUST_PROXY', false)
+    const trustProxy = envBool('GOTONG_TRUST_PROXY', false)
     // Audit #149 — env wiring for the inbound rate limit. Default
     // 60/60s mirrors PeerRegistry's own default (set to 0 either side
     // to disable; useful in closed networks / tests). Operators
     // raise these when running a peer farm where 60 hellos / 60s is
     // genuinely too tight, or drop them when under sustained attack
     // and a tighter floor is preferable to letting one IP saturate.
-    const rateLimitMax = envInt('AIPE_PEER_INBOUND_RATE_MAX', 60)
-    const rateLimitWindowMs = envInt('AIPE_PEER_INBOUND_RATE_WINDOW_MS', 60_000)
+    const rateLimitMax = envInt('GOTONG_PEER_INBOUND_RATE_MAX', 60)
+    const rateLimitWindowMs = envInt('GOTONG_PEER_INBOUND_RATE_WINDOW_MS', 60_000)
     const inboundRateLimit = { max: rateLimitMax, windowMs: rateLimitWindowMs }
     // Phase 19 P4-M4 — fixed window for the per-link inbound quota counter
     // (`perLinkQuotaBudget` tasks per window). Default 60s; in-memory, resets
     // on restart (a fail-closed safety cap, not a billing ledger).
-    const linkQuotaWindowMs = envInt('AIPE_PEER_LINK_QUOTA_WINDOW_MS', 60_000)
+    const linkQuotaWindowMs = envInt('GOTONG_PEER_LINK_QUOTA_WINDOW_MS', 60_000)
     // Provider side of the cross-hub MCP proxy. Reads the same hub
     // registry the admin UI writes; only servers flagged `shared` are
     // ever served to a peer (ACL lives inside respond()).
@@ -2160,9 +2160,9 @@ async function main(): Promise<void> {
       const n = Number(raw ?? '')
       return Number.isFinite(n) ? Math.min(hi, Math.max(lo, Math.trunc(n))) : def
     }
-    const alertRetryAttempts = clampInt(process.env.AIPE_PEER_SUMMARY_ALERT_RETRY_ATTEMPTS, 1, 1, 6)
-    const alertRetryBaseMs = clampInt(process.env.AIPE_PEER_SUMMARY_ALERT_RETRY_BASE_MS, 500, 50, 30_000)
-    const alertDedupWindowMs = clampInt(process.env.AIPE_PEER_SUMMARY_ALERT_DEDUP_MS, 60_000, 0, 3_600_000)
+    const alertRetryAttempts = clampInt(process.env.GOTONG_PEER_SUMMARY_ALERT_RETRY_ATTEMPTS, 1, 1, 6)
+    const alertRetryBaseMs = clampInt(process.env.GOTONG_PEER_SUMMARY_ALERT_RETRY_BASE_MS, 500, 50, 30_000)
+    const alertDedupWindowMs = clampInt(process.env.GOTONG_PEER_SUMMARY_ALERT_DEDUP_MS, 60_000, 0, 3_600_000)
     peerSummaryFederation = createPeerSummaryFederation(fedRegistry, {
       buildLocal: () => buildLocalSummary(summaryDeps),
       // v5 Stream F — persist a counts-only snapshot per refresh so the control
@@ -2189,7 +2189,7 @@ async function main(): Promise<void> {
       logger: log,
     })
     // v5 Stream F day-3 — proactive alert-delivery sweep. OPT-IN: only runs when
-    // AIPE_PEER_SUMMARY_ALERT_SWEEP_MS is set to a positive value (clamped to
+    // GOTONG_PEER_SUMMARY_ALERT_SWEEP_MS is set to a positive value (clamped to
     // [10s, 1h]). Each tick refreshes peer summaries then edge-triggers breaches
     // into firings + POSTs webhooks (notify ONCE per breach). A reentrancy guard
     // prevents a slow tick (many channels / slow webhooks) from overlapping the
@@ -2197,7 +2197,7 @@ async function main(): Promise<void> {
     // and a hub with no channels configured delivers nothing even when enabled.
     {
       const fed = peerSummaryFederation
-      const rawAlertInterval = Number(process.env.AIPE_PEER_SUMMARY_ALERT_SWEEP_MS ?? '0')
+      const rawAlertInterval = Number(process.env.GOTONG_PEER_SUMMARY_ALERT_SWEEP_MS ?? '0')
       const alertIntervalMs =
         Number.isFinite(rawAlertInterval) && rawAlertInterval >= 10_000
           ? Math.min(rawAlertInterval, 3_600_000)
@@ -2269,7 +2269,7 @@ async function main(): Promise<void> {
   // this hub's local capabilities (peer wrappers excluded) as A2A skills, each
   // skill id == the capability an inbound message/send targets. Public endpoint,
   // so opting in is a deliberate operator act.
-  const advertiseSkills = envBool('AIPE_A2A_ADVERTISE_SKILLS', false)
+  const advertiseSkills = envBool('GOTONG_A2A_ADVERTISE_SKILLS', false)
   const selfHubIdForCard = cardMeta.hubId ?? 'self'
   const agentCard = {
     json: (baseUrl: string): string => {
@@ -2282,7 +2282,7 @@ async function main(): Promise<void> {
         : []
       return JSON.stringify(
         buildAgentCard({
-          name: cardMeta.name || cardMeta.hubId || 'AipeHub',
+          name: cardMeta.name || cardMeta.hubId || 'Gotong',
           version: BAKED_VERSION,
           url: baseUrl,
           description: cardMeta.description,
@@ -2319,7 +2319,7 @@ async function main(): Promise<void> {
   }
 
   // Phase 16 — member task inbox. A workflow's `human:` step dispatches to the
-  // `aipehub.human/v1` capability; the broker parks it as an inbox item and
+  // `gotong.human/v1` capability; the broker parks it as an inbox item and
   // suspends (Phase 11). A member resolves it from /me, and HostInboxService
   // runs the two-step resume (child broker → parent workflow run). Gated on
   // identity: durable parking lives in suspended_tasks (identity SQLite), and
@@ -2421,8 +2421,8 @@ async function main(): Promise<void> {
       hub,
       source: identity,
       logger: log,
-      // Item 2 — per-agent outbound quota window (mirrors AIPE_PEER_LINK_QUOTA_WINDOW_MS).
-      quotaWindowMs: envInt('AIPE_A2A_OUTBOUND_QUOTA_WINDOW_MS', 60_000),
+      // Item 2 — per-agent outbound quota window (mirrors GOTONG_PEER_LINK_QUOTA_WINDOW_MS).
+      quotaWindowMs: envInt('GOTONG_A2A_OUTBOUND_QUOTA_WINDOW_MS', 60_000),
       ...(inboxStore && a2aApprover ? { approvalInbox: inboxStore, approver: a2aApprover } : {}),
     })
     a2aOutbound.registerAllFromStore()
@@ -2443,11 +2443,11 @@ async function main(): Promise<void> {
   if (identity) {
     // ACP-HITL — when a member inbox + an owner exist, a destructive coding
     // action ESCALATES to a /me approval (the sink writes the item; resolve runs
-    // the two-step recovery) instead of being denied inline. AIPE_ACP_DANGER=deny
+    // the two-step recovery) instead of being denied inline. GOTONG_ACP_DANGER=deny
     // forces the old hard-deny for unattended hubs (no one to approve → a park
     // would wait forever). The approver is the org owner, mirroring the Phase 18
     // outbound cross-org approval gate.
-    const forceDeny = process.env.AIPE_ACP_DANGER === 'deny'
+    const forceDeny = process.env.GOTONG_ACP_DANGER === 'deny'
     const acpApprover = inboxStore && !forceDeny ? findOwnerUserId(identity) : null
     let escalateDanger = false
     if (inboxStore && acpApprover) {
@@ -2465,8 +2465,8 @@ async function main(): Promise<void> {
       source: identity,
       logger: log,
       escalateDanger,
-      // Item 2 — per-agent outbound quota window (mirrors AIPE_PEER_LINK_QUOTA_WINDOW_MS).
-      quotaWindowMs: envInt('AIPE_ACP_OUTBOUND_QUOTA_WINDOW_MS', 60_000),
+      // Item 2 — per-agent outbound quota window (mirrors GOTONG_PEER_LINK_QUOTA_WINDOW_MS).
+      quotaWindowMs: envInt('GOTONG_ACP_OUTBOUND_QUOTA_WINDOW_MS', 60_000),
     })
     acpOutbound.registerAllFromStore()
   }
@@ -2488,12 +2488,12 @@ async function main(): Promise<void> {
 
   // Phase 18 C-M3 — inbound A2A message/send endpoint. OFF by default (it
   // exposes the hub to external A2A callers); enable with
-  // AIPE_A2A_INBOUND_ENABLED. Auth reuses the per-peer vault token via
-  // buildPeerTokenResolver; AIPE_A2A_INBOUND_CAPABILITY is the fallback
+  // GOTONG_A2A_INBOUND_ENABLED. Auth reuses the per-peer vault token via
+  // buildPeerTokenResolver; GOTONG_A2A_INBOUND_CAPABILITY is the fallback
   // dispatch capability for messages without an explicit metadata.skill.
   let a2aServer: A2aServer | undefined
-  if (identity && envBool('AIPE_A2A_INBOUND_ENABLED', false)) {
-    const a2aDefaultCap = env('AIPE_A2A_INBOUND_CAPABILITY')
+  if (identity && envBool('GOTONG_A2A_INBOUND_ENABLED', false)) {
+    const a2aDefaultCap = env('GOTONG_A2A_INBOUND_CAPABILITY')
     const identityForA2a = identity
     a2aServer = new A2aServer({
       hub,
@@ -2728,13 +2728,13 @@ async function main(): Promise<void> {
   // The ACS URL must be a STABLE absolute URL the IdP can POST back to (it's
   // baked into the AuthnRequest and re-checked against the response Recipient),
   // so it can't be request-derived like the agent card. Source it from
-  // AIPE_PUBLIC_URL (the externally-reachable base, e.g. behind a proxy);
+  // GOTONG_PUBLIC_URL (the externally-reachable base, e.g. behind a proxy);
   // fall back to host:port for local dev. Production behind TLS MUST set it.
   let samlLogin: SamlLoginSurface | undefined
   let samlAdmin: SamlProviderAdminSurface | undefined
   if (identity) {
     const idForSaml = identity
-    const publicBase = (env('AIPE_PUBLIC_URL') ?? `http://${config.host}:${config.webPort}`).replace(/\/+$/, '')
+    const publicBase = (env('GOTONG_PUBLIC_URL') ?? `http://${config.host}:${config.webPort}`).replace(/\/+$/, '')
     const samlAcsUrl = `${publicBase}/api/auth/saml/acs`
     const samlService = new SamlLoginService(idForSaml, { acsUrl: samlAcsUrl })
     samlLogin = {
@@ -2934,7 +2934,7 @@ async function main(): Promise<void> {
   // setting-ops M4 — the deterministic ops console surface (the WEB face of
   // ops-core). One host service, three surfaces (CLI / web / IM). It binds
   // ops-core's deps ONCE: the space root (env-knob + pricing files default off
-  // it — `<space>/aipehub.env`, `<space>/pricing.json`, the file the host
+  // it — `<space>/gotong.env`, `<space>/pricing.json`, the file the host
   // actually reads at boot), the live `adminHealth` surface for `status`, and
   // the IdentityStore as the config-write audit sink (absent → writes still land,
   // unaudited). The owner gate + destructive-offline chokepoint live in ops-core,
@@ -2958,7 +2958,7 @@ async function main(): Promise<void> {
     const identityForIm = identity
     // D3 — the entry gate is the admin bar (owner OR admin), matching
     // `requireAdmin`. A regular bound member who DMs `/setting` is refused
-    // 「命令模式仅限管理员」. Keyed by the bound AipeHub userId, never the raw
+    // 「命令模式仅限管理员」. Keyed by the bound Gotong userId, never the raw
     // IM handle.
     const imIsOperator = (userId: string): boolean => {
       const role = identityForIm.getMembership(userId)?.role
@@ -3141,7 +3141,7 @@ async function main(): Promise<void> {
     // Lets Prometheus pull the same body as /api/admin/metrics without a
     // machine-admin token. Unset/empty (env() already maps '' → undefined) →
     // the route 404s (fail-closed: no anonymous metrics endpoint).
-    ...(env('AIPE_METRICS_TOKEN') ? { metricsToken: env('AIPE_METRICS_TOKEN') } : {}),
+    ...(env('GOTONG_METRICS_TOKEN') ? { metricsToken: env('GOTONG_METRICS_TOKEN') } : {}),
     ...(allowedHosts ? { allowedHosts } : {}),
     adminLoginRateLimit: { max: adminRateMax, windowSec: adminRateSec },
     readinessGate: { isReady: () => bootReady },
@@ -3193,7 +3193,7 @@ async function main(): Promise<void> {
   // was still closed. Now we wait until WS is listening + give the
   // grace window below for sidecars to re-HELLO before kicking off
   // the resume. Local agents (LocalAgentPool) are already started.
-  const resumeGraceMs = envInt('AIPE_WORKFLOW_RESUME_GRACE_MS', 2_000)
+  const resumeGraceMs = envInt('GOTONG_WORKFLOW_RESUME_GRACE_MS', 2_000)
   resumeKickoffTimer = setTimeout(() => {
     workflowController.resumeRunningRuns().then((r) => {
       if (r.resumed > 0 || r.abandoned > 0) {
@@ -3225,7 +3225,7 @@ async function main(): Promise<void> {
   // the operator where to read it. This keeps the plaintext token
   // out of journalctl / docker logs / pm2 logs — log shippers that
   // capture stdout no longer see secret material.
-  console.log(`\n=== AipeHub host ready ===`)
+  console.log(`\n=== Gotong host ready ===`)
   console.log(`Space     : ${SPACE_DIR}`)
   console.log(`Web       : ${web.url}`)
   console.log(`WebSocket : ${ws.url}`)
@@ -3245,30 +3245,30 @@ async function main(): Promise<void> {
         ? allowedHosts.join(', ')
         : isLoopbackHost(config.host)
           ? 'disabled (loopback only is safe)'
-          : 'DISABLED while network-exposed — AIPE_ALLOW_INSECURE set (see boot warnings)'
+          : 'DISABLED while network-exposed — GOTONG_ALLOW_INSECURE set (see boot warnings)'
     }`,
   )
-  // PRO-M2 — deployment profile lens (presentation only). AIPE_PROFILE=hub|
+  // PRO-M2 — deployment profile lens (presentation only). GOTONG_PROFILE=hub|
   // federation reorders/annotates the entry surface toward within-hub vs
   // cross-hub work; it enables/disables NO code path. Unset → nothing printed
   // here (byte-identical to before). A set-but-unknown value is surfaced as a
   // likely typo and then ignored (still the byte-identical default).
-  const profile = resolveProfileEnv(process.env.AIPE_PROFILE)
+  const profile = resolveProfileEnv(process.env.GOTONG_PROFILE)
   if (profile.unrecognized) {
-    log.warn('AIPE_PROFILE not recognized — ignoring (expected hub|federation)', {
+    log.warn('GOTONG_PROFILE not recognized — ignoring (expected hub|federation)', {
       value: profile.unrecognized,
     })
     console.warn(
-      `  ⚠ AIPE_PROFILE="${profile.unrecognized}" 无法识别,已忽略 (可选 hub|federation) / unrecognized, ignored.`,
+      `  ⚠ GOTONG_PROFILE="${profile.unrecognized}" 无法识别,已忽略 (可选 hub|federation) / unrecognized, ignored.`,
     )
   }
   for (const line of profileBannerLines(profile)) console.log(line)
 
   // Friendly first-run nicety (presentation only): point a fresh local user
   // at the loopback setup wizard and optionally open their browser. Never
-  // auto-opens when network-exposed (see shouldOpenBrowser). AIPE_OPEN_BROWSER
+  // auto-opens when network-exposed (see shouldOpenBrowser). GOTONG_OPEN_BROWSER
   // controls it: auto (default, first run only) / always / never.
-  const openMode = parseOpenBrowserEnv(process.env.AIPE_OPEN_BROWSER)
+  const openMode = parseOpenBrowserEnv(process.env.GOTONG_OPEN_BROWSER)
   const loopbackHost = isLoopbackHost(config.host)
   const maybeOpenBrowser = (targetUrl: string, firstRun: boolean): void => {
     if (!shouldOpenBrowser(openMode, { loopback: loopbackHost, firstRun })) return
@@ -3277,7 +3277,7 @@ async function main(): Promise<void> {
     })
     console.log(
       opened
-        ? `  (已自动打开浏览器 / browser opened — AIPE_OPEN_BROWSER=0 关闭)`
+        ? `  (已自动打开浏览器 / browser opened — GOTONG_OPEN_BROWSER=0 关闭)`
         : `  (自动打开浏览器失败,请手动打开上面的地址)`,
     )
   }
@@ -3308,7 +3308,7 @@ async function main(): Promise<void> {
         `\nFATAL: could not write ${linkPath}.\n` +
           `       The first-run admin token is no longer recoverable from\n` +
           `       this run; re-init by removing the workspace and starting\n` +
-          `       over, or use \`aipehub-host mint-admin-token\` to create\n` +
+          `       over, or use \`gotong-host mint-admin-token\` to create\n` +
           `       a fresh admin against the existing workspace once the\n` +
           `       underlying error is fixed.\n`,
       )
@@ -3316,7 +3316,7 @@ async function main(): Promise<void> {
     }
   } else {
     console.log(`Admin     : ${web.url}/admin    (existing cookie or token)\n`)
-    // Only opens when AIPE_OPEN_BROWSER=always (firstRun=false → 'auto' is a
+    // Only opens when GOTONG_OPEN_BROWSER=always (firstRun=false → 'auto' is a
     // no-op), so restarts don't spam the browser.
     maybeOpenBrowser(`${web.url}/admin`, false)
   }
@@ -3457,7 +3457,7 @@ function describe(e: TranscriptEntry): string {
 
 main().catch((err) => {
   // ease-of-use ⑥-M2 — turn the common, recoverable EADDRINUSE into an
-  // actionable hint (which port var to change + `aipehub doctor`) instead of a
+  // actionable hint (which port var to change + `gotong doctor`) instead of a
   // structured-fatal dump. Everything else keeps the default observability path.
   const hint = friendlyBootError(err)
   if (hint) {

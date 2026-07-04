@@ -22,9 +22,9 @@ import { fileURLToPath } from 'node:url'
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { Hub, HumanParticipant, Space } from '@aipehub/core'
-import { serveWeb, type WebServerHandle } from '@aipehub/web'
-import { openIdentityStore, type IdentityStore } from '@aipehub/identity'
+import { Hub, HumanParticipant, Space } from '@gotong/core'
+import { serveWeb, type WebServerHandle } from '@gotong/web'
+import { openIdentityStore, type IdentityStore } from '@gotong/identity'
 
 import { WorkflowController } from '../src/workflow-controller.js'
 
@@ -42,7 +42,7 @@ interface Rig {
 }
 
 async function boot(): Promise<Rig> {
-  const root = await mkdtemp(join(tmpdir(), 'aipe-me-e2e-'))
+  const root = await mkdtemp(join(tmpdir(), 'gotong-me-e2e-'))
   const { space, adminToken } = await Space.init(root, {
     name: 'me-e2e',
     adminDisplayName: 'Owner',

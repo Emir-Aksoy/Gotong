@@ -1,7 +1,7 @@
 /**
  * Reusable IM router — `ImMessage` in, `Hub.dispatch` out.
  *
- * This is the glue that lets ANY `@aipehub/im-*` bridge talk to the
+ * This is the glue that lets ANY `@gotong/im-*` bridge talk to the
  * Hub. The shape is deliberately copy-paste-able into a production
  * host: import the bridges you actually want, wire each through
  * `createImRouter` (or call `handleImMessage` directly), and that's
@@ -9,8 +9,8 @@
  *
  * Why an example-internal module instead of a published package?
  *
- *   1. The 6 concrete bridges already pull in `@aipehub/im-adapter`;
- *      a separate `@aipehub/im-router` would mostly re-export it.
+ *   1. The 6 concrete bridges already pull in `@gotong/im-adapter`;
+ *      a separate `@gotong/im-router` would mostly re-export it.
  *   2. Real hosts will want to fork this with their own command
  *      vocabulary (e.g. add `/quota`, `/whoami`). Inlining keeps the
  *      authoring path obvious.
@@ -28,9 +28,9 @@ import type {
   ImBindingResolver,
   ImMessage,
   ImUser,
-} from '@aipehub/im-adapter'
-import { parseImCommand } from '@aipehub/im-adapter'
-import type { DispatchStrategy, Hub, TaskResult } from '@aipehub/core'
+} from '@gotong/im-adapter'
+import { parseImCommand } from '@gotong/im-adapter'
+import type { DispatchStrategy, Hub, TaskResult } from '@gotong/core'
 
 // ---------------------------------------------------------------------------
 // Hooks the host provides to the router.
@@ -109,16 +109,16 @@ export interface ImRouterConfig {
   /**
    * Optional structured logger. Defaults to `console.error` for
    * warnings and silent for info — keeping the demo readable. Real
-   * hosts pass `@aipehub/host`'s logger.
+   * hosts pass `@gotong/host`'s logger.
    */
   log?: (level: 'info' | 'warn' | 'error', msg: string, extra?: unknown) => void
 }
 
 export const defaultHelpText = [
-  'AipeHub IM bridge — recognised commands:',
+  'Gotong IM bridge — recognised commands:',
   '',
   '  /help                  — show this list',
-  '  /bind <code>           — link this IM identity to your AipeHub account',
+  '  /bind <code>           — link this IM identity to your Gotong account',
   '                           (issue a code in the admin UI → Profile → Bind IM)',
   '  /unbind                — drop the binding',
   '  /agents                — list the agents you can talk to',
@@ -218,7 +218,7 @@ export async function handleImMessage(
     await reply(
       bridge,
       msg,
-      'You haven\'t linked your AipeHub account yet. Go to the admin UI → Profile → Bind IM to get a 6-digit code, then DM me `/bind <code>`.',
+      'You haven\'t linked your Gotong account yet. Go to the admin UI → Profile → Bind IM to get a 6-digit code, then DM me `/bind <code>`.',
     )
     return
   }
@@ -326,9 +326,9 @@ export async function handleImMessage(
  * Build the `from` participant id used as `Task.from`. Embedding the
  * platform + user lets the transcript reader tell apart e.g. "the same
  * user typed this in Telegram vs Slack", without conflating with
- * AipeHub-internal user ids.
+ * Gotong-internal user ids.
  *
- * The actual *AipeHub* user id goes into `Task.origin.userId` so the
+ * The actual *Gotong* user id goes into `Task.origin.userId` so the
  * quota gate / audit log / per-user routing can use it. `from` is the
  * loose human-readable wrapper for transcript display.
  */

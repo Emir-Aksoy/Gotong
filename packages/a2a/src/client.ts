@@ -11,9 +11,9 @@
  *
  * `fetchImpl` is injectable so tests (and the double-hub smoke) run without a
  * real network. The bearer goes in `Authorization: Bearer <token>`; `peerId`
- * (AipeHub-to-AipeHub) adds the `X-Aipe-Peer-Id` header the receiving hub uses
+ * (Gotong-to-Gotong) adds the `X-Gotong-Peer-Id` header the receiving hub uses
  * to resolve the expected token + synthesize task origin / scope task ownership.
- * A generic (non-AipeHub) A2A agent needs only the bearer.
+ * A generic (non-Gotong) A2A agent needs only the bearer.
  */
 
 import {
@@ -46,9 +46,9 @@ interface PostOptions {
   /** Inject for deterministic tests; defaults to the global `fetch`. */
   fetchImpl?: typeof fetch
   /**
-   * AipeHub-to-AipeHub only: the CALLER's own peer id, sent as `X-Aipe-Peer-Id`
+   * Gotong-to-Gotong only: the CALLER's own peer id, sent as `X-Gotong-Peer-Id`
    * so the receiving hub resolves the expected bearer + stamps origin. Omit
-   * for a generic (non-AipeHub) A2A agent.
+   * for a generic (non-Gotong) A2A agent.
    */
   peerId?: string
   /** Abort signal forwarded to fetch. */
@@ -61,7 +61,7 @@ export interface A2aSendOptions extends PostOptions {
   /** JSON-RPC request id; defaults to 1. */
   requestId?: string | number
   /**
-   * Message metadata forwarded on the request. An AipeHub server reads
+   * Message metadata forwarded on the request. An Gotong server reads
    * `metadata.skill` to pick the dispatch capability; set `{ skill: '...' }`
    * to target a specific remote capability.
    */
@@ -81,7 +81,7 @@ async function postA2a(url: string, token: string, body: unknown, opts: PostOpti
     accept: 'application/json',
   }
   if (token) headers.authorization = `Bearer ${token}`
-  if (opts.peerId) headers['x-aipe-peer-id'] = opts.peerId
+  if (opts.peerId) headers['x-gotong-peer-id'] = opts.peerId
 
   let res: Response
   try {

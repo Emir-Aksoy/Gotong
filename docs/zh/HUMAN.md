@@ -1,8 +1,8 @@
-# 以"人"的身份加入 AipeHub
+# 以"人"的身份加入 Gotong
 
 > 同步自英文版 [`docs/HUMAN.md`](../HUMAN.md) @ 2026-05-12。
 
-AipeHub 把人当作一等公民来对待。两种角色，每种自己一个 web UI：
+Gotong 把人当作一等公民来对待。两种角色，每种自己一个 web UI：
 
 | 角色 | URL | 能做什么 |
 |---|---|---|
@@ -103,7 +103,7 @@ admin 面板有几个区块：
 - 一次可以导入一个 agent 或一整个 team（多个 agent）
 - 服务器解析 → 校验 schema → 创建 + 启动
 
-**公网模板库**：[github.com/Emir-Aksoy/AipeHub/tree/main/templates](https://github.com/Emir-Aksoy/AipeHub/tree/main/templates)
+**公网模板库**：[github.com/Emir-Aksoy/Gotong/tree/main/templates](https://github.com/Emir-Aksoy/Gotong/tree/main/templates)
 收集了官方维护的"标准 agent"和"标准 team"模板，包括两套：
 
 - `templates/agents/`、`templates/teams/` —— 项目原创
@@ -123,11 +123,11 @@ admin 面板有几个区块：
 - **编辑** —— 同一个表单预填，可以改 prompt / model 等；保存会重启
   该 agent。**不建议频繁编辑标准模板** —— 你的修改会和上游同名模板
   冲突。
-- **导出** —— 下载 `<id>.aipehub-agent.json`，可以备份或在别的空间导入
+- **导出** —— 下载 `<id>.gotong-agent.json`，可以备份或在别的空间导入
 - **移除** —— 从 `agents.json` 删除 + 取消注册
 
 **外部 SDK agent**：如果 agents.json 里某条没有 `managed` 字段（即通过
-`@aipehub/sdk-node` 远程连进来的），card 上显示「外部 SDK 接入」标签，
+`@gotong/sdk-node` 远程连进来的），card 上显示「外部 SDK 接入」标签，
 不可编辑也不可导出（因为代码不在 host 这边）。
 
 #### API Key 管理（v2.1）
@@ -145,7 +145,7 @@ admin 面板有几个区块：
 
 - 加密后的 key 存 `<space>/secrets.enc.json`
 - 主密钥存 `<space>/runtime/secret.key`（0600，跨机器迁移时**不带走**）
-- 也可以用 `AIPE_SECRET_KEY` 环境变量代替主密钥文件（适合 KMS / k8s secret）
+- 也可以用 `GOTONG_SECRET_KEY` 环境变量代替主密钥文件（适合 KMS / k8s secret）
 
 **安全保证**：
 
@@ -299,7 +299,7 @@ First-run admin URL (shown ONCE — save it):
 
 - 至少还有一个 admin 有有效 cookie 的话：让他 `POST /api/admin/admins`
   给你 mint 一个新邀请。
-- 你一个人锁外面了：停 host，删工作区目录（`rm -rf /srv/aipehub-data`），
+- 你一个人锁外面了：停 host，删工作区目录（`rm -rf /srv/gotong-data`），
   重启。一个新 admin 会被 mint。**所有 transcript 历史会丢**，删之前
   请备份。
 

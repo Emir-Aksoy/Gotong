@@ -2,12 +2,12 @@
  * `FakeBridge` — an in-memory `ImBridge` for demos and unit tests.
  *
  * Copied verbatim from `examples/im-bridge-host/src/fake-bridge.ts`. Real bridges
- * (`@aipehub/im-telegram`, …) talk to actual IM platforms; that's overkill for
+ * (`@gotong/im-telegram`, …) talk to actual IM platforms; that's overkill for
  * showing how the steward router glues everything together. `FakeBridge` lets the
  * example script inject inbound messages by calling `inject(msg)` and observe
  * outbound replies via `outbound`.
  *
- * Anyone writing a real-bridge unit test in the `@aipehub/im-*` packages should
+ * Anyone writing a real-bridge unit test in the `@gotong/im-*` packages should
  * NOT import this — those packages have their own (richer) fake-socket / fake-http
  * helpers tuned to each platform's quirks. This one is intentionally minimal.
  */
@@ -17,7 +17,7 @@ import type {
   ImBridge,
   ImMessage,
   ImUser,
-} from '@aipehub/im-adapter'
+} from '@gotong/im-adapter'
 
 export interface FakeBridgeOutbound {
   to: ImUser

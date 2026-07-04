@@ -28,8 +28,8 @@
  * /me / 管家）都能压在同一个核上（WIZ-M4）。
  */
 
-import { parseWorkflow } from '@aipehub/workflow'
-import type { WorkflowDefinition, WorkflowGraphView } from '@aipehub/workflow'
+import { parseWorkflow } from '@gotong/workflow'
+import type { WorkflowDefinition, WorkflowGraphView } from '@gotong/workflow'
 
 import {
   installedCapabilities,

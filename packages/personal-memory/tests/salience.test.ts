@@ -10,7 +10,7 @@
 
 import { describe, expect, it } from 'vitest'
 
-import type { MemoryEntry } from '@aipehub/services-sdk'
+import type { MemoryEntry } from '@gotong/services-sdk'
 
 import {
   DEFAULT_REINFORCE_WEIGHT,

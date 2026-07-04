@@ -1,5 +1,5 @@
 /**
- * A2A (Agent2Agent) wire types — the subset AipeHub speaks.
+ * A2A (Agent2Agent) wire types — the subset Gotong speaks.
  *
  * Scope is the blocking `message/send` JSON-RPC method of A2A 0.2.5, the
  * AgentSkill subset the agent card advertises, AND the task lifecycle pair
@@ -31,7 +31,7 @@ export interface A2ASkill {
   tags?: string[]
 }
 
-/** A text part — the only `Part` kind AipeHub emits / reads. */
+/** A text part — the only `Part` kind Gotong emits / reads. */
 export interface A2ATextPart {
   kind: 'text'
   text: string
@@ -74,7 +74,7 @@ export interface A2ARequest {
 // --- task lifecycle (Route B P1-M8) ----------------------------------------
 
 /**
- * A2A `TaskState` (0.2.5) — the subset AipeHub emits / recognizes. The host
+ * A2A `TaskState` (0.2.5) — the subset Gotong emits / recognizes. The host
  * EMITS only `working` (parked: long compute or HITL approval), `completed`
  * (the parked task resumed → ok) and `failed` (resumed → failed / cancelled /
  * no_participant). `submitted` / `input-required` / `canceled` are recognized

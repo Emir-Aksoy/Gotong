@@ -22,7 +22,7 @@ import {
   MASTER_KEY_LEN_BYTES,
   openIdentityStore,
   userPrincipal,
-} from '@aipehub/identity'
+} from '@gotong/identity'
 
 import { HostMeAgentGrantsService } from '../src/me-agent-grants-service.js'
 
@@ -36,7 +36,7 @@ describe('HostMeAgentGrantsService (v5 A-M4)', () => {
   let svc: HostMeAgentGrantsService
 
   beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), 'aipehub-megrant-'))
+    dir = mkdtempSync(join(tmpdir(), 'gotong-megrant-'))
     identity = openIdentityStore({
       dbPath: join(dir, 'identity.sqlite'),
       masterKey: randomBytes(MASTER_KEY_LEN_BYTES),

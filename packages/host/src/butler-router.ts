@@ -11,7 +11,7 @@
  *
  * The router is the fix. It registers under the chat agent's id + capability,
  * so the hub's capability routing reaches it unchanged. On each task it reads
- * `task.origin.userId` (the IM bridge always stamps it — the bound AipeHub user,
+ * `task.origin.userId` (the IM bridge always stamps it — the bound Gotong user,
  * never the raw IM handle) and routes to a PER-USER butler, lazily built on
  * first contact and memoized for the process lifetime. Each butler opens its own
  * per-user memory namespace, so memory is isolated by construction.
@@ -41,7 +41,7 @@ import type {
   Task,
   TaskId,
   TaskResult,
-} from '@aipehub/core'
+} from '@gotong/core'
 
 /**
  * Bucket for tasks that carry no `origin.userId` (operator pokes, admin

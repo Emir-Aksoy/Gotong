@@ -14,7 +14,7 @@
 
 ## 1. Por qué solo reconocimiento
 
-La forma a largo plazo de AipeHub es un **mercado gobernado de componentes
+La forma a largo plazo de Gotong es un **mercado gobernado de componentes
 reutilizables** — plantillas, adaptadores, conectores de bases de conocimiento —
 construido para que las personas confíen en él lo suficiente como para apuntarlo a su
 hogar, su familia o su dinero (ver [`GOVERNANCE.md`](../../GOVERNANCE.md) § "Path to a
@@ -201,7 +201,7 @@ Así que el pilar ⑤ añade dos artefactos ligeros y file-first — y nada más
   GitHub Action (el repositorio no gasta presupuesto de Actions en contabilidad, y una
   tabla markdown es la cosa más ligera y honesta); se te añade con un PR normal.
 - **Un escaparate curado de aprendizaje — [`LEARN.md`](../../LEARN.md).** El mejor material
-  comunitario para aprender AipeHub — vídeos, charlas, tutoriales, posts — cada uno
+  comunitario para aprender Gotong — vídeos, charlas, tutoriales, posts — cada uno
   acreditado a su autor y enlazado desde el README. Este es el **análogo de difusión del
   pilar ④**: las plantillas insignia son las mejores cosas para *mezclar*; las entradas
   de LEARN son las mejores cosas *de las que aprender*. Curar el vídeo de alguien aquí

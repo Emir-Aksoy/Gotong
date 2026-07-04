@@ -4,7 +4,7 @@
 # Adapted:    2026-05-12 — removed Turkish first-sentence opener; clarified
 #             that translation language is always English regardless of input;
 #             added structured JSON output option (commented).
-schema: aipehub.agent/v1
+schema: gotong.agent/v1
 agent:
   id: english-improver
   displayName: 英文翻译与润色

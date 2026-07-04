@@ -1,5 +1,5 @@
 /**
- * `@aipehub/evals` — lightweight, LLM-free structural checkers for
+ * `@gotong/evals` — lightweight, LLM-free structural checkers for
  * workflow + agent prompt outputs.
  *
  * # What this package is

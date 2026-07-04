@@ -1,4 +1,4 @@
-/* AipeHub — admin console (v2.0, file-first).
+/* Gotong — admin console (v2.0, file-first).
  *
  * All admin endpoints require the cookie minted by /admin?token=…
  * (or `Authorization: Bearer …`). No browser caches.
@@ -20,7 +20,7 @@ import { createWorkflows } from './workflows.js'
           fetchJson, connectStream, syncLangFromConfig, formatBytes,
           fetchLeaderboard, renderLeaderboard, taskMetricsHtml, formatScore,
           attachContribToggle, applyContribToggleState, attachCapChips,
-          gotoTab } = window.AipeHub
+          gotoTab } = window.Gotong
 
   // Managed-agent state: list, providers available, secrets status, form mode.
   const ma = {
@@ -103,7 +103,7 @@ import { createWorkflows } from './workflows.js'
   const services = createServices(ma)
   // MCP integration tab lives in admin-src/mcp.js (#2-M4). Self-contained
   // — list / install / uninstall against /api/admin/mcp-servers, no shared
-  // state beyond window.AipeHub helpers. Lazy-loaded on first tab focus.
+  // state beyond window.Gotong helpers. Lazy-loaded on first tab focus.
   const mcp = createMcp()
   // Managed Agents tab lives in admin-src/managed-agents.js (P3 Phase 2,
   // second ES-module split). It drives the shared `dom` cache, so we hand
@@ -1101,7 +1101,7 @@ import { createWorkflows } from './workflows.js'
   // defaults the provider to a key-backed one, so the operator reviews + clicks
   // Save (= POST /api/admin/agents). Faithful to "框架只提议、人点一下执行" —
   // no auto-generated disk state, no "deleted but respawns on restart" trap.
-  const START_HERE_DISMISS_KEY = 'aipe_start_here_dismissed'
+  const START_HERE_DISMISS_KEY = 'gotong_start_here_dismissed'
   // Latches once the card is hidden for good (dismissed OR hub no longer fresh)
   // so we stop re-probing the three endpoints on every overview focus / lang
   // switch. A fresh, undismissed hub keeps re-rendering (cheap, rare) until it
@@ -1921,7 +1921,7 @@ import { createWorkflows } from './workflows.js'
   // --- Phase 9 M5: multimodal block helpers -----------------------------
   // Walk an arbitrary JSON tree and collect every LlmFileRefBlock /
   // LlmImageBlock / LlmAudioBlock-shaped node. The shape check is
-  // structural (no schema dep on @aipehub/llm here) — we look for
+  // structural (no schema dep on @gotong/llm here) — we look for
   // the `type` discriminator and the per-kind required fields. Same
   // shapes the providers expect on the LlmRequest side, so any
   // payload that's been authored via the workflow `type: 'file'` flow
@@ -2071,8 +2071,8 @@ import { createWorkflows } from './workflows.js'
     } else if (f.type === 'file') {
       // Phase 9 M4 — file upload. The `accept` attr is a UI hint
       // only (the upload endpoint also enforces server-side caps).
-      // `data-aipe-file` lets the submit handler find file inputs
-      // without re-walking the schema. `aipe-file-status` shows
+      // `data-gotong-file` lets the submit handler find file inputs
+      // without re-walking the schema. `gotong-file-status` shows
       // "上传中…" / "已上传 (123 KB)" inline so the admin gets feedback
       // before the workflow dispatch fires.
       const accept = Array.isArray(f.accept) && f.accept.length > 0
@@ -2081,8 +2081,8 @@ import { createWorkflows } from './workflows.js'
       const sizeHint = typeof f.maxSizeMb === 'number'
         ? `<small class="hint">${escapeHtml(t.admMaxSize(f.maxSizeMb))}</small>`
         : ''
-      control = `<input type="file" id="${id}" data-aipe-file="1"${accept} />
-        <span class="aipe-file-status" data-aipe-file-status="${id}" style="font-size:0.85em;color:#666;margin-left:0.5em;"></span>
+      control = `<input type="file" id="${id}" data-gotong-file="1"${accept} />
+        <span class="gotong-file-status" data-gotong-file-status="${id}" style="font-size:0.85em;color:#666;margin-left:0.5em;"></span>
         ${sizeHint}`
     } else {
       control = `<input type="text" id="${id}"${ph} value="${defaultV}" />`
@@ -2129,7 +2129,7 @@ import { createWorkflows } from './workflows.js'
             return
           }
           const statusEl = document.querySelector(
-            `[data-aipe-file-status="wf-start-field-${cssEscape(f.id)}"]`,
+            `[data-gotong-file-status="wf-start-field-${cssEscape(f.id)}"]`,
           )
           if (statusEl) statusEl.textContent = t.admUploading
           try {
@@ -2581,12 +2581,12 @@ import { createWorkflows } from './workflows.js'
       const r = await fetch(`/api/admin/workflows/${encodeURIComponent(id)}/source`)
       const j = await r.json().catch(() => ({}))
       if (!r.ok || !j.ok || typeof j.yaml !== 'string') {
-        alert((window.AipeHub?.t?.wfaArchExplainLoadFailed || 'Failed to load workflow') + (j.error ? `: ${j.error}` : ''))
+        alert((window.Gotong?.t?.wfaArchExplainLoadFailed || 'Failed to load workflow') + (j.error ? `: ${j.error}` : ''))
         return
       }
       wfAssist.open({ mode: 'explain', subjectYaml: j.yaml, subjectId: id })
     } catch (err) {
-      alert((window.AipeHub?.t?.wfaArchExplainLoadFailed || 'Failed to load workflow') + `: ${err.message || err}`)
+      alert((window.Gotong?.t?.wfaArchExplainLoadFailed || 'Failed to load workflow') + `: ${err.message || err}`)
     }
   }
 
@@ -2700,11 +2700,11 @@ import { createWorkflows } from './workflows.js'
   // R14b — the SOLE tab router now lives in app.js (the SPA orchestrator):
   // it wires the tabbar clicks + the single hashchange listener and drives
   // setActiveTab, which toggles `.tab-hidden` / `.active` / <body
-  // data-active-tab> and dispatches `aipehub:tabchange`. We used to run a
+  // data-active-tab> and dispatches `gotong:tabchange`. We used to run a
   // duplicate setActiveTab + hashchange here; both fired on every change
   // and raced (admin.js, loading later, even stomped C1 tabs back to
   // overview). This bundle now only LISTENS (see boot) and reuses app.js's
-  // gotoTab (destructured off window.AipeHub) for cross-tab jumps.
+  // gotoTab (destructured off window.Gotong) for cross-tab jumps.
   //
   // All sections stay in the DOM at all times — tab switches just flip the
   // `tab-hidden` class — so cross-tab interactions (clicking a task_result
@@ -2720,8 +2720,8 @@ import { createWorkflows } from './workflows.js'
     // Construct the workflow-AI-assistant factory now that `dom` is resolved.
     // It captures dom by value + wires the depth-row click synchronously, so
     // it must run AFTER resolveDom() (see the `let wfAssist = null` note above).
-    wfAssist = (window.AipeHub && window.AipeHub.installWorkflowAssist)
-      ? window.AipeHub.installWorkflowAssist({
+    wfAssist = (window.Gotong && window.Gotong.installWorkflowAssist)
+      ? window.Gotong.installWorkflowAssist({
           dom,
           state,
           ma,
@@ -2736,13 +2736,13 @@ import { createWorkflows } from './workflows.js'
     updateDispatchVisibility()
 
     // R14b — app.js owns the tabbar clicks + hashchange + setActiveTab and
-    // dispatches `aipehub:tabchange`. We just subscribe and run the admin-
+    // dispatches `gotong:tabchange`. We just subscribe and run the admin-
     // only per-tab side effect: refresh the growth-reports panel (which
     // lives under the Workflows tab) whenever the user lands there mid-
     // session — e.g. after the synthesist uploads a report. The initial
     // population on first load is covered by the unconditional
     // refreshGrowthReports() later in boot, so no deep-link catch-up needed.
-    window.addEventListener('aipehub:tabchange', (e) => {
+    window.addEventListener('gotong:tabchange', (e) => {
       if (e.detail?.name === 'workflows') refreshGrowthReports().catch(() => {})
       // MCP tab (#2-M4): lazy-refresh the registry list on every focus so
       // installs/uninstalls from another window get picked up.
@@ -3095,14 +3095,14 @@ import { createWorkflows } from './workflows.js'
     // it again — intentional. Failures (private browsing without
     // storage permission) just skip the modal silently.
     try {
-      if (dom.disclaimerModal && !localStorage.getItem('aipehub_disclaimer_v1')) {
+      if (dom.disclaimerModal && !localStorage.getItem('gotong_disclaimer_v1')) {
         dom.disclaimerModal.hidden = false
       }
     } catch (err) {
       console.debug('disclaimer storage check failed:', err)
     }
     dom.disclaimerAccept?.addEventListener('click', () => {
-      try { localStorage.setItem('aipehub_disclaimer_v1', String(Date.now())) } catch {}
+      try { localStorage.setItem('gotong_disclaimer_v1', String(Date.now())) } catch {}
       if (dom.disclaimerModal) dom.disclaimerModal.hidden = true
     })
 
@@ -3203,7 +3203,7 @@ import { createWorkflows } from './workflows.js'
     })
 
     // View switcher — jump to the worker (`/`) view. Both views share
-    // identity through HttpOnly cookies (`aipehub_admin` + `aipehub_worker`),
+    // identity through HttpOnly cookies (`gotong_admin` + `gotong_worker`),
     // so a person who is both admin and worker keeps both sessions across
     // the switch. No client-side state is saved here — server is the
     // source of truth and the new page re-fetches everything.
@@ -3234,7 +3234,7 @@ import { createWorkflows } from './workflows.js'
     }
 
     // MCP integration tab (#2-M4). Per-focus refresh rides the canonical
-    // aipehub:tabchange listener above; here we wire the install form + the
+    // gotong:tabchange listener above; here we wire the install form + the
     // stdio/remote field toggle once, set the initial field visibility, and
     // populate on a deep link straight into #mcp.
     const mcpForm = document.getElementById('mcp-form')

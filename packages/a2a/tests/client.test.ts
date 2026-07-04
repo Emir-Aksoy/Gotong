@@ -1,5 +1,5 @@
 /**
- * Phase 18 C-M2 — @aipehub/a2a client + wire-type builders.
+ * Phase 18 C-M2 — @gotong/a2a client + wire-type builders.
  *
  * No network: `fetchImpl` is injected with a capturing fake so we can assert
  * the exact JSON-RPC request shape AND the reply parsing / error mapping.
@@ -55,7 +55,7 @@ describe('a2aSend (Phase 18 C-M2)', () => {
     const headers = init.headers as Record<string, string>
     expect(headers.authorization).toBe('Bearer tok-123')
     expect(headers['content-type']).toBe('application/json')
-    expect(headers['x-aipe-peer-id']).toBe('hubA')
+    expect(headers['x-gotong-peer-id']).toBe('hubA')
 
     const body = JSON.parse(init.body as string)
     expect(body).toEqual({
@@ -73,13 +73,13 @@ describe('a2aSend (Phase 18 C-M2)', () => {
     })
   })
 
-  it('omits X-Aipe-Peer-Id when no peerId is given (generic A2A agent)', async () => {
+  it('omits X-Gotong-Peer-Id when no peerId is given (generic A2A agent)', async () => {
     const { fn, calls } = fakeFetch(() =>
       jsonResponse({ jsonrpc: '2.0', id: 1, result: agentMessage('ok', 'm') }),
     )
     await a2aSend('https://ext.example/a2a', 'tok', 'hi', { fetchImpl: fn })
     const headers = calls[0]!.init.headers as Record<string, string>
-    expect(headers['x-aipe-peer-id']).toBeUndefined()
+    expect(headers['x-gotong-peer-id']).toBeUndefined()
     expect(headers.authorization).toBe('Bearer tok')
   })
 

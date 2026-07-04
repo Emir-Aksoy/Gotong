@@ -15,7 +15,7 @@
  *     an identical (channel, firing, event); a failed send stays free to retry
  */
 
-import type { PeerSummaryAlertChannel, PeerSummaryAlertFiring } from '@aipehub/identity'
+import type { PeerSummaryAlertChannel, PeerSummaryAlertFiring } from '@gotong/identity'
 import { describe, expect, it } from 'vitest'
 
 import type { PeerSummaryAlertBreach } from '../src/peer-summary-alerts.js'
@@ -154,7 +154,7 @@ describe('renderWebhookPayload (counts-only)', () => {
   it('builds the opened payload from a firing', () => {
     const p = renderWebhookPayload(firing({ id: 42, label: 'too many parked' }), 'opened')
     expect(p).toEqual({
-      type: 'aipehub.peer_summary_alert/v1',
+      type: 'gotong.peer_summary_alert/v1',
       event: 'opened',
       firingId: 42,
       ruleId: 'asr_1',
@@ -377,20 +377,20 @@ describe('renderAlertText (counts-only)', () => {
   it('renders a firing line from counts-only fields (label + ruleId)', () => {
     const text = renderAlertText(renderWebhookPayload(firing({ label: 'too many parked' }), 'opened'))
     expect(text).toBe(
-      '[aipehub] alert firing: too many parked (asr_1) — health.suspendedTasks gt 5 (observed 9) on source local',
+      '[gotong] alert firing: too many parked (asr_1) — health.suspendedTasks gt 5 (observed 9) on source local',
     )
   })
 
   it('uses the ruleId alone when there is no label, and says resolved for a resolved event', () => {
     const text = renderAlertText(renderWebhookPayload(firing({ resolvedAt: 2000 }), 'resolved'))
-    expect(text).toBe('[aipehub] alert resolved: asr_1 — health.suspendedTasks gt 5 (observed 9) on source local')
+    expect(text).toBe('[gotong] alert resolved: asr_1 — health.suspendedTasks gt 5 (observed 9) on source local')
   })
 })
 
 describe('buildDeliveryRequest (per-kind/platform, pure)', () => {
   const payload = renderWebhookPayload(firing({ label: 'parked' }), 'opened')
   const text =
-    '[aipehub] alert firing: parked (asr_1) — health.suspendedTasks gt 5 (observed 9) on source local'
+    '[gotong] alert firing: parked (asr_1) — health.suspendedTasks gt 5 (observed 9) on source local'
 
   it('webhook → JSON payload body, Authorization from the secret', () => {
     const req = buildDeliveryRequest(channel({ kind: 'webhook' }), payload, 'Bearer t')
@@ -457,7 +457,7 @@ describe('buildDeliveryRequest (per-kind/platform, pure)', () => {
     expect(req?.headers.authorization).toBe('Bearer key')
     expect(JSON.parse(req!.body)).toEqual({
       to: 'ops@example.com',
-      subject: '[aipehub] alert opened: health.suspendedTasks',
+      subject: '[gotong] alert opened: health.suspendedTasks',
       text,
     })
   })

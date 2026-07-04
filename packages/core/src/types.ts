@@ -1,9 +1,9 @@
 /**
  * Wire-level types — `ParticipantId`, `Message`, `Task`, `TaskResult`,
- * etc — live in `@aipehub/protocol` so a lightweight SDK can speak the
+ * etc — live in `@gotong/protocol` so a lightweight SDK can speak the
  * protocol without pulling in core's runtime (Hub / Scheduler / Storage).
  *
- * `@aipehub/core` re-exports them here so in-tree `from '@aipehub/core'`
+ * `@gotong/core` re-exports them here so in-tree `from '@gotong/core'`
  * imports keep working — the move is invisible to existing consumers.
  */
 export type {
@@ -18,7 +18,7 @@ export type {
   AncestryNode,
   Task,
   TaskResult,
-} from '@aipehub/protocol'
+} from '@gotong/protocol'
 
 import type {
   ParticipantId,
@@ -27,7 +27,7 @@ import type {
   Task,
   TaskResult,
   ParticipantKind,
-} from '@aipehub/protocol'
+} from '@gotong/protocol'
 
 // --- Participant -----------------------------------------------------------
 
@@ -63,7 +63,7 @@ export interface Participant {
 // --- Admission gating (v1.1) -----------------------------------------------
 
 /**
- * Coarse-grained mirror of `@aipehub/protocol`'s `ServiceUseDecl`. Carried
+ * Coarse-grained mirror of `@gotong/protocol`'s `ServiceUseDecl`. Carried
  * inside `PendingApplication` so admins can see what services a remote
  * agent is requesting **before** they approve the application.
  *
@@ -302,8 +302,8 @@ export type TranscriptEntry =
    *
    * `chunk` is the provider-neutral `LlmStreamChunk` payload (text /
    * tool_use / usage / end / error). Declared as `unknown` here to
-   * avoid pulling @aipehub/llm into @aipehub/core as a hard dep —
-   * the shape contract lives in `@aipehub/llm`'s `LlmStreamChunk`
+   * avoid pulling @gotong/llm into @gotong/core as a hard dep —
+   * the shape contract lives in `@gotong/llm`'s `LlmStreamChunk`
    * type and the host translator + web SSE forwarder both honor it.
    *
    * Consumer guidance:

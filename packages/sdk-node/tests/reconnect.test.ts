@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { AgentParticipant, Hub, type Task } from '@aipehub/core'
-import { serveWebSocket, type WebSocketTransportHandle } from '@aipehub/transport-ws'
+import { AgentParticipant, Hub, type Task } from '@gotong/core'
+import { serveWebSocket, type WebSocketTransportHandle } from '@gotong/transport-ws'
 
 import { connect, type Session, type SessionState } from '../src/index.js'
 

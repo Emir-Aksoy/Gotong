@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# AipeHub — 60-second demo, designed for asciinema recording.
+# Gotong — 60-second demo, designed for asciinema recording.
 #
-# Spawns a fresh AipeHub host in a temp workspace, imports one mock-provider
+# Spawns a fresh Gotong host in a temp workspace, imports one mock-provider
 # agent (no API key required), dispatches a task, prints the result, then
 # tears everything down. Total wall time ≈ 5 seconds — well inside an
 # asciinema 60s GIF.
@@ -24,8 +24,8 @@ if ! command -v jq >/dev/null 2>&1; then
   exit 1
 fi
 
-SPACE="$(mktemp -d -t aipehub-demo-XXXXXX)"
-LOG="/tmp/aipehub-demo-$$.log"
+SPACE="$(mktemp -d -t gotong-demo-XXXXXX)"
+LOG="/tmp/gotong-demo-$$.log"
 HOST_PID=""
 
 cleanup() {
@@ -38,8 +38,8 @@ trap cleanup EXIT INT TERM
 clear
 cat <<'BANNER'
 ╔══════════════════════════════════════════════════════╗
-║      AipeHub — 60-second demo                        ║
-║   AI + Person + Hub — communication space            ║
+║      Gotong — 60-second demo                         ║
+║   humans + agents — one communication space          ║
 ╚══════════════════════════════════════════════════════╝
 BANNER
 sleep 0.6
@@ -47,8 +47,8 @@ sleep 0.6
 step() { printf '\n\033[1;34m▶ %s\033[0m\n' "$1"; }
 
 step "Starting host on http://127.0.0.1:3399 (workspace: ${SPACE/$HOME/~})"
-AIPE_SPACE="$SPACE" AIPE_WEB_PORT=3399 AIPE_WS_PORT=4399 \
-  node packages/host/bin/aipehub-host.js >"$LOG" 2>&1 &
+GOTONG_SPACE="$SPACE" GOTONG_WEB_PORT=3399 GOTONG_WS_PORT=4399 \
+  node packages/host/bin/gotong-host.js >"$LOG" 2>&1 &
 HOST_PID=$!
 sleep 1.6
 
@@ -72,7 +72,7 @@ step "Dispatching a task (strategy=capability, waits for the result)"
 curl -fsS -X POST "http://127.0.0.1:3399/api/admin/dispatch" "${AUTH[@]}" \
   -d '{
     "strategy": {"kind": "capability", "capabilities": ["echo"]},
-    "payload":  {"text": "hello AipeHub"},
+    "payload":  {"text": "hello Gotong"},
     "title":    "60-second demo task",
     "weight":   2.0,
     "wait":     true,

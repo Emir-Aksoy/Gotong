@@ -14,7 +14,7 @@
 
 ## 1. Pourquoi la reconnaissance seulement
 
-La forme à long terme d'AipeHub est un **marché gouverné de composants réutilisables**
+La forme à long terme d'Gotong est un **marché gouverné de composants réutilisables**
 — modèles, adaptateurs, connecteurs de bases de connaissances — construit pour que les
 gens lui fassent suffisamment confiance pour le pointer vers leur maison, leur famille
 ou leur argent (voir [`GOVERNANCE.md`](../../GOVERNANCE.md) § « Vers un comité des
@@ -201,7 +201,7 @@ lourd :
   une table markdown est la chose la plus légère et honnête) ; vous êtes ajouté par un
   PR ordinaire.
 - **Une vitrine d'apprentissage — [`LEARN.md`](../../LEARN.md).** Les meilleurs
-  matériels communautaires pour apprendre AipeHub — vidéos, conférences, tutoriels,
+  matériels communautaires pour apprendre Gotong — vidéos, conférences, tutoriels,
   articles — chacun crédité à son auteur et lié depuis le README. C'est **l'analogue de
   diffusion du pilier ④** : les templates phares sont les meilleures choses à *réutiliser* ;
   les entrées LEARN sont les meilleures choses dont *apprendre*. Mettre en valeur la

@@ -1,9 +1,9 @@
 /**
  * Phase 10 M2 — Hub.dispatch ancestry tracking + depth + cycle gates.
  *
- * Validates the wire-level contract DispatchToolset (in @aipehub/llm)
+ * Validates the wire-level contract DispatchToolset (in @gotong/llm)
  * relies on. The toolset code itself is tested in
- * @aipehub/llm/tests/dispatch-toolset-ancestry.test.ts; this file
+ * @gotong/llm/tests/dispatch-toolset-ancestry.test.ts; this file
  * covers the core/hub side in isolation so a regression here is
  * traceable without crossing package boundaries.
  */
@@ -218,40 +218,40 @@ describe('Hub.dispatch ancestry — cycle gate', () => {
 describe('readMaxDispatchDepth', () => {
   let saved: string | undefined
   beforeEach(() => {
-    saved = process.env.AIPE_MAX_DISPATCH_DEPTH
+    saved = process.env.GOTONG_MAX_DISPATCH_DEPTH
   })
   afterEach(() => {
-    if (saved === undefined) delete process.env.AIPE_MAX_DISPATCH_DEPTH
-    else process.env.AIPE_MAX_DISPATCH_DEPTH = saved
+    if (saved === undefined) delete process.env.GOTONG_MAX_DISPATCH_DEPTH
+    else process.env.GOTONG_MAX_DISPATCH_DEPTH = saved
   })
 
   it('defaults to 5 when env var unset', () => {
-    delete process.env.AIPE_MAX_DISPATCH_DEPTH
+    delete process.env.GOTONG_MAX_DISPATCH_DEPTH
     expect(readMaxDispatchDepth()).toBe(5)
   })
 
   it('honours a valid override', () => {
-    process.env.AIPE_MAX_DISPATCH_DEPTH = '12'
+    process.env.GOTONG_MAX_DISPATCH_DEPTH = '12'
     expect(readMaxDispatchDepth()).toBe(12)
   })
 
   it('falls back to default for non-numeric input', () => {
-    process.env.AIPE_MAX_DISPATCH_DEPTH = 'banana'
+    process.env.GOTONG_MAX_DISPATCH_DEPTH = 'banana'
     expect(readMaxDispatchDepth()).toBe(5)
   })
 
   it('falls back to default for out-of-range input (<1)', () => {
-    process.env.AIPE_MAX_DISPATCH_DEPTH = '0'
+    process.env.GOTONG_MAX_DISPATCH_DEPTH = '0'
     expect(readMaxDispatchDepth()).toBe(5)
   })
 
   it('falls back to default for out-of-range input (>50)', () => {
-    process.env.AIPE_MAX_DISPATCH_DEPTH = '999'
+    process.env.GOTONG_MAX_DISPATCH_DEPTH = '999'
     expect(readMaxDispatchDepth()).toBe(5)
   })
 
   it('falls back to default for non-integer input', () => {
-    process.env.AIPE_MAX_DISPATCH_DEPTH = '3.5'
+    process.env.GOTONG_MAX_DISPATCH_DEPTH = '3.5'
     expect(readMaxDispatchDepth()).toBe(5)
   })
 })

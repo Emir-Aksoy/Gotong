@@ -36,7 +36,7 @@ Two agents serve every capability these workflows dispatch:
   — suggests an overtime amount per policy, and drafts a shift proposal from
   submitted availability.
 
-The `human:` steps dispatch to `aipehub.human/v1` — the host's inbox broker, a
+The `human:` steps dispatch to `gotong.human/v1` — the host's inbox broker, a
 built-in, **not** a template agent.
 
 ---
@@ -55,7 +55,7 @@ overtime hours pay differently on a workday vs a rest-day vs a public holiday.
 [assess]  运营助手 → 建议金额  (¥22/h × 2 [休息日] × 3h = ¥132, 仅供参考)
    │       倍率随日别: 工作日 1.5 / 休息日 2 / 法定节假日 3
    ▼
-[manager-approval]  human: → aipehub.human/v1
+[manager-approval]  human: → gotong.human/v1
    │  broker writes an inbox item for the manager, then SUSPENDS the run
    ▼
    ⏸  parked — not failed.  店长 /me 收件箱 sees one pending approval.
@@ -96,7 +96,7 @@ nothing else changes.
 
 ## The loadable template
 
-`template/cafe-ops.template.yaml` is one self-contained `aipehub.template/v1`
+`template/cafe-ops.template.yaml` is one self-contained `gotong.template/v1`
 file carrying the whole working skeleton: 2 agents + 3 declarative workflows + an
 addressable KB slot + a one-click DeepSeek key prompt. Load it into a real host:
 

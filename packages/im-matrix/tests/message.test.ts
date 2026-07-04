@@ -15,7 +15,7 @@ import {
 import type { MatrixMessageContent, MatrixRoomEvent } from '../src/types.js'
 
 const SENDER = '@alice:matrix.org'
-const BOT = '@aipe_bot:matrix.org'
+const BOT = '@gotong_bot:matrix.org'
 const ROOM = '!abc123:matrix.org'
 
 function makeEvent(over: Partial<MatrixRoomEvent>): MatrixRoomEvent {

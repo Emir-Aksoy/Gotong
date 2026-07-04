@@ -12,7 +12,7 @@
  *   PATCH  /api/admin/acp-agents/:id     targeted update (id immutable)
  *   DELETE /api/admin/acp-agents/:id     remove + unregister from the hub
  *
- * Backed by a host-injected surface (web has no @aipehub/identity dep). Absent
+ * Backed by a host-injected surface (web has no @gotong/identity dep). Absent
  * (no identity store) → every route 503s.
  *
  * Unlike A2A there is NOTHING secret here, not even an env-var pointer: an ACP
@@ -24,8 +24,8 @@
  */
 
 import type { IncomingMessage, ServerResponse } from 'node:http'
-import type { AdminRecord } from '@aipehub/core'
-import { createLogger } from '@aipehub/core'
+import type { AdminRecord } from '@gotong/core'
+import { createLogger } from '@gotong/core'
 
 import { readJsonBody, sendJson } from './http-helpers.js'
 

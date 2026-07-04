@@ -1,5 +1,5 @@
 {
-  "name": "@aipehub/example-industry-consultation-deepseek",
+  "name": "@gotong/example-industry-consultation-deepseek",
   "version": "0.0.0",
   "type": "module",
   "private": true,
@@ -9,12 +9,12 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@aipehub/core": "workspace:*",
-    "@aipehub/host": "workspace:*",
-    "@aipehub/llm": "workspace:*",
-    "@aipehub/llm-openai": "workspace:*",
-    "@aipehub/services-sdk": "workspace:*",
-    "@aipehub/workflow": "workspace:*",
+    "@gotong/core": "workspace:*",
+    "@gotong/host": "workspace:*",
+    "@gotong/llm": "workspace:*",
+    "@gotong/llm-openai": "workspace:*",
+    "@gotong/services-sdk": "workspace:*",
+    "@gotong/workflow": "workspace:*",
     "openai": "^6.38.0"
   }
 }

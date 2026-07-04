@@ -3,7 +3,7 @@
  * RESUME control seams from AGENT-ADAPTER-CONTRACT.
  *
  * Pure policy + state types + a cooperative takeover switch + a pre-spawn action
- * gate. No `@aipehub/core` dependency here; the participant (`cli-participant.ts`)
+ * gate. No `@gotong/core` dependency here; the participant (`cli-participant.ts`)
  * imports these and turns its single-shot run into a checkpoint loop.
  *
  * The model: `CliParticipant` runs the CLI in bounded TURNS. Before each turn it
@@ -18,11 +18,11 @@
  * (optionally with a reviewer-edited prompt = handoff) or fails fail-closed.
  */
 
-import type { TaskId } from '@aipehub/core'
+import type { TaskId } from '@gotong/core'
 
 /**
  * Sentinel `resumeAt` meaning "never auto-resume". Same value the inbox uses
- * (`@aipehub/inbox` NEVER_RESUME_AT) — duplicated as a local constant rather than
+ * (`@gotong/inbox` NEVER_RESUME_AT) — duplicated as a local constant rather than
  * importing inbox, so this leaf package stays core-only. A checkpoint park is
  * woken by a human decision (the host calls `hub.resumeTask`), never by the 30s
  * resume sweep, so its `resumeAt` must sit beyond any real clock.

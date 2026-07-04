@@ -45,12 +45,12 @@ AI 桌面", **不需要看到任何组织概念**(除非他主动升级)。
 
 ### 决策 A: mode 检测 — auto vs explicit
 
-**选项 A1: explicit flag** — env `AIPE_MODE=personal` 触发, 默认 team
+**选项 A1: explicit flag** — env `GOTONG_MODE=personal` 触发, 默认 team
 
 **选项 A2: auto-detect** — 启动时查 identity:
   - users.count === 1 && memberships.count === 1 → personal
   - 否则 → team
-  - operator 可用 `AIPE_MODE=team` 强制覆盖(永远是 team, 即使只有 1 个用户)
+  - operator 可用 `GOTONG_MODE=team` 强制覆盖(永远是 team, 即使只有 1 个用户)
 
 **推荐 A2** 理由:
 - 0 配置体验: 第一次跑就是个人模式; 邀请第二个人后自动升级
@@ -163,13 +163,13 @@ personal 状态, 复杂; 推迟到有需求再做)
 
 **文件**:
 - `packages/identity/src/store.ts` — bootstrap 加 mode 检测 + auto
-- `packages/host/src/main.ts` — env `AIPE_MODE` + 透传到 identity
+- `packages/host/src/main.ts` — env `GOTONG_MODE` + 透传到 identity
 - 新表 `org_meta(key TEXT PK, value TEXT)` 或 reuse 现有 secrets blob
   - 选 `org_meta` 比较干净, 给后续"org-wide config"留扩展
 
 **测试**:
 - bootstrap 空 db → users.count=1 → personal
-- bootstrap 空 db + AIPE_MODE=team → team(即使单 user)
+- bootstrap 空 db + GOTONG_MODE=team → team(即使单 user)
 - bootstrap 现有多 user db → team(无论 env)
 - bootstrap 现有单 user db (从老版本升级) → personal
 

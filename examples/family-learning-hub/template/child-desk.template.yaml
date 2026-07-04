@@ -1,4 +1,4 @@
-# 家长给孩子开 AI 订阅的家庭学习 hub — 孩子 (child) hub 一侧的可载入模板 (aipehub.template/v1)
+# 家长给孩子开 AI 订阅的家庭学习 hub — 孩子 (child) hub 一侧的可载入模板 (gotong.template/v1)
 #
 # 这是 family-tutor.template.yaml 的**另一半**: family-tutor 是家长 (guardian) hub 一侧
 # (订阅 + 导师 + 主题白名单 + 审批都在那), 这个文件是孩子 hub 一侧 —— 孩子借家长的订阅学习。
@@ -42,7 +42,7 @@
 #     -H 'content-type: application/json' \
 #     -d "$(jq -Rs '{template: .}' examples/family-learning-hub/template/child-desk.template.yaml)" \
 #     http://127.0.0.1:8745/api/admin/templates/import
-schema: aipehub.template/v1
+schema: gotong.template/v1
 template:
   name: 孩子学习桌(家庭学习 hub · 孩子侧)
   description: |-

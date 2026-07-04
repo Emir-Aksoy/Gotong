@@ -17,12 +17,12 @@ import { join } from 'node:path'
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { createLogger, Hub, Space, type AgentRecord } from '@aipehub/core'
+import { createLogger, Hub, Space, type AgentRecord } from '@gotong/core'
 import {
   MASTER_KEY_LEN_BYTES,
   openIdentityStore,
   type IdentityStore,
-} from '@aipehub/identity'
+} from '@gotong/identity'
 
 import { LocalAgentPool } from '../src/local-agent-pool.js'
 import { bootstrapServices, type HubServices } from '../src/services/index.js'
@@ -37,7 +37,7 @@ describe('LocalAgentPool — usage ledger sink (Phase 17)', () => {
   let identity: IdentityStore
 
   beforeEach(async () => {
-    root = await mkdtemp(join(tmpdir(), 'aipe-lap-ledger-'))
+    root = await mkdtemp(join(tmpdir(), 'gotong-lap-ledger-'))
     await rm(root, { recursive: true, force: true })
     const opened = await Space.init(root, { name: 'test' })
     space = opened.space

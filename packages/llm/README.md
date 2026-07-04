@@ -1,28 +1,28 @@
-# @aipehub/llm
+# @gotong/llm
 
-`LlmAgent` base class + neutral `LlmProvider` interface for [AipeHub](https://github.com/Emir-Aksoy/AipeHub). Builds an LLM-backed `Participant` in three lines.
+`LlmAgent` base class + neutral `LlmProvider` interface for [Gotong](https://github.com/Emir-Aksoy/Gotong). Builds an LLM-backed `Participant` in three lines.
 
 The Hub does not call LLMs. `LlmAgent` does. The provider is the only place vendor SDKs are imported — pick one:
 
-- [`@aipehub/llm-anthropic`](https://www.npmjs.com/package/@aipehub/llm-anthropic) — Anthropic Claude
-- [`@aipehub/llm-openai`](https://www.npmjs.com/package/@aipehub/llm-openai) — OpenAI
+- [`@gotong/llm-anthropic`](https://www.npmjs.com/package/@gotong/llm-anthropic) — Anthropic Claude
+- [`@gotong/llm-openai`](https://www.npmjs.com/package/@gotong/llm-openai) — OpenAI
 
 Or roll your own by implementing `LlmProvider.stream(req)` (returns `AsyncIterable<LlmStreamChunk>`). If you just want the folded final response, pipe through the exported `drainStream(provider.stream(req))` helper.
 
 ## Install
 
 ```bash
-pnpm add @aipehub/llm
+pnpm add @gotong/llm
 # plus a provider:
-pnpm add @aipehub/llm-anthropic @anthropic-ai/sdk
+pnpm add @gotong/llm-anthropic @anthropic-ai/sdk
 ```
 
 ## Use
 
 ```ts
-import { Hub } from '@aipehub/core'
-import { LlmAgent } from '@aipehub/llm'
-import { AnthropicProvider } from '@aipehub/llm-anthropic'
+import { Hub } from '@gotong/core'
+import { LlmAgent } from '@gotong/llm'
+import { AnthropicProvider } from '@gotong/llm-anthropic'
 
 const hub = new Hub()
 await hub.start()
@@ -55,7 +55,7 @@ For full control (multi-step reasoning, tool loops, retries) override `handleTas
 Ships in this package — a deterministic in-process provider for tests and no-key demos.
 
 ```ts
-import { MockLlmProvider } from '@aipehub/llm'
+import { MockLlmProvider } from '@gotong/llm'
 
 const provider = new MockLlmProvider({
   reply: (req) => `mock reply to ${req.messages.at(-1)?.content}`,

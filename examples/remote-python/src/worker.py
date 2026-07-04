@@ -9,7 +9,7 @@ from __future__ import annotations
 import asyncio
 import sys
 
-from aipehub import AgentParticipant, connect
+from gotong import AgentParticipant, connect
 
 
 class WriterAgent(AgentParticipant):

@@ -20,8 +20,8 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { Hub, Space } from '@aipehub/core'
-import { loadOrCreateMasterKey, openIdentityStore, type IdentityStore } from '@aipehub/identity'
+import { Hub, Space } from '@gotong/core'
+import { loadOrCreateMasterKey, openIdentityStore, type IdentityStore } from '@gotong/identity'
 
 import { serveWeb, type WebServerHandle } from '../src/server.js'
 
@@ -36,7 +36,7 @@ interface Boot {
 }
 
 async function boot(): Promise<Boot> {
-  const tmp = await mkdtemp(join(tmpdir(), 'aipehub-agents-route-'))
+  const tmp = await mkdtemp(join(tmpdir(), 'gotong-agents-route-'))
   const init = await Space.init(tmp, { name: 'agents-route-test' })
   const space = init.space
   const hub = new Hub({ space })
@@ -137,7 +137,7 @@ describe('agents-route: heartbeat (v5 D-M4)', () => {
   // HeartbeatScheduler; here a counter stands in).
   beforeEach(async () => {
     reconcileCalls = 0
-    const tmp = await mkdtemp(join(tmpdir(), 'aipehub-agents-route-hb-'))
+    const tmp = await mkdtemp(join(tmpdir(), 'gotong-agents-route-hb-'))
     const init = await Space.init(tmp, { name: 'agents-route-hb-test' })
     const space = init.space
     const hub = new Hub({ space })
@@ -205,7 +205,7 @@ describe('agents-route: heartbeat (v5 D-M4)', () => {
 describe('agents-route: v4 identity admin auth', () => {
   let b: Boot
   beforeEach(async () => {
-    const tmp = await mkdtemp(join(tmpdir(), 'aipehub-agents-v4-auth-'))
+    const tmp = await mkdtemp(join(tmpdir(), 'gotong-agents-v4-auth-'))
     const init = await Space.init(tmp, { name: 'agents-v4-auth-test' })
     const space = init.space
     const hub = new Hub({ space })
@@ -242,7 +242,7 @@ describe('agents-route: v4 identity admin auth', () => {
     })
     expect(res.status).toBe(200)
     const cookie = res.headers.get('set-cookie')?.split(';')[0]
-    expect(cookie).toMatch(/^aipehub_identity=/)
+    expect(cookie).toMatch(/^gotong_identity=/)
     return cookie!
   }
 

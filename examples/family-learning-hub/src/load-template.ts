@@ -80,7 +80,7 @@ const RUNTIME_GATE_CAPS = ['topic.screen', 'content.moderate']
 const CHILD_LEARNING = 'child-learning'
 
 function main(): void {
-  console.log('\n=== AipeHub case: family-learning-hub — load the 家长 (cross-org) template ===\n')
+  console.log('\n=== Gotong case: family-learning-hub — load the 家长 (cross-org) template ===\n')
 
   // --- [1] LOAD: the config is a FILE, parsed live (not a built-in literal) ---
   section('[1] load the config from a FILE')
@@ -154,7 +154,7 @@ function main(): void {
   // whitelist — opposite of tea-shop — and a `teach` step tagged child-learning),
   // and a KB POINTER (no content).
   const ids = new Set(agents.map((a) => a.id))
-  if (doc.schema !== 'aipehub.template/v1') throw new Error('expected schema aipehub.template/v1')
+  if (doc.schema !== 'gotong.template/v1') throw new Error('expected schema gotong.template/v1')
   if (!ids.has('family-tutor')) throw new Error('expected a family-tutor agent')
   // The cross-hub trigger AND the two deterministic gate caps must NOT be served by a
   // template agent — they're the workflow trigger + runtime participants respectively.

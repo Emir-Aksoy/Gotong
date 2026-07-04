@@ -2,7 +2,7 @@
  * HostInboxService — host-side orchestration for the member task inbox.
  *
  * Implements the web layer's duck-typed `InboxSurface` *structurally* (no
- * import — web stays zero-dep on `@aipehub/inbox`). This is the only place the
+ * import — web stays zero-dep on `@gotong/inbox`). This is the only place the
  * concrete `Hub` + `IdentityStore` meet, so the two-step resume lives here:
  *
  *   resolve(itemId, userId, decision):
@@ -23,9 +23,9 @@
  * first just re-parks it (harmless, but no progress).
  */
 
-import type { Hub, Task, TaskResult } from '@aipehub/core'
-import { InboxError, type InboxDecision, type InboxItem, type InboxStore } from '@aipehub/inbox'
-import { AUDIT_ACTIONS, type WriteAuditLogInput } from '@aipehub/identity'
+import type { Hub, Task, TaskResult } from '@gotong/core'
+import { InboxError, type InboxDecision, type InboxItem, type InboxStore } from '@gotong/inbox'
+import { AUDIT_ACTIONS, type WriteAuditLogInput } from '@gotong/identity'
 
 /**
  * Fired after an item is fully resolved (child — and, for a workflow parent, the

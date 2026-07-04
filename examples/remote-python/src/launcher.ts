@@ -21,7 +21,7 @@ const repoRoot = resolve(here, '..', '..', '..')
 const venvPython = join(repoRoot, 'python-sdk', '.venv', 'bin', 'python')
 
 async function main(): Promise<void> {
-  console.log('=== AipeHub remote-python demo ===\n')
+  console.log('=== Gotong remote-python demo ===\n')
 
   if (!existsSync(venvPython)) {
     console.error(

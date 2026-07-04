@@ -16,7 +16,7 @@ import {
   Space,
   type AdminRecord,
   type FeedbackEntryDraft,
-} from '@aipehub/core'
+} from '@gotong/core'
 
 import { serveWeb, type WebServerHandle } from '../src/server.js'
 
@@ -31,7 +31,7 @@ interface Boot {
 }
 
 async function boot(): Promise<Boot> {
-  const tmp = await mkdtemp(join(tmpdir(), 'aipehub-feedback-inbound-'))
+  const tmp = await mkdtemp(join(tmpdir(), 'gotong-feedback-inbound-'))
   const init = await Space.init(tmp, { name: 'm8-test' })
   const space = init.space
   const hub = new Hub({ space })

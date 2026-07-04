@@ -1,5 +1,5 @@
 {
-  "name": "@aipehub/example-services-sidecar-demo",
+  "name": "@gotong/example-services-sidecar-demo",
   "version": "0.0.0",
   "type": "module",
   "private": true,
@@ -9,10 +9,10 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@aipehub/core": "workspace:*",
-    "@aipehub/host": "workspace:*",
-    "@aipehub/llm": "workspace:*",
-    "@aipehub/sdk-node": "workspace:*",
-    "@aipehub/transport-ws": "workspace:*"
+    "@gotong/core": "workspace:*",
+    "@gotong/host": "workspace:*",
+    "@gotong/llm": "workspace:*",
+    "@gotong/sdk-node": "workspace:*",
+    "@gotong/transport-ws": "workspace:*"
   }
 }

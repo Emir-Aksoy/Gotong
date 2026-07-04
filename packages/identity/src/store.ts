@@ -1,5 +1,5 @@
 /**
- * IdentityStore — the single public surface of @aipehub/identity.
+ * IdentityStore — the single public surface of @gotong/identity.
  *
  * One process opens one store, pointing at one `.sqlite` file. Methods
  * are synchronous (better-sqlite3 is sync); we expose them sync so the
@@ -181,8 +181,8 @@ const DEFAULT_SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000 // 7 days
 // Route B P0-M1 — tenant/namespace of this identity store. An identity DB is
 // already one tenant's (the `dbPath` is tenant-resolved by the host); this is
 // the self-describing label so higher layers can read back *which* tenant.
-// Kept as a local literal — `@aipehub/identity` has zero deps on purpose, so
-// we deliberately do NOT import `DEFAULT_TENANT` from `@aipehub/core`. The
+// Kept as a local literal — `@gotong/identity` has zero deps on purpose, so
+// we deliberately do NOT import `DEFAULT_TENANT` from `@gotong/core`. The
 // value MUST stay in sync with core's `DEFAULT_TENANT`.
 const DEFAULT_NAMESPACE = 'default'
 
@@ -203,7 +203,7 @@ const MAX_INVITATION_TTL_MS = 30 * 24 * 60 * 60 * 1000
 const EMAIL_RE = /^[^\s@]+@[^\s@]+$/
 
 // Pre-computed at module load — see security note (1).
-const DUMMY_SCRYPT_HASH = hashPassword('aipehub-identity-timing-equaliser-not-a-real-credential')
+const DUMMY_SCRYPT_HASH = hashPassword('gotong-identity-timing-equaliser-not-a-real-credential')
 
 export interface OpenIdentityStoreInput {
   dbPath: string
@@ -727,7 +727,7 @@ export class IdentityStore {
     // Phase 12 M1 — IM bindings.
     //
     // INSERT OR REPLACE on im_bindings handles the "user moves their
-    // (platform, platformUserId) to a different AipeHub account" case
+    // (platform, platformUserId) to a different Gotong account" case
     // (or just re-binds after the prior owner of the IM identity
     // explicitly unbound — same effect).
     //
@@ -862,7 +862,7 @@ export class IdentityStore {
    *     pre-Phase-7 db that never wrote the row).
    *
    * Returns 'team' otherwise. Operators can pin either value via
-   * setOrgMode() (eg. AIPE_MODE env at host startup).
+   * setOrgMode() (eg. GOTONG_MODE env at host startup).
    */
   getOrgMode(): 'personal' | 'team' {
     const stored = this.getOrgMeta('org_mode')
@@ -1350,7 +1350,7 @@ export class IdentityStore {
    * Route B P1-M5b — bind a verified SAML identity to a local user. The SAML
    * twin of linkOidc: idempotent on the SAME (idpEntityId, NameID) → user, and
    * throws `saml_already_linked` when that pair already maps to a DIFFERENT
-   * user. The assertion MUST be validated upstream (@aipehub/saml verifies the
+   * user. The assertion MUST be validated upstream (@gotong/saml verifies the
    * signature, Issuer, Audience, time window, Recipient, InResponseTo) — this
    * method makes no trust decision, it only maps.
    */
@@ -1835,12 +1835,12 @@ export class IdentityStore {
     return transactionImmediate(this.db, () => {
       // Phase 6 #9 — global hard cap on active-pending invites. Run
       // INSIDE the transaction so we can't TOCTOU past the limit.
-      // Default 1000; AIPE_MAX_PENDING_INVITES overrides. The cap
+      // Default 1000; GOTONG_MAX_PENDING_INVITES overrides. The cap
       // guards against owner / script error blowing up the invites
       // table (audit log gets one row per attempt; admin UI 'pending'
       // tab becomes unusable; identity.sqlite grows). 1000 active
       // pending is way more than any real org needs.
-      const maxPendingRaw = process.env.AIPE_MAX_PENDING_INVITES
+      const maxPendingRaw = process.env.GOTONG_MAX_PENDING_INVITES
       const maxPending = (() => {
         if (!maxPendingRaw) return 1000
         const n = Number.parseInt(maxPendingRaw, 10)
@@ -2989,7 +2989,7 @@ export class IdentityStore {
    * Verify + consume a binding code. Called by an IM bridge when its
    * user DMs the bot `/bind <code>`. On success: deletes the code row
    * (single-shot) and creates/updates the `im_bindings` row in the
-   * same transaction; returns the resolved AipeHub user id + binding.
+   * same transaction; returns the resolved Gotong user id + binding.
    *
    * Failure modes (each throws an IdentityError with a distinct code):
    *   - `invalid_input` — empty / wrong-shape platform/platformUserId/code
@@ -3076,7 +3076,7 @@ export class IdentityStore {
 
   /**
    * Hot-path resolver — every incoming IM message calls this to map
-   * the IM identity back to an AipeHub user id. Returns `null` for
+   * the IM identity back to an Gotong user id. Returns `null` for
    * unbound IM users (the bridge typically replies with a "bind first
    * via `/bind <code>`" prompt in that case).
    */

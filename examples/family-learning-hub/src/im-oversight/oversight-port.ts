@@ -3,7 +3,7 @@
  * lessons, modelled over a REAL `FileInboxStore`.
  *
  * This is the family-learning twin of im-steward-bridge's `FakeStewardPort`. The steward
- * port modelled its inbox in memory; here we use the REAL `@aipehub/inbox` `FileInboxStore`
+ * port modelled its inbox in memory; here we use the REAL `@gotong/inbox` `FileInboxStore`
  * so the race guard is genuine — a second resolve of the same item throws
  * `InboxError('already_resolved')` (file-inbox-store.ts:159), exactly the teeth the
  * production `HostInboxService.resolve` relies on. The bridge demo asserts that directly.
@@ -17,7 +17,7 @@
  * One concern per milestone.
  */
 
-import { FileInboxStore, InboxError, type InboxItem } from '@aipehub/inbox'
+import { FileInboxStore, InboxError, type InboxItem } from '@gotong/inbox'
 
 /** A lesson that needs the parent's blessing before it may cross to the tutor. */
 export interface LessonApprovalRequest {

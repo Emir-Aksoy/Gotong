@@ -17,16 +17,16 @@
  *      REFUSES (explains + points to settings). No secret ever touches chat.
  *   8. /unbind — binding removed.
  *
- * The same flow works against the 6 real `@aipehub/im-*` bridges — swap
+ * The same flow works against the 6 real `@gotong/im-*` bridges — swap
  * `FakeBridge` for `new TelegramBridge({ token })` and point the `StewardPort` at
  * the host's real `MeHubStewardSurface`. The router, the binding flow, and the
  * tier badges are unchanged. That's the point of an example-first bridge.
  *
- * Run:  pnpm --filter @aipehub/example-im-steward-bridge start
+ * Run:  pnpm --filter @gotong/example-im-steward-bridge start
  */
 
-import { openIdentityStore } from '@aipehub/identity'
-import type { ImMessage, ImUser } from '@aipehub/im-adapter'
+import { openIdentityStore } from '@gotong/identity'
+import type { ImMessage, ImUser } from '@gotong/im-adapter'
 
 import { FakeBridge } from './fake-bridge.js'
 import { makeIdentityImBindingResolver } from './identity-resolver.js'
@@ -43,7 +43,7 @@ function assert(cond: boolean, msg: string): void {
 }
 
 async function main(): Promise<void> {
-  console.log('\n=== AipeHub demo: im-steward-bridge (v5 Stream SW Phase D) ===\n')
+  console.log('\n=== Gotong demo: im-steward-bridge (v5 Stream SW Phase D) ===\n')
 
   // -- 1. Identity ----------------------------------------------------------
   const identity = openIdentityStore({ dbPath: ':memory:' })

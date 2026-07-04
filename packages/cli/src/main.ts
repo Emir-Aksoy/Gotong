@@ -1,25 +1,25 @@
 /**
- * `aipehub` CLI entry point. Dispatches to the subcommand handlers in
+ * `gotong` CLI entry point. Dispatches to the subcommand handlers in
  * `./commands/`. Kept deliberately tiny — the bin shim imports this
  * file for its side-effects (call `runCli`).
  *
  * Subcommands supported in v1.2:
  *
- *   - `aipehub init`                    bootstrap a workspace on disk
- *   - `aipehub start`                   launch `@aipehub/host` (delegated)
- *   - `aipehub doctor`                  pre-flight environment check
- *   - `aipehub new agent <name>`        scaffold a TypeScript sidecar
- *   - `aipehub new python-agent <name>` scaffold a Python sidecar
- *   - `aipehub ping <ws-url>`           handshake-only probe of a Hub
- *   - `aipehub help [cmd]`              usage
+ *   - `gotong init`                    bootstrap a workspace on disk
+ *   - `gotong start`                   launch `@gotong/host` (delegated)
+ *   - `gotong doctor`                  pre-flight environment check
+ *   - `gotong new agent <name>`        scaffold a TypeScript sidecar
+ *   - `gotong new python-agent <name>` scaffold a Python sidecar
+ *   - `gotong ping <ws-url>`           handshake-only probe of a Hub
+ *   - `gotong help [cmd]`              usage
  *
- * The CLI deliberately does NOT depend on `@aipehub/sdk-node` or
- * `@aipehub/host` at runtime — both pull in transitive deps (LLM
+ * The CLI deliberately does NOT depend on `@gotong/sdk-node` or
+ * `@gotong/host` at runtime — both pull in transitive deps (LLM
  * SDKs, sqlite, …) that bloat install time. The only runtime dep is
- * `@aipehub/protocol` for the wire-protocol version string. `ping`
+ * `@gotong/protocol` for the wire-protocol version string. `ping`
  * uses a hand-rolled WebSocket client (the `ws` package, declared as
  * a devDep so the published CLI bundles it via `bundleDependencies`).
- * `start` keeps that discipline: it resolves `@aipehub/host` lazily at
+ * `start` keeps that discipline: it resolves `@gotong/host` lazily at
  * runtime (never a build-time dep) and only launches it if present.
  */
 
@@ -90,7 +90,7 @@ export async function runCli(argv: readonly string[] = process.argv.slice(2)): P
         return 2
     }
   } catch (err) {
-    console.error(`[aipehub] ${err instanceof Error ? err.message : String(err)}`)
+    console.error(`[gotong] ${err instanceof Error ? err.message : String(err)}`)
     return 1
   }
 }
@@ -98,7 +98,7 @@ export async function runCli(argv: readonly string[] = process.argv.slice(2)): P
 // Top-level for the bin shim. When invoked through Vitest the file is
 // imported for tests, in which case we don't want to call runCli().
 // Guard with the standard "main module" check (Node 20+).
-const isMain = import.meta.url === `file://${process.argv[1]}` || process.argv[1]?.endsWith('aipehub.js')
+const isMain = import.meta.url === `file://${process.argv[1]}` || process.argv[1]?.endsWith('gotong.js')
 if (isMain) {
   runCli().then((code) => {
     if (typeof code === 'number' && code !== 0) process.exit(code)

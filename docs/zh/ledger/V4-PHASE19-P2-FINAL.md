@@ -14,7 +14,7 @@
 
 | # | 现状 | 治理缺口 |
 |---|---|---|
-| 1 | `parseWorkflow` 接受了语法合法但运行时会爆的 workflow（`bad_ref` / `forward_ref` / `self_trigger_cycle` / dispatch 到无人满足的 cap） | `checkWorkflowStructure`（`@aipehub/evals`，6 类违规）此前只在 `WorkflowAssistantAgent` 里**建议性**调用；import/publish 无硬闸 |
+| 1 | `parseWorkflow` 接受了语法合法但运行时会爆的 workflow（`bad_ref` / `forward_ref` / `self_trigger_cycle` / dispatch 到无人满足的 cap） | `checkWorkflowStructure`（`@gotong/evals`，6 类违规）此前只在 `WorkflowAssistantAgent` 里**建议性**调用；import/publish 无硬闸 |
 | 2 | `audit_log` 表 + `listAuditLog` 已有，但 `AUDIT_ACTIONS` 没有 `WORKFLOW_*` | 生命周期转移只写本地 `lifecycle.json`；「谁发布/下线了这个 workflow」无统一审计 |
 | 3 | RBAC 仅 `owner/admin/member/viewer` 四个组织角色，所有 workflow CRUD 走 `requireAdmin` | **零资源级权限**：无法把某个 workflow 的编辑权委托给特定成员而不给整个 hub 的 admin 权 |
 

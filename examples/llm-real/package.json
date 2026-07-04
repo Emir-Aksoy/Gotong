@@ -1,5 +1,5 @@
 {
-  "name": "@aipehub/example-llm-real",
+  "name": "@gotong/example-llm-real",
   "version": "0.0.0",
   "type": "module",
   "private": true,
@@ -9,10 +9,10 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@aipehub/core": "workspace:*",
-    "@aipehub/llm": "workspace:*",
-    "@aipehub/llm-anthropic": "workspace:*",
-    "@aipehub/llm-openai": "workspace:*",
+    "@gotong/core": "workspace:*",
+    "@gotong/llm": "workspace:*",
+    "@gotong/llm-anthropic": "workspace:*",
+    "@gotong/llm-openai": "workspace:*",
     "@anthropic-ai/sdk": "^0.96.0",
     "openai": "^6.38.0"
   }

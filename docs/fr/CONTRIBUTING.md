@@ -1,9 +1,9 @@
-# Contribuer à AipeHub
+# Contribuer à Gotong
 
 <!-- doc-version: 1.0 -->
 > **Version du document 1.0** · Traduction française · Mis à jour le 2026-06-27 · Source faisant autorité : [English](../../CONTRIBUTING.md). En cas de divergence entre la traduction et la version anglaise, la version anglaise prévaut.
 
-Merci de considérer une contribution. AipeHub est un projet en phase précoce
+Merci de considérer une contribution. Gotong est un projet en phase précoce
 et nous sommes heureux d'accepter des correctifs, des rapports de bugs, des retours de
 conception et des améliorations de documentation — **et nous entendons chaque type de
 contribution, grande ou petite.** Construire quelque chose de nouveau *et porter le
@@ -20,7 +20,7 @@ conférence qui amène des gens. Tout est reconnu — voir
   voudriez qu'un ingénieur senior vous traite un mauvais jour.
 - **Petites PRs.** Les changements indépendants livrent plus vite que les méga-PRs. Si une
   fonctionnalité se divise proprement, envoyez les parties séparément.
-- **Le Hub reste simple.** L'idée de conception entière d'AipeHub est que le Hub
+- **Le Hub reste simple.** L'idée de conception entière d'Gotong est que le Hub
   route / persiste et ne possède pas de logique d'agent. Les correctifs qui mettent des appels LLM,
   des boucles d'agents ou des règles métier dans le Hub seront redirigés.
 - **Le protocole wire est versionné.** Tout ce qui change les formes de messages au niveau
@@ -33,8 +33,8 @@ conférence qui amène des gens. Tout est reconnu — voir
 
 ```bash
 # forkez sur GitHub, puis :
-git clone git@github.com:<vous>/AipeHub.git
-cd AipeHub
+git clone git@github.com:<vous>/Gotong.git
+cd Gotong
 pnpm install
 pnpm build
 
@@ -87,7 +87,7 @@ Si vous voulez une tâche de démarrage avec peu de contexte, cherchez des issue
 
 ## Contribuer un modèle
 
-Vous n'avez pas à écrire du TypeScript pour contribuer. AipeHub livre des **modèles** —
+Vous n'avez pas à écrire du TypeScript pour contribuer. Gotong livre des **modèles** —
 du YAML autonome que quelqu'un importe pour obtenir un hub fonctionnel (agents +
 workflows + références de base de connaissances, jamais de secrets ou de contenu de connaissances).
 
@@ -105,7 +105,7 @@ pas de secrets littéraux) est plus basse que la barre pour être *livré comme 
 
 ## Diffuser le projet compte aussi
 
-Vous n'avez pas besoin de livrer du code *ni* un modèle pour contribuer. Porter AipeHub
+Vous n'avez pas besoin de livrer du code *ni* un modèle pour contribuer. Porter Gotong
 vers les gens — un billet de blog, un tutoriel, une conférence, une vidéo, une
 traduction, répondre aux nouveaux dans les Discussions — est un vrai travail, et dans
 notre expérience la plupart des projets open source le sous-créditent. **Nous non.**

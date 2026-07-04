@@ -19,7 +19,7 @@
  * becomes the model's; the hub wiring is identical.
  */
 
-import type { LlmProvider, LlmRequest, LlmStreamChunk } from '@aipehub/llm'
+import type { LlmProvider, LlmRequest, LlmStreamChunk } from '@gotong/llm'
 
 import { planResearch, type KbSnapshot } from './research-plan.js'
 

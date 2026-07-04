@@ -1,12 +1,12 @@
 {
-  "name": "@aipehub/service-memory-file",
+  "name": "@gotong/service-memory-file",
   "version": "1.0.0",
   "type": "module",
-  "description": "AipeHub memory service — file-backed (jsonl) implementation. First-party plugin: episodic / semantic / working memory persisted as append-only JSONL files. Agent's data is private by default per RFC §4.",
+  "description": "Gotong memory service — file-backed (jsonl) implementation. First-party plugin: episodic / semantic / working memory persisted as append-only JSONL files. Agent's data is private by default per RFC §4.",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/Emir-Aksoy/AipeHub.git",
+    "url": "https://github.com/Emir-Aksoy/Gotong.git",
     "directory": "packages/service-memory-file"
   },
   "publishConfig": {
@@ -33,8 +33,8 @@
     "prepack": "tsc -p tsconfig.json"
   },
   "dependencies": {
-    "@aipehub/services-sdk": "workspace:*",
-    "@aipehub/core": "workspace:*"
+    "@gotong/services-sdk": "workspace:*",
+    "@gotong/core": "workspace:*"
   },
   "devDependencies": {
     "vitest": "^3.2.4"

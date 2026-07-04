@@ -17,7 +17,7 @@
  * `hub.dispatch()` calls, it never decides anything itself.
  */
 
-import { type TaskId, type TaskResult } from '@aipehub/core'
+import { type TaskId, type TaskResult } from '@gotong/core'
 
 import type { CompiledPredicate } from './predicate.js'
 import type { ResolutionContext } from './resolver.js'

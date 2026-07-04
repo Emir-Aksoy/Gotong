@@ -12,7 +12,7 @@ problèmes de sécurité.** Utilisez un canal privé :
 
 Ouvrez un avis privé à :
 
-> **<https://github.com/Emir-Aksoy/AipeHub/security/advisories/new>**
+> **<https://github.com/Emir-Aksoy/Gotong/security/advisories/new>**
 
 Le formulaire intégré de GitHub vous offre :
 
@@ -26,7 +26,7 @@ Vous aurez besoin d'un compte GitHub gratuit ; c'est le seul prérequis.
 ### Pas de canal email (pré-1.0)
 
 Il n'y a délibérément **pas d'email de sécurité** pendant la période v0.x.
-`security@aipehub.dev` apparaît dans d'anciennes révisions de ce dépôt comme une
+`security@gotong.dev` apparaît dans d'anciennes révisions de ce dépôt comme une
 adresse *aspirationnelle* — le domaine n'est pas enregistré et la boîte aux lettres
 n'est pas activée, donc les messages qui y sont envoyés n'arrivent nulle part. Nous
 avons cessé de l'annoncer comme alternative plutôt que d'exposer un contact mort que
@@ -83,7 +83,7 @@ identifiant un mainteneur.
 
 ## Versions prises en charge
 
-AipeHub est pré-1.0 en interne (les étiquettes v2.0 / v2.1 que vous voyez dans
+Gotong est pré-1.0 en interne (les étiquettes v2.0 / v2.1 que vous voyez dans
 `CHANGELOG.md` font référence à la génération de réécriture file-first, pas au seuil
 SemVer 1.0). Nous corrigeons les problèmes de sécurité sur la branche `main` actuelle
 uniquement. Il n'y a **pas de branche LTS**.
@@ -96,7 +96,7 @@ indéfiniment.
 
 ## Modèle de menace
 
-AipeHub est conçu pour des déploiements **petits, de confiance, mono-locataire** —
+Gotong est conçu pour des déploiements **petits, de confiance, mono-locataire** —
 un laboratoire de recherche, une équipe de projet, un petit groupe de prévisualisation
 publique. Les valeurs par défaut supposent que la salle est exploitée par des personnes
 qui se font confiance mutuellement.
@@ -148,20 +148,20 @@ Lors de l'évaluation d'un problème, vérifiez si l'une d'elles le couvre déj�
   d'être écrits sur disque. Le texte en clair est affiché exactement une fois à la
   création. La vérification utilise une comparaison en temps constant.
 - **Stockage des cookies** : HttpOnly toujours ; `SameSite=Strict` + `Secure` quand
-  `AIPE_COOKIE_SECURE=1` (requis derrière HTTPS).
-- **CSRF** : `AIPE_ALLOWED_HOSTS` applique des vérifications `Host:` et `Origin:` sur
+  `GOTONG_COOKIE_SECURE=1` (requis derrière HTTPS).
+- **CSRF** : `GOTONG_ALLOWED_HOSTS` applique des vérifications `Host:` et `Origin:` sur
   chaque méthode changeant l'état. **Définissez-le sur chaque déploiement en
   production.** Non défini signifie « seul le loopback est sûr ».
-- **Limitation de débit** : `AIPE_ADMIN_RATE_MAX` / `_SEC` plafonne les tentatives de
+- **Limitation de débit** : `GOTONG_ADMIN_RATE_MAX` / `_SEC` plafonne les tentatives de
   vérification de token admin par IP par fenêtre glissante. Valeurs par défaut 10 / 60s.
 - **En-têtes de sécurité** : `X-Frame-Options: DENY`, une CSP stricte,
   `Referrer-Policy: no-referrer`, `X-Content-Type-Options: nosniff` sur chaque réponse.
-- **Contrôle d'admission** : `AIPE_GATING=admin-approval` (défaut) exige que chaque
+- **Contrôle d'admission** : `GOTONG_GATING=admin-approval` (défaut) exige que chaque
   agent distant soit approuvé par un humain avant de rejoindre. `gating=open` est
   **dev uniquement** et est rejeté en production avec un avertissement au démarrage.
 - **Chiffrement des clés API** : les clés API de workspace et par agent vivent dans
   `<space>/secrets.enc.json`, AES-256-GCM, clé maître dans
-  `<space>/runtime/secret.key` (0600) ou variable d'env `AIPE_SECRET_KEY`. Le fichier
+  `<space>/runtime/secret.key` (0600) ou variable d'env `GOTONG_SECRET_KEY`. Le fichier
   chiffré seul ne suffit pas à récupérer les clés.
 - **Liaison d'identité par agent (v0.4)** : `authenticate()` peut retourner
   `{ ok: true, allowedAgents: [...] }` pour qu'une clé API divulguée ne puisse pas
@@ -199,11 +199,11 @@ de durcissement côté déploiement se trouve dans
 
 En bref :
 
-- [ ] `AIPE_COOKIE_SECURE=1` quand fronté par HTTPS
-- [ ] `AIPE_ALLOWED_HOSTS` défini sur vos vrais noms d'hôtes
-- [ ] `AIPE_GATING=admin-approval` (jamais `open` sur l'internet public)
+- [ ] `GOTONG_COOKIE_SECURE=1` quand fronté par HTTPS
+- [ ] `GOTONG_ALLOWED_HOSTS` défini sur vos vrais noms d'hôtes
+- [ ] `GOTONG_GATING=admin-approval` (jamais `open` sur l'internet public)
 - [ ] Caddy / nginx termine TLS ; backend lié à `127.0.0.1`
-- [ ] `runtime/secret.key` (chmod 600) ou variable d'env `AIPE_SECRET_KEY` est définie
+- [ ] `runtime/secret.key` (chmod 600) ou variable d'env `GOTONG_SECRET_KEY` est définie
 - [ ] Des sauvegardes existent pour le répertoire `<space>/`
 - [ ] Au moins 2 comptes admin pour pouvoir récupérer un blocage
 - [ ] `/healthz` surveillé

@@ -1,8 +1,8 @@
-# `@aipehub/example-im-bridge-host`
+# `@gotong/example-im-bridge-host`
 
 Phase 12 M8 demo — wire an IM bridge end-to-end through a host-side
 router into `Hub.dispatch`, with the binding-code flow against
-`@aipehub/identity`.
+`@gotong/identity`.
 
 Runs offline. No real Telegram / Slack / QQ account required.
 
@@ -14,7 +14,7 @@ Runs offline. No real Telegram / Slack / QQ account required.
    `/bind <code>`.
 3. They DM `/bind 123456` with a code minted in the admin UI — the
    binding lands in `im_bindings`, future messages are auto-resolved
-   to their AipeHub user.
+   to their Gotong user.
 4. They free-text "what can you do?" — router dispatches to the
    `chat` capability; an echo `AgentParticipant` replies; the reply
    is sent back to IM via `bridge.sendMessage`.
@@ -53,14 +53,14 @@ the transcript size and outbound count.
 The router is intentionally a small standalone module. To take it to
 production:
 
-1. **Pick the real bridges you want.** Each `@aipehub/im-*` package
+1. **Pick the real bridges you want.** Each `@gotong/im-*` package
    has its own README with the platform-specific setup (bot tokens,
    webhook URLs, signing secrets, OneBot adapter, …). See also
    `docs/zh/IM-BRIDGES.md` for the cross-bridge cookbook.
 
 2. **Copy `router.ts` + `identity-resolver.ts`** into your host
    package (e.g. `packages/host/src/im/`). Wire `resolveWorkflow` to
-   your real workflow registry (`@aipehub/host`'s `workflow-loader`)
+   your real workflow registry (`@gotong/host`'s `workflow-loader`)
    and `listAgents` to whatever surface your host uses to enumerate
    reachable agents for a given user.
 
@@ -87,7 +87,7 @@ production:
 ## Why this is an example and not a package
 
 The router is ~250 lines of glue plus type imports. Carving it into
-`@aipehub/im-router` would mostly re-export `@aipehub/im-adapter` and
+`@gotong/im-router` would mostly re-export `@gotong/im-adapter` and
 add a workspace edge for no value — the canonical thing hosts want
 to fork (the command vocabulary) is right there in source form.
 

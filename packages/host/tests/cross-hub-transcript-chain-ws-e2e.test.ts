@@ -34,8 +34,8 @@ import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { WebSocketServer } from 'ws'
 
-import { AgentParticipant, Hub, installPeerLink, type HubLink, type Task } from '@aipehub/core'
-import { acceptHubLinks, connectHubLink } from '@aipehub/transport-ws'
+import { AgentParticipant, Hub, installPeerLink, type HubLink, type Task } from '@gotong/core'
+import { acceptHubLinks, connectHubLink } from '@gotong/transport-ws'
 
 import { WorkflowController } from '../src/workflow-controller.js'
 import { PeerTranscriptHost, denyPeerTranscriptRpc } from '../src/peer-transcript.js'
@@ -51,7 +51,7 @@ const drain = async () => {
 }
 
 const WORKFLOW_YAML = `
-schema: aipehub.workflow/v1
+schema: gotong.workflow/v1
 workflow:
   id: cross-hub-flow
   name: cross-hub orchestration

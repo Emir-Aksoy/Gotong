@@ -23,8 +23,8 @@ import { join, dirname } from 'node:path'
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { createLogger, Hub, Space, type AgentRecord } from '@aipehub/core'
-import type { LlmRequest } from '@aipehub/llm'
+import { createLogger, Hub, Space, type AgentRecord } from '@gotong/core'
+import type { LlmRequest } from '@gotong/llm'
 
 import { LocalAgentPool } from '../src/local-agent-pool.js'
 import {
@@ -33,13 +33,13 @@ import {
   mergeAgentMcpSpecs,
   type SecretSource,
 } from '../src/mcp-config.js'
-import type { McpServerSpec } from '@aipehub/core'
+import type { McpServerSpec } from '@gotong/core'
 
 const logger = createLogger('lap-mcp-test', { disabled: true })
 void logger
 
 /**
- * Path to the in-tree fake MCP server (lives in `@aipehub/mcp-client/tests`).
+ * Path to the in-tree fake MCP server (lives in `@gotong/mcp-client/tests`).
  * Re-used here so the host test exercises the real spawn + handshake
  * without depending on `npx -y` (flaky in CI, slow on first run).
  */
@@ -235,7 +235,7 @@ describe('LocalAgentPool — agent with mcpServers attaches a toolset', () => {
   let hub: Hub
 
   beforeEach(async () => {
-    root = await mkdtemp(join(tmpdir(), 'aipe-lap-mcp-'))
+    root = await mkdtemp(join(tmpdir(), 'gotong-lap-mcp-'))
     await rm(root, { recursive: true, force: true })
     const opened = await Space.init(root, { name: 'test' })
     space = opened.space

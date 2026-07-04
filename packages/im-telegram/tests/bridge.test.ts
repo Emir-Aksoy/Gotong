@@ -3,7 +3,7 @@
  * (no fetch involved) so we control the poll-loop's view of the world.
  */
 
-import type { ImMessage } from '@aipehub/im-adapter'
+import type { ImMessage } from '@gotong/im-adapter'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { TelegramApiError, type TelegramClient } from '../src/client.js'

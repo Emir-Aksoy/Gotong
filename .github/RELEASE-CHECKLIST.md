@@ -10,7 +10,7 @@ list keeps the checklist honest.
 
 > **Decided 2026-06-01 (Phase 19 P3-M3):** no email channel pre-1.0.
 > GitHub Private Vulnerability Reporting is the **sole** disclosure
-> channel. The `security@aipehub.dev` placeholder has been removed from
+> channel. The `security@gotong.dev` placeholder has been removed from
 > the advertised contacts (`SECURITY.md` → "No email channel",
 > `security.txt` → no `mailto:` line) rather than dangle a dead address.
 > Standing up a real mailbox stays a 1.0 *option*, not a blocker.
@@ -20,7 +20,7 @@ list keeps the checklist honest.
       autoresponder pointing at the advisory URL, and on-call routing,
       then re-adding the `mailto:` to `SECURITY.md` + `security.txt`.
 - [ ] **Enable Private Vulnerability Reporting** on
-      `github.com/Emir-Aksoy/AipeHub` (Settings → Security & analysis).
+      `github.com/Emir-Aksoy/Gotong` (Settings → Security & analysis).
       Without this the `/security/advisories/new` URL returns 404 for
       external reporters.
 - [ ] **Refresh `Expires:` in `security.txt`** to a date < 1 year out
@@ -31,12 +31,12 @@ list keeps the checklist honest.
       GitHub advisory's TLS channel" stance is already shipped in
       `SECURITY.md` ("What about PGP?") and `.well-known/security.txt`
       (note 3). If you ever change your mind, publish a key at
-      `https://aipehub.dev/security.asc` and update both files.
+      `https://gotong.dev/security.asc` and update both files.
 
 ## Domain & DNS
 
-- [ ] **Register `aipehub.dev`** (or whichever domain is canonical).
-      Until then, `aipehub.dev` in this repo is **aspirational**, not
+- [ ] **Register `gotong.dev`** (or whichever domain is canonical).
+      Until then, `gotong.dev` in this repo is **aspirational**, not
       authoritative.
 - [ ] **Set up Caddy** or equivalent in front of any public demo —
       the `docs/DEPLOY.md` C-shape pattern is the reference.
@@ -77,16 +77,16 @@ Decisions (updated 2026-06-08) — each is independent and any can stay
   - **Option 2 — JSR (jsr.io).** GitHub OAuth login (no separate
     npm account), native TypeScript, works with npm / pnpm / Bun /
     Deno. Suggested if `npm install`-equivalent UX matters. Requires
-    `@aipehub` scope reservation on jsr.io and minor `package.json`
+    `@gotong` scope reservation on jsr.io and minor `package.json`
     `exports` cleanup per package.
-  - **Option 3 — GitHub Packages.** Same `@aipehub/*` scope as the
+  - **Option 3 — GitHub Packages.** Same `@gotong/*` scope as the
     GitHub org. Standard `npm publish` workflow. Lower install UX
-    than JSR — users must put `@aipehub:registry=https://npm.pkg.github.com`
+    than JSR — users must put `@gotong:registry=https://npm.pkg.github.com`
     in `.npmrc` first. Choose this if you want zero-tooling change.
   - **Option 4 — npmjs.com.** The original plan. Requires npm
-    account + 2FA + `@aipehub` org reservation. Best install UX (`pnpm
-    add @aipehub/workflow`) but most setup overhead.
-- [x] **PyPI publish for `aipehub`** — **Decided 2026-06-08:** defer to
+    account + 2FA + `@gotong` org reservation. Best install UX (`pnpm
+    add @gotong/workflow`) but most setup overhead.
+- [x] **PyPI publish for `gotong`** — **Decided 2026-06-08:** defer to
       1.0, publish **alongside JSR** (`pyproject.toml` is already
       PyPI-ready). Currently `pip install -e python-sdk/` is the only path.
       Referenced in [`python-sdk/README.md`](../python-sdk/README.md)
@@ -99,7 +99,7 @@ Decisions (updated 2026-06-08) — each is independent and any can stay
       remain:
   - ✅ Implemented: [`workflows/release.yml`](workflows/release.yml)
     cuts binaries for all 5 targets via `bun build … --compile` on a
-    GitHub Actions matrix (`packages/host/bin/aipehub-host.js`), then
+    GitHub Actions matrix (`packages/host/bin/gotong-host.js`), then
     attaches `SHA256SUMS` + SLSA provenance + a CycloneDX SBOM.
   - ✅ Blocker resolved: static assets are inlined at build time by
     `packages/web/scripts/build-static-assets.mjs`, and the host
@@ -119,7 +119,7 @@ Decisions (updated 2026-06-08) — each is independent and any can stay
     [`scripts/build-portable.mjs`](../scripts/build-portable.mjs) — an
     embedded-runtime portable bundle (pinned Node + `pnpm deploy --prod`
     host + real on-disk `node_modules`, double-click via the tier-0
-    branch in [`deploy/AipeHub.command`](../deploy/AipeHub.command)).
+    branch in [`deploy/Gotong.command`](../deploy/Gotong.command)).
     Real Node → `isCompiledBinary()` false → host runs the full
     identity-backed path. Built on demand, **not committed** (`dist-portable/`
     is gitignored); macOS arm64 this round. Write-up:
@@ -203,11 +203,11 @@ Decisions (updated 2026-06-08) — each is independent and any can stay
 **State as of the last review (2026-06-14):**
 
 - Push freeze: **lifted for the PRIVATE remote only** (`origin =
-  github.com/Emir-Aksoy/AipeHub`, private). Going public is still frozen.
+  github.com/Emir-Aksoy/Gotong`, private). Going public is still frozen.
 - REL-1 → REL-9 are **done** (freeze lift + ops debt + doc translation +
   full bilingual UI). REL-10 (this file) is the closeout.
 - All remaining unchecked boxes above are **maintainer-only external
-  actions** (register `aipehub.dev`, enable GitHub Private Vulnerability
+  actions** (register `gotong.dev`, enable GitHub Private Vulnerability
   Reporting, enable GitHub Discussions, optional binaries/registry/CI
   secrets, optional demo-domain URL swap, CVE authority, tabletop). None
   block correctness; they gate the *public* posture.
@@ -219,7 +219,7 @@ Decisions (updated 2026-06-08) — each is independent and any can stay
 2. Enable **Private Vulnerability Reporting** so the advertised
    `/security/advisories/new` channel resolves (currently the sole
    disclosure path).
-3. (Optional) register `aipehub.dev` + swap demo URLs if you want the
+3. (Optional) register `gotong.dev` + swap demo URLs if you want the
    docs' `hub.example.com` placeholders to point at a real preview.
 4. Flip the repo to **public** (GitHub Settings → General → Danger zone).
 5. Cut the **`v1.0.0`** tag — this triggers

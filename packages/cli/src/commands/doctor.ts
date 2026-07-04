@@ -1,8 +1,8 @@
 /**
- * `aipehub doctor` — pre-flight environment check.
+ * `gotong doctor` — pre-flight environment check.
  *
  * Runs BEFORE the host boots and WITHOUT importing it (the CLI stays tiny —
- * same discipline as start.ts). It inspects the exact AIPE_* env the host
+ * same discipline as start.ts). It inspects the exact GOTONG_* env the host
  * reads (host / web port / ws port / space / master-key) and reports, per
  * check, ✓ / ⚠ / ✖ with an actionable fix — so "it won't start and I don't
  * know why" becomes a list you can act on. It is the first thing to run on a
@@ -30,13 +30,13 @@ import { dirname, resolve } from 'node:path'
 
 import { resolveModule } from './start.js'
 
-const HOST_PKG = '@aipehub/host'
+const HOST_PKG = '@gotong/host'
 // A variable, not a string literal, on purpose: tsc only resolves
 // `import("literal")` at build time, so this dynamic import does NOT make
-// `@aipehub/host` a build-time dependency of the tiny CLI (same trick as
+// `@gotong/host` a build-time dependency of the tiny CLI (same trick as
 // `start` / `check`). The deep definitions check runs the host's own
 // validators via its non-booting `./check` subpath.
-const CHECK_PKG = '@aipehub/host/check'
+const CHECK_PKG = '@gotong/host/check'
 
 /** Repo `engines.node` floor — keep in sync with the workspace package.json. */
 const MIN_NODE_MAJOR = 20
@@ -71,12 +71,12 @@ export interface DoctorDeps {
   resolveHost?: () => string | null
   probePort?: (host: string, port: number) => Promise<PortProbe>
   probePath?: (path: string) => Promise<PathProbe>
-  /** `--fix` seam: create AIPE_SPACE (recursive). Defaults to a real `mkdir -p`. */
+  /** `--fix` seam: create GOTONG_SPACE (recursive). Defaults to a real `mkdir -p`. */
   mkdirp?: (path: string) => Promise<void>
   /**
    * Deep definitions-check seam: validate the workspace's loaded workflows +
    * agents (the host-owned validators). Defaults to importing
-   * `@aipehub/host/check` and running `validateWorkspace`. Tests inject a fake.
+   * `@gotong/host/check` and running `validateWorkspace`. Tests inject a fake.
    */
   runWorkspaceCheck?: (
     spaceDir: string,
@@ -88,8 +88,8 @@ export interface DoctorDeps {
 
 /**
  * Just the definitions counts the doctor needs from a workspace check —
- * structural so the CLI takes NO build-time type dependency on `@aipehub/host`.
- * (The detailed per-file report is what `aipehub check` prints; the doctor only
+ * structural so the CLI takes NO build-time type dependency on `@gotong/host`.
+ * (The detailed per-file report is what `gotong check` prints; the doctor only
  * summarises "do they load".)
  */
 export interface WorkspaceCheckSummary {
@@ -129,7 +129,7 @@ export function probePortReal(host: string, port: number): Promise<PortProbe> {
   })
 }
 
-/** Distinguish writable / creatable / read-only / not-a-dir / blocked for AIPE_SPACE. */
+/** Distinguish writable / creatable / read-only / not-a-dir / blocked for GOTONG_SPACE. */
 export async function probePathReal(p: string): Promise<PathProbe> {
   const abs = resolve(p)
   try {
@@ -167,7 +167,7 @@ export interface FixAction {
 
 /**
  * Apply the SAFE, REVERSIBLE auto-fixes for `--fix`. Today that is exactly one
- * thing: create the data directory (AIPE_SPACE) when it's missing — `mkdir -p`,
+ * thing: create the data directory (GOTONG_SPACE) when it's missing — `mkdir -p`,
  * which an operator can trivially undo (`rmdir`) and which the host would do on
  * first boot anyway; doing it here lets `doctor` confirm it's writable BEFORE
  * you start, instead of trusting "will be created on first run".
@@ -186,7 +186,7 @@ export async function applyFixes(deps: DoctorDeps = {}): Promise<FixAction[]> {
   const env = deps.env ?? process.env
   const probePath = deps.probePath ?? probePathReal
   const mkdirp = deps.mkdirp ?? mkdirpReal
-  const space = env.AIPE_SPACE?.trim() || '.aipehub'
+  const space = env.GOTONG_SPACE?.trim() || '.gotong'
 
   const probe = await probePath(space)
   switch (probe) {
@@ -202,7 +202,7 @@ export async function applyFixes(deps: DoctorDeps = {}): Promise<FixAction[]> {
         return [
           {
             outcome: 'failed',
-            text: `Could not create ${space} (${code}) — create it with write access manually, or point AIPE_SPACE somewhere writable.`,
+            text: `Could not create ${space} (${code}) — create it with write access manually, or point GOTONG_SPACE somewhere writable.`,
           },
         ]
       }
@@ -226,7 +226,7 @@ function portCheck(label: string, host: string, port: number, envVar: string, pr
       level: 'warn',
       label,
       detail: `${where} is already in use`,
-      fix: `If AipeHub is already running this is expected. Otherwise stop whatever holds ${where}, or set ${envVar} to a free port.`,
+      fix: `If Gotong is already running this is expected. Otherwise stop whatever holds ${where}, or set ${envVar} to a free port.`,
     }
   }
   return {
@@ -241,18 +241,18 @@ function portCheck(label: string, host: string, port: number, envVar: string, pr
 }
 
 function spaceCheck(space: string, probe: PathProbe): DoctorCheck {
-  const label = 'Data dir (AIPE_SPACE)'
+  const label = 'Data dir (GOTONG_SPACE)'
   switch (probe) {
     case 'writable':
       return { level: 'ok', label, detail: `${space} exists and is writable` }
     case 'creatable':
       return { level: 'ok', label, detail: `${space} will be created on first run` }
     case 'exists-readonly':
-      return { level: 'error', label, detail: `${space} exists but is not writable`, fix: 'Grant write to the directory, or point AIPE_SPACE somewhere writable.' }
+      return { level: 'error', label, detail: `${space} exists but is not writable`, fix: 'Grant write to the directory, or point GOTONG_SPACE somewhere writable.' }
     case 'not-a-dir':
-      return { level: 'error', label, detail: `${space} exists but is a file, not a directory`, fix: 'Point AIPE_SPACE at a directory path.' }
+      return { level: 'error', label, detail: `${space} exists but is a file, not a directory`, fix: 'Point GOTONG_SPACE at a directory path.' }
     case 'blocked':
-      return { level: 'error', label, detail: `${space} can't be created (parent directory not writable)`, fix: 'Create the parent with write access, or point AIPE_SPACE somewhere writable.' }
+      return { level: 'error', label, detail: `${space} can't be created (parent directory not writable)`, fix: 'Create the parent with write access, or point GOTONG_SPACE somewhere writable.' }
   }
 }
 
@@ -260,18 +260,18 @@ function masterKeyCheck(provider: string, masterKey: string): DoctorCheck {
   const label = 'Master key'
   if (provider === 'env') {
     return masterKey.trim()
-      ? { level: 'ok', label, detail: 'provider=env, AIPE_MASTER_KEY is set' }
+      ? { level: 'ok', label, detail: 'provider=env, GOTONG_MASTER_KEY is set' }
       : {
           level: 'error',
           label,
-          detail: 'AIPE_MASTER_KEY_PROVIDER=env but AIPE_MASTER_KEY is empty',
-          fix: 'Set AIPE_MASTER_KEY (32+ random bytes, base64), or unset the provider to use the auto-generated file key.',
+          detail: 'GOTONG_MASTER_KEY_PROVIDER=env but GOTONG_MASTER_KEY is empty',
+          fix: 'Set GOTONG_MASTER_KEY (32+ random bytes, base64), or unset the provider to use the auto-generated file key.',
         }
   }
   // Default / file: the key file is auto-generated under the space — fine for
   // personal / home use. Validating an arbitrary custom provider needs boot, so
   // the doctor stays advisory here rather than over-failing.
-  return { level: 'ok', label, detail: provider ? `provider=${provider}` : 'file-based default (auto-generated under AIPE_SPACE)' }
+  return { level: 'ok', label, detail: provider ? `provider=${provider}` : 'file-based default (auto-generated under GOTONG_SPACE)' }
 }
 
 function llmKeyCheck(env: Record<string, string | undefined>): DoctorCheck {
@@ -297,29 +297,29 @@ export async function collectChecks(deps: DoctorDeps = {}): Promise<DoctorCheck[
   const probePort = deps.probePort ?? probePortReal
   const probePath = deps.probePath ?? probePathReal
 
-  const host = env.AIPE_HOST?.trim() || '127.0.0.1'
-  const webPort = intOr(env.AIPE_WEB_PORT, 3000)
-  const wsPort = intOr(env.AIPE_WS_PORT, 4000)
-  const space = env.AIPE_SPACE?.trim() || '.aipehub'
-  const provider = env.AIPE_MASTER_KEY_PROVIDER?.trim() || ''
-  const masterKey = env.AIPE_MASTER_KEY ?? ''
+  const host = env.GOTONG_HOST?.trim() || '127.0.0.1'
+  const webPort = intOr(env.GOTONG_WEB_PORT, 3000)
+  const wsPort = intOr(env.GOTONG_WS_PORT, 4000)
+  const space = env.GOTONG_SPACE?.trim() || '.gotong'
+  const provider = env.GOTONG_MASTER_KEY_PROVIDER?.trim() || ''
+  const masterKey = env.GOTONG_MASTER_KEY ?? ''
 
   return [
     Number.isFinite(nodeMajor) && nodeMajor >= MIN_NODE_MAJOR
       ? { level: 'ok', label: 'Node.js', detail: `v${nodeVersion} (need >= ${MIN_NODE_MAJOR})` }
       : { level: 'error', label: 'Node.js', detail: `v${nodeVersion} is older than the required ${MIN_NODE_MAJOR}`, fix: `Install Node ${MIN_NODE_MAJOR}+ (https://nodejs.org) and re-run.` },
     resolveHost()
-      ? { level: 'ok', label: '@aipehub/host', detail: 'installed and resolvable' }
-      : { level: 'warn', label: '@aipehub/host', detail: 'not resolvable in this context', fix: 'Fine if you run `npx @aipehub/host` or from a source checkout; else `npm i -g @aipehub/host`.' },
-    portCheck('Web port', host, webPort, 'AIPE_WEB_PORT', await probePort(host, webPort)),
-    portCheck('Agent WS port', host, wsPort, 'AIPE_WS_PORT', await probePort(host, wsPort)),
+      ? { level: 'ok', label: '@gotong/host', detail: 'installed and resolvable' }
+      : { level: 'warn', label: '@gotong/host', detail: 'not resolvable in this context', fix: 'Fine if you run `npx @gotong/host` or from a source checkout; else `npm i -g @gotong/host`.' },
+    portCheck('Web port', host, webPort, 'GOTONG_WEB_PORT', await probePort(host, webPort)),
+    portCheck('Agent WS port', host, wsPort, 'GOTONG_WS_PORT', await probePort(host, wsPort)),
     spaceCheck(space, await probePath(space)),
     masterKeyCheck(provider, masterKey),
     llmKeyCheck(env),
   ]
 }
 
-/** Map definitions counts to doctor ✓/✖ lines (summary; details are `aipehub check`). */
+/** Map definitions counts to doctor ✓/✖ lines (summary; details are `gotong check`). */
 function definitionChecks(s: WorkspaceCheckSummary): DoctorCheck[] {
   const out: DoctorCheck[] = []
   const wTotal = s.workflows.ok + s.workflows.bad
@@ -329,7 +329,7 @@ function definitionChecks(s: WorkspaceCheckSummary): DoctorCheck[] {
           level: 'error',
           label: 'Workflow definitions',
           detail: `${s.workflows.bad} of ${wTotal} won't parse`,
-          fix: 'Run `aipehub check` for the details, fix the YAML, or set AIPE_STRICT_DEFINITIONS=1 to refuse to boot on a broken file.',
+          fix: 'Run `gotong check` for the details, fix the YAML, or set GOTONG_STRICT_DEFINITIONS=1 to refuse to boot on a broken file.',
         }
       : {
           level: 'ok',
@@ -343,7 +343,7 @@ function definitionChecks(s: WorkspaceCheckSummary): DoctorCheck[] {
           level: 'error',
           label: 'Agents (agents.json)',
           detail: `${s.agents.bad} broken row(s)`,
-          fix: 'Run `aipehub check` for the details, then fix agents.json.',
+          fix: 'Run `gotong check` for the details, then fix agents.json.',
         }
       : {
           level: 'ok',
@@ -359,13 +359,13 @@ function definitionChecks(s: WorkspaceCheckSummary): DoctorCheck[] {
  * same deterministic validators the host runs at boot, surfaced in the
  * pre-flight. Gated, and best-effort:
  *
- *   - Definitions live UNDER AIPE_SPACE, so there's nothing to check until the
+ *   - Definitions live UNDER GOTONG_SPACE, so there's nothing to check until the
  *     directory exists — on a fresh box (space `creatable`/`blocked`/not-a-dir)
  *     this returns [] and the section is omitted entirely.
- *   - The validators ship in `@aipehub/host`; without it resolvable we skip
+ *   - The validators ship in `@gotong/host`; without it resolvable we skip
  *     (the env section already warns the host isn't installed here).
  *   - A probe error never breaks the pre-flight — it degrades to one ⚠ that
- *     points at `aipehub check`.
+ *     points at `gotong check`.
  *
  * Pure given its seams (`probePath` / `resolveHost` / `runWorkspaceCheck`).
  */
@@ -374,7 +374,7 @@ export async function collectDefinitionChecks(deps: DoctorDeps = {}): Promise<Do
   const resolveHost = deps.resolveHost ?? (() => resolveModule(HOST_PKG))
   const probePath = deps.probePath ?? probePathReal
   const runCheck = deps.runWorkspaceCheck ?? defaultRunWorkspaceCheck
-  const space = env.AIPE_SPACE?.trim() || '.aipehub'
+  const space = env.GOTONG_SPACE?.trim() || '.gotong'
 
   const probe = await probePath(space)
   if (probe !== 'writable' && probe !== 'exists-readonly') return []
@@ -389,7 +389,7 @@ export async function collectDefinitionChecks(deps: DoctorDeps = {}): Promise<Do
         level: 'warn',
         label: 'Definitions',
         detail: `could not check workflows/agents (${e instanceof Error ? e.message : String(e)})`,
-        fix: 'Run `aipehub check` directly to see why.',
+        fix: 'Run `gotong check` directly to see why.',
       },
     ]
   }
@@ -410,15 +410,15 @@ export async function doctor(args: readonly string[], deps: DoctorDeps = {}): Pr
   const fix = args.includes('--fix')
   const stray = args.find((a) => a !== '--help' && a !== '-h' && a !== '--fix')
   if (stray) {
-    err(`[aipehub doctor] unexpected argument: ${stray}`)
-    err('Run `aipehub doctor --help`.')
+    err(`[gotong doctor] unexpected argument: ${stray}`)
+    err('Run `gotong doctor --help`.')
     return 2
   }
 
-  out('aipehub doctor — pre-flight check\n\n')
+  out('gotong doctor — pre-flight check\n\n')
 
   // `--fix` runs BEFORE the checks so the re-probe below reflects anything it
-  // just created (e.g. a freshly mkdir'd AIPE_SPACE shows up ✓ writable).
+  // just created (e.g. a freshly mkdir'd GOTONG_SPACE shows up ✓ writable).
   if (fix) {
     const actions = await applyFixes(deps)
     out('Applying safe fixes (--fix):\n')
@@ -434,7 +434,7 @@ export async function doctor(args: readonly string[], deps: DoctorDeps = {}): Pr
   out('\n')
 
   // Deep definitions check — runs the host's own validators against the loaded
-  // workflows + agents when the host + a seeded AIPE_SPACE are present (skipped,
+  // workflows + agents when the host + a seeded GOTONG_SPACE are present (skipped,
   // not failed, on a fresh box). Printed as its own section under the env checks.
   const defChecks = await collectDefinitionChecks(deps)
   if (defChecks.length) {
@@ -455,41 +455,41 @@ export async function doctor(args: readonly string[], deps: DoctorDeps = {}): Pr
   }
   out(
     warns > 0
-      ? `✓ no blockers, ${warns} warning${warns > 1 ? 's' : ''} (advisory). Start with:  aipehub start\n`
-      : `✓ all checks passed. Start with:  aipehub start\n`,
+      ? `✓ no blockers, ${warns} warning${warns > 1 ? 's' : ''} (advisory). Start with:  gotong start\n`
+      : `✓ all checks passed. Start with:  gotong start\n`,
   )
   return 0
 }
 
-const DOCTOR_HELP = `aipehub doctor
+const DOCTOR_HELP = `gotong doctor
 
 Pre-flight check for a fresh box. Inspects the same environment the host
 reads — WITHOUT booting it — and prints, per check, ✓ / ⚠ / ✖ with a fix:
 
   - Node.js >= ${MIN_NODE_MAJOR}
-  - @aipehub/host resolvable (or how to get it)
-  - AIPE_WEB_PORT / AIPE_WS_PORT actually free to bind
-  - AIPE_SPACE writable (or creatable on first run)
-  - master key: AIPE_MASTER_KEY present when provider=env
+  - @gotong/host resolvable (or how to get it)
+  - GOTONG_WEB_PORT / GOTONG_WS_PORT actually free to bind
+  - GOTONG_SPACE writable (or creatable on first run)
+  - master key: GOTONG_MASTER_KEY present when provider=env
   - an LLM provider key in the env (optional — the setup wizard can set one)
-  - workflow + agent definitions parse — when @aipehub/host and a seeded
-    AIPE_SPACE are present (same validators as \`aipehub check\`; skipped on a
+  - workflow + agent definitions parse — when @gotong/host and a seeded
+    GOTONG_SPACE are present (same validators as \`gotong check\`; skipped on a
     fresh box where there's nothing loaded yet)
 
 It reports the NAMES of key env vars, never their values. Exit code is 0 when
 there are no ✖ blockers (⚠ are advisory), 1 otherwise.
 
 With --fix it FIRST applies the safe, reversible repairs, then re-checks:
-  - creates AIPE_SPACE (mkdir -p) when it's missing
+  - creates GOTONG_SPACE (mkdir -p) when it's missing
 It will NOT auto-change anything risky — a port already in use, directory
 permissions, a read-only mount, or the master key are reported, not touched.
 
-Configuration it reads (12-factor, same as \`aipehub start\`):
-  AIPE_HOST=127.0.0.1   AIPE_WEB_PORT=3000   AIPE_WS_PORT=4000
-  AIPE_SPACE=.aipehub   AIPE_MASTER_KEY_PROVIDER   AIPE_MASTER_KEY
+Configuration it reads (12-factor, same as \`gotong start\`):
+  GOTONG_HOST=127.0.0.1   GOTONG_WEB_PORT=3000   GOTONG_WS_PORT=4000
+  GOTONG_SPACE=.gotong   GOTONG_MASTER_KEY_PROVIDER   GOTONG_MASTER_KEY
 
 Examples:
-  aipehub doctor
-  aipehub doctor --fix
-  AIPE_WEB_PORT=8080 aipehub doctor
+  gotong doctor
+  gotong doctor --fix
+  GOTONG_WEB_PORT=8080 gotong doctor
 `

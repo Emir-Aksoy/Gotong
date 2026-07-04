@@ -23,15 +23,15 @@
 ;(function () {
   'use strict'
 
-  // i18n — read the live dict off window.AipeHub at call time (app-core.js runs
-  // synchronously before this panel is injected, so AipeHub is always defined).
+  // i18n — read the live dict off window.Gotong at call time (app-core.js runs
+  // synchronously before this panel is injected, so Gotong is always defined).
   // `t()` returns the current-language dict; re-render on language change.
-  const AH = window.AipeHub
+  const AH = window.Gotong
   function t() { return AH.t }
 
   const API = '/api/admin/saml/providers'
   // The IdP must POST assertions to this path (the absolute URL is
-  // host-configured via AIPE_PUBLIC_URL; M5e saml-routes.ts /acs). Shown as a
+  // host-configured via GOTONG_PUBLIC_URL; M5e saml-routes.ts /acs). Shown as a
   // hint so the owner registers the matching ACS at the IdP.
   const ACS_PATH = '/api/auth/saml/acs'
   // Per-provider SP metadata (entityID + ACS) for the IdP admin to import.

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { validateMemoryFileConfig } from '../src/config.js'
-import { ServiceConfigError } from '@aipehub/services-sdk'
+import { ServiceConfigError } from '@gotong/services-sdk'
 
 describe('validateMemoryFileConfig', () => {
   it('accepts empty config — defaults all three kinds', () => {

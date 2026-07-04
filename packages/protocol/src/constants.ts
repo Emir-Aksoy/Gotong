@@ -54,14 +54,14 @@ export function majorVersionOf(v: string): number {
 }
 
 /**
- * Built-in service types AipeHub ships with. Used as the immutable base of
+ * Built-in service types Gotong ships with. Used as the immutable base of
  * the runtime allowlist — third-party `registerServiceMethods` calls only
  * ADD entries on top of this map, never mutate or override it.
  *
  * Dotted forms (e.g. `'sql.exec'`) descend into a named sub-namespace on
  * the handle; the router splits on `.` once before doing the lookup.
  *
- * Aligned with the contracts in `@aipehub/services-sdk/types/{memory,
+ * Aligned with the contracts in `@gotong/services-sdk/types/{memory,
  * artifact,datastore}.ts`.
  */
 export const BUILTIN_SERVICE_METHODS: Readonly<Record<string, readonly string[]>> = {

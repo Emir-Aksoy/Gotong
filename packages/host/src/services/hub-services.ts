@@ -1,14 +1,14 @@
 /**
  * `HubServices` — host-side facade for the loaded Hub Services.
  *
- * The pure plugin contract lives in `@aipehub/services-sdk`; this class
+ * The pure plugin contract lives in `@gotong/services-sdk`; this class
  * is the **glue** the host stitches on top: it owns the {@link ServiceRegistry},
  * keeps a bag of bookkeeping for which (plugin, owner) handles are
  * currently attached, and exposes the high-level methods the rest of
  * the host (LocalAgentPool, Web admin routes, lifecycle sweeps) calls.
  *
  * Why a separate class instead of folding it into `Hub`:
- *   - `@aipehub/services-sdk` already depends on `@aipehub/core` (for
+ *   - `@gotong/services-sdk` already depends on `@gotong/core` (for
  *     the `Logger` type). Putting this glue inside `core` would close
  *     the loop and turn the workspace into a cycle.
  *   - The host is the only natural place that knows where the space
@@ -42,7 +42,7 @@ import type {
   ServiceTarget,
   ServiceTrashRef,
   ServicesAdminSurface,
-} from '@aipehub/core'
+} from '@gotong/core'
 import type {
   HubSurfaceForPlugins,
   Owner,
@@ -51,9 +51,9 @@ import type {
   ServiceSnapshot,
   ServiceType,
   TrashRef,
-} from '@aipehub/services-sdk'
-import { PluginNotFoundError } from '@aipehub/services-sdk'
-import { unregisterServiceMethods } from '@aipehub/protocol'
+} from '@gotong/services-sdk'
+import { PluginNotFoundError } from '@gotong/services-sdk'
+import { unregisterServiceMethods } from '@gotong/protocol'
 
 /**
  * Shape of a `uses:` entry on an agent yaml. PR-7 will validate this

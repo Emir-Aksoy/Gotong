@@ -29,12 +29,12 @@ import {
   createInprocHubLinkPair,
   installPeerLink,
   type Task,
-} from '@aipehub/core'
+} from '@gotong/core'
 import {
   MASTER_KEY_LEN_BYTES,
   openIdentityStore,
   type IdentityStore,
-} from '@aipehub/identity'
+} from '@gotong/identity'
 
 /** Records every task it's handed so a test can assert what crossed the gate. */
 class RecordingAgent extends AgentParticipant {
@@ -50,7 +50,7 @@ describe('peer inbound ACL from the identity row gates tasks (Phase 18 B-M2)', (
   let tmp: string
 
   beforeEach(async () => {
-    tmp = await mkdtemp(join(tmpdir(), 'aipe-peer-acl-'))
+    tmp = await mkdtemp(join(tmpdir(), 'gotong-peer-acl-'))
     store = openIdentityStore({
       dbPath: join(tmp, 'identity.sqlite'),
       masterKey: randomBytes(MASTER_KEY_LEN_BYTES),

@@ -10,7 +10,7 @@
 import { appendFileSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
-import { AgentParticipant, type Task } from '@aipehub/core'
+import { AgentParticipant, type Task } from '@gotong/core'
 
 import { firstParagraph, slugify, type KnowledgeBase } from './knowledge-base.js'
 

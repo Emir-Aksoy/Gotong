@@ -1,5 +1,5 @@
 # 行业研究分析师 —— 给 industry-coach-pro 提供对标案例
-# AipeHub agent v1 manifest (v2.2 — services-aware)
+# Gotong agent v1 manifest (v2.2 — services-aware)
 #
 # 这个 agent 不直接和客户对话，它是 industry-coach-pro 的"后端"。
 # 工作流（industry-consultation-flow.yaml）在 intake 步骤之后调
@@ -12,7 +12,7 @@
 #
 # 没有 datastore 内容时，agent 会**老实承认**自己没数据，让下游
 # coach 继续走（而不是编案例）。
-schema: aipehub.agent/v1
+schema: gotong.agent/v1
 
 agent:
   id: industry-research-analyst

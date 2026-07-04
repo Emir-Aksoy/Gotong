@@ -50,20 +50,20 @@ Fixed the four high-priority audit findings from
 Passed:
 
 ```bash
-pnpm --filter @aipehub/workflow test -- runner.test.ts
-pnpm --filter @aipehub/evals test -- workflow-structure.test.ts
-pnpm --filter @aipehub/host test -- workflow-controller.test.ts
-pnpm --filter @aipehub/host test -- workflow-loader.test.ts
-pnpm --filter @aipehub/web test -- agents-route.test.ts
+pnpm --filter @gotong/workflow test -- runner.test.ts
+pnpm --filter @gotong/evals test -- workflow-structure.test.ts
+pnpm --filter @gotong/host test -- workflow-controller.test.ts
+pnpm --filter @gotong/host test -- workflow-loader.test.ts
+pnpm --filter @gotong/web test -- agents-route.test.ts
 pnpm -r typecheck
-pnpm --filter @aipehub/core test
-pnpm --filter @aipehub/workflow test
-pnpm --filter @aipehub/evals test
-pnpm --filter @aipehub/host test
-pnpm --filter @aipehub/web test
+pnpm --filter @gotong/core test
+pnpm --filter @gotong/workflow test
+pnpm --filter @gotong/evals test
+pnpm --filter @gotong/host test
+pnpm --filter @gotong/web test
 git diff --check
 ```
 
-Note: `@aipehub/host` and `@aipehub/web` tests need local
+Note: `@gotong/host` and `@gotong/web` tests need local
 `127.0.0.1` listeners, so they were rerun with sandbox escalation after the
 default sandbox rejected listen attempts with `listen EPERM`.

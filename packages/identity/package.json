@@ -1,8 +1,8 @@
 {
-  "name": "@aipehub/identity",
+  "name": "@gotong/identity",
   "version": "0.1.0",
   "type": "module",
-  "description": "AipeHub v4 identity layer — users, credentials, memberships, sessions. SQLite-backed, zero-dep on other workspace packages (host/web wire it in).",
+  "description": "Gotong v4 identity layer — users, credentials, memberships, sessions. SQLite-backed, zero-dep on other workspace packages (host/web wire it in).",
   "license": "MIT",
   "private": true,
   "main": "./dist/index.js",

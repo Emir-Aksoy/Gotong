@@ -25,10 +25,10 @@ import { fileURLToPath } from 'node:url'
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { Hub, InMemoryStorage, type Logger } from '@aipehub/core'
-import { ACP_NEVER_RESUME_AT } from '@aipehub/acp-agent'
-import { openIdentityStore, type IdentityStore } from '@aipehub/identity'
-import { FileInboxStore } from '@aipehub/inbox'
+import { Hub, InMemoryStorage, type Logger } from '@gotong/core'
+import { ACP_NEVER_RESUME_AT } from '@gotong/acp-agent'
+import { openIdentityStore, type IdentityStore } from '@gotong/identity'
+import { FileInboxStore } from '@gotong/inbox'
 
 import { AcpOutboundManager } from '../src/acp-outbound.js'
 import { acpApprovalItemFor } from '../src/acp-escalation.js'

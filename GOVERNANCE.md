@@ -1,16 +1,16 @@
-# AipeHub Governance
+# Gotong Governance
 
 <!-- doc-version: 1.0 -->
 > **Doc version 1.0** · English (authoritative source) · Updated 2026-06-27 · Translations: [中文](docs/zh/GOVERNANCE.md) · [日本語](docs/ja/GOVERNANCE.md) · [Русский](docs/ru/GOVERNANCE.md) · [Français](docs/fr/GOVERNANCE.md) · [Español](docs/es/GOVERNANCE.md) · [한국어](docs/ko/GOVERNANCE.md). If a translation conflicts with this English version, the English version governs.
 
-This document describes **how decisions get made** in AipeHub: who maintains
+This document describes **how decisions get made** in Gotong: who maintains
 the project, how a change lands, how a community template enters the official
 gallery, and what happens when people disagree. It is deliberately small —
 the project is young, and a heavy governance structure on a small project is
 just ceremony. We will grow this document as the community grows, not before.
 
 This document sits under the project's constitution, [`CHARTER.md`](CHARTER.md):
-the charter says *what* AipeHub is and what it refuses to become; this says *how*
+the charter says *what* Gotong is and what it refuses to become; this says *how*
 we decide. Where the two meet — e.g. "the framework does not run the LLM" — the
 charter is the source and this is the enforcement.
 
@@ -49,7 +49,7 @@ guideline, not a checklist to game:
   sustained review / triage help — *and equally* keeping the docs alive in a
   language the core team doesn't speak, running the community so newcomers get
   unstuck, or sustained educational material that brings people to the project.
-  Carrying AipeHub to people is real work; this ladder counts it as a path to a
+  Carrying Gotong to people is real work; this ladder counts it as a path to a
   say, not a lesser track (see [pillar ⑤ of the recognition
   system](docs/RECOGNITION-SYSTEM.md#pillar-5),
   and [`CONTRIBUTORS.md`](CONTRIBUTORS.md) where contributions of every kind are
@@ -109,7 +109,7 @@ purpose:
 
 ## How a template enters the official gallery
 
-AipeHub ships **templates** (`aipehub.template/v1` — a self-contained YAML that
+Gotong ships **templates** (`gotong.template/v1` — a self-contained YAML that
 carries an agent team + workflows + knowledge-base *references*, but never
 secrets, knowledge content, or personnel). The bar to be *shipped with the
 framework* — to appear in the one-click gallery in the admin UI and on the
@@ -183,8 +183,8 @@ Conduct disputes are handled separately — see
 
 ## The one non-negotiable
 
-AipeHub has exactly one architectural commitment that a PR cannot vote away,
-because changing it means the project is no longer AipeHub:
+Gotong has exactly one architectural commitment that a PR cannot vote away,
+because changing it means the project is no longer Gotong:
 
 > **The framework does not run the LLM.** The Hub routes messages, dispatches
 > tasks, writes the transcript, and emits events. Every decision stays with the
@@ -233,17 +233,17 @@ A chapter is **sovereign, not a franchise.** It owns its room and answers to no
 central landlord. Nobody's permission is required to *start* one — that would
 contradict the whole "no single party whose permission you need to keep running"
 premise the project rests on. You can stand up a hub, gather a local community, and
-curate templates for them today, and call it an AipeHub chapter.
+curate templates for them today, and call it an Gotong chapter.
 
 What a chapter is **not**:
 
 - **Not an official voice of the project.** A chapter speaks for its own community,
-  not for AipeHub. It does not set the design line, ratify the charter, or decide
+  not for Gotong. It does not set the design line, ratify the charter, or decide
   what is promoted to flagship — those stay with the maintainers and the steward on
   the canonical repository ([`MAINTAINERS.md`](MAINTAINERS.md)).
 - **Not a fork that holds the line.** A chapter may run a modified build for its own
   people, but the authoritative charter, protocol, and flagship set live in the
-  canonical repository. A chapter that wants its changes to be *the* AipeHub sends
+  canonical repository. A chapter that wants its changes to be *the* Gotong sends
   them upstream as pull requests, like anyone else.
 
 ### Recognition is optional and light
@@ -270,7 +270,7 @@ it is a light maintainer call.
 
 ---
 
-## Using the AipeHub name
+## Using the Gotong name
 
 The code is [MIT](LICENSE) — you may embed it, modify it, and ship it in commercial or
 closed-source products, with the license and copyright line preserved. The **license
@@ -278,19 +278,19 @@ covers the code; it does not hand over the project's name and identity.** There 
 registered trademark here, and we will not pretend otherwise — what follows is a
 **community norm**, asked for in good faith, not a legal threat:
 
-- **Descriptive use is welcome.** "Built on AipeHub," "an AipeHub hub," "the AipeHub
+- **Descriptive use is welcome.** "Built on Gotong," "an Gotong hub," "the Gotong
   Malaysia chapter" — say these freely. They are true, and we are glad you are saying
   them.
 - **Do not imply an endorsement you do not have.** Do not name a product, fork, or
-  service in a way that presents it *as* AipeHub-the-project or as officially blessed
-  by it — no "AipeHub Official," no look-alike that poses as the canonical download.
+  service in a way that presents it *as* Gotong-the-project or as officially blessed
+  by it — no "Gotong Official," no look-alike that poses as the canonical download.
 - **Do not rebrand the canonical project.** A modified distribution is yours to ship,
-  but the authoritative "AipeHub" — the charter, the design line, the flagship set — is
+  but the authoritative "Gotong" — the charter, the design line, the flagship set — is
   the one in the canonical repository. If your fork diverges in spirit, give it your own
   name; the MIT license guarantees you can, and an honest name serves your users better
   than a borrowed one.
 
-This is the lightest version of name protection that works: enough that "AipeHub" keeps
+This is the lightest version of name protection that works: enough that "Gotong" keeps
 meaning the governed, file-first, human-in-the-loop thing the charter describes, and no
 more.
 

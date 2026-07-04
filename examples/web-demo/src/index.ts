@@ -1,5 +1,5 @@
 /**
- * web-demo — opens the AipeHub reference web UI on `.aipehub-web-demo/`
+ * web-demo — opens the Gotong reference web UI on `.gotong-web-demo/`
  * (auto-init) and runs a tiny perpetual loop:
  *
  *   1. WriterAgent drafts a one-liner (auto, in-process)
@@ -11,13 +11,13 @@
  *
  * The admin token is minted on first launch and printed once.
  *
- * No env vars required. Set AIPE_SPACE=/tmp/foo to use a different space dir.
+ * No env vars required. Set GOTONG_SPACE=/tmp/foo to use a different space dir.
  */
 
-import { AgentParticipant, Hub, Space, type Task } from '@aipehub/core'
-import { serveWeb } from '@aipehub/web'
+import { AgentParticipant, Hub, Space, type Task } from '@gotong/core'
+import { serveWeb } from '@gotong/web'
 
-const SPACE_DIR = process.env.AIPE_SPACE ?? '.aipehub-web-demo'
+const SPACE_DIR = process.env.GOTONG_SPACE ?? '.gotong-web-demo'
 
 class WriterAgent extends AgentParticipant {
   private n = 0

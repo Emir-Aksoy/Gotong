@@ -1,4 +1,4 @@
-"""CrewAI adapter — a crew becomes an AipeHub participant.
+"""CrewAI adapter — a crew becomes an Gotong participant.
 
 We never import crewai: the adapter is duck-typed on ``.kickoff(inputs)`` /
 ``.kickoff_async``, so fakes exercise every path. Tests drive ``on_task``
@@ -8,8 +8,8 @@ default ``.raw`` extraction, and error semantics.
 
 from __future__ import annotations
 
-from aipehub import AgentParticipant
-from aipehub.adapters import CrewParticipant, crewai_participant
+from gotong import AgentParticipant
+from gotong.adapters import CrewParticipant, crewai_participant
 
 
 class FakeOutput:

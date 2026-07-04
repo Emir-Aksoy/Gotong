@@ -12,7 +12,7 @@
 
 다음 주소에서 비공개 보안 권고를 열어주세요:
 
-> **<https://github.com/Emir-Aksoy/AipeHub/security/advisories/new>**
+> **<https://github.com/Emir-Aksoy/Gotong/security/advisories/new>**
 
 GitHub의 내장 양식은 다음을 제공합니다:
 
@@ -26,7 +26,7 @@ GitHub의 내장 양식은 다음을 제공합니다:
 ### 이메일 채널 없음 (1.0 이전)
 
 v0.x 기간 동안에는 의도적으로 **보안 이메일이 없습니다**. 이 저장소의 이전
-개정판에는 `security@aipehub.dev`가 *희망적인* 주소로 나타납니다 — 도메인이
+개정판에는 `security@gotong.dev`가 *희망적인* 주소로 나타납니다 — 도메인이
 등록되어 있지 않고 메일함이 활성화되지 않았으므로, 그쪽으로 보내는 메일은
 어디에도 도달하지 않습니다. 실제 신고를 신뢰할 수 있는 누군가가 믿을 수 있는
 죽은 연락처를 매달지 않도록 광고를 중단했습니다.
@@ -79,7 +79,7 @@ GitHub를 정말로 사용할 수 없으면, **보안 상세 내용 없이** 메
 
 ## 지원 버전
 
-AipeHub는 내부적으로 1.0 이전(`CHANGELOG.md`에서 보이는 v2.0 / v2.1 레이블은
+Gotong는 내부적으로 1.0 이전(`CHANGELOG.md`에서 보이는 v2.0 / v2.1 레이블은
 파일 우선 리라이트 세대를 가리키며, SemVer 1.0 임계값이 아닙니다). 현재 `main`
 브랜치에서만 보안 이슈를 패치합니다. **LTS 브랜치가 없습니다**.
 
@@ -90,7 +90,7 @@ AipeHub는 내부적으로 1.0 이전(`CHANGELOG.md`에서 보이는 v2.0 / v2.1
 
 ## 위협 모델
 
-AipeHub는 **소규모, 신뢰, 단일 테넌트** 배포를 위해 설계되었습니다 — 연구소, 프로젝트
+Gotong는 **소규모, 신뢰, 단일 테넌트** 배포를 위해 설계되었습니다 — 연구소, 프로젝트
 팀, 소규모 공개 프리뷰 그룹. 기본값은 방이 서로 신뢰하는 사람들에 의해 운영된다고 가정합니다.
 
 범위 내 (신고를 수락함):
@@ -127,20 +127,20 @@ AipeHub는 **소규모, 신뢰, 단일 테넌트** 배포를 위해 설계되었
 
 - **토큰 저장**: 관리자 / 작업자 토큰은 디스크에 쓰기 전에 SHA-256으로 해싱됩니다.
   평문은 발행 시 정확히 한 번 표시됩니다. 검증은 상수 시간 비교를 사용합니다.
-- **쿠키 저장**: 항상 HttpOnly; `AIPE_COOKIE_SECURE=1`이면 `SameSite=Strict` + `Secure`
+- **쿠키 저장**: 항상 HttpOnly; `GOTONG_COOKIE_SECURE=1`이면 `SameSite=Strict` + `Secure`
   (HTTPS 뒤에서 필요).
-- **CSRF**: `AIPE_ALLOWED_HOSTS`는 모든 상태 변경 메서드에서 `Host:`와 `Origin:` 검사를
+- **CSRF**: `GOTONG_ALLOWED_HOSTS`는 모든 상태 변경 메서드에서 `Host:`와 `Origin:` 검사를
   모두 강제합니다. **모든 프로덕션 배포에서 설정하세요.** 설정되지 않으면 "루프백만 안전"을
   의미합니다.
-- **속도 제한**: `AIPE_ADMIN_RATE_MAX` / `_SEC`은 슬라이딩 창당 IP별 관리자 토큰 검증
+- **속도 제한**: `GOTONG_ADMIN_RATE_MAX` / `_SEC`은 슬라이딩 창당 IP별 관리자 토큰 검증
   시도를 제한합니다. 기본값 10 / 60초.
 - **보안 헤더**: 모든 응답에 `X-Frame-Options: DENY`, 엄격한 CSP, `Referrer-Policy: no-referrer`,
   `X-Content-Type-Options: nosniff`.
-- **입장 게이팅**: `AIPE_GATING=admin-approval` (기본값)은 모든 원격 에이전트가 합류 전에
+- **입장 게이팅**: `GOTONG_GATING=admin-approval` (기본값)은 모든 원격 에이전트가 합류 전에
   인간 승인을 받도록 요구합니다. `gating=open`은 **개발 전용**이며 시작 경고와 함께 프로덕션에서
   거부됩니다.
 - **API 키 암호화**: 워크스페이스 및 에이전트별 API 키는 `<space>/secrets.enc.json`에 AES-256-GCM으로,
-  마스터 키는 `<space>/runtime/secret.key` (0600) 또는 `AIPE_SECRET_KEY` 환경 변수에 있습니다.
+  마스터 키는 `<space>/runtime/secret.key` (0600) 또는 `GOTONG_SECRET_KEY` 환경 변수에 있습니다.
   암호화된 파일만으로는 키를 복구하기에 충분하지 않습니다.
 - **에이전트별 신원 바인딩 (v0.4)**: `authenticate()`는 `{ ok: true, allowedAgents: [...] }`를
   반환할 수 있으므로, 유출된 API 키는 임의의 에이전트 id를 사칭할 수 없습니다 — 바인딩된 것들만 가능합니다.
@@ -173,11 +173,11 @@ AipeHub는 **소규모, 신뢰, 단일 테넌트** 배포를 위해 설계되었
 
 요약:
 
-- [ ] HTTPS 뒤에 있을 때 `AIPE_COOKIE_SECURE=1`
-- [ ] `AIPE_ALLOWED_HOSTS`를 실제 호스트명으로 설정
-- [ ] `AIPE_GATING=admin-approval` (공용 인터넷에서 절대 `open`이 아님)
+- [ ] HTTPS 뒤에 있을 때 `GOTONG_COOKIE_SECURE=1`
+- [ ] `GOTONG_ALLOWED_HOSTS`를 실제 호스트명으로 설정
+- [ ] `GOTONG_GATING=admin-approval` (공용 인터넷에서 절대 `open`이 아님)
 - [ ] Caddy / nginx가 TLS를 종료; 백엔드는 `127.0.0.1`에 바인딩
-- [ ] `runtime/secret.key` (chmod 600) 또는 `AIPE_SECRET_KEY` 환경 변수 설정
+- [ ] `runtime/secret.key` (chmod 600) 또는 `GOTONG_SECRET_KEY` 환경 변수 설정
 - [ ] `<space>/` 디렉토리에 대한 백업 존재
 - [ ] 잠금을 복구할 수 있도록 최소 2개의 관리자 계정
 - [ ] `/healthz` 모니터링됨

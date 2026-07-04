@@ -41,9 +41,9 @@ import {
   SuspendTaskError,
   type Task,
   type TaskResult,
-} from '@aipehub/core'
-import { A2aRemoteParticipant } from '@aipehub/a2a'
-import { workflowParticipantId } from '@aipehub/workflow'
+} from '@gotong/core'
+import { A2aRemoteParticipant } from '@gotong/a2a'
+import { workflowParticipantId } from '@gotong/workflow'
 
 import { A2aServer } from '../src/a2a-server.js'
 import { WorkflowController } from '../src/workflow-controller.js'
@@ -63,7 +63,7 @@ const NEVER = 9_999_999_999_000
 // ordinary `{kind:capability}` dispatch; it has no idea the first capability is
 // remote OR that it will park.
 const WORKFLOW_YAML = `
-schema: aipehub.workflow/v1
+schema: gotong.workflow/v1
 workflow:
   id: ${WORKFLOW_ID}
   name: a2a long-running external step

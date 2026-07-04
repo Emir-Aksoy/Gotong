@@ -1,8 +1,8 @@
 {
-  "name": "@aipehub/workflow-assistant",
+  "name": "@gotong/workflow-assistant",
   "version": "0.1.0",
   "type": "module",
-  "description": "AipeHub workflow assistant — LlmAgent that turns a natural-language description into an aipehub.workflow/v1 YAML draft. Lives outside @aipehub/workflow so the runner stays free of any LLM runtime dependency.",
+  "description": "Gotong workflow assistant — LlmAgent that turns a natural-language description into an gotong.workflow/v1 YAML draft. Lives outside @gotong/workflow so the runner stays free of any LLM runtime dependency.",
   "license": "MIT",
   "private": true,
   "main": "./dist/index.js",
@@ -26,10 +26,10 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "@aipehub/core": "workspace:*",
-    "@aipehub/evals": "workspace:*",
-    "@aipehub/llm": "workspace:*",
-    "@aipehub/workflow": "workspace:*"
+    "@gotong/core": "workspace:*",
+    "@gotong/evals": "workspace:*",
+    "@gotong/llm": "workspace:*",
+    "@gotong/workflow": "workspace:*"
   },
   "devDependencies": {
     "vitest": "^3.2.4"

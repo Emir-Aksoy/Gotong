@@ -1,9 +1,9 @@
-import type { Hub } from '@aipehub/core'
+import type { Hub } from '@gotong/core'
 import {
   DEFAULT_HEARTBEAT_INTERVAL_MS,
   type ServiceOwner,
   type ServiceType,
-} from '@aipehub/protocol'
+} from '@gotong/protocol'
 import { WebSocketServer } from 'ws'
 
 import { Session, type SessionInfo } from './session.js'
@@ -34,7 +34,7 @@ export type AuthenticateResult =
  * Narrow contract the WebSocket transport needs to expose Hub Services to
  * remote agents (protocol v1.1 SERVICE_CALL). The host's `HubServices` is
  * the production implementation; tests pass a fake. transport-ws is kept
- * decoupled from `@aipehub/host` and `@aipehub/services-sdk` — the gateway
+ * decoupled from `@gotong/host` and `@gotong/services-sdk` — the gateway
  * is the only seam.
  *
  * `attach` is called on first SERVICE_CALL for a given `(type, impl, owner)`;
@@ -98,7 +98,7 @@ export interface WebSocketTransportOptions {
    *     pending application via `hub.requestAdmission(...)`. WELCOME is sent
    *     only after `hub.approveApplication(...)` is called; if it is
    *     rejected (or the client disconnects), no agent is registered and the
-   *     socket is closed cleanly. Pair with `@aipehub/web` admin UI to drive
+   *     socket is closed cleanly. Pair with `@gotong/web` admin UI to drive
    *     the approval decisions.
    */
   gating?: 'open' | 'admin-approval'
@@ -172,7 +172,7 @@ export interface WebSocketTransportHandle {
 }
 
 /**
- * Start a WebSocket server that accepts remote agents speaking the AipeHub
+ * Start a WebSocket server that accepts remote agents speaking the Gotong
  * wire protocol (see docs/PROTOCOL.md). Each connecting client is wrapped
  * in a Session; each declared agent becomes a `RemoteAgentParticipant`
  * registered in the Hub's registry.
@@ -184,7 +184,7 @@ export interface WebSocketTransportHandle {
 /**
  * Default WS-upgrade hardening values (v3.4). Centralised so tests and
  * docs can refer to the same constants and so a future deployment-
- * profile env var (`AIPE_WS_HARDENING_PROFILE=lan|public`) can flip
+ * profile env var (`GOTONG_WS_HARDENING_PROFILE=lan|public`) can flip
  * them without rewiring callsites.
  */
 export const DEFAULT_MAX_PAYLOAD_BYTES = 262_144 // 256 KiB
@@ -251,7 +251,7 @@ export function serveWebSocket(
       const addr = wss.address()
       const actualPort = typeof addr === 'object' && addr ? addr.port : port
       const url = `ws://${host}:${actualPort}`
-      console.log(`[aipehub-ws] listening at ${url}`)
+      console.log(`[gotong-ws] listening at ${url}`)
 
       wss.on('connection', (ws, req) => {
         const session = new Session(ws, hub, {
@@ -265,7 +265,7 @@ export function serveWebSocket(
         session.onClosed(() => sessions.delete(session))
       })
 
-      wss.on('error', (err) => console.error('[aipehub-ws] server error:', err))
+      wss.on('error', (err) => console.error('[gotong-ws] server error:', err))
 
       resolve({
         host,

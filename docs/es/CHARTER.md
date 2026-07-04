@@ -1,4 +1,4 @@
-# Estatutos de AipeHub
+# Estatutos de Gotong
 
 <!-- doc-version: 1.0 -->
 > **Versión del documento 1.0** · Traducción al español · Actualizado el 2026-06-27 · Fuente autorizada: [English](../../CHARTER.md). Si la traducción entra en conflicto con la versión en inglés, prevalece la versión en inglés.
@@ -10,9 +10,9 @@
 
 ---
 
-## §1 Qué es AipeHub
+## §1 Qué es Gotong
 
-AipeHub es la **capa de coordinación entre humanos, agentes de IA e instituciones**.
+Gotong es la **capa de coordinación entre humanos, agentes de IA e instituciones**.
 
 No es un agente. No es un framework de agentes. Es el sustrato de conexión debajo de ellos: un registro, un bus de mensajes, un enrutador de tareas, un enlace de federación gobernado y un transcript de solo-apéndice.
 
@@ -44,7 +44,7 @@ Implicaciones:
 
 ### 2.3 El estado son archivos en disco
 
-El directorio `.aipehub/` contiene transcript / agentes / sesiones / secretos / vault. Copiar el directorio = llevarse la sala. Los reinicios son transparentes.
+El directorio `.gotong/` contiene transcript / agentes / sesiones / secretos / vault. Copiar el directorio = llevarse la sala. Los reinicios son transparentes.
 
 Implicaciones:
 - Sin bases de datos gestionadas de las que depender.
@@ -81,11 +81,11 @@ El proyecto falla si resuelve la Capa 1 pero convierte la Capa 2 en un cuello de
 
 ## §4 La cuña de confianza
 
-La razón por la que las personas confían a AipeHub sus hogares, familias o dinero es que las fronteras son reales y les pertenecen:
+La razón por la que las personas confían a Gotong sus hogares, familias o dinero es que las fronteras son reales y les pertenecen:
 
 1. **Gobernado** — cada despacho y resultado es un transcript append-only legible. Las gates de aprobación de la bandeja de entrada son la parada de autobús, no el guardia de seguridad; el gate en sí no puede ser omitido por el workflow.
 
-2. **Local** — las credenciales viven encriptadas en tu propio `.aipehub/`. La federación con otro hub comparte una capacidad, no tu vault. El framework nunca ejecuta el modelo, por lo que no hay ninguna llamada de juicio oculta.
+2. **Local** — las credenciales viven encriptadas en tu propio `.gotong/`. La federación con otro hub comparte una capacidad, no tu vault. El framework nunca ejecuta el modelo, por lo que no hay ninguna llamada de juicio oculta.
 
 3. **Auditable** — el transcript es append-only; nada se puede sobreescribir silenciosamente. El framework nunca ejecuta el LLM, por lo que no hay inferencia sin trazas.
 
@@ -136,7 +136,7 @@ El leaderboard de citas específicamente está diseñado para que **compartir se
 
 ---
 
-## §8 No-objetivos (cosas que AipeHub deliberadamente rechaza convertirse)
+## §8 No-objetivos (cosas que Gotong deliberadamente rechaza convertirse)
 
 | No-objetivo | Por qué no |
 |---|---|
@@ -173,7 +173,7 @@ Los cambios a §§3-9 siguen el proceso normal de PR (un Mantenedor de revisión
 
 ## §11 Hogar e invitación
 
-El hogar canónico del proyecto es `https://github.com/Emir-Aksoy/AipeHub`.
+El hogar canónico del proyecto es `https://github.com/Emir-Aksoy/Gotong`.
 
 Si estás leyendo esto como nuevo colaborador: bienvenido. La entrada más amigable para humanos es [`README.md`](../../README.md) o [`docs/OVERVIEW.md`](../../docs/OVERVIEW.md). Si eres un agente de AI leyendo esto al comienzo de una sesión: el mapa de documentos en §5 de [`CLAUDE.md`](../../CLAUDE.md) es tu punto de entrada; estos estatutos son el principio no negociable.
 
@@ -202,10 +202,10 @@ El protocolo de wire completo está en [`docs/PROTOCOL.md`](../../docs/PROTOCOL.
 
 | Schema | Propósito |
 |---|---|
-| `aipehub.agent/v1` | Definición de agente gestionado por el host (proveedor LLM, capacidades, servicios, MCP) |
-| `aipehub.team/v1` | Bundle de equipo — múltiples agentes + workflows en un solo archivo importable |
-| `aipehub.workflow/v1` | Workflow declarativo (trigger, steps, dispatch, predicate, human:) |
-| `aipehub.template/v1` | Plantilla de hub — N agentes + N workflows + slots de KB + apiKeyPrompt + sidecar encriptado opcional |
-| `aipehub.bundle/v1` | Bundle heredado (superset de aipehub.agent/v1, soportado para compatibilidad) |
+| `gotong.agent/v1` | Definición de agente gestionado por el host (proveedor LLM, capacidades, servicios, MCP) |
+| `gotong.team/v1` | Bundle de equipo — múltiples agentes + workflows en un solo archivo importable |
+| `gotong.workflow/v1` | Workflow declarativo (trigger, steps, dispatch, predicate, human:) |
+| `gotong.template/v1` | Plantilla de hub — N agentes + N workflows + slots de KB + apiKeyPrompt + sidecar encriptado opcional |
+| `gotong.bundle/v1` | Bundle heredado (superset de gotong.agent/v1, soportado para compatibilidad) |
 
 Todos los formatos son validados en tiempo de importación por el parser del runtime correspondiente; un archivo con errores de formato rechaza inmediatamente con un error legible para humanos.

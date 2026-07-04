@@ -6,7 +6,7 @@
 
 import { describe, expect, it } from 'vitest'
 
-import { butlerGateState } from '@aipehub/personal-butler'
+import { butlerGateState } from '@gotong/personal-butler'
 
 import { butlerApprovalItemFor } from '../src/personal-butler-escalation.js'
 

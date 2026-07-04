@@ -1,5 +1,5 @@
 /**
- * @aipehub/im-telegram — public surface.
+ * @gotong/im-telegram — public surface.
  */
 
 export { TelegramBridge, type TelegramBridgeOptions } from './bridge.js'

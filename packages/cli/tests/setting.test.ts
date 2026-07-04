@@ -1,7 +1,7 @@
 /**
- * `aipehub setting` tests — the deterministic ops console CLI face.
+ * `gotong setting` tests — the deterministic ops console CLI face.
  *
- * Like `start` / `check`, `setting` never imports `@aipehub/host` at build time;
+ * Like `start` / `check`, `setting` never imports `@gotong/host` at build time;
  * it resolves the host lazily and drives its non-booting `./ops` subpath. So both
  * the host-present and host-absent paths are driven through INJECTED seams
  * (`resolveHost` / `importOps` / `runProcess` / `confirm` / `io`), keeping the
@@ -27,7 +27,7 @@ import type { ReplIo } from '../src/repl/loop.js'
 
 // ── tiny fakes ───────────────────────────────────────────────────────────────
 
-/** A fake `@aipehub/host/ops` module whose `runOpsCommand` is a spy. */
+/** A fake `@gotong/host/ops` module whose `runOpsCommand` is a spy. */
 function fakeOps(
   runImpl: (...a: unknown[]) => Promise<{ lines: string[] }> = async () => ({ lines: ['ok'] }),
 ) {
@@ -57,8 +57,8 @@ function scriptedIo(lines: string[]): { io: ReplIo; writes: string[] } {
 }
 
 // A realistic resolved `.` entry so host-root derivation is assertable.
-const HOST_ENTRY = 'file:///opt/app/node_modules/@aipehub/host/dist/index.js'
-const HOST_ROOT = '/opt/app/node_modules/@aipehub/host'
+const HOST_ENTRY = 'file:///opt/app/node_modules/@gotong/host/dist/index.js'
+const HOST_ROOT = '/opt/app/node_modules/@gotong/host'
 
 // ═════════════════════════════════════════════════════════════════════════════
 // dispatch wiring
@@ -67,7 +67,7 @@ const HOST_ROOT = '/opt/app/node_modules/@aipehub/host'
 describe('runCli setting wiring', () => {
   it('routes `setting` through the dispatcher (not "unknown command")', async () => {
     // Under Vitest `import.meta.resolve` is unavailable, so the real
-    // `resolveModule('@aipehub/host')` returns null → host-absent branch → exit
+    // `resolveModule('@gotong/host')` returns null → host-absent branch → exit
     // 1 with the install hint. The point of THIS test is wiring: the dispatcher
     // reaches `setting` (returns 1), not the default arm (returns 2).
     const errs: string[] = []
@@ -78,7 +78,7 @@ describe('runCli setting wiring', () => {
     errSpy.mockRestore()
 
     expect(code).toBe(1)
-    expect(errs.join('\n')).toContain('@aipehub/host is not installed')
+    expect(errs.join('\n')).toContain('@gotong/host is not installed')
   })
 
   it('`help setting` documents the command', () => {
@@ -90,7 +90,7 @@ describe('runCli setting wiring', () => {
     runCli(['help', 'setting'])
     out.mockRestore()
     const text = writes.join('')
-    expect(text).toContain('aipehub setting')
+    expect(text).toContain('gotong setting')
     expect(text).toContain('cold-start')
     expect(text).toContain('CLI ONLY')
   })
@@ -112,8 +112,8 @@ describe('setting — host absent', () => {
     expect(code).toBe(1)
     expect(importOps).not.toHaveBeenCalled()
     const text = err.join('\n')
-    expect(text).toContain('@aipehub/host is not installed')
-    expect(text).toContain('npm i -g @aipehub/host')
+    expect(text).toContain('@gotong/host is not installed')
+    expect(text).toContain('npm i -g @gotong/host')
   })
 })
 
@@ -123,12 +123,12 @@ describe('setting — host absent', () => {
 
 describe('setting — online ops via runOpsCommand', () => {
   it('runs status, forwards the cli caller + space deps, prints the lines', async () => {
-    const { module, runOpsCommand } = fakeOps(async () => ({ lines: ['workspace : .aipehub', 'config    : ok'] }))
+    const { module, runOpsCommand } = fakeOps(async () => ({ lines: ['workspace : .gotong', 'config    : ok'] }))
     const out: string[] = []
     const code = await setting(['status'], {
       resolveHost: () => HOST_ENTRY,
       importOps: async () => module,
-      env: { AIPE_SPACE: '/srv/space' },
+      env: { GOTONG_SPACE: '/srv/space' },
       out: (l) => out.push(l),
     })
     expect(code).toBe(0)
@@ -137,7 +137,7 @@ describe('setting — online ops via runOpsCommand', () => {
       'status',
       [],
       { surface: 'cli', allowConfigWrite: true },
-      { spaceDir: '/srv/space', env: { AIPE_SPACE: '/srv/space' } },
+      { spaceDir: '/srv/space', env: { GOTONG_SPACE: '/srv/space' } },
     )
     expect(out.join('')).toContain('config    : ok')
   })
@@ -152,7 +152,7 @@ describe('setting — online ops via runOpsCommand', () => {
     expect(runOpsCommand).toHaveBeenCalledWith('check', ['--strict'], expect.anything(), expect.anything())
   })
 
-  it('defaults spaceDir to .aipehub when AIPE_SPACE is unset', async () => {
+  it('defaults spaceDir to .gotong when GOTONG_SPACE is unset', async () => {
     const { module, runOpsCommand } = fakeOps()
     await setting(['list'], {
       resolveHost: () => HOST_ENTRY,
@@ -160,7 +160,7 @@ describe('setting — online ops via runOpsCommand', () => {
       env: {},
       out: () => {},
     })
-    expect(runOpsCommand).toHaveBeenCalledWith('list', [], expect.anything(), { spaceDir: '.aipehub', env: {} })
+    expect(runOpsCommand).toHaveBeenCalledWith('list', [], expect.anything(), { spaceDir: '.gotong', env: {} })
   })
 
   it('surfaces an OpsError message and exits 1 (unknown command)', async () => {
@@ -244,7 +244,7 @@ describe('setting restore — destructive, confirmation-gated', () => {
     })
     expect(code).toBe(2)
     expect(runProcess).not.toHaveBeenCalled()
-    expect(err.join('')).toContain('usage: aipehub setting restore')
+    expect(err.join('')).toContain('usage: gotong setting restore')
   })
 })
 
@@ -270,7 +270,7 @@ describe('setting rotate-master-key — destructive, confirmation-gated', () => 
     })
     expect(code).toBe(0)
     expect(runProcess).toHaveBeenCalledWith(process.execPath, [
-      `${HOST_ROOT}/bin/aipehub-host.js`,
+      `${HOST_ROOT}/bin/gotong-host.js`,
       'rotate-master-key',
     ])
   })
@@ -285,7 +285,7 @@ describe('setting rotate-master-key — destructive, confirmation-gated', () => 
     })
     expect(code).toBe(1)
     expect(runProcess).not.toHaveBeenCalled()
-    expect(err.join('\n')).toContain('@aipehub/host is not installed')
+    expect(err.join('\n')).toContain('@gotong/host is not installed')
   })
 })
 
@@ -378,7 +378,7 @@ describe('runSettingShell — interactive', () => {
     // destructive ops never reach the runner OR a spawned process from the shell.
     expect(runOpsCommand).not.toHaveBeenCalled()
     expect(runProcess).not.toHaveBeenCalled()
-    expect(writes.join('')).toContain('aipehub setting restore')
+    expect(writes.join('')).toContain('gotong setting restore')
   })
 
   it('exits 1 when the host is absent', async () => {
@@ -386,7 +386,7 @@ describe('runSettingShell — interactive', () => {
     const { io } = scriptedIo(['status', 'exit'])
     const code = await runSettingShell({ resolveHost: () => null, io, err: (l) => err.push(l) })
     expect(code).toBe(1)
-    expect(err.join('\n')).toContain('@aipehub/host is not installed')
+    expect(err.join('\n')).toContain('@gotong/host is not installed')
   })
 
   it('bare `setting` (no subcommand) enters the shell', async () => {

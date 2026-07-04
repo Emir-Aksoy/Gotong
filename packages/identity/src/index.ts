@@ -1,8 +1,8 @@
 /**
- * @aipehub/identity — public re-exports.
+ * @gotong/identity — public re-exports.
  *
  * Consumers import from the package root:
- *   import { openIdentityStore, type User } from '@aipehub/identity'
+ *   import { openIdentityStore, type User } from '@gotong/identity'
  *
  * Internal modules (db / schema / credentials / tokens) are not exported;
  * they're implementation details of `IdentityStore` and may change

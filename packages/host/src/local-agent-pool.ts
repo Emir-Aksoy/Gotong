@@ -12,7 +12,7 @@ import {
   type ServiceUseSpec,
   type Space,
   type Task,
-} from '@aipehub/core'
+} from '@gotong/core'
 import {
   ComposedToolset,
   DispatchToolset,
@@ -25,7 +25,7 @@ import {
   type LlmProvider,
   type LlmUsage,
   type LlmUsageSinkMeta,
-} from '@aipehub/llm'
+} from '@gotong/llm'
 import { PersonalGrowthAgent } from './agents/personal-growth-agent.js'
 import {
   DEFAULT_PRICING,
@@ -33,9 +33,9 @@ import {
   resolveModelPrice,
   type PricingTable,
 } from './pricing.js'
-import { AnthropicProvider } from '@aipehub/llm-anthropic'
-import { OpenAIProvider } from '@aipehub/llm-openai'
-import { McpToolset, type McpServerConfig, type NamespacedTool } from '@aipehub/mcp-client'
+import { AnthropicProvider } from '@gotong/llm-anthropic'
+import { OpenAIProvider } from '@gotong/llm-openai'
+import { McpToolset, type McpServerConfig, type NamespacedTool } from '@gotong/mcp-client'
 import {
   resolveMcpServerConfig,
   envSecretSource,
@@ -53,14 +53,14 @@ import {
   type Owner,
   type Scope,
   type ServiceCtx,
-} from '@aipehub/services-sdk'
+} from '@gotong/services-sdk'
 
 import type { HubServices, ServiceUseSpec as AttachSpec } from './services/index.js'
 import type { OrgApiPool, QuotaGate } from './org-api-pool.js'
 import {
   AUDIT_ACTIONS,
   type IdentityStore,
-} from '@aipehub/identity'
+} from '@gotong/identity'
 
 const log = createLogger('local-agents')
 
@@ -76,8 +76,8 @@ const BUDGET_PERIOD = 'daily' as const
 // M8 — operator override: when set, an unpriced model may run even though a
 // cost cap can't meter it. Default (unset) is fail-closed.
 const ALLOW_UNPRICED_MODELS =
-  process.env.AIPE_ALLOW_UNPRICED_MODELS === '1' ||
-  process.env.AIPE_ALLOW_UNPRICED_MODELS === 'true'
+  process.env.GOTONG_ALLOW_UNPRICED_MODELS === '1' ||
+  process.env.GOTONG_ALLOW_UNPRICED_MODELS === 'true'
 
 /**
  * Phase 17 — derive usage-ledger attribution from a task. `origin`
@@ -208,9 +208,9 @@ export type ButlerFactory = (base: LlmAgentOptions, mcp?: ButlerMcpHandoff) => P
  * of the host binary's startup code, factored into a class so the Web
  * layer can call its `start` / `stop` / `availableProviders` through the
  * `ManagedAgentLifecycle` interface without taking a direct dependency
- * on `@aipehub/llm-*`.
+ * on `@gotong/llm-*`.
  *
- * Everything stays in one process, one package (`@aipehub/host`). When
+ * Everything stays in one process, one package (`@gotong/host`). When
  * the host boots, the pool walks `agents.json` and instantiates an
  * `LlmAgent` for every record that has a `managed` spec, registering
  * each one on the same Hub the WS / Web layers serve. When an admin
@@ -323,7 +323,7 @@ export class LocalAgentPool implements ManagedAgentLifecycle {
    * Phase 17 — effective model price table. Used by the usage sink to
    * resolve `cost_micros` before appending a ledger row. Defaults to the
    * built-in {@link DEFAULT_PRICING}; the host loads any
-   * `<AIPE_SPACE>/pricing.json` override and passes it in.
+   * `<GOTONG_SPACE>/pricing.json` override and passes it in.
    */
   private readonly pricingTable: PricingTable
   /**
@@ -360,7 +360,7 @@ export class LocalAgentPool implements ManagedAgentLifecycle {
   /**
    * BF-M3 — when true, EVERY `chat`-capable managed LLM agent becomes a butler
    * (unless it sets `managed.butler === false`). The host sets this from
-   * `AIPE_BUTLER` (default on). Default `false` here so a pool constructed
+   * `GOTONG_BUTLER` (default on). Default `false` here so a pool constructed
    * without the flag (tests, non-butler hosts) keeps the historical behaviour.
    * Only consulted when `butlerFactory` is present.
    */
@@ -414,7 +414,7 @@ export class LocalAgentPool implements ManagedAgentLifecycle {
     butlerFactory?: ButlerFactory
     /**
      * BF-M3 — default every `chat`-capable LLM agent to a butler (see field
-     * doc). The host sets this from `AIPE_BUTLER`. Default `false`.
+     * doc). The host sets this from `GOTONG_BUTLER`. Default `false`.
      */
     butlerDefaultOn?: boolean
   }) {
@@ -696,7 +696,7 @@ export class LocalAgentPool implements ManagedAgentLifecycle {
    *   - only the generic `'llm'` kind is eligible (specialized kinds like
    *     `personal-growth` keep their bespoke behaviour);
    *   - per-agent `managed.butler === true` opts IN, else the pool default
-   *     {@link butlerDefaultOn} (host sets it from `AIPE_BUTLER`);
+   *     {@link butlerDefaultOn} (host sets it from `GOTONG_BUTLER`);
    *   - the agent must advertise `chat`, so the butler only stands in front of
    *     the conversational / IM channel, not every back-office LLM agent.
    */
@@ -1377,7 +1377,7 @@ export class LocalAgentPool implements ManagedAgentLifecycle {
     if (!record.managed) return undefined
     if (record.managed.provider === 'mock') return undefined
     // v5 A-M3 — auto-revoke applies to ANY vault-backed key (org pool or a
-    // member's own per-user key); both are AipeHub-managed rows we can
+    // member's own per-user key); both are Gotong-managed rows we can
     // soft-delete on a 401. per-agent / workspace / env stay operator-owned.
     if (!resolution) return undefined
     const src = resolution.source
@@ -1771,7 +1771,7 @@ function buildToolset(
   )
   const toolset = new McpToolset({ servers: configs })
   // Route MCP-server stderr into our structured logger. Operators
-  // running `journalctl -u aipehub` get one unified stream.
+  // running `journalctl -u gotong` get one unified stream.
   toolset.on('server-stderr', ({ serverName, line }) => {
     log.info('mcp server stderr', { agentId, serverName, line })
   })

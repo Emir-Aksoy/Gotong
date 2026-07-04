@@ -1,12 +1,12 @@
 {
-  "name": "@aipehub/llm-anthropic",
+  "name": "@gotong/llm-anthropic",
   "version": "3.1.0",
   "type": "module",
-  "description": "AipeHub LLM provider for Anthropic — wraps @anthropic-ai/sdk and implements LlmProvider.",
+  "description": "Gotong LLM provider for Anthropic — wraps @anthropic-ai/sdk and implements LlmProvider.",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/Emir-Aksoy/AipeHub.git",
+    "url": "https://github.com/Emir-Aksoy/Gotong.git",
     "directory": "packages/llm-anthropic"
   },
   "publishConfig": {
@@ -33,7 +33,7 @@
     "prepack": "tsc -p tsconfig.json"
   },
   "dependencies": {
-    "@aipehub/llm": "workspace:*"
+    "@gotong/llm": "workspace:*"
   },
   "peerDependencies": {
     "@anthropic-ai/sdk": "^0.96.0"

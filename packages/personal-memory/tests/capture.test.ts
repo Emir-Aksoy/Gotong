@@ -1,4 +1,4 @@
-import type { Task } from '@aipehub/core'
+import type { Task } from '@gotong/core'
 import { describe, expect, it } from 'vitest'
 
 import {

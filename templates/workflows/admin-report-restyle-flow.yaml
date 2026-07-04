@@ -1,7 +1,7 @@
 # =============================================================================
 # Workflow: 行政任务 · 报告改写（快速复用既有材料出新口径报告）
 # Companion team: templates/teams/admin-task-orchestration.yaml
-# Schema: aipehub.workflow/v1
+# Schema: gotong.workflow/v1
 #
 # 这个 workflow 解决一个具体痛点：
 #   "上周写过给上级的工作报告了，这周要给媒体外宣，下周还要给党组会 ——
@@ -12,7 +12,7 @@
 # 触发：admin 派一个 capability=restyle-report 的任务即可。
 # =============================================================================
 
-schema: aipehub.workflow/v1
+schema: gotong.workflow/v1
 
 workflow:
   id: admin-report-restyle-flow

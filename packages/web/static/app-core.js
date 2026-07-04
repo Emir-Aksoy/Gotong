@@ -1,4 +1,4 @@
-/* AipeHub web UI — shared core (v2.0).
+/* Gotong web UI — shared core (v2.0).
  *
  * "File-first" mindset extends to the browser: NO localStorage, NO
  * sessionStorage. The only state the browser keeps is HttpOnly cookies
@@ -230,7 +230,7 @@
       workflowsTitle: '工作流',
       importWorkflow: '导入工作流',
       workflowsHint: '工作流把多个 agent 按顺序/并行串起来。admin 派一个任务到工作流的触发能力，整个流程自动跑完，结果一次性回来。模板：',
-      workflowImportHint: '只支持 schema: aipehub.workflow/v1 格式。导入后立刻在 Hub 注册为一个 workflow:<id> 参与者，并写入 .aipehub/workflows/definitions/ 目录（host 重启自动加载）。',
+      workflowImportHint: '只支持 schema: gotong.workflow/v1 格式。导入后立刻在 Hub 注册为一个 workflow:<id> 参与者，并写入 .gotong/workflows/definitions/ 目录（host 重启自动加载）。',
       workflowsEmpty: '尚未加载任何工作流',
       workflowsSummary: (count) => `已加载 ${count} 个`,
       // LIFE-L1-M3 — 定时(零 LLM 工作流调度)卡
@@ -723,7 +723,7 @@
       settingOpsOk: '完成。',
       settingOpsWhereCli: '去服务器 CLI 跑：此操作期间 hub 已停机或正被替换，只有 CLI 能执行。',
       settingOpsWhereOwner: '由 hub 所有者在管理网页或服务器 CLI 修改。',
-      settingOpsUsageConfigSet: 'KEY value，如 AIPE_WEB_PORT 8080',
+      settingOpsUsageConfigSet: 'KEY value，如 GOTONG_WEB_PORT 8080',
       settingOpsUsageConfigPrice: 'model inputPer1M outputPer1M [cacheWrite] [cacheRead]',
       settingOpsCmd: {
         status: {
@@ -732,7 +732,7 @@
         },
         check: {
           title: '校验工作区',
-          summary: '确定性的配置 + 工作流 + 智能体校验（与 aipehub check 和启动时同一套）。',
+          summary: '确定性的配置 + 工作流 + 智能体校验（与 gotong check 和启动时同一套）。',
         },
         list: { title: '列出运维命令', summary: '每条 setting 命令、它的层级，以及能在哪里运行。' },
         inventory: { title: '备份清单', summary: '备份目录里的可恢复候选（只读列出，最新在前）。' },
@@ -743,7 +743,7 @@
         },
         'config-set': {
           title: '设置一个 env 旋钮',
-          summary: '在 <space>/aipehub.env 写一个白名单内的非密钥 env 旋钮（下次启动生效）。',
+          summary: '在 <space>/gotong.env 写一个白名单内的非密钥 env 旋钮（下次启动生效）。',
         },
         'config-price': {
           title: '设置一个模型价格',
@@ -1018,7 +1018,7 @@
       opsQuickHint: '部署相关的状态和配置都收在这一页:IM 通道 / 凭证 / 体检 / 运维控制台。',
       opsKeysBtn: 'API Key 管理',
       imStatusTitle: 'IM 通道',
-      imStatusNone: '还没有已连接的 IM 通道。可用首次启动向导粘贴 bot token,或设环境变量 (如 AIPE_TELEGRAM_BOT_TOKEN),重启 host 后生效。',
+      imStatusNone: '还没有已连接的 IM 通道。可用首次启动向导粘贴 bot token,或设环境变量 (如 GOTONG_TELEGRAM_BOT_TOKEN),重启 host 后生效。',
       imStatusHint: '换 token:设置对应环境变量后重启 host 即可 — 环境变量永远优先于密钥库里存的 token。',
       imSourceEnv: '环境变量',
       imSourceVault: '密钥库',
@@ -1092,7 +1092,7 @@
       psChannelsDesc: '告警越线时把<strong>计数摘要</strong>投递到 webhook / 即时通讯(IM) / 邮件(边沿触发:开启发一次、解决发一次)。' +
         '渠道只存<strong>环境变量名</strong>(headerEnv)与目的地,绝不存密钥本身 —— host 在投递时从该环境变量读取令牌。' +
         'IM 用<strong>无状态平台 send</strong>:slack/discord/lark 是 incoming-webhook(令牌在 URL 里),telegram 走 bot API(令牌从环境变量读、拼进路径)。' +
-        '<strong>主动投递需开启轮询</strong>:设 <code>AIPE_PEER_SUMMARY_ALERT_SWEEP_MS</code>(≥10000)host 才会定期' +
+        '<strong>主动投递需开启轮询</strong>:设 <code>GOTONG_PEER_SUMMARY_ALERT_SWEEP_MS</code>(≥10000)host 才会定期' +
         '求值并投递;未设时渠道仅在下方「测试」按钮触发时发出。',
       psFieldKind: '类型',
       psKindIm: 'IM (即时通讯)',
@@ -1288,7 +1288,7 @@
       idnColTime: '时间',
       a2aTitle: '出站 A2A 智能体',
       a2aDesc:
-        '注册本 hub 对外转发的 A2A 智能体。把某个本地能力 (capability) 派发出去时,会转成对外部智能体的 <code>message/send</code> 调用。替代旧的 <code>AIPE_A2A_AGENTS</code> 环境变量,改为持久化 + 即时生效。',
+        '注册本 hub 对外转发的 A2A 智能体。把某个本地能力 (capability) 派发出去时,会转成对外部智能体的 <code>message/send</code> 调用。替代旧的 <code>GOTONG_A2A_AGENTS</code> 环境变量,改为持久化 + 即时生效。',
       a2aTokenNote:
         '<strong>令牌不在这里填</strong> —— 「令牌环境变量」是 host 读取 bearer 的环境变量<strong>名</strong>,密钥本身永不进数据库或浏览器。某行环境变量未设置时显示「未激活」;在主机设好后把该行停用→启用即可让 host 重新读取并上线 (无需重启)。',
       a2aAddSummary: '注册出站智能体',
@@ -1297,7 +1297,7 @@
       a2aPhCaps: '能力 capabilities (逗号分隔, 至少一个)',
       a2aPhUrl: '远端 A2A message/send URL',
       a2aPhTokenEnv: '令牌环境变量名 (如 WRITER_A2A_TOKEN)',
-      a2aPhPeerId: 'X-Aipe-Peer-Id (AipeHub↔AipeHub 时, 可选)',
+      a2aPhPeerId: 'X-Gotong-Peer-Id (Gotong↔Gotong 时, 可选)',
       a2aPhTargetSkill: '远端 skill (metadata.skill, 可选)',
       a2aLifecycleLabel:
         '长任务模式 (远端返回挂起任务时轮询 <code>tasks/get</code>; 不勾=阻塞, 远端必须一轮回完)',
@@ -1424,7 +1424,7 @@
       padmTitle: '对端 / Peers (联邦)',
       padmDesc:
         '登记本 hub 信任的联邦对端。认证是<strong>对称</strong>的:' +
-        '同一 bearer token 两边各登记一次 —— 用 <code>aipehub mint-peer-token</code> 生成,' +
+        '同一 bearer token 两边各登记一次 —— 用 <code>gotong mint-peer-token</code> 生成,' +
         '走安全信道交换。token 是 secret, 加密存 vault, <strong>永不回显</strong>(只能写入 / 轮换)。',
       padmLabelOptional: '标签 (可选)',
       padmLabelPlaceholder: '合作方 hub',
@@ -1469,7 +1469,7 @@
       padmPolicySaved: '策略已保存',
       padmPolicySaveFailed: (e) => `保存策略失败: ${e}`,
       padmRotatePrompt:
-        '粘贴新的 peer token (用 `aipehub mint-peer-token` 生成)。\n两边都要换成同一新值。',
+        '粘贴新的 peer token (用 `gotong mint-peer-token` 生成)。\n两边都要换成同一新值。',
       padmTokenEmpty: 'token 不能为空',
       padmTokenRotated: 'token 已轮换',
       padmConfirmRemove: (name) => `删除 peer ${name}? 链路会断开。`,
@@ -1640,7 +1640,7 @@
       wfaStreamProgress: (done, chars, tools) =>
         `${done ? '✓ 流结束' : '● 生成中'} · ${chars} chars${tools ? ` · 🔧 ${tools}` : ''}`,
       wfaStreamEnd: '✓ 流结束 — 等待 schema 校验 + 深度检查…',
-      wfaAssistDisabled: 'AI 助手未启用 — 设置 AIPE_ASSISTANT_PROVIDER + 对应 API key 后重启 host',
+      wfaAssistDisabled: 'AI 助手未启用 — 设置 GOTONG_ASSISTANT_PROVIDER + 对应 API key 后重启 host',
       wfaGenFailed: (e) => `生成失败:${e}`,
       wfaGenerateBtn: '生成草稿',
       wfaSaving: '保存中…',
@@ -1654,7 +1654,7 @@
       usgGroupPeer: '联邦对端',
       usgTitle: '用量 / 成本',
       usgIntro:
-        '从用量账本(usage ledger)按维度汇总 token 与成本。成本由服务端按模型价目表算好(整数 micro-USD),这里换算成美元显示;未知模型记 token、成本计 0。价目可用 <code>&lt;AIPE_SPACE&gt;/pricing.json</code> 覆盖。',
+        '从用量账本(usage ledger)按维度汇总 token 与成本。成本由服务端按模型价目表算好(整数 micro-USD),这里换算成美元显示;未知模型记 token、成本计 0。价目可用 <code>&lt;GOTONG_SPACE&gt;/pricing.json</code> 覆盖。',
       usgGroupByLabel: '分组',
       usgRefreshBtn: '刷新',
       usgColDimension: '维度',
@@ -1721,7 +1721,7 @@
       repEmpty: '还没有反馈数据。一旦跨 hub 任务跑过 + feedback ledger 有写入,这里会自动出现。',
       contribToggleTitle: '是否将我派发的任务计入贡献榜',
       setupTitle: '首次设置 — 给 owner 设密码',
-      setupIntro: 'host 已启动,但 owner 账号还没设密码。在<strong>本机</strong>(<code>127.0.0.1</code>)上设置一次,以后用 Email + 密码登录。<br>反向代理后的部署请改用 CLI: <code>aipehub-host mint-admin-token</code>。',
+      setupIntro: 'host 已启动,但 owner 账号还没设密码。在<strong>本机</strong>(<code>127.0.0.1</code>)上设置一次,以后用 Email + 密码登录。<br>反向代理后的部署请改用 CLI: <code>gotong-host mint-admin-token</code>。',
       setupPwNew: '新密码 (至少 12 位)',
       setupPwConfirm: '再输一次',
       setupSubmit: '设置密码',
@@ -1796,7 +1796,7 @@
       quickChatNoResult: '没有拿到回应（可能超时）。',
       quickChatFailed: (msg) => `发送失败：${msg}`,
       quickChatAgentFailed: (reason) => `它没能回应：${reason}`,
-      loginTitle: '登录 AipeHub',
+      loginTitle: '登录 Gotong',
       loginPassword: '密码',
       loginTotp: '两步验证码',
       loginTotpPlaceholder: '6 位验证码',
@@ -1903,15 +1903,15 @@
       wfAssistBtn: 'AI 助手 (beta)',
       close: '关闭',
       download: '下载',
-      disclaimerTitle: '欢迎使用 AipeHub · 先看几条',
-      disclaimerP1: '<strong>1. 这是个人本地工具,不是云服务。</strong>你的对话、画像、报告、API key 都存在你这台机器的 <code>.aipehub-*</code> 目录里。我们不收集任何数据,host 也不上报任何遥测。',
+      disclaimerTitle: '欢迎使用 Gotong · 先看几条',
+      disclaimerP1: '<strong>1. 这是个人本地工具,不是云服务。</strong>你的对话、画像、报告、API key 都存在你这台机器的 <code>.gotong-*</code> 目录里。我们不收集任何数据,host 也不上报任何遥测。',
       disclaimerP2: '<strong>2. LLM 推理走第三方 API。</strong>你的 4 段自述会发给你配置的模型供应商(DeepSeek / Anthropic / OpenAI 等)做推理。供应商各自有自己的数据政策,看他们的隐私条款。如果有顾虑,可以用 mock provider 或本地 LLM。',
       disclaimerP3: '<strong>3. 这不是医生 / 心理咨询师 / 财务顾问 / 关系治疗师的替代品。</strong>个人成长教练们都被设计成"有边界的陪伴者"——触及红旗信号会让你去找专业人。不要把它们当成诊断或处方。',
       disclaimerP4: '<strong>4. 如果你正在心理危机中,请立即联系:</strong>',
       disclaimerCrisisCn1: '🇨🇳 北京心理危机研究与干预中心:<strong>010-82951332</strong>',
       disclaimerCrisisCn2: '🇨🇳 全国心理援助热线:<strong>400-161-9995</strong>',
       disclaimerCrisisIntl: '🌏 其他地区:<a href="https://findahelpline.com" target="_blank" rel="noopener">findahelpline.com</a>',
-      disclaimerP5: '<strong>5. 你可以随时删除自己的数据。</strong>停掉 host,删除 <code>.aipehub-*</code> 目录即可彻底清掉。',
+      disclaimerP5: '<strong>5. 你可以随时删除自己的数据。</strong>停掉 host,删除 <code>.gotong-*</code> 目录即可彻底清掉。',
       disclaimerAccept: '我看完了,开始用',
       growthReportsTitle: '成长报告',
       growthReportsHint: '个人成长工作流跑完一轮后,综合规划师把 7 段产出汇总成一篇 Markdown 报告,落在这里。点"下载"把它存成本地文件。',
@@ -1919,7 +1919,7 @@
       colGeneratedTime: '生成时间',
       colActions: '操作',
       wfAssistModalTitle: '工作流架构师 — 生成工作流草稿',
-      wfAssistModalHint: '用一句话描述你想要的工作流(中文 / 英文都行)。AI 会按 <code>aipehub.workflow/v1</code> 生成 YAML 草稿,自动 validate 通过后才能保存。',
+      wfAssistModalHint: '用一句话描述你想要的工作流(中文 / 英文都行)。AI 会按 <code>gotong.workflow/v1</code> 生成 YAML 草稿,自动 validate 通过后才能保存。',
       wfAssistDescLabel: '描述',
       wfAssistDescPh: '例:每周一爬 5 个新闻源、用 DeepSeek 总结、发到 Telegram 群',
       wfAssistGenerate: '生成草稿',
@@ -1942,8 +1942,8 @@
       wfaArchExplainLoadFailed: '加载工作流失败',
       wfStartTitle: '开始工作流',
       wfStartSubmit: '派发任务',
-      bundleImportHint: 'aipehub.bundle/v1 格式 — 一个文件包含一组 agent + 一条 workflow + API key 输入提示。导入后所有 agent 一次创建,workflow 自动注册,可直接派发。',
-      bundleImportTemplates: '模板：<a href="https://github.com/AipeHub/AipeHub/tree/main/templates/bundles" target="_blank" rel="noopener">templates/bundles/</a> · 或用内置模板:',
+      bundleImportHint: 'gotong.bundle/v1 格式 — 一个文件包含一组 agent + 一条 workflow + API key 输入提示。导入后所有 agent 一次创建,workflow 自动注册,可直接派发。',
+      bundleImportTemplates: '模板：<a href="https://github.com/Gotong/Gotong/tree/main/templates/bundles" target="_blank" rel="noopener">templates/bundles/</a> · 或用内置模板:',
       bundleBuiltinPg: '🎁 用内置模板:个人成长 (7 教练 + 12 周墙上计划)',
       bundleKeyPh: '为 openai-compatible 类 agent 一次性填 key (留空跳过)',
       bundleKeyHint: '如果 bundle 里有 <code>openai-compatible</code> 类 agent (e.g. DeepSeek),粘贴一次 API key,自动应用到所有该类 agent — 不再需要逐个手填。',
@@ -2162,7 +2162,7 @@
       workflowsTitle: 'Workflows',
       importWorkflow: 'Import workflow',
       workflowsHint: 'Workflows chain several agents in sequence / in parallel. Admin dispatches one task to the workflow\'s trigger capability and gets one final result back. Templates:',
-      workflowImportHint: 'Accepts schema: aipehub.workflow/v1 only. On import, the runner is registered immediately as a workflow:<id> participant and the file is written to .aipehub/workflows/definitions/ (host auto-loads on restart).',
+      workflowImportHint: 'Accepts schema: gotong.workflow/v1 only. On import, the runner is registered immediately as a workflow:<id> participant and the file is written to .gotong/workflows/definitions/ (host auto-loads on restart).',
       workflowsEmpty: 'No workflows loaded yet',
       workflowsSummary: (count) => `${count} loaded`,
       // LIFE-L1-M3 — zero-LLM workflow-schedule card
@@ -2650,7 +2650,7 @@
       settingOpsOk: 'Done.',
       settingOpsWhereCli: 'Run it from the server CLI: the hub is down (or being replaced) during this operation, so only the CLI can.',
       settingOpsWhereOwner: 'A hub owner makes this change from the admin web UI or the server CLI.',
-      settingOpsUsageConfigSet: 'KEY value, e.g. AIPE_WEB_PORT 8080',
+      settingOpsUsageConfigSet: 'KEY value, e.g. GOTONG_WEB_PORT 8080',
       settingOpsUsageConfigPrice: 'model inputPer1M outputPer1M [cacheWrite] [cacheRead]',
       settingOpsCmd: {
         status: {
@@ -2659,7 +2659,7 @@
         },
         check: {
           title: 'Validate workspace',
-          summary: 'Deterministic config + workflow + agent validation (same checks as aipehub check and boot).',
+          summary: 'Deterministic config + workflow + agent validation (same checks as gotong check and boot).',
         },
         list: { title: 'List ops commands', summary: 'Every setting command, its tier, and where it can run.' },
         inventory: { title: 'Backup inventory', summary: 'Recovery candidates in the backup directory (read-only, newest first).' },
@@ -2670,7 +2670,7 @@
         },
         'config-set': {
           title: 'Set an env knob',
-          summary: 'Set one whitelisted non-secret env knob in <space>/aipehub.env (takes effect on restart).',
+          summary: 'Set one whitelisted non-secret env knob in <space>/gotong.env (takes effect on restart).',
         },
         'config-price': {
           title: 'Set a model price',
@@ -2950,7 +2950,7 @@
       opsQuickHint: 'Deployment-related status and settings live on this page: IM channels / credentials / health check / ops console.',
       opsKeysBtn: 'Manage API keys',
       imStatusTitle: 'IM channels',
-      imStatusNone: 'No IM channel connected yet. Paste a bot token in the first-boot wizard, or set an env var (e.g. AIPE_TELEGRAM_BOT_TOKEN) and restart the host.',
+      imStatusNone: 'No IM channel connected yet. Paste a bot token in the first-boot wizard, or set an env var (e.g. GOTONG_TELEGRAM_BOT_TOKEN) and restart the host.',
       imStatusHint: 'To rotate a token: set the matching env var and restart — env vars always take precedence over vault-stored tokens.',
       imSourceEnv: 'env var',
       imSourceVault: 'vault',
@@ -3024,7 +3024,7 @@
       psChannelsDesc: 'When an alert breaches, deliver a <strong>count summary</strong> to a webhook / instant messaging (IM) / email (edge-triggered: send once on open, once on resolve). ' +
         'A channel stores only the <strong>env-var name</strong> (headerEnv) and destination, never the secret itself — the host reads the token from that env var at delivery time. ' +
         'IM uses <strong>stateless platform send</strong>: slack/discord/lark are incoming-webhooks (token in the URL), telegram uses the bot API (token read from an env var, spliced into the path). ' +
-        '<strong>Proactive delivery requires polling</strong>: set <code>AIPE_PEER_SUMMARY_ALERT_SWEEP_MS</code> (≥10000) for the host to evaluate ' +
+        '<strong>Proactive delivery requires polling</strong>: set <code>GOTONG_PEER_SUMMARY_ALERT_SWEEP_MS</code> (≥10000) for the host to evaluate ' +
         'and deliver periodically; until then channels only fire when you press the "Test" button below.',
       psFieldKind: 'Kind',
       psKindIm: 'IM (instant messaging)',
@@ -3221,7 +3221,7 @@
       idnColTime: 'Time',
       a2aTitle: 'Outbound A2A agents',
       a2aDesc:
-        'Register A2A agents this hub forwards to. When a matching local capability is dispatched, it is turned into a <code>message/send</code> call to the external agent. Replaces the old <code>AIPE_A2A_AGENTS</code> env var with persistent config that takes effect immediately.',
+        'Register A2A agents this hub forwards to. When a matching local capability is dispatched, it is turned into a <code>message/send</code> call to the external agent. Replaces the old <code>GOTONG_A2A_AGENTS</code> env var with persistent config that takes effect immediately.',
       a2aTokenNote:
         '<strong>The token is not entered here</strong> — the "token env var" is the <strong>name</strong> of the env var the host reads the bearer from; the secret itself never enters the database or browser. A row whose env var is unset reads "Inactive"; once you set it on the host, toggle the row off→on to make the host re-read it and come online (no restart needed).',
       a2aAddSummary: 'Register outbound agent',
@@ -3230,7 +3230,7 @@
       a2aPhCaps: 'Capabilities (comma-separated, at least one)',
       a2aPhUrl: 'Remote A2A message/send URL',
       a2aPhTokenEnv: 'Token env var name (e.g. WRITER_A2A_TOKEN)',
-      a2aPhPeerId: 'X-Aipe-Peer-Id (for AipeHub↔AipeHub, optional)',
+      a2aPhPeerId: 'X-Gotong-Peer-Id (for Gotong↔Gotong, optional)',
       a2aPhTargetSkill: 'Remote skill (metadata.skill, optional)',
       a2aLifecycleLabel:
         'Long-running mode (poll <code>tasks/get</code> when the remote returns a parked task; unchecked = blocking, the remote must answer in one turn)',
@@ -3358,7 +3358,7 @@
       padmTitle: 'Peers (federation)',
       padmDesc:
         'Register the federation peers this hub trusts. Authentication is <strong>symmetric</strong>: ' +
-        'register the same bearer token on both sides — generate it with <code>aipehub mint-peer-token</code> ' +
+        'register the same bearer token on both sides — generate it with <code>gotong mint-peer-token</code> ' +
         'and exchange it over a secure channel. The token is a secret, stored vault-encrypted and <strong>never displayed</strong> (write / rotate only).',
       padmLabelOptional: 'Label (optional)',
       padmLabelPlaceholder: 'partner hub',
@@ -3403,7 +3403,7 @@
       padmPolicySaved: 'Policy saved',
       padmPolicySaveFailed: (e) => `Save policy failed: ${e}`,
       padmRotatePrompt:
-        'Paste the new peer token (generate it with `aipehub mint-peer-token`).\nBoth sides must change to the same new value.',
+        'Paste the new peer token (generate it with `gotong mint-peer-token`).\nBoth sides must change to the same new value.',
       padmTokenEmpty: 'Token cannot be empty',
       padmTokenRotated: 'Token rotated',
       padmConfirmRemove: (name) => `Remove peer ${name}? The link will disconnect.`,
@@ -3577,7 +3577,7 @@
         `${done ? '✓ Stream ended' : '● Generating'} · ${chars} chars${tools ? ` · 🔧 ${tools}` : ''}`,
       wfaStreamEnd: '✓ Stream ended — waiting for schema validation + deep check…',
       wfaAssistDisabled:
-        'AI assistant is disabled — set AIPE_ASSISTANT_PROVIDER + the matching API key and restart the host',
+        'AI assistant is disabled — set GOTONG_ASSISTANT_PROVIDER + the matching API key and restart the host',
       wfaGenFailed: (e) => `Generation failed: ${e}`,
       wfaGenerateBtn: 'Generate draft',
       wfaSaving: 'Saving…',
@@ -3591,7 +3591,7 @@
       usgGroupPeer: 'Federated peer',
       usgTitle: 'Usage / Cost',
       usgIntro:
-        'Token and cost rolled up by dimension from the usage ledger. Cost is computed server-side from the model price list (integer micro-USD) and shown here in USD; unknown models record tokens at $0 cost. Prices can be overridden with <code>&lt;AIPE_SPACE&gt;/pricing.json</code>.',
+        'Token and cost rolled up by dimension from the usage ledger. Cost is computed server-side from the model price list (integer micro-USD) and shown here in USD; unknown models record tokens at $0 cost. Prices can be overridden with <code>&lt;GOTONG_SPACE&gt;/pricing.json</code>.',
       usgGroupByLabel: 'Group by',
       usgRefreshBtn: 'Refresh',
       usgColDimension: 'Dimension',
@@ -3658,7 +3658,7 @@
       repEmpty: 'No feedback data yet. Once cross-hub tasks have run and the feedback ledger has writes, scores will appear here automatically.',
       contribToggleTitle: 'Whether tasks I dispatch count toward the contribution leaderboard',
       setupTitle: 'First-time setup — set the owner password',
-      setupIntro: 'The host is up, but the owner account has no password yet. Set one once on <strong>this machine</strong> (<code>127.0.0.1</code>); afterwards sign in with Email + password.<br>For deployments behind a reverse proxy, use the CLI instead: <code>aipehub-host mint-admin-token</code>.',
+      setupIntro: 'The host is up, but the owner account has no password yet. Set one once on <strong>this machine</strong> (<code>127.0.0.1</code>); afterwards sign in with Email + password.<br>For deployments behind a reverse proxy, use the CLI instead: <code>gotong-host mint-admin-token</code>.',
       setupPwNew: 'New password (at least 12 chars)',
       setupPwConfirm: 'Enter it again',
       setupSubmit: 'Set password',
@@ -3730,7 +3730,7 @@
       quickChatNoResult: 'No reply received (it may have timed out).',
       quickChatFailed: (msg) => `Send failed: ${msg}`,
       quickChatAgentFailed: (reason) => `It couldn't respond: ${reason}`,
-      loginTitle: 'Sign in to AipeHub',
+      loginTitle: 'Sign in to Gotong',
       loginPassword: 'Password',
       loginTotp: 'Two-factor code',
       loginTotpPlaceholder: '6-digit code',
@@ -3837,15 +3837,15 @@
       wfAssistBtn: 'AI assistant (beta)',
       close: 'Close',
       download: 'Download',
-      disclaimerTitle: 'Welcome to AipeHub · A few things first',
-      disclaimerP1: '<strong>1. This is a personal local tool, not a cloud service.</strong> Your conversations, profiles, reports and API keys all live in the <code>.aipehub-*</code> directories on this machine. We collect no data and the host sends no telemetry.',
+      disclaimerTitle: 'Welcome to Gotong · A few things first',
+      disclaimerP1: '<strong>1. This is a personal local tool, not a cloud service.</strong> Your conversations, profiles, reports and API keys all live in the <code>.gotong-*</code> directories on this machine. We collect no data and the host sends no telemetry.',
       disclaimerP2: '<strong>2. LLM inference goes through a third-party API.</strong> Your four self-description sections are sent to the model provider you configure (DeepSeek / Anthropic / OpenAI, etc.) for inference. Each provider has its own data policy — read their privacy terms. If you have concerns, use a mock provider or a local LLM.',
       disclaimerP3: '<strong>3. This is not a substitute for a doctor / therapist / financial advisor / relationship counselor.</strong> The personal-growth coaches are designed as "bounded companions" — when they hit a red-flag signal they steer you to a professional. Do not treat them as diagnosis or prescription.',
       disclaimerP4: '<strong>4. If you are in a mental-health crisis, reach out immediately:</strong>',
       disclaimerCrisisCn1: '🇨🇳 Beijing Psychological Crisis Research & Intervention Center: <strong>010-82951332</strong>',
       disclaimerCrisisCn2: '🇨🇳 National Psychological Support Hotline: <strong>400-161-9995</strong>',
       disclaimerCrisisIntl: '🌏 Other regions: <a href="https://findahelpline.com" target="_blank" rel="noopener">findahelpline.com</a>',
-      disclaimerP5: '<strong>5. You can delete your data at any time.</strong> Stop the host and remove the <code>.aipehub-*</code> directories to wipe everything.',
+      disclaimerP5: '<strong>5. You can delete your data at any time.</strong> Stop the host and remove the <code>.gotong-*</code> directories to wipe everything.',
       disclaimerAccept: "I've read it — let's start",
       growthReportsTitle: 'Growth reports',
       growthReportsHint: 'After a personal-growth workflow finishes a round, the synthesist consolidates the 7 outputs into one Markdown report, which lands here. Click "Download" to save it as a local file.',
@@ -3853,7 +3853,7 @@
       colGeneratedTime: 'Generated',
       colActions: 'Actions',
       wfAssistModalTitle: 'Workflow Architect — generate workflow draft',
-      wfAssistModalHint: 'Describe the workflow you want in one sentence (Chinese or English). The AI generates a YAML draft per <code>aipehub.workflow/v1</code>; you can only save it after it validates automatically.',
+      wfAssistModalHint: 'Describe the workflow you want in one sentence (Chinese or English). The AI generates a YAML draft per <code>gotong.workflow/v1</code>; you can only save it after it validates automatically.',
       wfAssistDescLabel: 'Description',
       wfAssistDescPh: 'e.g. every Monday crawl 5 news sources, summarize with DeepSeek, post to a Telegram group',
       wfAssistGenerate: 'Generate draft',
@@ -3876,8 +3876,8 @@
       wfaArchExplainLoadFailed: 'Failed to load workflow',
       wfStartTitle: 'Start workflow',
       wfStartSubmit: 'Dispatch task',
-      bundleImportHint: 'aipehub.bundle/v1 format — one file holds a set of agents + one workflow + an API-key prompt. On import all agents are created at once, the workflow auto-registers, and you can dispatch right away.',
-      bundleImportTemplates: 'Templates: <a href="https://github.com/AipeHub/AipeHub/tree/main/templates/bundles" target="_blank" rel="noopener">templates/bundles/</a> · or use a built-in template:',
+      bundleImportHint: 'gotong.bundle/v1 format — one file holds a set of agents + one workflow + an API-key prompt. On import all agents are created at once, the workflow auto-registers, and you can dispatch right away.',
+      bundleImportTemplates: 'Templates: <a href="https://github.com/Gotong/Gotong/tree/main/templates/bundles" target="_blank" rel="noopener">templates/bundles/</a> · or use a built-in template:',
       bundleBuiltinPg: '🎁 Use built-in template: Personal Growth (7 coaches + 12-week wall plan)',
       bundleKeyPh: 'Fill the key once for openai-compatible agents (leave blank to skip)',
       bundleKeyHint: 'If the bundle has <code>openai-compatible</code> agents (e.g. DeepSeek), paste the API key once and it applies to every such agent — no need to fill them one by one.',
@@ -4057,7 +4057,7 @@
   // register a listener per known kind so every transcript event the
   // server forwards reaches applyEvent in real time.
   //
-  // Add new TranscriptEntry kinds here when @aipehub/core grows one;
+  // Add new TranscriptEntry kinds here when @gotong/core grows one;
   // unknown server events fall through to the generic 'message'
   // listener so future kinds don't go silent until this list is
   // updated.
@@ -4442,7 +4442,7 @@
 
   // --- expose -------------------------------------------------------------
 
-  window.AipeHub = {
+  window.Gotong = {
     get lang() { return lang },
     get t() { return t },
     setLang,

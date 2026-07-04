@@ -1,7 +1,7 @@
-/* AipeHub — unified SPA orchestrator (C1).
+/* Gotong — unified SPA orchestrator (C1).
  *
  * Boot order:
- *   1. Read the server-injected role meta (`<meta name="x-aipehub-role">`).
+ *   1. Read the server-injected role meta (`<meta name="x-gotong-role">`).
  *      Possible values:
  *        ''                 — anonymous (no v4 cookie or session expired)
  *        'owner'|'admin'    — full admin shell available
@@ -18,7 +18,7 @@
  * "client renders, server enforces" pattern admin.js has always used.
  */
 (() => {
-  const ROLE_META = document.querySelector('meta[name="x-aipehub-role"]')
+  const ROLE_META = document.querySelector('meta[name="x-gotong-role"]')
   const role = (ROLE_META?.getAttribute('content') || '').trim()
   const ROLE_LABELS = () => ({
     owner: t('meRoleOwner'),
@@ -33,7 +33,7 @@
   // decide to enter the wizard WITHOUT a blocking flag fetch before first
   // paint on every normal boot. Strictly '1' — any other content (including
   // an unreplaced placeholder in a raw static serve) means "not pending".
-  const BOOTSTRAP_META = document.querySelector('meta[name="x-aipehub-bootstrap"]')
+  const BOOTSTRAP_META = document.querySelector('meta[name="x-gotong-bootstrap"]')
   const BOOTSTRAP_PENDING = (BOOTSTRAP_META?.getAttribute('content') || '').trim() === '1'
 
   // ---- DOM helpers ------------------------------------------------------
@@ -43,18 +43,18 @@
   const show = (el) => { if (el) el.hidden = false }
   const hide = (el) => { if (el) el.hidden = true }
 
-  // ---- Shared formatters from app-core.js's window.AipeHub -------------
+  // ---- Shared formatters from app-core.js's window.Gotong -------------
   // escapeHtml is aliased to the historical local name `escape`; formatBytes
   // is the guarded copy. R14 — these were 3 duplicated local defs.
-  const { escapeHtml: escape, formatBytes, formatTs } = window.AipeHub
+  const { escapeHtml: escape, formatBytes, formatTs } = window.Gotong
 
   // ---- i18n translator (REL-7) -----------------------------------------
-  // Reads window.AipeHub.t on every call (it's a live getter that flips on
+  // Reads window.Gotong.t on every call (it's a live getter that flips on
   // setLang), so dynamic panels render in the current language and re-render
   // correctly when the toggle fires. Function-form keys (interpolation) are
   // invoked with the passed args; plain-string keys ignore extra args.
   const t = (key, ...args) => {
-    const v = window.AipeHub.t[key]
+    const v = window.Gotong.t[key]
     return typeof v === 'function' ? v(...args) : v ?? key
   }
 
@@ -143,12 +143,12 @@
   }
 
   // Render the guide body for a provider into bodyEl. Reads the live language
-  // (window.AipeHub.lang) so a toggle re-renders correctly via refreshKeyGuides.
+  // (window.Gotong.lang) so a toggle re-renders correctly via refreshKeyGuides.
   function renderKeyGuide(bodyEl, provider) {
     if (!bodyEl) return
     const guide = KEY_PROVIDER_GUIDES[provider]
     if (!guide) { bodyEl.innerHTML = ''; return }
-    const lang = (window.AipeHub && window.AipeHub.lang) || 'zh'
+    const lang = (window.Gotong && window.Gotong.lang) || 'zh'
     const g = guide[lang] || guide.zh
     const steps = g.steps.map((s) => `<li>${escape(s)}</li>`).join('')
     bodyEl.innerHTML =
@@ -185,8 +185,8 @@
       if (sel) renderKeyGuide(body, sel.value)
     }
   }
-  if (window.AipeHub && typeof window.AipeHub.onLangChange === 'function') {
-    window.AipeHub.onLangChange(refreshKeyGuides)
+  if (window.Gotong && typeof window.Gotong.onLangChange === 'function') {
+    window.Gotong.onLangChange(refreshKeyGuides)
   }
 
   // ---- Apply role visibility filter ------------------------------------
@@ -373,7 +373,7 @@
             status.textContent = j?.error || t('meSetupFailedHttp', r.status)
             return
           }
-          const d = window.AipeHub.describeKeyTest(await r.json())
+          const d = window.Gotong.describeKeyTest(await r.json())
           status.className = 'login-status ' + (d.level === 'ok' ? 'ok' : 'error')
           status.textContent = d.text
         } catch (err) {
@@ -651,8 +651,8 @@
   // services/users AND the C1-only home/settings). admin.js used to run a
   // second setActiveTab + hashchange of its own — both fired on every
   // change and, since admin.js loads later, it stomped C1 tabs back to
-  // overview. Now setActiveTab dispatches `aipehub:tabchange` and admin.js
-  // just listens for its per-tab side effects. See window.AipeHub.gotoTab.
+  // overview. Now setActiveTab dispatches `gotong:tabchange` and admin.js
+  // just listens for its per-tab side effects. See window.Gotong.gotoTab.
   //
   // ADMIN_TABS must list EVERY admin-shell tabbar button so the router can
   // activate it. `quotas` / `reputation` are real tabs whose sections are
@@ -678,7 +678,7 @@
   // admin tabs the router activates + which sections render. It grants/removes
   // NO capability — the server still enforces every route. core / identity /
   // host routes are untouched; this lives entirely in the SPA.
-  const SIMPLE_MODE_KEY = 'aipe_simple_mode'
+  const SIMPLE_MODE_KEY = 'gotong_simple_mode'
   const SIMPLE_ADMIN_TABS = new Set(['overview', 'agents', 'workflows', 'tasks', 'usage'])
   function isSimpleMode() {
     try { return localStorage.getItem(SIMPLE_MODE_KEY) === '1' } catch (_) { return false }
@@ -715,7 +715,7 @@
     // Notify subscribers (admin.js) of the resolved tab so they can run
     // per-tab side effects (e.g. refresh growth reports on 'workflows')
     // without owning a competing router.
-    window.dispatchEvent(new CustomEvent('aipehub:tabchange', { detail: { name } }))
+    window.dispatchEvent(new CustomEvent('gotong:tabchange', { detail: { name } }))
   }
 
   function currentTabFromHash() {
@@ -727,7 +727,7 @@
 
   // Programmatic navigation. Mirrors a tabbar click: set the hash
   // (→ hashchange → setActiveTab) unless we're already there, in which
-  // case switch directly. Exposed on window.AipeHub so admin.js can do
+  // case switch directly. Exposed on window.Gotong so admin.js can do
   // cross-tab jumps (e.g. click a task_result row → open the Tasks tab).
   function gotoTab(name) {
     if (window.location.hash !== `#${name}`) {
@@ -798,11 +798,11 @@
   }
 
   // Publish gotoTab for admin.js (lazy-loaded later in boot). app-core.js
-  // already created window.AipeHub by the time this IIFE evaluates — line ~37
+  // already created window.Gotong by the time this IIFE evaluates — line ~37
   // destructures from it, so it's guaranteed present here. We expose only
   // gotoTab (not setActiveTab): callers must go through the hash so the URL
   // stays in sync — a bare setActiveTab would diverge body state from #hash.
-  window.AipeHub.gotoTab = gotoTab
+  window.Gotong.gotoTab = gotoTab
 
   // ---- Home tab — port of /me functionality (whoami / dispatch / reports)
   //
@@ -1439,7 +1439,7 @@
   // DRAFT from one sentence — the host rejects any cross-hub egress, so members
   // are local-only. EXPLAIN narrates the selected catalog workflow at a chosen
   // depth (一句话/简要/详细). Both emit a pure `graph` projection of the YAML
-  // that the shared standalone renderer (window.AipeHubWorkflowGraph — the same
+  // that the shared standalone renderer (window.GotongWorkflowGraph — the same
   // module the admin dialog uses) draws inline as a downloadable SVG. The depth
   // only affects the prose; the YAML + graph are identical at every depth.
 
@@ -1471,7 +1471,7 @@
   // Render an architect result (create OR explain) into `body`: the inline SVG
   // flowchart (+ a download-SVG link), the narration, and a collapsed YAML
   // view. The graph is drawn by the shared standalone module so the admin +
-  // member renderers never diverge — `window.AipeHub.t` is the live i18n dict
+  // member renderers never diverge — `window.Gotong.t` is the live i18n dict
   // it expects (NOT this file's `t` function). `headKey` titles the section.
   function renderArchitectResult(body, j, headKey) {
     if (!body) return
@@ -1483,13 +1483,13 @@
     // The diagram — only when the YAML parsed (graph present) AND the shared
     // renderer is loaded. The download link carries a self-contained data: URL
     // (embedded styles) so a saved .svg opens legible on its own.
-    const G = window.AipeHubWorkflowGraph
+    const G = window.GotongWorkflowGraph
     if (j && j.graph && G) {
-      const svg = G.renderWorkflowGraphSvg(j.graph, { t: window.AipeHub.t, escapeHtml: escape })
+      const svg = G.renderWorkflowGraphSvg(j.graph, { t: window.Gotong.t, escapeHtml: escape })
       const href = G.svgDownloadHref(svg)
       parts.push(
         `<div class="me-wf-arch-graph">${svg}</div>` +
-          G.graphLegend({ t: window.AipeHub.t, escapeHtml: escape }) +
+          G.graphLegend({ t: window.Gotong.t, escapeHtml: escape }) +
           `<a class="me-secondary-btn me-wf-arch-dl" href="${href}" download="${escape(wid)}.svg">${t('meWfArchDownloadSvg')}</a>`,
       )
     }
@@ -2006,7 +2006,7 @@
   // Scroll the member to the inbox panel (same home tab) + refresh it, so a
   // parked steward action is one click from the second confirmation.
   function gotoMyInbox() {
-    if (window.AipeHub && typeof window.AipeHub.gotoTab === 'function') window.AipeHub.gotoTab('home')
+    if (window.Gotong && typeof window.Gotong.gotoTab === 'function') window.Gotong.gotoTab('home')
     const inbox = document.querySelector('.me-inbox')
     if (inbox && inbox.scrollIntoView) inbox.scrollIntoView({ behavior: 'smooth', block: 'start' })
     loadMyInbox()
@@ -2204,7 +2204,7 @@
   // data-me-runs-fix-key because #me-runs-tbody is rebuilt on every refresh.
   function renderRunFailure(run) {
     if (run.status !== 'failed' || !run.error) return ''
-    const d = window.AipeHub.describeError(run.error)
+    const d = window.Gotong.describeError(run.error)
     const fix = d.fix ? ` <span class="me-run-reason-fix">${escape(d.fix)}</span>` : ''
     const keyBtn = d.fixIsKey
       ? ` <button type="button" class="me-chat-fix-btn" data-me-runs-fix-key>${escape(t('meChatGoAddKey'))}</button>`
@@ -2356,7 +2356,7 @@
       if (!c) {
         const item = t.closest('.me-inbox-item')
         const statusEl = item ? item.querySelector('[data-inbox-status]') : null
-        if (statusEl) { statusEl.className = 'me-status error'; statusEl.textContent = window.AipeHub.t.meInboxChangesNeedComment }
+        if (statusEl) { statusEl.className = 'me-status error'; statusEl.textContent = window.Gotong.t.meInboxChangesNeedComment }
         return
       }
       return resolveInbox(changes, { kind: 'approval', approved: false, changesRequested: true, comment: c }, t)
@@ -2687,12 +2687,12 @@
       if (!r.ok) {
         // 429 / 503 / 504 / 4xx — fold the server error to plain words + a fix, and
         // offer a one-click jump to the key panel when it's a key/quota issue (③TC-ME).
-        setChatFailure(statusEl, window.AipeHub.describeError(j?.error || `HTTP ${r.status}`), 'quickChatFailed')
+        setChatFailure(statusEl, window.Gotong.describeError(j?.error || `HTTP ${r.status}`), 'quickChatFailed')
         return
       }
       renderMeChatReply(j?.result, statusEl, replyEl, nextEl)
     } catch (err) {
-      setChatFailure(statusEl, window.AipeHub.describeError(err?.message || String(err)), 'quickChatFailed')
+      setChatFailure(statusEl, window.Gotong.describeError(err?.message || String(err)), 'quickChatFailed')
     } finally {
       if (btn) { btn.disabled = false; btn.textContent = prevLabel || t('quickChatSend') }
     }
@@ -2725,7 +2725,7 @@
     const raw = result.kind === 'ok'
       ? (out && typeof out.text === 'string' ? out.text : '')
       : (result.error || result.reason || result.kind || '')
-    const d = window.AipeHub.describeError(raw)
+    const d = window.Gotong.describeError(raw)
     if (replyEl) { replyEl.hidden = true; replyEl.textContent = '' }
     setChatFailure(statusEl, d, 'quickChatAgentFailed')
   }
@@ -3199,7 +3199,7 @@
         status.textContent = j?.error || `HTTP ${r.status}`
         return
       }
-      const d = window.AipeHub.describeKeyTest(await r.json())
+      const d = window.Gotong.describeKeyTest(await r.json())
       status.className = 'me-status ' + (d.level === 'ok' ? 'ok' : 'error')
       status.textContent = d.text
     } catch (err) {
@@ -3615,16 +3615,16 @@
       s.onerror = reject
       document.head.appendChild(s)
     })
-    // Order matters: admin.js depends on window.AipeHub from app-core.js
+    // Order matters: admin.js depends on window.Gotong from app-core.js
     // (already loaded via the synchronous <script defer> tag above us);
-    // admin-wf-assist.js registers window.AipeHub.installWorkflowAssist
+    // admin-wf-assist.js registers window.Gotong.installWorkflowAssist
     // which admin.js then calls at IIFE init time — so it MUST load before
     // admin.js; identity-ui.js depends on the users-panel DOM that
     // admin.html declares. We just chain.
     inject('/admin-wf-assist.js')
       .then(() => inject('/admin.js'))
       // SW-M9 A-M8 — operator-console steward panel (overview tab). Self-contained
-      // like the federation panels; only needs window.AipeHub + its own DOM.
+      // like the federation panels; only needs window.Gotong + its own DOM.
       .then(() => inject('/operator-steward-ui.js'))
       // setting-ops M4 — unified deterministic "运维 / 设置" console (overview tab).
       // Self-contained; loads its catalog on overview-tab focus, self-hides on 503.
@@ -3699,7 +3699,7 @@
     // listeners on the static buttons/forms). applyOrgMode re-asserts the
     // personal-mode subtitle, which applyStaticI18n would otherwise reset to
     // the generic team subtitle.
-    window.AipeHub.onLangChange(() => {
+    window.Gotong.onLangChange(() => {
       if (!SIGNED_IN) return
       applyOrgMode().catch((err) => console.warn('[app] applyOrgMode (lang) failed', err))
       renderHome().catch((err) => console.error('[app] renderHome (lang) failed', err))
@@ -3709,7 +3709,7 @@
     // the recent-runs poll (the panel isn't re-rendered on a tab switch). Wired
     // AFTER wireTabs above, so the boot-time tabchange has already fired and
     // this listener doesn't trigger a redundant startup fetch.
-    window.addEventListener('aipehub:tabchange', (ev) => {
+    window.addEventListener('gotong:tabchange', (ev) => {
       if (ev?.detail?.name === 'home') armMyRunsPollOnReturn()
     })
   })

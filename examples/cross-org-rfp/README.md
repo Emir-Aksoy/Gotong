@@ -1,4 +1,4 @@
-# @aipehub/example-cross-org-rfp
+# @gotong/example-cross-org-rfp
 
 A **cross-organisation** RFP (request-for-quote) demo. Unlike the
 existing examples — which all use one hub with multiple agents
@@ -28,12 +28,12 @@ business artifact (a quote)**.
 ## Run it
 
 ```bash
-pnpm --filter @aipehub/example-cross-org-rfp start
+pnpm --filter @gotong/example-cross-org-rfp start
 ```
 
 Single terminal. No web UI, no admin tokens, no WebSocket, no Space
 on disk. Just one process running two in-memory hubs talking to each
-other across the federation primitives that `@aipehub/core` already
+other across the federation primitives that `@gotong/core` already
 exposes (`createInprocHubLinkPair` + `installPeerLink`).
 
 ## What's happening
@@ -59,7 +59,7 @@ architectural choice in `docs/zh/ledger/V4-ARCH.md` lives or dies on
 federation actually being usable for cross-org work. This demo is the
 proof: **the wiring is already a few lines of code**. v4's identity
 layer is what gets bolted on top — every org runs its own
-`@aipehub/identity` store, federation links carry the identity-
+`@gotong/identity` store, federation links carry the identity-
 authenticated principal across the boundary (Phase 3+ work).
 
 ## What's deliberately not in this demo

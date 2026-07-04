@@ -1,4 +1,4 @@
-import { isSuspendTaskError, SuspendTaskError, type Task } from '@aipehub/core'
+import { isSuspendTaskError, SuspendTaskError, type Task } from '@gotong/core'
 import { describe, expect, it } from 'vitest'
 
 import { NEVER_RESUME_AT } from '../src/constants.js'

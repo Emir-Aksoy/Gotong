@@ -10,12 +10,12 @@
  * examples/llm-real) requires zero changes to the agent code itself.
  */
 
-import { Hub, type TranscriptEntry } from '@aipehub/core'
+import { Hub, type TranscriptEntry } from '@gotong/core'
 import {
   LlmAgent,
   MockLlmProvider,
   type LlmRequest,
-} from '@aipehub/llm'
+} from '@gotong/llm'
 
 function describe(e: TranscriptEntry): string {
   switch (e.kind) {
@@ -121,7 +121,7 @@ async function main(): Promise<void> {
     }),
   )
 
-  console.log('\n=== AipeHub demo: LlmAgent + mock provider ===\n')
+  console.log('\n=== Gotong demo: LlmAgent + mock provider ===\n')
 
   // Capability dispatch to the writer
   const draft = await hub.dispatch({

@@ -19,7 +19,7 @@ function makeRun(overrides: Partial<RunState> & Pick<RunState, 'runId' | 'workfl
 }
 
 beforeEach(() => {
-  tmp = mkdtempSync(join(tmpdir(), 'aipehub-runstore-'))
+  tmp = mkdtempSync(join(tmpdir(), 'gotong-runstore-'))
   store = new RunStore(tmp)
   store.ensureDirs()
 })

@@ -1,9 +1,9 @@
-# AipeHub — Charte du projet
+# Gotong — Charte du projet
 
 <!-- doc-version: 1.0 -->
 > **Version du document 1.0** · Traduction française · Mis à jour le 2026-06-27 · Source faisant autorité : [English](../../CHARTER.md). En cas de divergence entre la traduction et la version anglaise, la version anglaise prévaut.
 
-**Version 0.1** · adoptée le 2026-06-27 · ratifiée par le gardien fondateur
+**Version 0.2** · adoptée le 2026-06-27 · renommée AipeHub → Gotong le 2026-07-04 · ratifiée par le gardien fondateur
 ([`MAINTAINERS.md`](../../MAINTAINERS.md))
 
 > Il s'agit de la constitution du projet : le document qui évolue le plus lentement dans le
@@ -18,10 +18,12 @@
 
 ---
 
-## 1. Ce qu'est AipeHub
+## 1. Ce qu'est Gotong
 
-**AipeHub est le substrat auto-hébergé pour les liens de l'ère de l'IA entre les personnes,
-les agents et les organisations.** AI + Person + Hub.
+**Gotong est le substrat auto-hébergé pour les liens de l'ère de l'IA entre les personnes,
+les agents et les organisations.** Le nom vient du *gotong-royong* — la
+tradition malaisienne et indonésienne où tout le village porte le travail
+ensemble, chaque foyer restant souverain ; en chinois, il se lit 共同 (« ensemble »).
 
 Ce n'est pas un agent, et ce n'est pas un autre framework d'agents. C'est la couche
 *en dessous* d'eux — un registre, un bus de messages, un routeur de tâches, un lien
@@ -40,18 +42,18 @@ Le modèle mental est assez petit pour tenir dans une main :
   l'est. Il n'y a pas d'"outil de demande d'entrée humaine" ; les personnes et les agents partagent la même
   tâche, la même transcription et les mêmes primitives d'exécution longue durée.
 - **L'état n'est que des fichiers.** Un espace de travail est un répertoire sur le disque
-  (`.aipehub/`). Supprimez-le et la salle est partie ; copiez-le et vous avez transmis
+  (`.gotong/`). Supprimez-le et la salle est partie ; copiez-le et vous avez transmis
   toute la salle à quelqu'un ; redémarrez et rien n'est perdu.
 
-Cette combinaison — pas un protocole intelligent quelconque — est ce qu'AipeHub *est*.
+Cette combinaison — pas un protocole intelligent quelconque — est ce qu'Gotong *est*.
 
 ---
 
 ## 2. L'Étoile du Nord — trois non-négociables
 
 Trois phrases définissent le projet. Ce ne sont pas des fonctionnalités ; ce sont
-l'identité. Changer l'une d'entre elles ne produit pas un meilleur AipeHub — cela
-produit quelque chose qui n'est plus AipeHub.
+l'identité. Changer l'une d'entre elles ne produit pas un meilleur Gotong — cela
+produit quelque chose qui n'est plus Gotong.
 
 1. **Le framework n'exécute pas le LLM.** Le Hub route, dispatche, enregistre
    et contrôle. L'inférence et la prise de décision résident dans les participants. C'est
@@ -70,7 +72,7 @@ le reste est négociable à leur service.
 
 ## 3. Pourquoi il existe — les trois couches
 
-AipeHub construit le substrat de travail pour trois couches de liens, dans l'ordre où
+Gotong construit le substrat de travail pour trois couches de liens, dans l'ordre où
 un utilisateur les atteint :
 
 **Couche 1 — une personne et sa propre IA.** "Mon bureau IA." Le hub d'une personne,
@@ -91,7 +93,7 @@ la rapidité avec laquelle l'IA évolue sans trahir les couches 1 et 2.
 L'IA, les agents et les frameworks multi-agents qui arrivent maintenant vont s'intégrer dans la vie quotidienne
 à une vitesse remarquable. Les plus grands fournisseurs de modèles, les plateformes de communication et
 d'autres acteurs existants bougent tout aussi vite pour occuper ce terrain comme un monopole — une
-position dont toute la valeur est le levier pour extraire de quiconque vient à en dépendre. AipeHub existe pour
+position dont toute la valeur est le levier pour extraire de quiconque vient à en dépendre. Gotong existe pour
 garder une alternative sur la table : pour émousser ce levier en intégrant l'IA, les agents et les workflows
 dans une seule pile et en la publiant en open-source, afin que n'importe qui puisse l'obtenir, la déployer et
 la faire fonctionner lui-même — pas de portier, pas de loyer, pas de permission à demander.
@@ -105,7 +107,7 @@ prête à remettre à un cloud qu'elle ne contrôle pas les clés pour le faire.
 ## 4. Le coin de confiance — pourquoi vous pouvez lui confier les choses importantes
 
 La plupart des outils IA offrent deux options : tout donner à un cloud que vous ne contrôlez pas,
-ou tout connecter vous-même. AipeHub est la troisième option — une IA que vous pouvez pointer
+ou tout connecter vous-même. Gotong est la troisième option — une IA que vous pouvez pointer
 vers votre maison, votre famille ou votre argent, parce que les frontières sont réelles et
 elles vous appartiennent. Trois propriétés le rendent vrai, et elles sont le fossé du projet :
 
@@ -113,18 +115,18 @@ elles vous appartiennent. Trois propriétés le rendent vrai, et elles sont le f
   porte, dépenser de l'argent, envoyer les données d'un enfant via un lien — attendent qu'une personne
   confirme dans une boîte de réception, et le workflow ne peut pas contourner le portail. Les actions dangereuses et
   inter-frontières sont fail-closed par construction.
-- **Local.** Les identifiants vivent chiffrés dans votre propre répertoire `.aipehub/`.
+- **Local.** Les identifiants vivent chiffrés dans votre propre répertoire `.gotong/`.
   La fédération avec un autre hub partage une *capacité*, jamais votre coffre-fort. Chaque hub
   garde son propre magasin d'identifiants et son propre registre d'utilisation/coûts.
 - **Dans l'ouvert.** Chaque dispatch et chaque résultat est une transcription en ajout seul
   que vous pouvez lire. Parce que le framework n'exécute jamais le modèle, il n'y a pas de jugement caché
   à prendre sur la foi.
 
-Et l'autorité vous appartient, pas à nous. AipeHub fournit le mécanisme — le portail,
+Et l'autorité vous appartient, pas à nous. Gotong fournit le mécanisme — le portail,
 le coffre-fort, la transcription — mais la politique est définie et détenue par celui qui gère le hub,
 pas par ce projet. Quelles actions comptent comme conséquentes, ce qu'une liste blanche autorise,
 qui répond à la boîte de réception : l'opérateur décide, et l'opérateur détient la décision. Dans
-le hub d'apprentissage familial, c'est le parent — pas AipeHub — qui définit le portail et
+le hub d'apprentissage familial, c'est le parent — pas Gotong — qui définit le portail et
 confirme à celui-ci. Nous ne gardons pas un siège de fournisseur à vos décisions ; le framework vous
 remet les commandes et s'écarte.
 
@@ -145,7 +147,7 @@ dont vous avez besoin de la permission pour continuer à fonctionner.
 
 Les participants sur ce graphe ne sont pas seulement des personnes et des agents logiciels. L'intelligence
 incarnée — robots, capteurs, les machines qui agissent dans le monde physique — arrive
-sur le même calendrier, et AipeHub est construit pour l'accueillir : partout où un tel système
+sur le même calendrier, et Gotong est construit pour l'accueillir : partout où un tel système
 parle **MCP**, il rejoint en tant qu'un autre `Participant` derrière la même frontière gouvernée —
 les tâches dispatchées, soumises aux mêmes portails, écrites dans la même
 transcription que tout le reste. Le framework est naturellement adapté pour gérer les personnes,
@@ -168,7 +170,7 @@ aucune partie centrale n'est nécessaire pour régler un registre.
 
 ## 6. Comment l'utiliser
 
-AipeHub rencontre les personnes à la surface qui leur convient, et le même Hub se trouve derrière
+Gotong rencontre les personnes à la surface qui leur convient, et le même Hub se trouve derrière
 toutes :
 
 - **Mode personnel** — cinq minutes, sans code. Importez un modèle phare ou construisez
@@ -183,7 +185,7 @@ toutes :
 Les surfaces sont plurielles par conception : une interface administrateur de navigateur, le bureau membre `/me`,
 des ponts IM (Telegram, Lark, Slack et QQ aujourd'hui ; Discord et Matrix prévus), un
 CLI/REPL interactif,
-MCP pour les outils et les clients externes, et une PWA installable. AipeHub parle les
+MCP pour les outils et les clients externes, et une PWA installable. Gotong parle les
 protocoles ouverts de l'écosystème là où ils existent — **MCP** (outils et données, les deux
 directions), **A2A** (agent-à-agent, les deux directions), **ACP** (piloter une session
 d'agent de codage maintenue) — et possède exactement l'un des siens : **HubLink**, le
@@ -225,7 +227,7 @@ analyse, zéro secrets en clair, provenance déclarée), se trouvent dans
 
 ## 8. Non-objectifs — ce qu'il refuse de devenir
 
-Une charte ancre autant par ce qu'elle exclut que par ce qu'elle promet. AipeHub n'est
+Une charte ancre autant par ce qu'elle exclut que par ce qu'elle promet. Gotong n'est
 délibérément **pas** :
 
 - **Un hôte de modèle.** Il ne fera pas croître une boucle d'inférence LLM dans le Hub. Apportez
@@ -253,8 +255,8 @@ SaaS, modifiable, redistribuable, avec le fichier de licence et la ligne de copy
 préservés ([`LICENSE`](../../LICENSE), [`docs/LICENSE-FAQ.md`](../../docs/LICENSE-FAQ.md)).
 Les modèles communautaires portent leur propre provenance CC0/MIT, tous compatibles avec l'usage commercial.
 
-Les formats qu'AipeHub a inventés sont ouverts en tant que spécifications, pas seulement comme code en cours d'exécution.
-Le langage de définition de workflow et d'agent (`aipehub.workflow/v1` et les manifests d'agent,
+Les formats qu'Gotong a inventés sont ouverts en tant que spécifications, pas seulement comme code en cours d'exécution.
+Le langage de définition de workflow et d'agent (`gotong.workflow/v1` et les manifests d'agent,
 d'équipe et de modèle) et **HubLink** — le protocole de fédération entre deux
 hubs — sont notre propre conception, et ils appartiennent à tout le monde : n'importe qui peut les lire,
 les implémenter, construire un runtime concurrent sur eux, et les distribuer dans des logiciels commerciaux,
@@ -296,7 +298,7 @@ document avec lequel argumenter. C'est à ça qu'elle sert.
 ## 11. Domicile, et une invitation ouverte
 
 Le domicile canonique de ce projet est son dépôt GitHub,
-**[github.com/Emir-Aksoy/AipeHub](https://github.com/Emir-Aksoy/AipeHub)** — l'
+**[github.com/Emir-Aksoy/Gotong](https://github.com/Emir-Aksoy/Gotong)** — l'
 original, et l'enregistrement de vérité. Les forks sont les bienvenus et encouragés, mais c'est
 là que la ligne de conception est maintenue et où la charte, le protocole et les modèles phares
 sont faisant autorité.
@@ -346,7 +348,7 @@ portail de classe de données, quota, révocation, liste blanche de base de conn
 workflow peut traverser une ligne organisationnelle tandis que les identifiants, les données et la
 facturation restent à la maison des deux côtés.
 
-HubLink est la propre conception d'AipeHub, offerte comme une spécification ouverte qui appartient à
+HubLink est la propre conception d'Gotong, offerte comme une spécification ouverte qui appartient à
 tout le monde : implémentez-la dans n'importe quel langage ou produit, commercial ou non, sans frais et
 sans permission nécessaire. L'implémentation de référence vit dans
 `packages/transport-ws/`.
@@ -356,21 +358,21 @@ sans permission nécessaire. L'implémentation de référence vit dans
 ## Annexe B — les formats de définition de workflow et d'agent
 
 Ces formats YAML sont la façon dont la structure d'un hub est écrite, gouvernée et partagée.
-Tous sont la propre conception d'AipeHub, et tous sont offerts dans les mêmes conditions que HubLink : une
+Tous sont la propre conception d'Gotong, et tous sont offerts dans les mêmes conditions que HubLink : une
 spécification ouverte qui appartient à tout le monde — implémentez-les n'importe où, commercial ou
 non, sans frais et sans permission demandée.
 
-- **`aipehub.workflow/v1`** — un workflow déclaratif : un `trigger`, une liste de `steps`
+- **`gotong.workflow/v1`** — un workflow déclaratif : un `trigger`, une liste de `steps`
   qui dispatchent chacun à une *capacité* (pas un agent nommé), un graphe de dispatch câblé par
   `$ref`, et le sucre de flux de contrôle `when:` (conditionnel), `parallel:` (éventail),
   et `human:` (une étape humain dans la boucle). Un `surface.me` optionnel l'expose sur le
   bureau membre et `governance` déclare sa posture de risque. Le YAML est la
   racine gouvernée et versionnée d'un workflow — chaque exécution est épinglée à une révision immuable
   afin qu'elle ne dérive jamais.
-- **`aipehub.agent/v1`** et **`aipehub.team/v1`** — un manifest d'agent, un agent ou
+- **`gotong.agent/v1`** et **`gotong.team/v1`** — un manifest d'agent, un agent ou
   une équipe entière dans un fichier : fournisseur, modèle, invite système, capacités, serveurs MCP,
   une liste blanche de dispatch de sous-agents, et un heartbeat optionnel.
-- **`aipehub.template/v1`** — un modèle contient N agents, N workflows, des *créneaux* de base de
+- **`gotong.template/v1`** — un modèle contient N agents, N workflows, des *créneaux* de base de
   connaissances adressables, et une configuration de clé en une seule invite dans un seul fichier partageable. Il
   porte uniquement la structure et les références — jamais le contenu de connaissances, vos personnes,
   ou vos secrets.

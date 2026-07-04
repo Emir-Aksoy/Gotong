@@ -2,7 +2,7 @@
 #
 # 配套 templates/workflows/industry-consultation-flow.yaml 使用。
 # 导入这一个 team 文件就能拿到两个 agent；再把同名 workflow 放进
-# `.aipehub/workflows/definitions/` 即可全流程跑起来。
+# `.gotong/workflows/definitions/` 即可全流程跑起来。
 #
 # 工作流流程：
 #   admin 派 consult-industry-with-human →
@@ -19,7 +19,7 @@
 # URL 发给一位行业前辈，他选了 capability=consultant-review 入场
 # 就成了团队成员。这是 HITL approve 模式的标准做法,详见
 # docs/zh/HITL-GLOSSARY.md。
-schema: aipehub.team/v1
+schema: gotong.team/v1
 
 team:
   name: 传统行业 AI 咨询团队（含 AI evaluator + HITL approve）
@@ -187,7 +187,7 @@ team:
 
   # 团队上线后的使用提示
   setup_hints:
-    - "把 templates/workflows/industry-consultation-flow.yaml 复制到 .aipehub/workflows/definitions/ 并重启 host"
+    - "把 templates/workflows/industry-consultation-flow.yaml 复制到 .gotong/workflows/definitions/ 并重启 host"
     - "AI evaluator 是新加的(v2.6) — 跟 coach 是不同实体,避免自我偏袒(MAST §3.x 失败模式)"
     - "找一位资深顾问,发 worker URL,让他选 capability=consultant-review 入场"
     - "admin 控制台派一个 capability=consult-industry-with-human 的任务,带 payload {industry, role, user_situation}"

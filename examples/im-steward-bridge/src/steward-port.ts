@@ -10,7 +10,7 @@
  * so the demo runs offline.
  *
  * What is REAL here (not faked): the risk TIER each action gets. The port runs the
- * shipped `classifyStewardAction` from `@aipehub/hub-steward`, so a `delete_agent`
+ * shipped `classifyStewardAction` from `@gotong/hub-steward`, so a `delete_agent`
  * honestly tiers `dangerous`, an `edit_workflow` on a cross-hub workflow honestly
  * tiers `cross_hub`, and an out-of-scope ask honestly tiers `forbidden`. The only
  * faked bit is the "LLM" that turns an instruction into actions — exactly like
@@ -26,7 +26,7 @@ import {
   type StewardAction,
   type StewardActionTier,
   type StewardClassifyContext,
-} from '@aipehub/hub-steward'
+} from '@gotong/hub-steward'
 
 // ---------------------------------------------------------------------------
 // Public seam — what the router depends on.
@@ -75,7 +75,7 @@ export interface StewardPort {
 /**
  * What the port emits when an approval-inbox item is resolved (in `/me`). The
  * router listens for this and pushes an async notify-back to the IM user (D-M2).
- * In production the inbox lives in `@aipehub/inbox` + `HostInboxService`; this
+ * In production the inbox lives in `@gotong/inbox` + `HostInboxService`; this
  * example keeps a tiny in-memory stand-in so the notify-back is demonstrable.
  */
 export interface StewardInboxResolveEvent {

@@ -4,7 +4,7 @@
  * `GET /api/admin/workflows/:id/graph` returns the host's read-only
  * `{ nodes, edges }` projection (the "view flow chart" affordance). These tests
  * stub the duck-typed `WorkflowSurface.graphOf` so the web package stays
- * decoupled from `@aipehub/workflow`, and assert the route:
+ * decoupled from `@gotong/workflow`, and assert the route:
  *   (a) forwards to `graphOf(id)` and echoes its `{ graph }` verbatim,
  *   (b) maps a null result (unknown id) to 404,
  *   (c) maps an absent `graphOf` method (legacy host) to 404 "not enabled",
@@ -17,7 +17,7 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { Hub, Space } from '@aipehub/core'
+import { Hub, Space } from '@gotong/core'
 
 import {
   serveWeb,
@@ -129,7 +129,7 @@ interface BootResult {
 
 async function boot(opts: { withWorkflows?: boolean; withGraphOf?: boolean } = {}): Promise<BootResult> {
   const withWorkflows = opts.withWorkflows ?? true
-  const tmp = await mkdtemp(join(tmpdir(), 'aipehub-web-wfgraph-'))
+  const tmp = await mkdtemp(join(tmpdir(), 'gotong-web-wfgraph-'))
   const init = await Space.init(tmp, { name: 'wfgraph-test' })
   const hub = new Hub({ space: init.space })
   await hub.start()

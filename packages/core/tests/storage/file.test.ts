@@ -21,7 +21,7 @@ describe('FileStorage', () => {
   beforeEach(() => {
     path = join(
       tmpdir(),
-      `aipehub-test-${Date.now()}-${Math.random().toString(36).slice(2)}.jsonl`,
+      `gotong-test-${Date.now()}-${Math.random().toString(36).slice(2)}.jsonl`,
     )
   })
 

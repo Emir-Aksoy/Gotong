@@ -15,7 +15,7 @@
 |---|---|---|
 | M1 | `8a40e82` | `SuspendTaskError`、`isSuspendTaskError`、`Participant.onResume` 接口、`AgentParticipant.handleResume` 钩子 |
 | M2 | `e3380fe` | `TaskResult.kind='suspended'`、`DefaultScheduler` 的 `notifySuspend` 回调、`suspended_tasks` 表 (migration v=9) + CRUD API、host main.ts 注入 |
-| M3 | `dc8ab54` | `TranscriptEntry.kind='task_resumed'`、`Hub.resumeTask(agentId, task, state)`、host resume sweep (`AIPE_RESUME_SWEEP_MS`) |
+| M3 | `dc8ab54` | `TranscriptEntry.kind='task_resumed'`、`Hub.resumeTask(agentId, task, state)`、host resume sweep (`GOTONG_RESUME_SWEEP_MS`) |
 | M4 | `d7b3e7d` | `LlmAgent.runToolLoop` + `handleResume` —— tool-use loop 中的 messages 自动打包 / 解包，跨 suspend/resume 保持上下文 |
 | M5 | `c83c56d` | `examples/long-running-agent` —— 自包含 demo，suspend 中间 → sweep 唤醒 → resume 接着干 |
 | M6 | (this commit) | 本文 + CLAUDE.md 标 Phase 11 完 |
@@ -60,7 +60,7 @@ throw new SuspendTaskError({
 | resume 走 `onResume` 还是 `onTask` | `onResume` 优先，没实现 fallback `onTask` | 不破坏现有 agent；要利用 state 的就 override |
 | broadcast 中 suspend | 当 single-candidate failure，不持久化 | broadcast = "first ok wins"，parked candidate 不是 winner；另一个 candidate `ok` 后再持久化会双终态 |
 | 持久化失败 (SQLite 锁等) | 降级为 `failed`，不是 `ok` 也不是再次 `suspended` | 给 caller 一个终态，避免 ghost task；ops 看 log 排查 |
-| sweep 节流 | 默认 30s，env `AIPE_RESUME_SWEEP_MS` 可调；reentrancy guard | 大多 long-running 场景秒级精度足够；guard 防慢 sweep 跨 tick |
+| sweep 节流 | 默认 30s，env `GOTONG_RESUME_SWEEP_MS` 可调；reentrancy guard | 大多 long-running 场景秒级精度足够；guard 防慢 sweep 跨 tick |
 | LlmAgent 怎么保存 messages | 包进 `SuspendTaskError.state` 的 `__llmMessages` 字段 | 复用 M2 持久化路径，不开新表 / 服务；用户态保留在 `state.user` |
 | Working memory 版本号 | `__llmAgentMemVersion: 1` | 未来 schema 变动有迁移钩子 |
 | no_participant 没 onResume 也没 onTask | 返 `kind: 'no_participant'` | 跟 dispatch 路径一致 |
@@ -100,7 +100,7 @@ throw new SuspendTaskError({
    (...time passes — resumeAt arrives...)
 
 
-4.  setInterval (every AIPE_RESUME_SWEEP_MS, default 30 s)
+4.  setInterval (every GOTONG_RESUME_SWEEP_MS, default 30 s)
        │  if (sweepInflight) return
        │  sweepInflight = true
        │
@@ -163,13 +163,13 @@ throw new SuspendTaskError({
 
 ### 环境变量
 
-- `AIPE_RESUME_SWEEP_MS` —— resume sweep 周期，默认 30000 (30s)；
+- `GOTONG_RESUME_SWEEP_MS` —— resume sweep 周期，默认 30000 (30s)；
   clamp 到 [1_000, 600_000]；out-of-range 静默 fallback 到默认。
   生产建议：
   - 长流程（每个 suspend ≥10 分钟）：保持默认或调大到 60_000 减 SQLite 触发
   - 短流程（秒级 retry-after-rate-limit）：调小到 5_000
 
-- `AIPE_MAX_DISPATCH_DEPTH` (Phase 10 留下的) —— 不影响 resume；
+- `GOTONG_MAX_DISPATCH_DEPTH` (Phase 10 留下的) —— 不影响 resume；
   resume 不通过 Hub.dispatch 路径，depth/cycle gate 不重新评估。
 
 ### SQLite 表
@@ -242,8 +242,8 @@ DELETE FROM suspended_tasks WHERE resume_at < strftime('%s', 'now') * 1000 - 864
 
 下一步 (Phase 12): **协议外通路 — IM bridges + PWA + REPL**。
 
-让浏览器以外的人也能用 AipeHub：Telegram / Matrix / 飞书 / Discord / Slack
-机器人桥接（每个一个 `@aipehub/im-<platform>` 包），加 PWA manifest 让
-admin UI 能"添加到主屏幕"，加 `aipehub repl` 交互式 CLI。
+让浏览器以外的人也能用 Gotong：Telegram / Matrix / 飞书 / Discord / Slack
+机器人桥接（每个一个 `@gotong/im-<platform>` 包），加 PWA manifest 让
+admin UI 能"添加到主屏幕"，加 `gotong repl` 交互式 CLI。
 
 详见 `docs/zh/ledger/V4-PHASE7-13-PLAN.md` 第七节。

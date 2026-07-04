@@ -5,7 +5,7 @@
  *   1. Unit test: mock HubServices, verify artifactId conventions
  *      (path shape, ext sanitisation, random uniqueness, mime
  *      pass-through) without touching the real plugin loader.
- *   2. E2E: real `@aipehub/service-artifact-file` attach via
+ *   2. E2E: real `@gotong/service-artifact-file` attach via
  *      `bootstrapServices`, real `put()` writes bytes to disk, and
  *      a fresh attach can read them back via `handle.readBytes()`
  *      (the path Phase 9 M2/M3 providers take for multimodal).
@@ -22,12 +22,12 @@ import { join } from 'node:path'
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { createLogger, Hub, Space } from '@aipehub/core'
+import { createLogger, Hub, Space } from '@gotong/core'
 import type {
   ArtifactHandle,
   AttachedHandle,
   Owner,
-} from '@aipehub/services-sdk'
+} from '@gotong/services-sdk'
 
 import { bootstrapServices, type HubServices } from '../src/services/index.js'
 import { createUploadSurface } from '../src/uploads.js'
@@ -256,7 +256,7 @@ describe('createUploadSurface (e2e via real artifact-file plugin)', () => {
   let space: Space
   let hub: Hub
   beforeEach(async () => {
-    root = await mkdtemp(join(tmpdir(), 'aipe-uploads-e2e-'))
+    root = await mkdtemp(join(tmpdir(), 'gotong-uploads-e2e-'))
     await rm(root, { recursive: true, force: true })
     const opened = await Space.init(root, { name: 'test' })
     space = opened.space
@@ -266,7 +266,7 @@ describe('createUploadSurface (e2e via real artifact-file plugin)', () => {
     // for a leaner e2e).
     await writeFile(
       join(space.paths.services, 'plugins.json'),
-      JSON.stringify({ plugins: ['@aipehub/service-artifact-file'] }, null, 2) + '\n',
+      JSON.stringify({ plugins: ['@gotong/service-artifact-file'] }, null, 2) + '\n',
       'utf8',
     )
   })

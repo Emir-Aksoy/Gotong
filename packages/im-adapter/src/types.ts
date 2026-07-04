@@ -1,8 +1,8 @@
 /**
- * Public type surface for `@aipehub/im-adapter`.
+ * Public type surface for `@gotong/im-adapter`.
  *
  * The contract is deliberately tiny — concrete bridges
- * (@aipehub/im-telegram, @aipehub/im-matrix, …) implement `ImBridge`
+ * (@gotong/im-telegram, @gotong/im-matrix, …) implement `ImBridge`
  * and depend on a host-supplied `ImBindingResolver`. The bridge SDK
  * itself has zero runtime deps; the only thing it ships is:
  *
@@ -114,8 +114,8 @@ export type ImCommand =
 // ---------------------------------------------------------------------------
 
 /**
- * Resolves IM identities to AipeHub user ids and consumes binding
- * codes. Concrete impl typically wraps `@aipehub/identity`'s
+ * Resolves IM identities to Gotong user ids and consumes binding
+ * codes. Concrete impl typically wraps `@gotong/identity`'s
  * `IdentityStore` (sync) and lifts it into Promise form so bridges
  * can `await` uniformly — including future remote / federated
  * resolvers.
@@ -138,7 +138,7 @@ export type ImCommand =
 export interface ImBindingResolver {
   /**
    * Hot-path lookup for routing incoming messages. Returns the
-   * AipeHub user id bound to this IM identity, or `null` when the
+   * Gotong user id bound to this IM identity, or `null` when the
    * user hasn't bound yet (bridges reply with the "send `/bind
    * <code>`" prompt).
    */
@@ -176,7 +176,7 @@ export type ClaimResult =
  * Why no in-tree router or dispatcher: the bridge SDK stays pure-types
  * so this package has zero side-effecty code paths. The router is a
  * host concern (it knows about the Hub, the BindingResolver, the
- * default agent / workflow set). Future `@aipehub/im-host` may
+ * default agent / workflow set). Future `@gotong/im-host` may
  * publish a default router; for now each concrete bridge wires its
  * own.
  *

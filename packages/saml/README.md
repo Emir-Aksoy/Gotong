@@ -1,6 +1,6 @@
-# @aipehub/saml
+# @gotong/saml
 
-SAML 2.0 **Service Provider (SP)** protocol core for AipeHub enterprise SSO
+SAML 2.0 **Service Provider (SP)** protocol core for Gotong enterprise SSO
 (Route B P1-M5). Pure functions; no network, no state, no IdP.
 
 The dangerous parts — XML canonicalization (C14N) and the signature math — are

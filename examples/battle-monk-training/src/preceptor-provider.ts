@@ -20,7 +20,7 @@
  * deterministic so the demo runs with no API key and self-asserts the routing.
  */
 
-import type { LlmProvider, LlmRequest, LlmStreamChunk } from '@aipehub/llm'
+import type { LlmProvider, LlmRequest, LlmStreamChunk } from '@gotong/llm'
 
 import { PILLARS, PILLAR_TITLE, type Pillar } from './codex.js'
 import {

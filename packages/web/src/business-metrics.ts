@@ -5,7 +5,7 @@
  * host-injected surfaces (workflow run store + identity ledger / suspended
  * tasks). Web keeps its zero-runtime-dep posture: the source interfaces here
  * are narrow duck types that `ctx.workflows` / `ctx.identity` satisfy
- * structurally, never imports of @aipehub/workflow or @aipehub/identity.
+ * structurally, never imports of @gotong/workflow or @gotong/identity.
  *
  * Everything is best-effort. A source the host didn't wire, a method it
  * doesn't carry (older host), or a call that throws → that metric family is

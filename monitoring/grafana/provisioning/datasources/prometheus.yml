@@ -1,4 +1,4 @@
-# Grafana datasource provisioning — points the AipeHub dashboard at the
+# Grafana datasource provisioning — points the Gotong dashboard at the
 # Prometheus service in this compose stack. Auto-loaded on Grafana startup.
 apiVersion: 1
 datasources:

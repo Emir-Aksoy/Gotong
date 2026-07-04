@@ -1,5 +1,5 @@
 /**
- * Outbound bridge: an AipeHub agent that delegates a task to a durable
+ * Outbound bridge: an Gotong agent that delegates a task to a durable
  * external workflow engine (Windmill) and returns its result.
  *
  * This is the mirror image of the Activepieces bridge (which is inbound). Here
@@ -14,7 +14,7 @@
  * passed in by the caller (read from env / vault), never inlined here.
  */
 
-import { AgentParticipant, type Task } from '@aipehub/core'
+import { AgentParticipant, type Task } from '@gotong/core'
 
 export type FetchLike = (url: string, init?: {
   method?: string
@@ -32,7 +32,7 @@ export interface WindmillParticipantOptions {
   token: string
   /** Flow path, e.g. `u/alice/process_lead` or `f/onboarding/triage`. */
   flowPath: string
-  /** Map the AipeHub task to the flow's inputs. Default: the payload object. */
+  /** Map the Gotong task to the flow's inputs. Default: the payload object. */
   toInputs?: (task: Task) => Record<string, unknown>
   /** Map the durable job's result to the task output. Default: identity. */
   fromResult?: (result: unknown) => unknown

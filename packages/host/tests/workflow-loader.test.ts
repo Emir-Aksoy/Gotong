@@ -30,7 +30,7 @@ describe('workflow-loader', () => {
     writeFileSync(
       join(dir, 'editorial.yaml'),
       `
-schema: aipehub.workflow/v1
+schema: gotong.workflow/v1
 workflow:
   id: ed
   trigger: { capability: run-editorial }
@@ -63,7 +63,7 @@ workflow:
     writeFileSync(
       join(dir, 'good.yaml'),
       `
-schema: aipehub.workflow/v1
+schema: gotong.workflow/v1
 workflow:
   id: ok
   trigger: { capability: go }
@@ -84,7 +84,7 @@ workflow:
   it('rejects a duplicate workflow id (second file fails dedup)', async () => {
     mkdirSync(dir, { recursive: true })
     const sameId = `
-schema: aipehub.workflow/v1
+schema: gotong.workflow/v1
 workflow:
   id: dup
   trigger: { capability: trig }
@@ -108,7 +108,7 @@ workflow:
     writeFileSync(
       join(dir, 'one.yaml'),
       `
-schema: aipehub.workflow/v1
+schema: gotong.workflow/v1
 workflow:
   id: one
   trigger: { capability: c1 }

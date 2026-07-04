@@ -17,7 +17,7 @@
  *
  * The provider is injected (the `provider` test seam) so we can script the exact
  * proposal — classification + parse correctness already have unit coverage in
- * `@aipehub/hub-steward`; this test is about the host wiring around them.
+ * `@gotong/hub-steward`; this test is about the host wiring around them.
  */
 
 import { mkdtemp, rm } from 'node:fs/promises'
@@ -26,8 +26,8 @@ import { join } from 'node:path'
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { Hub, Space, createLogger } from '@aipehub/core'
-import { MockLlmProvider, type LlmMessage, type LlmRequest } from '@aipehub/llm'
+import { Hub, Space, createLogger } from '@gotong/core'
+import { MockLlmProvider, type LlmMessage, type LlmRequest } from '@gotong/llm'
 
 import {
   createHubStewardService,
@@ -98,7 +98,7 @@ interface Bench {
 }
 
 async function boot(): Promise<Bench> {
-  const root = await mkdtemp(join(tmpdir(), 'aipe-steward-plan-'))
+  const root = await mkdtemp(join(tmpdir(), 'gotong-steward-plan-'))
   const { space } = await Space.init(root, { name: 'steward-plan-test' })
   const hub = new Hub({ space })
   await hub.start()

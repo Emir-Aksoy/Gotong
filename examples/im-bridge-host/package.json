@@ -1,16 +1,16 @@
 {
-  "name": "@aipehub/example-im-bridge-host",
+  "name": "@gotong/example-im-bridge-host",
   "version": "0.0.0",
   "type": "module",
   "private": true,
-  "description": "Phase 12 M8 demo — wire an IM bridge (`@aipehub/im-*`) end-to-end through a host-side router into `Hub.dispatch`, with binding-code flow against `@aipehub/identity`.",
+  "description": "Phase 12 M8 demo — wire an IM bridge (`@gotong/im-*`) end-to-end through a host-side router into `Hub.dispatch`, with binding-code flow against `@gotong/identity`.",
   "scripts": {
     "start": "tsx src/index.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@aipehub/core": "workspace:*",
-    "@aipehub/identity": "workspace:*",
-    "@aipehub/im-adapter": "workspace:*"
+    "@gotong/core": "workspace:*",
+    "@gotong/identity": "workspace:*",
+    "@gotong/im-adapter": "workspace:*"
   }
 }

@@ -1,6 +1,6 @@
 # =============================================================================
 # Workflow: 销售线索资格审查 + CRM 回写 (lead qualification with CRM sync)
-# Schema: aipehub.workflow/v1
+# Schema: gotong.workflow/v1
 #
 # 行业模板 #2 (Phase 19 P5-M6). 演示「AI 富化 + 条件分流 + 回写外部系统」:
 #   1) AI 富化原始线索 (推断公司规模 / 行业 / 意向)
@@ -18,7 +18,7 @@
 #   + crm-upsert (一个写 CRM 的 agent / MCP 工具桥, 见 examples/rag-mcp 思路)。
 # =============================================================================
 
-schema: aipehub.workflow/v1
+schema: gotong.workflow/v1
 
 workflow:
   id: lead-qualification-flow

@@ -9,7 +9,7 @@
 
 ## 一句话
 
-**个人模式 = 单用户的 AipeHub. 主页是"我的 AI 桌面"而不是"管理员控制台",
+**个人模式 = 单用户的 Gotong. 主页是"我的 AI 桌面"而不是"管理员控制台",
 role chip 隐藏, 设置里有"升级到团队"按钮. 其他 admin 功能全部保留,
 只是不占主屏幕注意力.**
 
@@ -128,19 +128,19 @@ POST /api/admin/identity/org-mode
 
 ## env 强制覆盖
 
-启动时 `AIPE_MODE` 可 pin 一个模式:
+启动时 `GOTONG_MODE` 可 pin 一个模式:
 
 | env | 行为 |
 |---|---|
 | 未设置 / 空 | 走数据库 `org_mode` (自动模式) |
-| `AIPE_MODE=personal` | 启动时把 `org_mode` pin 到 `'personal'` |
-| `AIPE_MODE=team` | 启动时把 `org_mode` pin 到 `'team'` |
+| `GOTONG_MODE=personal` | 启动时把 `org_mode` pin 到 `'personal'` |
+| `GOTONG_MODE=team` | 启动时把 `org_mode` pin 到 `'team'` |
 | 其他值 (如 `weird`) | warn log + 忽略, 走自动模式 |
 
 注意: env 只在启动那一次 pin. 之后用 createInvitation / 显式 flip
 仍然能改变 mode. env 不是"硬锁"。
 
-如果你想让生产环境永远是 team (即使临时回到 1 个用户), 把 `AIPE_MODE=team`
+如果你想让生产环境永远是 team (即使临时回到 1 个用户), 把 `GOTONG_MODE=team`
 写进 docker-compose.yml 即可。
 
 ---

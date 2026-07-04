@@ -1,20 +1,20 @@
 # Workflows · 工作流模板（初始参考集）
 
-> 🧩 **AipeHub 的 Hub 不内置 workflow 引擎**，它只负责派任务和记录 transcript。
-> "工作流"是上一层的能力，由 [`@aipehub/workflow`](../../packages/workflow/) 这个
+> 🧩 **Gotong 的 Hub 不内置 workflow 引擎**，它只负责派任务和记录 transcript。
+> "工作流"是上一层的能力，由 [`@gotong/workflow`](../../packages/workflow/) 这个
 > 可热插拔的包提供。本目录是该包配套的 YAML 模板集。
 
 ## 怎么用
 
 1. 把 `.yaml` 文件放到 host 配置的 workflow 目录下（默认
-   `.aipehub/workflows/definitions/`）
+   `.gotong/workflows/definitions/`）
 2. 启动 host —— 它扫这个目录，每个 yaml 自动注册成一个 `WorkflowRunner`
 3. admin 在控制台派任务到 workflow 的 `trigger.capability` —— 整个流程自动跑完，
    最后回一个 TaskResult
 
 ```bash
 # 比如
-cp templates/workflows/editorial-flow.yaml .aipehub/workflows/definitions/
+cp templates/workflows/editorial-flow.yaml .gotong/workflows/definitions/
 pnpm host                    # host 启动时自动加载
 # admin UI 派任务：strategy={kind:capability, capabilities:['run-editorial']}
 # payload={topic:'...', notes:'...'}
@@ -73,7 +73,7 @@ LLM 也能在 CI 跑通。`contract-review-flow` 还演示 Phase 16 `human:` 步
 ## YAML 速查
 
 ```yaml
-schema: aipehub.workflow/v1
+schema: gotong.workflow/v1
 workflow:
   id: my-flow                          # 必填，全空间唯一
   name: 显示用名字                     # 可选
@@ -196,7 +196,7 @@ predicate 根本不会评估。
 - 每一步的输出 / 错误
 - 最终结果
 
-崩了重启也能用 `jq` 翻看历史。和 AipeHub v2.0 "file-first" 路线完全一致。
+崩了重启也能用 `jq` 翻看历史。和 Gotong v2.0 "file-first" 路线完全一致。
 
 ### 中断恢复（v0.3）
 

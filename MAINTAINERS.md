@@ -8,7 +8,7 @@ releases. For what each role means and how the maintainer ladder works, see
 [`GOVERNANCE.md`](GOVERNANCE.md) — in particular
 [Becoming a maintainer](GOVERNANCE.md#becoming-a-maintainer).
 
-It is intentionally short. AipeHub is a young project with, today, a single
+It is intentionally short. Gotong is a young project with, today, a single
 maintainer. This file exists so the *second* maintainer joins by a written path
 rather than an ad-hoc tap on the shoulder — and so the line of responsibility is
 never an unwritten habit.

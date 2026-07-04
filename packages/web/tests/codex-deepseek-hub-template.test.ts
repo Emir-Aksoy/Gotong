@@ -22,7 +22,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { Hub, Space } from '@aipehub/core'
+import { Hub, Space } from '@gotong/core'
 
 import { serveWeb, type WebServerHandle, type WorkflowSurface } from '../src/server.js'
 import { parseTemplate } from '../src/template-manifest.js'
@@ -41,7 +41,7 @@ beforeEach(async () => {
 })
 
 describe('examples/codex-deepseek-hub/template (DST1)', () => {
-  it('parses as a valid aipehub.template/v1 manifest', () => {
+  it('parses as a valid gotong.template/v1 manifest', () => {
     const t = parseTemplate(templateText)
     expect(t.name).toBe('配对编码导师(Codex × DeepSeek TUI)')
     expect(t.version).toBe(1)
@@ -79,7 +79,7 @@ describe('examples/codex-deepseek-hub/template (DST1)', () => {
   })
 
   it('imports end-to-end: the mentor agent lands, KB slot is reported', async () => {
-    const tmp = await mkdtemp(join(tmpdir(), 'aipehub-cdh-'))
+    const tmp = await mkdtemp(join(tmpdir(), 'gotong-cdh-'))
     const { space } = await Space.init(tmp, { name: 'cdh-test' })
     const hub = new Hub({ space })
     await hub.start()

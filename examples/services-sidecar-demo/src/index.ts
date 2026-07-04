@@ -29,18 +29,18 @@
 //        └──────────────────────────────────────────────────────────┘
 //
 // In production these two sub-trees would be separate OS processes
-// (the SDK-side could even be Python via `pip install aipehub`). Wire
+// (the SDK-side could even be Python via `pip install gotong`). Wire
 // behaviour is identical. We co-locate here for demo brevity.
 
 import { mkdir, rm, writeFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 
-import { Hub, Space, type Task } from '@aipehub/core'
-import { bootstrapServices } from '@aipehub/host/services'
-import { MockLlmProvider, drainStream } from '@aipehub/llm'
-import { AgentParticipant, connect, type Session, type ServiceClient } from '@aipehub/sdk-node'
-import { serveWebSocket, type WebSocketTransportHandle } from '@aipehub/transport-ws'
+import { Hub, Space, type Task } from '@gotong/core'
+import { bootstrapServices } from '@gotong/host/services'
+import { MockLlmProvider, drainStream } from '@gotong/llm'
+import { AgentParticipant, connect, type Session, type ServiceClient } from '@gotong/sdk-node'
+import { serveWebSocket, type WebSocketTransportHandle } from '@gotong/transport-ws'
 
 // ---------------------------------------------------------------------------
 // Two sidecar agents — each declares its own service ACL in HELLO.
@@ -147,7 +147,7 @@ function banner(text: string): void {
 }
 
 async function main(): Promise<void> {
-  const ROOT = join(process.cwd(), '..', '..', '.aipehub-sidecar-demo')
+  const ROOT = join(process.cwd(), '..', '..', '.gotong-sidecar-demo')
   if (existsSync(ROOT)) await rm(ROOT, { recursive: true, force: true })
   await mkdir(ROOT, { recursive: true })
 
@@ -159,7 +159,7 @@ async function main(): Promise<void> {
 
   await writeFile(
     join(space.paths.services, 'plugins.json'),
-    JSON.stringify({ plugins: ['@aipehub/service-memory-file'] }, null, 2) + '\n',
+    JSON.stringify({ plugins: ['@gotong/service-memory-file'] }, null, 2) + '\n',
     'utf8',
   )
   const boot = await bootstrapServices({ space, hub })
@@ -172,7 +172,7 @@ async function main(): Promise<void> {
   log(`✓ ws server listening at ${ws.url}`)
 
   // 2) Sidecar side: two agents over connect() ----------------------------
-  banner('Phase 2 — sidecar agents (via @aipehub/sdk-node connect)')
+  banner('Phase 2 — sidecar agents (via @gotong/sdk-node connect)')
   const provider = new MockLlmProvider({
     reply: (req) => `mock-reply: ${(req.messages[0]?.content ?? '').slice(0, 40)}`,
   })

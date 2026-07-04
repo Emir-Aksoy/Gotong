@@ -25,7 +25,7 @@
  * "this is what the user just said".
  */
 
-import type { MemoryEntry } from '@aipehub/services-sdk'
+import type { MemoryEntry } from '@gotong/services-sdk'
 
 import { isActive } from './bitemporal.js'
 import { compareByImportanceThenRecency } from './importance.js'
@@ -95,8 +95,8 @@ export const DEFAULT_PROCEDURE_SECTION_MAX = 8
 const PROCEDURE_HEADING = 'Things I know how to do'
 
 /** Stable delimiters. NEVER interpolate variable data into these. */
-const OPEN_MARKER = '<!-- aipehub:memory:begin -->'
-const CLOSE_MARKER = '<!-- aipehub:memory:end -->'
+const OPEN_MARKER = '<!-- gotong:memory:begin -->'
+const CLOSE_MARKER = '<!-- gotong:memory:end -->'
 
 const PREAMBLE =
   'Durable facts I have remembered from our past sessions. Frozen for ' +

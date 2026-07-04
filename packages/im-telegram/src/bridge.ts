@@ -51,7 +51,7 @@ import type {
   ImBridge,
   ImMessage,
   ImUser,
-} from '@aipehub/im-adapter'
+} from '@gotong/im-adapter'
 
 import {
   createTelegramClient,

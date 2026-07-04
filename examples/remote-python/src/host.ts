@@ -3,8 +3,8 @@
  * but listens on :4001 so the two demos can coexist.
  */
 
-import { Hub, type TranscriptEntry } from '@aipehub/core'
-import { serveWebSocket } from '@aipehub/transport-ws'
+import { Hub, type TranscriptEntry } from '@gotong/core'
+import { serveWebSocket } from '@gotong/transport-ws'
 
 async function main(): Promise<void> {
   const hub = Hub.inMemory()

@@ -20,7 +20,7 @@
  *     subfields.
  *   - H15: New `decodeFrameClosed` enables an opt-in tighter mode
  *     that rejects unknown discriminators. Wired through
- *     `transport-ws` as `AIPE_PROTOCOL_STRICT=closed`.
+ *     `transport-ws` as `GOTONG_PROTOCOL_STRICT=closed`.
  *
  * See AUDIT-v3.3.md findings H14 + H15.
  */

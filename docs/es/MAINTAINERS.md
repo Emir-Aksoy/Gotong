@@ -8,7 +8,7 @@ versiones. Para saber qué significa cada rol y cómo funciona la escalera de ma
 [`GOVERNANCE.md`](../../GOVERNANCE.md) — en particular
 [Convertirse en mantenedor](../../GOVERNANCE.md#becoming-a-maintainer).
 
-Es intencionalmente corto. AipeHub es un proyecto joven con, hoy en día, un único
+Es intencionalmente corto. Gotong es un proyecto joven con, hoy en día, un único
 mantenedor. Este archivo existe para que el *segundo* mantenedor se incorpore por un camino escrito
 en lugar de un toque informal en el hombro — y para que la línea de responsabilidad nunca sea
 un hábito no escrito.

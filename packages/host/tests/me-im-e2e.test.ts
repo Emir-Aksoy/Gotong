@@ -19,7 +19,7 @@
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { openIdentityStore, IdentityError, type IdentityStore } from '@aipehub/identity'
+import { openIdentityStore, IdentityError, type IdentityStore } from '@gotong/identity'
 
 import { HostMeImService } from '../src/me-im-service.js'
 

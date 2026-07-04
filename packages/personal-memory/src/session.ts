@@ -20,7 +20,7 @@
  * `recall` tool, not poured into every prompt.
  */
 
-import type { MemoryHandle, MemoryKind } from '@aipehub/services-sdk'
+import type { MemoryHandle, MemoryKind } from '@gotong/services-sdk'
 
 import { renderClusteredFrozenBlock, renderFrozenBlock } from './frozen-block.js'
 import type { TierConfig } from './tiers.js'

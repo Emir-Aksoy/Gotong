@@ -1,5 +1,5 @@
 /**
- * @aipehub/im-matrix — public surface.
+ * @gotong/im-matrix — public surface.
  */
 
 export { MatrixBridge, type MatrixBridgeOptions } from './bridge.js'

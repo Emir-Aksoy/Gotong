@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { parse as parseYaml } from 'yaml'
 
-import type { ManagedAgentSpec } from '@aipehub/core'
+import type { ManagedAgentSpec } from '@gotong/core'
 
 import { ManifestError } from '../src/manifest.js'
 import { encryptJson } from '../src/template-crypto.js'
@@ -22,7 +22,7 @@ import {
  */
 
 const FULL = `
-schema: aipehub.template/v1
+schema: gotong.template/v1
 template:
   name: 客服知识助手
   description: 一个客服 agent + 工单工作流 + 指向你自己 KB 的接线
@@ -76,7 +76,7 @@ template:
       label: DeepSeek
 `
 
-describe('parseTemplate (aipehub.template/v1)', () => {
+describe('parseTemplate (gotong.template/v1)', () => {
   it('parses a full template (agents + workflows + KBs + defaults)', () => {
     const t = parseTemplate(FULL)
     expect(t.schema).toBe(TEMPLATE_SCHEMA_V1)
@@ -118,11 +118,11 @@ describe('parseTemplate (aipehub.template/v1)', () => {
     })
   })
 
-  it('re-serializes each workflow into a parseable aipehub.workflow/v1 yaml', () => {
+  it('re-serializes each workflow into a parseable gotong.workflow/v1 yaml', () => {
     const t = parseTemplate(FULL)
     const wf = t.workflows[0]!
     const doc = parseYaml(wf.yaml) as { schema?: string; workflow?: Record<string, unknown> }
-    expect(doc.schema).toBe('aipehub.workflow/v1')
+    expect(doc.schema).toBe('gotong.workflow/v1')
     expect(doc.workflow?.id).toBe('ticket-flow')
     // the whole block round-trips verbatim — steps survive untouched
     expect(Array.isArray(doc.workflow?.steps)).toBe(true)
@@ -130,7 +130,7 @@ describe('parseTemplate (aipehub.template/v1)', () => {
 
   it('parses the equivalent JSON template', () => {
     const json = JSON.stringify({
-      schema: 'aipehub.template/v1',
+      schema: 'gotong.template/v1',
       template: {
         name: 'json-template',
         knowledgeBases: [{ name: 'kb', useMcpServer: 'some-mcp' }],
@@ -164,13 +164,13 @@ describe('parseTemplate (aipehub.template/v1)', () => {
   })
 
   it('rejects a wrong / missing schema', () => {
-    expect(() => parseTemplate('schema: aipehub.bundle/v1\nbundle: {}')).toThrow(/schema must be/)
+    expect(() => parseTemplate('schema: gotong.bundle/v1\nbundle: {}')).toThrow(/schema must be/)
     expect(() => parseTemplate('template:\n  name: x')).toThrow(ManifestError)
   })
 
   it('rejects a missing template object / missing name', () => {
-    expect(() => parseTemplate('schema: aipehub.template/v1')).toThrow(/template.template is required/)
-    expect(() => parseTemplate('schema: aipehub.template/v1\ntemplate: {}')).toThrow(/name is required/)
+    expect(() => parseTemplate('schema: gotong.template/v1')).toThrow(/template.template is required/)
+    expect(() => parseTemplate('schema: gotong.template/v1\ntemplate: {}')).toThrow(/name is required/)
   })
 
   it('rejects an entirely empty template (no agents / workflows / KBs)', () => {
@@ -269,7 +269,7 @@ describe('parseTemplate (aipehub.template/v1)', () => {
 
 /**
  * renderTemplate is the inverse of parseTemplate — it turns selected hub
- * structure into an aipehub.template/v1 object. Its `template` is the
+ * structure into an gotong.template/v1 object. Its `template` is the
  * structure-safe DEFAULT export (decision #5): structure + wiring + references,
  * and by construction NO personnel, NO knowledge content, NO literal secrets.
  * Any scrubbed literal secrets are returned *separately* as `secrets` (the B-M3
@@ -511,7 +511,7 @@ describe('parseTemplate carries the B-M3 encrypted sidecar (B-M4)', () => {
     const { blob } = encryptJson({ secrets: { '${KB_TOKEN}': 'sk-REAL' } })
     const t = parseTemplate(
       JSON.stringify({
-        schema: 'aipehub.template/v1',
+        schema: 'gotong.template/v1',
         template: { name: 't', agents: [llmAgent('a')], encrypted: blob },
       }),
     )
@@ -522,7 +522,7 @@ describe('parseTemplate carries the B-M3 encrypted sidecar (B-M4)', () => {
     expect(() =>
       parseTemplate(
         JSON.stringify({
-          schema: 'aipehub.template/v1',
+          schema: 'gotong.template/v1',
           template: { name: 't', agents: [llmAgent('a')], encrypted: { algo: 'aes-256-gcm', iv: 'x' } },
         }),
       ),
@@ -713,7 +713,7 @@ describe('template provenance (citation graph)', () => {
 /** Build a `template:` document around an arbitrary inner object (JSON form). */
 function tmpl(inner: Record<string, unknown>): string {
   return JSON.stringify({
-    schema: 'aipehub.template/v1',
+    schema: 'gotong.template/v1',
     template: { name: 'test-template', ...inner },
   })
 }

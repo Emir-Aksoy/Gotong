@@ -1,8 +1,8 @@
 {
-  "name": "@aipehub/evals",
+  "name": "@gotong/evals",
   "version": "0.1.0",
   "type": "module",
-  "description": "AipeHub workflow + agent prompt eval harness — lightweight structural checkers that catch output-format regressions without burning LLM tokens.",
+  "description": "Gotong workflow + agent prompt eval harness — lightweight structural checkers that catch output-format regressions without burning LLM tokens.",
   "license": "MIT",
   "private": true,
   "main": "./dist/index.js",
@@ -37,7 +37,7 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "@aipehub/workflow": "workspace:*"
+    "@gotong/workflow": "workspace:*"
   },
   "devDependencies": {
     "vitest": "^3.2.4"

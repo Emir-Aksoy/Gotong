@@ -13,7 +13,7 @@
 
 import { describe, expect, it, vi } from 'vitest'
 
-import type { MemoryEntry, MemoryHandle } from '@aipehub/services-sdk'
+import type { MemoryEntry, MemoryHandle } from '@gotong/services-sdk'
 
 import {
   activeProcedures,

@@ -1,4 +1,4 @@
-schema: aipehub.workflow/v1
+schema: gotong.workflow/v1
 workflow:
   id: a2a-long-review-and-file
   name: review via a long-running external A2A agent, then file

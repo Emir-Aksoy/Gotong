@@ -33,8 +33,8 @@ import {
   createInprocHubLinkPair,
   installPeerLink,
   type Task,
-} from '@aipehub/core'
-import { MASTER_KEY_LEN_BYTES, openIdentityStore, type IdentityStore } from '@aipehub/identity'
+} from '@gotong/core'
+import { MASTER_KEY_LEN_BYTES, openIdentityStore, type IdentityStore } from '@gotong/identity'
 
 /** Receiver-side worker that records every task it's handed. */
 class RecordingAgent extends AgentParticipant {
@@ -50,7 +50,7 @@ describe('v5 Stream G-M1 — outboundCaps advertise the peer wrapper for cross-h
   let tmp: string
 
   beforeEach(async () => {
-    tmp = await mkdtemp(join(tmpdir(), 'aipe-peer-advertise-'))
+    tmp = await mkdtemp(join(tmpdir(), 'gotong-peer-advertise-'))
     store = openIdentityStore({
       dbPath: join(tmp, 'identity.sqlite'),
       masterKey: randomBytes(MASTER_KEY_LEN_BYTES),

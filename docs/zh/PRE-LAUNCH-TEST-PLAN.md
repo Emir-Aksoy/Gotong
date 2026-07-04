@@ -1,4 +1,4 @@
-# AipeHub 上线前测试计划（Pre-Launch Test Plan）
+# Gotong 上线前测试计划（Pre-Launch Test Plan）
 
 > 这份是「**放给真实用户之前**，系统性验证一遍」的测试计划。它**站在
 > [`GO-LIVE.md`](GO-LIVE.md) 之上**：GO-LIVE 回答「怎么部署、配置项设对没有」，
@@ -120,7 +120,7 @@
 - **目标**：真实外部凭证（IM、按需 SSO/KB）在真平台上能握手、能收发。
 - **前置**：真 Telegram bot token（@BotFather）；按需真 QQ/Lark/Slack app 凭证、真 IdP、真 KB。
 - **步骤 / 通过标准**：
-  - **Telegram（必）**：填 `AIPE_TELEGRAM_BOT_TOKEN` 启动 → 自己私信机器人
+  - **Telegram（必）**：填 `GOTONG_TELEGRAM_BOT_TOKEN` 启动 → 自己私信机器人
     `/help` 有响应 → 完成 §六 绑定流程（出码 → `/bind` → 发消息收到 agent 回复）。
     通过 = 双向通、绑定落库、消息按真实成员归属。
   - **QQ/Lark/Slack（按需）**：仅本次启用时测。QQ 走官方 webhook 需公网 + 反代
@@ -137,7 +137,7 @@
 - **目标**：选定的两档拓扑真能从零起来、拿到 admin、健康检查通。
 - **T1 家用主机 + IM**：
   ```bash
-  cp deploy/.env.home .env.local   # 填 AIPE_TELEGRAM_BOT_TOKEN
+  cp deploy/.env.home .env.local   # 填 GOTONG_TELEGRAM_BOT_TOKEN
   set -a; . ./.env.local; set +a
   pnpm host
   ```
@@ -157,15 +157,15 @@
 
 - **目标**：云主机暴露面 fail-closed，照 GO-LIVE §七 风险表逐项过线。
 - **步骤 / 通过标准**：
-  - **boot 自检负例**：故意非 loopback bind 且不设 `AIPE_ALLOWED_HOSTS`/
-    `AIPE_COOKIE_SECURE` → 确认**拒绝启动**（`boot-security.ts`）。通过 = 真的起不来。
+  - **boot 自检负例**：故意非 loopback bind 且不设 `GOTONG_ALLOWED_HOSTS`/
+    `GOTONG_COOKIE_SECURE` → 确认**拒绝启动**（`boot-security.ts`）。通过 = 真的起不来。
   - **加固脚本**：`scripts/cloud-harden.sh` 跑完**无红项**（核对绑定/防火墙/过线开关/备份）。
-  - **过线三件套**：`AIPE_COOKIE_SECURE=1` + `AIPE_ALLOWED_HOSTS` + `AIPE_TRUST_PROXY=1`。
-  - **master key 挪出数据盘**：`AIPE_MASTER_KEY_PROVIDER=env` + key 从 secret 注入、
+  - **过线三件套**：`GOTONG_COOKIE_SECURE=1` + `GOTONG_ALLOWED_HOSTS` + `GOTONG_TRUST_PROXY=1`。
+  - **master key 挪出数据盘**：`GOTONG_MASTER_KEY_PROVIDER=env` + key 从 secret 注入、
     **单独离线备份**、不落数据盘、不进 git/journal。
   - **防火墙**：只开 SSH（T2 不开 443，因走 IM 出站；若也开直连才需 443）。
-  - **注册闸**：`AIPE_GATING=admin-approval`（**绝不** `open`）。
-  - **限速**：`AIPE_ADMIN_RATE_*` 生效 + 按真客户端 IP（`TRUST_PROXY`）。
+  - **注册闸**：`GOTONG_GATING=admin-approval`（**绝不** `open`）。
+  - **限速**：`GOTONG_ADMIN_RATE_*` 生效 + 按真客户端 IP（`TRUST_PROXY`）。
 - **资产**：`scripts/cloud-harden.sh`、`packages/host/src/boot-security.ts`、`GO-LIVE.md` §七、
   `DEPLOY.md` §B/§C.6。
 
@@ -176,7 +176,7 @@
   - **备份→恢复→校验→不变量 diff**：`scripts/backup/drill.sh <数据目录>` → **exit 0 +
     "DRILL PASSED"**（admins 保住 / 加密 secrets 随备份走 / **master key 正确缺席**——
     v3 `runtime/secret.key` + v4 `identity-master.key` 都不进备份）。
-  - **master key 轮换**：`aipehub-host rotate-master-key` 跑一次 + 重启采纳新 key、
+  - **master key 轮换**：`gotong-host rotate-master-key` 跑一次 + 重启采纳新 key、
     vault 仍解得开（崩溃中途可 boot 自动恢复）。
   - **崩溃不丢 / 不重复扣费**：`crash-resume-ledger-e2e` 已 hermetic 钉死；真机做一次
     kill -9 → 重启 → 确认 parked 任务恢复、账本恰扣一次。
@@ -189,7 +189,7 @@
 
 - **目标**：上线后看得见状态、越线能拍肩。
 - **步骤 / 通过标准**：
-  - `/metrics` 用 `AIPE_METRICS_TOKEN` bearer 抓得到（无 token → 404，错 token → 401）。
+  - `/metrics` 用 `GOTONG_METRICS_TOKEN` bearer 抓得到（无 token → 404，错 token → 401）。
   - `monitoring/docker-compose.yml` 起 Prometheus + Alertmanager + Grafana，dashboard
     自动 provision，抓到 `/metrics`。
   - `/healthz` 接入监控（systemd/uptime）。

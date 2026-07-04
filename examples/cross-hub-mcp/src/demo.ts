@@ -1,7 +1,7 @@
 /**
  * Cross-hub MCP federation (代理转发) — two hubs in one process.
  *
- * Run with: pnpm --filter @aipehub/example-cross-hub-mcp start
+ * Run with: pnpm --filter @gotong/example-cross-hub-mcp start
  * (build workspace deps first — see ../README.md)
  *
  * The story: hub A owns an MCP server ("calc") and shares it with peers.
@@ -21,7 +21,7 @@
  * (3) A un-shares calc and the next remote call is refused mid-flight.
  *
  * The proxy classes (McpProxyHost / RemoteMcpToolset / fetchPeerSharedMcp)
- * are the REAL host implementation, imported via `@aipehub/host/mcp-proxy`
+ * are the REAL host implementation, imported via `@gotong/host/mcp-proxy`
  * — no reimplementation, no drift.
  */
 
@@ -29,19 +29,19 @@ import {
   Hub,
   createInprocHubLinkPair,
   type HubMcpServerRecord,
-} from '@aipehub/core'
+} from '@gotong/core'
 import {
   LlmAgent,
   MockLlmProvider,
   type LlmToolCallResult,
   type LlmToolDefinition,
-} from '@aipehub/llm'
+} from '@gotong/llm'
 import {
   McpProxyHost,
   RemoteMcpToolset,
   fetchPeerSharedMcp,
   type ProxyToolset,
-} from '@aipehub/host/mcp-proxy'
+} from '@gotong/host/mcp-proxy'
 
 // ---------------------------------------------------------------------------
 // Hub A's "calc" MCP server. Stands in for a REAL MCP server (filesystem,

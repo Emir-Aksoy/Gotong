@@ -1,7 +1,7 @@
 # RES — 资源适配（快速适配自身部署环境资源）
 
 > 收口文档。对应 CLAUDE.md 目标「快速适配自身部署环境资源」里那唯一一个 🔴：
-> 在 RES 之前，AipeHub 从不探测本机资源——载入一个声明 `provider: anthropic`
+> 在 RES 之前，Gotong 从不探测本机资源——载入一个声明 `provider: anthropic`
 > 却没有密钥的 agent，它就只是静默地跑不起来，没人告诉你「本机其实有个
 > Ollama 在跑，一键改过去就能用」。RES 把这条缺口补上。
 >

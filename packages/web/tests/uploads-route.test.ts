@@ -23,7 +23,7 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { Hub, Space } from '@aipehub/core'
+import { Hub, Space } from '@gotong/core'
 
 import {
   serveWeb,
@@ -52,7 +52,7 @@ interface BootResult {
 }
 
 async function boot(opts: { withUploads: boolean } = { withUploads: true }): Promise<BootResult> {
-  const tmp = await mkdtemp(join(tmpdir(), 'aipehub-web-uploads-'))
+  const tmp = await mkdtemp(join(tmpdir(), 'gotong-web-uploads-'))
   const init = await Space.init(tmp, { name: 'uploads-test' })
   const space = init.space
   const hub = new Hub({ space })

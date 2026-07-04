@@ -13,8 +13,8 @@
 
 import { describe, expect, it } from 'vitest'
 
-import { parseWorkflow, type LifecycleState } from '@aipehub/workflow'
-import type { WorkflowAssistantOutput } from '@aipehub/workflow-assistant'
+import { parseWorkflow, type LifecycleState } from '@gotong/workflow'
+import type { WorkflowAssistantOutput } from '@gotong/workflow-assistant'
 
 import {
   MeWorkflowEditService,
@@ -48,7 +48,7 @@ function yamlWf(opts: { id?: string; trigger?: string; steps: StepSpec[] }): str
   // parseWorkflow wants `schema:` at the top level and everything else nested
   // under a `workflow:` object (see packages/workflow/src/schema.ts).
   return [
-    'schema: aipehub.workflow/v1',
+    'schema: gotong.workflow/v1',
     'workflow:',
     `  id: ${opts.id ?? 'flow'}`,
     '  trigger:',

@@ -4,15 +4,15 @@ import { join } from 'node:path'
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { Hub, HumanParticipant, InMemoryStorage, type HubLink } from '@aipehub/core'
-import { NEVER_RESUME_AT } from '@aipehub/inbox'
-import { RunStore } from '@aipehub/workflow'
+import { Hub, HumanParticipant, InMemoryStorage, type HubLink } from '@gotong/core'
+import { NEVER_RESUME_AT } from '@gotong/inbox'
+import { RunStore } from '@gotong/workflow'
 
 import { WorkflowController, createWorkflowController } from '../src/workflow-controller.js'
 import { loadWorkflows } from '../src/workflow-loader.js'
 
 const SAMPLE = `
-schema: aipehub.workflow/v1
+schema: gotong.workflow/v1
 workflow:
   id: editorial
   name: 中文编辑
@@ -156,7 +156,7 @@ describe('WorkflowController', () => {
   it('importFromText() rejects workflows that dispatch to their own trigger capability', async () => {
     const c = new WorkflowController({ hub, definitionsDir, spaceRoot: tmp })
     const yaml = `
-schema: aipehub.workflow/v1
+schema: gotong.workflow/v1
 workflow:
   id: loop
   trigger: { capability: loop:start }
@@ -700,7 +700,7 @@ workflow:
     // bad_ref: a step payload references a step that doesn't exist. Pure
     // structural → rejected on every path, even with no agents registered.
     const BAD_REF = `
-schema: aipehub.workflow/v1
+schema: gotong.workflow/v1
 workflow:
   id: bad-ref-wf
   trigger: { capability: badref:start }
@@ -712,7 +712,7 @@ workflow:
 `
     // forward_ref: 'first' references 'second.output', but 'second' runs later.
     const FORWARD_REF = `
-schema: aipehub.workflow/v1
+schema: gotong.workflow/v1
 workflow:
   id: fwd-ref-wf
   trigger: { capability: fwd:start }
@@ -728,7 +728,7 @@ workflow:
 `
     // unknown_agent: explicit dispatch at an id that isn't registered.
     const NEEDS_GHOST = `
-schema: aipehub.workflow/v1
+schema: gotong.workflow/v1
 workflow:
   id: needs-ghost
   trigger: { capability: ghost:start }
@@ -808,7 +808,7 @@ workflow:
   describe('cross-hub step flagging (Stream G G2)', () => {
     // One LOCAL step (draft-order) + one PEER-only step (supplier.confirm-order).
     const SUPPLY = `
-schema: aipehub.workflow/v1
+schema: gotong.workflow/v1
 workflow:
   id: supply
   name: 补货

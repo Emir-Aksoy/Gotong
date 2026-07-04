@@ -1,7 +1,7 @@
 # 个人 Hub 管家 (Personal Butler) — 设计文档
 
 > 把现有 `HubStewardAgent` 升级成「**可快速投入工作、类似 OpenClaw / Hermes 的常驻个人管家**」:
-> 记忆 + 会话上下文引擎 + 良性灵活调用 + 治理动作审批,落在 AipeHub 北极星上。
+> 记忆 + 会话上下文引擎 + 良性灵活调用 + 治理动作审批,落在 Gotong 北极星上。
 >
 > 本文是**建之前**的设计文档(对标 OpenClaw / Hermes 源码)。一里程碑一小 commit,
 > 每个里程碑带验收门。
@@ -21,7 +21,7 @@
 
 ## 北极星对齐
 
-- **框架不跑 LLM**:管家是一个 `Participant`(`LlmAgent` 子类),决策在它(模型)手里;Hub 只路由 / 记 transcript。记忆是**文件**(`.aipehub/` 里看得见,复制目录=搬走管家的「大脑」),不是云端黑盒。
+- **框架不跑 LLM**:管家是一个 `Participant`(`LlmAgent` 子类),决策在它(模型)手里;Hub 只路由 / 记 transcript。记忆是**文件**(`.gotong/` 里看得见,复制目录=搬走管家的「大脑」),不是云端黑盒。
 - **人和 agent 是同一个 Participant**:敏感动作不是「管家自己干」,而是**派一个 Task 给代表你收件箱的 Participant**,你在 `/me` 拍板后再恢复(复用 Phase 16)。
 - **状态即文件**:episodic 原始记忆 = jsonl;semantic 策展 profile = 可读 markdown 风格;会话 = transcript。全在磁盘。
 - **不学的那一半**:OpenClaw / Hermes 是**无界、无门控、宿主机自治**的 tool-loop(OpenClaw 469 个安全 issue + ClawHavoc 供应链攻击的根)。我们做**有界 + 敏感动作门控**的 tool-loop——见决策 D2 / D8。
@@ -81,11 +81,11 @@
 
 ---
 
-## 三、AipeHub 现有底座(~70% 已在)
+## 三、Gotong 现有底座(~70% 已在)
 
-| parity 标准 | AipeHub 已有的对应物 | 判定 |
+| parity 标准 | Gotong 已有的对应物 | 判定 |
 |---|---|---|
-| ① 文件优先记忆 | `@aipehub/memory-file`(jsonl,episodic/semantic kinds,per-owner,`remember/recall/list/forget`)+ transcript;`this.services.memory` 已挂每个 agent(`agent.ts:260`) | 半(缺策展 profile 层 + 冻结注入) |
+| ① 文件优先记忆 | `@gotong/memory-file`(jsonl,episodic/semantic kinds,per-owner,`remember/recall/list/forget`)+ transcript;`this.services.memory` 已挂每个 agent(`agent.ts:260`) | 半(缺策展 profile 层 + 冻结注入) |
 | ② 模型自决捕获 + 安全网 | services.memory 句柄在,但未暴露成 LLM 工具、无自动捕获 | 缺(hook 点在:turn-end / heartbeat) |
 | ③ 有界 + 强制蒸馏 + 冻结注入 | `handle.ts:196` byte-cap 砍旧的一半(非蒸馏);`personal-growth-context.ts` 有 `COMPACT_TRIGGER` 触发器模式 | 缺(有可泛化的触发器) |
 | ④ 真主动节奏 | **Stream D heartbeat**(`HeartbeatParticipant`,per-agent interval,`HEARTBEAT_OK` 抑制,checklist) | ✅ 近 1:1 |
@@ -102,7 +102,7 @@
 - **D2 — 一条有界 tool-loop,敏感工具审批门控(不是两套引擎)。** 良性工具(`recall` / `dispatch` / `workflow-start` / `mcp-query`)直跑;敏感工具(改 hub / 花钱 / 对外发 / 删)是**审批门控的工具**——调用即 `SuspendTaskError(NEVER_RESUME_AT)`→`/me` 收件箱→批准才执行。这**复用 ACP-HITL `dangerousToolGate` + `StewardApprovalBroker` 的现成模式**,把「两条路」统一成「一条 loop,危险工具挂起等人」。
 - **D3 — 记忆=文件优先策展。** episodic = `memory-file` jsonl 原始捕获;semantic = LLM 蒸馏出的**可读策展 profile**(`MEMORY.md`/`USER.md` 风格,落进 `memory-file` 的 `semantic` kind 或并列 markdown)。向量是**可选层**,走现成 `chroma-mcp`,不进框架(北极星:框架不存知识)。
 - **D4 — 会话管理与记忆共用机器。** 「会话管理」不是独立模块:会话起注入(M1)、turn-end 捕获(M2)、超阈值蒸馏(M3)就是会话上下文管理。服务端 `MemorySession`(per-(user,butler))取代客户端 `history` 重传。
-- **D5 — 捕获触发点=turn-end + heartbeat(诚实)。** AipeHub 的 `LlmAgent` **没有** context 自动压缩事件(`agent.ts` 的 truncate 只是 log dump),所以学不了 OpenClaw 的「save-before-compact 静默轮」。我们的捕获=**turn 结束** + **heartbeat 复盘**——等价且更干净(不在热路径上烧 token)。
+- **D5 — 捕获触发点=turn-end + heartbeat(诚实)。** Gotong 的 `LlmAgent` **没有** context 自动压缩事件(`agent.ts` 的 truncate 只是 log dump),所以学不了 OpenClaw 的「save-before-compact 静默轮」。我们的捕获=**turn 结束** + **heartbeat 复盘**——等价且更干净(不在热路径上烧 token)。
 - **D6 — 注入=冻结块护前缀缓存。** profile + 近期 episodic 渲染成**稳定位置、每会话算一次**的块注入 `req.system`(`agent.ts:522`),中途不刷——抄 Hermes 的前缀缓存纪律(最不显而易见、最值得抄的一条)。
 - **D7 — 快速投入 = example-first 模板 + 默认开 + 5 分钟。** 对齐北极星第 1 层「5 分钟跑起来,不写代码」。`examples/personal-butler` 一键 import(管家 + 默认 heartbeat + 记忆开 + IM 接线),不 fold 进 host main.ts(沿全项目 example-first 先例)。
 - **D8 — 反北极星的不做。** 无界 loop(必须 `maxTurns` 有界)、无门控敏感动作(必须过 D2 门)、宿主机无沙箱自治(执行走已带闸的 ACP/CLI,不裸 spawn)。
@@ -143,7 +143,7 @@ MemoryReviewParticipant:蒸馏近段 episodic → semantic profile      ← M3 /
 
 | 层 | 复用(已有) | 新建 |
 |---|---|---|
-| 记忆存储 | `@aipehub/memory-file`(jsonl + recall + byte-cap) | `MemorySession` / `renderFrozenBlock` / `consolidate()` |
+| 记忆存储 | `@gotong/memory-file`(jsonl + recall + byte-cap) | `MemorySession` / `renderFrozenBlock` / `consolidate()` |
 | 记忆工具 | `this.services.memory` 句柄 | `MemoryToolset`(remember/recall/forget 当 LLM 工具) |
 | 灵活调用 | `DispatchToolset` / `ComposedToolset` / `runToolLoop` / MCP client / workflow-start 路由 | 接线进 butler + `maxTurns` 有界 |
 | 治理动作 | `hub-steward` classify + `HostStewardService` + `StewardApprovalBroker` | `GovernedActionToolset`(包成审批门控工具) |
@@ -153,8 +153,8 @@ MemoryReviewParticipant:蒸馏近段 episodic → semantic profile      ← M3 /
 
 ### 包结构(提案)
 
-- **`@aipehub/personal-memory`**(新叶包,依赖 core + services-sdk + llm):`MemorySession` / `MemoryToolset` / `renderFrozenBlock` / `consolidate` / `MemoryReviewParticipant`。可被任意 `LlmAgent` 复用,不只管家。
-- **`PersonalButlerAgent`**(`extends LlmAgent`):组合 `personal-memory`(上下文)+ 良性 `ComposedToolset` + `GovernedActionToolset`(包 hub-steward)。落在 host 或新 `@aipehub/personal-butler`,待 M1 实现时定。
+- **`@gotong/personal-memory`**(新叶包,依赖 core + services-sdk + llm):`MemorySession` / `MemoryToolset` / `renderFrozenBlock` / `consolidate` / `MemoryReviewParticipant`。可被任意 `LlmAgent` 复用,不只管家。
+- **`PersonalButlerAgent`**(`extends LlmAgent`):组合 `personal-memory`(上下文)+ 良性 `ComposedToolset` + `GovernedActionToolset`(包 hub-steward)。落在 host 或新 `@gotong/personal-butler`,待 M1 实现时定。
 - **`examples/personal-butler`**:turnkey 模板。
 
 ---
@@ -197,7 +197,7 @@ MemoryReviewParticipant:蒸馏近段 episodic → semantic profile      ← M3 /
 
 「类似 OpenClaw、可快速投入」= 北极星第 1 层「5 分钟跑起来,不写代码」。M5 交付:
 
-- **`examples/personal-butler` 模板**(`aipehub.template/v1`):管家 agent(默认 DeepSeek / 可换)+ `heartbeat`(默认开,间隔可调)+ 记忆开(默认 caps)+ KB 槽位(可选,presetData 指针)+ `apiKeyPrompt`。一键 `POST /templates/import` 即跑。
+- **`examples/personal-butler` 模板**(`gotong.template/v1`):管家 agent(默认 DeepSeek / 可换)+ `heartbeat`(默认开,间隔可调)+ 记忆开(默认 caps)+ KB 槽位(可选,presetData 指针)+ `apiKeyPrompt`。一键 `POST /templates/import` 即跑。
 - **admin 开关**:记忆 on/off、caps、kinds、heartbeat 间隔——改配置即时生效(复用 `reconcileHeartbeats`)。
 - **`/me`「它记得你什么」隐私视图**:读 semantic profile + 近期 episodic,`forget` 单条、导出全部(被遗忘权,前置到 UI 让用户安心)。
 - **IM 接入**:管家走现有 6 桥(官方化完),IM 里直接聊;敏感动作的审批落 `/me` 收件箱(跨端深链)。
@@ -239,7 +239,7 @@ MemoryReviewParticipant:蒸馏近段 episodic → semantic profile      ← M3 /
 - 现有管家:`docs/zh/ledger/V5-STEWARD-FINAL.md`(`HubStewardAgent` + 四级分级 + 收件箱审批)
 - 主动节奏:Stream D heartbeat(`packages/host/src/heartbeat.ts`)
 - 持久任务:Phase 11(`SuspendTaskError` + `suspended_tasks` + resume sweep)
-- 记忆原语:`@aipehub/memory-file`(`packages/service-memory-file/src/`)+ worked 模式 `packages/host/src/services/personal-growth-context.ts`
+- 记忆原语:`@gotong/memory-file`(`packages/service-memory-file/src/`)+ worked 模式 `packages/host/src/services/personal-growth-context.ts`
 - 灵活调用:Phase 10 `DispatchToolset` / `ComposedToolset`(`docs/zh/ledger/V4-PHASE10-FINAL.md`)
 - 治理审批:Phase 16 inbox(`docs/zh/ledger/V4-PHASE16-FINAL.md`)+ ACP-HITL `dangerousToolGate`(`docs/zh/ledger/V5-ACP-ADAPTER.md`)
 - 上手 / turnkey:`docs/zh/HANDS-ON-HUBS.md` / `docs/zh/TEMPLATE-GALLERY.md`

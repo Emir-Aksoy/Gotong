@@ -6,9 +6,9 @@ body:
   - type: markdown
     attributes:
       value: |
-        Got an idea for where AipeHub should go? Pitch it here. 有想法就在这里提。
+        Got an idea for where Gotong should go? Pitch it here. 有想法就在这里提。
 
-        AipeHub has a deliberate spine — it helps to aim with it, not against it:
+        Gotong has a deliberate spine — it helps to aim with it, not against it:
         - **The hub never runs an LLM.** It routes messages, dispatches tasks, writes transcripts. Decisions live with the participants (agents / people / services).
         - **People and agents are the same `Participant`.** A human isn't a "request_human_input tool."
         - **State is files on disk.** Copy the directory, move the room.
@@ -35,7 +35,7 @@ body:
     id: layer
     attributes:
       label: Which layer does this touch?
-      description: AipeHub's three layers (see the README north star). Pick the closest.
+      description: Gotong's three layers (see the README north star). Pick the closest.
       multiple: false
       options:
         - "Layer 1 — Person ↔ their own AI / agent (my AI desktop)"

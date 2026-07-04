@@ -26,7 +26,7 @@ body:
   - type: textarea
     id: how
     attributes:
-      label: How does it use AipeHub?
+      label: How does it use Gotong?
       description: Which agents / workflows / KB slots / federation / human-in-the-loop steps? What's the interesting part?
     validations:
       required: true

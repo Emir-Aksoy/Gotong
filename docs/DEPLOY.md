@@ -1,6 +1,6 @@
-# Deploying AipeHub
+# Deploying Gotong
 
-This guide is for running AipeHub somewhere other than your laptop —
+This guide is for running Gotong somewhere other than your laptop —
 LAN, a single VPS, or a small fleet. The intended scale is **dozens of
 users, single-node**, not a global SaaS. If you outgrow that, the file-
 first storage is the first thing you'll want to replace.
@@ -14,7 +14,7 @@ There are three deployment shapes. Pick the smallest that fits your need
 | **B. LAN** | Trusted office / WiFi | minutes — change `host` | no | LAN-only |
 | **C. Public** | Small体验版 over the internet | ~1 h — Caddy + systemd | yes | anywhere |
 
-The same `@aipehub/host` binary is used for all three. Only environment
+The same `@gotong/host` binary is used for all three. Only environment
 variables change.
 
 > **Going beyond first-run?** Once your host is up, the day-2 playbook
@@ -39,27 +39,27 @@ pnpm build                  # produces packages/*/dist
 pnpm host                   # runs packages/host with defaults
 
 # or, after publishing:
-pnpm install -g @aipehub/host
-aipehub-host
+pnpm install -g @gotong/host
+gotong-host
 ```
 
 ### Environment variables
 
 | Variable | Default | Notes |
 |---|---|---|
-| `AIPE_SPACE` | `.aipehub` | Workspace directory (created on first run) |
-| `AIPE_HOST` | `127.0.0.1` | Bind address (loopback is correct behind a reverse proxy) |
-| `AIPE_WEB_PORT` | `3000` | HTTP port for browser + admin API |
-| `AIPE_WS_PORT` | `4000` | WebSocket port for remote agents |
-| `AIPE_GATING` | `admin-approval` | `open` skips admission gating (do **not** use on the public internet) |
-| `AIPE_COOKIE_SECURE` | `0` | `1` to add `Secure`+`SameSite=Strict`. Required when fronted by HTTPS |
-| `AIPE_ALLOWED_HOSTS` | (unset) | Comma list. Reject POST/DELETE if `Host:` or `Origin:` is off-list. Set this in production. |
-| `AIPE_ADMIN_RATE_MAX` | `10` | Admin-token attempts per IP per window (0 disables) |
-| `AIPE_ADMIN_RATE_SEC` | `60` | Window for the rate limit in seconds |
-| `AIPE_DEFAULT_LANG` | `zh` | `zh` or `en` |
-| `AIPE_HEARTBEAT_MS` | `30000` | Transport heartbeat interval |
-| `AIPE_SPACE_NAME` | `AipeHub` | Label written into `space.json` on first init |
-| `AIPE_ADMIN_DISPLAY_NAME` | `Operator` | First admin's display name (on first init only) |
+| `GOTONG_SPACE` | `.gotong` | Workspace directory (created on first run) |
+| `GOTONG_HOST` | `127.0.0.1` | Bind address (loopback is correct behind a reverse proxy) |
+| `GOTONG_WEB_PORT` | `3000` | HTTP port for browser + admin API |
+| `GOTONG_WS_PORT` | `4000` | WebSocket port for remote agents |
+| `GOTONG_GATING` | `admin-approval` | `open` skips admission gating (do **not** use on the public internet) |
+| `GOTONG_COOKIE_SECURE` | `0` | `1` to add `Secure`+`SameSite=Strict`. Required when fronted by HTTPS |
+| `GOTONG_ALLOWED_HOSTS` | (unset) | Comma list. Reject POST/DELETE if `Host:` or `Origin:` is off-list. Set this in production. |
+| `GOTONG_ADMIN_RATE_MAX` | `10` | Admin-token attempts per IP per window (0 disables) |
+| `GOTONG_ADMIN_RATE_SEC` | `60` | Window for the rate limit in seconds |
+| `GOTONG_DEFAULT_LANG` | `zh` | `zh` or `en` |
+| `GOTONG_HEARTBEAT_MS` | `30000` | Transport heartbeat interval |
+| `GOTONG_SPACE_NAME` | `Gotong` | Label written into `space.json` on first init |
+| `GOTONG_ADMIN_DISPLAY_NAME` | `Operator` | First admin's display name (on first init only) |
 
 When the binary boots it **prints the first-run admin URL exactly
 once**. Save it. Subsequent boots only print the `/admin` URL, since the
@@ -69,33 +69,33 @@ admin's token already lives (hashed) in `admins.json`.
 
 ## 0.5 Single-file binary (no Node required)
 
-`aipehub-host` is also distributed as a self-contained executable built
+`gotong-host` is also distributed as a self-contained executable built
 with `bun build --compile`. Use this when you want to spin up a hub on
 a fresh box without installing Node.js, pnpm, or the workspace.
 
 ```bash
 # Linux x64 — substitute -darwin-arm64 / -darwin-x64 / -windows-x64.exe
 # / -linux-arm64 for the matching platform.
-curl -L -o aipehub-host \
-  https://github.com/Emir-Aksoy/AipeHub/releases/latest/download/aipehub-host-linux-x64
-chmod +x aipehub-host
-./aipehub-host
+curl -L -o gotong-host \
+  https://github.com/Emir-Aksoy/Gotong/releases/latest/download/gotong-host-linux-x64
+chmod +x gotong-host
+./gotong-host
 ```
 
-The binary reads the same `AIPE_*` environment variables as the npm
+The binary reads the same `GOTONG_*` environment variables as the npm
 build, so every recipe later in this document (A / B / C) works
-unmodified — just substitute `./aipehub-host` for `pnpm host` or
-`aipehub-host` (npm-installed).
+unmodified — just substitute `./gotong-host` for `pnpm host` or
+`gotong-host` (npm-installed).
 
 What's **inside** the binary:
-- The entire `@aipehub/host` workspace — Hub, WebSocket transport,
+- The entire `@gotong/host` workspace — Hub, WebSocket transport,
   Web UI (HTML/CSS/JS assets are embedded at build time, not read off
   disk), and the LLM adapters.
 - The two first-party plugins that don't need native code:
-  `@aipehub/service-memory-file` and `@aipehub/service-artifact-file`.
+  `@gotong/service-memory-file` and `@gotong/service-artifact-file`.
 
 What's **not** included:
-- `@aipehub/service-datastore-sqlite` — depends on `better-sqlite3`,
+- `@gotong/service-datastore-sqlite` — depends on `better-sqlite3`,
   which ships native `.node` bindings the bundler can't embed. The
   binary detects its own runtime and writes a default `plugins.json`
   *without* sqlite, so first-run is warning-free. If you need
@@ -119,7 +119,7 @@ pnpm host
 ```
 
 Open the admin URL once, the cookie is set, you're in. Stop with
-`Ctrl-C`. Your space lives in `./.aipehub/`.
+`Ctrl-C`. Your space lives in `./.gotong/`.
 
 This is functionally identical to `pnpm demo:open-space`, just without
 the demo agent — useful when you want to start with a clean room and
@@ -132,14 +132,14 @@ plug in your own agents.
 Stay on HTTP, but bind to all interfaces and open the firewall.
 
 ```bash
-AIPE_HOST=0.0.0.0 \
-AIPE_WEB_PORT=3000 \
-AIPE_WS_PORT=4000 \
-AIPE_ALLOWED_HOSTS=192.168.1.42:3000 \
+GOTONG_HOST=0.0.0.0 \
+GOTONG_WEB_PORT=3000 \
+GOTONG_WS_PORT=4000 \
+GOTONG_ALLOWED_HOSTS=192.168.1.42:3000 \
 pnpm host
 ```
 
-> Why `AIPE_ALLOWED_HOSTS` even on a LAN? Defence in depth: a colleague
+> Why `GOTONG_ALLOWED_HOSTS` even on a LAN? Defence in depth: a colleague
 > who visits `evil.com` while signed in to your hub cannot forge admin
 > POSTs because your hub will reject the foreign `Origin:`.
 
@@ -160,7 +160,7 @@ ws://192.168.1.42:4000            ← remote agents
 
 ## C. Public — Caddy + systemd on a VPS
 
-The pattern: AipeHub still binds `127.0.0.1` so nothing can reach it
+The pattern: Gotong still binds `127.0.0.1` so nothing can reach it
 except through Caddy, which terminates TLS on `:443` and proxies inward.
 Everything that follows assumes Debian/Ubuntu; adjust paths for other
 distros.
@@ -172,37 +172,37 @@ distros.
   `hub.example.com` and `hub-ws.example.com`.
 - Node 20 LTS + pnpm 9
 - Caddy 2 (`apt install caddy`)
-- A non-root system user (`aipehub`) that owns `/srv/aipehub-data`
+- A non-root system user (`gotong`) that owns `/srv/gotong-data`
 
 ### C.2 Lay out the filesystem
 
 ```bash
-sudo useradd --system --create-home --shell /usr/sbin/nologin aipehub
-sudo mkdir -p /srv/aipehub-data
-sudo chown aipehub:aipehub /srv/aipehub-data
-sudo mkdir -p /opt/aipehub && sudo chown aipehub:aipehub /opt/aipehub
+sudo useradd --system --create-home --shell /usr/sbin/nologin gotong
+sudo mkdir -p /srv/gotong-data
+sudo chown gotong:gotong /srv/gotong-data
+sudo mkdir -p /opt/gotong && sudo chown gotong:gotong /opt/gotong
 
-# as the aipehub user
-sudo -u aipehub -H git clone https://github.com/Emir-Aksoy/AipeHub.git /opt/aipehub
-sudo -u aipehub -H bash -lc 'cd /opt/aipehub && pnpm install && pnpm build'
+# as the gotong user
+sudo -u gotong -H git clone https://github.com/Emir-Aksoy/Gotong.git /opt/gotong
+sudo -u gotong -H bash -lc 'cd /opt/gotong && pnpm install && pnpm build'
 ```
 
 ### C.3 Environment file
 
-`/etc/aipehub.env` (chmod 640, owned by `aipehub:aipehub`):
+`/etc/gotong.env` (chmod 640, owned by `gotong:gotong`):
 
 ```bash
-AIPE_SPACE=/srv/aipehub-data
-AIPE_HOST=127.0.0.1
-AIPE_WEB_PORT=3000
-AIPE_WS_PORT=4000
-AIPE_GATING=admin-approval
-AIPE_COOKIE_SECURE=1
-AIPE_ALLOWED_HOSTS=hub.example.com,hub-ws.example.com
-AIPE_ADMIN_RATE_MAX=10
-AIPE_ADMIN_RATE_SEC=60
-AIPE_SPACE_NAME=Hub Beta
-AIPE_ADMIN_DISPLAY_NAME=Operator
+GOTONG_SPACE=/srv/gotong-data
+GOTONG_HOST=127.0.0.1
+GOTONG_WEB_PORT=3000
+GOTONG_WS_PORT=4000
+GOTONG_GATING=admin-approval
+GOTONG_COOKIE_SECURE=1
+GOTONG_ALLOWED_HOSTS=hub.example.com,hub-ws.example.com
+GOTONG_ADMIN_RATE_MAX=10
+GOTONG_ADMIN_RATE_SEC=60
+GOTONG_SPACE_NAME=Hub Beta
+GOTONG_ADMIN_DISPLAY_NAME=Operator
 ```
 
 > ⚠️ List **every** hostname that will reach the box — Caddy uses Host
@@ -214,29 +214,29 @@ AIPE_ADMIN_DISPLAY_NAME=Operator
 
 ### C.4 systemd unit
 
-`/etc/systemd/system/aipehub.service`:
+`/etc/systemd/system/gotong.service`:
 
 ```ini
 [Unit]
-Description=AipeHub host
+Description=Gotong host
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=simple
-User=aipehub
-Group=aipehub
-WorkingDirectory=/opt/aipehub
-EnvironmentFile=/etc/aipehub.env
+User=gotong
+Group=gotong
+WorkingDirectory=/opt/gotong
+EnvironmentFile=/etc/gotong.env
 # Run the built host. `pnpm build` (step C.2) produced dist/. This is
 # the recommended path: zero runtime transpile, fewer moving parts, no
 # Node-version sensitivity.
-ExecStart=/usr/bin/env node /opt/aipehub/packages/host/dist/main.js
+ExecStart=/usr/bin/env node /opt/gotong/packages/host/dist/main.js
 Restart=always
 RestartSec=5
 NoNewPrivileges=true
 ProtectSystem=strict
-ReadWritePaths=/srv/aipehub-data
+ReadWritePaths=/srv/gotong-data
 ProtectHome=true
 PrivateTmp=true
 MemoryMax=512M
@@ -252,14 +252,14 @@ WantedBy=multi-user.target
 > default above — pick one of these only if you have a specific reason:
 >
 > ```ini
-> # If you `pnpm install -g @aipehub/host` (or once it's on a registry):
-> ExecStart=/usr/bin/env aipehub-host
+> # If you `pnpm install -g @gotong/host` (or once it's on a registry):
+> ExecStart=/usr/bin/env gotong-host
 >
 > # Skip the build step entirely — requires Node 22+:
-> ExecStart=/usr/bin/env node --experimental-strip-types /opt/aipehub/packages/host/src/main.ts
+> ExecStart=/usr/bin/env node --experimental-strip-types /opt/gotong/packages/host/src/main.ts
 >
 > # Run from source via tsx (Node 20 friendly, extra global dep):
-> ExecStart=/usr/bin/env tsx /opt/aipehub/packages/host/src/main.ts
+> ExecStart=/usr/bin/env tsx /opt/gotong/packages/host/src/main.ts
 > ```
 >
 > `--experimental-strip-types` requires **Node 22+** — on Node 20 the
@@ -298,7 +298,7 @@ hub.example.com {
     # Standard hardening
     header {
         Strict-Transport-Security "max-age=63072000; includeSubDomains; preload"
-        # AipeHub already sets X-Frame-Options + CSP at the application
+        # Gotong already sets X-Frame-Options + CSP at the application
         # layer; these don't hurt but are kept here as defence in depth.
         X-Frame-Options "DENY"
         Referrer-Policy "no-referrer"
@@ -342,9 +342,9 @@ sudo ufw --force enable
 
 ```bash
 sudo systemctl daemon-reload
-sudo systemctl enable --now aipehub
+sudo systemctl enable --now gotong
 sudo systemctl enable --now caddy
-sudo journalctl -u aipehub -f
+sudo journalctl -u gotong -f
 ```
 
 In the log, find the line:
@@ -355,7 +355,7 @@ First-run admin URL (shown ONCE — save it):
 ```
 
 Replace `http://127.0.0.1:3000` with `https://hub.example.com` and open
-it in your browser. The cookie sticks because `AIPE_COOKIE_SECURE=1`
+it in your browser. The cookie sticks because `GOTONG_COOKIE_SECURE=1`
 and the page is served over TLS. Subsequent restarts of the service do
 not re-print the token — admins persist in `admins.json`.
 
@@ -364,14 +364,14 @@ not re-print the token — admins persist in `admins.json`.
 > recovery subcommand:
 >
 > ```bash
-> sudo -u aipehub -H AIPE_SPACE=/srv/aipehub-data \
->   AIPE_HOST=hub.example.com AIPE_COOKIE_SECURE=1 \
->   /opt/aipehub/packages/host/bin/aipehub-host.js mint-admin-token
+> sudo -u gotong -H GOTONG_SPACE=/srv/gotong-data \
+>   GOTONG_HOST=hub.example.com GOTONG_COOKIE_SECURE=1 \
+>   /opt/gotong/packages/host/bin/gotong-host.js mint-admin-token
 > ```
 >
-> Opens `AIPE_SPACE` without starting the Hub or WebSocket / Web
+> Opens `GOTONG_SPACE` without starting the Hub or WebSocket / Web
 > listeners, appends a new admin to `admins.json`, prints the one-time
-> URL (respecting `AIPE_HOST` / `AIPE_WEB_PORT` / `AIPE_COOKIE_SECURE`
+> URL (respecting `GOTONG_HOST` / `GOTONG_WEB_PORT` / `GOTONG_COOKIE_SECURE`
 > so the printed URL points at your public hostname), and exits.
 > Existing admins, cookies, and sessions are untouched. Pass an
 > optional display name to label the row: `mint-admin-token "Carol"`.
@@ -398,7 +398,7 @@ above is what it calls.)
 ### C.9 Remote agents
 
 ```ts
-import { connect, AgentParticipant } from '@aipehub/sdk-node'
+import { connect, AgentParticipant } from '@gotong/sdk-node'
 
 class MyAgent extends AgentParticipant {
   constructor() { super({ id: 'my-agent', capabilities: ['draft'] }) }
@@ -416,12 +416,12 @@ They will hang in pending until an admin approves them in
 
 ### C.10 Backups
 
-The entire state is one directory tree (`/srv/aipehub-data`). A nightly
+The entire state is one directory tree (`/srv/gotong-data`). A nightly
 `rsync` is enough:
 
 ```cron
-30 03 * * * /usr/bin/rsync -a --delete /srv/aipehub-data/ \
-  backup-host:/srv/aipehub-backup/$(date +\%F)/
+30 03 * * * /usr/bin/rsync -a --delete /srv/gotong-data/ \
+  backup-host:/srv/gotong-backup/$(date +\%F)/
 ```
 
 To restore: stop systemd, replace the directory, start systemd. Cookies
@@ -434,17 +434,17 @@ issued before the restore continue working as long as
 this is rarely an issue (KB/day per active user), but at some volume
 configure `logrotate`:
 
-`/etc/logrotate.d/aipehub`:
+`/etc/logrotate.d/gotong`:
 
 ```
-/srv/aipehub-data/transcript.jsonl {
+/srv/gotong-data/transcript.jsonl {
     monthly
     rotate 24
     missingok
     notifempty
     compress
     delaycompress
-    create 640 aipehub aipehub
+    create 640 gotong gotong
     copytruncate
 }
 ```
@@ -467,8 +467,8 @@ curl -fsS https://hub.example.com/healthz
 ### C.13 Updating the deployment
 
 ```bash
-sudo -u aipehub -H bash -lc 'cd /opt/aipehub && git pull && pnpm install && pnpm build'
-sudo systemctl restart aipehub
+sudo -u gotong -H bash -lc 'cd /opt/gotong && git pull && pnpm install && pnpm build'
+sudo systemctl restart gotong
 ```
 
 `hub.stop()` drains gracefully on SIGTERM, so in-flight tasks settle and
@@ -480,9 +480,9 @@ SSE clients disconnect cleanly before the new process starts.
 
 Before pointing users at the URL:
 
-- [ ] `AIPE_COOKIE_SECURE=1` set
-- [ ] `AIPE_ALLOWED_HOSTS` lists exactly the user-facing hostnames
-- [ ] `AIPE_GATING=admin-approval` (never `open` on the public internet)
+- [ ] `GOTONG_COOKIE_SECURE=1` set
+- [ ] `GOTONG_ALLOWED_HOSTS` lists exactly the user-facing hostnames
+- [ ] `GOTONG_GATING=admin-approval` (never `open` on the public internet)
 - [ ] Caddy has TLS issued and HSTS header sent
 - [ ] systemd auto-restart enabled (`Restart=always`)
 - [ ] 3000 / 4000 are loopback-only; only 80 / 443 in firewall

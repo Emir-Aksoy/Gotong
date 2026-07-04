@@ -21,7 +21,7 @@
  * any IDE chat shell). Anything that escapes here is a bug.
  */
 
-import type { DispatchStrategy, Hub, ParticipantId, TaskResult, TranscriptEntry } from '@aipehub/core'
+import type { DispatchStrategy, Hub, ParticipantId, TaskResult, TranscriptEntry } from '@gotong/core'
 
 import { parseReplCommand, type ReplCommand } from './parse.js'
 

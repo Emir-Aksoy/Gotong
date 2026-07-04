@@ -5,7 +5,7 @@
  *   wiki/   the COMPILED layer the agents write: interlinked markdown notes,
  *           an index home, and answers/ (ask-your-wiki results filed back).
  *
- * AipeHub never stores knowledge — this is a real directory the agents read and
+ * Gotong never stores knowledge — this is a real directory the agents read and
  * write (same idea as personal-coding-hub's shared repo). The demo seeds two
  * tiny raw sources; the compiler turns them into wiki notes.
  */

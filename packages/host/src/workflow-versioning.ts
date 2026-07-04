@@ -3,7 +3,7 @@
  * state of every workflow and keeps the right runners registered on the Hub.
  *
  * It is the persistence + orchestration layer above two file-first stores from
- * `@aipehub/workflow` and the pure `transition()` state machine:
+ * `@gotong/workflow` and the pure `transition()` state machine:
  *
  *   - `RevisionStore`  — immutable, write-once snapshots (`<rev>.json`)
  *   - `LifecycleStore` — the one mutable record per workflow (state, pointers,
@@ -30,7 +30,7 @@
  * rare and HTTP-serialized, so we keep it at that (no extra lock).
  */
 
-import type { Hub, ParticipantId } from '@aipehub/core'
+import type { Hub, ParticipantId } from '@gotong/core'
 import {
   FileLifecycleStore,
   FileRevisionStore,
@@ -53,13 +53,13 @@ import {
   type RevisionStore,
   type TransitionLog,
   type WorkflowDefinition,
-} from '@aipehub/workflow'
+} from '@gotong/workflow'
 
 /**
  * The Hub surface the service needs: register/unregister runners and check the
  * registry. The runner construction also needs `dispatch`, which the concrete
  * `Hub` provides — so we take the concrete type (the host already depends on
- * `@aipehub/core`) rather than re-declaring a structural subset.
+ * `@gotong/core`) rather than re-declaring a structural subset.
  */
 export type VersioningHub = Hub
 

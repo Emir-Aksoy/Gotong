@@ -24,12 +24,12 @@
  *
  * Pure + injectable so the policy is unit-tested; the only side effects live in
  * `runCheckCli`'s default file seams. NOTHING here boots a server — this module
- * is exported from `@aipehub/host` under the non-booting `./check` subpath so
- * the CLI's `aipehub check` can import it without becoming the host.
+ * is exported from `@gotong/host` under the non-booting `./check` subpath so
+ * the CLI's `gotong check` can import it without becoming the host.
  *
  * Honest scope: "syntax/schema correctness", per the operator's "只审核文件是
  * 否有语法错误". Deeper cross-reference checks (does a dispatch target a
- * registered agent? — still NON-AI) live in `@aipehub/evals`
+ * registered agent? — still NON-AI) live in `@gotong/evals`
  * `checkWorkflowStructure` and stay opt-in; this checker answers "will the file
  * even load", which is the question that keeps a live hub healthy.
  */
@@ -98,13 +98,13 @@ export interface HostConfigCheckInput {
   webPort: number
   /** SpaceConfig.wsPort. */
   wsPort: number
-  /** Parsed AIPE_ALLOWED_HOSTS (undefined/empty = unset). */
+  /** Parsed GOTONG_ALLOWED_HOSTS (undefined/empty = unset). */
   allowedHosts: string[] | undefined
-  /** AIPE_ALLOW_INSECURE — downgrade exposure fatals to warnings. */
+  /** GOTONG_ALLOW_INSECURE — downgrade exposure fatals to warnings. */
   allowInsecure: boolean
-  /** AIPE_MASTER_KEY_PROVIDER ('' = file-based default). */
+  /** GOTONG_MASTER_KEY_PROVIDER ('' = file-based default). */
   masterKeyProvider: string
-  /** Whether AIPE_MASTER_KEY is non-empty. Presence ONLY — never the value. */
+  /** Whether GOTONG_MASTER_KEY is non-empty. Presence ONLY — never the value. */
   masterKeyPresent: boolean
 }
 
@@ -136,7 +136,7 @@ export function checkHostConfig(input: HostConfigCheckInput): CheckFinding[] {
     })
   }
 
-  // (b) Enum sanity — main.ts throws on a bad AIPE_GATING / AIPE_DEFAULT_LANG,
+  // (b) Enum sanity — main.ts throws on a bad GOTONG_GATING / GOTONG_DEFAULT_LANG,
   // but a hand-edited config.json can hold a bad value the env path never saw.
   if (!GATING_VALUES.has(input.gating)) {
     out.push({
@@ -144,7 +144,7 @@ export function checkHostConfig(input: HostConfigCheckInput): CheckFinding[] {
       level: 'error',
       code: 'config.bad_gating',
       message: `gating is '${input.gating}' — must be 'open' or 'admin-approval'.`,
-      fix: `set AIPE_GATING (or config.json gating) to 'open' or 'admin-approval'.`,
+      fix: `set GOTONG_GATING (or config.json gating) to 'open' or 'admin-approval'.`,
     })
   }
   if (!LANG_VALUES.has(input.defaultLang)) {
@@ -153,14 +153,14 @@ export function checkHostConfig(input: HostConfigCheckInput): CheckFinding[] {
       level: 'error',
       code: 'config.bad_lang',
       message: `defaultLang is '${input.defaultLang}' — must be 'zh' or 'en'.`,
-      fix: `set AIPE_DEFAULT_LANG (or config.json defaultLang) to 'zh' or 'en'.`,
+      fix: `set GOTONG_DEFAULT_LANG (or config.json defaultLang) to 'zh' or 'en'.`,
     })
   }
 
   // (c) Ports — valid range + no collision (both can't share one port).
   for (const [label, port, envVar] of [
-    ['web', input.webPort, 'AIPE_WEB_PORT'],
-    ['ws', input.wsPort, 'AIPE_WS_PORT'],
+    ['web', input.webPort, 'GOTONG_WEB_PORT'],
+    ['ws', input.wsPort, 'GOTONG_WS_PORT'],
   ] as const) {
     if (!Number.isInteger(port) || port < 1 || port > 65535) {
       out.push({
@@ -181,7 +181,7 @@ export function checkHostConfig(input: HostConfigCheckInput): CheckFinding[] {
       level: 'error',
       code: 'config.port_collision',
       message: `web and agent-WS ports are both ${input.webPort} — they must differ.`,
-      fix: `set AIPE_WEB_PORT and AIPE_WS_PORT to two different ports.`,
+      fix: `set GOTONG_WEB_PORT and GOTONG_WS_PORT to two different ports.`,
     })
   }
 
@@ -191,8 +191,8 @@ export function checkHostConfig(input: HostConfigCheckInput): CheckFinding[] {
       domain: 'config',
       level: 'error',
       code: 'config.master_key_missing',
-      message: `AIPE_MASTER_KEY_PROVIDER=env but AIPE_MASTER_KEY is empty.`,
-      fix: `set AIPE_MASTER_KEY (64 hex chars), or unset the provider to use the auto-generated file key.`,
+      message: `GOTONG_MASTER_KEY_PROVIDER=env but GOTONG_MASTER_KEY is empty.`,
+      fix: `set GOTONG_MASTER_KEY (64 hex chars), or unset the provider to use the auto-generated file key.`,
     })
   }
 
@@ -205,7 +205,7 @@ export function checkHostConfig(input: HostConfigCheckInput): CheckFinding[] {
       level: 'warn',
       code: 'config.open_gating_exposed',
       message: `gating='open' on a network-exposed host (${input.host}) — anyone who can reach it joins without admin approval.`,
-      fix: `set AIPE_GATING=admin-approval, or ensure an upstream gate restricts who can reach the port.`,
+      fix: `set GOTONG_GATING=admin-approval, or ensure an upstream gate restricts who can reach the port.`,
     })
   }
 
@@ -226,7 +226,7 @@ export interface WorkflowCheckResult {
  * Map a workflow loader `LoadReport` to check findings — one error per file the
  * loader couldn't parse. Shared by `checkWorkflowFiles` (the CLI path, which
  * re-loads) and the host boot banner (which ALREADY holds a `LoadReport` from
- * its own load and must NOT re-read), so "what `aipehub check` flags" and "what
+ * its own load and must NOT re-read), so "what `gotong check` flags" and "what
  * boot flags" can never drift.
  */
 export function workflowFindingsFromReport(report: LoadReport): CheckFinding[] {
@@ -235,7 +235,7 @@ export function workflowFindingsFromReport(report: LoadReport): CheckFinding[] {
     level: 'error' as const,
     code: 'workflow.parse_failed',
     message: f.error,
-    fix: 'fix the YAML/JSON so it parses as aipehub.workflow/v1, or remove the file.',
+    fix: 'fix the YAML/JSON so it parses as gotong.workflow/v1, or remove the file.',
     file: f.file,
   }))
 }
@@ -423,13 +423,13 @@ function idLabel(id: unknown): string {
 // ───────────────────────────────────────────────────────────────────────────
 
 export interface ValidateWorkspaceOptions {
-  /** Workspace root (AIPE_SPACE). */
+  /** Workspace root (GOTONG_SPACE). */
   spaceDir: string
-  /** Environment to read AIPE_* from (defaults to process.env). */
+  /** Environment to read GOTONG_* from (defaults to process.env). */
   env?: Record<string, string | undefined>
   /**
    * Pre-resolved live SpaceConfig — boot passes this so the check sees exactly
-   * what the host resolved. Omitted in standalone `aipehub check`, where we read
+   * what the host resolved. Omitted in standalone `gotong check`, where we read
    * `<space>/config.json` + env overrides + defaults ourselves.
    */
   config?: {
@@ -440,7 +440,7 @@ export interface ValidateWorkspaceOptions {
     webPort: number
     wsPort: number
   }
-  /** Override the workflows dir (defaults to AIPE_WORKFLOWS_DIR or <space>/workflows/definitions). */
+  /** Override the workflows dir (defaults to GOTONG_WORKFLOWS_DIR or <space>/workflows/definitions). */
   workflowsDir?: string
   /** Override the agents.json path (defaults to <space>/agents.json). */
   agentsPath?: string
@@ -476,7 +476,7 @@ export async function validateWorkspace(
   // ── workflow 文件 ──
   const workflowsDir =
     opts.workflowsDir ??
-    env.AIPE_WORKFLOWS_DIR ??
+    env.GOTONG_WORKFLOWS_DIR ??
     join(opts.spaceDir, 'workflows', 'definitions')
   const wf = await checkWorkflowFiles(workflowsDir, opts.loadWorkflowsImpl ?? loadWorkflows)
   findings.push(...wf.findings)
@@ -566,12 +566,12 @@ async function resolveConfigInput(
         })
       }
     }
-    host = pickStr(env.AIPE_HOST, persisted.host, '127.0.0.1')
-    cookieSecure = pickBool(env.AIPE_COOKIE_SECURE, persisted.cookieSecure, false)
-    gating = pickStr(env.AIPE_GATING, persisted.gating, 'admin-approval')
-    defaultLang = pickStr(env.AIPE_DEFAULT_LANG, persisted.defaultLang, 'zh')
-    webPort = pickInt(env.AIPE_WEB_PORT, persisted.webPort, 3000)
-    wsPort = pickInt(env.AIPE_WS_PORT, persisted.wsPort, 4000)
+    host = pickStr(env.GOTONG_HOST, persisted.host, '127.0.0.1')
+    cookieSecure = pickBool(env.GOTONG_COOKIE_SECURE, persisted.cookieSecure, false)
+    gating = pickStr(env.GOTONG_GATING, persisted.gating, 'admin-approval')
+    defaultLang = pickStr(env.GOTONG_DEFAULT_LANG, persisted.defaultLang, 'zh')
+    webPort = pickInt(env.GOTONG_WEB_PORT, persisted.webPort, 3000)
+    wsPort = pickInt(env.GOTONG_WS_PORT, persisted.wsPort, 4000)
   }
 
   const input: HostConfigCheckInput = {
@@ -581,10 +581,10 @@ async function resolveConfigInput(
     defaultLang,
     webPort,
     wsPort,
-    allowedHosts: parseList(env.AIPE_ALLOWED_HOSTS),
-    allowInsecure: parseBoolEnv(env.AIPE_ALLOW_INSECURE),
-    masterKeyProvider: (env.AIPE_MASTER_KEY_PROVIDER ?? '').trim(),
-    masterKeyPresent: (env.AIPE_MASTER_KEY ?? '').trim() !== '',
+    allowedHosts: parseList(env.GOTONG_ALLOWED_HOSTS),
+    allowInsecure: parseBoolEnv(env.GOTONG_ALLOW_INSECURE),
+    masterKeyProvider: (env.GOTONG_MASTER_KEY_PROVIDER ?? '').trim(),
+    masterKeyPresent: (env.GOTONG_MASTER_KEY ?? '').trim() !== '',
   }
   return { input, findings }
 }
@@ -668,7 +668,7 @@ export function formatCheckReport(
 }
 
 // ───────────────────────────────────────────────────────────────────────────
-// CLI entry (non-booting) — exported via @aipehub/host/check
+// CLI entry (non-booting) — exported via @gotong/host/check
 // ───────────────────────────────────────────────────────────────────────────
 
 export interface RunCheckDeps {
@@ -681,7 +681,7 @@ export interface RunCheckDeps {
 }
 
 /**
- * `aipehub check` body. Validates the workspace pointed at by AIPE_SPACE and
+ * `gotong check` body. Validates the workspace pointed at by GOTONG_SPACE and
  * prints the report. Exit code:
  *   - 0   no errors  (warnings allowed)
  *   - 1   any error  — OR any warning when `--strict`
@@ -702,26 +702,26 @@ export async function runCheckCli(deps: RunCheckDeps = {}): Promise<number> {
   const strict = argv.includes('--strict')
   const stray = argv.find((a) => a !== '--strict' && a !== '--help' && a !== '-h')
   if (stray) {
-    err(`[aipehub check] unexpected argument: ${stray}`)
-    err('  Run `aipehub check --help` for usage.')
+    err(`[gotong check] unexpected argument: ${stray}`)
+    err('  Run `gotong check --help` for usage.')
     return 2
   }
 
-  const spaceDir = (env.AIPE_SPACE ?? '.aipehub').trim() || '.aipehub'
+  const spaceDir = (env.GOTONG_SPACE ?? '.gotong').trim() || '.gotong'
   const report = await validate({ spaceDir, env })
   out(formatCheckReport(report))
 
   if (report.errors > 0) return 1
   if (strict && report.warnings > 0) {
-    err('[aipehub check] --strict: treating warnings as failures.')
+    err('[gotong check] --strict: treating warnings as failures.')
     return 1
   }
   return 0
 }
 
-const CHECK_HELP = `aipehub check [--strict]
+const CHECK_HELP = `gotong check [--strict]
 
-Deterministic (non-AI) self-check of the workspace AIPE_SPACE points at:
+Deterministic (non-AI) self-check of the workspace GOTONG_SPACE points at:
 
   1. 主机配置体检 — exposure security, gating/lang enums, ports, master key
   2. 工作流文件   — every workflows/definitions/*.yaml|json parses
@@ -730,11 +730,11 @@ Deterministic (non-AI) self-check of the workspace AIPE_SPACE points at:
 Reads, never writes; never boots the server. Exit 0 if no errors (warnings
 allowed); exit 1 on any error, or on any warning with --strict.
 
-Configured via the same AIPE_* environment variables as the host, e.g.:
+Configured via the same GOTONG_* environment variables as the host, e.g.:
 
-  AIPE_SPACE=.aipehub          workspace directory to check
-  AIPE_WORKFLOWS_DIR=…         override the workflows directory
+  GOTONG_SPACE=.gotong          workspace directory to check
+  GOTONG_WORKFLOWS_DIR=…         override the workflows directory
 
-Run it before \`aipehub start\`, or wire \`AIPE_STRICT_DEFINITIONS=1\` into the
+Run it before \`gotong start\`, or wire \`GOTONG_STRICT_DEFINITIONS=1\` into the
 host to refuse to boot when a definition file is broken.
 `

@@ -11,8 +11,8 @@
 import { describe, expect, it } from 'vitest'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 
-import type { PeerLinkAcl, TaskResult } from '@aipehub/core'
-import { buildSendRequest, buildTasksGetRequest, isA2ATask, type A2AResponse, type A2ATask } from '@aipehub/a2a'
+import type { PeerLinkAcl, TaskResult } from '@gotong/core'
+import { buildSendRequest, buildTasksGetRequest, isA2ATask, type A2AResponse, type A2ATask } from '@gotong/a2a'
 
 import { A2aServer, type A2aServerOptions } from '../src/a2a-server.js'
 
@@ -95,8 +95,8 @@ function fakeRes() {
   return { res, out }
 }
 
-const AUTH = { 'x-aipe-peer-id': 'hubA', authorization: 'Bearer secret-token' }
-const AUTH_B = { 'x-aipe-peer-id': 'hubB', authorization: 'Bearer token-b' }
+const AUTH = { 'x-gotong-peer-id': 'hubA', authorization: 'Bearer secret-token' }
+const AUTH_B = { 'x-gotong-peer-id': 'hubB', authorization: 'Bearer token-b' }
 
 function sendBody(text: string, metadata?: Record<string, unknown>): string {
   return JSON.stringify(
@@ -165,7 +165,7 @@ describe('A2aServer.handle — happy path (Phase 18 C-M3)', () => {
 })
 
 describe('A2aServer.handle — auth (own bearer domain)', () => {
-  it('401 when X-Aipe-Peer-Id is missing', async () => {
+  it('401 when X-Gotong-Peer-Id is missing', async () => {
     const { server, calls } = makeServer({ defaultCapability: 'chat' })
     const { res, out } = fakeRes()
     await server.handle(
@@ -180,7 +180,7 @@ describe('A2aServer.handle — auth (own bearer domain)', () => {
     const { server, calls } = makeServer({ defaultCapability: 'chat' })
     const { res, out } = fakeRes()
     await server.handle(
-      fakeReq({ headers: { 'x-aipe-peer-id': 'hubA', authorization: 'Bearer wrong' }, body: sendBody('x') }),
+      fakeReq({ headers: { 'x-gotong-peer-id': 'hubA', authorization: 'Bearer wrong' }, body: sendBody('x') }),
       res,
     )
     expect(out.status).toBe(401)
@@ -191,7 +191,7 @@ describe('A2aServer.handle — auth (own bearer domain)', () => {
     const { server } = makeServer({ defaultCapability: 'chat' })
     const { res, out } = fakeRes()
     await server.handle(
-      fakeReq({ headers: { 'x-aipe-peer-id': 'stranger', authorization: 'Bearer secret-token' }, body: sendBody('x') }),
+      fakeReq({ headers: { 'x-gotong-peer-id': 'stranger', authorization: 'Bearer secret-token' }, body: sendBody('x') }),
       res,
     )
     expect(out.status).toBe(401)

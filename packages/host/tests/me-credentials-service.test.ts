@@ -15,7 +15,7 @@ import {
   IdentityStore,
   MASTER_KEY_LEN_BYTES,
   openIdentityStore,
-} from '@aipehub/identity'
+} from '@gotong/identity'
 
 import { HostMeCredentialsService } from '../src/me-credentials-service.js'
 
@@ -28,7 +28,7 @@ describe('HostMeCredentialsService (v5 A-M3)', () => {
   let svc: HostMeCredentialsService
 
   beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), 'aipehub-mecred-'))
+    dir = mkdtempSync(join(tmpdir(), 'gotong-mecred-'))
     identity = openIdentityStore({
       dbPath: join(dir, 'identity.sqlite'),
       masterKey: randomBytes(MASTER_KEY_LEN_BYTES),

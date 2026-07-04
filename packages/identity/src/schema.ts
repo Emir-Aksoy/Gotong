@@ -280,7 +280,7 @@ const MIGRATIONS: Migration[] = [
     // D1 (v4 Phase 5) — Peer Registry. Replaces "peer config baked into
     // an env var / json file" with vault-encrypted tokens + a sqlite row
     // per remote hub. The host's PeerRegistry polls this table on a
-    // 5s tick (default; AIPE_PEER_POLL_MS overrides) and reconciles
+    // 5s tick (default; GOTONG_PEER_POLL_MS overrides) and reconciles
     // its set of open HubLinks: new rows trigger connectHubLink, vanished
     // / disabled rows trigger uninstall().
     //
@@ -423,9 +423,9 @@ const MIGRATIONS: Migration[] = [
     //
     //   im_bindings — confirmed (platform, platformUserId) → userId
     //                 rows. PK on (platform, platformUserId) means one
-    //                 IM identity binds to exactly one AipeHub user.
+    //                 IM identity binds to exactly one Gotong user.
     //                 ON DELETE CASCADE strips bindings when the
-    //                 AipeHub user is deleted.
+    //                 Gotong user is deleted.
     //   im_binding_codes — short-lived (10 min default) codes the user
     //                 types into the IM client to prove ownership.
     //                 PK on `code` so a re-issued code rotates
@@ -801,7 +801,7 @@ const MIGRATIONS: Migration[] = [
     // Route B P1-M11a — outbound A2A agent registrations. An entry makes a
     // local capability dispatch reach OUT to an external A2A agent's
     // `message/send` (the mirror of the inbound A2aServer). Replaces the
-    // `AIPE_A2A_AGENTS` env blob with persisted, admin-editable config.
+    // `GOTONG_A2A_AGENTS` env blob with persisted, admin-editable config.
     //
     // There is NO vault pointer here — like saml_providers (idp_cert is
     // public), every column is NON-secret. The bearer the remote demands is
@@ -814,7 +814,7 @@ const MIGRATIONS: Migration[] = [
     //   capabilities  JSON string[] advertised on the local hub → routing key.
     //   url           the remote A2A `message/send` endpoint.
     //   token_env     name of the env var holding the bearer (never the secret).
-    //   peer_id       our X-Aipe-Peer-Id (AipeHub↔AipeHub only); NULL = generic.
+    //   peer_id       our X-Gotong-Peer-Id (Gotong↔Gotong only); NULL = generic.
     //   target_skill  metadata.skill the remote should dispatch to; NULL = its default.
     //   enabled       0 disables without deleting the config.
     version: 22,
@@ -913,7 +913,7 @@ const MIGRATIONS: Migration[] = [
     // ACP-OUT-M1 — outbound ACP agent registrations. An entry makes a local
     // capability dispatch SPAWN and drive an external coding agent (Claude Code
     // / Codex) over ACP, OpenClaw-style: spawn once, hold one session, dispatch
-    // many tasks (the host-side mirror of the inbound `aipehub connect`).
+    // many tasks (the host-side mirror of the inbound `gotong connect`).
     // Replaces hand-written example glue with persisted, admin-editable config.
     //
     // Like a2a_outbound_agents (v22) there is NO vault pointer — and ACP goes
@@ -1080,7 +1080,7 @@ const MIGRATIONS: Migration[] = [
     // and polls `tasks/get` until the remote settles.
     //
     // Stored as JSON in one column, mirroring `capabilities` in this same table
-    // — it maps 1:1 to the @aipehub/a2a participant's `lifecycle?` option object
+    // — it maps 1:1 to the @gotong/a2a participant's `lifecycle?` option object
     // ({pollIntervalMs?,maxAttempts?}), so `{}` = lifecycle on with defaults.
     // Identity validates only the structural bits (numeric, positive); the
     // participant owns the flooring/semantics.

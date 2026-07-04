@@ -1,14 +1,14 @@
 {
-  "name": "@aipehub/example-windmill-bridge",
+  "name": "@gotong/example-windmill-bridge",
   "version": "0.0.0",
   "type": "module",
   "private": true,
-  "description": "Phase 19 P5-M4 demo — an AipeHub agent that delegates a task to a durable external workflow engine (Windmill) and polls for its result; the outbound twin of the Activepieces bridge.",
+  "description": "Phase 19 P5-M4 demo — an Gotong agent that delegates a task to a durable external workflow engine (Windmill) and polls for its result; the outbound twin of the Activepieces bridge.",
   "scripts": {
     "start": "tsx src/index.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@aipehub/core": "workspace:*"
+    "@gotong/core": "workspace:*"
   }
 }

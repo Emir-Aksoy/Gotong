@@ -1,5 +1,5 @@
 #!/bin/zsh
-# 双击启动 AipeHub Open Space demo
+# 双击启动 Gotong Open Space demo
 # 第一次跑会自动 pnpm install + pnpm build（约 1-2 分钟）
 # 之后秒启。Ctrl-C 停止。
 
@@ -11,7 +11,7 @@ export NVM_DIR="$HOME/.nvm"
 export PATH="/opt/homebrew/opt/curl/bin:/opt/homebrew/bin:$PATH"
 
 echo "============================================"
-echo "  AipeHub Open Space — 启动中"
+echo "  Gotong Open Space — 启动中"
 echo "============================================"
 echo "项目目录：$(pwd)"
 echo "Node    ：$(node -v 2>/dev/null || echo '未找到')"

@@ -225,16 +225,16 @@ describe('createLogger — pretty format', () => {
 describe('createLogger — env vars', () => {
   const originalEnv = { ...process.env }
   beforeEach(() => {
-    delete process.env.AIPE_LOG_LEVEL
-    delete process.env.AIPE_LOG_FORMAT
-    delete process.env.AIPE_LOG_DISABLED
+    delete process.env.GOTONG_LOG_LEVEL
+    delete process.env.GOTONG_LOG_FORMAT
+    delete process.env.GOTONG_LOG_DISABLED
   })
   afterEach(() => {
     process.env = { ...originalEnv }
   })
 
-  it('AIPE_LOG_LEVEL=warn raises the threshold', () => {
-    process.env.AIPE_LOG_LEVEL = 'warn'
+  it('GOTONG_LOG_LEVEL=warn raises the threshold', () => {
+    process.env.GOTONG_LOG_LEVEL = 'warn'
     const sink = makeSink()
     const log = createLogger('x', {
       format: 'json',
@@ -248,8 +248,8 @@ describe('createLogger — env vars', () => {
     expect(sink.errOut.length).toBe(1)
   })
 
-  it('AIPE_LOG_FORMAT=json overrides TTY-derived default', () => {
-    process.env.AIPE_LOG_FORMAT = 'json'
+  it('GOTONG_LOG_FORMAT=json overrides TTY-derived default', () => {
+    process.env.GOTONG_LOG_FORMAT = 'json'
     const sink = makeSink()
     const log = createLogger('x', {
       level: 'info',
@@ -263,8 +263,8 @@ describe('createLogger — env vars', () => {
     expect(() => JSON.parse(sink.out[0]!)).not.toThrow()
   })
 
-  it("AIPE_LOG_DISABLED='1' silences output", () => {
-    process.env.AIPE_LOG_DISABLED = '1'
+  it("GOTONG_LOG_DISABLED='1' silences output", () => {
+    process.env.GOTONG_LOG_DISABLED = '1'
     const sink = makeSink()
     const log = createLogger('x', {
       level: 'trace',
@@ -280,8 +280,8 @@ describe('createLogger — env vars', () => {
   })
 
   it('explicit opts beat env vars', () => {
-    process.env.AIPE_LOG_LEVEL = 'error'
-    process.env.AIPE_LOG_DISABLED = '1'
+    process.env.GOTONG_LOG_LEVEL = 'error'
+    process.env.GOTONG_LOG_DISABLED = '1'
     const sink = makeSink()
     const log = createLogger('x', {
       level: 'info',     // opt > env
@@ -295,8 +295,8 @@ describe('createLogger — env vars', () => {
     expect(sink.out.length).toBe(1)
   })
 
-  it('unknown AIPE_LOG_LEVEL value falls back to info', () => {
-    process.env.AIPE_LOG_LEVEL = 'verbose'
+  it('unknown GOTONG_LOG_LEVEL value falls back to info', () => {
+    process.env.GOTONG_LOG_LEVEL = 'verbose'
     const sink = makeSink()
     const log = createLogger('x', {
       format: 'json',

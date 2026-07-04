@@ -132,7 +132,7 @@ function main(): void {
 
   // —— board round-trip + blind isolation ——
   section('consult-board')
-  const dir = mkdtempSync(join(tmpdir(), 'aipe-consult-'))
+  const dir = mkdtempSync(join(tmpdir(), 'gotong-consult-'))
   try {
     const board = setupConsultBoard(dir)
     const dx: Diagnosis = {

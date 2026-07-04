@@ -22,7 +22,7 @@ import { join } from 'node:path'
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { type Logger } from '@aipehub/core'
+import { type Logger } from '@gotong/core'
 
 import {
   ButlerProactiveSweeper,
@@ -74,7 +74,7 @@ describe('memberLocalNow (pure)', () => {
 describe('proactive config store + set_daily_brief tool', () => {
   let root: string
   beforeEach(async () => {
-    root = await mkdtemp(join(tmpdir(), 'aipe-butler-proactive-cfg-'))
+    root = await mkdtemp(join(tmpdir(), 'gotong-butler-proactive-cfg-'))
   })
   afterEach(async () => {
     await rm(root, { recursive: true, force: true })
@@ -195,7 +195,7 @@ describe('butler-proactive-e2e — opt-in → due → compose → push (acceptan
   }
 
   beforeEach(async () => {
-    root = await mkdtemp(join(tmpdir(), 'aipe-butler-proactive-'))
+    root = await mkdtemp(join(tmpdir(), 'gotong-butler-proactive-'))
     composeCalls = []
     briefText = '早安,今天也照顾好自己。'
     pushed = []

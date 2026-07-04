@@ -18,7 +18,7 @@
 - **备份脚本齐但无自动验证**：`scripts/backup/{backup,restore,verify}.sh` +
   `drill-init.example.mjs` 种子都在，但 **没有一个测试证明这条链真能往返** ——
   一个坏 tar flag 或过严的 verify 检查，只会在真灾难恢复时（最糟的时刻）才暴露。
-- **文档挂着不存在的渠道**：`security@aipehub.dev` 是占位符（域名没注册、邮箱没激活），
+- **文档挂着不存在的渠道**：`security@gotong.dev` 是占位符（域名没注册、邮箱没激活），
   却在 SECURITY.md 里以「Backup — email」的形式呈现成可用后备；`security.txt` 还有
   一行 `Contact: mailto:` 指向这个死信箱，会误导自动扫描器。分发渠道（Docker+source
   为主，binary/npm 状态）、supported-versions 文案也悬而未决。
@@ -44,12 +44,12 @@
     静默省略，hub 自省指标照常渲染。`/metrics` 抓取**永不**因为某个计数器读不到而 500。
 - `metrics.ts` 扩 `BusinessMetrics` 类型 + `renderBusinessMetrics(w,b)`（纯同步格式化），
   emit 6 条新 series：
-  - `aipehub_workflow_runs{status}`        gauge
-  - `aipehub_workflow_runs_scan_capped`    gauge（1 = 抽样而非全量）
-  - `aipehub_suspended_tasks`              gauge
-  - `aipehub_llm_calls_total{model}`       counter
-  - `aipehub_llm_tokens_total{model}`      counter
-  - `aipehub_llm_cost_micros_total{model}` counter（整数 micro-USD，1e6=$1）
+  - `gotong_workflow_runs{status}`        gauge
+  - `gotong_workflow_runs_scan_capped`    gauge（1 = 抽样而非全量）
+  - `gotong_suspended_tasks`              gauge
+  - `gotong_llm_calls_total{model}`       counter
+  - `gotong_llm_tokens_total{model}`      counter
+  - `gotong_llm_cost_micros_total{model}` counter（整数 micro-USD，1e6=$1）
 - identity 加 `SuspendedTaskStore.countSuspendedTasks()`（数全部 parked 行，含
   `NEVER_RESUME_AT` 的 inbox/审批挂起）+ facade 透传。
 - `/metrics` handler 先 `await collectBusinessMetrics(...)`（`.catch(()=>({}))` 兜底）
@@ -85,7 +85,7 @@
 决策点已与维护者预先拍板，本里程碑把决定落进文档，**不再用占位符冒充可用渠道**。
 
 - **安全联系方式**：GitHub Private Vulnerability Reporting 是 pre-1.0 **唯一**渠道，
-  **不设邮箱**。`security@aipehub.dev` 域名没注册、邮箱没激活，挂成「Backup — email」
+  **不设邮箱**。`security@gotong.dev` 域名没注册、邮箱没激活，挂成「Backup — email」
   会让报告者把真漏洞托付给一个死信箱。
   - `SECURITY.md`：「Backup — email」→「No email channel (pre-1.0)」，直说没有邮箱、
     advisory 唯一，并给「实在用不了 GitHub」的逃生口（开一个**不含**漏洞细节的
@@ -106,7 +106,7 @@
 1. **采集 / 渲染分离，web 维持零依赖**：`business-metrics.ts`（异步采集，从 host
    surface 取数）与 `metrics.ts`（同步格式化）分两文件，`BusinessMetrics` 类型住在
    渲染侧、采集侧单向 import（无环）。host 注入的是结构满足的窄鸭子接口，web 不 import
-   `@aipehub/workflow` / `@aipehub/identity`。
+   `@gotong/workflow` / `@gotong/identity`。
 2. **指标 best-effort + 永不 500**：`/metrics` 是运维生命线，一个读不到的计数器不能
    掀翻整个抓取。逐族 try/catch、缺即省略，是「可观测性自身要高可用」的体现。
 3. **扫描封顶 + 诚实标志优于静默截断**：run-file 扫描封 2000 并 emit
@@ -138,23 +138,23 @@
 
 - **`/metrics` 仍 admin-gated**：业务指标经现有 `/metrics` handler 出，鉴权不变；
   Prometheus 抓取需带 admin 凭证（见 `docs/MONITORING.md`）。
-- **成本指标是 micro-USD 整数**：`aipehub_llm_cost_micros_total` 除以 1e6 得美元；
+- **成本指标是 micro-USD 整数**：`gotong_llm_cost_micros_total` 除以 1e6 得美元；
   PromQL 里直接 `/ 1e6`。未定价模型在账本里记 `unpriced`（成本 0），仍计 calls/tokens。
-- **run 扫描封顶 2000**：超过会 emit `aipehub_workflow_runs_scan_capped 1`，此时
-  `aipehub_workflow_runs{status}` 是抽样下界而非精确值 —— 大 host 想要精确计数得另接
+- **run 扫描封顶 2000**：超过会 emit `gotong_workflow_runs_scan_capped 1`，此时
+  `gotong_workflow_runs{status}` 是抽样下界而非精确值 —— 大 host 想要精确计数得另接
   RunStore 聚合（本期未做，显式推迟）。
 - **灾难恢复**：restore 后的 space **缺 `runtime/secret.key`**（备份故意排除）。host
   首启会懒生成一把新 key，但旧 `secrets.enc.json` 里的 provider key **解不开** ——
-  恢复加密凭证必须**单独**把原 `secret.key`（或 `AIPE_SECRET_KEY`）放回去。这正是
+  恢复加密凭证必须**单独**把原 `secret.key`（或 `GOTONG_SECRET_KEY`）放回去。这正是
   smoke 测试钉死的不变量。
 - **安全报告**：只走
-  `https://github.com/Emir-Aksoy/AipeHub/security/advisories/new`。没有邮箱。
+  `https://github.com/Emir-Aksoy/Gotong/security/advisories/new`。没有邮箱。
 
 ---
 
 ## 六、显式推迟（保持精简）
 
-- `aipehub_upload_bytes_total`（plan 列过）—— 需要 web handler 走文件系统统计 uploads
+- `gotong_upload_bytes_total`（plan 列过）—— 需要 web handler 走文件系统统计 uploads
   目录，当前 handler 没有这条路径；要做得给 host 加一个上传用量 surface。
 - workflow run 精确计数（去掉 2000 封顶）—— 需 RunStore 出一个 `countByStatus` 聚合，
   避免逐文件扫。

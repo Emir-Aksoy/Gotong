@@ -1,5 +1,5 @@
 /**
- * `@aipehub/acp-agent` demo — the OpenClaw-style ACP coding-agent bridge.
+ * `@gotong/acp-agent` demo — the OpenClaw-style ACP coding-agent bridge.
  *
  * The hub MANAGES a coding agent from startup, HOLDS one ACP session, and
  * dispatches many tasks to it — the lifecycle ownership the one-shot cli-agent
@@ -28,8 +28,8 @@
 
 import { fileURLToPath } from 'node:url'
 
-import { Hub, InMemoryStorage, type Task, type TaskId } from '@aipehub/core'
-import { AcpParticipant, ACP_NEVER_RESUME_AT } from '@aipehub/acp-agent'
+import { Hub, InMemoryStorage, type Task, type TaskId } from '@gotong/core'
+import { AcpParticipant, ACP_NEVER_RESUME_AT } from '@gotong/acp-agent'
 
 import { ACP_PRESETS } from './presets.js'
 

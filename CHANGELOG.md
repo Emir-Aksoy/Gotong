@@ -1,8 +1,8 @@
 # Changelog
 
-All notable changes to AipeHub are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html) at the npm-package level.
+All notable changes to Gotong are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html) at the npm-package level.
 
-The npm scope is `@aipehub/*`; the PyPI package is `aipehub`. The wire protocol has its own version (currently `1.2`) and is governed by `docs/PROTOCOL.md` — major changes to the wire protocol bump that version, independent of these package versions.
+The npm scope is `@gotong/*`; the PyPI package is `gotong`. The wire protocol has its own version (currently `1.2`) and is governed by `docs/PROTOCOL.md` — major changes to the wire protocol bump that version, independent of these package versions.
 
 ## 3.2.0 — 2026-06-08 — Federation, identity, and the member workbench
 
@@ -14,14 +14,14 @@ Distribution stays **Docker + source-only**; a JS registry (JSR), PyPI, and publ
 
 - **Cross-organization federation** — peer capability manifests (`peer.manifest`), per-link trust contracts (inbound ACL, outbound capability allowlist, per-link quotas, data-class gating, revocation), and cross-hub workflow orchestration through an outbound approval gate. A2A (Agent2Agent) interop: inbound `message/send` → dispatch, outbound `A2aRemoteParticipant`, and a task lifecycle for long-running steps.
 - **Identity & SSO** — OIDC and SAML 2.0 single sign-on, TOTP MFA, resource-level RBAC (`resource_grants`: viewer/editor/owner over workflows, agents, credentials), and per-user bring-your-own API keys.
-- **Member workbench (`/me`)** — the "my AI desktop": self-serve agent creation, run history, member uploads, and a human-in-the-loop inbox (approval / choice / edit steps) via `@aipehub/inbox`.
+- **Member workbench (`/me`)** — the "my AI desktop": self-serve agent creation, run history, member uploads, and a human-in-the-loop inbox (approval / choice / edit steps) via `@gotong/inbox`.
 - **Workflow lifecycle & governance** — a draft→review→published→deprecated→archived state machine with immutable revisions (runs pin their revision, eliminating drift), import/publish structural hard-gates, a `governance` metadata block, and an AI workflow-authoring assistant.
 - **Usage & cost ledger** — per-call `usage_ledger`, a host pricing table, token/cost budgets with fail-closed quota peeks, and CSV/JSONL audit + ledger export.
-- **Outbound coding-agent adapters** — drive Claude Code / Codex / Aider from the hub: `@aipehub/cli-agent` (one-shot shell-out) and `@aipehub/acp-agent` (long-lived ACP session, OpenClaw-style), both with a dangerous-action gate that escalates to the `/me` inbox.
+- **Outbound coding-agent adapters** — drive Claude Code / Codex / Aider from the hub: `@gotong/cli-agent` (one-shot shell-out) and `@gotong/acp-agent` (long-lived ACP session, OpenClaw-style), both with a dangerous-action gate that escalates to the `/me` inbox.
 - **Control plane** — opt-in, counts-only peer summaries with history trends, alert rules, and multi-channel alert delivery (webhook / IM / email); privacy-preserving by construction (no raw rows cross the wire).
-- **Entry points** — Telegram / Matrix / Lark / Discord / Slack / QQ IM bridges, an `aipehub repl` interactive shell, a PWA app-shell with a mobile-responsive admin UI, and end-to-end LLM streaming + multimodal content blocks (image / audio / file_ref).
+- **Entry points** — Telegram / Matrix / Lark / Discord / Slack / QQ IM bridges, an `gotong repl` interactive shell, a PWA app-shell with a mobile-responsive admin UI, and end-to-end LLM streaming + multimodal content blocks (image / audio / file_ref).
 - **Heartbeat / proactive autonomy** — agents can wake themselves on a fixed interval to run a checklist, reusing the suspend/resume engine with zero new tables or timers.
-- **Hands-on hub templates** — eight ready-to-load `aipehub.template/v1` examples (personal coding / research / growth hubs; café-ops, warband-club, tea-supply-link, tea-chain-HQ organizations) on a loadable template system that ships structure + references but never knowledge content.
+- **Hands-on hub templates** — eight ready-to-load `gotong.template/v1` examples (personal coding / research / growth hubs; café-ops, warband-club, tea-supply-link, tea-chain-HQ organizations) on a loadable template system that ships structure + references but never knowledge content.
 
 ### Security
 
@@ -32,7 +32,7 @@ This release also rolls in the **v3.4 audit-hardening batch** held back from 3.1
 - **Batch 2** (C2 + C3 + H10) — SDK TLS surface: forbid plaintext over `wss://`, require explicit opt-in for self-signed cert acceptance, surface TLS errors instead of swallowing them.
 - **Batch 3** (H1 + H3 + H4) — workflow resolver prototype-pollution close + MCP admin Bearer token redaction in stderr + MCP tool-error redaction.
 - **Batch 4** (H2 + H8 + H9) — SQLite per-agent quota + SDK call-id collision guard + SDK task-handle GC.
-- **Batch 5** (H5 + H11 + H13) — retry-budget redaction in logs + reject-reason redaction + dev-knob (`AIPE_DEBUG_*`) hygiene in production.
+- **Batch 5** (H5 + H11 + H13) — retry-budget redaction in logs + reject-reason redaction + dev-knob (`GOTONG_DEBUG_*`) hygiene in production.
 - **Batch 6** (H14 + H15) — protocol strict-mode max-depth + closed-mode rejection paths for unknown verbs.
 
 ### Fixed
@@ -52,19 +52,19 @@ The first release after v3.0. Folds in three months of operability work, an MCP 
 Headline themes:
 - **Frictionless install** — single-file `bun --compile` binary (no Node required) and a top-level `docker-compose.yml` (no manual `docker run` flags).
 - **Observability you can ship to ops** — Prometheus alert rules, Grafana dashboard, structured HTTP response-class counter, service-call latency histogram with p50/p95/p99 buckets.
-- **Tools-using agents** — `LlmAgent` now drives `LlmAgentToolset` natively; `@aipehub/mcp-client` plugs any MCP server (filesystem, GitHub, Postgres, …) straight into an agent via `tools:`; workflow templates declare `mcpServers:` so a YAML file is all the operator needs.
+- **Tools-using agents** — `LlmAgent` now drives `LlmAgentToolset` natively; `@gotong/mcp-client` plugs any MCP server (filesystem, GitHub, Postgres, …) straight into an agent via `tools:`; workflow templates declare `mcpServers:` so a YAML file is all the operator needs.
 - **Audit-1 hardening** — WS upgrade input validation, workspace file permissions, admin link off stdout, supply-chain hardening (SHA-pinned actions + harden-runner audit), CVE fixes (vite/esbuild via vitest 3 bump).
 - **Operations runbooks** — backup/restore/verify shell scripts with documented drill, load-test harness with pre-launch baseline report.
 
 ### Added
 
-- **Single-file binary** (`bun build --compile`) per-platform: `aipehub-host-{darwin-arm64, darwin-x64, linux-x64, linux-arm64, windows-x64.exe}`. Install becomes `curl + chmod +x + run`. ~60 MB per arch. (Earlier dev-cycle commit; first release with a tag.)
-- **`docker-compose.yml`** at repo root — `docker compose up` boots the hub with the published image, a named volume for `/data`, sensible `AIPE_*` defaults, and ports 3000/4000 exposed.
-- **`@aipehub/mcp-client`** (#37) — MCP client toolkit (`McpToolset`) that connects to one or many stdio MCP servers, exposes their tools as a single `LlmAgentToolset`, and surfaces tool-call results back as `LlmToolResultBlock`s. Includes structured `server-stderr` event (#39) so operators can ingest MCP-server logs through the host's logger.
-- **`LlmAgent.tools` + `maxToolRounds`** (#38) — built-in multi-turn tool-use loop. Drop an `LlmAgentToolset` in `LlmAgentOptions` and the agent will tool-call → result → re-prompt until the model emits `end_turn` (capped by `maxToolRounds`, default 8). Anthropic + OpenAI providers translate the neutral `tool_use` / `tool_result` shape natively. Out-of-band toolsets work too — `McpToolset` is a drop-in but not a dependency of `@aipehub/llm`.
+- **Single-file binary** (`bun build --compile`) per-platform: `gotong-host-{darwin-arm64, darwin-x64, linux-x64, linux-arm64, windows-x64.exe}`. Install becomes `curl + chmod +x + run`. ~60 MB per arch. (Earlier dev-cycle commit; first release with a tag.)
+- **`docker-compose.yml`** at repo root — `docker compose up` boots the hub with the published image, a named volume for `/data`, sensible `GOTONG_*` defaults, and ports 3000/4000 exposed.
+- **`@gotong/mcp-client`** (#37) — MCP client toolkit (`McpToolset`) that connects to one or many stdio MCP servers, exposes their tools as a single `LlmAgentToolset`, and surfaces tool-call results back as `LlmToolResultBlock`s. Includes structured `server-stderr` event (#39) so operators can ingest MCP-server logs through the host's logger.
+- **`LlmAgent.tools` + `maxToolRounds`** (#38) — built-in multi-turn tool-use loop. Drop an `LlmAgentToolset` in `LlmAgentOptions` and the agent will tool-call → result → re-prompt until the model emits `end_turn` (capped by `maxToolRounds`, default 8). Anthropic + OpenAI providers translate the neutral `tool_use` / `tool_result` shape natively. Out-of-band toolsets work too — `McpToolset` is a drop-in but not a dependency of `@gotong/llm`.
 - **`workflow.yaml mcpServers:`** (#40) — declarative MCP wiring for templated agents. Spawning resolves `${ENV_VAR}` references from the host environment so credentials never live in the manifest. `templates/agents/repo-reader.yaml` demoes the filesystem MCP server end-to-end.
-- **Service-call latency histogram + HTTP response-class counter** (#41) — `aipehub_service_call_duration_ms_bucket{type, impl, le}` (10 buckets, 5ms…5000ms) feeds the p50/p95/p99 panels in the Grafana dashboard. `aipehub_http_responses_total{class}` (`2xx/3xx/4xx/5xx/other`) gives uptime monitors a single low-cardinality series to alert on.
-- **Prometheus alerts + Grafana dashboard + monitoring runbook** (#36) — `monitoring/prometheus/aipehub.alerts.yml`, `monitoring/grafana/aipehub-overview.json`, and `docs/MONITORING.md`. Covers WS auth-failure rate, tail-latency spikes, hub stop/restart loops, and process-RSS growth.
+- **Service-call latency histogram + HTTP response-class counter** (#41) — `gotong_service_call_duration_ms_bucket{type, impl, le}` (10 buckets, 5ms…5000ms) feeds the p50/p95/p99 panels in the Grafana dashboard. `gotong_http_responses_total{class}` (`2xx/3xx/4xx/5xx/other`) gives uptime monitors a single low-cardinality series to alert on.
+- **Prometheus alerts + Grafana dashboard + monitoring runbook** (#36) — `monitoring/prometheus/gotong.alerts.yml`, `monitoring/grafana/gotong-overview.json`, and `docs/MONITORING.md`. Covers WS auth-failure rate, tail-latency spikes, hub stop/restart loops, and process-RSS growth.
 - **Load-test harness** (`examples/loadtest/`, passed through #36 squash) — in-process and over-WS scenarios with shared scenario kit, plus a pre-launch baseline report under `examples/loadtest/runs/`.
 - **Backup playbook** (`scripts/backup/`, passed through #36 squash) — `backup.sh`, `restore.sh`, `verify.sh`, `prune.sh` + a documented disaster-recovery drill in `docs/OPERATIONS.md`.
 
@@ -83,7 +83,7 @@ Headline themes:
 ### Fixed
 
 - **Dockerfile build stage** — added `packages/mcp-client/package.json` to the per-package COPY list so `pnpm install` picks up `@modelcontextprotocol/sdk` before `tsc` runs. (Without this, the production image build broke at the typecheck step.)
-- **Counter monotonicity** — `aipehub_service_call_duration_ms_sum` clamps negative `durationMs` (clock-skew artifacts) at zero so `rate()` queries don't decrease.
+- **Counter monotonicity** — `gotong_service_call_duration_ms_sum` clamps negative `durationMs` (clock-skew artifacts) at zero so `rate()` queries don't decrease.
 - **Test report annotations** — JUnit publication step gracefully tolerates Test report failures so CI's `CI passed` summary tracks the underlying jobs.
 
 ### Notes
@@ -96,23 +96,23 @@ Headline themes:
 
 | Package | Old | New |
 |---|---|---|
-| `@aipehub/core` | 3.0.0 | **3.1.0** |
-| `@aipehub/host` | 3.0.0 | **3.1.0** |
-| `@aipehub/llm` | 3.0.0 | **3.1.0** |
-| `@aipehub/llm-anthropic` | 3.0.0 | **3.1.0** |
-| `@aipehub/llm-openai` | 3.0.0 | **3.1.0** |
-| `@aipehub/protocol` | 3.0.0 | **3.1.0** |
-| `@aipehub/sdk-node` | 3.0.0 | **3.1.0** |
-| `@aipehub/transport-ws` | 3.0.0 | **3.1.0** |
-| `@aipehub/web` | 3.0.0 | **3.1.0** |
-| `@aipehub/workflow` | 1.0.0 | **1.1.0** |
-| `@aipehub/mcp-client` | 0.1.0 | **0.2.0** *(new package in this cycle)* |
-| `@aipehub/cli` | 1.0.0 | 1.0.0 *(unchanged)* |
-| `@aipehub/mcp-server` | 1.0.0 | 1.0.0 *(unchanged)* |
-| `@aipehub/services-sdk` | 1.0.0 | 1.0.0 *(unchanged)* |
-| `@aipehub/service-memory-file` | 1.0.0 | 1.0.0 *(unchanged)* |
-| `@aipehub/service-artifact-file` | 1.0.0 | 1.0.0 *(unchanged)* |
-| `@aipehub/service-datastore-sqlite` | 1.0.0 | 1.0.0 *(unchanged)* |
+| `@gotong/core` | 3.0.0 | **3.1.0** |
+| `@gotong/host` | 3.0.0 | **3.1.0** |
+| `@gotong/llm` | 3.0.0 | **3.1.0** |
+| `@gotong/llm-anthropic` | 3.0.0 | **3.1.0** |
+| `@gotong/llm-openai` | 3.0.0 | **3.1.0** |
+| `@gotong/protocol` | 3.0.0 | **3.1.0** |
+| `@gotong/sdk-node` | 3.0.0 | **3.1.0** |
+| `@gotong/transport-ws` | 3.0.0 | **3.1.0** |
+| `@gotong/web` | 3.0.0 | **3.1.0** |
+| `@gotong/workflow` | 1.0.0 | **1.1.0** |
+| `@gotong/mcp-client` | 0.1.0 | **0.2.0** *(new package in this cycle)* |
+| `@gotong/cli` | 1.0.0 | 1.0.0 *(unchanged)* |
+| `@gotong/mcp-server` | 1.0.0 | 1.0.0 *(unchanged)* |
+| `@gotong/services-sdk` | 1.0.0 | 1.0.0 *(unchanged)* |
+| `@gotong/service-memory-file` | 1.0.0 | 1.0.0 *(unchanged)* |
+| `@gotong/service-artifact-file` | 1.0.0 | 1.0.0 *(unchanged)* |
+| `@gotong/service-datastore-sqlite` | 1.0.0 | 1.0.0 *(unchanged)* |
 
 ## 3.0.0 — 2026-05-17 — Services
 
@@ -136,11 +136,11 @@ summary.
 
 - **`peerDependencies` majors** — consumer projects must align before
   upgrading:
-  - `@aipehub/llm-openai`: `openai` `^4.104` → `^6.38` (two majors)
-  - `@aipehub/llm-anthropic`: `@anthropic-ai/sdk` `^0.32` → `^0.96`
+  - `@gotong/llm-openai`: `openai` `^4.104` → `^6.38` (two majors)
+  - `@gotong/llm-anthropic`: `@anthropic-ai/sdk` `^0.32` → `^0.96`
     (large pre-1.0 jump; captures Managed Agents + webhooks + zod-v4
     typings)
-  - `@aipehub/mcp-server`: `zod` `^3.25` → `^4.4`
+  - `@gotong/mcp-server`: `zod` `^3.25` → `^4.4`
 - **Wire protocol v1.2 narrowing is enforced.** A client declaring
   `ServiceUseDecl.methods: [...]` will see `forbidden_method`
   (new error code) for SERVICE_CALL frames outside that list, even
@@ -161,18 +161,18 @@ summary.
   extend the allowlist at host bootstrap. `ServiceUseDecl.methods`
   optional ACL narrowing per connection. `ServicePlugin.wireMethods`
   on the plugin contract. Plus `PROTOCOL_VERSION = '1.2'` advertised
-  in WELCOME + the new `aipehub_protocol_version` metric.
+  in WELCOME + the new `gotong_protocol_version` metric.
 
 ### Added — Hub Services (per-agent state, plugin-from-day-1)
 
-- **`@aipehub/services-sdk`** — `ServicePlugin` contract + registry
+- **`@gotong/services-sdk`** — `ServicePlugin` contract + registry
   + loader. The seam plugin authors implement.
 - **First-party plugins**:
-  - `@aipehub/service-memory-file` — episodic / semantic / working
+  - `@gotong/service-memory-file` — episodic / semantic / working
     memory as JSONL on disk
-  - `@aipehub/service-artifact-file` — per-owner directories with
+  - `@gotong/service-artifact-file` — per-owner directories with
     MIME + size guards
-  - `@aipehub/service-datastore-sqlite` — KV + raw SQL on one
+  - `@gotong/service-datastore-sqlite` — KV + raw SQL on one
     `.sqlite` per declared name
 - **Yaml `uses:` schema** — agents declare `{type, impl, config}`
   triples; host resolves at spawn time, agent reads from
@@ -186,7 +186,7 @@ summary.
 
 ### Added — npm features (v2.1 → v2.3)
 
-- **Workflow engine** (v2.1). New `@aipehub/workflow` package: YAML
+- **Workflow engine** (v2.1). New `@gotong/workflow` package: YAML
   workflows, file-first runtime state, Hub stays a dumb dispatcher.
 - **Managed agents + encrypted API keys** (v2.1). UI form / paste /
   file-upload import paths; per-agent → workspace → env-var key
@@ -200,16 +200,16 @@ summary.
 - **Case-conversation** (v2.3). Append-only case timeline + the
   `case-manager` agent; agents on the same `caseId` see human
   interjections without manual hand-off.
-- **Public-deployment hardening**. CSRF defence (`AIPE_ALLOWED_HOSTS`
+- **Public-deployment hardening**. CSRF defence (`GOTONG_ALLOWED_HOSTS`
   + Host / Origin check), SameSite-Strict + Secure cookies, admin-
   token rate limit, response-wide security headers (CSP,
   X-Content-Type-Options, X-Frame-Options, Referrer-Policy),
   `/healthz` endpoint.
 - **Sidecar DevX**. `docs/SIDECAR.md` "Day 1" tutorial. New
-  `@aipehub/cli` package (`aipehub new agent` / `new python-agent` /
-  `ping`). Python SDK reaches parity: `aipehub.services` module
-  mirrors `@aipehub/sdk-node`'s `ServiceClient`.
-- **MCP bridge**. `@aipehub/mcp-server` lets Claude Desktop / Cursor
+  `@gotong/cli` package (`gotong new agent` / `new python-agent` /
+  `ping`). Python SDK reaches parity: `gotong.services` module
+  mirrors `@gotong/sdk-node`'s `ServiceClient`.
+- **MCP bridge**. `@gotong/mcp-server` lets Claude Desktop / Cursor
   / Cline drive a Hub via five tools (list, dispatch, evaluate,
   leaderboard, tasks).
 
@@ -228,10 +228,10 @@ summary.
 - Admin UI "Services" tab gains a SERVICE_CALL audit panel + a
   per-plugin describe surface (size, item count, preview).
 - `GET /api/admin/metrics` — Prometheus / OpenMetrics text. Series:
-  `aipehub_protocol_version` (info), `aipehub_participants{kind}`,
-  `aipehub_tasks_total{kind}`, `aipehub_pending_applications`,
-  `aipehub_service_calls_total{type,impl,outcome}`,
-  `aipehub_service_call_duration_ms_{sum,count}{type,impl}`.
+  `gotong_protocol_version` (info), `gotong_participants{kind}`,
+  `gotong_tasks_total{kind}`, `gotong_pending_applications`,
+  `gotong_service_calls_total{type,impl,outcome}`,
+  `gotong_service_call_duration_ms_{sum,count}{type,impl}`.
 - Aggregated lazily from the transcript per scrape — no in-memory
   bookkeeping.
 
@@ -265,7 +265,7 @@ Seven post-v1.2 patches landed in the same cycle. Highlights:
 - `openai` `4.104.0` → `6.38.0` (peer; two majors at once)
 - `zod` `3.25.76` → `4.4.3` (peer for mcp-server)
 - `better-sqlite3` `11.10.0` → `12.10.0` (runtime via
-  `@aipehub/service-datastore-sqlite`)
+  `@gotong/service-datastore-sqlite`)
 - `ws` `8.20.0` → `8.20.1` (security: uninitialized memory
   disclosure in `websocket.close()`)
 - `tsx` `4.21.0` → `4.22.0` (build dep)
@@ -281,8 +281,8 @@ Seven post-v1.2 patches landed in the same cycle. Highlights:
 - `docs/DEPLOY.md` C.4 systemd default flipped to built-`dist/main.js`
   ExecStart — the previous `--experimental-strip-types` default
   failed on the Node 20 LTS the same doc recommends.
-- All `AipeHub/AipeHub` aspirational org URLs swept to the actual
-  `Emir-Aksoy/AipeHub` fork path (`git clone` instructions, package
+- All `Gotong/Gotong` aspirational org URLs swept to the actual
+  `Emir-Aksoy/Gotong` fork path (`git clone` instructions, package
   `repository.url`, boot-log links, security.txt, mcp-server README).
 
 ### Notes
@@ -293,7 +293,7 @@ Seven post-v1.2 patches landed in the same cycle. Highlights:
   protocol, sdk-node, transport-ws, web) bumped `2.0.0` → `3.0.0` in
   this release. Services + workflow + CLI + mcp-server remain on
   their own pre-1.0 lines while their public surfaces stabilise.
-- The Python SDK (PyPI name: `aipehub`) tracks the wire-protocol
+- The Python SDK (PyPI name: `gotong`) tracks the wire-protocol
   version, not the npm version.
 
 ### Stats

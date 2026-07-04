@@ -13,7 +13,7 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { Hub, Space, type AdminRecord } from '@aipehub/core'
+import { Hub, Space, type AdminRecord } from '@gotong/core'
 
 import { serveWeb, type WebServerHandle } from '../src/server.js'
 
@@ -28,7 +28,7 @@ interface Boot {
 }
 
 async function boot(): Promise<Boot> {
-  const tmp = await mkdtemp(join(tmpdir(), 'aipehub-admin-routes-'))
+  const tmp = await mkdtemp(join(tmpdir(), 'gotong-admin-routes-'))
   const init = await Space.init(tmp, { name: 'admin-routes-test' })
   const space = init.space
   const hub = new Hub({ space })

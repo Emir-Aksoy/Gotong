@@ -1,7 +1,7 @@
 /**
  * Open Space host (v2.0 — file-first):
  *
- *   - Space at `.aipehub/` (auto-init if missing). One admin minted on
+ *   - Space at `.gotong/` (auto-init if missing). One admin minted on
  *     first run; their plaintext token is printed once and never again.
  *   - Hub bound to the space (transcript + pending apps + sessions all
  *     persisted)
@@ -13,11 +13,11 @@
  * bearer token).
  */
 
-import { Hub, Space, type TranscriptEntry } from '@aipehub/core'
-import { serveWebSocket } from '@aipehub/transport-ws'
-import { serveWeb } from '@aipehub/web'
+import { Hub, Space, type TranscriptEntry } from '@gotong/core'
+import { serveWebSocket } from '@gotong/transport-ws'
+import { serveWeb } from '@gotong/web'
 
-const SPACE_DIR = process.env.AIPE_SPACE ?? '.aipehub-open-space'
+const SPACE_DIR = process.env.GOTONG_SPACE ?? '.gotong-open-space'
 
 async function main(): Promise<void> {
   const initResult = await Space.openOrInit(SPACE_DIR, {
@@ -43,7 +43,7 @@ async function main(): Promise<void> {
     cookieSecure: config.cookieSecure,
   })
 
-  console.log(`\n=== AipeHub Open Space ready (v2.0) ===`)
+  console.log(`\n=== Gotong Open Space ready (v2.0) ===`)
   console.log(`Space dir : ${SPACE_DIR}/   (delete to start fresh)`)
   if (adminToken) {
     console.log(`Admin     : ${web.url}/admin?token=${adminToken}`)

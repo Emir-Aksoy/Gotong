@@ -1,4 +1,4 @@
-/* AipeHub admin — Hub Services tab (plugins / per-agent data / trash / audit).
+/* Gotong admin — Hub Services tab (plugins / per-agent data / trash / audit).
  *
  * Extracted from main.js as the first ES-module split of the admin console
  * (P3 admin.js split, Phase 2). Factory shape mirrors admin-wf-assist.js:
@@ -8,11 +8,11 @@
  * private to the closure.
  *
  * Shared utilities (t / escapeHtml / fetchJson) are pulled off the global
- * window.AipeHub namespace that app-core.js installs — same source the
+ * window.Gotong namespace that app-core.js installs — same source the
  * hand-written file used, so no behavior changes.
  */
 
-const { t, escapeHtml, fetchJson, formatBytes } = window.AipeHub
+const { t, escapeHtml, fetchJson, formatBytes } = window.Gotong
 
 export function createServices(ma) {
   const svc = {

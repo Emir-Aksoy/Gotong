@@ -1,5 +1,5 @@
 /**
- * `McpToolset` — attach a fleet of MCP servers to an AipeHub agent.
+ * `McpToolset` — attach a fleet of MCP servers to an Gotong agent.
  *
  * Conceptual model:
  *
@@ -74,7 +74,7 @@ export interface McpToolsetOptions {
 
   /**
    * Client identity advertised to the MCP server during handshake.
-   * Default is `{ name: '@aipehub/mcp-client', version: '0.1.0' }`.
+   * Default is `{ name: '@gotong/mcp-client', version: '0.1.0' }`.
    * Override for telemetry / per-tenant attribution.
    */
   clientInfo?: { name: string; version: string }
@@ -92,7 +92,7 @@ interface ServerState {
 }
 
 const DEFAULT_CLIENT_INFO = {
-  name: '@aipehub/mcp-client',
+  name: '@gotong/mcp-client',
   version: '0.1.0',
 }
 

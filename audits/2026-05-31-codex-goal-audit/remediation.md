@@ -34,20 +34,20 @@
 已运行:
 
 ```bash
-pnpm --filter @aipehub/workflow test -- runner.test.ts
-pnpm --filter @aipehub/evals test -- workflow-structure.test.ts
-pnpm --filter @aipehub/host test -- workflow-controller.test.ts
-pnpm --filter @aipehub/host test -- workflow-loader.test.ts
-pnpm --filter @aipehub/web test -- agents-route.test.ts
+pnpm --filter @gotong/workflow test -- runner.test.ts
+pnpm --filter @gotong/evals test -- workflow-structure.test.ts
+pnpm --filter @gotong/host test -- workflow-controller.test.ts
+pnpm --filter @gotong/host test -- workflow-loader.test.ts
+pnpm --filter @gotong/web test -- agents-route.test.ts
 pnpm -r typecheck
-pnpm --filter @aipehub/core test
-pnpm --filter @aipehub/workflow test
-pnpm --filter @aipehub/evals test
-pnpm --filter @aipehub/host test
-pnpm --filter @aipehub/web test
+pnpm --filter @gotong/core test
+pnpm --filter @gotong/workflow test
+pnpm --filter @gotong/evals test
+pnpm --filter @gotong/host test
+pnpm --filter @gotong/web test
 git diff --check
 ```
 
 结果: 全部通过。
 
-说明: `@aipehub/host` 和 `@aipehub/web` 测试需要监听 `127.0.0.1`，在沙箱内会因 `listen EPERM` 失败；本轮按权限规则用提权重跑后通过。
+说明: `@gotong/host` 和 `@gotong/web` 测试需要监听 `127.0.0.1`，在沙箱内会因 `listen EPERM` 失败；本轮按权限规则用提权重跑后通过。

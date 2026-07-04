@@ -1,12 +1,12 @@
 {
-  "name": "@aipehub/mcp-client",
+  "name": "@gotong/mcp-client",
   "version": "0.2.0",
   "type": "module",
-  "description": "MCP (Model Context Protocol) client toolkit for AipeHub agents — attach a fleet of MCP servers to an LlmAgent and let it use GitHub / filesystem / Slack / Postgres / etc. tools natively.",
+  "description": "MCP (Model Context Protocol) client toolkit for Gotong agents — attach a fleet of MCP servers to an LlmAgent and let it use GitHub / filesystem / Slack / Postgres / etc. tools natively.",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/Emir-Aksoy/AipeHub.git",
+    "url": "https://github.com/Emir-Aksoy/Gotong.git",
     "directory": "packages/mcp-client"
   },
   "publishConfig": {

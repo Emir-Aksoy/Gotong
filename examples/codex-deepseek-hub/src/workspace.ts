@@ -17,7 +17,7 @@ export interface SharedWorkspace {
 
 const AGENTS_MD = `# Project spec (shared by every coding agent)
 
-This repo is driven by an AipeHub personal hub. Two coding agents — Codex and a
+This repo is driven by an Gotong personal hub. Two coding agents — Codex and a
 DeepSeek-backed TUI — operate on THIS directory. They coordinate through two
 shared files:
 

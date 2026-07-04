@@ -1,14 +1,14 @@
-/* AipeHub — worker view (v2.0, file-first).
+/* Gotong — worker view (v2.0, file-first).
  *
  * No sessionStorage / localStorage. The browser's only state is the
- * HttpOnly `aipehub_worker` cookie set by POST /api/workers; identity is
+ * HttpOnly `gotong_worker` cookie set by POST /api/workers; identity is
  * recovered on each load via GET /api/whoami.
  */
 (() => {
   const { $, t, applyStaticI18n, onLangChange, escapeHtml, summarize, isBadResult,
           fetchJson, connectStream, syncLangFromConfig,
           fetchLeaderboard, renderLeaderboard, attachCapChips,
-          attachContribToggle, applyContribToggleState } = window.AipeHub
+          attachContribToggle, applyContribToggleState } = window.Gotong
 
   const state = {
     participants: [],
@@ -299,7 +299,7 @@
     })
 
     // View switcher — jump to the admin (`/admin`) view. If the user
-    // already has an `aipehub_admin` cookie they land in the admin
+    // already has an `gotong_admin` cookie they land in the admin
     // console directly; otherwise the admin page presents the usual
     // login flow. No client-side state is saved here.
     const switchToAdminBtn = document.getElementById('switch-to-admin-btn')

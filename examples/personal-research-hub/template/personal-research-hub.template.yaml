@@ -1,4 +1,4 @@
-# 个人研究中枢 — 可载入模板 (aipehub.template/v1)
+# 个人研究中枢 — 可载入模板 (gotong.template/v1)
 #
 # personal-research-hub 的「研究团队」做成一个**可载入文件**(不是内置 TS):
 #   3 个托管 LLM agent  +  1 个可寻址知识库槽位(你的 Obsidian wiki / mcp-obsidian)。
@@ -20,7 +20,7 @@
 #     -H 'content-type: application/json' \
 #     -d "$(jq -Rs '{template: .}' examples/personal-research-hub/template/personal-research-hub.template.yaml)" \
 #     http://127.0.0.1:8745/api/admin/templates/import
-schema: aipehub.template/v1
+schema: gotong.template/v1
 template:
   name: 个人研究中枢(Karpathy 知识库循环)
   description: |-

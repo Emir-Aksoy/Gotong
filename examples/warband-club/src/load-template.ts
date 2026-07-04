@@ -54,7 +54,7 @@ interface LoadedTemplate {
 }
 
 function main(): void {
-  console.log('\n=== AipeHub case: warband-club — load the org template ===\n')
+  console.log('\n=== Gotong case: warband-club — load the org template ===\n')
 
   // --- [1] LOAD: the config is a FILE, parsed live (not a built-in literal) ---
   section('[1] load the config from a FILE')
@@ -115,7 +115,7 @@ function main(): void {
   const ids = new Set(agents.map((a) => a.id))
   const wfIds = new Set(workflows.map((w) => w.id))
   const kb = kbs.find((k) => k.name === 'warband_archive')
-  if (doc.schema !== 'aipehub.template/v1') throw new Error('expected schema aipehub.template/v1')
+  if (doc.schema !== 'gotong.template/v1') throw new Error('expected schema gotong.template/v1')
   for (const want of ['archivist', 'herald']) {
     if (!ids.has(want)) throw new Error(`expected a ${want} agent in the loaded template`)
   }

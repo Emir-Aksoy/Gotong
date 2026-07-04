@@ -25,7 +25,7 @@ a VIP email on its 3rd beat and is idle otherwise. The interval is squeezed to
 ## What you'll see
 
 ```
-=== AipeHub demo: heartbeat-agent (v5 Stream D) ===
+=== Gotong demo: heartbeat-agent (v5 Stream D) ===
 
   [system] seeded heartbeat for "inbox-monitor" every 150 ms; sweeping…
 
@@ -90,7 +90,7 @@ The hub schedules the wake; the agent decides what to do. The north star holds:
 | | This demo | Production host |
 |---|---|---|
 | parked-row store | in-process `Map` | `IdentityStore.suspended_tasks` (SQLite) |
-| sweep | hand-rolled 50 ms poll | `setInterval(AIPE_RESUME_SWEEP_MS)` (default 30 s) |
+| sweep | hand-rolled 50 ms poll | `setInterval(GOTONG_RESUME_SWEEP_MS)` (default 30 s) |
 | broker / scheduler | inline mirror | `packages/host/src/heartbeat.ts` (16-test suite) |
 | enable | seeded in code | per-agent `heartbeat` field via admin UI |
 
@@ -105,7 +105,7 @@ just substitutes the `Map` + poll loop to stay one self-contained file.
   `packages/core/src/hub.ts`
 - Suspended-tasks table: `packages/identity/src/schema.ts` (migration v=9)
 - Host boot wiring + resume sweep: `packages/host/src/main.ts`
-  (search `heartbeat engine started`, `AIPE_RESUME_SWEEP_MS`)
+  (search `heartbeat engine started`, `GOTONG_RESUME_SWEEP_MS`)
 - Sibling demo (the engine this builds on): `examples/long-running-agent`
 - Stream D release notes: `docs/zh/ledger/V5-D-FINAL.md`
 

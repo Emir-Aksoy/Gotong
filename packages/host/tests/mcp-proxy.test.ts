@@ -9,7 +9,7 @@
 
 import { describe, expect, it } from 'vitest'
 
-import { createInprocHubLinkPair, type HubLink, type HubMcpServerRecord } from '@aipehub/core'
+import { createInprocHubLinkPair, type HubLink, type HubMcpServerRecord } from '@gotong/core'
 
 import {
   McpProxyHost,

@@ -47,21 +47,21 @@ import {
   type AgentRecord,
   type ManagedAgentLifecycle,
   type ParticipantId,
-} from '@aipehub/core'
-import { MockLlmProvider, type LlmRequest } from '@aipehub/llm'
+} from '@gotong/core'
+import { MockLlmProvider, type LlmRequest } from '@gotong/llm'
 import {
   MASTER_KEY_LEN_BYTES,
   openIdentityStore,
   userPrincipal,
   type IdentityStore,
-} from '@aipehub/identity'
-import { FileInboxStore, NEVER_RESUME_AT } from '@aipehub/inbox'
+} from '@gotong/identity'
+import { FileInboxStore, NEVER_RESUME_AT } from '@gotong/inbox'
 import {
   WorkflowAssistantAgent,
   WORKFLOW_ASSISTANT_CAPABILITY,
   type WorkflowAssistantOutput,
-} from '@aipehub/workflow-assistant'
-import type { StewardSnapshotWorkflow, StewardTurn, StewardTurnResult } from '@aipehub/hub-steward'
+} from '@gotong/workflow-assistant'
+import type { StewardSnapshotWorkflow, StewardTurn, StewardTurnResult } from '@gotong/hub-steward'
 
 import { WorkflowController, type PeerCapabilityView } from '../src/workflow-controller.js'
 import { MeWorkflowEditService, type WorkflowAssistView } from '../src/me-workflow-edit-service.js'
@@ -163,7 +163,7 @@ function stewardReply(req: LlmRequest): string {
 
 function yamlWf(opts: { id: string; trigger: string; steps: string[] }): string {
   return (
-    ['schema: aipehub.workflow/v1', 'workflow:', `  id: ${opts.id}`, '  trigger:', `    capability: ${opts.trigger}`, '  steps:', ...opts.steps].join(
+    ['schema: gotong.workflow/v1', 'workflow:', `  id: ${opts.id}`, '  trigger:', `    capability: ${opts.trigger}`, '  steps:', ...opts.steps].join(
       '\n',
     ) + '\n'
   )
@@ -236,7 +236,7 @@ interface Rig {
 }
 
 async function boot(): Promise<Rig> {
-  const tmp = await mkdtemp(join(tmpdir(), 'aipe-steward-e2e-'))
+  const tmp = await mkdtemp(join(tmpdir(), 'gotong-steward-e2e-'))
   const { space } = await Space.init(tmp, { name: 'steward-e2e' })
 
   // Real IdentityStore (vault unlocked, mirroring me-agent-service.test) so the

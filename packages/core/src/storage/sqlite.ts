@@ -72,7 +72,7 @@ export interface SqliteStorageOptions {
  *   the "skip the trailing corrupt line" guarantee FileStorage offers.
  *
  * Requires `better-sqlite3` (declared as an optional peer dependency on
- * `@aipehub/core`). If you import this class without installing it, the
+ * `@gotong/core`). If you import this class without installing it, the
  * constructor throws a clear error.
  */
 export class SqliteStorage implements Storage {

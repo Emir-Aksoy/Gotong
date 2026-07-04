@@ -119,7 +119,7 @@ export interface ResourceInventoryDeps {
   /** File-existence check. Default `fs.existsSync`. Injectable for tests. */
   exists?(p: string): boolean
   /**
-   * Local endpoints to probe. Default: Ollama + anything in `AIPE_RES_ENDPOINTS`
+   * Local endpoints to probe. Default: Ollama + anything in `GOTONG_RES_ENDPOINTS`
    * (comma-separated `label=url`). Pass `[]` to skip the network family entirely.
    */
   localEndpoints?: { label: string; url: string }[]
@@ -166,7 +166,7 @@ function isSet(v: string | undefined): boolean {
 }
 
 /**
- * Parse the `AIPE_RES_ENDPOINTS` extension: comma-separated `label=url` pairs.
+ * Parse the `GOTONG_RES_ENDPOINTS` extension: comma-separated `label=url` pairs.
  * Malformed entries are skipped silently (advisory config, never a boot blocker).
  */
 function parseEndpointEnv(raw: string | undefined): { label: string; url: string }[] {
@@ -219,7 +219,7 @@ export function createResourceInventoryService(
   const probeTimeoutMs = deps.probeTimeoutMs ?? 800
   const pathDirs = deps.pathDirs ?? (env.PATH ?? '').split(delimiter).filter(Boolean)
   const endpoints =
-    deps.localEndpoints ?? [...DEFAULT_LOCAL_ENDPOINTS, ...parseEndpointEnv(env.AIPE_RES_ENDPOINTS)]
+    deps.localEndpoints ?? [...DEFAULT_LOCAL_ENDPOINTS, ...parseEndpointEnv(env.GOTONG_RES_ENDPOINTS)]
 
   return {
     async inventory(): Promise<ResourceInventory> {

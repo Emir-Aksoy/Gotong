@@ -1,5 +1,5 @@
 /**
- * @aipehub/hub-steward — the "管家" (hub steward) action vocabulary.
+ * @gotong/hub-steward — the "管家" (hub steward) action vocabulary.
  *
  * The steward is an LLM that turns a member's plain-language instruction into a
  * STRUCTURED PROPOSAL — it NEVER executes writes itself. The host re-classifies
@@ -8,7 +8,7 @@
  * These types are the contract between the LLM (which emits `StewardAction[]`)
  * and the host executor (which performs them).
  *
- * Pure data — no core / llm / host deps — so the agent (which DOES use `@aipehub/llm`)
+ * Pure data — no core / llm / host deps — so the agent (which DOES use `@gotong/llm`)
  * and the host executor share one vocabulary without a dependency cycle.
  */
 

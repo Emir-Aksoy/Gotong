@@ -1,8 +1,8 @@
 {
-  "name": "@aipehub/im-matrix",
+  "name": "@gotong/im-matrix",
   "version": "0.1.0",
   "type": "module",
-  "description": "AipeHub IM bridge for Matrix — implements ImBridge against the Matrix Client-Server API. Sync long-poll; no matrix-bot-sdk dep (uses fetch).",
+  "description": "Gotong IM bridge for Matrix — implements ImBridge against the Matrix Client-Server API. Sync long-poll; no matrix-bot-sdk dep (uses fetch).",
   "license": "MIT",
   "private": true,
   "main": "./dist/index.js",
@@ -25,7 +25,7 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "@aipehub/im-adapter": "workspace:*"
+    "@gotong/im-adapter": "workspace:*"
   },
   "devDependencies": {
     "vitest": "^3.2.4"

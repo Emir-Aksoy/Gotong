@@ -14,7 +14,7 @@ import { FileCrossHubMarkerStore } from '../src/cross-hub-marker.js'
 let sandbox: string
 let root: string
 beforeEach(async () => {
-  sandbox = await mkdtemp(join(tmpdir(), 'aipe-xhub-marker-'))
+  sandbox = await mkdtemp(join(tmpdir(), 'gotong-xhub-marker-'))
   // Nest the store root two levels deep so the `../../…` traversal probe
   // below resolves INSIDE the sandbox. With root directly at the tmpdir,
   // `join(root, '..', '..', 'etc', 'passwd')` lands on the real /etc/passwd

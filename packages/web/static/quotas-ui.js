@@ -27,10 +27,10 @@
 ;(function () {
   'use strict'
 
-  // i18n — read the live dict off window.AipeHub at call time. `t()` returns
+  // i18n — read the live dict off window.Gotong at call time. `t()` returns
   // the current-language dict; render/handler functions read t().<key> at call
   // time, and we re-render on language change.
-  const AH = window.AipeHub
+  const AH = window.Gotong
   function t() { return AH.t }
 
   const API = '/api/admin/identity/org-quotas'

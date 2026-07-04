@@ -35,9 +35,9 @@
 
 import { randomBytes } from 'node:crypto'
 
-import type { Logger } from '@aipehub/core'
-import type { ArtifactHandle, Owner } from '@aipehub/services-sdk'
-import type { UploadSurface } from '@aipehub/web'
+import type { Logger } from '@gotong/core'
+import type { ArtifactHandle, Owner } from '@gotong/services-sdk'
+import type { UploadSurface } from '@gotong/web'
 
 import type { HubServices } from './services/index.js'
 

@@ -1,5 +1,5 @@
 /**
- * Thin HTTP client for the AipeHub admin API. Used by the MCP server
+ * Thin HTTP client for the Gotong admin API. Used by the MCP server
  * to translate MCP tool calls into REST calls against a running Hub.
  *
  * Auth is a Bearer admin token. We never store / cache responses — every
@@ -217,7 +217,7 @@ export class HubClient {
 }
 
 // --- response shape echoes ---
-// We don't import these from @aipehub/core so the MCP server stays a
+// We don't import these from @gotong/core so the MCP server stays a
 // pure HTTP client with zero workspace deps. The fields we use are
 // stable across v2.x; if they drift we'd notice in the integration smoke.
 

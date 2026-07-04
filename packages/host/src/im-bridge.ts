@@ -25,14 +25,14 @@
  *
  * Binding model (unchanged): a member issues a 6-digit code in the admin
  * UI / `/me`, then DMs the bot `/bind <code>`. The binding maps
- * `platform + platformUserId → AipeHub userId`. Every dispatch carries
+ * `platform + platformUserId → Gotong userId`. Every dispatch carries
  * `origin.userId`, so the quota gate / audit log attribute work to the
  * real member — never to the raw IM handle (which goes only into
  * `Task.from` for transcript display).
  */
 
-import type { DispatchStrategy, Hub, TaskResult } from '@aipehub/core'
-import { IdentityError, type IdentityStore } from '@aipehub/identity'
+import type { DispatchStrategy, Hub, TaskResult } from '@gotong/core'
+import { IdentityError, type IdentityStore } from '@gotong/identity'
 import {
   parseImCommand,
   type ClaimResult,
@@ -40,17 +40,17 @@ import {
   type ImBridge,
   type ImMessage,
   type ImUser,
-} from '@aipehub/im-adapter'
-import { TelegramBridge } from '@aipehub/im-telegram'
-import { QqBridge } from '@aipehub/im-qq'
-import { LarkBridge } from '@aipehub/im-lark'
-import { SlackBridge, type WebSocketCtor as SlackWebSocketCtor } from '@aipehub/im-slack'
+} from '@gotong/im-adapter'
+import { TelegramBridge } from '@gotong/im-telegram'
+import { QqBridge } from '@gotong/im-qq'
+import { LarkBridge } from '@gotong/im-lark'
+import { SlackBridge, type WebSocketCtor as SlackWebSocketCtor } from '@gotong/im-slack'
 import { WebSocket as NodeWebSocket } from 'ws'
 
 import { ButlerReachableRegistry, type ButlerPushResult } from './butler-reachable.js'
 
 /**
- * Minimal structural logger — the host's `@aipehub/core` `Logger`
+ * Minimal structural logger — the host's `@gotong/core` `Logger`
  * satisfies it. Declaring it locally keeps this module from importing a
  * concrete logger and keeps the unit test's fake one line long.
  */
@@ -147,7 +147,7 @@ export interface ImSettingOps {
  */
 export interface HostImSettingConfig {
   /** Owner/operator gate (D3): only an admin may enter the console. Keyed by the
-   *  bound AipeHub userId (resolved from the binding), never the raw IM handle. */
+   *  bound Gotong userId (resolved from the binding), never the raw IM handle. */
   isOperator: (userId: string) => boolean | Promise<boolean>
   /**
    * Per-user "in command mode" flag, OWNED by the orchestration layer
@@ -195,7 +195,7 @@ export interface HostImConfig {
 /**
  * The "never resume on a timer" sentinel — a suspend that only a human resolves
  * (`/me` inbox: a butler governed action, a workflow human step, an approval
- * gate). Mirrors `@aipehub/inbox`'s `NEVER_RESUME_AT` / the butler's
+ * gate). Mirrors `@gotong/inbox`'s `NEVER_RESUME_AT` / the butler's
  * `BUTLER_NEVER_RESUME_AT`; duplicated as a local const so this module needs no
  * dep just to phrase a friendlier reply. Any `resumeAt >= this` means "waiting on
  * you", never "I'll get back to it at time T".
@@ -203,10 +203,10 @@ export interface HostImConfig {
 const NEVER_RESUME_AT = 9_999_999_999_000
 
 const HELP_TEXT = [
-  'AipeHub IM bridge — commands:',
+  'Gotong IM bridge — commands:',
   '',
   '  /help                   — show this list',
-  '  /bind <code>            — link this IM identity to your AipeHub account',
+  '  /bind <code>            — link this IM identity to your Gotong account',
   '                            (issue a code in the admin UI / 我的 → 绑定 IM)',
   '  /unbind                 — drop the binding',
   '  /agents                 — list agents you can talk to',
@@ -269,7 +269,7 @@ export async function handleImMessage(
     await reply(
       bridge,
       msg,
-      '你还没有绑定 AipeHub 账户。在管理界面 / 我的 生成 6 位绑定码，然后私信我 `/bind <code>`。\n' +
+      '你还没有绑定 Gotong 账户。在管理界面 / 我的 生成 6 位绑定码，然后私信我 `/bind <code>`。\n' +
         'You haven\'t linked your account yet — get a code in the admin UI / 我的, then DM me `/bind <code>`.',
     )
     return
@@ -374,7 +374,7 @@ async function handleSettingConsole(
   const text = msg.text ?? ''
   const isTrigger = SETTING_TRIGGER_RE.test(text.trim())
 
-  // Resolve the binding once. Command mode is keyed by AipeHub userId, so an
+  // Resolve the binding once. Command mode is keyed by Gotong userId, so an
   // unbound sender can never be "in mode".
   const userId = await config.resolver.resolveUserId(bridge.platform, msg.from.platformUserId)
   const inMode = userId !== null && setting.mode.get(userId) === true
@@ -390,7 +390,7 @@ async function handleSettingConsole(
     await reply(
       bridge,
       msg,
-      '你还没有绑定 AipeHub 账户，无法进入命令模式。先私信我 `/bind <code>`。\n' +
+      '你还没有绑定 Gotong 账户，无法进入命令模式。先私信我 `/bind <code>`。\n' +
         'You must link your account before using the setting console — DM me `/bind <code>` first.',
     )
     return true
@@ -504,7 +504,7 @@ function settingHelpText(setting: HostImSettingConfig): string {
 // `metadata.platform` as the resolution tag — same convention llm_provider
 // rows use `metadata.provider` for) so a fresh box gets IM without anyone
 // hand-editing an env file. Env vars still WIN: an operator who set
-// AIPE_TELEGRAM_BOT_TOKEN keeps exactly today's behaviour, vault unread.
+// GOTONG_TELEGRAM_BOT_TOKEN keeps exactly today's behaviour, vault unread.
 // Only the two wizard-offered platforms resolve from vault; QQ/Slack stay
 // env-only — their multi-field + webhook tuning is operator-level config,
 // not a first-boot form.
@@ -525,14 +525,14 @@ export function resolveImCreds(
   log?: ImLogger,
 ): ResolvedImCreds | undefined {
   if (platform === 'telegram') {
-    const token = process.env.AIPE_TELEGRAM_BOT_TOKEN?.trim()
+    const token = process.env.GOTONG_TELEGRAM_BOT_TOKEN?.trim()
     if (token) return { source: 'env', fields: { token } }
   } else {
-    // Both-or-nothing from env: a lone AIPE_LARK_APP_ID never pairs with a
+    // Both-or-nothing from env: a lone GOTONG_LARK_APP_ID never pairs with a
     // vault secret — mixed-source halves would make "which app is this?"
     // undebuggable.
-    const appId = process.env.AIPE_LARK_APP_ID?.trim()
-    const appSecret = process.env.AIPE_LARK_APP_SECRET?.trim()
+    const appId = process.env.GOTONG_LARK_APP_ID?.trim()
+    const appSecret = process.env.GOTONG_LARK_APP_SECRET?.trim()
     if (appId && appSecret) return { source: 'env', fields: { appId, appSecret } }
   }
   try {
@@ -591,7 +591,7 @@ export interface StartImBridgesOptions {
   hub: Hub
   identity: IdentityStore
   log: ImLogger
-  /** Defaults to env `AIPE_IM_CHAT_CAPABILITY` or 'chat'. */
+  /** Defaults to env `GOTONG_IM_CHAT_CAPABILITY` or 'chat'. */
   freeTextCapability?: string
   listAgents?: ImAgentLister
   resolveWorkflow?: ImWorkflowResolver
@@ -685,11 +685,11 @@ export interface ImBridgesHandle {
  *     cloud host. See docs/zh/IM-OFFICIAL-REARCH.md.
  *
  * Env per platform (a bridge needs ALL of its vars to activate):
- *   Telegram  AIPE_TELEGRAM_BOT_TOKEN   — or vault kind='im_bridge' (wizard)
- *   QQ        AIPE_QQ_BOT_APPID + AIPE_QQ_BOT_SECRET
- *             (+ AIPE_QQ_WEBHOOK_PORT / _HOST / _PATH to tune the listener)
- *   Lark      AIPE_LARK_APP_ID + AIPE_LARK_APP_SECRET — or vault (wizard)
- *   Slack     AIPE_SLACK_APP_TOKEN (xapp-) + AIPE_SLACK_BOT_TOKEN (xoxb-)
+ *   Telegram  GOTONG_TELEGRAM_BOT_TOKEN   — or vault kind='im_bridge' (wizard)
+ *   QQ        GOTONG_QQ_BOT_APPID + GOTONG_QQ_BOT_SECRET
+ *             (+ GOTONG_QQ_WEBHOOK_PORT / _HOST / _PATH to tune the listener)
+ *   Lark      GOTONG_LARK_APP_ID + GOTONG_LARK_APP_SECRET — or vault (wizard)
+ *   Slack     GOTONG_SLACK_APP_TOKEN (xapp-) + GOTONG_SLACK_BOT_TOKEN (xoxb-)
  */
 export async function startImBridges(
   opts: StartImBridgesOptions,
@@ -709,16 +709,16 @@ export async function startImBridges(
     factories.push({ source: telegram.source, make: () => makeVaultable('telegram', telegram) })
   }
 
-  const qqAppId = process.env.AIPE_QQ_BOT_APPID?.trim()
-  const qqSecret = process.env.AIPE_QQ_BOT_SECRET?.trim()
+  const qqAppId = process.env.GOTONG_QQ_BOT_APPID?.trim()
+  const qqSecret = process.env.GOTONG_QQ_BOT_SECRET?.trim()
   if (qqAppId && qqSecret) {
     // The official QQ Bot API is inbound-webhook only (its WS was
     // discontinued), so the bridge binds its own listener that a reverse
     // proxy terminates TLS in front of. Port 0 disables the listener for a
     // host that drives the webhook from its own HTTP layer.
-    const webhookPort = parseImPort(process.env.AIPE_QQ_WEBHOOK_PORT)
-    const webhookHost = process.env.AIPE_QQ_WEBHOOK_HOST?.trim()
-    const webhookPath = process.env.AIPE_QQ_WEBHOOK_PATH?.trim()
+    const webhookPort = parseImPort(process.env.GOTONG_QQ_WEBHOOK_PORT)
+    const webhookHost = process.env.GOTONG_QQ_WEBHOOK_HOST?.trim()
+    const webhookPath = process.env.GOTONG_QQ_WEBHOOK_PATH?.trim()
     factories.push({
       // QQ has no vault path — env is its only credential source, stated
       // explicitly so the status() projection reads uniformly.
@@ -740,8 +740,8 @@ export async function startImBridges(
     factories.push({ source: lark.source, make: () => makeVaultable('lark', lark) })
   }
 
-  const slackBotToken = process.env.AIPE_SLACK_BOT_TOKEN?.trim()
-  const slackAppToken = process.env.AIPE_SLACK_APP_TOKEN?.trim()
+  const slackBotToken = process.env.GOTONG_SLACK_BOT_TOKEN?.trim()
+  const slackAppToken = process.env.GOTONG_SLACK_APP_TOKEN?.trim()
   if (slackBotToken && slackAppToken) {
     factories.push({
       // Slack likewise: env-only credentials, no vault path.
@@ -789,7 +789,7 @@ export async function startImBridges(
     hub: opts.hub,
     resolver,
     freeTextCapability:
-      opts.freeTextCapability ?? (process.env.AIPE_IM_CHAT_CAPABILITY?.trim() || 'chat'),
+      opts.freeTextCapability ?? (process.env.GOTONG_IM_CHAT_CAPABILITY?.trim() || 'chat'),
     onUnbind: async (platform, platformUserId) => {
       const n = opts.identity.removeImBinding(platform, platformUserId)
       return { removed: n > 0 }
@@ -937,7 +937,7 @@ async function dispatchSafely(
 /**
  * `Task.from` — embeds platform + platformUserId so the transcript reader
  * can tell apart "same person on Telegram vs Slack" without conflating
- * with AipeHub-internal user ids (which go into `origin.userId`).
+ * with Gotong-internal user ids (which go into `origin.userId`).
  */
 function makeFromId(platform: string, platformUserId: string): string {
   return `im:${platform}:${platformUserId}`

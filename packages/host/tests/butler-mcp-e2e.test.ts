@@ -28,21 +28,21 @@ import { randomBytes } from 'node:crypto'
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { Hub, Space, type Logger } from '@aipehub/core'
+import { Hub, Space, type Logger } from '@gotong/core'
 import {
   MASTER_KEY_LEN_BYTES,
   openIdentityStore,
   type IdentityStore,
-} from '@aipehub/identity'
-import { FileInboxStore } from '@aipehub/inbox'
-import { BUTLER_NEVER_RESUME_AT, PersonalButlerAgent } from '@aipehub/personal-butler'
+} from '@gotong/identity'
+import { FileInboxStore } from '@gotong/inbox'
+import { BUTLER_NEVER_RESUME_AT, PersonalButlerAgent } from '@gotong/personal-butler'
 import type {
   LlmMessage,
   LlmProvider,
   LlmRequest,
   LlmStreamChunk,
   LlmToolCallResult,
-} from '@aipehub/llm'
+} from '@gotong/llm'
 
 import {
   buildButlerMcpToolsets,
@@ -198,7 +198,7 @@ interface Rig {
 }
 
 async function boot(): Promise<Rig> {
-  const tmp = await mkdtemp(join(tmpdir(), 'aipe-butler-mcp-e2e-'))
+  const tmp = await mkdtemp(join(tmpdir(), 'gotong-butler-mcp-e2e-'))
   const { space } = await Space.init(tmp, { name: 'butler-mcp-e2e' })
   const identity = openIdentityStore({
     dbPath: join(tmp, 'identity.sqlite'),

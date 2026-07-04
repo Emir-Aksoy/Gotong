@@ -28,7 +28,7 @@
 import { existsSync, readFileSync, renameSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 
-import { probeVaultMasterKey } from '@aipehub/identity'
+import { probeVaultMasterKey } from '@gotong/identity'
 
 // Reuse the rotation command's filenames so the two can never drift apart.
 import { IDENTITY_DB_FILENAME, MASTER_KEY_FILENAME } from './rotate-master-key.js'

@@ -48,7 +48,7 @@ mesh 对等 hub 那一步若对方设了 `requireApprovalOutbound`，会**挂起
 
 ## 为什么用注入的 `fetchImpl` 而不是真 socket
 
-「外部 A2A agent」由一个注入的 `fetchImpl` 来扮演（和 `@aipehub/a2a` 单测同一个手法），
+「外部 A2A agent」由一个注入的 `fetchImpl` 来扮演（和 `@gotong/a2a` 单测同一个手法），
 不起真 socket。它**解析出站的 JSON-RPC body 并断言协议形状**（method `message/send`、
 bearer 鉴权、`metadata.skill`），所以这个 demo 同时是一个 **A2A 协议冒烟**。
 
@@ -74,7 +74,7 @@ pnpm demo:a2a-workflow-step
 
 | demo 用的 | 生产真东西 |
 |---|---|
-| `A2aRemoteParticipant` + 注入 `fetchImpl` | 同一个 `A2aRemoteParticipant`（`@aipehub/a2a`），`fetchImpl` 用 `global fetch` 调真端点 |
+| `A2aRemoteParticipant` + 注入 `fetchImpl` | 同一个 `A2aRemoteParticipant`（`@gotong/a2a`），`fetchImpl` 用 `global fetch` 调真端点 |
 | `EXTERNAL_URL` / `EXTERNAL_TOKEN` 常量 | identity `a2a_outbound_agents` 表（url + `tokenEnv` 从环境变量读 bearer，永不入库）+ admin「联邦」tab 出站 A2A agent 面板（Route B P1-M11） |
 | `external.translate` 路由到本地 participant | hub 能力调度（与调任何本地能力同一条路径） |
 
@@ -82,7 +82,7 @@ pnpm demo:a2a-workflow-step
 
 | 维度 | cross-hub-workflow（姊妹） | a2a-workflow-step（本例） |
 |---|---|---|
-| 目的地 | mesh 对等 hub（AipeHub↔AipeHub，联邦链路） | 外部 A2A agent（第三方 HTTP 端点） |
+| 目的地 | mesh 对等 hub（Gotong↔Gotong，联邦链路） | 外部 A2A agent（第三方 HTTP 端点） |
 | 协议 | mesh RPC over HubLink | A2A `message/send` over HTTP |
 | 审批闸 | 可有（peer 设 `requireApprovalOutbound` → 挂起等人批） | **无**（裸注册的出站边，立即外发） |
 | 出站参与者 | peer wrapper（`installPeerLink`） | `A2aRemoteParticipant`（本地参与者） |
@@ -91,7 +91,7 @@ pnpm demo:a2a-workflow-step
 
 ## 进阶可叠加（本 demo 故意不做，保持聚焦）
 
-- **A2A task 生命周期（Route B P1-M8）**：若远端 agent 是会**挂起**的 AipeHub（返回 Task
+- **A2A task 生命周期（Route B P1-M8）**：若远端 agent 是会**挂起**的 Gotong（返回 Task
   而非 Message），`a2aSend` 会抛带 `.taskId` 的错；改用 `a2aSendRaw` + `a2aGetTask` 轮询。
 - **per-agent 持久配置（Route B P1-M11）**：把 `EXTERNAL_URL`/`tokenEnv` 落 identity
   `a2a_outbound_agents` 表，admin「联邦」tab 管理出站 agent。

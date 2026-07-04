@@ -23,7 +23,7 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { Hub, Space } from '@aipehub/core'
+import { Hub, Space } from '@gotong/core'
 
 import {
   serveWeb,
@@ -64,7 +64,7 @@ function fakeSurface(sink: { value: Boot['lastInput'] }): ResourceAdaptationSurf
 }
 
 async function boot(opts: { withSurface: boolean }): Promise<Boot> {
-  const tmp = await mkdtemp(join(tmpdir(), 'aipehub-res-adapts-'))
+  const tmp = await mkdtemp(join(tmpdir(), 'gotong-res-adapts-'))
   const init = await Space.init(tmp, { name: 'res-adapts-test' })
   const space = init.space
   const hub = new Hub({ space })

@@ -24,7 +24,7 @@
  *
  * What's NOT here (deliberate for M5):
  *
- *   - Sharding. Single-shard supports up to 2500 guilds; AipeHub-side
+ *   - Sharding. Single-shard supports up to 2500 guilds; Gotong-side
  *     deployments are usually 1 hub <-> 1-few guilds, so the simplest
  *     wins.
  *   - Compression / zlib. The official client uses zstd; bridge takes
@@ -269,8 +269,8 @@ export function createDiscordGateway(opts: DiscordGatewayOptions): DiscordGatewa
         intents,
         properties: {
           os: 'linux',
-          browser: 'aipehub',
-          device: 'aipehub',
+          browser: 'gotong',
+          device: 'gotong',
         },
       },
     })

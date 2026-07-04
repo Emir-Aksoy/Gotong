@@ -27,12 +27,12 @@
 用户指令：「模仿 openclaw 的操作方式，我们**必须做到直接管理从启动到分派任务**给 Claude
 Code 和 Codex」。
 
-仓库已有 `@aipehub/cli-agent`（E2）——但它是 **一次性 shell-out**：`spawn('claude', ['-p',
+仓库已有 `@gotong/cli-agent`（E2）——但它是 **一次性 shell-out**：`spawn('claude', ['-p',
 prompt])` 每个任务跑完即 **退出**，无 session、任务间零上下文。那只满足「分派」，没满足
-「从启动 hold 住到分派」。本包 `@aipehub/acp-agent` 是它的 **互补**（不是替换）：补上
+「从启动 hold 住到分派」。本包 `@gotong/acp-agent` 是它的 **互补**（不是替换）：补上
 OpenClaw 式的全生命周期所有权。
 
-| | `@aipehub/cli-agent`（E2，已有） | `@aipehub/acp-agent`（本 Stream） |
+| | `@gotong/cli-agent`（E2，已有） | `@gotong/acp-agent`（本 Stream） |
 |---|---|---|
 | 进程模型 | 每任务 spawn → 跑完**退出** | spawn **一次**，stdio 长开，反复派任务 |
 | 协议 | 无（argv + stdout 文本） | ACP = JSON-RPC 2.0 over NDJSON on child stdio |
@@ -49,7 +49,7 @@ identity）；example-first（host `main.ts` **零改**，验收门在 `packages
 
 ## 动了什么
 
-### 新包 `@aipehub/acp-agent`（core-only 叶包，依赖仅 `@aipehub/core`）
+### 新包 `@gotong/acp-agent`（core-only 叶包，依赖仅 `@gotong/core`）
 
 | 模块 | 职责 |
 |---|---|
@@ -59,7 +59,7 @@ identity）；example-first（host `main.ts` **零改**，验收门在 `packages
 | `acp-checkpoint.ts` | 纯权限闸原语（仿 cli-checkpoint 纪律，不 import cli-agent）：`dangerousToolGate`（fail-closed）+ `pickOptionId` + `readPermissionDecision`（容忍 `{decision}`+`{answer}`）+ `ACP_NEVER_RESUME_AT` + checkpoint round-trip |
 | `acp-participant.ts` | `AcpParticipant extends AgentParticipant`：一个实例 = 一个长 session，接通五缝 |
 
-host 仅加 **test devDep** `@aipehub/acp-agent`（验收门要 import 叶包），`main.ts` 零改。
+host 仅加 **test devDep** `@gotong/acp-agent`（验收门要 import 叶包），`main.ts` 零改。
 
 ---
 
@@ -134,7 +134,7 @@ acp-agent 53、host e2e 4，全 `pnpm -r test` 绿。
 上下文保留 → `terminate`。跑在 `mkdtemp` 抛弃 repo，`dangerousToolGate` fail-closed。
 
 ```bash
-ACP_LIVE=1 ACP_AGENT=claude-code-acp pnpm --filter @aipehub/example-acp-coding-bridge start:live
+ACP_LIVE=1 ACP_AGENT=claude-code-acp pnpm --filter @gotong/example-acp-coding-bridge start:live
 ```
 
 完整前置 / 命令 / 预期输出 / env 旋钮见 `examples/acp-coding-bridge/README.md` 的
@@ -175,8 +175,8 @@ exit 0；跑后核验：无残留 `claude-code-acp`/`claude` 子进程、throwaw
 > `7bf4485`（M5）→ 本提交（M6）
 
 M0-M8 把 adapter 做成了 core-only 叶包 + example 胶水：能力齐了，但要在终端写
-example。**ACP-OUT** 把它折进 `aipehub start` 的生产 host——一个加载了工作流的
-AipeHub 现在能从 **admin UI 配置 + 持久化** 来「启动 Claude Code / Codex、给它们派
+example。**ACP-OUT** 把它折进 `gotong start` 的生产 host——一个加载了工作流的
+Gotong 现在能从 **admin UI 配置 + 持久化** 来「启动 Claude Code / Codex、给它们派
 任务、关掉它们」，不再只是 example。整条纵切**逐字镜像** `a2a_outbound_agents`
 （Route B P1-M11）那条已验证的纵切，只是 **更纯**：ACP 记录里没有任何密钥列。
 
@@ -208,7 +208,7 @@ hub 上注册该 participant（**首个派发时才真 spawn 子进程**，长 s
 
 ### 真机联调验证（2026-06-05，开发机）
 
-把上面这条「从启动到关闭」的闭环在**真生产 host 上真驱动了一遍真 Codex**（`aipehub start`
+把上面这条「从启动到关闭」的闭环在**真生产 host 上真驱动了一遍真 Codex**（`gotong start`
 + admin API，bridge = `@zed-industries/codex-acp`，走 Codex 自己的 ChatGPT 登录态）：
 
 1. `POST /api/admin/acp-agents`（201）注册 `codex-live` → host 立即在 hub 上 JOIN 该
@@ -248,14 +248,14 @@ ACP-OUT 把破坏性动作做成 **fail-closed deny**：agent 不带那个 tool 
 `Participant`，不是 request_human_input tool**」最直接的一笔，也是 ACP-OUT 自己文档里记着的
 follow-up。
 
-**关键：`@aipehub/acp-agent` 叶包零改**——爆炸半径锁在 host。整条流程骑在**已经存在且被测过**的
+**关键：`@gotong/acp-agent` 叶包零改**——爆炸半径锁在 host。整条流程骑在**已经存在且被测过**的
 设施上：
 
 | 机件 | 之前 | 现在 |
 |---|---|---|
 | `AcpOutboundManager` 闸 | 硬编码 `onMatch:'deny'` | 新 `escalateDanger` 选项：main.ts 接好 inbox + owner 时翻成 `onMatch:'escalate'`，破坏性 tool **park**（`SuspendTaskError`，`ACP_NEVER_RESUME_AT`）扣住子进程阻塞在它**开着的反向权限请求**上 |
 | park → inbox item | 无（叶包没 inbox 依赖，写不了人来解的那条记录） | 新 `acp-escalation.ts` 纯函数 `acpApprovalItemFor`——host 把 ACP park 塑成 `approval` `InboxItem` 的**唯一**一处；**任何非 ACP park 返 null**（broker / approval-gate 的 `{inboxItemId}`、心跳、long-running……），故全局 `suspendNotifier` 能对**每个** suspend 调它而不重写那些 broker 自己写的 item |
-| `suspendNotifier` | 同步 persist | 改 `async`（scheduler **本就 await** 它）：persist park 后跑 sink，**审批 item 在 dispatch 返回 `suspended` 之前就存在**。审批人 = org owner（镜像 `ApprovalGatedParticipant`）；`AIPE_ACP_DANGER=deny` 强制旧的硬拒（给没审批人的无人值守 hub）|
+| `suspendNotifier` | 同步 persist | 改 `async`（scheduler **本就 await** 它）：persist park 后跑 sink，**审批 item 在 dispatch 返回 `suspended` 之前就存在**。审批人 = org owner（镜像 `ApprovalGatedParticipant`）；`GOTONG_ACP_DANGER=deny` 强制旧的硬拒（给没审批人的无人值守 hub）|
 | `HostInboxService.resumeChild` | 只注入 `{answer:decision}`（broker 约定） | 合并 `{...row.state, answer}`：ACP `handleResume` 从持久 checkpoint state 里**重新找到内存 `permissionToken`**，而 broker / approval-gate 只读 `.answer`（多出的字段惰性无害 → 向后兼容）|
 
 恢复时**无漂移**：权限前的流式工作保留，权限后的工作在**同一 session** 上接着跑。拒绝
@@ -288,7 +288,7 @@ follow-up。
 **做法（复用，不重造）**: 在 `AcpParticipant` 自己的出站边复用**同一个** core 纯函数
 `checkOutboundDataClasses`（`packages/core/src/peer-acl.ts:94`）——和 mesh 边、A2A 边**零漂移**。
 
-- **X-M2**（`73b8680`，`@aipehub/acp-agent`）构造加 `allowedDataClasses?` + `outboundQuotaGate?`;
+- **X-M2**（`73b8680`，`@gotong/acp-agent`）构造加 `allowedDataClasses?` + `outboundQuotaGate?`;
   `handleTask` 把闸插在 `session.ensureStarted()` **之前**（`acp-participant.ts:183`）→ **被拒任务
   绝不 spawn 子进程**（R2 缓解，单测断言「禁类时子进程从未 ensureStarted」）。`!ok` 抛
   `outbound_data_class_denied:<class>`;配额超抛 `outbound_quota_exceeded`。
@@ -333,7 +333,7 @@ redaction hook（同 A2A，独立增量）。完整推迟清单见 [`V5-H-FINAL.
 - ~~ACP agent 的 admin-UI 配置 / 持久化~~ **✓ ACP-OUT 已做**（`acp_outbound_agents` v26 +
   CRUD + admin 面板，见上「折进生产 host」节）。
 - ~~把 ACP 权限 park 升级成 inbox 审批（`onMatch:'escalate'` → 两步恢复）~~ **✓ ACP-HITL 已做**
-  （main.ts 接好 inbox + owner 时自动 escalate，`AIPE_ACP_DANGER=deny` 强制旧硬拒；见上「ACP-HITL」节）。
+  （main.ts 接好 inbox + owner 时自动 escalate，`GOTONG_ACP_DANGER=deny` 强制旧硬拒；见上「ACP-HITL」节）。
 - ~~ACP 出站边的 per-step data-class + 配额闸（不过 P4-M4 chokepoint）~~ **✓ Item 2 已做**
   （identity v34 两列 + 复用 core `checkOutboundDataClasses` + 闸先于 `ensureStarted` + admin 面板;见上「Item 2 — ACP 出站闸」节）。
 - `tool_call` / `plan` `session/update` 富渲染（MVP 只 message-chunk 文本 OBSERVE）。
@@ -344,6 +344,6 @@ redaction hook（同 A2A，独立增量）。完整推迟清单见 [`V5-H-FINAL.
 
 - `packages/acp-agent/` — `AcpParticipant` + `AcpSession` + `acp-connection`（NDJSON）+ 权限闸原语（core-only 叶包）
 - `examples/acp-coding-bridge/` — 五缝 + 长 session demo（mock）+ 真机 LIVE-RUNBOOK（M8）
-- `docs/zh/ledger/V5-E2-CLI-ADAPTER.md` — 一次性 shell-out 的姊妹 adapter（`@aipehub/cli-agent`）
+- `docs/zh/ledger/V5-E2-CLI-ADAPTER.md` — 一次性 shell-out 的姊妹 adapter（`@gotong/cli-agent`）
 - `docs/zh/AGENT-ADAPTER-CONTRACT.md` — 双向 + 可快速接管的契约本体
-- `docs/zh/QUICK-CONNECT.md` — 入站方向（`aipehub connect <agent>`）
+- `docs/zh/QUICK-CONNECT.md` — 入站方向（`gotong connect <agent>`）

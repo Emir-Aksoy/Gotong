@@ -10,7 +10,7 @@ import type {
   MemoryKind,
   MemoryQuery,
   NewMemoryEntry,
-} from '@aipehub/services-sdk'
+} from '@gotong/services-sdk'
 
 export interface FakeMemory extends MemoryHandle {
   /** Live view of stored entries. */

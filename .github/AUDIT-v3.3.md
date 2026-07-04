@@ -1,4 +1,4 @@
-# AipeHub v3.3 全量代码审计 — 2026-05-18
+# Gotong v3.3 全量代码审计 — 2026-05-18
 
 > 触发：用户决定"不发 Docker，先把测试和审计补齐"，对整个 monorepo 做安全 + 正确性审计。
 >
@@ -53,7 +53,7 @@ maxConnections?: number          // 默认 1024
 **修复**：`ConnectOptions` 增加 `tls?: import('tls').ConnectionOptions`，透传到 `new WebSocket(url, { ...tlsOpts })`。README 写明默认信任系统 CA，并强调"不要用 `NODE_TLS_REJECT_UNAUTHORIZED=0`，请 `tls: { ca: fs.readFileSync(...) }`"。
 
 ### C3. python-sdk 的 `wss://` 也没有 SSLContext 入口 + `ws://` 明文 apiKey 不告警
-**文件**：`python-sdk/src/aipehub/session.py:201`
+**文件**：`python-sdk/src/gotong/session.py:201`
 
 `async with websockets.connect(self._url) as ws:` 没办法传自定义 `ssl.SSLContext`。同时 `api_key` 在 `ws://` URL 下静默走明文。
 
@@ -124,12 +124,12 @@ await chmod(keyPath, 0o600).catch(() => { /* best-effort */ })
 ### H7. workspace 根无符号链接 / 属主检查
 **文件**：`packages/core/src/space.ts:109-117, 134-141`
 
-`Space.init` 直接 `mkdirSync(root, { recursive: true })`，没 `lstat` 防符号链接、没 `fstat.uid === geteuid()`。共享主机上攻击者预创 `/tmp/.aipehub/runtime/secret.key` 指向受害者文件，等受害者 init 就覆盖。
+`Space.init` 直接 `mkdirSync(root, { recursive: true })`，没 `lstat` 防符号链接、没 `fstat.uid === geteuid()`。共享主机上攻击者预创 `/tmp/.gotong/runtime/secret.key` 指向受害者文件，等受害者 init 就覆盖。
 
 **修复**：`Space.init` / `Space.open` 对 root 和 `runtime/` 下每个文件 `lstat`，符号链接或异属主则拒绝。`secret.key` 首次创建用 `open(... O_NOFOLLOW | O_CREAT | O_EXCL)`。
 
 ### H8. `callId` 用 `Math.random()`
-**文件**：`packages/sdk-node/src/service-client.ts:322`、`python-sdk/src/aipehub/services.py:418`
+**文件**：`packages/sdk-node/src/service-client.ts:322`、`python-sdk/src/gotong/services.py:418`
 
 ```ts
 const callId = `c${this.callCounter.toString(36)}_${Math.random().toString(36).slice(2, 8)}`
@@ -139,7 +139,7 @@ const callId = `c${this.callCounter.toString(36)}_${Math.random().toString(36).s
 **修复**：TS 用 `randomBytes(6).toString('hex')`，Py 用 `secrets.token_hex(6)`。
 
 ### H9. python-sdk fire-and-forget `asyncio.create_task` 可被 GC
-**文件**：`python-sdk/src/aipehub/session.py:117`
+**文件**：`python-sdk/src/gotong/session.py:117`
 
 `asyncio.create_task(ws.send(json.dumps(frame)))` 返回的 Task 未存引用；3.11+ 仅持弱引用，内存压力下可能被 GC 掉，导致 SERVICE_CALL 静默丢帧，30s 后 `session_not_ready` 超时。
 
@@ -151,7 +151,7 @@ const callId = `c${this.callCounter.toString(36)}_${Math.random().toString(36).s
 ```ts
 ...(this.opts.apiKey !== undefined ? { apiKey: this.opts.apiKey } : {})
 ```
-SDK 不论 URL scheme 都把 apiKey 塞 HELLO JSON。CLI template 默认 `ws://127.0.0.1:4000`，配合 `AIPE_KEY` env 用户可能在远程 dev tunnel 上明文飞 key。
+SDK 不论 URL scheme 都把 apiKey 塞 HELLO JSON。CLI template 默认 `ws://127.0.0.1:4000`，配合 `GOTONG_KEY` env 用户可能在远程 dev tunnel 上明文飞 key。
 
 **修复**：`connect()` 检测 `apiKey` 已设 + `url.startsWith('ws:')` 且非 loopback 时 `console.warn` 或拒绝（除非 `--allow-plaintext-auth`）。Python 端同步。
 
@@ -169,10 +169,10 @@ SDK 不论 URL scheme 都把 apiKey 塞 HELLO JSON。CLI template 默认 `ws://1
 
 **修复**：`decodeFrame` 入口先 `if (text.length > 1_048_576) return { ok: false, reason: 'too_large' }`，`DecodeResult.reason` union 加 `'too_large'`。
 
-### H13. `AIPE_PROTOCOL_STRICT` 未文档化 + 热路径每帧读 env
+### H13. `GOTONG_PROTOCOL_STRICT` 未文档化 + 热路径每帧读 env
 **文件**：`packages/transport-ws/src/session.ts:155`
 
-每个入站消息都 `process.env.AIPE_PROTOCOL_STRICT === '1'`。`grep -r AIPE_PROTOCOL_STRICT docs/` 零命中。
+每个入站消息都 `process.env.GOTONG_PROTOCOL_STRICT === '1'`。`grep -r GOTONG_PROTOCOL_STRICT docs/` 零命中。
 
 **修复**：构造时一次性 capture，写进 `docs/PROTOCOL.md` 操作指南 + `docs/SIDECAR.md` 错误图册。
 
@@ -188,19 +188,19 @@ strict 模式 TASK 只查 `task` 是对象，不检 `task.id` / `from` / `strate
 
 strict `default:` 返 null，`{"type":"FROM_THE_FUTURE"}` 通过。这是文档化的前向兼容策略，但操作员调试新 SDK 时没法 assert "陌生 type 应该报错"。
 
-**修复**：分两档 — `AIPE_PROTOCOL_STRICT=1`（当前）+ `AIPE_PROTOCOL_STRICT=closed`（拒绝未知 discriminator）。
+**修复**：分两档 — `GOTONG_PROTOCOL_STRICT=1`（当前）+ `GOTONG_PROTOCOL_STRICT=closed`（拒绝未知 discriminator）。
 
 ### H16. core/tests 创建临时目录从不清理
 **文件**：`packages/core/tests/secrets.test.ts:83,92,121,141,159,170`、`packages/core/tests/contributions.test.ts:465`
 
-7 个 `mkdtempSync(join(tmpdir(), 'aipehub-...-'))` 没有 `afterEach` rm。CI runner 上残留加密 secrets 文件 + master key — 共享 CI 上最坏的残留类型。
+7 个 `mkdtempSync(join(tmpdir(), 'gotong-...-'))` 没有 `afterEach` rm。CI runner 上残留加密 secrets 文件 + master key — 共享 CI 上最坏的残留类型。
 
 **修复**：每个 `it` 体 `try { ... } finally { rmSync(dir, { recursive: true, force: true }) }`，或 hoist 到 `beforeEach`/`afterEach`。
 
 ### H17. `packages/web/src/server.ts` 测试覆盖率最低
 **文件**：`packages/web/src/server.ts`（2276 LOC）vs `packages/web/tests/*`（4 文件，1209 LOC）
 
-src:test ratio 2.17 — 全 monorepo 最差。dispatch、leaderboard、workflow control、services-admin 端点零 unit test，只靠 host 集成测试间接覆盖。CSRF / `AIPE_ALLOWED_HOSTS` / `AIPE_COOKIE_SECURE` 关键分支没有专门测试。
+src:test ratio 2.17 — 全 monorepo 最差。dispatch、leaderboard、workflow control、services-admin 端点零 unit test，只靠 host 集成测试间接覆盖。CSRF / `GOTONG_ALLOWED_HOSTS` / `GOTONG_COOKIE_SECURE` 关键分支没有专门测试。
 
 **修复**：补写路径级 unit test，重点是 CSRF / allowed-hosts / cookie security flag。
 
@@ -226,7 +226,7 @@ res.end(`server error: ${err.message}`)
 
 `console.log(...)` 打印 admin token URL — systemd journal / docker logs / pm2 logs 全部抓到。任何能读这些日志的人都能拿 admin。
 
-**修复**：写到 `<root>/.aipehub/runtime/admin-link.txt`（0600），stdout 只打 "admin link saved to ..."。
+**修复**：写到 `<root>/.gotong/runtime/admin-link.txt`（0600），stdout 只打 "admin link saved to ..."。
 
 ### H21. cookie-sid 路径未限流（**手工发现**）
 **文件**：`packages/web/src/server.ts:1738-1754` (`findAdminFromRequest`)
@@ -265,7 +265,7 @@ Bearer auth 走限流，但 cookie 路径没限。攻击者可用大量 cookie s
 `packages/workflow/src/runner.ts:274` — `state.error` 包含 `record.error` 里下游栈追踪 / 路径。**修复**：scrub。
 
 ### M7. MCP admin token 通过 CLI flag 泄漏 ps
-`packages/mcp-server/src/main.ts:56-60` — `--token <BEARER>` 写 help 文档，`ps auxww` 能看到。**修复**：help 加 "prefer `AIPE_ADMIN_TOKEN=…`" 警告。
+`packages/mcp-server/src/main.ts:56-60` — `--token <BEARER>` 写 help 文档，`ps auxww` 能看到。**修复**：help 加 "prefer `GOTONG_ADMIN_TOKEN=…`" 警告。
 
 ### M8. MCP server 用户控制错误串原样回 LLM
 `packages/mcp-server/src/tools.ts:119-120` — `throw new Error(\`Dispatch failed: ${r.error}\`)`。恶意 remote agent 可在错误里塞 prompt-injection 标记。**修复**：`JSON.stringify(r.error)` 中和。
@@ -282,14 +282,14 @@ Bearer auth 走限流，但 cookie 路径没限。攻击者可用大量 cookie s
 ### M12. `HubClientError.body` 保留原始解析体
 `packages/mcp-server/src/hub-client.ts:31-33` — 若 Hub 返调试字段（如 `token_seen`）会留在 error 上传到 stderr。**修复**：构造时 scrub。
 
-### M13. `AIPE_SECRET_KEY` 直接 hex-decode 无 KDF
-`packages/core/src/secrets.ts:107-117` — 用户口令 padding 成 hex 也通过，没有 PBKDF2/scrypt 拉伸。**修复**：增加 `AIPE_SECRET_PASSPHRASE` 走 scrypt(N=2^17,r=8,p=1)。
+### M13. `GOTONG_SECRET_KEY` 直接 hex-decode 无 KDF
+`packages/core/src/secrets.ts:107-117` — 用户口令 padding 成 hex 也通过，没有 PBKDF2/scrypt 拉伸。**修复**：增加 `GOTONG_SECRET_PASSPHRASE` 走 scrypt(N=2^17,r=8,p=1)。
 
 ### M14. admins/workers token 验证 O(n) 短路
 `packages/core/src/space.ts:259-266,373-381` — 每条 `constantTimeEqualString` 常时，但循环短路可探测位置。**修复**：indexed by `tokenHash` Map。
 
 ### M15. python-sdk `str(err)` 可能泄漏路径 / API key
-`python-sdk/src/aipehub/session.py:286-293`、`packages/sdk-node/src/session.ts:367` — `httpx.HTTPStatusError("401 from https://api.example.com/v1/?api_key=sk-...")` 整串进 transcript。**修复**：regex scrub `(api[_-]?key|token|secret)=...` / `Bearer\s+\S+`。
+`python-sdk/src/gotong/session.py:286-293`、`packages/sdk-node/src/session.ts:367` — `httpx.HTTPStatusError("401 from https://api.example.com/v1/?api_key=sk-...")` 整串进 transcript。**修复**：regex scrub `(api[_-]?key|token|secret)=...` / `Bearer\s+\S+`。
 
 ### M16. CLI `ping ws://...` apiKey 默认无警告
 `packages/cli/src/commands/ping.ts:46` — `ws://` + `--api-key` 静默明文。**修复**：拒绝或要 `--allow-plaintext-auth`。
@@ -380,7 +380,7 @@ Bearer auth 走限流，但 cookie 路径没限。攻击者可用大量 cookie s
 - LLM 包零 `console.*` — key 不会经本地日志泄。
 - WS 测试统一 `{ port: 0 }` 用临时端口。
 - 生产 compose `read_only: true` + `cap_drop: ALL` + `no-new-privileges`。
-- `.dockerignore` 正确排除 `.aipehub*` / `*.pem` / `*.key` / `.env*`。
+- `.dockerignore` 正确排除 `.gotong*` / `*.pem` / `*.key` / `.env*`。
 - 没有快照测试 — 不会有 snapshot rot。
 - LLM 实时测试统一 `describe.skipIf(!process.env.X_API_KEY)`。
 - Python conftest 也用 `port=0`。
@@ -406,7 +406,7 @@ Bearer auth 走限流，但 cookie 路径没限。攻击者可用大量 cookie s
 - **M19** + **M20** + **M21** transport-ws backpressure + duplicate HELLO + heartbeat 文档对齐。
 
 ### Batch 3 — Quality & docs
-- **H13** + **H14** + **H15** + **M22** protocol strict 模式深化 + 文档化 `AIPE_PROTOCOL_STRICT`。
+- **H13** + **H14** + **H15** + **M22** protocol strict 模式深化 + 文档化 `GOTONG_PROTOCOL_STRICT`。
 - **H16** core/tests 临时目录清理。
 - **M23** + **M24** 测试 flake 治理（sleep → event-based）。
 - **M25** + **M26** Dockerfile slim + healthcheck `/readyz`。

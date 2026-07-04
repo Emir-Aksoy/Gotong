@@ -29,7 +29,7 @@
  * with a helpful message that names the bad ref.
  */
 
-import type { AncestryNode } from '@aipehub/core'
+import type { AncestryNode } from '@gotong/core'
 
 import { WorkflowRefError } from './types.js'
 

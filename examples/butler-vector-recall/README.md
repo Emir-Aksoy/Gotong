@@ -32,7 +32,7 @@ pnpm demo:butler-vector-recall
 ### Scene 1 — `embeddingRetriever`
 
 ```ts
-import { embeddingRetriever, type Embedder } from '@aipehub/personal-memory'
+import { embeddingRetriever, type Embedder } from '@gotong/personal-memory'
 
 // 注入你的文本→向量函数(本地 sentence-transformers 子进程 / ONNX / embedding API)。
 // 批量:retriever 把 query + 所有候选放一次调用里,所以托管 embedding API 每次召回只命中一次。

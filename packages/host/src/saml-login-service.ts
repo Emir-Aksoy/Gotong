@@ -9,7 +9,7 @@
  *   complete(relayState,→ look up the stashed request (RelayState is SAML's CSRF
  *           samlResponse)  token), validate the signed SAMLResponse against the
  *                         PINNED IdP cert (signature → Issuer → Audience → time →
- *                         Recipient → InResponseTo, all in @aipehub/saml),
+ *                         Recipient → InResponseTo, all in @gotong/saml),
  *                         resolve a LOCAL user, and mint the SAME `ses_` session
  *                         every other auth path produces (decision D-3).
  *
@@ -28,8 +28,8 @@
  * unknown identity is refused (`saml_no_account`).
  */
 
-import type { Session, User } from '@aipehub/identity'
-import { randomUrlToken } from '@aipehub/identity'
+import type { Session, User } from '@gotong/identity'
+import { randomUrlToken } from '@gotong/identity'
 import {
   SamlError,
   generateAuthnRequest as realGenerateAuthnRequest,
@@ -39,7 +39,7 @@ import {
   type AuthnRequestResult,
   type SamlAssertionResult,
   type ValidateSamlResponseInput,
-} from '@aipehub/saml'
+} from '@gotong/saml'
 
 /** The narrow identity facade this service needs (the real IdentityStore satisfies it). */
 export interface SamlLoginIdentity {
@@ -58,7 +58,7 @@ export interface SamlLoginIdentity {
 }
 
 /**
- * The pure SAML protocol slice (the real `@aipehub/saml` functions satisfy it).
+ * The pure SAML protocol slice (the real `@gotong/saml` functions satisfy it).
  * Injected so the orchestration can be unit-tested with a fake; defaults to the
  * real, signature-verifying implementation (whose XSW defenses are proven in the
  * saml package's own tests).

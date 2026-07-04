@@ -1,12 +1,12 @@
 /**
- * Run the shared plugin contract suite from @aipehub/services-sdk
+ * Run the shared plugin contract suite from @gotong/services-sdk
  * against DatastoreSqlitePlugin. Verifies it satisfies the same
  * lifecycle invariants as the other first-party plugins.
  */
 
 import { describe, expect } from 'vitest'
-import { runPluginContract } from '@aipehub/services-sdk/testing'
-import type { DatastoreHandle } from '@aipehub/services-sdk'
+import { runPluginContract } from '@gotong/services-sdk/testing'
+import type { DatastoreHandle } from '@gotong/services-sdk'
 import { DatastoreSqlitePlugin } from '../src/plugin.js'
 
 describe('contract: datastore-sqlite', () => {

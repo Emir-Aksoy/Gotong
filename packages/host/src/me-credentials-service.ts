@@ -25,10 +25,10 @@
  * member rotating their key flushes the resolved-key cache with no extra wiring.
  */
 
-import { createLogger } from '@aipehub/core'
-import type { VaultEntry, WriteAuditLogInput } from '@aipehub/identity'
-import { AUDIT_ACTIONS } from '@aipehub/identity'
-import type { WebServerOptions } from '@aipehub/web'
+import { createLogger } from '@gotong/core'
+import type { VaultEntry, WriteAuditLogInput } from '@gotong/identity'
+import { AUDIT_ACTIONS } from '@gotong/identity'
+import type { WebServerOptions } from '@gotong/web'
 
 const log = createLogger('me-credentials')
 

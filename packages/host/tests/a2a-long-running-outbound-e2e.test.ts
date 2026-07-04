@@ -44,9 +44,9 @@ import {
   type Logger,
   type Task,
   type TaskResult,
-} from '@aipehub/core'
-import { openIdentityStore, type IdentityStore } from '@aipehub/identity'
-import { workflowParticipantId } from '@aipehub/workflow'
+} from '@gotong/core'
+import { openIdentityStore, type IdentityStore } from '@gotong/identity'
+import { workflowParticipantId } from '@gotong/workflow'
 
 import { A2aServer } from '../src/a2a-server.js'
 import { A2aOutboundManager } from '../src/a2a-outbound.js'
@@ -79,7 +79,7 @@ const silentLogger: Logger = {
 // The runner emits an ordinary `{kind:capability}` dispatch; it has no idea the
 // first capability is served by a remote A2A agent OR that it will park.
 const WORKFLOW_YAML = `
-schema: aipehub.workflow/v1
+schema: gotong.workflow/v1
 workflow:
   id: ${WORKFLOW_ID}
   name: a2a long-running outbound step

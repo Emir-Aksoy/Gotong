@@ -44,7 +44,7 @@
  * touching the filesystem.
  */
 
-import type { MemoryEntry, MemoryHandle } from '@aipehub/services-sdk'
+import type { MemoryEntry, MemoryHandle } from '@gotong/services-sdk'
 
 import { isExpired } from './bitemporal.js'
 import type { MemoryReviewer, ReviewContext, ReviewOutcome } from './review.js'

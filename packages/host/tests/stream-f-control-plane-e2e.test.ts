@@ -41,12 +41,12 @@ import {
   createInprocHubLinkPair,
   installPeerLink,
   type HubLink,
-} from '@aipehub/core'
+} from '@gotong/core'
 import {
   MASTER_KEY_LEN_BYTES,
   openIdentityStore,
   type IdentityStore,
-} from '@aipehub/identity'
+} from '@gotong/identity'
 
 import {
   PeerSummaryHost,
@@ -118,7 +118,7 @@ describe('v5 Stream F-M7 — control-plane trends + alerts over two hubs', () =>
   let consumerClock: number
 
   beforeEach(async () => {
-    tmp = await mkdtemp(join(tmpdir(), 'aipe-stream-f-e2e-'))
+    tmp = await mkdtemp(join(tmpdir(), 'gotong-stream-f-e2e-'))
     providerStore = openIdentityStore({
       dbPath: join(tmp, 'provider.sqlite'),
       masterKey: randomBytes(MASTER_KEY_LEN_BYTES),

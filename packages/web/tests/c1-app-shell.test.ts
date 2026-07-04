@@ -19,8 +19,8 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { Hub, Space } from '@aipehub/core'
-import { openIdentityStore, type IdentityStore } from '@aipehub/identity'
+import { Hub, Space } from '@gotong/core'
+import { openIdentityStore, type IdentityStore } from '@gotong/identity'
 
 import { serveWeb, type WebServerHandle } from '../src/server.js'
 
@@ -37,7 +37,7 @@ interface BootResult {
 }
 
 async function boot(): Promise<BootResult> {
-  const tmp = await mkdtemp(join(tmpdir(), 'aipehub-web-c1-'))
+  const tmp = await mkdtemp(join(tmpdir(), 'gotong-web-c1-'))
   const init = await Space.init(tmp, { name: 'c1-test' })
   const space = init.space
   const hub = new Hub({ space })
@@ -46,7 +46,7 @@ async function boot(): Promise<BootResult> {
   const { admin, token: adminToken } = await space.createAdmin('TestAdmin')
   const adminSid = 'c1-sid-' + Math.random().toString(36).slice(2)
   await space.addAdminSession(adminSid, admin.id)
-  const adminCookie = `aipehub_admin=${adminSid}`
+  const adminCookie = `gotong_admin=${adminSid}`
 
   const identity = openIdentityStore({ dbPath: join(tmp, 'identity.sqlite') })
   const ib = identity.bootstrap({
@@ -106,7 +106,7 @@ async function teardown(b: BootResult): Promise<void> {
 
 /** Extract the role meta value from a served HTML response. */
 function metaRole(html: string): string {
-  const m = html.match(/<meta name="x-aipehub-role" content="([^"]*)"/)
+  const m = html.match(/<meta name="x-gotong-role" content="([^"]*)"/)
   return m ? m[1]! : '__missing__'
 }
 
@@ -120,10 +120,10 @@ describe('C1 — unified SPA shell', () => {
       const r = await fetch(`${b.baseUrl}/`)
       expect(r.status).toBe(200)
       const html = await r.text()
-      expect(html).toContain('AipeHub')
+      expect(html).toContain('Gotong')
       // worker.html-specific marker — its title / nav are distinct from
       // app.html's tabbar with home/settings buttons.
-      expect(html).not.toContain('x-aipehub-role')
+      expect(html).not.toContain('x-gotong-role')
     })
 
     it('v4 member cookie → serves app.html with role=member meta', async () => {
@@ -183,7 +183,7 @@ describe('C1 — unified SPA shell', () => {
       // Forge a v4-shaped cookie pointing at no session row. The token
       // looks valid; the lookup returns null; the helper falls through
       // to v3 (also absent); role becomes ''.
-      const fakeCookie = 'aipehub_identity=000000000000000000000000000000000000000000000000'
+      const fakeCookie = 'gotong_identity=000000000000000000000000000000000000000000000000'
       const r = await fetch(`${b.baseUrl}/`, {
         headers: { cookie: fakeCookie },
       })

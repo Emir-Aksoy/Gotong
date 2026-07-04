@@ -14,8 +14,8 @@
  *     returns 503 the same way it does for `services` when the host
  *     hasn't wired Hub Services at all.
  *   - It's narrow enough (list + read) that no SDK types leak in.
- *     `@aipehub/web` can read this surface without growing a
- *     dependency on `@aipehub/services-sdk`.
+ *     `@gotong/web` can read this surface without growing a
+ *     dependency on `@gotong/services-sdk`.
  *
  * The host's implementation walks the synthesist agent's live
  * `artifact` handle (and optionally its `datastore['growth-runs']`)

@@ -22,7 +22,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import WebSocket from 'ws'
 
-import { Hub } from '@aipehub/core'
+import { Hub } from '@gotong/core'
 
 import {
   DEFAULT_MAX_CONNECTIONS,

@@ -11,7 +11,7 @@ describe('Space (v2.0 — file-first persistence)', () => {
   let root: string
 
   beforeEach(async () => {
-    root = await mkdtemp(join(tmpdir(), 'aipehub-space-'))
+    root = await mkdtemp(join(tmpdir(), 'gotong-space-'))
     // tmpdir hands back an existing dir; remove and let init recreate
     await rm(root, { recursive: true, force: true })
   })

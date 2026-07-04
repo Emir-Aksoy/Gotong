@@ -72,7 +72,7 @@ interface LoadedTemplate {
 const SHOP_CAP = 'shop.apply-directive'
 
 function main(): void {
-  console.log('\n=== AipeHub case: tea-chain-hq — load the 连锁总部 (cross-org) template ===\n')
+  console.log('\n=== Gotong case: tea-chain-hq — load the 连锁总部 (cross-org) template ===\n')
 
   // --- [1] LOAD: the config is a FILE, parsed live (not a built-in literal) ---
   section('[1] load the config from a FILE')
@@ -141,7 +141,7 @@ function main(): void {
   // agent + the cross-org workflow (a `rollout` step targeting the shop cap, and
   // NO human step), and a KB POINTER (no content).
   const ids = new Set(agents.map((a) => a.id))
-  if (doc.schema !== 'aipehub.template/v1') throw new Error('expected schema aipehub.template/v1')
+  if (doc.schema !== 'gotong.template/v1') throw new Error('expected schema gotong.template/v1')
   if (!ids.has('rollout-coordinator')) throw new Error('expected a rollout-coordinator agent')
   // The shop capability must NOT be served by a template agent (it's on the peer).
   for (const a of agents) {

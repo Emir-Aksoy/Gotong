@@ -36,7 +36,7 @@
  * `/.well-known/agent-card.json`.
  */
 
-import type { HubLink, TaskId, TranscriptEntry } from '@aipehub/core'
+import type { HubLink, TaskId, TranscriptEntry } from '@gotong/core'
 import type { RpcResponder } from './peer-kb-gate.js'
 
 /** Wire method names for the peer transcript (shared producer/consumer). */

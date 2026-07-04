@@ -49,7 +49,7 @@ describe('runCli — version + help', () => {
     const code = await runCli(['help', 'new'])
     expect(code).toBe(0)
     const out = writes.join('')
-    expect(out).toContain('aipehub new')
+    expect(out).toContain('gotong new')
     // Per-command help must mention the flag inventory.
     expect(out).toContain('--capabilities=')
     expect(out).toContain('--id=')
@@ -66,7 +66,7 @@ describe('runCli — version + help', () => {
     const code = await runCli(['help', 'ping'])
     expect(code).toBe(0)
     const out = writes.join('')
-    expect(out).toContain('aipehub ping')
+    expect(out).toContain('gotong ping')
     expect(out).toContain('--api-key=')
     expect(out).toContain('--timeout=')
     log.mockRestore()
@@ -80,7 +80,7 @@ describe('runCli — version + help', () => {
     })
     const code = await runCli(['help', 'flarble'])
     expect(code).toBe(0)
-    expect(writes.join('')).toContain('aipehub <command>')
+    expect(writes.join('')).toContain('gotong <command>')
     log.mockRestore()
   })
 
@@ -97,7 +97,7 @@ describe('runCli — new with bad args', () => {
 
   beforeEach(async () => {
     cwdBefore = process.cwd()
-    cwd = await mkdtemp(join(tmpdir(), 'aipehub-cli-extra-'))
+    cwd = await mkdtemp(join(tmpdir(), 'gotong-cli-extra-'))
     process.chdir(cwd)
   })
 

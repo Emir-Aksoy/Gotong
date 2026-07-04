@@ -3,7 +3,7 @@
  * E2E smoke for the personal-growth bundle import path.
  *
  * Simulates a brand-new user:
- *   1. Empty $TMPDIR/aipehub-bundle-test space
+ *   1. Empty $TMPDIR/gotong-bundle-test space
  *   2. Init via Space.create + mint an admin token
  *   3. Boot a host (via child_process spawn, NOT in-process)
  *   4. POST templates/bundles/personal-growth.yaml + a stub DeepSeek key
@@ -29,7 +29,7 @@ import { resolve, join } from 'node:path'
 import { spawn } from 'node:child_process'
 import { tmpdir } from 'node:os'
 
-const SPACE_DIR = join(tmpdir(), 'aipehub-bundle-test-' + Date.now())
+const SPACE_DIR = join(tmpdir(), 'gotong-bundle-test-' + Date.now())
 const WEB_PORT = 3531
 const WS_PORT = 4531
 const BUNDLE_PATH = resolve('templates/bundles/personal-growth.yaml')
@@ -71,9 +71,9 @@ const hostProc = spawn(
     cwd: resolve('packages/host'),
     env: {
       ...process.env,
-      AIPE_SPACE: SPACE_DIR,
-      AIPE_WEB_PORT: String(WEB_PORT),
-      AIPE_WS_PORT: String(WS_PORT),
+      GOTONG_SPACE: SPACE_DIR,
+      GOTONG_WEB_PORT: String(WEB_PORT),
+      GOTONG_WS_PORT: String(WS_PORT),
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   },
@@ -171,7 +171,7 @@ try {
   const ctype = yamlRes.headers.get('content-type') || ''
   check('content-type is yaml/text', /yaml|text\//.test(ctype), `got '${ctype}'`)
   const builtinText = await yamlRes.text()
-  check('built-in yaml starts with schema marker', builtinText.includes('schema: aipehub.bundle/v1'))
+  check('built-in yaml starts with schema marker', builtinText.includes('schema: gotong.bundle/v1'))
   check('built-in yaml has the 7 agent ids',
     ['growth-interviewer','body-coach','mind-coach','direction-coach','leverage-coach','circle-coach','growth-synthesist']
       .every((id) => builtinText.includes(`id: ${id}`)))

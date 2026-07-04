@@ -44,9 +44,9 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { readdir } from 'node:fs/promises'
 import { join } from 'node:path'
 
-import type { Logger } from '@aipehub/core'
-import { drainStream, type LlmProvider } from '@aipehub/llm'
-import { ownerDir } from '@aipehub/service-memory-file'
+import type { Logger } from '@gotong/core'
+import { drainStream, type LlmProvider } from '@gotong/llm'
+import { ownerDir } from '@gotong/service-memory-file'
 
 import { openButlerMemory } from './personal-butler-memory.js'
 

@@ -24,8 +24,8 @@ import { join } from 'node:path'
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { Hub, Space, createLogger } from '@aipehub/core'
-import { MockLlmProvider } from '@aipehub/llm'
+import { Hub, Space, createLogger } from '@gotong/core'
+import { MockLlmProvider } from '@gotong/llm'
 
 import {
   createHubStewardService,
@@ -104,7 +104,7 @@ function fakeWorkflowEditor(calls: { edited: Array<{ workflowId: string; instruc
         ok: true,
         state: 'published',
         applied: 'published',
-        yaml: 'schema: aipehub.workflow/v1\nid: local-wf\n',
+        yaml: 'schema: gotong.workflow/v1\nid: local-wf\n',
         explanation: '语气改礼貌了。',
         boundary: { trigger: 'chat', egress: [] },
         diff: [{ kind: 'add', text: '  # politer' }],
@@ -122,7 +122,7 @@ interface Bench {
 }
 
 async function boot(): Promise<Bench> {
-  const root = await mkdtemp(join(tmpdir(), 'aipe-steward-apply-'))
+  const root = await mkdtemp(join(tmpdir(), 'gotong-steward-apply-'))
   const { space } = await Space.init(root, { name: 'steward-apply-test' })
   const hub = new Hub({ space })
   await hub.start()

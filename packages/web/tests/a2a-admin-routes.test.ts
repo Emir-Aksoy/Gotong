@@ -2,7 +2,7 @@
  * Route B P1-M11c — /api/admin/a2a-agents CRUD.
  *
  * An admin registers the external A2A agents this hub forwards capability
- * dispatches to (replacing Phase 18's `AIPE_A2A_AGENTS` env blob). Driven
+ * dispatches to (replacing Phase 18's `GOTONG_A2A_AGENTS` env blob). Driven
  * through a real serveWeb with a STUB A2aAgentAdminSurface — the store is
  * covered in identity/tests/a2a-agent-store.test.ts and the hub-sync in
  * host/tests/a2a-outbound.test.ts; here we pin auth gating, body validation
@@ -20,7 +20,7 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { Hub, Space } from '@aipehub/core'
+import { Hub, Space } from '@gotong/core'
 
 import {
   serveWeb,
@@ -66,7 +66,7 @@ function view(over: Partial<A2aAgentView> = {}): A2aAgentView {
 
 async function boot(opts: { wired?: boolean } = {}): Promise<Boot> {
   const wired = opts.wired ?? true
-  const tmp = await mkdtemp(join(tmpdir(), 'aipehub-web-a2a-admin-'))
+  const tmp = await mkdtemp(join(tmpdir(), 'gotong-web-a2a-admin-'))
   const init = await Space.init(tmp, { name: 'a2a-admin-route-test' })
   const hub = new Hub({ space: init.space })
   await hub.start()

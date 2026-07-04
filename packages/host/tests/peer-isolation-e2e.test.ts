@@ -38,13 +38,13 @@ import {
   createInprocHubLinkPair,
   installPeerLink,
   type Task,
-} from '@aipehub/core'
+} from '@gotong/core'
 import {
   MASTER_KEY_LEN_BYTES,
   openIdentityStore,
   type IdentityStore,
   type PeerRegistration,
-} from '@aipehub/identity'
+} from '@gotong/identity'
 
 import { FixedWindowLimiter } from '../src/peer-registry.js'
 
@@ -91,7 +91,7 @@ describe('Phase 19 P4-M4 — per-link trust contracts are isolated across peers'
   let tmp: string
 
   beforeEach(async () => {
-    tmp = await mkdtemp(join(tmpdir(), 'aipe-peer-isolation-'))
+    tmp = await mkdtemp(join(tmpdir(), 'gotong-peer-isolation-'))
     store = openIdentityStore({
       dbPath: join(tmp, 'identity.sqlite'),
       masterKey: randomBytes(MASTER_KEY_LEN_BYTES),

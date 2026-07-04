@@ -60,9 +60,9 @@ import {
   type ParticipantId,
   type Task,
   type TaskResult,
-} from '@aipehub/core'
-import { FileInboxStore, NEVER_RESUME_AT, type InboxDecision, type InboxItem } from '@aipehub/inbox'
-import { parseWorkflow, WorkflowRunner } from '@aipehub/workflow'
+} from '@gotong/core'
+import { FileInboxStore, NEVER_RESUME_AT, type InboxDecision, type InboxItem } from '@gotong/inbox'
+import { parseWorkflow, WorkflowRunner } from '@gotong/workflow'
 
 import { HqDeskStandin, ShopStandin } from './standins.js'
 
@@ -152,9 +152,9 @@ class OutboundApprovalGate {
 }
 
 async function main(): Promise<void> {
-  console.log('\n=== AipeHub case: tea-chain-hq — 连锁总部 → 加盟门店 (跨组织指令下发) ===\n')
+  console.log('\n=== Gotong case: tea-chain-hq — 连锁总部 → 加盟门店 (跨组织指令下发) ===\n')
 
-  const tmp = mkdtempSync(join(tmpdir(), 'aipehub-tea-chain-hq-'))
+  const tmp = mkdtempSync(join(tmpdir(), 'gotong-tea-chain-hq-'))
   const parked = new Map<string, ParkedRow>()
   const inbox = new FileInboxStore(tmp)
   inbox.ensureDirs()

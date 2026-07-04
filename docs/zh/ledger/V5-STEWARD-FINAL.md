@@ -1,6 +1,6 @@
 # Hub Steward（管家）— 用大白话管理 hub 设置的智能体
 
-> OpenClaw / Hermes 式体验，落在 AipeHub 北极星上：**框架只提议，人审阅 / 执行；
+> OpenClaw / Hermes 式体验，落在 Gotong 北极星上：**框架只提议，人审阅 / 执行；
 > 危险 + 跨 hub 动作走 Phase 16 收件箱二次确认**。
 >
 > 里程碑 SW-M1 → SW-M8 全清。一里程碑一小 commit。Last updated: 2026-06-14。
@@ -62,11 +62,11 @@
 
 | M | 交付 | commit |
 |---|---|---|
-| SW-M1 | `@aipehub/hub-steward` 包脚手架 + 提议 / 动作类型（`StewardAction` 判别联合）+ 纯分类器 `classifyStewardAction` | `d36dd80` |
+| SW-M1 | `@gotong/hub-steward` 包脚手架 + 提议 / 动作类型（`StewardAction` 判别联合）+ 纯分类器 `classifyStewardAction` | `d36dd80` |
 | SW-M2 | `HubStewardAgent extends LlmAgent`（cap `hub:steward`）+ 系统 prompt（内嵌 action schema + 两条硬规则）+ `parseProposal`（JSON 三级降级抽取）| `eaf0663` |
 | SW-M3 | host `HostStewardService.plan()` + `HubStewardSurface` + 包注册（`resolveStewardConfig` 读 env，缺 key 跳过注册 → web 503）| `af88b7d` |
 | SW-M4 | `HostStewardService.apply()` 安全路径执行器 + `performStewardAction()` 单一执行 chokepoint | `daf2a7d` |
-| SW-M5 | `StewardApprovalBroker`（cap `aipehub.steward.exec/v1`）+ 危险 / 跨 hub → 收件箱审批（**两条硬约束**）| `daf2a7d` |
+| SW-M5 | `StewardApprovalBroker`（cap `gotong.steward.exec/v1`）+ 危险 / 跨 hub → 收件箱审批（**两条硬约束**）| `daf2a7d` |
 | SW-M6 | web 鸭子 `MeHubStewardSurface` + 路由 `POST /api/me/steward/plan` + `/apply`（userId 服务端强制）| `934b414` |
 | SW-M7 | 统一 SPA「管家」面板（home tab，tier 徽章 safe 绿 / dangerous 红 / cross_hub 琥珀 / forbidden 灰）+ 重建 static-assets + 24 个 i18n key zh/en parity | `934b414` |
 | SW-M8 | host e2e 验收门 `hub-steward-e2e.test.ts`（真 Hub + 生产 suspendNotifier→真 IdentityStore + 真 FileInboxStore + 真 `HostMeAgentService` + 真 `MeWorkflowEditService` + 真 broker）+ main.ts 接线 + 本文档 + CLAUDE.md | 本提交 |
@@ -107,7 +107,7 @@ WorkflowAssistantAgent 同源。
 
 ### D4 — 危险 / 跨 hub 走「审批 broker」复用既有两步恢复
 
-`StewardApprovalBroker`（cap `aipehub.steward.exec/v1`，id `aipehub:steward-exec`，仿
+`StewardApprovalBroker`（cap `gotong.steward.exec/v1`，id `gotong:steward-exec`，仿
 `ApprovalGatedParticipant`）：`apply` 把 action 派给它 → `onTask` 写 approval `InboxItem` +
 抛 `SuspendTaskError(NEVER_RESUME_AT, state={inboxItemId})` 挂起 → 人在既有 `/me/inbox` 批 / 拒 →
 `HostInboxService.resolve` → `resumeChild` 注入 `{answer}` → broker `onResume`：**批准 → 走同一个
@@ -147,7 +147,7 @@ SPA 渲染提议: 红色 dangerous 徽章 + 「提交审批」钮（非「执行
 host HostStewardService.apply(userId, action)
   │   ├─ validateStewardAction(action) → 合法
   │   ├─ classifyStewardAction → dangerous
-  │   └─ 有 inbox → dispatch aipehub.steward.exec/v1 给 broker
+  │   └─ 有 inbox → dispatch gotong.steward.exec/v1 给 broker
   │         broker.onTask: 写 approval InboxItem(parentKind='none')
   │                        + 抛 SuspendTaskError(NEVER_RESUME_AT)
   │         suspendNotifier → identity.persistSuspendedTask（NEVER → sweep 永远取不到）
@@ -222,10 +222,10 @@ id, userPrincipal(userId), 'editor')` 过滤，`crossHub` 从 `(s.crossHubSteps?
 
 | env | 默认 | 作用 |
 |---|---|---|
-| `AIPE_STEWARD_PROVIDER` | `anthropic` | 管家 LLM provider（`anthropic` / `openai` / `mock`）|
-| `AIPE_STEWARD_MODEL` | provider default | 管家模型 |
-| `AIPE_STEWARD_MAX_TOKENS` | provider default | 单次提议最大 token |
-| `AIPE_STEWARD_DISABLED` | `false` | 设 `1` 关停管家（不注册，路由 503）|
+| `GOTONG_STEWARD_PROVIDER` | `anthropic` | 管家 LLM provider（`anthropic` / `openai` / `mock`）|
+| `GOTONG_STEWARD_MODEL` | provider default | 管家模型 |
+| `GOTONG_STEWARD_MAX_TOKENS` | provider default | 单次提议最大 token |
+| `GOTONG_STEWARD_DISABLED` | `false` | 设 `1` 关停管家（不注册，路由 503）|
 
 key 走 `orgApiPool → env` 链；缺 key 就**跳过注册** → web 在 `/api/me/steward/*` 返 503，
 SPA 管家面板优雅隐藏。配额：成员经 `/me` 调用有 `task.origin` → 照 Phase 17 计账；
@@ -311,8 +311,8 @@ WorkflowController + 真 WorkflowAssistantAgent with mock LLM）+ 真 `StewardAp
 
 | | agent id | capability | broker id |
 |---|---|---|---|
-| 成员 | `hub-steward` | `hub:steward` | `aipehub:steward-exec` |
-| operator | `hub-steward-operator` | `hub:steward:operator` | `aipehub:steward-exec:operator` |
+| 成员 | `hub-steward` | `hub:steward` | `gotong:steward-exec` |
+| operator | `hub-steward-operator` | `hub:steward:operator` | `gotong:steward-exec:operator` |
 
 **执行器走现有 admin 写路径**（非裸 `LocalAgentPool`、非成员 `MeWorkflowEditService`），三个新 host 件：
 
@@ -390,13 +390,13 @@ quota 是数值）。
 把管家从「成员 SPA / admin 控制台」推到 **IM 客户端**（Telegram 等 6 桥同源）。新
 `examples/im-steward-bridge/`（复制 `examples/im-bridge-host/`），commit `b40febf`。
 
-**关键事实 — 这个桥不需要 `@aipehub/core` Hub。** 管家**不走 `hub.dispatch`** 而走 `plan` / `apply`
+**关键事实 — 这个桥不需要 `@gotong/core` Hub。** 管家**不走 `hub.dispatch`** 而走 `plan` / `apply`
 口（镜像 host 的 `MeHubStewardSurface`）→ 从 admin 控制台、`/me` SPA、IM 三个 transport **够到同一个
-管家**。这个 example 只依赖三个包：`@aipehub/identity`（绑定流）+ `@aipehub/im-adapter`（桥 / 路由契约）
-+ `@aipehub/hub-steward`（**真** `classifyStewardAction` → tier 徽章诚实，不是手写的）。
+管家**。这个 example 只依赖三个包：`@gotong/identity`（绑定流）+ `@gotong/im-adapter`（桥 / 路由契约）
++ `@gotong/hub-steward`（**真** `classifyStewardAction` → tier 徽章诚实，不是手写的）。
 
 - **D-M1 — 管家感知 IM 路由。** `StewardImRouter` **分叉路由**：`/steward` `/apply` 是
-  `parseImCommand`（`@aipehub/im-adapter`）不认的 UNKNOWN verb（会 fall through 成 `{kind:'free'}`），
+  `parseImCommand`（`@gotong/im-adapter`）不认的 UNKNOWN verb（会 fall through 成 `{kind:'free'}`），
   所以**先预解析这两个**；其余共享 verb（`/help` `/bind` `/unbind`）**仍复用 `parseImCommand`** 让绑定
   UX 与每个桥一致；自由文本 → `plan`。tier 徽章 `safe` 内联 / `dangerous`·`cross_hub` 进 `/me` 收件箱 /
   `forbidden` 拒。**`apply` 服务端 RE-classify**，**从不信 `plan` 带回的 tier**（伪造 tier 不能让危险动作
@@ -435,7 +435,7 @@ provider 顶真 provider。tier 来自**真**分类器，`apply` **RE-classify**
 
 - **operator 管家经 IM** —— 现 example 走**成员**口（`MeHubStewardSurface`）；要 operator 全站管家经 IM，
   需把 `StewardPort` 指到 admin 口（`/api/admin/steward/*`，A-M6）并**谨慎 gate IM 访问到 operator**。
-- **IM 路由升格 `@aipehub/im-router` 包** —— example-first，到第二个 caller（社区 host / 联邦 hub）再提。
+- **IM 路由升格 `@gotong/im-router` 包** —— example-first，到第二个 caller（社区 host / 联邦 hub）再提。
 - **RBAC grant 的写**经管家（Phase B 只做凭证 / peer / 安全三族）。
 - 工作流 lifecycle 转移（publish / deprecate / archive）经管家——仍留 admin 面板。
 - **自治 tool-loop 管家**——**明确不做**（北极星：框架不跑自治决策）。

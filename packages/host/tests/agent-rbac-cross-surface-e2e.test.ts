@@ -22,9 +22,9 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { Hub, Space } from '@aipehub/core'
-import { openIdentityStore, type IdentityStore } from '@aipehub/identity'
-import { serveWeb, type WebServerHandle } from '@aipehub/web'
+import { Hub, Space } from '@gotong/core'
+import { openIdentityStore, type IdentityStore } from '@gotong/identity'
+import { serveWeb, type WebServerHandle } from '@gotong/web'
 
 import { HostMeAgentGrantsService } from '../src/me-agent-grants-service.js'
 
@@ -46,7 +46,7 @@ interface Boot {
 }
 
 async function boot(): Promise<Boot> {
-  const tmp = await mkdtemp(join(tmpdir(), 'aipehub-agent-xsurface-'))
+  const tmp = await mkdtemp(join(tmpdir(), 'gotong-agent-xsurface-'))
   const space = (await Space.init(tmp, { name: 'xsurface-test' })).space
   const hub = new Hub({ space })
   await hub.start()
@@ -55,9 +55,9 @@ async function boot(): Promise<Boot> {
   identity.bootstrap({ ownerEmail: 'owner@local', ownerDisplayName: 'Owner' })
 
   const a = identity.createUser({ email: 'admin-a@local', displayName: 'AdminA', role: 'admin', password: 'admin-a-password-123' })
-  const adminACookie = `aipehub_identity=${identity.authenticatePassword({ email: 'admin-a@local', password: 'admin-a-password-123' }).token}`
+  const adminACookie = `gotong_identity=${identity.authenticatePassword({ email: 'admin-a@local', password: 'admin-a-password-123' }).token}`
   const bUser = identity.createUser({ email: 'admin-b@local', displayName: 'AdminB', role: 'admin', password: 'admin-b-password-123' })
-  const adminBCookie = `aipehub_identity=${identity.authenticatePassword({ email: 'admin-b@local', password: 'admin-b-password-123' }).token}`
+  const adminBCookie = `gotong_identity=${identity.authenticatePassword({ email: 'admin-b@local', password: 'admin-b-password-123' }).token}`
 
   const server = await serveWeb(hub, { host: '127.0.0.1', port: 0, identity })
   // The /me grants surface, against the very same identity store the routes use.

@@ -1,9 +1,9 @@
 /**
  * Audit #148 — drift guard for action-name constants mirrored from
- * `@aipehub/identity` into `packages/web/src/identity-routes.ts`.
+ * `@gotong/identity` into `packages/web/src/identity-routes.ts`.
  *
  * Why this test exists:
- *   `@aipehub/web` declares `@aipehub/identity` as a **devDependency**
+ *   `@gotong/web` declares `@gotong/identity` as a **devDependency**
  *   (see packages/web/package.json). Runtime code in `src/` must NOT
  *   `import` it; web is structurally decoupled and only knows the
  *   IdentityStore through method-shape projections (see top of
@@ -13,10 +13,10 @@
  *   not a TypeScript type — so we can't `import type` it. The
  *   work-around: mirror just the strings we need as local `as const`
  *   literals in identity-routes.ts, and use a TEST (which IS allowed
- *   to import @aipehub/identity, devDep is fine) to pin equality.
+ *   to import @gotong/identity, devDep is fine) to pin equality.
  *
  * If this test breaks:
- *   - You changed AUDIT_ACTIONS in @aipehub/identity → either reverse
+ *   - You changed AUDIT_ACTIONS in @gotong/identity → either reverse
  *     the change, or update the mirrored constant in identity-routes.ts
  *     to match.
  *   - You added a new mirrored constant in identity-routes.ts → add
@@ -24,16 +24,16 @@
  *
  * Keep this table SHORT and obvious. The whole point is "drift will
  * be caught early"; the moment it grows past ~5 entries, the right
- * move is to extract a shared `@aipehub/audit-vocab` zero-dep package.
+ * move is to extract a shared `@gotong/audit-vocab` zero-dep package.
  */
 
 import { describe, expect, it } from 'vitest'
 
 // devDep import — fine in test code. NEVER do this in src/.
-import { AUDIT_ACTIONS } from '@aipehub/identity'
+import { AUDIT_ACTIONS } from '@gotong/identity'
 
 describe('identity-routes audit-vocab mirrors (Audit #148)', () => {
-  it('INVITE_CREATE_BLOCKED mirror matches @aipehub/identity', async () => {
+  it('INVITE_CREATE_BLOCKED mirror matches @gotong/identity', async () => {
     // Re-export from identity-routes is private; we assert against the
     // *value* the constant should hold. If identity-routes.ts changes
     // the literal, this assertion will catch it via the dist build the

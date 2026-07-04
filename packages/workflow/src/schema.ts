@@ -1,7 +1,7 @@
 /**
- * Parser + validator for `aipehub.workflow/v1` YAML / JSON files.
+ * Parser + validator for `gotong.workflow/v1` YAML / JSON files.
  *
- * The contract is the same as `parseManifest` in `@aipehub/web`:
+ * The contract is the same as `parseManifest` in `@gotong/web`:
  *   - try JSON first if the body looks JSON-y (`{` / `[`)
  *   - else parse YAML
  *   - reject loudly with a helpful message; the admin UI surfaces these
@@ -14,7 +14,7 @@
 
 import { parse as parseYaml } from 'yaml'
 
-import type { DispatchStrategy } from '@aipehub/core'
+import type { DispatchStrategy } from '@gotong/core'
 
 import { parsePredicate, WorkflowPredicateError } from './predicate.js'
 import {
@@ -39,10 +39,10 @@ const ID_RE = /^[a-zA-Z0-9_.:-]+$/
 
 /**
  * The capability a `human:` step desugars to — the member task inbox
- * (`@aipehub/inbox`). Hardcoded (not imported) so the workflow package keeps
- * zero dep on `@aipehub/inbox`; it's a stable wire constant, like the schema id.
+ * (`@gotong/inbox`). Hardcoded (not imported) so the workflow package keeps
+ * zero dep on `@gotong/inbox`; it's a stable wire constant, like the schema id.
  */
-const HUMAN_CAPABILITY = 'aipehub.human/v1'
+const HUMAN_CAPABILITY = 'gotong.human/v1'
 
 export function parseWorkflow(raw: string): WorkflowDefinition {
   const trimmed = raw.trim()
@@ -183,7 +183,7 @@ function validateStep(raw: unknown, path: string, seenIds: Set<string>): Step {
 
   // `human:` sugar — a human-in-the-loop step. Desugars to a plain dispatch to
   // the member task inbox capability, so the runner, resolver, and deepCheck all
-  // see a normal capability dispatch and need zero changes. See @aipehub/inbox.
+  // see a normal capability dispatch and need zero changes. See @gotong/inbox.
   if (s.human !== undefined) {
     if (isParallel) {
       throw new WorkflowSchemaError(`${path} cannot be both 'human' and 'parallel'`)

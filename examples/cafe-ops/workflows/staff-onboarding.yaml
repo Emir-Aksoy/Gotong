@@ -1,7 +1,7 @@
 # 新员工岗位上手 — 成员自助 (surface.me), 无审批。
 # 新人选岗位 → 培训师从店面运营手册调出该岗位 SOP + 规范, 边问边学。
 # 这是 "新员工上手就能学到对应职位的操作、规范" 那条。
-schema: aipehub.workflow/v1
+schema: gotong.workflow/v1
 workflow:
   id: cafe-staff-onboarding
   name: 新员工岗位上手

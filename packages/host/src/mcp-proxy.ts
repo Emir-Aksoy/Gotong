@@ -32,13 +32,13 @@
  * across peers). `close()` disconnects them all on shutdown.
  */
 
-import type { HubLink, HubMcpServerRecord } from '@aipehub/core'
-import { McpToolset, type McpServerConfig } from '@aipehub/mcp-client'
+import type { HubLink, HubMcpServerRecord } from '@gotong/core'
+import { McpToolset, type McpServerConfig } from '@gotong/mcp-client'
 import type {
   LlmAgentToolset,
   LlmToolCallResult,
   LlmToolDefinition,
-} from '@aipehub/llm'
+} from '@gotong/llm'
 
 import {
   resolveMcpServerConfig,

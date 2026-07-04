@@ -18,7 +18,7 @@
 
   const API = '/api/admin/identity/reputation'
 
-  const AH = window.AipeHub
+  const AH = window.Gotong
   function t() { return AH.t }
 
   function $(sel, root) {

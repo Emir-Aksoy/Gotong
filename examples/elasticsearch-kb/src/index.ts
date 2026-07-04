@@ -1,11 +1,11 @@
 /**
  * Elasticsearch index as a knowledge base — config-preview demo.
  *
- * AipeHub never connects to your cluster or stores its documents. An agent
+ * Gotong never connects to your cluster or stores its documents. An agent
  * declares the `@elastic/mcp-server-elasticsearch` MCP server in its
  * `mcpServers` config; the host spawns it as a child process and exposes its
  * tools (`es__list_indices`, `es__get_mappings`, `es__search`) to the agent's
- * LLM tool-use loop. The cluster URL and API key live outside AipeHub.
+ * LLM tool-use loop. The cluster URL and API key live outside Gotong.
  *
  *   User question
  *        │
@@ -25,7 +25,7 @@
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 
-import { createLogger } from '@aipehub/core'
+import { createLogger } from '@gotong/core'
 
 const log = createLogger('elasticsearch-kb')
 const AGENT_YAML = fileURLToPath(new URL('../agents/elasticsearch-researcher.yaml', import.meta.url))
@@ -33,7 +33,7 @@ const AGENT_YAML = fileURLToPath(new URL('../agents/elasticsearch-researcher.yam
 function main(): void {
   log.info('Elasticsearch index as a knowledge base (via @elastic/mcp-server-elasticsearch)')
   log.info('')
-  log.info('AipeHub does not connect to your cluster. The agent declares an MCP')
+  log.info('Gotong does not connect to your cluster. The agent declares an MCP')
   log.info('server; the host spawns it and wires its tools into the tool-use loop.')
   log.info('')
 
@@ -53,7 +53,7 @@ function main(): void {
   log.info('  1. export ES_URL=https://my-cluster.es.cloud:443')
   log.info('  2. export ES_API_KEY=<base64 api key from Kibana>')
   log.info('  3. export DEEPSEEK_API_KEY=sk-...   # the agent\'s LLM key')
-  log.info('  4. aipehub init && npx @aipehub/host')
+  log.info('  4. gotong init && npx @gotong/host')
   log.info('  5. Admin UI → Agents → Import YAML → paste the manifest above')
   log.info('  6. Chat: "How many orders shipped last week?" (the agent searches ES)')
 }

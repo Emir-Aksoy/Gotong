@@ -1,12 +1,12 @@
-# Prometheus alerting rules for an AipeHub host.
+# Prometheus alerting rules for an Gotong host.
 #
 # Drop this into your Alertmanager / Prometheus rules dir. Every rule
 # has a `for:` window long enough to ignore single-scrape blips but
 # short enough that an operator gets paged within ~10 minutes of a
 # real problem.
 #
-# All `aipehub-core` rules use only metrics emitted by AipeHub itself
-# (`aipehub_*` plus its own `process_resident_memory_bytes` gauge).
+# All `gotong-core` rules use only metrics emitted by Gotong itself
+# (`gotong_*` plus its own `process_resident_memory_bytes` gauge).
 # One rule requires node_exporter alongside the Hub to cover the
 # OS-level disk concern — that one is at the bottom under a
 # clearly-labelled section.
@@ -18,7 +18,7 @@
 # See docs/MONITORING.md for the runbook each alert links to.
 
 groups:
-  - name: aipehub-core
+  - name: gotong-core
     interval: 30s
     rules:
 
@@ -27,16 +27,16 @@ groups:
       # ----------------------------------------------------------------
       # The fact that Prometheus can't scrape /metrics is the most
       # important signal. Could be: process crashed, port closed, the
-      # AIPE_METRICS_TOKEN rotated/unset (→ /metrics 404s), network
+      # GOTONG_METRICS_TOKEN rotated/unset (→ /metrics 404s), network
       # partition. for=2m so a deploy-window restart doesn't page.
-      - alert: AipehubHostDown
-        expr: up{job="aipehub"} == 0
+      - alert: GotongHostDown
+        expr: up{job="gotong"} == 0
         for: 2m
         labels:
           severity: page
           component: hub
         annotations:
-          summary: "AipeHub host unreachable (job={{ $labels.job }}, instance={{ $labels.instance }})"
+          summary: "Gotong host unreachable (job={{ $labels.job }}, instance={{ $labels.instance }})"
           description: >
             Prometheus has been unable to scrape /api/admin/metrics for
             2 minutes. Process crashed, port closed, admin Bearer token
@@ -50,9 +50,9 @@ groups:
       # in a small-team deployment. Could be: an LLM provider key
       # expired, a downstream service is down, a buggy agent is being
       # dispatched to repeatedly.
-      - alert: AipehubTaskFailureRateHigh
+      - alert: GotongTaskFailureRateHigh
         expr: |
-          rate(aipehub_tasks_total{kind="failed"}[5m]) > 0.1
+          rate(gotong_tasks_total{kind="failed"}[5m]) > 0.1
         for: 10m
         labels:
           severity: ticket
@@ -71,9 +71,9 @@ groups:
       # `no_participant` means the capability matcher found nothing. A
       # handful is fine (someone typed a wrong capability). A continuous
       # stream means an agent is down or unregistered when it shouldn't be.
-      - alert: AipehubNoMatchingAgent
+      - alert: GotongNoMatchingAgent
         expr: |
-          increase(aipehub_tasks_total{kind="no_participant"}[15m]) > 5
+          increase(gotong_tasks_total{kind="no_participant"}[15m]) > 5
         for: 5m
         labels:
           severity: ticket
@@ -83,7 +83,7 @@ groups:
           description: >
             Either an agent went offline without anyone noticing, or a
             new capability is being dispatched that no agent is
-            registered for. Check `aipehub_participants` by kind.
+            registered for. Check `gotong_participants` by kind.
             Runbook: docs/MONITORING.md § No matching agent.
 
       # ----------------------------------------------------------------
@@ -92,8 +92,8 @@ groups:
       # admin-approval gating means new agents queue waiting for review.
       # >5 unresolved for 30 min is the "admin forgot to check the
       # admissions tab" signal.
-      - alert: AipehubPendingApplicationsStale
-        expr: aipehub_pending_applications > 5
+      - alert: GotongPendingApplicationsStale
+        expr: gotong_pending_applications > 5
         for: 30m
         labels:
           severity: ticket
@@ -113,12 +113,12 @@ groups:
       # histograms (yet); _sum / _count gives mean — fine for catching
       # an order-of-magnitude regression in service-call latency
       # (memory / artifact / datastore).
-      - alert: AipehubServiceCallSlow
+      - alert: GotongServiceCallSlow
         expr: |
           (
-            increase(aipehub_service_call_duration_ms_sum[5m])
+            increase(gotong_service_call_duration_ms_sum[5m])
             /
-            clamp_min(increase(aipehub_service_call_duration_ms_count[5m]), 1)
+            clamp_min(increase(gotong_service_call_duration_ms_count[5m]), 1)
           ) > 500
         for: 10m
         labels:
@@ -139,9 +139,9 @@ groups:
       # status class. A sustained stream of 5xx means a route is
       # crashing (bad surface wiring, store exception) rather than
       # clients misbehaving (that would be 4xx).
-      - alert: AipehubHttp5xxRateHigh
+      - alert: GotongHttp5xxRateHigh
         expr: |
-          rate(aipehub_http_responses_total{class="5xx"}[5m]) > 0.05
+          rate(gotong_http_responses_total{class="5xx"}[5m]) > 0.05
         for: 10m
         labels:
           severity: ticket
@@ -159,8 +159,8 @@ groups:
       # Parked tasks include human-in-the-loop approvals that only a
       # person can resume. A persistently high count means inbox items
       # are not being handled (or a resume sweep is failing).
-      - alert: AipehubSuspendedTasksBacklog
-        expr: aipehub_suspended_tasks > 20
+      - alert: GotongSuspendedTasksBacklog
+        expr: gotong_suspended_tasks > 20
         for: 2h
         labels:
           severity: ticket
@@ -180,9 +180,9 @@ groups:
       # $5/hour sustained is well above a small-team baseline — tune
       # the threshold to your budget. Catches runaway agent loops and
       # leaked keys before the monthly invoice does.
-      - alert: AipehubLlmSpendBurnHigh
+      - alert: GotongLlmSpendBurnHigh
         expr: |
-          sum(increase(aipehub_llm_cost_micros_total[1h])) > 5 * 1000 * 1000
+          sum(increase(gotong_llm_cost_micros_total[1h])) > 5 * 1000 * 1000
         for: 30m
         labels:
           severity: ticket
@@ -199,18 +199,18 @@ groups:
       # ----------------------------------------------------------------
       # 9. Process RSS creep
       # ----------------------------------------------------------------
-      # AipeHub exports its own process_resident_memory_bytes gauge,
+      # Gotong exports its own process_resident_memory_bytes gauge,
       # so this needs no node_exporter. The threshold is generous:
       # small-team hosts shouldn't cross 2 GB without a reason.
-      - alert: AipehubProcessRssCreep
+      - alert: GotongProcessRssCreep
         expr: |
-          process_resident_memory_bytes{job="aipehub"} > 2 * 1024 * 1024 * 1024
+          process_resident_memory_bytes{job="gotong"} > 2 * 1024 * 1024 * 1024
         for: 30m
         labels:
           severity: ticket
           component: hub
         annotations:
-          summary: "AipeHub RSS > 2 GB for 30m (instance={{ $labels.instance }})"
+          summary: "Gotong RSS > 2 GB for 30m (instance={{ $labels.instance }})"
           description: >
             Hub process holding > 2 GB resident for 30 min. Most likely
             a slow leak in a long-running service plugin. Restart will
@@ -221,13 +221,13 @@ groups:
   # OS-level alerts via node_exporter
   # ----------------------------------------------------------------
   # Requires node_exporter scraped from the same host. Not coupled to
-  # AipeHub but part of "is your AipeHub box healthy" — disk is the
+  # Gotong but part of "is your Gotong box healthy" — disk is the
   # most common silent killer.
-  - name: aipehub-host
+  - name: gotong-host
     interval: 30s
     rules:
 
-      - alert: AipehubDiskAlmostFull
+      - alert: GotongDiskAlmostFull
         expr: |
           node_filesystem_avail_bytes{mountpoint="/", job="node"} /
           node_filesystem_size_bytes{mountpoint="/", job="node"} < 0.1

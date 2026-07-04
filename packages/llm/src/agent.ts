@@ -4,8 +4,8 @@ import {
   isSuspendTaskError,
   type AgentOptions,
   type Task,
-} from '@aipehub/core'
-import { EMPTY_SERVICE_CTX, type ServiceCtx } from '@aipehub/services-sdk'
+} from '@gotong/core'
+import { EMPTY_SERVICE_CTX, type ServiceCtx } from '@gotong/services-sdk'
 import type {
   LlmAgentToolset,
   LlmContentBlock,

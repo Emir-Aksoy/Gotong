@@ -1,4 +1,4 @@
-# 连锁奶茶店总部 → 加盟门店 (跨组织指令下发) — 总部一侧的可载入模板 (aipehub.template/v1)
+# 连锁奶茶店总部 → 加盟门店 (跨组织指令下发) — 总部一侧的可载入模板 (gotong.template/v1)
 #
 # 这是第二个**跨组织 (cross-org)** 模板,是 tea-supply-link 的 MIRROR、三层链条的最上一层:
 #
@@ -40,7 +40,7 @@
 #     -H 'content-type: application/json' \
 #     -d "$(jq -Rs '{template: .}' examples/tea-chain-hq/template/chain-hq.template.yaml)" \
 #     http://127.0.0.1:8745/api/admin/templates/import
-schema: aipehub.template/v1
+schema: gotong.template/v1
 template:
   name: 连锁奶茶店总部(跨组织指令下发)
   description: |-

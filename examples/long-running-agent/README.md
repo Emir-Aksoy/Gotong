@@ -84,7 +84,7 @@ The framework's job:
   "I'm being woken up."
 
 In a real host, the persistence is `IdentityStore.suspended_tasks`
-and the sweep is `setInterval(AIPE_RESUME_SWEEP_MS)`. This demo
+and the sweep is `setInterval(GOTONG_RESUME_SWEEP_MS)`. This demo
 substitutes an in-process `Map` + a hand-rolled poll loop to keep
 the example self-contained — the data shape is the same as what
 the production sweep handles.
@@ -97,7 +97,7 @@ the production sweep handles.
   (migration v=9), `packages/identity/src/store.ts`
   (`persistSuspendedTask`, `listDueSuspendedTasks`, …)
 - Host resume sweep: `packages/host/src/main.ts`
-  (search for `AIPE_RESUME_SWEEP_MS`)
+  (search for `GOTONG_RESUME_SWEEP_MS`)
 - `LlmAgent` working memory (Phase 11 M4):
   `packages/llm/src/agent.ts` (`runToolLoop` + `handleResume`)
 - Phase 11 plan: `docs/zh/ledger/V4-PHASE7-13-PLAN.md` section 六

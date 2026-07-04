@@ -1,10 +1,10 @@
-# @aipehub/im-adapter
+# @gotong/im-adapter
 
-Phase 12 M1 — the base SDK for AipeHub IM bridges.
+Phase 12 M1 — the base SDK for Gotong IM bridges.
 
 This package ships **only types + one pure parser**. There's no
 runtime side effect, no network code, no SQLite — those live in the
-concrete bridges (`@aipehub/im-telegram`, `@aipehub/im-matrix`, …) and
+concrete bridges (`@gotong/im-telegram`, `@gotong/im-matrix`, …) and
 in the host's wiring layer.
 
 ## What lives here
@@ -16,7 +16,7 @@ in the host's wiring layer.
 | `ImMessage`          | One inbound message + attachments + chat metadata        |
 | `ImAttachment`       | Image / audio / file (url-or-bytes; bridge picks)        |
 | `ImCommand`          | Discriminated union returned by `parseImCommand`         |
-| `ImBindingResolver`  | Host-supplied callback: IM identity → AipeHub user id    |
+| `ImBindingResolver`  | Host-supplied callback: IM identity → Gotong user id    |
 | `parseImCommand`     | Pure-function text → `ImCommand` parser                  |
 
 ## What does NOT live here
@@ -88,7 +88,7 @@ to handle it. Event emitters lose both.
 ## Status
 
 - Phase 12 M1 — released.
-- Next: M2 — `@aipehub/im-telegram` first concrete bridge.
+- Next: M2 — `@gotong/im-telegram` first concrete bridge.
 
 See `docs/zh/ledger/V4-PHASE7-13-PLAN.md` section 七 for the full Phase 12
 roadmap.

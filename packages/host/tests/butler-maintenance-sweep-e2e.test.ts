@@ -5,7 +5,7 @@
  *
  * The MR4 §九 gate (`personal-butler-maintenance-e2e.test.ts`) fires the
  * maintenance reviewer DIRECTLY over a hand-built file handle. This gate is
- * distinct: it proves the two pieces BF-M8 actually adds to `aipehub start` —
+ * distinct: it proves the two pieces BF-M8 actually adds to `gotong start` —
  *
  *   1. seam: the sweep's distillation model comes from the SAME managed `chat`
  *      row the butler talks through, resolved through the real
@@ -34,10 +34,10 @@ import {
   AgentParticipant,
   type Logger,
   type Task,
-} from '@aipehub/core'
-import type { LlmAgentOptions } from '@aipehub/llm'
-import { levelOf, tierOf, type MemoryEntry } from '@aipehub/personal-memory'
-import type { MemoryHandle } from '@aipehub/services-sdk'
+} from '@gotong/core'
+import type { LlmAgentOptions } from '@gotong/llm'
+import { levelOf, tierOf, type MemoryEntry } from '@gotong/personal-memory'
+import type { MemoryHandle } from '@gotong/services-sdk'
 
 import { HostButlerMemoryService } from '../src/butler-memory-service.js'
 import { LocalAgentPool, type ButlerFactory } from '../src/local-agent-pool.js'
@@ -99,7 +99,7 @@ describe('BF-M8 — butler 蒸馏 + 6h maintenance in the production host sweep'
   let memRoot: string
 
   beforeEach(async () => {
-    root = await mkdtemp(join(tmpdir(), 'aipe-butler-maint-sweep-'))
+    root = await mkdtemp(join(tmpdir(), 'gotong-butler-maint-sweep-'))
     const opened = await Space.init(root, { name: 'test' })
     space = opened.space
     hub = new Hub({ space })

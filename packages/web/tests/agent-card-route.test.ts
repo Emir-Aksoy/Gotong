@@ -11,7 +11,7 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { Hub, Space } from '@aipehub/core'
+import { Hub, Space } from '@gotong/core'
 
 import {
   serveWeb,
@@ -27,7 +27,7 @@ interface Boot {
 }
 
 async function boot(agentCard?: AgentCardSurface): Promise<Boot> {
-  const tmp = await mkdtemp(join(tmpdir(), 'aipehub-agent-card-'))
+  const tmp = await mkdtemp(join(tmpdir(), 'gotong-agent-card-'))
   const init = await Space.init(tmp, { name: 'card-test' })
   const hub = new Hub({ space: init.space })
   await hub.start()

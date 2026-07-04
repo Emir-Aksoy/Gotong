@@ -13,7 +13,7 @@
  * fetch involved. The REST send path is unchanged from the webhook era.
  */
 
-import type { ImMessage } from '@aipehub/im-adapter'
+import type { ImMessage } from '@gotong/im-adapter'
 import { afterEach, describe, expect, it } from 'vitest'
 
 import {

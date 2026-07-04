@@ -5,8 +5,8 @@ import { join } from 'node:path'
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { FileStorage } from '@aipehub/core'
-import type { TranscriptEntry } from '@aipehub/core'
+import { FileStorage } from '@gotong/core'
+import type { TranscriptEntry } from '@gotong/core'
 
 import {
   TRANSCRIPT_ARCHIVE_DAYS_ENV,
@@ -102,7 +102,7 @@ describe('applyTranscriptRetention (Route B P0-M2 M3b)', () => {
   let path: string
 
   beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), 'aipe-retain-'))
+    dir = mkdtempSync(join(tmpdir(), 'gotong-retain-'))
     path = join(dir, 'transcript.jsonl')
   })
   afterEach(async () => {

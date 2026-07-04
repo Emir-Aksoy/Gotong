@@ -1,12 +1,12 @@
 # 中文编辑团队 — 写作 + 审稿 双 agent
 #
-# 工作流（由 admin 在控制台手动派发，AipeHub 不内置 workflow 引擎）：
+# 工作流（由 admin 在控制台手动派发，Gotong 不内置 workflow 引擎）：
 #   1. 派发到 capability=draft → writer-zh 出一稿
 #   2. 派发到 capability=review → reviewer-zh 给修改建议
 #   3. admin 评分（贡献榜计入）
 #
 # 想跑这套：用 admin → 智能体 → 导入 → 粘贴本文件，一次注册两个 agent。
-schema: aipehub.team/v1
+schema: gotong.team/v1
 
 team:
   name: 中文编辑团队

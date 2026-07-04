@@ -1,12 +1,12 @@
 {
-  "name": "@aipehub/core",
+  "name": "@gotong/core",
   "version": "3.1.0",
   "type": "module",
-  "description": "AipeHub core — Hub, message bus, registry, scheduler, transcript, storage.",
+  "description": "Gotong core — Hub, message bus, registry, scheduler, transcript, storage.",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/Emir-Aksoy/AipeHub.git",
+    "url": "https://github.com/Emir-Aksoy/Gotong.git",
     "directory": "packages/core"
   },
   "publishConfig": {
@@ -33,7 +33,7 @@
     "prepack": "tsc -p tsconfig.json"
   },
   "dependencies": {
-    "@aipehub/protocol": "workspace:*"
+    "@gotong/protocol": "workspace:*"
   },
   "peerDependencies": {
     "better-sqlite3": ">=11.0.0"

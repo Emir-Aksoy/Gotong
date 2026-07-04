@@ -11,12 +11,12 @@
 
 import { describe, expect, it } from 'vitest'
 
-import { createInprocHubLinkPair, type HubLink, type Participant } from '@aipehub/core'
+import { createInprocHubLinkPair, type HubLink, type Participant } from '@gotong/core'
 import type {
   AddPeerSummaryAlertRuleInput,
   PeerSummaryAlertRule,
   UpdatePeerSummaryAlertRuleInput,
-} from '@aipehub/identity'
+} from '@gotong/identity'
 
 import {
   PeerSummaryHost,

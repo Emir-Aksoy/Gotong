@@ -11,7 +11,7 @@
 
 ## 一、为什么做(缺口性质 = 打包/呈现,不是能力)
 
-模板系统(v5 Stream B)早就能导入 `aipehub.template/v1`:一个文件装 N agent +
+模板系统(v5 Stream B)早就能导入 `gotong.template/v1`:一个文件装 N agent +
 N 工作流 + 可寻址 KB 槽位 + 一键 `apiKeyPrompt`。能力一直在,缺的是**可发现性 +
 打包**:这些上手模板原本只散落在 `examples/*/template/*.template.yaml`,要装得自己
 找文件、读 YAML、贴进「导入 bundle」框。画廊把它们**就地铺在 admin UI 里**,一眼看清

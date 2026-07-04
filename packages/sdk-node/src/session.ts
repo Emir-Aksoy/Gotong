@@ -5,14 +5,14 @@ import type {
   ParticipantId,
   Task,
   TaskResult,
-} from '@aipehub/core'
+} from '@gotong/core'
 import {
   decodeFrame,
   encodeFrame,
   PROTOCOL_VERSION,
   type ClientFrame,
   type ServerFrame,
-} from '@aipehub/protocol'
+} from '@gotong/protocol'
 import WebSocket from 'ws'
 
 import { redactSecrets } from './redact.js'
@@ -115,7 +115,7 @@ export interface ConnectOptions {
    * Hub Services to make available to this connection (protocol v1.1). The
    * SDK turns these into `HELLO.services` and exposes a `ServiceClient` on
    * the returned `Session`. The `ServiceClient` surface mirrors the
-   * in-process `ServiceCtx` from `@aipehub/services-sdk` so an agent can
+   * in-process `ServiceCtx` from `@gotong/services-sdk` so an agent can
    * call `this.services.memory.recall(...)` regardless of whether it's
    * running in-process or as a remote sidecar.
    *
@@ -138,7 +138,7 @@ export interface Session {
    *     const session = await connect({ url, agents: [coach], services: [...] })
    *     coach.services = session.services        // <-- hand-off
    *
-   * The `ServiceClient` surface mirrors `@aipehub/services-sdk`'s
+   * The `ServiceClient` surface mirrors `@gotong/services-sdk`'s
    * `ServiceCtx` shape (`memory` / `artifact` / `datastore`) so agent
    * code reads identically to an in-process LlmAgent.
    */
@@ -191,7 +191,7 @@ export async function connect(opts: ConnectOptions): Promise<Session> {
     autoReconnect: opts.autoReconnect ?? true,
     reconnectInitialBackoffMs: opts.reconnectInitialBackoffMs ?? 1_000,
     reconnectMaxBackoffMs: opts.reconnectMaxBackoffMs ?? 30_000,
-    clientName: opts.clientName ?? '@aipehub/sdk-node',
+    clientName: opts.clientName ?? '@gotong/sdk-node',
     clientVersion: opts.clientVersion ?? '0.0.0',
     connectTimeoutMs: opts.connectTimeoutMs ?? 10_000,
     allowPlaintextAuth: opts.allowPlaintextAuth ?? false,
@@ -257,7 +257,7 @@ export async function connect(opts: ConnectOptions): Promise<Session> {
   // wiring the field was a documentation-only placeholder.
   //
   // We use `isTeamBridge` rather than a raw `instanceof` so that bridges
-  // built against a second copy of `@aipehub/sdk-node` (pnpm peer mismatch /
+  // built against a second copy of `@gotong/sdk-node` (pnpm peer mismatch /
   // monorepo override edge cases) are still recognised — `instanceof` checks
   // class identity, which differs between dep-graph realms.
   const federationBridges: TeamBridgeAgent[] = []

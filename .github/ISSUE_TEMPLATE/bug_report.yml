@@ -26,8 +26,8 @@ body:
       label: Steps to reproduce
       description: A minimal sequence of commands or clicks. The more concrete, the faster the fix.
       placeholder: |
-        1. `git clone … && cd AipeHub && pnpm install && pnpm build`
-        2. `AIPE_SPACE=$(mktemp -d) pnpm host`
+        1. `git clone … && cd Gotong && pnpm install && pnpm build`
+        2. `GOTONG_SPACE=$(mktemp -d) pnpm host`
         3. Open the printed admin URL
         4. Click "+ 创建"
         5. …
@@ -44,8 +44,8 @@ body:
     id: version
     attributes:
       label: Version / commit
-      description: Output of `git rev-parse HEAD` or the `@aipehub/host` package version.
-      placeholder: "e.g. 1f3a2c4 or @aipehub/host@2.0.0"
+      description: Output of `git rev-parse HEAD` or the `@gotong/host` package version.
+      placeholder: "e.g. 1f3a2c4 or @gotong/host@2.0.0"
     validations:
       required: true
   - type: dropdown
@@ -55,10 +55,10 @@ body:
       multiple: false
       options:
         - "Local (pnpm host on my laptop)"
-        - "LAN (AIPE_HOST=0.0.0.0)"
+        - "LAN (GOTONG_HOST=0.0.0.0)"
         - "Public (Caddy + systemd / VPS)"
         - "Docker (docker compose up)"
-        - "Embedded library (own binary using @aipehub/core)"
+        - "Embedded library (own binary using @gotong/core)"
         - "Other / unsure"
     validations:
       required: true

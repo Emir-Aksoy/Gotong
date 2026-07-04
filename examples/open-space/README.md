@@ -21,15 +21,15 @@ Open the admin URL in your browser, the worker URL in a private tab, and you hav
 
 `src/launcher.ts` spawns:
 
-1. `src/host.ts` — Hub + WebSocket (`:4100`) + Web UI (`:3100`) bound to the `.aipehub-open-space/` directory.
+1. `src/host.ts` — Hub + WebSocket (`:4100`) + Web UI (`:3100`) bound to the `.gotong-open-space/` directory.
 2. `src/agent.ts` — a remote writer agent that connects over WebSocket and lands in **pending** state under `admission gating`.
 
 ## What this proves
 
-- **File-first persistence**: admins, workers, sessions, transcript, and pending applications all live in `.aipehub-open-space/`. Stop the demo, restart it, you're still admin; the writer reconnects automatically.
+- **File-first persistence**: admins, workers, sessions, transcript, and pending applications all live in `.gotong-open-space/`. Stop the demo, restart it, you're still admin; the writer reconnects automatically.
 - **Admission gating**: with `gating: 'admin-approval'` a new agent appears in the pending tray; you click Approve to let it in.
 - **Web UI** as the production driver — not a separate demo surface.
 
-To start completely fresh: [`重置-OpenSpace.command`](../../重置-OpenSpace.command) (or `rm -rf examples/open-space/.aipehub-open-space`).
+To start completely fresh: [`重置-OpenSpace.command`](../../重置-OpenSpace.command) (or `rm -rf examples/open-space/.gotong-open-space`).
 
 Source: [`src/launcher.ts`](src/launcher.ts), [`src/host.ts`](src/host.ts), [`src/agent.ts`](src/agent.ts).

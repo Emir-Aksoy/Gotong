@@ -6,7 +6,7 @@
  * Note: the launcher does NOT pass the admin token to driver
  * automatically — it greps it from upstream's stdout, so on second run
  * (token already minted, won't print again) it tells you to delete
- * `.aipehub-upstream/` to mint a new one. Same caveat as open-space.
+ * `.gotong-upstream/` to mint a new one. Same caveat as open-space.
  */
 
 import { spawn, type ChildProcess } from 'node:child_process'
@@ -43,7 +43,7 @@ function teeWithCapture(p: ChildProcess, tag: string, re: RegExp): Promise<strin
 }
 
 async function main(): Promise<void> {
-  console.log('=== AipeHub federation demo ===\n')
+  console.log('=== Gotong federation demo ===\n')
 
   const upstream = child('upstream-host.ts')
   const tokenP = teeWithCapture(upstream, 'upstream', /\/admin\?token=([a-f0-9]+)/)
@@ -59,13 +59,13 @@ async function main(): Promise<void> {
   let driver: ChildProcess | undefined
   if (token) {
     console.log(`\n[launcher] captured admin token, starting driver…\n`)
-    driver = child('driver.ts', { AIPE_ADMIN_TOKEN: token })
+    driver = child('driver.ts', { GOTONG_ADMIN_TOKEN: token })
     driver.stdout?.pipe(process.stdout)
   } else {
     console.log(`\n[launcher] couldn't capture admin token (already minted on a previous run).`)
     console.log(`[launcher] Either:`)
-    console.log(`[launcher]   - rm -rf .aipehub-upstream  &&  re-run`)
-    console.log(`[launcher]   - or paste old token: AIPE_ADMIN_TOKEN=<x> pnpm driver`)
+    console.log(`[launcher]   - rm -rf .gotong-upstream  &&  re-run`)
+    console.log(`[launcher]   - or paste old token: GOTONG_ADMIN_TOKEN=<x> pnpm driver`)
   }
 
   const onSignal = () => {

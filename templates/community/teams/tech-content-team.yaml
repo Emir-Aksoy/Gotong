@@ -5,7 +5,7 @@
 #             composition. This team is our own arrangement of three CC0
 #             prompts into a writing-pipeline (draft → polish → meta-prompt
 #             review). Whole composition stays under CC0.
-schema: aipehub.team/v1
+schema: gotong.team/v1
 team:
   name: 英文技术内容生产团队
   description: |

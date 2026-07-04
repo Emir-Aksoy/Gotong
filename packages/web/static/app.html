@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <!--
       C1 — unified SPA shell. Server injects the viewer's v4 role via the
-      x-aipehub-role meta tag below (string-replace on serveStatic). app.js
+      x-gotong-role meta tag below (string-replace on serveStatic). app.js
       reads it on boot and:
         1. Hides every [data-roles] element whose role list doesn't
            include the viewer's role.
@@ -16,13 +16,13 @@
         4. For anonymous (no role), shows the inline login shell.
       The role meta is hint-only; every API call is revalidated server-side.
     -->
-    <meta name="x-aipehub-role" content="<!--AIPE_ROLE-->" />
+    <meta name="x-gotong-role" content="<!--GOTONG_ROLE-->" />
     <!-- DEPLOY-C followup — '1' while the first-run bootstrap window is
          open (single owner, no password). Lets a signed-in operator's boot
          enter the setup wizard without a blocking flag fetch on every
          normal boot. Hint-only, like the role meta above. -->
-    <meta name="x-aipehub-bootstrap" content="<!--AIPE_BOOTSTRAP-->" />
-    <title>AipeHub</title>
+    <meta name="x-gotong-bootstrap" content="<!--GOTONG_BOOTSTRAP-->" />
+    <title>Gotong</title>
     <!-- PWA (Phase 12 M9) — installable app shell. The service worker is
          registered from app.js; it never caches /api or the SSE stream. -->
     <link rel="manifest" href="/manifest.webmanifest" />
@@ -31,10 +31,10 @@
     <link rel="apple-touch-icon" href="/icon.svg" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-    <meta name="apple-mobile-web-app-title" content="AipeHub" />
+    <meta name="apple-mobile-web-app-title" content="Gotong" />
     <link rel="stylesheet" href="/styles.css" />
     <!-- Shared workflow-graph SVG renderer (workflow-architect ARCH-M4):
-         attaches window.AipeHubWorkflowGraph, consumed by the member SPA
+         attaches window.GotongWorkflowGraph, consumed by the member SPA
          (app.js) AND the admin console (admin.js, injected later by app.js).
          Loads first so the global exists before any consumer runs. -->
     <script src="/workflow-graph.js" defer></script>
@@ -43,7 +43,7 @@
   </head>
   <body class="admin">
     <header class="site-header">
-      <h1>AipeHub</h1>
+      <h1>Gotong</h1>
       <span class="subtitle" id="role-subtitle" data-i18n="adminTitle">管理员控制台</span>
       <span id="conn" class="conn" data-status="pending" data-i18n="connecting">连接中…</span>
       <span class="role-badge" id="role-badge"></span>
@@ -68,7 +68,7 @@
         <p class="login-meta" data-i18n-html="setupIntro">
           host 已启动,但 owner 账号还没设密码。在<strong>本机</strong>(<code>127.0.0.1</code>)
           上设置一次,以后用 Email + 密码登录。<br>
-          反向代理后的部署请改用 CLI: <code>aipehub-host mint-admin-token</code>。
+          反向代理后的部署请改用 CLI: <code>gotong-host mint-admin-token</code>。
         </p>
         <form id="setup-form">
           <label><span data-i18n="setupPwNew">新密码 (至少 12 位)</span>
@@ -165,7 +165,7 @@
          re-inject the role meta on the next render. -->
     <section id="login-shell" data-roles="anonymous" hidden>
       <div class="login-card">
-        <h2 data-i18n="loginTitle">登录 AipeHub</h2>
+        <h2 data-i18n="loginTitle">登录 Gotong</h2>
         <form id="login-form">
           <label>Email
             <input name="email" type="email" required autocomplete="username" placeholder="you@example.com" />
@@ -632,7 +632,7 @@
         <div id="managed-agents-list" class="managed-agents-list"></div>
         <p class="hint">
           <span data-i18n="templatesHint">主仓库 <code>templates/</code> 目录下有标准 agent / team / workflow 模板。打开任一 yaml，复制内容到「导入」即可：</span>
-          <a href="https://github.com/Emir-Aksoy/AipeHub/tree/main/templates" target="_blank" rel="noopener">github.com/Emir-Aksoy/AipeHub · templates/</a>
+          <a href="https://github.com/Emir-Aksoy/Gotong/tree/main/templates" target="_blank" rel="noopener">github.com/Emir-Aksoy/Gotong · templates/</a>
         </p>
       </section>
 
@@ -827,12 +827,12 @@
         </div>
         <p class="hint">
           <span data-i18n="workflowsHint">工作流把多个 agent 按顺序串起来。admin 派一个任务到 workflow 的触发能力，整个流程自动跑完。模板：</span>
-          <a href="https://github.com/AipeHub/AipeHub/tree/main/templates/workflows" target="_blank" rel="noopener">templates/workflows/</a>
+          <a href="https://github.com/Gotong/Gotong/tree/main/templates/workflows" target="_blank" rel="noopener">templates/workflows/</a>
         </p>
       </section>
 
       <!-- One-time disclaimer (v2.4) — shown the first time an admin
-           opens this page. Stores a `aipehub_disclaimer_v1` flag in
+           opens this page. Stores a `gotong_disclaimer_v1` flag in
            localStorage so subsequent visits skip it. The disclaimer is
            workflow-agnostic but the language tilts toward
            personal-growth use (the first shipped workflow that touches
@@ -841,10 +841,10 @@
         <div class="modal-backdrop"></div>
         <div class="modal-card" role="dialog" aria-modal="true" style="max-width: 36rem;">
           <header class="modal-head">
-            <h3 data-i18n="disclaimerTitle">欢迎使用 AipeHub · 先看几条</h3>
+            <h3 data-i18n="disclaimerTitle">欢迎使用 Gotong · 先看几条</h3>
           </header>
           <div class="dispatch-form" style="line-height: 1.7;">
-            <p data-i18n-html="disclaimerP1"><strong>1. 这是个人本地工具,不是云服务。</strong>你的对话、画像、报告、API key 都存在你这台机器的 <code>.aipehub-*</code> 目录里。我们不收集任何数据,host 也不上报任何遥测。</p>
+            <p data-i18n-html="disclaimerP1"><strong>1. 这是个人本地工具,不是云服务。</strong>你的对话、画像、报告、API key 都存在你这台机器的 <code>.gotong-*</code> 目录里。我们不收集任何数据,host 也不上报任何遥测。</p>
             <p data-i18n-html="disclaimerP2"><strong>2. LLM 推理走第三方 API。</strong>你的 4 段自述会发给你配置的模型供应商(DeepSeek / Anthropic / OpenAI 等)做推理。供应商各自有自己的数据政策,看他们的隐私条款。如果有顾虑,可以用 mock provider 或本地 LLM。</p>
             <p data-i18n-html="disclaimerP3"><strong>3. 这不是医生 / 心理咨询师 / 财务顾问 / 关系治疗师的替代品。</strong>个人成长教练们都被设计成"有边界的陪伴者"——触及红旗信号会让你去找专业人。不要把它们当成诊断或处方。</p>
             <p data-i18n-html="disclaimerP4"><strong>4. 如果你正在心理危机中,请立即联系:</strong></p>
@@ -854,7 +854,7 @@
               <li>🇲🇾 Befrienders Kuala Lumpur:<strong>03-7956 8144</strong></li>
               <li data-i18n-html="disclaimerCrisisIntl">🌏 其他地区:<a href="https://findahelpline.com" target="_blank" rel="noopener">findahelpline.com</a></li>
             </ul>
-            <p data-i18n-html="disclaimerP5"><strong>5. 你可以随时删除自己的数据。</strong>停掉 host,删除 <code>.aipehub-*</code> 目录即可彻底清掉。</p>
+            <p data-i18n-html="disclaimerP5"><strong>5. 你可以随时删除自己的数据。</strong>停掉 host,删除 <code>.gotong-*</code> 目录即可彻底清掉。</p>
             <p style="margin-top: 1rem; text-align: center;">
               <button type="button" id="disclaimer-accept" class="ma-btn" style="padding: 0.5rem 1.6rem;" data-i18n="disclaimerAccept">我看完了,开始用</button>
             </p>
@@ -1036,7 +1036,7 @@
                  existing workflow, not a typed description). -->
             <p id="wf-assist-hint" class="hint" data-i18n-html="wfAssistModalHint">
               用一句话描述你想要的工作流(中文 / 英文都行)。AI 会按
-              <code>aipehub.workflow/v1</code> 生成 YAML 草稿,自动 validate
+              <code>gotong.workflow/v1</code> 生成 YAML 草稿,自动 validate
               通过后才能保存。
             </p>
             <label id="wf-assist-desc-row">
@@ -1082,7 +1082,7 @@
               <div id="wf-assist-explanation" class="hint" style="margin: 0.4rem 0 0.8rem;"></div>
               <!-- workflow-architect ARCH-M4 — inline SVG diagram of the workflow.
                    Rendered client-side from result.graph by the shared renderer
-                   (window.AipeHubWorkflowGraph). "下载 SVG" is a client-only
+                   (window.GotongWorkflowGraph). "下载 SVG" is a client-only
                    data: URL — the host renders nothing. Hidden when the YAML
                    isn't valid (no graph to draw). -->
               <div id="wf-assist-graph-wrap" hidden style="margin-bottom: 0.8rem;">
@@ -1131,14 +1131,14 @@
             <button type="button" class="modal-close" data-act="close-modal" data-i18n-aria="close" aria-label="关闭">×</button>
           </header>
           <div class="dispatch-form">
-            <p class="hint" data-i18n="workflowImportHint">aipehub.workflow/v1 格式。导入后立刻注册到 Hub，并写入 .aipehub/workflows/definitions/ 目录。</p>
+            <p class="hint" data-i18n="workflowImportHint">gotong.workflow/v1 格式。导入后立刻注册到 Hub，并写入 .gotong/workflows/definitions/ 目录。</p>
             <label>
               <span data-i18n="uploadFile">上传文件</span>
               <input id="wf-import-file" type="file" accept=".yaml,.yml,.json" />
             </label>
             <label>
               <span data-i18n="orPaste">或粘贴内容</span>
-              <textarea id="wf-import-text" rows="12" placeholder="schema: aipehub.workflow/v1&#10;workflow:&#10;  id: ..."></textarea>
+              <textarea id="wf-import-text" rows="12" placeholder="schema: gotong.workflow/v1&#10;workflow:&#10;  id: ..."></textarea>
             </label>
             <button type="button" id="wf-import-submit" data-i18n="doImport">导入</button>
             <p id="wf-import-msg" class="form-msg"></p>
@@ -1181,8 +1181,8 @@
             <button type="button" class="modal-close" data-act="close-modal" data-i18n-aria="close" aria-label="关闭">×</button>
           </header>
           <div class="dispatch-form">
-            <p class="hint" data-i18n="bundleImportHint">aipehub.bundle/v1 格式 — 一个文件包含一组 agent + 一条 workflow + API key 输入提示。导入后所有 agent 一次创建,workflow 自动注册,可直接派发。</p>
-            <p class="hint" data-i18n-html="bundleImportTemplates">模板：<a href="https://github.com/AipeHub/AipeHub/tree/main/templates/bundles" target="_blank" rel="noopener">templates/bundles/</a> · 或用内置模板:</p>
+            <p class="hint" data-i18n="bundleImportHint">gotong.bundle/v1 格式 — 一个文件包含一组 agent + 一条 workflow + API key 输入提示。导入后所有 agent 一次创建,workflow 自动注册,可直接派发。</p>
+            <p class="hint" data-i18n-html="bundleImportTemplates">模板：<a href="https://github.com/Gotong/Gotong/tree/main/templates/bundles" target="_blank" rel="noopener">templates/bundles/</a> · 或用内置模板:</p>
             <p>
               <button type="button" id="bundle-builtin-pg-btn" class="ma-btn ma-btn-secondary" data-i18n="bundleBuiltinPg">🎁 用内置模板:个人成长 (7 教练 + 12 周墙上计划)</button>
             </p>
@@ -1192,7 +1192,7 @@
             </label>
             <label>
               <span data-i18n="orPaste">或粘贴内容</span>
-              <textarea id="bundle-import-text" rows="10" placeholder="schema: aipehub.bundle/v1&#10;bundle:&#10;  name: ...&#10;  team: ..."></textarea>
+              <textarea id="bundle-import-text" rows="10" placeholder="schema: gotong.bundle/v1&#10;bundle:&#10;  name: ...&#10;  team: ..."></textarea>
             </label>
             <label>
               <span id="bundle-key-label">API key (optional)</span>
@@ -1280,7 +1280,7 @@
             </label>
             <label>
               <span data-i18n="orPaste">或粘贴内容</span>
-              <textarea id="ma-import-text" rows="10" placeholder="schema: aipehub.team/v1&#10;team:&#10;  name: ..."></textarea>
+              <textarea id="ma-import-text" rows="10" placeholder="schema: gotong.team/v1&#10;team:&#10;  name: ..."></textarea>
             </label>
             <button type="button" id="ma-import-submit" data-i18n="doImport">导入</button>
             <p id="ma-import-msg" class="form-msg"></p>
@@ -1627,7 +1627,7 @@
       <!-- Route B P1-M11d — outbound A2A agent registry. Owner-only, same "联邦"
            tab, BELOW the peer panels. Rendered by /a2a-ui.js (CRUD over
            /api/admin/a2a-agents): register the external A2A agents this hub
-           forwards capability dispatches to (replacing the AIPE_A2A_AGENTS env
+           forwards capability dispatches to (replacing the GOTONG_A2A_AGENTS env
            blob). 503 inline when the host wired no identity store. -->
       <section id="a2a-outbound-panel" class="a2a-outbound-panel" data-tab="federation"></section>
 

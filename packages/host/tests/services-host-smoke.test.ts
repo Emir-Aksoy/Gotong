@@ -1,5 +1,5 @@
 /**
- * High-fidelity boot smoke: spawn the real `aipehub-host` Node process
+ * High-fidelity boot smoke: spawn the real `gotong-host` Node process
  * against a fresh temp space and verify all three first-party service
  * plugins reach `ready` state.
  *
@@ -29,17 +29,17 @@ const hostMain = join(here, '..', 'dist', 'main.js')
 describe('host process smoke — plugins resolve under native Node', () => {
   let root: string
   beforeEach(async () => {
-    root = await mkdtemp(join(tmpdir(), 'aipe-host-smoke-'))
+    root = await mkdtemp(join(tmpdir(), 'gotong-host-smoke-'))
   })
   afterEach(async () => {
     await rm(root, { recursive: true, force: true })
   })
 
-  it('spawns aipehub-host, all three first-party plugins reach "ready", graceful shutdown', async () => {
+  it('spawns gotong-host, all three first-party plugins reach "ready", graceful shutdown', async () => {
     if (!existsSync(hostMain)) {
       // CI / local dev may forget to build. Skip rather than false-fail —
       // the rest of the suite covers in-process boot exhaustively.
-      console.warn(`[skip] ${hostMain} not built — run 'pnpm --filter @aipehub/host build' first`)
+      console.warn(`[skip] ${hostMain} not built — run 'pnpm --filter @gotong/host build' first`)
       return
     }
     if (process.platform === 'win32') {
@@ -59,9 +59,9 @@ describe('host process smoke — plugins resolve under native Node', () => {
     const child = spawn(process.execPath, [hostMain], {
       env: {
         ...process.env,
-        AIPE_SPACE: join(root, 'space'),
-        AIPE_WEB_PORT: '0',
-        AIPE_WS_PORT: '0',
+        GOTONG_SPACE: join(root, 'space'),
+        GOTONG_WEB_PORT: '0',
+        GOTONG_WS_PORT: '0',
       },
       stdio: ['ignore', 'pipe', 'pipe'],
     })
@@ -73,7 +73,7 @@ describe('host process smoke — plugins resolve under native Node', () => {
     child.stdout.on('data', (c: Buffer) => chunks.push(c))
     child.stderr.on('data', (c: Buffer) => chunks.push(c))
 
-    // Wait for the banner ("=== AipeHub host ready ===") which is the
+    // Wait for the banner ("=== Gotong host ready ===") which is the
     // last thing main prints before going idle, OR a 6s timeout. Using
     // a banner watch avoids unconditional 4s sleeps in fast CI machines
     // and gives generous margin on slow ones.
@@ -81,7 +81,7 @@ describe('host process smoke — plugins resolve under native Node', () => {
       let booted = false
       const onData = (c: Buffer): void => {
         if (booted) return
-        if (Buffer.concat(chunks).toString().includes('AipeHub host ready')) {
+        if (Buffer.concat(chunks).toString().includes('Gotong host ready')) {
           booted = true
           // Give the process one more tick to settle (services log line
           // is async after the banner), then SIGTERM. The 50ms is enough

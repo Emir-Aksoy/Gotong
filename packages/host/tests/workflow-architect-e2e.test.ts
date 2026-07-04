@@ -37,15 +37,15 @@ import { join } from 'node:path'
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { Hub, HumanParticipant, InMemoryStorage } from '@aipehub/core'
-import { MockLlmProvider, type LlmRequest } from '@aipehub/llm'
-import { openIdentityStore, type IdentityStore } from '@aipehub/identity'
-import { parseWorkflow, projectWorkflowGraph } from '@aipehub/workflow'
+import { Hub, HumanParticipant, InMemoryStorage } from '@gotong/core'
+import { MockLlmProvider, type LlmRequest } from '@gotong/llm'
+import { openIdentityStore, type IdentityStore } from '@gotong/identity'
+import { parseWorkflow, projectWorkflowGraph } from '@gotong/workflow'
 import {
   WorkflowAssistantAgent,
   WORKFLOW_ASSISTANT_CAPABILITY,
   type WorkflowAssistantOutput,
-} from '@aipehub/workflow-assistant'
+} from '@gotong/workflow-assistant'
 
 import { WorkflowController, type PeerCapabilityView } from '../src/workflow-controller.js'
 import {
@@ -73,7 +73,7 @@ function yamlStep(s: StepSpec): string {
 function yamlWf(opts: { id: string; trigger: string; steps: StepSpec[] }): string {
   return (
     [
-      'schema: aipehub.workflow/v1',
+      'schema: gotong.workflow/v1',
       'workflow:',
       `  id: ${opts.id}`,
       '  trigger:',
@@ -162,7 +162,7 @@ interface Rig {
 }
 
 async function boot(): Promise<Rig> {
-  const tmp = await mkdtemp(join(tmpdir(), 'aipe-arch-e2e-'))
+  const tmp = await mkdtemp(join(tmpdir(), 'gotong-arch-e2e-'))
   const hub = new Hub({ storage: new InMemoryStorage() })
   await hub.start()
 

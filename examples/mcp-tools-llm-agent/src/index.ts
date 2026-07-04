@@ -1,5 +1,5 @@
 /**
- * End-to-end demo: AipeHub + Anthropic + `@aipehub/mcp-client`.
+ * End-to-end demo: Gotong + Anthropic + `@gotong/mcp-client`.
  *
  * What it shows: an `LlmAgent` driven by the Anthropic SDK is given a
  * tool-use loop wired to a freshly-spawned MCP filesystem server, then
@@ -10,8 +10,8 @@
  *
  *   export ANTHROPIC_API_KEY=sk-ant-…
  *   pnpm install
- *   pnpm --filter @aipehub/example-mcp-tools-llm-agent build  # builds workspace deps
- *   pnpm --filter @aipehub/example-mcp-tools-llm-agent start
+ *   pnpm --filter @gotong/example-mcp-tools-llm-agent build  # builds workspace deps
+ *   pnpm --filter @gotong/example-mcp-tools-llm-agent start
  *
  * Expected output (truncated):
  *
@@ -21,7 +21,7 @@
  *   ← agent finished after N tool round(s)
  *
  *     [model response]
- *     The README opens with: "AipeHub — a polite party for AI agents…"
+ *     The README opens with: "Gotong — a polite party for AI agents…"
  *     …
  *
  *     [usage] inputTokens=… outputTokens=…
@@ -33,10 +33,10 @@
  * what arguments, until it has enough to answer.
  */
 
-import { Hub } from '@aipehub/core'
-import { LlmAgent, type LlmRequest } from '@aipehub/llm'
-import { AnthropicProvider } from '@aipehub/llm-anthropic'
-import { McpToolset } from '@aipehub/mcp-client'
+import { Hub } from '@gotong/core'
+import { LlmAgent, type LlmRequest } from '@gotong/llm'
+import { AnthropicProvider } from '@gotong/llm-anthropic'
+import { McpToolset } from '@gotong/mcp-client'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 

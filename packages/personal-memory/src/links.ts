@@ -2,7 +2,7 @@
  * links.ts — associative memory / link evolution (decision E).
  *
  * A-MEM (Zettelkasten for agents) interlinks memory notes so a cluster becomes a
- * small graph: pull one fact and you can walk to the related ones. AipeHub's own
+ * small graph: pull one fact and you can walk to the related ones. Gotong's own
  * `[[name]]` memory works the same way. E brings that to the butler — entries
  * carry `meta.links: string[]` (ids of related entries), exactly like importance
  * / recallCount: free-form meta, NO schema change.
@@ -25,7 +25,7 @@
  * deterministic "related: [id]" tail per line, byte-stable for a fixed set.
  */
 
-import type { MemoryEntry } from '@aipehub/services-sdk'
+import type { MemoryEntry } from '@gotong/services-sdk'
 
 import { compareByImportanceThenRecency } from './importance.js'
 import { extractTerms } from './relevance.js'

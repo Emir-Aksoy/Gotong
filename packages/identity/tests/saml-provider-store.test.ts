@@ -16,7 +16,7 @@ import { openIdentityStore, IdentityStore, IdentityError } from '../src/index.js
 const IDP = 'https://idp.example.com/saml/metadata'
 const SSO = 'https://idp.example.com/saml/sso'
 // A stand-in PEM body — the store treats it as opaque public config (the real
-// cert parsing happens in @aipehub/saml at verify time, not here).
+// cert parsing happens in @gotong/saml at verify time, not here).
 const CERT = '-----BEGIN CERTIFICATE-----\nMIIBfakefakefake\n-----END CERTIFICATE-----'
 const SP = 'https://hub.test/saml/metadata'
 

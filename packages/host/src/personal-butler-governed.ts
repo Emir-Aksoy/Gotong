@@ -32,7 +32,7 @@
  * exposed at all — a member steward tiers them `forbidden` and is never handed
  * their executors, so the butler simply has no such tools.
  *
- * Host-only: it wires `@aipehub/hub-steward` (the action vocabulary + validator)
+ * Host-only: it wires `@gotong/hub-steward` (the action vocabulary + validator)
  * to `performStewardAction` (host) + the member services. Per-user — the router
  * builds one butler (and one of these) per `origin.userId`, each bound to that
  * member's id so the executor's RBAC scopes to them.
@@ -41,8 +41,8 @@
 import {
   GovernedActionToolset,
   type GovernedToolSpec,
-} from '@aipehub/personal-butler'
-import { validateStewardAction } from '@aipehub/hub-steward'
+} from '@gotong/personal-butler'
+import { validateStewardAction } from '@gotong/hub-steward'
 
 import {
   performStewardAction,

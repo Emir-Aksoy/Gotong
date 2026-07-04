@@ -20,7 +20,7 @@
  * credential surfaces, not bound to one kind.
  */
 
-import { createLogger } from '@aipehub/core'
+import { createLogger } from '@gotong/core'
 import {
   AUDIT_ACTIONS,
   principalKey,
@@ -28,7 +28,7 @@ import {
   type Principal,
   type ResourceKind,
   type WriteAuditLogInput,
-} from '@aipehub/identity'
+} from '@gotong/identity'
 
 const log = createLogger('resource-access')
 

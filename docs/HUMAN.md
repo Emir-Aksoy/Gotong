@@ -1,6 +1,6 @@
 # Joining as a human
 
-AipeHub treats humans as first-class participants. There are two
+Gotong treats humans as first-class participants. There are two
 roles, each with its own web UI:
 
 | Role | URL | What they can do |
@@ -109,7 +109,7 @@ The admin panel has four sections:
 - 一次可以导入一个 agent 或一整个 team（多个 agent）
 - 服务器解析 → 校验 schema → 创建 + 启动
 
-**公网模板库**：[github.com/Emir-Aksoy/AipeHub/tree/main/templates](https://github.com/Emir-Aksoy/AipeHub/tree/main/templates) 收集了官方维护的"标准 agent"和"标准 team"模板。流程：
+**公网模板库**：[github.com/Emir-Aksoy/Gotong/tree/main/templates](https://github.com/Emir-Aksoy/Gotong/tree/main/templates) 收集了官方维护的"标准 agent"和"标准 team"模板。流程：
 
 1. 浏览 `templates/agents/` 找一个你要的（如 `writer-zh.yaml`）
 2. 点 GitHub 上的 **Raw** → 全选 + 复制
@@ -119,10 +119,10 @@ The admin panel has four sections:
 每个 card 上还有：
 
 - **编辑** — 同一个表单预填，可以改 prompt / model 等；保存会重启该 agent。**不建议频繁编辑标准模板**——你的修改会和上游同名模板冲突。
-- **导出** — 下载 `<id>.aipehub-agent.json`，可以备份或在别的空间导入
+- **导出** — 下载 `<id>.gotong-agent.json`，可以备份或在别的空间导入
 - **移除** — 从 `agents.json` 删除 + 取消注册
 
-**外部 SDK agent**：如果 agents.json 里某条没有 `managed` 字段（即通过 `@aipehub/sdk-node` 远程连进来的），card 上显示「外部 SDK 接入」标签，不可编辑也不可导出（因为代码不在 host 这边）。
+**外部 SDK agent**：如果 agents.json 里某条没有 `managed` 字段（即通过 `@gotong/sdk-node` 远程连进来的），card 上显示「外部 SDK 接入」标签，不可编辑也不可导出（因为代码不在 host 这边）。
 
 #### API Key 管理（v2.1）
 
@@ -138,7 +138,7 @@ The admin panel has four sections:
 
 - 加密后的 key 存 `<space>/secrets.enc.json`
 - 主密钥存 `<space>/runtime/secret.key`（0600，跨机器迁移时**不带走**）
-- 也可以用 `AIPE_SECRET_KEY` 环境变量代替主密钥文件（适合 KMS / k8s secret）
+- 也可以用 `GOTONG_SECRET_KEY` 环境变量代替主密钥文件（适合 KMS / k8s secret）
 
 **安全保证**：
 
@@ -303,7 +303,7 @@ you lose it before opening it in a browser:
 - If at least one other admin still has a working cookie: ask them to
   `POST /api/admin/admins` to mint you a fresh invite.
 - If you're alone and locked out: stop the host, delete the workspace
-  directory (`rm -rf /srv/aipehub-data`), restart. A new admin is
+  directory (`rm -rf /srv/gotong-data`), restart. A new admin is
   minted. **All transcript history is lost** in this path — back up
   before you do it.
 

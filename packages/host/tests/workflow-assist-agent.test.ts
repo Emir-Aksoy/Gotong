@@ -3,7 +3,7 @@
  *
  * Tests cover the `createWorkflowAssistAgent` factory + the
  * `WorkflowAssistSurface` it returns:
- *   - returns null when AIPE_ASSISTANT_DISABLED=1 (via resolveWorkflowAssistConfig)
+ *   - returns null when GOTONG_ASSISTANT_DISABLED=1 (via resolveWorkflowAssistConfig)
  *   - returns null when a real provider is configured but no key resolves
  *   - mock provider works without a key (registration succeeds, surface usable)
  *   - surface.assist dispatches to capability=workflow:assist + returns
@@ -18,8 +18,8 @@
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { createLogger, Hub, InMemoryStorage } from '@aipehub/core'
-import { WORKFLOW_ASSISTANT_CAPABILITY } from '@aipehub/workflow-assistant'
+import { createLogger, Hub, InMemoryStorage } from '@gotong/core'
+import { WORKFLOW_ASSISTANT_CAPABILITY } from '@gotong/workflow-assistant'
 
 import {
   createWorkflowAssistAgent,
@@ -31,25 +31,25 @@ const logger = createLogger('wf-assist-test', { disabled: true })
 describe('resolveWorkflowAssistConfig', () => {
   const ORIG = { ...process.env }
   beforeEach(() => {
-    delete process.env.AIPE_ASSISTANT_DISABLED
-    delete process.env.AIPE_ASSISTANT_PROVIDER
-    delete process.env.AIPE_ASSISTANT_MODEL
-    delete process.env.AIPE_ASSISTANT_MAX_TOKENS
-    delete process.env.AIPE_ASSISTANT_BASE_URL
-    delete process.env.AIPE_ASSISTANT_API_KEY_ENV
+    delete process.env.GOTONG_ASSISTANT_DISABLED
+    delete process.env.GOTONG_ASSISTANT_PROVIDER
+    delete process.env.GOTONG_ASSISTANT_MODEL
+    delete process.env.GOTONG_ASSISTANT_MAX_TOKENS
+    delete process.env.GOTONG_ASSISTANT_BASE_URL
+    delete process.env.GOTONG_ASSISTANT_API_KEY_ENV
   })
   afterEach(() => {
     // Restore — vitest doesn't isolate process.env between tests.
     process.env = { ...ORIG }
   })
 
-  it('returns null when AIPE_ASSISTANT_DISABLED=1', () => {
-    process.env.AIPE_ASSISTANT_DISABLED = '1'
+  it('returns null when GOTONG_ASSISTANT_DISABLED=1', () => {
+    process.env.GOTONG_ASSISTANT_DISABLED = '1'
     expect(resolveWorkflowAssistConfig()).toBeNull()
   })
 
-  it("returns null when AIPE_ASSISTANT_DISABLED='true'", () => {
-    process.env.AIPE_ASSISTANT_DISABLED = 'true'
+  it("returns null when GOTONG_ASSISTANT_DISABLED='true'", () => {
+    process.env.GOTONG_ASSISTANT_DISABLED = 'true'
     expect(resolveWorkflowAssistConfig()).toBeNull()
   })
 
@@ -58,19 +58,19 @@ describe('resolveWorkflowAssistConfig', () => {
   })
 
   it('honours provider override', () => {
-    process.env.AIPE_ASSISTANT_PROVIDER = 'openai'
+    process.env.GOTONG_ASSISTANT_PROVIDER = 'openai'
     expect(resolveWorkflowAssistConfig()).toEqual({ provider: 'openai' })
   })
 
   it('falls back to anthropic on unknown provider name', () => {
-    process.env.AIPE_ASSISTANT_PROVIDER = 'gemini'
+    process.env.GOTONG_ASSISTANT_PROVIDER = 'gemini'
     expect(resolveWorkflowAssistConfig()).toEqual({ provider: 'anthropic' })
   })
 
   it('reads model + maxTokens overrides', () => {
-    process.env.AIPE_ASSISTANT_PROVIDER = 'mock'
-    process.env.AIPE_ASSISTANT_MODEL = 'claude-3-5-sonnet-latest'
-    process.env.AIPE_ASSISTANT_MAX_TOKENS = '8192'
+    process.env.GOTONG_ASSISTANT_PROVIDER = 'mock'
+    process.env.GOTONG_ASSISTANT_MODEL = 'claude-3-5-sonnet-latest'
+    process.env.GOTONG_ASSISTANT_MAX_TOKENS = '8192'
     expect(resolveWorkflowAssistConfig()).toEqual({
       provider: 'mock',
       model: 'claude-3-5-sonnet-latest',
@@ -79,7 +79,7 @@ describe('resolveWorkflowAssistConfig', () => {
   })
 
   it('ignores malformed maxTokens', () => {
-    process.env.AIPE_ASSISTANT_MAX_TOKENS = 'lots'
+    process.env.GOTONG_ASSISTANT_MAX_TOKENS = 'lots'
     const cfg = resolveWorkflowAssistConfig()
     expect(cfg).toBeTruthy()
     expect(cfg!.maxTokens).toBeUndefined()
@@ -87,10 +87,10 @@ describe('resolveWorkflowAssistConfig', () => {
 
   // S1-M4 — openai-compatible (MiMo / DeepSeek / …) via env.
   it('reads openai-compatible + baseURL + apiKeyEnv (pointer, never the key)', () => {
-    process.env.AIPE_ASSISTANT_PROVIDER = 'openai-compatible'
-    process.env.AIPE_ASSISTANT_BASE_URL = 'https://vendor.example/v1'
-    process.env.AIPE_ASSISTANT_API_KEY_ENV = 'VENDOR_KEY'
-    process.env.AIPE_ASSISTANT_MODEL = 'mimo-v2.5-pro'
+    process.env.GOTONG_ASSISTANT_PROVIDER = 'openai-compatible'
+    process.env.GOTONG_ASSISTANT_BASE_URL = 'https://vendor.example/v1'
+    process.env.GOTONG_ASSISTANT_API_KEY_ENV = 'VENDOR_KEY'
+    process.env.GOTONG_ASSISTANT_MODEL = 'mimo-v2.5-pro'
     expect(resolveWorkflowAssistConfig()).toEqual({
       provider: 'openai-compatible',
       model: 'mimo-v2.5-pro',
@@ -100,9 +100,9 @@ describe('resolveWorkflowAssistConfig', () => {
   })
 
   it('openai-compatible fields are ignored for other providers', () => {
-    process.env.AIPE_ASSISTANT_PROVIDER = 'openai'
-    process.env.AIPE_ASSISTANT_BASE_URL = 'https://vendor.example/v1'
-    process.env.AIPE_ASSISTANT_API_KEY_ENV = 'VENDOR_KEY'
+    process.env.GOTONG_ASSISTANT_PROVIDER = 'openai'
+    process.env.GOTONG_ASSISTANT_BASE_URL = 'https://vendor.example/v1'
+    process.env.GOTONG_ASSISTANT_API_KEY_ENV = 'VENDOR_KEY'
     expect(resolveWorkflowAssistConfig()).toEqual({ provider: 'openai' })
   })
 })
@@ -236,7 +236,7 @@ describe('createWorkflowAssistAgent', () => {
       by: 'admin',
     })
     expect(out.draftStatus).toBe('valid')
-    expect(out.yaml).toContain('schema: aipehub.workflow/v1')
+    expect(out.yaml).toContain('schema: gotong.workflow/v1')
     expect(out.yaml).toContain('id: assistant-mock-draft')
     expect(out.validationError).toBeUndefined()
     expect(out.raw).toContain('Mock assistant')
@@ -333,7 +333,7 @@ describe('createWorkflowAssistAgent', () => {
 
     it('explain mode echoes subjectYaml verbatim + projects ITS graph (not the LLM echo)', async () => {
       const subject = [
-        'schema: aipehub.workflow/v1',
+        'schema: gotong.workflow/v1',
         'workflow:',
         '  id: explain-subject',
         '  trigger:',

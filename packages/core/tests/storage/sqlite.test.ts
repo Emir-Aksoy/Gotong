@@ -21,7 +21,7 @@ describe('SqliteStorage', () => {
   beforeEach(() => {
     path = join(
       tmpdir(),
-      `aipehub-sqlite-${Date.now()}-${Math.random().toString(36).slice(2)}.db`,
+      `gotong-sqlite-${Date.now()}-${Math.random().toString(36).slice(2)}.db`,
     )
   })
 

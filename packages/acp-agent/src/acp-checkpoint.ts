@@ -19,7 +19,7 @@
  *      NOT survive a hub restart — see the package README's durability boundary.
  */
 
-import type { TaskId } from '@aipehub/core'
+import type { TaskId } from '@gotong/core'
 
 import type { AcpPermissionOption, AcpToolCall } from './acp-protocol.js'
 

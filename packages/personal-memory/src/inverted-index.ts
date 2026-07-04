@@ -33,7 +33,7 @@
  * seam.
  */
 
-import type { MemoryEntry, MemoryQuery } from '@aipehub/services-sdk'
+import type { MemoryEntry, MemoryQuery } from '@gotong/services-sdk'
 
 import { isActive } from './bitemporal.js'
 import { compareByImportanceThenRecency } from './importance.js'

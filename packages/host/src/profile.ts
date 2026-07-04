@@ -1,12 +1,12 @@
 // Deployment profile — the entry-surface *lens*, not a behavior fork.
 //
-// AipeHub's real dividing line is "within one hub" vs "across hubs", but the
+// Gotong's real dividing line is "within one hub" vs "across hubs", but the
 // entry UX still frames things as the old "individual vs organization" axis
 // (缺口 1). A hub is the node unit: one person + their agents is a sovereign
 // hub; a cluster of agents can be a non-sovereign hub; workflows run inside a
 // hub OR across hubs. Teams and organizations are BOTH just "cross-hub".
 //
-// `AIPE_PROFILE` lets a deployer pick which mental model the entry surface
+// `GOTONG_PROFILE` lets a deployer pick which mental model the entry surface
 // leads with:
 //   - hub         → foreground within-hub work (one node)
 //   - federation  → foreground cross-hub work (many nodes linked)
@@ -85,7 +85,7 @@ const ALIASES: Record<string, ProfileId> = {
 }
 
 /**
- * Pure parse of `AIPE_PROFILE`. Returns the profile id for a recognized value,
+ * Pure parse of `GOTONG_PROFILE`. Returns the profile id for a recognized value,
  * or `undefined` for unset / empty / unrecognized. Deliberately case- and
  * whitespace-insensitive; underscores normalize to hyphens so `single_node`
  * works too.
@@ -111,7 +111,7 @@ export interface ResolvedProfile {
 }
 
 /**
- * Resolve `AIPE_PROFILE` into a lens decision, distinguishing three cases:
+ * Resolve `GOTONG_PROFILE` into a lens decision, distinguishing three cases:
  *   - unset / empty        → `{}`                    (byte-identical default)
  *   - recognized value     → `{ id, descriptor }`
  *   - non-empty but bad     → `{ unrecognized: raw }` (caller warns, then defaults)

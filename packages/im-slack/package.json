@@ -1,8 +1,8 @@
 {
-  "name": "@aipehub/im-slack",
+  "name": "@gotong/im-slack",
   "version": "0.1.0",
   "type": "module",
-  "description": "AipeHub IM bridge for Slack — implements ImBridge over the official Socket Mode transport (outbound WebSocket, 免穿透). xapp- app token + xoxb- bot token; hand-rolled ws state machine, no @slack/bolt / @slack/socket-mode dep.",
+  "description": "Gotong IM bridge for Slack — implements ImBridge over the official Socket Mode transport (outbound WebSocket, 免穿透). xapp- app token + xoxb- bot token; hand-rolled ws state machine, no @slack/bolt / @slack/socket-mode dep.",
   "license": "MIT",
   "private": true,
   "main": "./dist/index.js",
@@ -25,7 +25,7 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "@aipehub/im-adapter": "workspace:*"
+    "@gotong/im-adapter": "workspace:*"
   },
   "devDependencies": {
     "vitest": "^3.2.4"

@@ -1,4 +1,4 @@
-"""Python equivalent of @aipehub/sdk-node's ``connect()`` and ``Session``.
+"""Python equivalent of @gotong/sdk-node's ``connect()`` and ``Session``.
 
 State machine (mirrors the Node SDK):
 
@@ -31,7 +31,7 @@ from . import protocol
 from .agent import AgentParticipant
 from .services import ServiceClient, ServiceUseRequest, to_wire_decls
 
-log = logging.getLogger("aipehub.session")
+log = logging.getLogger("gotong.session")
 
 
 _LOOPBACK_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
@@ -84,8 +84,8 @@ _SECRET_PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(r"sk-[A-Za-z0-9_-]+"),
     # 2. HTTP Authorization Bearer.
     re.compile(r"Bearer\s+[^\s'\"`{}]+", re.IGNORECASE),
-    # 3. aipe-... admin / agent tokens.
-    re.compile(r"aipe-[A-Za-z0-9_-]+"),
+    # 3. gotong-... admin / agent tokens.
+    re.compile(r"gotong-[A-Za-z0-9_-]+"),
 )
 
 
@@ -316,7 +316,7 @@ class Session:
         Returns once the first WELCOME has been observed (or on hard failure).
         The loop continues in the background via ``_reader_task``.
         """
-        self._reader_task = asyncio.create_task(self._run(), name="aipehub-session")
+        self._reader_task = asyncio.create_task(self._run(), name="gotong-session")
         # block until WELCOME or REJECT (or transport failure)
         await self._welcome_event.wait()
         if self._welcome_error is not None:
@@ -492,7 +492,7 @@ async def connect(
     unless ``auto_reconnect=False``.
 
     ``services`` (v1.1) is the list of Hub Services this connection wants
-    to call. Each entry is a :class:`aipehub.services.ServiceUseRequest`.
+    to call. Each entry is a :class:`gotong.services.ServiceUseRequest`.
     See ``docs/AGENT.md`` for the model.
 
     ``ssl`` (v3.4) — an optional ``ssl.SSLContext`` forwarded to

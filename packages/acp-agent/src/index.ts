@@ -1,7 +1,7 @@
 /**
- * `@aipehub/acp-agent` — outbound ACP (Agent Client Protocol) adapter.
+ * `@gotong/acp-agent` — outbound ACP (Agent Client Protocol) adapter.
  *
- * The OpenClaw-style COMPLEMENT to the one-shot `@aipehub/cli-agent`. Where
+ * The OpenClaw-style COMPLEMENT to the one-shot `@gotong/cli-agent`. Where
  * cli-agent does `spawn('claude', ['-p', prompt])` and the process exits per
  * task with no preserved context, acp-agent spawns the agent subprocess ONCE,
  * does the ACP handshake, holds the session OPEN, and dispatches many tasks to

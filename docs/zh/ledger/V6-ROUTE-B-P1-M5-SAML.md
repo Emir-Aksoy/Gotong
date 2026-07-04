@@ -12,7 +12,7 @@
 
 ## 一句话
 
-AipeHub 当 **SAML 2.0 Service Provider (SP)**: 把外部 IdP (Okta / Entra /
+Gotong 当 **SAML 2.0 Service Provider (SP)**: 把外部 IdP (Okta / Entra /
 ADFS / Keycloak …) **签名断言**里的 `(idpEntityId, NameID)` 映射到一个**已存在**
 的本地用户, 铸出**和密码登录完全一样**的 `ses_` 会话。登录页多了「用 X 登录」
 按钮 (和 OIDC 共用那一排), owner 在「SAML」标签页注册它信任的 IdP。**框架不跑
@@ -37,15 +37,15 @@ ADFS / Keycloak …) **签名断言**里的 `(idpEntityId, NameID)` 映射到一
 ### 成熟 DSig 库 + 自写 SP 胶水 (M5a 用户拍板)
 
 XML 规范化 (C14N) + 签名验证是出了名的易错且攻击面大。**不自己实现**: 新包
-`@aipehub/saml` 依赖 `xml-crypto` + `@xmldom/xmldom` + `xpath`, 危险的 C14N+签名
+`@gotong/saml` 依赖 `xml-crypto` + `@xmldom/xmldom` + `xpath`, 危险的 C14N+签名
 数学全委托 xml-crypto; 本包只写 xml-crypto **不做**的 SP 协议流程 (AuthnRequest
 生成 / SAMLResponse 解码 / 断言取值) + 围绕它的 XSW 防护。
 
 ### 独立小包隔离 XML 依赖 (M5a)
 
-`@aipehub/saml` 是第 30 个包, 故意**独立**而非塞进 identity —— identity 刻意
+`@gotong/saml` 是第 30 个包, 故意**独立**而非塞进 identity —— identity 刻意
 dep-light (只 `node:crypto`), 这正是 OIDC 的 `oidc.ts` 能住 identity 而 SAML 的
-XML 协议核**不能**的原因。镜像 `@aipehub/a2a` / `@aipehub/inbox` 的小聚焦包先例。
+XML 协议核**不能**的原因。镜像 `@gotong/a2a` / `@gotong/inbox` 的小聚焦包先例。
 **但账号联结 + provider 存储仍住 identity** (纯映射 / 纯 SQL, 零 XML)。
 
 ### 不自动开户 — JIT-link-by-asserted-email (M5d)
@@ -82,11 +82,11 @@ RBAC, 与 IdP 无关。`kind='saml'` 凭证与 `kind='oidc'` 并列, `samlLinkId
 
 | M | commit | 包 | 做了什么 |
 |---|---|---|---|
-| **M5a** | `f37d225` | saml (新) | SP **协议纯核**。新包 `@aipehub/saml` (xml-crypto+@xmldom/xmldom+xpath): `generateAuthnRequest` (HTTP-Redirect deflate+base64, 返 @ID 供 InResponseTo) / `decodeSamlPostResponse` (POST base64) / `validateSamlResponse` (**签名先于取值**→Issuer/Audience/时窗/Recipient/InResponseTo) / `buildSpMetadata`。承重: ① 验签 key 钉死配置 cert (noop `getCertFromKeyInfo` 绝不取文档 KeyInfo); ② 取值只从 `getSignedReferences()`; ③ 已签 @ID 文档唯一; ④ DOCTYPE 拒; ⑤ 失败全抛 `SamlError`。22 测试 (含 XSW 旁挂/重复 ID/签后篡改/错 key/未签/DOCTYPE 攻击 fixture)。 |
+| **M5a** | `f37d225` | saml (新) | SP **协议纯核**。新包 `@gotong/saml` (xml-crypto+@xmldom/xmldom+xpath): `generateAuthnRequest` (HTTP-Redirect deflate+base64, 返 @ID 供 InResponseTo) / `decodeSamlPostResponse` (POST base64) / `validateSamlResponse` (**签名先于取值**→Issuer/Audience/时窗/Recipient/InResponseTo) / `buildSpMetadata`。承重: ① 验签 key 钉死配置 cert (noop `getCertFromKeyInfo` 绝不取文档 KeyInfo); ② 取值只从 `getSignedReferences()`; ③ 已签 @ID 文档唯一; ④ DOCTYPE 拒; ⑤ 失败全抛 `SamlError`。22 测试 (含 XSW 旁挂/重复 ID/签后篡改/错 key/未签/DOCTYPE 攻击 fixture)。 |
 | **M5b** | `10e7abc` | identity | 账号联结 + `authenticateSaml`。`credentials.kind` 加 `'saml'`; `samlLinkIdentifier` 内部 helper; 复用 `credentials` 表 (revoke/CASCADE/审计全免费), `secret_hash=''` (无可重放 secret)。`linkSaml`/`findUserBySaml`/`authenticateSaml` 铸**同一 `ses_` session** (D-3)。store mechanism-only (`saml_not_linked` 让调用方定策略)。11 测试 (含同 NameID 不同 IdP 不撞 / SAML-vs-OIDC kind 隔离)。 |
 | **M5c** | `7fb81ce` | identity | provider **配置存储** (表 v21, **无 vault**)。OIDC M4d 的孪生但去掉 vault 注入/readSecret/孤儿清理 (cert 是公钥)。`SamlProviderStore` (add/get/getByEntityId/list/update/remove, idpEntityId 不可变); IdentityStore facade 6 方法。8 测试 (无 masterKey 开 store 钉死「公钥不需密钥库」)。 |
 | **M5d** | `c1a5218` | host, web | 登录**编排** `saml-login-service.ts` (OIDC M4e 的孪生)。`begin()`→AuthnRequest + 按新 RelayState 暂存 + IdP 重定向 URL; `complete()`→查暂存 (RelayState 验签**前**消费, 验签失败也消费防重放) + 对钉死 cert 验签 + `expectedInResponseTo` 钉 @ID + JIT-link-by-asserted-email + 铸 session。纯 SAML 函数注入 (默认真) → 编排用 fake 单测。8 测试。 |
-| **M5e** | `f5b24f1` | web, host | 浏览器侧**公开**路由 (住 pre-CSRF 区): `/api/auth/saml/providers` (登录页读它) / `/metadata?provider=` (SP 元数据 XML) / `/start?provider=` (302→IdP) / `/acs` (**跨站 POST** SAMLResponse+RelayState → 成功铸**同一身份 cookie**+302 `/`, 失败 bounce `/?saml_error=<code>`)。ACS URL 从 `AIPE_PUBLIC_URL` 取 (稳定绝对 URL, 烤进 AuthnRequest 回程复核)。12 测试。 |
+| **M5e** | `f5b24f1` | web, host | 浏览器侧**公开**路由 (住 pre-CSRF 区): `/api/auth/saml/providers` (登录页读它) / `/metadata?provider=` (SP 元数据 XML) / `/start?provider=` (302→IdP) / `/acs` (**跨站 POST** SAMLResponse+RelayState → 成功铸**同一身份 cookie**+302 `/`, 失败 bounce `/?saml_error=<code>`)。ACS URL 从 `GOTONG_PUBLIC_URL` 取 (稳定绝对 URL, 烤进 AuthnRequest 回程复核)。12 测试。 |
 | **M5f-1** | `fdc2f29` | web, host | 管理侧 CRUD `/api/admin/saml/providers` (list/add/PATCH/DELETE, requireAdmin)。**vs OIDC: cert 是公钥**, view 出完整行含 cert (owner 审计钉的哪张), 无 secret 藏。idpEntityId 不可变。11 测试。 |
 | **M5f-2** | `d5552a0` | web | 登录屏 SAML 按钮: 扩 `renderSsoButtons()` 同时拉 OIDC+SAML 两 provider 列表, 任一出按钮即露分隔符。SAML 按钮顶层导航 `/api/auth/saml/start`。`?saml_error=` 并进既有 `?oidc_error=` 处理。 |
 | **M5f-3** | `be5211e` | web | admin「SAML」tab + 自包含 `saml-ui.js` (CRUD 面板, cert 预览+title 全值, 轮换证书/启停/删 + 每行 SP 元数据链接)。`ADMIN_TABS` 加 `'saml'`; i18n `tabSaml`; +2 c1-app-shell 哨兵。 |
@@ -96,7 +96,7 @@ RBAC, 与 IdP 无关。`kind='saml'` 凭证与 `kind='oidc'` 并列, `samlLinkId
 ## 四、数据流 — 一次浏览器 SAML 往返
 
 ```
- 浏览器                      AipeHub (SP)                         外部 IdP
+ 浏览器                      Gotong (SP)                         外部 IdP
    │                            │                                   │
    │ 1. GET /login 页           │                                   │
    │   renderSsoButtons()       │                                   │
@@ -172,13 +172,13 @@ CSRF 闸**之前**。真实性来自**签名断言** (钉死 cert 验), RelaySta
 ## 七、运维须知
 
 - **无需 env (除 ACS base)**: provider 走 admin「SAML」标签页 (DB) 配置。唯一 env
-  是 `AIPE_PUBLIC_URL` —— ACS URL 必须是 IdP 能 POST 回来的稳定绝对 URL (烤进
+  是 `GOTONG_PUBLIC_URL` —— ACS URL 必须是 IdP 能 POST 回来的稳定绝对 URL (烤进
   AuthnRequest 且回程对 Recipient 复核), 不能像 agent card 那样按请求派生。
-  **生产 (反代/TLS 后) 必须设 `AIPE_PUBLIC_URL`**; 本地 dev 回退 `host:port`。
+  **生产 (反代/TLS 后) 必须设 `GOTONG_PUBLIC_URL`**; 本地 dev 回退 `host:port`。
 - **SP 元数据**: admin 面板每行有「SP 元数据」链接 (`/api/auth/saml/metadata?
   provider=<id>`) → 把 SP entityID + ACS 交给 IdP 管理员导入。
 - **IdP 配置**: 在 IdP 处登记本 SP 的 entityID (= 你填的 spEntityId) + ACS URL
-  (`<AIPE_PUBLIC_URL>/api/auth/saml/acs`), 把 IdP 的签名证书 (X.509 PEM) 粘进面板。
+  (`<GOTONG_PUBLIC_URL>/api/auth/saml/acs`), 把 IdP 的签名证书 (X.509 PEM) 粘进面板。
 - **证书轮换**: IdP 换签名证书时, admin 面板「轮换证书」粘新 PEM 即可 (PATCH
   idpCert), 无需重建 provider。
 - **撤销**: admin 面板删 IdP, 或停用 (enabled=false 立刻从登录页消失)。已联结用户

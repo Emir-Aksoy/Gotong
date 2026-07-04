@@ -1,9 +1,9 @@
-# @aipehub/im-telegram
+# @gotong/im-telegram
 
-Phase 12 M2 — first concrete `ImBridge` for AipeHub.
+Phase 12 M2 — first concrete `ImBridge` for Gotong.
 
 A Telegram bot bridge implemented against
-[`@aipehub/im-adapter`](../im-adapter)'s `ImBridge` interface.
+[`@gotong/im-adapter`](../im-adapter)'s `ImBridge` interface.
 Long-polling mode; no SDK dependency (just `fetch`); ~400 lines of
 implementation.
 
@@ -22,8 +22,8 @@ same either way, so host wiring won't change.
 ## Quick start
 
 ```ts
-import { TelegramBridge } from '@aipehub/im-telegram'
-import { parseImCommand } from '@aipehub/im-adapter'
+import { TelegramBridge } from '@gotong/im-telegram'
+import { parseImCommand } from '@gotong/im-adapter'
 
 const bridge = new TelegramBridge({
   token: process.env.TELEGRAM_BOT_TOKEN!,

@@ -22,9 +22,9 @@ import { fileURLToPath } from 'node:url'
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { Hub, HumanParticipant, Space } from '@aipehub/core'
-import { serveWeb, type WebServerHandle } from '@aipehub/web'
-import { openIdentityStore, type IdentityStore } from '@aipehub/identity'
+import { Hub, HumanParticipant, Space } from '@gotong/core'
+import { serveWeb, type WebServerHandle } from '@gotong/web'
+import { openIdentityStore, type IdentityStore } from '@gotong/identity'
 
 import { WorkflowController } from '../src/workflow-controller.js'
 
@@ -63,7 +63,7 @@ interface Rig {
 }
 
 async function boot(): Promise<Rig> {
-  const root = await mkdtemp(join(tmpdir(), 'aipe-wf-graph-e2e-'))
+  const root = await mkdtemp(join(tmpdir(), 'gotong-wf-graph-e2e-'))
   const { space } = await Space.init(root, { name: 'wf-graph-e2e' })
   const hub = new Hub({ space })
   await hub.start()
@@ -100,7 +100,7 @@ async function boot(): Promise<Rig> {
     password: 'admin-strong-password',
     role: 'admin',
   })
-  const adminCookie = `aipehub_identity=${
+  const adminCookie = `gotong_identity=${
     identity.authenticatePassword({ email: 'admin@e2e.test', password: 'admin-strong-password' }).token
   }`
 

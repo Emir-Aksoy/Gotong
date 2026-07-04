@@ -221,7 +221,7 @@ export async function handleSetupRoute(
     if (!anchor) {
       sendJson(
         res,
-        { error: 'setup-owner-password needs loopback or an admin session — open the runtime/admin-link.txt URL first, or use `aipehub-host mint-admin-token` from a remote shell' },
+        { error: 'setup-owner-password needs loopback or an admin session — open the runtime/admin-link.txt URL first, or use `gotong-host mint-admin-token` from a remote shell' },
         403,
       )
       return true

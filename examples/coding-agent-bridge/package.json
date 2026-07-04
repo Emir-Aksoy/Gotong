@@ -1,5 +1,5 @@
 {
-  "name": "@aipehub/example-coding-agent-bridge",
+  "name": "@gotong/example-coding-agent-bridge",
   "version": "0.0.0",
   "type": "module",
   "private": true,
@@ -9,7 +9,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@aipehub/cli-agent": "workspace:*",
-    "@aipehub/core": "workspace:*"
+    "@gotong/cli-agent": "workspace:*",
+    "@gotong/core": "workspace:*"
   }
 }

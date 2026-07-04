@@ -1,5 +1,5 @@
 /**
- * `@aipehub/a2a` — Agent2Agent interop primitives.
+ * `@gotong/a2a` — Agent2Agent interop primitives.
  *
  * Public surface:
  *   - blocking `message/send` wire types (A2A 0.2.5 subset) + builders

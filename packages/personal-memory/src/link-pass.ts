@@ -30,7 +30,7 @@
  * whose link set grew, so a converged memory produces zero writes per tick.
  */
 
-import type { MemoryEntry, MemoryHandle, MemoryKind } from '@aipehub/services-sdk'
+import type { MemoryEntry, MemoryHandle, MemoryKind } from '@gotong/services-sdk'
 
 import {
   buildLinkGraph,

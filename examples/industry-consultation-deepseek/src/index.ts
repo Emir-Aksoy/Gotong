@@ -39,7 +39,7 @@ import {
   Space,
   type Task,
   type TranscriptEntry,
-} from '@aipehub/core'
+} from '@gotong/core'
 import {
   bootstrapServices,
   recallCaseConversation,
@@ -48,21 +48,21 @@ import {
   recordCaseStepOutput,
   formatCaseContextBlock,
   type CaseContextBinding,
-} from '@aipehub/host/services'
-import { LlmAgent, drainStream, type LlmAgentOptions } from '@aipehub/llm'
-import { OpenAIProvider } from '@aipehub/llm-openai'
+} from '@gotong/host/services'
+import { LlmAgent, drainStream, type LlmAgentOptions } from '@gotong/llm'
+import { OpenAIProvider } from '@gotong/llm-openai'
 import type {
   ArtifactHandle,
   DatastoreHandle,
   MemoryHandle,
   ServiceCtx,
-} from '@aipehub/services-sdk'
-import { parseWorkflow, WorkflowRunner } from '@aipehub/workflow'
+} from '@gotong/services-sdk'
+import { parseWorkflow, WorkflowRunner } from '@gotong/workflow'
 
 // ── 工作流定义（和 templates/workflows/industry-consultation-flow.yaml 同形状，
 //    多了一个字段 `caseId` —— 案主插话要靠它定位 case-memory owner）
 const WORKFLOW_YAML = `
-schema: aipehub.workflow/v1
+schema: gotong.workflow/v1
 workflow:
   id: industry-consultation-flow
   name: 传统行业咨询
@@ -555,11 +555,11 @@ async function main(): Promise<void> {
   if (!process.env.DEEPSEEK_API_KEY) {
     log('✗ DEEPSEEK_API_KEY env var missing.')
     log('  Set one in .env.local at repo root, or pass via:')
-    log('  DEEPSEEK_API_KEY=sk-... pnpm --filter @aipehub/example-industry-consultation-deepseek start')
+    log('  DEEPSEEK_API_KEY=sk-... pnpm --filter @gotong/example-industry-consultation-deepseek start')
     process.exit(1)
   }
 
-  const ROOT = join(process.cwd(), '..', '..', '.aipehub-consult-real-deepseek')
+  const ROOT = join(process.cwd(), '..', '..', '.gotong-consult-real-deepseek')
   log(`workspace dir: ${ROOT}`)
   if (existsSync(ROOT)) {
     log('  (clearing previous run)')
@@ -576,9 +576,9 @@ async function main(): Promise<void> {
     JSON.stringify(
       {
         plugins: [
-          '@aipehub/service-memory-file',
-          '@aipehub/service-artifact-file',
-          '@aipehub/service-datastore-sqlite',
+          '@gotong/service-memory-file',
+          '@gotong/service-artifact-file',
+          '@gotong/service-datastore-sqlite',
         ],
       },
       null,

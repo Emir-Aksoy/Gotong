@@ -2,8 +2,8 @@
 # Upstream:   Fatih Kadir Akın & contributors
 # License:    CC0 1.0 Universal (Public Domain) — see ../LICENSE-NOTICES.md §1
 # Adapted:    2026-05-12 — removed conversational opener; clarified async / Node vs
-#             browser behavior; restated output-only rule for AipeHub task model.
-schema: aipehub.agent/v1
+#             browser behavior; restated output-only rule for Gotong task model.
+schema: gotong.agent/v1
 agent:
   id: javascript-console
   displayName: JavaScript 控制台模拟器

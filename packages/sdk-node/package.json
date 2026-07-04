@@ -1,12 +1,12 @@
 {
-  "name": "@aipehub/sdk-node",
+  "name": "@gotong/sdk-node",
   "version": "3.1.0",
   "type": "module",
-  "description": "AipeHub Node SDK — connect agents to a remote Hub over WebSocket.",
+  "description": "Gotong Node SDK — connect agents to a remote Hub over WebSocket.",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/Emir-Aksoy/AipeHub.git",
+    "url": "https://github.com/Emir-Aksoy/Gotong.git",
     "directory": "packages/sdk-node"
   },
   "publishConfig": {
@@ -33,13 +33,13 @@
     "prepack": "tsc -p tsconfig.json"
   },
   "dependencies": {
-    "@aipehub/core": "workspace:*",
-    "@aipehub/protocol": "workspace:*",
-    "@aipehub/services-sdk": "workspace:*",
+    "@gotong/core": "workspace:*",
+    "@gotong/protocol": "workspace:*",
+    "@gotong/services-sdk": "workspace:*",
     "ws": "^8.20.1"
   },
   "devDependencies": {
-    "@aipehub/transport-ws": "workspace:*",
+    "@gotong/transport-ws": "workspace:*",
     "@types/ws": "^8.5.13",
     "vitest": "^3.2.4"
   }

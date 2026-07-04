@@ -20,7 +20,7 @@
  * the ctx into the LlmAgent constructor. SDK-connected external
  * agents are free to skip services entirely.
  *
- * The type sits in `services-sdk` so the `@aipehub/llm` package can
+ * The type sits in `services-sdk` so the `@gotong/llm` package can
  * import it without taking a runtime dep on the host. Agents that
  * declare `uses:` get a typed-aware ctx; agents that don't simply
  * never read it.
@@ -32,7 +32,7 @@ import type { MemoryHandle } from './memory.js'
 
 /**
  * Minimal task-result shape an agent sees when its nested
- * `ctx.dispatch?.dispatch(...)` call resolves. Mirrors `@aipehub/core`'s
+ * `ctx.dispatch?.dispatch(...)` call resolves. Mirrors `@gotong/core`'s
  * `TaskResult` discriminated union but declared inline so this package
  * doesn't take a runtime dep on `core` (services-sdk → core would be a
  * reverse arrow). At the seam (LocalAgentPool wiring) we just cast.

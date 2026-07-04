@@ -19,8 +19,8 @@
  */
 
 import type { IncomingMessage, ServerResponse } from 'node:http'
-import type { AdminRecord, HubMcpServerRecord, McpServerSpec } from '@aipehub/core'
-import { createLogger } from '@aipehub/core'
+import type { AdminRecord, HubMcpServerRecord, McpServerSpec } from '@gotong/core'
+import { createLogger } from '@gotong/core'
 
 import { BUILTIN_MCP_CONNECTORS } from './builtin-mcp-connectors.js'
 import { readJsonBody, sendJson } from './http-helpers.js'

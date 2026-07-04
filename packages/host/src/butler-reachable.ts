@@ -11,7 +11,7 @@
  *   - S3-M1: a reminder firing when its suspended task resumes;
  *   - S3-M2: a morning brief the heartbeat emits.
  *
- * All three need the same primitive: given an AipeHub `userId`, deliver a line of
+ * All three need the same primitive: given an Gotong `userId`, deliver a line of
  * text to wherever that member last talked to us. This module is that primitive.
  *
  * ── How reachability is learned ──────────────────────────────────────────────
@@ -35,8 +35,8 @@
 import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
-import type { ImBridge, ImUser } from '@aipehub/im-adapter'
-import { assertSafeOwnerId } from '@aipehub/services-sdk'
+import type { ImBridge, ImUser } from '@gotong/im-adapter'
+import { assertSafeOwnerId } from '@gotong/services-sdk'
 
 import type { ImLogger } from './im-bridge.js'
 

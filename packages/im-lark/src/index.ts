@@ -1,5 +1,5 @@
 /**
- * @aipehub/im-lark — public surface.
+ * @gotong/im-lark — public surface.
  */
 
 export {

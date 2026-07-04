@@ -9,7 +9,7 @@
 
 ## 1. Why "zero compute"
 
-AipeHub's whole design stance is **the hub doesn't run the LLM itself / state is all disk files / credentials stay on your machine / federation is peer-to-peer**. Follow that stance through and **the community infrastructure doesn't need a server either**:
+Gotong's whole design stance is **the hub doesn't run the LLM itself / state is all disk files / credentials stay on your machine / federation is peer-to-peer**. Follow that stance through and **the community infrastructure doesn't need a server either**:
 
 - **GitHub already hosts the substance** — a template is a file, a submission is a PR.
 - **The only thing missing is a storefront** — and the storefront for a file-first project is itself a pile of static files.
@@ -17,7 +17,7 @@ AipeHub's whole design stance is **the hub doesn't run the LLM itself / state is
 So this storefront = one generator + the static files it produces. The generator is [`packages/web/scripts/build-site.mjs`](../packages/web/scripts/build-site.mjs), producing `site/` (repo root, gitignored):
 
 - `index.html` — a self-contained single file (no framework, no runtime, inline CSS): the trust-narrative hero + a template-gallery card grid + the citation-leaderboard table.
-- `templates.json` — a machine-readable `aipehub.site/v1` feed (the storefront is also data, file-first).
+- `templates.json` — a machine-readable `gotong.site/v1` feed (the storefront is also data, file-first).
 
 Drop `site/` on any free tier of GitHub Pages / Cloudflare Pages / Netlify and the storefront is live at **$0**. The Tencent Cloud 2c2G box keeps idling as backup.
 

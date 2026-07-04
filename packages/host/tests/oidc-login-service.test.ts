@@ -19,7 +19,7 @@ import {
   MASTER_KEY_LEN_BYTES,
   OidcError,
   type IdTokenClaims,
-} from '@aipehub/identity'
+} from '@gotong/identity'
 import { OidcLoginService, type OidcLoginClient } from '../src/oidc-login-service.js'
 
 const FIXED_KEY = randomBytes(MASTER_KEY_LEN_BYTES)

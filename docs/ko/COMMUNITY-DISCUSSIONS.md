@@ -22,7 +22,7 @@
 
 **Discussions 활성화는 저장소 설정 토글이지 파일이 아닙니다 — Claude도 CI도 이를 변경할 수 없습니다.** 이 단계는 저장소 소유자가 웹 UI에서 직접 수행해야 합니다:
 
-1. `https://github.com/Emir-Aksoy/AipeHub/settings` (저장소 **Settings**)를 엽니다.
+1. `https://github.com/Emir-Aksoy/Gotong/settings` (저장소 **Settings**)를 엽니다.
 2. **Features** 섹션으로 스크롤하여 **Discussions**를 체크합니다.
 3. GitHub이 **기본 카테고리를 자동 생성**합니다: Announcements / General / **Ideas** / Polls / **Q&A** / **Show and tell**. 이 저장소와 함께 제공된 세 가지 폼 템플릿 (§4 참조)은 굵게 표시된 세 가지를 대상으로 하며, 활성화하는 **순간** 자동으로 연결됩니다 — 카테고리를 수동으로 생성할 필요가 없습니다.
 
@@ -63,19 +63,19 @@
 
 ## 5. 환영 / 고정 게시물 초안 (복사해 붙여넣기 준비 완료)
 
-Discussions를 활성화한 후, **아래 전체 블록을 복사**하고, **General** 카테고리에 제목 `👋 欢迎来到 AipeHub 客厅 / Welcome`으로 새 Discussion을 게시한 다음 **Pin**을 클릭합니다. 원본 초안은 중국어 (커뮤니티의 주요 청중)를 먼저, 영어를 다음으로 배치합니다; 청중에 맞게 순서를 조정하세요.
+Discussions를 활성화한 후, **아래 전체 블록을 복사**하고, **General** 카테고리에 제목 `👋 欢迎来到 Gotong 客厅 / Welcome`으로 새 Discussion을 게시한 다음 **Pin**을 클릭합니다. 원본 초안은 중국어 (커뮤니티의 주요 청중)를 먼저, 영어를 다음으로 배치합니다; 청중에 맞게 순서를 조정하세요.
 
 ```markdown
-## 👋 Welcome to the AipeHub living room
+## 👋 Welcome to the Gotong living room
 
-This is where the AipeHub community hangs out — ask, show, and talk shop. The map:
+This is where the Gotong community hangs out — ask, show, and talk shop. The map:
 
 - **🙋 A question?** Open one in **Q&A**. Say what you're trying to do and what you
   tried; someone will help.
 - **🛠 Built something?** Show it in **Show & Tell**. If it's a template others can
   import-and-run, submit it to the one-click gallery via the
   [submit flow](../../tree/main/templates/community/templates).
-- **💡 An idea?** Pitch it in **Ideas**. AipeHub has a deliberate spine — aiming with
+- **💡 An idea?** Pitch it in **Ideas**. Gotong has a deliberate spine — aiming with
   it lands better: **the hub never runs an LLM · people and agents are the same
   Participant · state is files on disk · federation is peer-to-peer (workflows can
   cross org lines, but credentials/data/billing each stay home)**.
@@ -90,14 +90,14 @@ people, rigorous about ideas — full text in the
 
 ---
 
-## 👋 欢迎来到 AipeHub 客厅
+## 👋 欢迎来到 Gotong 客厅
 
-这里是 AipeHub 的客厅——问问题、晒成果、聊想法的地方。先认认门:
+这里是 Gotong 的客厅——问问题、晒成果、聊想法的地方。先认认门:
 
 - **🙋 有问题?** 去 **Q&A** 开一帖。说清楚你想做什么、试过什么,有人会帮你。
 - **🛠 做了东西?** 去 **Show & Tell** 晒出来。如果是一个**别人能照着导入就跑**的
   模板,顺手按 [提交流程](../../tree/main/templates/community/templates) 提进一键画廊。
-- **💡 有想法?** 去 **Ideas** 提。AipeHub 有一条明确的脊梁,对着它提更容易被采纳:
+- **💡 有想法?** 去 **Ideas** 提。Gotong 有一条明确的脊梁,对着它提更容易被采纳:
   **框架不跑大模型 · 人和 agent 是同一种参与者 · 状态都是磁盘文件 · 联邦点对点
   (工作流能跨边界,但凭证/数据/计费各归各家)**。
 - **🐞 发现 bug?** 那个去 [Issues](../../issues/new/choose),不在这里。

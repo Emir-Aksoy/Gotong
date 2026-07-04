@@ -11,10 +11,10 @@
 
 ## Por qué estas
 
-El diferenciador de AipeHub no es "poder llamar a la IA" — eso está en todas partes. Es que **te atreves a apuntar la IA a tu hogar, tu familia, tu dinero**, porque los límites son reales y son tuyos:
+El diferenciador de Gotong no es "poder llamar a la IA" — eso está en todas partes. Es que **te atreves a apuntar la IA a tu hogar, tu familia, tu dinero**, porque los límites son reales y son tuyos:
 
 - **Un humano es el guardián de las acciones críticas.** Las reversibles (apagar una luz) simplemente ocurren; las irreversibles (cerrar una puerta con llave, gastar dinero, enviar datos de un niño) se suspenden y esperan que un humano lo confirme en la bandeja de entrada — el flujo de trabajo **no puede saltarse** ese guardián.
-- **Las claves y los datos están en tu propio disco.** Las credenciales están cifradas en tu directorio `.aipehub/`. La federación con otro hub comparte una **capacidad**, no tu bóveda.
+- **Las claves y los datos están en tu propio disco.** Las credenciales están cifradas en tu directorio `.gotong/`. La federación con otro hub comparte una **capacidad**, no tu bóveda.
 - **Sin decisiones de caja negra.** Cada despacho y resultado es una transcripción legible y de solo lectura. El framework nunca ejecuta el modelo; no hay juicios ocultos.
 
 Cada plantilla a continuación son estos tres principios **aplicados a una cosa concreta**.

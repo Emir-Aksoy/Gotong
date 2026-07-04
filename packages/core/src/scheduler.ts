@@ -74,7 +74,7 @@ export type CrossHubDispatcher = (task: Task) => Promise<TaskResult>
  * Phase 11 M2 — Called when a participant throws `SuspendTaskError`
  * from `onTask` / `onResume`. The scheduler hands off the carried
  * `(resumeAt, state)` plus the task / executor identity so the host
- * can persist a suspended-task row (in `@aipehub/identity` SQLite).
+ * can persist a suspended-task row (in `@gotong/identity` SQLite).
  *
  * Return shape:
  *   - resolves → scheduler returns `{ kind: 'suspended', ... }`

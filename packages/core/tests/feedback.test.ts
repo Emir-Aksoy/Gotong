@@ -164,7 +164,7 @@ describe('FileFeedbackStorage — persists across instances', () => {
   let dir: string
 
   beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), 'aipehub-feedback-test-'))
+    dir = mkdtempSync(join(tmpdir(), 'gotong-feedback-test-'))
   })
   afterEach(() => {
     try {
@@ -227,7 +227,7 @@ describe('Hub.feedback integration', () => {
   })
 
   it('Hub backed by space writes feedback to <space>/feedback/outbound.jsonl', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'aipehub-space-test-'))
+    const dir = mkdtempSync(join(tmpdir(), 'gotong-space-test-'))
     try {
       const { Space } = await import('../src/space.js')
       const opened = await Space.openOrInit(dir, { name: 'test-space' })

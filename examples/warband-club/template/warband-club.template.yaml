@@ -1,4 +1,4 @@
-# 战团同好会 — 可载入模板 (aipehub.template/v1)
+# 战团同好会 — 可载入模板 (gotong.template/v1)
 #
 # 这是第二个**组织 hub** 模板 (第一个是 cafe-ops 门店运营)。两个模板对照着看:
 #   - cafe-ops    自上而下的正式流程 (店长审批排班 / 加班) —— 组织的「管理」面。
@@ -14,7 +14,7 @@
 #       · 司库 (archivist) —— 归档贡献 (warband.file-contribution) + 检索作答
 #         (warband.consult-archive),两件事都落在同一个共享档案库上。
 #       · 传令官 (herald) —— 把集结提议整理成章程 (warband.draft-muster)。
-#     工作流里的 human: 步骤派到 aipehub.human/v1 —— host 自带的收件箱 broker,不是
+#     工作流里的 human: 步骤派到 gotong.human/v1 —— host 自带的收件箱 broker,不是
 #     模板 agent (战团长在 /me 拍板)。
 #   - 3 条声明式工作流,覆盖一个同好会最常见的三件事:
 #       1. 贡献档案 (surface.me 成员自助, 无审批) —— 共享资源的「写」。
@@ -33,7 +33,7 @@
 #     -H 'content-type: application/json' \
 #     -d "$(jq -Rs '{template: .}' examples/warband-club/template/warband-club.template.yaml)" \
 #     http://127.0.0.1:8745/api/admin/templates/import
-schema: aipehub.template/v1
+schema: gotong.template/v1
 template:
   name: 战团同好会(共享档案库)
   description: |-
@@ -110,10 +110,10 @@ template:
             OBSIDIAN_PORT: ${OBSIDIAN_PORT}
 
   # ── 3 条声明式工作流 ───────────────────────────────────────────────────────────
-  # 每条都是一个 aipehub.workflow/v1 的内层 block(id / trigger / steps / …);导入时
+  # 每条都是一个 gotong.workflow/v1 的内层 block(id / trigger / steps / …);导入时
   # parseTemplate 会逐条重新序列化成完整 workflow yaml 交给 workflow runtime 校验 + 注册。
   # surface.me 让成员能在 /me 自助发起(角色门 + 用户作用域由 /me 层强制);human: 步骤
-  # 派到 aipehub.human/v1 → host 收件箱 broker 挂起任务,战团长批了才恢复(Phase 14 + 16)。
+  # 派到 gotong.human/v1 → host 收件箱 broker 挂起任务,战团长批了才恢复(Phase 14 + 16)。
   workflows:
     # (1) 贡献档案 — 成员自助, 无审批。共享资源的「写」。
     - id: warband-contribute

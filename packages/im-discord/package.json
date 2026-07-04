@@ -1,8 +1,8 @@
 {
-  "name": "@aipehub/im-discord",
+  "name": "@gotong/im-discord",
   "version": "0.1.0",
   "type": "module",
-  "description": "AipeHub IM bridge for Discord — implements ImBridge against the Bot API (WebSocket Gateway v10 + REST). No discord.js dep (uses fetch + WebSocket).",
+  "description": "Gotong IM bridge for Discord — implements ImBridge against the Bot API (WebSocket Gateway v10 + REST). No discord.js dep (uses fetch + WebSocket).",
   "license": "MIT",
   "private": true,
   "main": "./dist/index.js",
@@ -25,7 +25,7 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "@aipehub/im-adapter": "workspace:*"
+    "@gotong/im-adapter": "workspace:*"
   },
   "devDependencies": {
     "vitest": "^3.2.4"

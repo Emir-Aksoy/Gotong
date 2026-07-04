@@ -1,13 +1,13 @@
-# One-click monitoring stack for an AipeHub host (Route B P0-M7).
+# One-click monitoring stack for an Gotong host (Route B P0-M7).
 #
 # Brings up Prometheus (scrape + alert rules), Alertmanager (severity routing),
-# and Grafana (the AipeHub dashboard, auto-provisioned). It scrapes the Hub's
+# and Grafana (the Gotong dashboard, auto-provisioned). It scrapes the Hub's
 # internal /metrics route — no machine-admin token needed.
 #
-#   1. On the HOST: export AIPE_METRICS_TOKEN=<a long random secret> and
+#   1. On the HOST: export GOTONG_METRICS_TOKEN=<a long random secret> and
 #      (re)start the hub, so GET /metrics serves to a bearer holder.
 #   2. Put the SAME token, one line no trailing newline, in
-#      ./secrets/aipehub.token  (cp ./secrets/aipehub.token.example first).
+#      ./secrets/gotong.token  (cp ./secrets/gotong.token.example first).
 #   3. docker compose up -d
 #   4. Grafana    → http://localhost:3001  (admin / admin, dashboard pre-loaded)
 #      Prometheus → http://localhost:9090
@@ -25,8 +25,8 @@ services:
       - --storage.tsdb.retention.time=15d
     volumes:
       - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
-      - ./prometheus/aipehub.alerts.yml:/etc/prometheus/aipehub.alerts.yml:ro
-      - ./secrets/aipehub.token:/etc/prometheus/aipehub.token:ro
+      - ./prometheus/gotong.alerts.yml:/etc/prometheus/gotong.alerts.yml:ro
+      - ./secrets/gotong.token:/etc/prometheus/gotong.token:ro
       - prometheus-data:/prometheus
     ports:
       - '9090:9090'
@@ -51,7 +51,7 @@ services:
       - GF_USERS_ALLOW_SIGN_UP=false
     volumes:
       - ./grafana/provisioning:/etc/grafana/provisioning:ro
-      - ./grafana/aipehub-overview.json:/var/lib/grafana/dashboards/aipehub-overview.json:ro
+      - ./grafana/gotong-overview.json:/var/lib/grafana/dashboards/gotong-overview.json:ro
       - grafana-data:/var/lib/grafana
     ports:
       - '3001:3000'

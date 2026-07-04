@@ -1,9 +1,9 @@
-# Contributing to AipeHub
+# Contributing to Gotong
 
 <!-- doc-version: 1.0 -->
 > **Doc version 1.0** · English (authoritative source) · Updated 2026-06-27 · Translations: [中文](docs/zh/CONTRIBUTING.md) · [日本語](docs/ja/CONTRIBUTING.md) · [Русский](docs/ru/CONTRIBUTING.md) · [Français](docs/fr/CONTRIBUTING.md) · [Español](docs/es/CONTRIBUTING.md) · [한국어](docs/ko/CONTRIBUTING.md). If a translation conflicts with this English version, the English version governs.
 
-Thanks for considering a contribution. AipeHub is an early-stage project
+Thanks for considering a contribution. Gotong is an early-stage project
 and we are happy to take patches, bug reports, design feedback, and
 documentation improvements — **and we mean every kind of contribution, big
 or small.** Building something new and *carrying the project to people* both
@@ -19,7 +19,7 @@ video, a talk that brings people in. All of it is recognized — see
   want a senior engineer to treat you on a bad day.
 - **Small PRs.** Independent changes ship faster than mega-PRs. If a
   feature splits cleanly, send the parts separately.
-- **The Hub stays dumb.** AipeHub's whole design idea is that the Hub
+- **The Hub stays dumb.** Gotong's whole design idea is that the Hub
   routes / persists and does not own agent logic. Patches that put LLM
   calls, agent loops, or business rules into the Hub will be redirected.
 - **Wire protocol is versioned.** Anything that changes the
@@ -32,8 +32,8 @@ video, a talk that brings people in. All of it is recognized — see
 
 ```bash
 # fork on GitHub, then:
-git clone git@github.com:<you>/AipeHub.git
-cd AipeHub
+git clone git@github.com:<you>/Gotong.git
+cd Gotong
 pnpm install
 pnpm build
 
@@ -87,7 +87,7 @@ If you want a low-context starter task, look for issues labelled
 
 ## Contributing a template
 
-You don't have to write TypeScript to contribute. AipeHub ships **templates** —
+You don't have to write TypeScript to contribute. Gotong ships **templates** —
 self-contained YAML that someone imports to get a working hub (agents +
 workflows + knowledge-base references, never secrets or knowledge content).
 
@@ -105,7 +105,7 @@ no literal secrets) is lower than the bar to be *shipped as a flagship*
 
 ## Spreading the word counts too
 
-You don't have to ship code *or* a template to contribute. Carrying AipeHub to
+You don't have to ship code *or* a template to contribute. Carrying Gotong to
 people — a blog post, a tutorial, a talk, a video, a translation, answering
 newcomers in Discussions — is real work, and in our experience most open source
 under-credits it. **We don't.** A good product only gets better by reaching

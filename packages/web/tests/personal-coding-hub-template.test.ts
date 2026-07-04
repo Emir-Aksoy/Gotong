@@ -17,7 +17,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { Hub, Space } from '@aipehub/core'
+import { Hub, Space } from '@gotong/core'
 
 import { serveWeb, type WebServerHandle, type WorkflowSurface } from '../src/server.js'
 import { parseTemplate } from '../src/template-manifest.js'
@@ -36,7 +36,7 @@ beforeEach(async () => {
 })
 
 describe('examples/personal-coding-hub/template (CW4)', () => {
-  it('parses as a valid aipehub.template/v1 manifest', () => {
+  it('parses as a valid gotong.template/v1 manifest', () => {
     const t = parseTemplate(templateText)
     expect(t.name).toBe('个人编码导师(Karpathy 工作流)')
     expect(t.version).toBe(1)
@@ -74,7 +74,7 @@ describe('examples/personal-coding-hub/template (CW4)', () => {
   })
 
   it('imports end-to-end: the mentor agent lands, KB slot is reported', async () => {
-    const tmp = await mkdtemp(join(tmpdir(), 'aipehub-pch-'))
+    const tmp = await mkdtemp(join(tmpdir(), 'gotong-pch-'))
     const { space } = await Space.init(tmp, { name: 'pch-test' })
     const hub = new Hub({ space })
     await hub.start()

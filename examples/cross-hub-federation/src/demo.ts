@@ -14,7 +14,7 @@
  * `connectHubLink`, and BOTH sides present + verify a bearer token (`bearerAuth`).
  * The approved task crosses an actual socket; the rejected one never opens it; and
  * a peer that shows up with the WRONG token is turned away at the handshake. In
- * production the token is minted by `aipehub mint-peer-token` and handed to the
+ * production the token is minted by `gotong mint-peer-token` and handed to the
  * other operator out-of-band (see docs/zh/FEDERATION-RUNBOOK.md).
  *
  * What this demo proves end to end (deterministic, no API key):
@@ -56,17 +56,17 @@ import {
   type ParticipantId,
   type Task,
   type TaskResult,
-} from '@aipehub/core'
-import { acceptHubLinks, bearerAuth, connectHubLink } from '@aipehub/transport-ws'
-import { FileInboxStore, NEVER_RESUME_AT, type InboxDecision, type InboxItem } from '@aipehub/inbox'
-import { parseWorkflow, WorkflowRunner } from '@aipehub/workflow'
+} from '@gotong/core'
+import { acceptHubLinks, bearerAuth, connectHubLink } from '@gotong/transport-ws'
+import { FileInboxStore, NEVER_RESUME_AT, type InboxDecision, type InboxItem } from '@gotong/inbox'
+import { parseWorkflow, WorkflowRunner } from '@gotong/workflow'
 import { WebSocketServer } from 'ws'
 
 const WORKFLOWS_DIR = fileURLToPath(new URL('../workflows', import.meta.url))
 const OWNER = 'org-a-owner' as ParticipantId // approves outbound sends from their /me inbox
 const PEER_CAP = 'legal.contract-review'
 
-// In production this is minted by `aipehub mint-peer-token` (256-bit base64url)
+// In production this is minted by `gotong mint-peer-token` (256-bit base64url)
 // and handed to org B's operator out-of-band; org B configures it on its peer
 // record so its `acceptHubLinks` resolver verifies it. A fixed constant here keeps
 // the demo deterministic — NEVER reuse a literal token like this for real.
@@ -193,9 +193,9 @@ class OutboundApprovalGate {
 }
 
 async function main(): Promise<void> {
-  console.log('\n=== AipeHub case: cross-hub-federation — 两个真 hub 过真 WebSocket 跨组织协作 ===\n')
+  console.log('\n=== Gotong case: cross-hub-federation — 两个真 hub 过真 WebSocket 跨组织协作 ===\n')
 
-  const tmp = mkdtempSync(join(tmpdir(), 'aipehub-cross-hub-fed-'))
+  const tmp = mkdtempSync(join(tmpdir(), 'gotong-cross-hub-fed-'))
   const parked = new Map<string, ParkedRow>()
   const inbox = new FileInboxStore(tmp)
   inbox.ensureDirs()

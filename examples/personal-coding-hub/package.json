@@ -1,5 +1,5 @@
 {
-  "name": "@aipehub/example-personal-coding-hub",
+  "name": "@gotong/example-personal-coding-hub",
   "version": "0.0.0",
   "type": "module",
   "private": true,
@@ -16,10 +16,10 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@aipehub/cli-agent": "workspace:*",
-    "@aipehub/core": "workspace:*",
-    "@aipehub/llm": "workspace:*",
-    "@aipehub/llm-openai": "workspace:*",
+    "@gotong/cli-agent": "workspace:*",
+    "@gotong/core": "workspace:*",
+    "@gotong/llm": "workspace:*",
+    "@gotong/llm-openai": "workspace:*",
     "yaml": "^2.6.0"
   }
 }

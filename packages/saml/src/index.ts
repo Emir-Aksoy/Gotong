@@ -1,5 +1,5 @@
 /**
- * @aipehub/saml — SAML 2.0 SP protocol core.
+ * @gotong/saml — SAML 2.0 SP protocol core.
  *
  * Pure functions for SP-initiated SSO: AuthnRequest generation (HTTP-Redirect
  * binding), SAMLResponse validation (XML-DSig via xml-crypto, with explicit

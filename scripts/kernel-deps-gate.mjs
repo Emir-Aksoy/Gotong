@@ -2,13 +2,13 @@
 /**
  * kernel-deps-gate — GUARD-M1. A load-bearing gate on the kernel's dependency
  * direction. Reads each package's `dependencies` and asserts the arrows that
- * make AipeHub's core clean (CLAUDE.md 缺口 2: "protocol 零依赖 → core →
+ * make Gotong's core clean (CLAUDE.md 缺口 2: "protocol 零依赖 → core →
  * workflow / inbox, 依赖方向正确"). It fails the moment someone adds an edge
  * that inverts the graph — a hub package reaching up into the assembly layer,
  * the wire root growing a dependency, the workflow runner pulling in an LLM.
  *
  * Only `dependencies` (the runtime graph) are checked; devDependencies (build
- * tooling) don't define architecture. Names are compared with the `@aipehub/`
+ * tooling) don't define architecture. Names are compared with the `@gotong/`
  * prefix stripped.
  *
  *   node scripts/kernel-deps-gate.mjs      # exit 0 clean / 1 on any violation
@@ -31,11 +31,11 @@ const ASSEMBLY = ['host', 'web', 'cli']
 const KERNEL = ['protocol', 'core', 'workflow', 'inbox', 'a2a']
 
 /**
- * Per-package invariants. `allowExactly` / `allowSubsetOf` bound the @aipehub
+ * Per-package invariants. `allowExactly` / `allowSubsetOf` bound the @gotong
  * deps; `forbid` names edges that must never appear. Omitted fields = unchecked.
  */
 const RULES = [
-  // The wire root: zero @aipehub dependencies, forever. Everything points AT it.
+  // The wire root: zero @gotong dependencies, forever. Everything points AT it.
   { pkg: 'protocol', allowExactly: [] },
   // Core sees only the wire types — never a leaf, never the assembly layer.
   { pkg: 'core', allowSubsetOf: ['protocol'] },
@@ -55,13 +55,13 @@ const RULES = [
   { pkg: 'web', forbid: ['host'] },
 ]
 
-function aipehubDeps(pkg) {
+function gotongDeps(pkg) {
   const p = join(REPO, 'packages', pkg, 'package.json')
   if (!existsSync(p)) return { missing: true, deps: [] }
   const json = JSON.parse(readFileSync(p, 'utf8'))
   const deps = Object.keys(json.dependencies ?? {})
-    .filter((k) => k.startsWith('@aipehub/'))
-    .map((k) => k.slice('@aipehub/'.length))
+    .filter((k) => k.startsWith('@gotong/'))
+    .map((k) => k.slice('@gotong/'.length))
     .sort()
   return { missing: false, deps }
 }
@@ -71,14 +71,14 @@ function main() {
 
   for (const rule of RULES) {
     const { pkg } = rule
-    const { missing, deps } = aipehubDeps(pkg)
+    const { missing, deps } = gotongDeps(pkg)
     if (missing) {
       violations.push(`${pkg}: package.json not found (stale rule in kernel-deps-gate?)`)
       continue
     }
     if (rule.allowExactly) {
       const extra = deps.filter((d) => !rule.allowExactly.includes(d))
-      if (extra.length) violations.push(`${pkg}: must have exactly [${rule.allowExactly.join(', ') || '∅'}] @aipehub deps, but also has [${extra.join(', ')}]`)
+      if (extra.length) violations.push(`${pkg}: must have exactly [${rule.allowExactly.join(', ') || '∅'}] @gotong deps, but also has [${extra.join(', ')}]`)
     }
     if (rule.allowSubsetOf) {
       const extra = deps.filter((d) => !rule.allowSubsetOf.includes(d))
@@ -92,7 +92,7 @@ function main() {
 
   // Global rule: no kernel package may depend on the assembly / entry layer.
   for (const pkg of KERNEL) {
-    const { missing, deps } = aipehubDeps(pkg)
+    const { missing, deps } = gotongDeps(pkg)
     if (missing) continue
     const up = deps.filter((d) => ASSEMBLY.includes(d))
     if (up.length) violations.push(`${pkg} (kernel) depends on assembly layer [${up.join(', ')}] — the arrow must point the other way`)

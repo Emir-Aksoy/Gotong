@@ -12,7 +12,7 @@
  * honouring the two hard constraints through a SECOND confirmation:
  *
  *   ★② a `delete_agent` (DANGEROUS) parks in the OPERATOR's inbox under the
- *      OPERATOR broker id (`aipehub:steward-exec:operator`, disjoint from the
+ *      OPERATOR broker id (`gotong:steward-exec:operator`, disjoint from the
  *      member broker) — nothing removed until APPROVE; a REJECT leaves it intact;
  *      and the operator can delete an agent it NEVER created (site-wide reach the
  *      member service structurally cannot do).
@@ -44,21 +44,21 @@ import {
   type AgentRecord,
   type ManagedAgentLifecycle,
   type ParticipantId,
-} from '@aipehub/core'
-import { MockLlmProvider, type LlmRequest } from '@aipehub/llm'
+} from '@gotong/core'
+import { MockLlmProvider, type LlmRequest } from '@gotong/llm'
 import {
   MASTER_KEY_LEN_BYTES,
   openIdentityStore,
   userPrincipal,
   type IdentityStore,
-} from '@aipehub/identity'
-import { FileInboxStore, NEVER_RESUME_AT } from '@aipehub/inbox'
+} from '@gotong/identity'
+import { FileInboxStore, NEVER_RESUME_AT } from '@gotong/inbox'
 import {
   WorkflowAssistantAgent,
   WORKFLOW_ASSISTANT_CAPABILITY,
   type WorkflowAssistantOutput,
-} from '@aipehub/workflow-assistant'
-import { buildOperatorStewardSystemPrompt, type StewardAction } from '@aipehub/hub-steward'
+} from '@gotong/workflow-assistant'
+import { buildOperatorStewardSystemPrompt, type StewardAction } from '@gotong/hub-steward'
 
 import { WorkflowController, type PeerCapabilityView } from '../src/workflow-controller.js'
 import { MeWorkflowEditService, type WorkflowAssistView } from '../src/me-workflow-edit-service.js'
@@ -91,7 +91,7 @@ const ASSIST_MARK = 'MARK_CROSSLOCAL'
 // B-M4 — a throwaway env var + secret for the sensitive credential scenarios. The
 // action only ever NAMES this var; the secret lives in the env channel and must
 // never appear in a proposal / inbox item / parked suspended-task row.
-const CRED_ENV = 'AIPE_TEST_OPERATOR_STEWARD_CRED'
+const CRED_ENV = 'GOTONG_TEST_OPERATOR_STEWARD_CRED'
 const CRED_SECRET = 'sk-operator-secret-never-in-any-artifact'
 
 // The verbatim site-wide id the operator names directly (no `me.<userId>.*`).
@@ -163,7 +163,7 @@ function stewardReply(req: LlmRequest): string {
 
 function yamlWf(opts: { id: string; trigger: string; steps: string[] }): string {
   return (
-    ['schema: aipehub.workflow/v1', 'workflow:', `  id: ${opts.id}`, '  trigger:', `    capability: ${opts.trigger}`, '  steps:', ...opts.steps].join(
+    ['schema: gotong.workflow/v1', 'workflow:', `  id: ${opts.id}`, '  trigger:', `    capability: ${opts.trigger}`, '  steps:', ...opts.steps].join(
       '\n',
     ) + '\n'
   )
@@ -236,7 +236,7 @@ interface Rig {
 }
 
 async function boot(): Promise<Rig> {
-  const tmp = await mkdtemp(join(tmpdir(), 'aipe-operator-steward-e2e-'))
+  const tmp = await mkdtemp(join(tmpdir(), 'gotong-operator-steward-e2e-'))
   const { space } = await Space.init(tmp, { name: 'operator-steward-e2e' })
 
   const identity = openIdentityStore({
@@ -409,7 +409,7 @@ describe('SW-M9 A-M7 — operator hub steward end-to-end (site-wide, the two har
     // resolve wakes the operator's broker, never the member's.
     const row = r.identity.getSuspendedTask(res.inboxItemId)
     expect(row?.agentId).toBe(OPERATOR_STEWARD_IDS.brokerId)
-    expect(OPERATOR_STEWARD_IDS.brokerId).toBe('aipehub:steward-exec:operator')
+    expect(OPERATOR_STEWARD_IDS.brokerId).toBe('gotong:steward-exec:operator')
     expect(row?.resumeAt).toBe(NEVER_RESUME_AT)
     expect(r.identity.listDueSuspendedTasks({ now: Date.now() }).some((d) => d.taskId === res.inboxItemId)).toBe(false)
 

@@ -4,7 +4,7 @@
 > **Versión del documento 1.0** · Traducción al español · Actualizado el 2026-06-27 · Fuente autorizada: [English](../COMPETITIVE-LANDSCAPE.md). Si la traducción entra en conflicto con la versión en inglés, prevalece la versión en inglés.
 
 > Fecha de estudio: 2026-05-29. Cubre 30+ proyectos/protocolos en cuatro pistas. Escrito tanto para agentes como para lectores humanos.
-> Conclusión en una línea: **ningún competidor tiene los cuatro pilares de AipeHub a la vez** — un hub tonto (las decisiones viven en los participantes) / humano = agente como un único `Participant` unificado / archivos como estado / federación soberana por organización. El mercado está dividido en cuatro bloques, cada uno tiene uno o dos pilares y le faltan el resto.
+> Conclusión en una línea: **ningún competidor tiene los cuatro pilares de Gotong a la vez** — un hub tonto (las decisiones viven en los participantes) / humano = agente como un único `Participant` unificado / archivos como estado / federación soberana por organización. El mercado está dividido en cuatro bloques, cada uno tiene uno o dos pilares y le faltan el resto.
 >
 > Lectura complementaria: [`PRODUCT-MATRIX.md`](../PRODUCT-MATRIX.md) (2026-06-21) — una matriz de comparación a nivel de producto (una tabla de fortalezas, una tabla de debilidades) + "qué usuario desatendido con una necesidad real nos queda mejor" + cómo la bajada de precios de DeepSeek desbloquea esa celda. Este documento es el mapa de pistas; ese es el juicio a nivel de producto sobre el usuario objetivo.
 
@@ -23,7 +23,7 @@
 
 ## 2. Posicionamiento
 
-> Otros son "**el framework es el cerebro**" (①), o "**LLM integrado en el lienzo, humano como nodo de aprobación**" (③), o "**solo un motor backend / solo un puente de mensajes**" (④). AipeHub es "**hub tonto + humano como participante + archivos como estado + federación soberana por organización**" — un **sustrato de colaboración**, no otro orquestador en proceso.
+> Otros son "**el framework es el cerebro**" (①), o "**LLM integrado en el lienzo, humano como nodo de aprobación**" (③), o "**solo un motor backend / solo un puente de mensajes**" (④). Gotong es "**hub tonto + humano como participante + archivos como estado + federación soberana por organización**" — un **sustrato de colaboración**, no otro orquestador en proceso.
 
 ---
 
@@ -51,7 +51,7 @@
 
 ## 5. Capa de protocolo de interoperabilidad (el objetivo de alineación más accionable)
 
-En H2 2025, los protocolos de interoperabilidad fueron colectivamente absorbidos por la Linux Foundation y divididos en dos capas, con AipeHub abarcando ambas:
+En H2 2025, los protocolos de interoperabilidad fueron colectivamente absorbidos por la Linux Foundation y divididos en dos capas, con Gotong abarcando ambas:
 
 - **Capa de herramientas (agente↔herramienta): MCP gana claramente.** 2025-12 Anthropic lo donó a la **Agentic AI Foundation (AAIF)** alojada en LF (co-construida con OpenAI/Block), ~97M descargas mensuales, ~10k servidores.
 - **Capa de agentes (agente↔agente entre organizaciones): A2A gana claramente.** Se unió a LF en 2025-06; **absorbió IBM ACP** en 2025-08; en su primer aniversario, **150+ organizaciones** en uso en producción.
@@ -66,7 +66,7 @@ En H2 2025, los protocolos de interoperabilidad fueron colectivamente absorbidos
 | NANDA | descubrimiento+identidad+economía | MIT Media Lab | DID+credenciales verificables+AgentFacts | semántica (registro) | investigación/no en producción |
 | Matrix | **transporte** de mensajes federado | Matrix.org | MXID federado por homeserver | transporte | 60M+ usuarios |
 
-**Mapeo de primitivos de federación de AipeHub → estándares:**
+**Mapeo de primitivos de federación de Gotong → estándares:**
 
 | Nuestro primitivo | Estándar alineado | Conclusión |
 |---|---|---|
@@ -83,7 +83,7 @@ En H2 2025, los protocolos de interoperabilidad fueron colectivamente absorbidos
 ## 6. Direcciones de mejora (ordenadas por "apalancamiento / contribución a la estrella del norte")
 
 **🔴 Alto apalancamiento**
-1. **Alinear a A2A (el movimiento de mayor valor único)** — exponer `/.well-known/agent-card.json`, re-expresar `peerToken` como esquema Bearer/OAuth2/mTLS declarado por A2A, para que un hub de AipeHub pueda federar con el ecosistema A2A de 150+ organizaciones, no solo AipeHub↔AipeHub. La procedencia de extremo a extremo `Task.origin` está realmente por delante de la especificación actual de A2A.
+1. **Alinear a A2A (el movimiento de mayor valor único)** — exponer `/.well-known/agent-card.json`, re-expresar `peerToken` como esquema Bearer/OAuth2/mTLS declarado por A2A, para que un hub de Gotong pueda federar con el ecosistema A2A de 150+ organizaciones, no solo Gotong↔Gotong. La procedencia de extremo a extremo `Task.origin` está realmente por delante de la especificación actual de A2A.
 2. **Llenar la amplitud de integración a través del ecosistema MCP**, en lugar de construir nuestros propios conectores — MCP ya está alojado en LF con ~10k servidores. Hacer que "capacidad de integración = instalar un servidor MCP" sea un proceso de incorporación de primera clase, convirtiendo el foso "8000 conectores" del otro lado en "abrazar un estándar abierto."
 3. **Actualizar los primitivos de dispatch en plantillas de orquestación reutilizables** — construir supervisor/trabajador, debate, enjambre paralelo en `templates/`, igualando la experiencia terminada de Flowise Agentflow / Lindy Swarms (architect-team ya sienta una base).
 

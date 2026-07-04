@@ -17,8 +17,8 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { Hub, Space } from '@aipehub/core'
-import { openIdentityStore, type IdentityStore } from '@aipehub/identity'
+import { Hub, Space } from '@gotong/core'
+import { openIdentityStore, type IdentityStore } from '@gotong/identity'
 
 import { serveWeb, type WebServerHandle, type WorkflowSurface } from '../src/server.js'
 import type {
@@ -67,14 +67,14 @@ class FakeWorkflowCreate implements MeWorkflowCreateSurface {
   createResult: MeWorkflowCreateResult = {
     ok: true,
     workflowId: 'my-flow',
-    yaml: 'schema: aipehub.workflow/v1\n',
+    yaml: 'schema: gotong.workflow/v1\n',
     explanation: '每天早上把你的待办整理一下发给你。',
     graph: GRAPH,
   }
   explainResult: MeWorkflowExplainResult = {
     ok: true,
     workflowId: 'flow',
-    yaml: 'schema: aipehub.workflow/v1\n',
+    yaml: 'schema: gotong.workflow/v1\n',
     explanation: '这个工作流先起草,再审阅,最后输出。',
     detail: 'brief',
     graph: GRAPH,
@@ -149,7 +149,7 @@ interface Boot {
 async function boot(opts: { withCreate?: boolean; withCatalog?: boolean } = {}): Promise<Boot> {
   const withCreate = opts.withCreate ?? true
   const withCatalog = opts.withCatalog ?? true
-  const tmp = await mkdtemp(join(tmpdir(), 'aipehub-web-wfcreate-'))
+  const tmp = await mkdtemp(join(tmpdir(), 'gotong-web-wfcreate-'))
   const space = (await Space.init(tmp, { name: 'wfcreate-test' })).space
   const hub = new Hub({ space })
   await hub.start()
@@ -387,12 +387,12 @@ describe('POST /api/me/workflows/create — streaming', () => {
   }
 
   it('streams chunk lines then a result line; surface got a per-call sink', async () => {
-    b.create.emitChunks = ['schema: aipehub', '.workflow/v1\n']
+    b.create.emitChunks = ['schema: gotong', '.workflow/v1\n']
     const { res, lines } = await postStream({ instruction: '建个工作流', stream: true })
     expect(res.status).toBe(200)
     expect(res.headers.get('content-type')).toContain('application/x-ndjson')
     expect(lines).toEqual([
-      { kind: 'chunk', text: 'schema: aipehub' },
+      { kind: 'chunk', text: 'schema: gotong' },
       { kind: 'chunk', text: '.workflow/v1\n' },
       expect.objectContaining({ kind: 'result', ok: true, workflowId: 'my-flow' }),
     ])

@@ -33,9 +33,9 @@ import {
   type ParticipantId,
   type Task,
   type TaskResult,
-} from '@aipehub/core'
-import { FileInboxStore, HumanInboxParticipant, type InboxDecision, type InboxItem } from '@aipehub/inbox'
-import { parseWorkflow, WorkflowRunner, type WorkflowDefinition } from '@aipehub/workflow'
+} from '@gotong/core'
+import { FileInboxStore, HumanInboxParticipant, type InboxDecision, type InboxItem } from '@gotong/inbox'
+import { parseWorkflow, WorkflowRunner, type WorkflowDefinition } from '@gotong/workflow'
 
 import {
   ModerationParticipant,
@@ -94,7 +94,7 @@ export interface Env {
 
 /** Make a fresh temp root for one demo run (caller rms it at teardown). */
 export function makeTmpRoot(): string {
-  return mkdtempSync(join(tmpdir(), 'aipehub-family-learning-'))
+  return mkdtempSync(join(tmpdir(), 'gotong-family-learning-'))
 }
 
 /**
@@ -126,7 +126,7 @@ export async function buildEnv(
   })
   await parentHub.start()
   const guardianInbox = new ReportToGuardianParticipant()
-  parentHub.register(new HumanInboxParticipant({ store: inbox })) // aipehub.human/v1 — both approval steps
+  parentHub.register(new HumanInboxParticipant({ store: inbox })) // gotong.human/v1 — both approval steps
   parentHub.register(new TopicScreenParticipant()) // topic.screen — ★ the gate-level fail-open fix (real boolean)
   parentHub.register(new ModerationParticipant(moderationRules)) // content.moderate — the OPTIONAL rule-engine layer
   parentHub.register(tutor) // teach.lesson — deterministic stand-in OR a real LlmAgent (real mode)

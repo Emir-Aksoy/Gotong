@@ -1,4 +1,4 @@
-schema: aipehub.agent/v1
+schema: gotong.agent/v1
 agent:
   id: obsidian-researcher
   displayName: Obsidian Vault Researcher
@@ -21,7 +21,7 @@ agent:
     1. ALWAYS obsidian__search first to find candidate notes for the question.
     2. obsidian__get_file_contents on the most relevant 1-3 notes.
     3. Answer from what you read, and cite each claim by its note path
-       (e.g. "per `Projects/AipeHub.md`").
+       (e.g. "per `Projects/Gotong.md`").
     4. If the vault has nothing relevant, say so plainly — do not guess.
 
     This agent is read-oriented. The mcp-obsidian server also exposes write

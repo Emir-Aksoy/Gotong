@@ -27,7 +27,7 @@ import { decryptSecret, encryptSecret } from '../src/crypto.js'
 let dir: string
 
 beforeEach(() => {
-  dir = mkdtempSync(join(tmpdir(), 'aipe-mkp-'))
+  dir = mkdtempSync(join(tmpdir(), 'gotong-mkp-'))
 })
 
 afterEach(() => {
@@ -94,7 +94,7 @@ describe('resolveMasterKeyProvider — env provider (Route B P0-M4a)', () => {
   it('env provider with no material throws (config error, fail closed)', () => {
     expect(() =>
       resolveMasterKeyProvider({ kind: 'env', localFilePath: join(dir, 'k.key') }),
-    ).toThrow(/AIPE_MASTER_KEY/)
+    ).toThrow(/GOTONG_MASTER_KEY/)
   })
 
   it('rejects wrong-length material (the length gate)', () => {

@@ -28,8 +28,8 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { Hub, Space } from '@aipehub/core'
-import { openIdentityStore, type IdentityStore } from '@aipehub/identity'
+import { Hub, Space } from '@gotong/core'
+import { openIdentityStore, type IdentityStore } from '@gotong/identity'
 
 import { serveWeb, type WebServerHandle } from '../src/server.js'
 
@@ -58,7 +58,7 @@ interface BootResult {
 
 async function boot(opts: { withIdentity?: boolean } = {}): Promise<BootResult> {
   const withIdentity = opts.withIdentity ?? true
-  const tmp = await mkdtemp(join(tmpdir(), 'aipehub-web-agrbac-'))
+  const tmp = await mkdtemp(join(tmpdir(), 'gotong-web-agrbac-'))
   const init = await Space.init(tmp, { name: 'agrbac-test' })
   const space = init.space
   const hub = new Hub({ space })
@@ -77,15 +77,15 @@ async function boot(opts: { withIdentity?: boolean } = {}): Promise<BootResult> 
     const ib = identity.bootstrap({ ownerEmail: 'owner@local', ownerDisplayName: 'Owner' })
     ownerUserId = ib.ownerUserId!
     identity.setPassword(ownerUserId, 'owner-password-123')
-    ownerCookie = `aipehub_identity=${identity.authenticatePassword({ email: 'owner@local', password: 'owner-password-123' }).token}`
+    ownerCookie = `gotong_identity=${identity.authenticatePassword({ email: 'owner@local', password: 'owner-password-123' }).token}`
 
     const a = identity.createUser({ email: 'admin-a@local', displayName: 'AdminA', role: 'admin', password: 'admin-a-password-123' })
     adminAUserId = a.id
-    adminACookie = `aipehub_identity=${identity.authenticatePassword({ email: 'admin-a@local', password: 'admin-a-password-123' }).token}`
+    adminACookie = `gotong_identity=${identity.authenticatePassword({ email: 'admin-a@local', password: 'admin-a-password-123' }).token}`
 
     const bUser = identity.createUser({ email: 'admin-b@local', displayName: 'AdminB', role: 'admin', password: 'admin-b-password-123' })
     adminBUserId = bUser.id
-    adminBCookie = `aipehub_identity=${identity.authenticatePassword({ email: 'admin-b@local', password: 'admin-b-password-123' }).token}`
+    adminBCookie = `gotong_identity=${identity.authenticatePassword({ email: 'admin-b@local', password: 'admin-b-password-123' }).token}`
   }
 
   const server = await serveWeb(hub, {

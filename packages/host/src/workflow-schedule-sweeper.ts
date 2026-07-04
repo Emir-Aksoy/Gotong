@@ -38,7 +38,7 @@
 import { readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
-import type { Logger } from '@aipehub/core'
+import type { Logger } from '@gotong/core'
 
 import {
   evaluateRunnable,

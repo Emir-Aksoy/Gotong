@@ -239,7 +239,7 @@ export interface DiscordAttachment {
 /**
  * `GET /gateway/bot` returns the WebSocket URL + shard recommendation.
  * Bridge uses just `url`; sharding is out of scope (single-shard bots
- * cover 2500 guilds — more than any AipeHub deployment plausibly hits).
+ * cover 2500 guilds — more than any Gotong deployment plausibly hits).
  */
 export interface DiscordGatewayBotResponse {
   url: string

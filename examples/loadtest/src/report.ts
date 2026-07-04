@@ -4,8 +4,8 @@
  * suitable for pasting into `docs/PERFORMANCE.md` or attaching to a PR.
  *
  * Usage:
- *   pnpm --filter @aipehub/example-loadtest report -- runs/*.json
- *   pnpm --filter @aipehub/example-loadtest report -- runs/inproc-50w-60s.json runs/ws-50w-60s.json
+ *   pnpm --filter @gotong/example-loadtest report -- runs/*.json
+ *   pnpm --filter @gotong/example-loadtest report -- runs/inproc-50w-60s.json runs/ws-50w-60s.json
  *
  * The output is always stdout — pipe it where you want.
  */

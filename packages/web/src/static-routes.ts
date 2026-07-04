@@ -59,9 +59,9 @@ const MIME: Record<string, string> = {
 
 // Cookie name re-declared locally rather than imported from server.ts to keep
 // this module a leaf (server.ts imports here — importing back would cycle).
-// 'aipehub_admin' is a stable wire constant shared with server.ts's
+// 'gotong_admin' is a stable wire constant shared with server.ts's
 // ADMIN_COOKIE; both must stay in sync.
-const ADMIN_COOKIE = 'aipehub_admin'
+const ADMIN_COOKIE = 'gotong_admin'
 
 /**
  * Narrow duck-typed slice of server.ts's `HandlerCtx` that `serveAppHtml`
@@ -75,7 +75,7 @@ export interface AppHtmlCtx {
   /**
    * DEPLOY-C followup — "is the first-run bootstrap window still open?"
    * (server.ts wires setup-routes' isBootstrapPending here, keeping the
-   * single source of truth). Injected into `<meta name="x-aipehub-bootstrap">`
+   * single source of truth). Injected into `<meta name="x-gotong-bootstrap">`
    * so a signed-in operator's boot can decide SYNCHRONOUSLY to enter the
    * setup wizard — no blocking flag fetch before first paint on every
    * normal boot. A render hint exactly like the role meta: the wizard's
@@ -150,7 +150,7 @@ export async function serveStatic(res: ServerResponse, requested: string): Promi
 
 /**
  * C1 — serve `app.html` (the unified SPA shell) with the viewer's v4
- * role injected into the `<meta name="x-aipehub-role">` tag.
+ * role injected into the `<meta name="x-gotong-role">` tag.
  *
  * Role resolution order:
  *   1. v4 identity cookie → `identity.getSessionByToken().role` —
@@ -227,7 +227,7 @@ export async function serveAppHtml(
     }
   }
 
-  // Single, idempotent substitution. The placeholder is `<!--AIPE_ROLE-->`
+  // Single, idempotent substitution. The placeholder is `<!--GOTONG_ROLE-->`
   // — anything else (legitimate user content, future translated strings)
   // is left intact. Role values are validated against a small enum so
   // an attacker who somehow stuffed garbage into the session can't break
@@ -242,8 +242,8 @@ export async function serveAppHtml(
     try { pending = ctx.bootstrapPending() === true } catch { /* hint only */ }
   }
   const out = raw
-    .replace('<!--AIPE_ROLE-->', safeRole)
-    .replace('<!--AIPE_BOOTSTRAP-->', pending ? '1' : '')
+    .replace('<!--GOTONG_ROLE-->', safeRole)
+    .replace('<!--GOTONG_BOOTSTRAP-->', pending ? '1' : '')
 
   res.writeHead(200, securityHeaders)
   res.end(out)

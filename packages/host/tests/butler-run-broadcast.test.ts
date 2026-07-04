@@ -22,7 +22,7 @@ import { join } from 'node:path'
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import type { Logger } from '@aipehub/core'
+import type { Logger } from '@gotong/core'
 
 import {
   ButlerRunBroadcastSweeper,
@@ -107,7 +107,7 @@ describe('butler-run-broadcast — the deterministic message', () => {
 
 describe('butler-run-broadcast — config store', () => {
   let root: string
-  beforeEach(async () => { root = await mkdtemp(join(tmpdir(), 'aipe-runbroadcast-cfg-')) })
+  beforeEach(async () => { root = await mkdtemp(join(tmpdir(), 'gotong-runbroadcast-cfg-')) })
   afterEach(async () => { await rm(root, { recursive: true, force: true }) })
 
   it('returns null for a member who never opted in', async () => {
@@ -131,7 +131,7 @@ describe('butler-run-broadcast — config store', () => {
 
 describe('butler-run-broadcast — sweeper dedup + high-water mark', () => {
   let root: string
-  beforeEach(async () => { root = await mkdtemp(join(tmpdir(), 'aipe-runbroadcast-')) })
+  beforeEach(async () => { root = await mkdtemp(join(tmpdir(), 'gotong-runbroadcast-')) })
   afterEach(async () => { await rm(root, { recursive: true, force: true }) })
 
   function sweeper(runs: ButlerRunSurface, push: fakePushReturn['push'], over?: { maxPerTick?: number }) {
@@ -215,7 +215,7 @@ describe('butler-run-broadcast — sweeper dedup + high-water mark', () => {
 
 describe('butler-run-broadcast — burst cap + best-effort delivery', () => {
   let root: string
-  beforeEach(async () => { root = await mkdtemp(join(tmpdir(), 'aipe-runbroadcast-be-')) })
+  beforeEach(async () => { root = await mkdtemp(join(tmpdir(), 'gotong-runbroadcast-be-')) })
   afterEach(async () => { await rm(root, { recursive: true, force: true }) })
 
   it('caps per tick and picks the rest up next tick', async () => {
@@ -289,7 +289,7 @@ describe('butler-run-broadcast — burst cap + best-effort delivery', () => {
 
 describe('butler-run-broadcast — sweep across members (best-effort)', () => {
   let root: string
-  beforeEach(async () => { root = await mkdtemp(join(tmpdir(), 'aipe-runbroadcast-multi-')) })
+  beforeEach(async () => { root = await mkdtemp(join(tmpdir(), 'gotong-runbroadcast-multi-')) })
   afterEach(async () => { await rm(root, { recursive: true, force: true }) })
 
   it('one member throwing does not stop the others', async () => {
@@ -316,7 +316,7 @@ describe('butler-run-broadcast — sweep across members (best-effort)', () => {
 
 describe('butler-run-broadcast — the set_run_broadcast opt-in tool', () => {
   let root: string
-  beforeEach(async () => { root = await mkdtemp(join(tmpdir(), 'aipe-runbroadcast-tool-')) })
+  beforeEach(async () => { root = await mkdtemp(join(tmpdir(), 'gotong-runbroadcast-tool-')) })
   afterEach(async () => { await rm(root, { recursive: true, force: true }) })
 
   function textOf(result: { content: { type: string; text?: string }[] }): string {

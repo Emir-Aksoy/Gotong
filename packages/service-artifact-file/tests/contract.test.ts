@@ -1,12 +1,12 @@
 /**
- * Run the shared plugin contract suite from @aipehub/services-sdk
+ * Run the shared plugin contract suite from @gotong/services-sdk
  * against ArtifactFilePlugin. Verifies it satisfies the same
  * lifecycle invariants as memory-file.
  */
 
 import { describe, expect } from 'vitest'
-import { runPluginContract } from '@aipehub/services-sdk/testing'
-import type { ArtifactHandle } from '@aipehub/services-sdk'
+import { runPluginContract } from '@gotong/services-sdk/testing'
+import type { ArtifactHandle } from '@gotong/services-sdk'
 import { ArtifactFilePlugin } from '../src/plugin.js'
 
 describe('contract: artifact-file', () => {

@@ -8,7 +8,7 @@
  * messages, and either side can close.
  *
  * Wire is JSON-encoded frames, distinct from the existing
- * `@aipehub/protocol` wire (HELLO/WELCOME/TASK/RESULT). The protocols
+ * `@gotong/protocol` wire (HELLO/WELCOME/TASK/RESULT). The protocols
  * are deliberately separate because:
  *
  *   - the existing protocol carries admission gating, agent registry,
@@ -42,7 +42,7 @@ import type {
   ParticipantId,
   Task,
   TaskResult,
-} from '@aipehub/core'
+} from '@gotong/core'
 
 import type { PeerAuthEnvelope, PeerAuthScheme, PeerAuthVerdict } from './peer-auth.js'
 
@@ -960,7 +960,7 @@ export interface AcceptHubLinksOptions {
 
 /**
  * Audit #142 — derive the rate-limit IP from the upgrade request.
- * Mirrors the semantics of @aipehub/web's clientIp helper so a host
+ * Mirrors the semantics of @gotong/web's clientIp helper so a host
  * running both surfaces gets consistent bucketing per real client.
  */
 function extractClientIp(

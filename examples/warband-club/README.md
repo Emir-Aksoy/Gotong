@@ -45,7 +45,7 @@ Two agents serve every capability these workflows dispatch:
 - **传令官** (`herald`, cap `warband.draft-muster`) — turns a muster proposal into a
   clean charter for the leader to confirm.
 
-The `human:` step dispatches to `aipehub.human/v1` — the host's inbox broker, a
+The `human:` step dispatches to `gotong.human/v1` — the host's inbox broker, a
 built-in, **not** a template agent.
 
 ---
@@ -78,7 +78,7 @@ And the muster flow shows the HITL gate collaboration needs to *decide*:
 brother-warden /me 提议集结「月末对战夜」
    │  dispatch warband.propose-muster → [draft] 传令官拟章程
    ▼
-[leader-confirm]  human: → aipehub.human/v1
+[leader-confirm]  human: → gotong.human/v1
    │  broker writes an inbox item for the warband leader, then SUSPENDS the run
    ▼
    ⏸  parked — not failed.  战团长 /me 收件箱 sees one pending approval.
@@ -117,7 +117,7 @@ else changes.
 
 ## The loadable template
 
-`template/warband-club.template.yaml` is one self-contained `aipehub.template/v1`
+`template/warband-club.template.yaml` is one self-contained `gotong.template/v1`
 file carrying the whole working skeleton: 2 agents + 3 declarative workflows + an
 addressable shared-archive KB slot + a one-click DeepSeek key prompt. Load it into
 a real host:

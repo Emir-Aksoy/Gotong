@@ -17,10 +17,10 @@
 
 import { fileURLToPath } from 'node:url'
 
-import type { Hub, TaskId } from '@aipehub/core'
-import { DispatchToolset, LlmAgent } from '@aipehub/llm'
-import { OpenAIProvider } from '@aipehub/llm-openai'
-import { dangerousCommandGate, type CliChunk } from '@aipehub/cli-agent'
+import type { Hub, TaskId } from '@gotong/core'
+import { DispatchToolset, LlmAgent } from '@gotong/llm'
+import { OpenAIProvider } from '@gotong/llm-openai'
+import { dangerousCommandGate, type CliChunk } from '@gotong/cli-agent'
 
 import { SharedWorkspaceCli } from './shared-workspace-cli.js'
 import type { SharedWorkspace } from './workspace.js'

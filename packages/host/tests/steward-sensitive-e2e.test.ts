@@ -35,8 +35,8 @@ import {
   type SetOrgQuotaInput,
   type SetQuotaInput,
   type UpdatePeerInput,
-} from '@aipehub/identity'
-import type { StewardAction } from '@aipehub/hub-steward'
+} from '@gotong/identity'
+import type { StewardAction } from '@gotong/hub-steward'
 
 import {
   HostStewardSensitiveExecutors,
@@ -50,7 +50,7 @@ import {
 
 // A made-up env var name + secret used only in this file. `set_credential_ref`
 // names the VAR; the secret lives only in the env channel, never in an action.
-const ENV_NAME = 'AIPE_TEST_STEWARD_KEY'
+const ENV_NAME = 'GOTONG_TEST_STEWARD_KEY'
 const SECRET = 'sk-this-must-never-appear-in-any-steward-artifact'
 const OP = 'op-user-1' // the operator who runs the sensitive write
 
@@ -60,7 +60,7 @@ describe('HostStewardSensitiveExecutors — real IdentityStore (vault unlocked)'
   let exec: HostStewardSensitiveExecutors
 
   beforeEach(async () => {
-    tmp = await mkdtemp(join(tmpdir(), 'aipe-steward-sensitive-'))
+    tmp = await mkdtemp(join(tmpdir(), 'gotong-steward-sensitive-'))
     identity = openIdentityStore({
       dbPath: join(tmp, 'identity.sqlite'),
       masterKey: randomBytes(MASTER_KEY_LEN_BYTES),

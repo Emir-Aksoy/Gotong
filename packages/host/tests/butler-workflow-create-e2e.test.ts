@@ -35,14 +35,14 @@ import {
   type Logger,
   type ManagedAgentLifecycle,
   type ParticipantId,
-} from '@aipehub/core'
-import { MASTER_KEY_LEN_BYTES, openIdentityStore, type IdentityStore } from '@aipehub/identity'
-import { FileInboxStore } from '@aipehub/inbox'
-import { PersonalButlerAgent } from '@aipehub/personal-butler'
-import { parseWorkflow, projectWorkflowGraph } from '@aipehub/workflow'
-import type { WorkflowAssistantOutput } from '@aipehub/workflow-assistant'
-import type { LlmMessage, LlmProvider, LlmRequest, LlmStreamChunk } from '@aipehub/llm'
-import type { MemoryHandle } from '@aipehub/services-sdk'
+} from '@gotong/core'
+import { MASTER_KEY_LEN_BYTES, openIdentityStore, type IdentityStore } from '@gotong/identity'
+import { FileInboxStore } from '@gotong/inbox'
+import { PersonalButlerAgent } from '@gotong/personal-butler'
+import { parseWorkflow, projectWorkflowGraph } from '@gotong/workflow'
+import type { WorkflowAssistantOutput } from '@gotong/workflow-assistant'
+import type { LlmMessage, LlmProvider, LlmRequest, LlmStreamChunk } from '@gotong/llm'
+import type { MemoryHandle } from '@gotong/services-sdk'
 
 import { buildButlerGovernedToolset } from '../src/personal-butler-governed.js'
 import { buildButlerWorkflowCreateToolset } from '../src/personal-butler-workflow-create.js'
@@ -68,7 +68,7 @@ function textOf(result: { content: { type: string; text?: string }[] }): string 
 
 function yamlWf(steps: string): string {
   return [
-    'schema: aipehub.workflow/v1',
+    'schema: gotong.workflow/v1',
     'workflow:',
     '  id: daily-todo',
     '  trigger:',
@@ -181,7 +181,7 @@ interface Rig {
 }
 
 async function boot(): Promise<Rig> {
-  const tmp = await mkdtemp(join(tmpdir(), 'aipe-butler-wfc-e2e-'))
+  const tmp = await mkdtemp(join(tmpdir(), 'gotong-butler-wfc-e2e-'))
   const { space } = await Space.init(tmp, { name: 'butler-wfc-e2e' })
   const identity = openIdentityStore({ dbPath: join(tmp, 'identity.sqlite'), masterKey: randomBytes(MASTER_KEY_LEN_BYTES) })
   const inboxStore = new FileInboxStore(tmp)

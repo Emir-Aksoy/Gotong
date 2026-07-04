@@ -4,7 +4,7 @@
  * The sibling of examples/cross-hub-workflow. Both put an off-hub destination in
  * the middle of a declarative workflow, but the destination differs:
  *
- *   - cross-hub-workflow: the step routes to a mesh PEER hub (AipeHub↔AipeHub
+ *   - cross-hub-workflow: the step routes to a mesh PEER hub (Gotong↔Gotong
  *     over a federation link). A peer that set `requireApprovalOutbound` makes
  *     the step PARK in the owner's inbox until they approve — the task can wait
  *     on a human before it crosses the org boundary.
@@ -31,7 +31,7 @@
  *       halts before `archive`, and the run fails closed.
  *
  * The "external A2A agent" is modelled by an injected `fetchImpl` rather than a
- * real socket — the same trick the @aipehub/a2a unit tests use. It parses the
+ * real socket — the same trick the @gotong/a2a unit tests use. It parses the
  * outbound JSON-RPC body and asserts the wire shape (method `message/send`,
  * bearer auth, `metadata.skill`), so this demo doubles as an A2A wire-contract
  * smoke. The real host reaches a real endpoint over `global fetch`; the
@@ -45,15 +45,15 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { Hub, InMemoryStorage, type ParticipantId, type Task, type TaskResult } from '@aipehub/core'
+import { Hub, InMemoryStorage, type ParticipantId, type Task, type TaskResult } from '@gotong/core'
 import {
   A2A_METHOD_MESSAGE_SEND,
   A2aRemoteParticipant,
   agentMessage,
   type A2ARequest,
   type A2AResponse,
-} from '@aipehub/a2a'
-import { parseWorkflow, WorkflowRunner } from '@aipehub/workflow'
+} from '@gotong/a2a'
+import { parseWorkflow, WorkflowRunner } from '@gotong/workflow'
 
 const WORKFLOWS_DIR = fileURLToPath(new URL('../workflows', import.meta.url))
 
@@ -104,7 +104,7 @@ const externalA2aAgent: typeof fetch = async (_url, init) => {
   if (req.method !== A2A_METHOD_MESSAGE_SEND) {
     return jsonRpc(req.id, { error: { code: -32601, message: 'method not found' } })
   }
-  // Auth: a generic A2A agent only needs the bearer (no X-Aipe-Peer-Id).
+  // Auth: a generic A2A agent only needs the bearer (no X-Gotong-Peer-Id).
   if (bearer !== `Bearer ${EXTERNAL_TOKEN}`) {
     return new Response('unauthorized', { status: 401 })
   }
@@ -146,7 +146,7 @@ class ArchiveAgent {
 }
 
 async function main(): Promise<void> {
-  console.log('\n=== AipeHub case: a2a-workflow-step — 外部 A2A agent 当工作流步 (Stream H) ===\n')
+  console.log('\n=== Gotong case: a2a-workflow-step — 外部 A2A agent 当工作流步 (Stream H) ===\n')
 
   const hub = new Hub({ storage: new InMemoryStorage() })
   await hub.start()

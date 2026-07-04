@@ -25,12 +25,12 @@
  * persisted high-water seq) when it loads.
  */
 
-import type { ArchiveOptions, FileStorage } from '@aipehub/core'
+import type { ArchiveOptions, FileStorage } from '@gotong/core'
 
 /** Keep this many of the newest sealed segments in the active load path. */
-export const TRANSCRIPT_KEEP_SEGMENTS_ENV = 'AIPE_TRANSCRIPT_KEEP_SEGMENTS'
+export const TRANSCRIPT_KEEP_SEGMENTS_ENV = 'GOTONG_TRANSCRIPT_KEEP_SEGMENTS'
 /** Archive sealed segments whose newest entry is older than this many days. */
-export const TRANSCRIPT_ARCHIVE_DAYS_ENV = 'AIPE_TRANSCRIPT_ARCHIVE_DAYS'
+export const TRANSCRIPT_ARCHIVE_DAYS_ENV = 'GOTONG_TRANSCRIPT_ARCHIVE_DAYS'
 
 const MS_PER_DAY = 86_400_000
 

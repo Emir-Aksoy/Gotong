@@ -55,7 +55,7 @@ describe('consolidateTiered', () => {
       memory: mem,
       summarize: jsonRouter({
         persona: { digest: 'likes tea', importance: 4 },
-        projects: { digest: 'building aipehub', importance: 5 },
+        projects: { digest: 'building gotong', importance: 5 },
       }),
       keepRecent: 8,
       force: true,

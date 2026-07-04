@@ -14,7 +14,7 @@
 
 import { spawn } from 'node:child_process'
 
-import { wrapWithFsJail, type FsJailSpec } from '@aipehub/core'
+import { wrapWithFsJail, type FsJailSpec } from '@gotong/core'
 
 export interface CliChunk {
   stream: 'stdout' | 'stderr'

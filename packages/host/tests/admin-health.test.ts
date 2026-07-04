@@ -115,9 +115,9 @@ describe('createAdminHealthService.snapshot', () => {
   })
 
   it('reports space writability + path from the injected probe', async () => {
-    const ok = await svc({ agents: [], writable: true, spacePath: '/data/.aipehub' }).snapshot()
+    const ok = await svc({ agents: [], writable: true, spacePath: '/data/.gotong' }).snapshot()
     expect(ok.spaceWritable).toBe(true)
-    expect(ok.spacePath).toBe('/data/.aipehub')
+    expect(ok.spacePath).toBe('/data/.gotong')
     const bad = await svc({ agents: [], writable: false }).snapshot()
     expect(bad.spaceWritable).toBe(false)
   })

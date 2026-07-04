@@ -11,7 +11,7 @@
  * ── Why this is safe to run inline (not governed) ────────────────────────────
  * Setting a reminder for yourself has no consequence for anyone else — it's the
  * plainest kind of self-service. The tool dispatches to the `ReminderParticipant`
- * broker (capability `aipehub.reminder/v1`), which PARKS the reminder task (a
+ * broker (capability `gotong.reminder/v1`), which PARKS the reminder task (a
  * separate task) with a finite `resumeAt`; the butler's own turn does NOT suspend —
  * `hub.dispatch` returns `{ kind:'suspended' }` promptly once the broker parks, so
  * the tool AWAITS that result and reports back inline. (Contrast S1-M1's fire-and-
@@ -26,7 +26,7 @@
  * turns it into a friendly refusal.
  */
 
-import type { LlmAgentToolset, LlmToolCallResult, LlmToolDefinition } from '@aipehub/llm'
+import type { LlmAgentToolset, LlmToolCallResult, LlmToolDefinition } from '@gotong/llm'
 
 import { REMINDER_CAPABILITY } from './reminder-participant.js'
 

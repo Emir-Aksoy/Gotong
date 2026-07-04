@@ -6,7 +6,7 @@
  *
  * The browser-side IIFE has a 3-file contract that no other test sees:
  *
- *   1. admin-wf-assist.js exports `window.AipeHub.installWorkflowAssist`
+ *   1. admin-wf-assist.js exports `window.Gotong.installWorkflowAssist`
  *   2. admin.js calls that factory with a bag of {dom, state, ma, wf,
  *      refreshWorkflows} closure refs and consumes the returned
  *      {open, close, submit, save}
@@ -42,7 +42,7 @@ const APP_HTML = readFileSync(join(HERE, '..', 'static', 'app.html'), 'utf8')
 const APP_CORE_JS = readFileSync(join(HERE, '..', 'static', 'app-core.js'), 'utf8')
 
 // The factory now reads its user-facing strings from the live i18n dict
-// (`window.AipeHub.t`) and re-renders on `window.AipeHub.onLangChange` —
+// (`window.Gotong.t`) and re-renders on `window.Gotong.onLangChange` —
 // both provided in production by app-core.js. Pull the real `I18N.zh`
 // off disk and inject it so this headless smoke exercises the true
 // render path (and its Chinese-text assertions stay meaningful) instead
@@ -123,15 +123,15 @@ function makeElement(tag = 'div'): FakeEl {
 }
 
 // Boot the factory file in a fresh vm context. Returns the
-// installWorkflowAssist function that the file registers on window.AipeHub.
+// installWorkflowAssist function that the file registers on window.Gotong.
 function loadFactory(): (deps: unknown) => {
   open: () => void
   close: () => void
   submit: () => Promise<void>
   save: () => Promise<void>
 } {
-  const fakeWindow: { AipeHub: Record<string, unknown> } = {
-    AipeHub: { t: I18N_ZH, onLangChange: () => {} },
+  const fakeWindow: { Gotong: Record<string, unknown> } = {
+    Gotong: { t: I18N_ZH, onLangChange: () => {} },
   }
   const ctx = {
     window: fakeWindow,
@@ -143,11 +143,11 @@ function loadFactory(): (deps: unknown) => {
     console,
   }
   runInNewContext(WF_ASSIST_JS, ctx)
-  const install = fakeWindow.AipeHub.installWorkflowAssist as (
+  const install = fakeWindow.Gotong.installWorkflowAssist as (
     deps: unknown,
   ) => ReturnType<ReturnType<typeof loadFactory>>
   if (typeof install !== 'function') {
-    throw new Error('installWorkflowAssist not registered on window.AipeHub')
+    throw new Error('installWorkflowAssist not registered on window.Gotong')
   }
   return install as never
 }
@@ -221,7 +221,7 @@ describe('admin-wf-assist.js — factory lifecycle', () => {
           ok: true,
           status: 200,
           json: async () => ({
-            yaml: 'schema: aipehub.workflow/v1\nworkflow:\n  id: smoke-out\n',
+            yaml: 'schema: gotong.workflow/v1\nworkflow:\n  id: smoke-out\n',
             explanation: 'smoke explanation',
             raw: 'raw text',
             draftStatus: 'valid',

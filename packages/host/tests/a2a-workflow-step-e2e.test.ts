@@ -6,7 +6,7 @@
  * real HTTP, and that agent's reply flows back as the step's output and feeds a
  * downstream LOCAL step.
  *
- * Stream G proved a workflow step can cross to a MESH peer (AipeHub↔AipeHub over
+ * Stream G proved a workflow step can cross to a MESH peer (Gotong↔Gotong over
  * an inproc HubLink, gated by the outbound approval gate). H is the sibling: the
  * destination is an EXTERNAL A2A endpoint reached via `A2aRemoteParticipant`
  * (the Phase 18 C-M4 outbound edge). The mechanism is identical capability
@@ -29,8 +29,8 @@ import { join } from 'node:path'
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { AgentParticipant, Hub, type Task } from '@aipehub/core'
-import { A2aRemoteParticipant } from '@aipehub/a2a'
+import { AgentParticipant, Hub, type Task } from '@gotong/core'
+import { A2aRemoteParticipant } from '@gotong/a2a'
 
 import { A2aServer } from '../src/a2a-server.js'
 import { WorkflowController } from '../src/workflow-controller.js'
@@ -47,7 +47,7 @@ const REMOTE_SKILL = 'review' // the capability hub B (the "external" agent) ser
 // result flowed back into the run. The runner emits an ordinary
 // `{kind:capability}` dispatch; it has no idea the first capability is remote.
 const WORKFLOW_YAML = `
-schema: aipehub.workflow/v1
+schema: gotong.workflow/v1
 workflow:
   id: a2a-step-flow
   name: a2a external step

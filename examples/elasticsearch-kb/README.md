@@ -1,16 +1,16 @@
-# Elasticsearch index as a knowledge base — AipeHub Example
+# Elasticsearch index as a knowledge base — Gotong Example
 
-Wire your [Elasticsearch](https://www.elastic.co) indices into an AipeHub agent
+Wire your [Elasticsearch](https://www.elastic.co) indices into an Gotong agent
 so it can search them in natural language — via the official
 [`@elastic/mcp-server-elasticsearch`](https://github.com/elastic/mcp-server-elasticsearch)
 MCP server.
 
 ## How it works
 
-AipeHub does not connect to your cluster or store its documents. The agent
+Gotong does not connect to your cluster or store its documents. The agent
 declares the MCP server in its `mcpServers` config; the host spawns it as a
 child process and exposes its tools to the agent's LLM tool-use loop. The
-cluster URL and API key stay outside AipeHub.
+cluster URL and API key stay outside Gotong.
 
 ```
   User question
@@ -35,8 +35,8 @@ export DEEPSEEK_API_KEY=sk-...          # the agent's own LLM key
 
 # 3. Initialize a workspace and start the host
 #    (npx fetches @elastic/mcp-server-elasticsearch on first spawn — Node 18+)
-aipehub init
-npx @aipehub/host
+gotong init
+npx @gotong/host
 
 # 4. Admin UI → Agents tab → Import YAML → paste agents/elasticsearch-researcher.yaml
 #    The mcpServers config auto-spawns the ES MCP server alongside the agent.
@@ -82,7 +82,7 @@ its tool-use loop.
 
 ## Security notes
 
-- **The cluster is reached only by the MCP server.** AipeHub never opens a
+- **The cluster is reached only by the MCP server.** Gotong never opens a
   connection to Elasticsearch; the child process does, using `ES_URL`.
 - **Use a least-privilege API key.** Scope `ES_API_KEY` to read-only on just the
   indices the agent should see. The agent can run arbitrary query DSL — it
@@ -101,4 +101,4 @@ its tool-use loop.
 - [`examples/obsidian-kb/`](../obsidian-kb/) — the same pattern for an Obsidian
   vault (document notes instead of a search index).
 - [`docs/zh/RAG-VIA-MCP.md`](../../docs/zh/RAG-VIA-MCP.md) — vector-RAG via MCP
-  (the original "AipeHub doesn't store knowledge" worked example).
+  (the original "Gotong doesn't store knowledge" worked example).

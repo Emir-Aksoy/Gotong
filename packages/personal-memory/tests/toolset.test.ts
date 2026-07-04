@@ -317,7 +317,7 @@ describe('MemoryToolset', () => {
         list: base.list.bind(base),
         forget: base.forget.bind(base),
         clear: base.clear.bind(base),
-      } as unknown as import('@aipehub/services-sdk').MemoryHandle
+      } as unknown as import('@gotong/services-sdk').MemoryHandle
       const ts = new MemoryToolset({ memory: noPatch })
       const r = await ts.callTool('refine_procedure', { id: 'm1', steps: ['x'] })
       expect(r.isError).toBe(true)

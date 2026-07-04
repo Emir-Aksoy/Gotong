@@ -15,7 +15,7 @@
  * key and self-asserts. Swap for real LlmAgents and the hub wiring is identical.
  */
 
-import { AgentParticipant, type Task } from '@aipehub/core'
+import { AgentParticipant, type Task } from '@gotong/core'
 
 import { appendEntry, priorSteps, type Codex, type Pillar } from './codex.js'
 import { drillIntensity, INTENSITY_TAG, type DailySituation, type Intensity } from './situation.js'

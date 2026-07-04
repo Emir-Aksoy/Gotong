@@ -7,7 +7,7 @@
  * `A2aClientError` → `kind: 'failed'`.
  */
 
-import { isSuspendTaskError, type SuspendTaskError, type Task } from '@aipehub/core'
+import { isSuspendTaskError, type SuspendTaskError, type Task } from '@gotong/core'
 import { describe, expect, it } from 'vitest'
 
 import {
@@ -71,14 +71,14 @@ describe('A2aRemoteParticipant (Phase 18 C-M4)', () => {
     expect(url).toBe('https://peer.example/a2a')
     const headers = init.headers as Record<string, string>
     expect(headers.authorization).toBe('Bearer tok-xyz')
-    expect(headers['x-aipe-peer-id']).toBe('hubA')
+    expect(headers['x-gotong-peer-id']).toBe('hubA')
     const body = JSON.parse(init.body as string)
     expect(body.method).toBe('message/send')
     expect(body.params.message.parts).toEqual([{ kind: 'text', text: 'hello' }])
     expect(body.params.message.metadata).toEqual({ skill: 'translate' })
   })
 
-  it('omits x-aipe-peer-id and metadata.skill when not configured (generic A2A agent)', async () => {
+  it('omits x-gotong-peer-id and metadata.skill when not configured (generic A2A agent)', async () => {
     const { fn, calls } = fakeFetch(() =>
       jsonResponse({ jsonrpc: '2.0', id: 1, result: agentMessage('ok', 'm') }),
     )
@@ -94,7 +94,7 @@ describe('A2aRemoteParticipant (Phase 18 C-M4)', () => {
 
     const { init } = calls[0]!
     const headers = init.headers as Record<string, string>
-    expect(headers['x-aipe-peer-id']).toBeUndefined()
+    expect(headers['x-gotong-peer-id']).toBeUndefined()
     const body = JSON.parse(init.body as string)
     expect(body.params.message.metadata).toBeUndefined()
     // A bare string payload is sent verbatim as the text.

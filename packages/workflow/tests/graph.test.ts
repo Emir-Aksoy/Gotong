@@ -315,7 +315,7 @@ describe('projectWorkflowGraph — purity + cross-hub left for host', () => {
 describe('projectWorkflowGraph — on a real parsed YAML', () => {
   it('projects a parseWorkflow output (parser-stamped kind, parallel, refs)', () => {
     const yaml = `
-schema: aipehub.workflow/v1
+schema: gotong.workflow/v1
 workflow:
   id: real-flow
   name: Real Flow

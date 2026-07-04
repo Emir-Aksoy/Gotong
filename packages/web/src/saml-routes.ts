@@ -20,7 +20,7 @@
  * Why the ACS lives in the pre-CSRF zone: it is a CROSS-SITE form POST from the
  * IdP's auto-submit page — it carries no admin session and no CSRF token, so the
  * Origin check would reject it. Its authenticity comes from the SIGNED SAML
- * assertion (validated against the pinned IdP cert in @aipehub/saml), not from a
+ * assertion (validated against the pinned IdP cert in @gotong/saml), not from a
  * same-origin guarantee. RelayState is single-use server-side, which is the
  * CSRF/replay defense for this endpoint.
  *
@@ -28,7 +28,7 @@
  * `/?saml_error=<code>` for the SPA login screen rather than dumping JSON in the
  * tab. `/providers` is read by JS and speaks JSON. All SAML detail lives behind
  * the host-injected `SamlLoginSurface`; web has no compile-time dep on
- * @aipehub/saml or @aipehub/identity.
+ * @gotong/saml or @gotong/identity.
  */
 
 import type { IncomingMessage, ServerResponse } from 'node:http'

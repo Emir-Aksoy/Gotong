@@ -24,58 +24,58 @@ importers:
 
   examples/a2a-long-running-step:
     dependencies:
-      '@aipehub/a2a':
+      '@gotong/a2a':
         specifier: workspace:*
         version: link:../../packages/a2a
-      '@aipehub/core':
+      '@gotong/core':
         specifier: workspace:*
         version: link:../../packages/core
-      '@aipehub/workflow':
+      '@gotong/workflow':
         specifier: workspace:*
         version: link:../../packages/workflow
 
   examples/a2a-workflow-step:
     dependencies:
-      '@aipehub/a2a':
+      '@gotong/a2a':
         specifier: workspace:*
         version: link:../../packages/a2a
-      '@aipehub/core':
+      '@gotong/core':
         specifier: workspace:*
         version: link:../../packages/core
-      '@aipehub/workflow':
+      '@gotong/workflow':
         specifier: workspace:*
         version: link:../../packages/workflow
 
   examples/acp-coding-bridge:
     dependencies:
-      '@aipehub/acp-agent':
+      '@gotong/acp-agent':
         specifier: workspace:*
         version: link:../../packages/acp-agent
-      '@aipehub/core':
+      '@gotong/core':
         specifier: workspace:*
         version: link:../../packages/core
 
   examples/activepieces-bridge:
     dependencies:
-      '@aipehub/core':
+      '@gotong/core':
         specifier: workspace:*
         version: link:../../packages/core
 
   examples/architect-team:
     dependencies:
-      '@aipehub/core':
+      '@gotong/core':
         specifier: workspace:*
         version: link:../../packages/core
-      '@aipehub/llm':
+      '@gotong/llm':
         specifier: workspace:*
         version: link:../../packages/llm
 
   examples/battle-monk-training:
     dependencies:
-      '@aipehub/core':
+      '@gotong/core':
         specifier: workspace:*
         version: link:../../packages/core
-      '@aipehub/llm':
+      '@gotong/llm':
         specifier: workspace:*
         version: link:../../packages/llm
       yaml:
@@ -84,16 +84,16 @@ importers:
 
   examples/broadcast-claim:
     dependencies:
-      '@aipehub/core':
+      '@gotong/core':
         specifier: workspace:*
         version: link:../../packages/core
 
   examples/butler-vector-recall:
     dependencies:
-      '@aipehub/personal-memory':
+      '@gotong/personal-memory':
         specifier: workspace:*
         version: link:../../packages/personal-memory
-      '@aipehub/services-sdk':
+      '@gotong/services-sdk':
         specifier: workspace:*
         version: link:../../packages/services-sdk
     devDependencies:
@@ -103,13 +103,13 @@ importers:
 
   examples/cafe-ops:
     dependencies:
-      '@aipehub/core':
+      '@gotong/core':
         specifier: workspace:*
         version: link:../../packages/core
-      '@aipehub/inbox':
+      '@gotong/inbox':
         specifier: workspace:*
         version: link:../../packages/inbox
-      '@aipehub/workflow':
+      '@gotong/workflow':
         specifier: workspace:*
         version: link:../../packages/workflow
       yaml:
@@ -118,25 +118,25 @@ importers:
 
   examples/cli-human:
     dependencies:
-      '@aipehub/core':
+      '@gotong/core':
         specifier: workspace:*
         version: link:../../packages/core
-      '@aipehub/llm':
+      '@gotong/llm':
         specifier: workspace:*
         version: link:../../packages/llm
 
   examples/codex-deepseek-hub:
     dependencies:
-      '@aipehub/cli-agent':
+      '@gotong/cli-agent':
         specifier: workspace:*
         version: link:../../packages/cli-agent
-      '@aipehub/core':
+      '@gotong/core':
         specifier: workspace:*
         version: link:../../packages/core
-      '@aipehub/llm':
+      '@gotong/llm':
         specifier: workspace:*
         version: link:../../packages/llm
-      '@aipehub/llm-openai':
+      '@gotong/llm-openai':
         specifier: workspace:*
         version: link:../../packages/llm-openai
       yaml:
@@ -145,25 +145,25 @@ importers:
 
   examples/coding-agent-bridge:
     dependencies:
-      '@aipehub/cli-agent':
+      '@gotong/cli-agent':
         specifier: workspace:*
         version: link:../../packages/cli-agent
-      '@aipehub/core':
+      '@gotong/core':
         specifier: workspace:*
         version: link:../../packages/core
 
   examples/cross-hub-federation:
     dependencies:
-      '@aipehub/core':
+      '@gotong/core':
         specifier: workspace:*
         version: link:../../packages/core
-      '@aipehub/inbox':
+      '@gotong/inbox':
         specifier: workspace:*
         version: link:../../packages/inbox
-      '@aipehub/transport-ws':
+      '@gotong/transport-ws':
         specifier: workspace:*
         version: link:../../packages/transport-ws
-      '@aipehub/workflow':
+      '@gotong/workflow':
         specifier: workspace:*
         version: link:../../packages/workflow
       ws:
@@ -176,37 +176,37 @@ importers:
 
   examples/cross-hub-mcp:
     dependencies:
-      '@aipehub/core':
+      '@gotong/core':
         specifier: workspace:*
         version: link:../../packages/core
-      '@aipehub/host':
+      '@gotong/host':
         specifier: workspace:*
         version: link:../../packages/host
-      '@aipehub/llm':
+      '@gotong/llm':
         specifier: workspace:*
         version: link:../../packages/llm
 
   examples/cross-hub-workflow:
     dependencies:
-      '@aipehub/core':
+      '@gotong/core':
         specifier: workspace:*
         version: link:../../packages/core
-      '@aipehub/inbox':
+      '@gotong/inbox':
         specifier: workspace:*
         version: link:../../packages/inbox
-      '@aipehub/workflow':
+      '@gotong/workflow':
         specifier: workspace:*
         version: link:../../packages/workflow
 
   examples/cross-org-rfp:
     dependencies:
-      '@aipehub/core':
+      '@gotong/core':
         specifier: workspace:*
         version: link:../../packages/core
 
   examples/elasticsearch-kb:
     dependencies:
-      '@aipehub/core':
+      '@gotong/core':
         specifier: workspace:*
         version: link:../../packages/core
     devDependencies:
@@ -216,31 +216,31 @@ importers:
 
   examples/family-learning-hub:
     dependencies:
-      '@aipehub/core':
+      '@gotong/core':
         specifier: workspace:*
         version: link:../../packages/core
-      '@aipehub/identity':
+      '@gotong/identity':
         specifier: workspace:*
         version: link:../../packages/identity
-      '@aipehub/im-adapter':
+      '@gotong/im-adapter':
         specifier: workspace:*
         version: link:../../packages/im-adapter
-      '@aipehub/inbox':
+      '@gotong/inbox':
         specifier: workspace:*
         version: link:../../packages/inbox
-      '@aipehub/llm':
+      '@gotong/llm':
         specifier: workspace:*
         version: link:../../packages/llm
-      '@aipehub/llm-openai':
+      '@gotong/llm-openai':
         specifier: workspace:*
         version: link:../../packages/llm-openai
-      '@aipehub/mcp-client':
+      '@gotong/mcp-client':
         specifier: workspace:*
         version: link:../../packages/mcp-client
-      '@aipehub/transport-ws':
+      '@gotong/transport-ws':
         specifier: workspace:*
         version: link:../../packages/transport-ws
-      '@aipehub/workflow':
+      '@gotong/workflow':
         specifier: workspace:*
         version: link:../../packages/workflow
       ws:
@@ -256,73 +256,73 @@ importers:
 
   examples/federated-team:
     dependencies:
-      '@aipehub/core':
+      '@gotong/core':
         specifier: workspace:*
         version: link:../../packages/core
-      '@aipehub/sdk-node':
+      '@gotong/sdk-node':
         specifier: workspace:*
         version: link:../../packages/sdk-node
-      '@aipehub/transport-ws':
+      '@gotong/transport-ws':
         specifier: workspace:*
         version: link:../../packages/transport-ws
-      '@aipehub/web':
+      '@gotong/web':
         specifier: workspace:*
         version: link:../../packages/web
 
   examples/heartbeat-agent:
     dependencies:
-      '@aipehub/core':
+      '@gotong/core':
         specifier: workspace:*
         version: link:../../packages/core
 
   examples/hello-collab:
     dependencies:
-      '@aipehub/core':
+      '@gotong/core':
         specifier: workspace:*
         version: link:../../packages/core
 
   examples/im-bridge-host:
     dependencies:
-      '@aipehub/core':
+      '@gotong/core':
         specifier: workspace:*
         version: link:../../packages/core
-      '@aipehub/identity':
+      '@gotong/identity':
         specifier: workspace:*
         version: link:../../packages/identity
-      '@aipehub/im-adapter':
+      '@gotong/im-adapter':
         specifier: workspace:*
         version: link:../../packages/im-adapter
 
   examples/im-steward-bridge:
     dependencies:
-      '@aipehub/hub-steward':
+      '@gotong/hub-steward':
         specifier: workspace:*
         version: link:../../packages/hub-steward
-      '@aipehub/identity':
+      '@gotong/identity':
         specifier: workspace:*
         version: link:../../packages/identity
-      '@aipehub/im-adapter':
+      '@gotong/im-adapter':
         specifier: workspace:*
         version: link:../../packages/im-adapter
 
   examples/industry-consultation-deepseek:
     dependencies:
-      '@aipehub/core':
+      '@gotong/core':
         specifier: workspace:*
         version: link:../../packages/core
-      '@aipehub/host':
+      '@gotong/host':
         specifier: workspace:*
         version: link:../../packages/host
-      '@aipehub/llm':
+      '@gotong/llm':
         specifier: workspace:*
         version: link:../../packages/llm
-      '@aipehub/llm-openai':
+      '@gotong/llm-openai':
         specifier: workspace:*
         version: link:../../packages/llm-openai
-      '@aipehub/services-sdk':
+      '@gotong/services-sdk':
         specifier: workspace:*
         version: link:../../packages/services-sdk
-      '@aipehub/workflow':
+      '@gotong/workflow':
         specifier: workspace:*
         version: link:../../packages/workflow
       openai:
@@ -331,69 +331,69 @@ importers:
 
   examples/llm-mock:
     dependencies:
-      '@aipehub/core':
+      '@gotong/core':
         specifier: workspace:*
         version: link:../../packages/core
-      '@aipehub/llm':
+      '@gotong/llm':
         specifier: workspace:*
         version: link:../../packages/llm
 
   examples/llm-real:
     dependencies:
-      '@aipehub/core':
-        specifier: workspace:*
-        version: link:../../packages/core
-      '@aipehub/llm':
-        specifier: workspace:*
-        version: link:../../packages/llm
-      '@aipehub/llm-anthropic':
-        specifier: workspace:*
-        version: link:../../packages/llm-anthropic
-      '@aipehub/llm-openai':
-        specifier: workspace:*
-        version: link:../../packages/llm-openai
       '@anthropic-ai/sdk':
         specifier: ^0.96.0
         version: 0.96.0(zod@4.4.3)
+      '@gotong/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      '@gotong/llm':
+        specifier: workspace:*
+        version: link:../../packages/llm
+      '@gotong/llm-anthropic':
+        specifier: workspace:*
+        version: link:../../packages/llm-anthropic
+      '@gotong/llm-openai':
+        specifier: workspace:*
+        version: link:../../packages/llm-openai
       openai:
         specifier: ^6.38.0
         version: 6.38.0(ws@8.20.1)(zod@4.4.3)
 
   examples/loadtest:
     dependencies:
-      '@aipehub/core':
+      '@gotong/core':
         specifier: workspace:*
         version: link:../../packages/core
-      '@aipehub/sdk-node':
+      '@gotong/sdk-node':
         specifier: workspace:*
         version: link:../../packages/sdk-node
-      '@aipehub/transport-ws':
+      '@gotong/transport-ws':
         specifier: workspace:*
         version: link:../../packages/transport-ws
 
   examples/long-running-agent:
     dependencies:
-      '@aipehub/core':
+      '@gotong/core':
         specifier: workspace:*
         version: link:../../packages/core
 
   examples/mcp-tools-llm-agent:
     dependencies:
-      '@aipehub/core':
-        specifier: workspace:*
-        version: link:../../packages/core
-      '@aipehub/llm':
-        specifier: workspace:*
-        version: link:../../packages/llm
-      '@aipehub/llm-anthropic':
-        specifier: workspace:*
-        version: link:../../packages/llm-anthropic
-      '@aipehub/mcp-client':
-        specifier: workspace:*
-        version: link:../../packages/mcp-client
       '@anthropic-ai/sdk':
         specifier: ^0.96.0
         version: 0.96.0(zod@4.4.3)
+      '@gotong/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      '@gotong/llm':
+        specifier: workspace:*
+        version: link:../../packages/llm
+      '@gotong/llm-anthropic':
+        specifier: workspace:*
+        version: link:../../packages/llm-anthropic
+      '@gotong/mcp-client':
+        specifier: workspace:*
+        version: link:../../packages/mcp-client
     devDependencies:
       tsx:
         specifier: ^4.7.0
@@ -401,7 +401,7 @@ importers:
 
   examples/mcp-tools-quickstart:
     dependencies:
-      '@aipehub/mcp-client':
+      '@gotong/mcp-client':
         specifier: workspace:*
         version: link:../../packages/mcp-client
     devDependencies:
@@ -411,28 +411,28 @@ importers:
 
   examples/multimodal-vision:
     dependencies:
-      '@aipehub/core':
-        specifier: workspace:*
-        version: link:../../packages/core
-      '@aipehub/llm':
-        specifier: workspace:*
-        version: link:../../packages/llm
-      '@aipehub/llm-anthropic':
-        specifier: workspace:*
-        version: link:../../packages/llm-anthropic
-      '@aipehub/llm-openai':
-        specifier: workspace:*
-        version: link:../../packages/llm-openai
       '@anthropic-ai/sdk':
         specifier: ^0.96.0
         version: 0.96.0(zod@4.4.3)
+      '@gotong/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      '@gotong/llm':
+        specifier: workspace:*
+        version: link:../../packages/llm
+      '@gotong/llm-anthropic':
+        specifier: workspace:*
+        version: link:../../packages/llm-anthropic
+      '@gotong/llm-openai':
+        specifier: workspace:*
+        version: link:../../packages/llm-openai
       openai:
         specifier: ^6.38.0
         version: 6.38.0(ws@8.20.1)(zod@4.4.3)
 
   examples/obsidian-kb:
     dependencies:
-      '@aipehub/core':
+      '@gotong/core':
         specifier: workspace:*
         version: link:../../packages/core
     devDependencies:
@@ -442,55 +442,55 @@ importers:
 
   examples/open-space:
     dependencies:
-      '@aipehub/core':
+      '@gotong/core':
         specifier: workspace:*
         version: link:../../packages/core
-      '@aipehub/sdk-node':
+      '@gotong/sdk-node':
         specifier: workspace:*
         version: link:../../packages/sdk-node
-      '@aipehub/transport-ws':
+      '@gotong/transport-ws':
         specifier: workspace:*
         version: link:../../packages/transport-ws
-      '@aipehub/web':
+      '@gotong/web':
         specifier: workspace:*
         version: link:../../packages/web
 
   examples/persist-and-resume:
     dependencies:
-      '@aipehub/core':
+      '@gotong/core':
         specifier: workspace:*
         version: link:../../packages/core
 
   examples/personal-butler:
     dependencies:
-      '@aipehub/core':
+      '@gotong/core':
         specifier: workspace:*
         version: link:../../packages/core
-      '@aipehub/llm':
+      '@gotong/llm':
         specifier: workspace:*
         version: link:../../packages/llm
-      '@aipehub/personal-butler':
+      '@gotong/personal-butler':
         specifier: workspace:*
         version: link:../../packages/personal-butler
-      '@aipehub/personal-memory':
+      '@gotong/personal-memory':
         specifier: workspace:*
         version: link:../../packages/personal-memory
-      '@aipehub/services-sdk':
+      '@gotong/services-sdk':
         specifier: workspace:*
         version: link:../../packages/services-sdk
 
   examples/personal-coding-hub:
     dependencies:
-      '@aipehub/cli-agent':
+      '@gotong/cli-agent':
         specifier: workspace:*
         version: link:../../packages/cli-agent
-      '@aipehub/core':
+      '@gotong/core':
         specifier: workspace:*
         version: link:../../packages/core
-      '@aipehub/llm':
+      '@gotong/llm':
         specifier: workspace:*
         version: link:../../packages/llm
-      '@aipehub/llm-openai':
+      '@gotong/llm-openai':
         specifier: workspace:*
         version: link:../../packages/llm-openai
       yaml:
@@ -499,10 +499,10 @@ importers:
 
   examples/personal-research-hub:
     dependencies:
-      '@aipehub/core':
+      '@gotong/core':
         specifier: workspace:*
         version: link:../../packages/core
-      '@aipehub/llm':
+      '@gotong/llm':
         specifier: workspace:*
         version: link:../../packages/llm
       yaml:
@@ -511,13 +511,13 @@ importers:
 
   examples/rag-mcp:
     dependencies:
-      '@aipehub/core':
+      '@gotong/core':
         specifier: workspace:*
         version: link:../../packages/core
-      '@aipehub/llm':
+      '@gotong/llm':
         specifier: workspace:*
         version: link:../../packages/llm
-      '@aipehub/mcp-client':
+      '@gotong/mcp-client':
         specifier: workspace:*
         version: link:../../packages/mcp-client
     devDependencies:
@@ -527,52 +527,52 @@ importers:
 
   examples/remote-agent:
     dependencies:
-      '@aipehub/core':
+      '@gotong/core':
         specifier: workspace:*
         version: link:../../packages/core
-      '@aipehub/sdk-node':
+      '@gotong/sdk-node':
         specifier: workspace:*
         version: link:../../packages/sdk-node
-      '@aipehub/transport-ws':
+      '@gotong/transport-ws':
         specifier: workspace:*
         version: link:../../packages/transport-ws
 
   examples/remote-python:
     dependencies:
-      '@aipehub/core':
+      '@gotong/core':
         specifier: workspace:*
         version: link:../../packages/core
-      '@aipehub/transport-ws':
+      '@gotong/transport-ws':
         specifier: workspace:*
         version: link:../../packages/transport-ws
 
   examples/services-sidecar-demo:
     dependencies:
-      '@aipehub/core':
+      '@gotong/core':
         specifier: workspace:*
         version: link:../../packages/core
-      '@aipehub/host':
+      '@gotong/host':
         specifier: workspace:*
         version: link:../../packages/host
-      '@aipehub/llm':
+      '@gotong/llm':
         specifier: workspace:*
         version: link:../../packages/llm
-      '@aipehub/sdk-node':
+      '@gotong/sdk-node':
         specifier: workspace:*
         version: link:../../packages/sdk-node
-      '@aipehub/transport-ws':
+      '@gotong/transport-ws':
         specifier: workspace:*
         version: link:../../packages/transport-ws
 
   examples/smart-home-hub:
     dependencies:
-      '@aipehub/core':
+      '@gotong/core':
         specifier: workspace:*
         version: link:../../packages/core
-      '@aipehub/inbox':
+      '@gotong/inbox':
         specifier: workspace:*
         version: link:../../packages/inbox
-      '@aipehub/workflow':
+      '@gotong/workflow':
         specifier: workspace:*
         version: link:../../packages/workflow
       yaml:
@@ -581,13 +581,13 @@ importers:
 
   examples/tea-chain-hq:
     dependencies:
-      '@aipehub/core':
+      '@gotong/core':
         specifier: workspace:*
         version: link:../../packages/core
-      '@aipehub/inbox':
+      '@gotong/inbox':
         specifier: workspace:*
         version: link:../../packages/inbox
-      '@aipehub/workflow':
+      '@gotong/workflow':
         specifier: workspace:*
         version: link:../../packages/workflow
       yaml:
@@ -596,13 +596,13 @@ importers:
 
   examples/tea-supply-link:
     dependencies:
-      '@aipehub/core':
+      '@gotong/core':
         specifier: workspace:*
         version: link:../../packages/core
-      '@aipehub/inbox':
+      '@gotong/inbox':
         specifier: workspace:*
         version: link:../../packages/inbox
-      '@aipehub/workflow':
+      '@gotong/workflow':
         specifier: workspace:*
         version: link:../../packages/workflow
       yaml:
@@ -611,13 +611,13 @@ importers:
 
   examples/warband-club:
     dependencies:
-      '@aipehub/core':
+      '@gotong/core':
         specifier: workspace:*
         version: link:../../packages/core
-      '@aipehub/inbox':
+      '@gotong/inbox':
         specifier: workspace:*
         version: link:../../packages/inbox
-      '@aipehub/workflow':
+      '@gotong/workflow':
         specifier: workspace:*
         version: link:../../packages/workflow
       yaml:
@@ -626,67 +626,67 @@ importers:
 
   examples/web-demo:
     dependencies:
-      '@aipehub/core':
+      '@gotong/core':
         specifier: workspace:*
         version: link:../../packages/core
-      '@aipehub/web':
+      '@gotong/web':
         specifier: workspace:*
         version: link:../../packages/web
 
   examples/windmill-bridge:
     dependencies:
-      '@aipehub/core':
+      '@gotong/core':
         specifier: workspace:*
         version: link:../../packages/core
 
   examples/workflow-architect:
     dependencies:
-      '@aipehub/core':
+      '@gotong/core':
         specifier: workspace:*
         version: link:../../packages/core
-      '@aipehub/llm':
+      '@gotong/llm':
         specifier: workspace:*
         version: link:../../packages/llm
-      '@aipehub/workflow':
+      '@gotong/workflow':
         specifier: workspace:*
         version: link:../../packages/workflow
-      '@aipehub/workflow-assistant':
+      '@gotong/workflow-assistant':
         specifier: workspace:*
         version: link:../../packages/workflow-assistant
 
   examples/workflow-assistant:
     dependencies:
-      '@aipehub/core':
-        specifier: workspace:*
-        version: link:../../packages/core
-      '@aipehub/evals':
-        specifier: workspace:*
-        version: link:../../packages/evals
-      '@aipehub/llm':
-        specifier: workspace:*
-        version: link:../../packages/llm
-      '@aipehub/llm-anthropic':
-        specifier: workspace:*
-        version: link:../../packages/llm-anthropic
-      '@aipehub/llm-openai':
-        specifier: workspace:*
-        version: link:../../packages/llm-openai
-      '@aipehub/workflow':
-        specifier: workspace:*
-        version: link:../../packages/workflow
-      '@aipehub/workflow-assistant':
-        specifier: workspace:*
-        version: link:../../packages/workflow-assistant
       '@anthropic-ai/sdk':
         specifier: ^0.96.0
         version: 0.96.0(zod@4.4.3)
+      '@gotong/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      '@gotong/evals':
+        specifier: workspace:*
+        version: link:../../packages/evals
+      '@gotong/llm':
+        specifier: workspace:*
+        version: link:../../packages/llm
+      '@gotong/llm-anthropic':
+        specifier: workspace:*
+        version: link:../../packages/llm-anthropic
+      '@gotong/llm-openai':
+        specifier: workspace:*
+        version: link:../../packages/llm-openai
+      '@gotong/workflow':
+        specifier: workspace:*
+        version: link:../../packages/workflow
+      '@gotong/workflow-assistant':
+        specifier: workspace:*
+        version: link:../../packages/workflow-assistant
       openai:
         specifier: ^6.38.0
         version: 6.38.0(ws@8.20.1)(zod@4.4.3)
 
   packages/a2a:
     dependencies:
-      '@aipehub/core':
+      '@gotong/core':
         specifier: workspace:*
         version: link:../core
     devDependencies:
@@ -696,7 +696,7 @@ importers:
 
   packages/acp-agent:
     dependencies:
-      '@aipehub/core':
+      '@gotong/core':
         specifier: workspace:*
         version: link:../core
     devDependencies:
@@ -706,10 +706,10 @@ importers:
 
   packages/cli:
     dependencies:
-      '@aipehub/core':
+      '@gotong/core':
         specifier: workspace:*
         version: link:../core
-      '@aipehub/protocol':
+      '@gotong/protocol':
         specifier: workspace:*
         version: link:../protocol
     devDependencies:
@@ -725,7 +725,7 @@ importers:
 
   packages/cli-agent:
     dependencies:
-      '@aipehub/core':
+      '@gotong/core':
         specifier: workspace:*
         version: link:../core
     devDependencies:
@@ -735,7 +735,7 @@ importers:
 
   packages/core:
     dependencies:
-      '@aipehub/protocol':
+      '@gotong/protocol':
         specifier: workspace:*
         version: link:../protocol
     devDependencies:
@@ -751,7 +751,7 @@ importers:
 
   packages/evals:
     dependencies:
-      '@aipehub/workflow':
+      '@gotong/workflow':
         specifier: workspace:*
         version: link:../workflow
     devDependencies:
@@ -761,93 +761,93 @@ importers:
 
   packages/host:
     dependencies:
-      '@aipehub/a2a':
-        specifier: workspace:*
-        version: link:../a2a
-      '@aipehub/acp-agent':
-        specifier: workspace:*
-        version: link:../acp-agent
-      '@aipehub/core':
-        specifier: workspace:*
-        version: link:../core
-      '@aipehub/evals':
-        specifier: workspace:*
-        version: link:../evals
-      '@aipehub/hub-steward':
-        specifier: workspace:*
-        version: link:../hub-steward
-      '@aipehub/identity':
-        specifier: workspace:*
-        version: link:../identity
-      '@aipehub/im-adapter':
-        specifier: workspace:*
-        version: link:../im-adapter
-      '@aipehub/im-lark':
-        specifier: workspace:*
-        version: link:../im-lark
-      '@aipehub/im-qq':
-        specifier: workspace:*
-        version: link:../im-qq
-      '@aipehub/im-slack':
-        specifier: workspace:*
-        version: link:../im-slack
-      '@aipehub/im-telegram':
-        specifier: workspace:*
-        version: link:../im-telegram
-      '@aipehub/inbox':
-        specifier: workspace:*
-        version: link:../inbox
-      '@aipehub/llm':
-        specifier: workspace:*
-        version: link:../llm
-      '@aipehub/llm-anthropic':
-        specifier: workspace:*
-        version: link:../llm-anthropic
-      '@aipehub/llm-openai':
-        specifier: workspace:*
-        version: link:../llm-openai
-      '@aipehub/mcp-client':
-        specifier: workspace:*
-        version: link:../mcp-client
-      '@aipehub/personal-butler':
-        specifier: workspace:*
-        version: link:../personal-butler
-      '@aipehub/personal-memory':
-        specifier: workspace:*
-        version: link:../personal-memory
-      '@aipehub/protocol':
-        specifier: workspace:*
-        version: link:../protocol
-      '@aipehub/saml':
-        specifier: workspace:*
-        version: link:../saml
-      '@aipehub/service-artifact-file':
-        specifier: workspace:*
-        version: link:../service-artifact-file
-      '@aipehub/service-datastore-sqlite':
-        specifier: workspace:*
-        version: link:../service-datastore-sqlite
-      '@aipehub/service-memory-file':
-        specifier: workspace:*
-        version: link:../service-memory-file
-      '@aipehub/services-sdk':
-        specifier: workspace:*
-        version: link:../services-sdk
-      '@aipehub/transport-ws':
-        specifier: workspace:*
-        version: link:../transport-ws
-      '@aipehub/web':
-        specifier: workspace:*
-        version: link:../web
-      '@aipehub/workflow':
-        specifier: workspace:*
-        version: link:../workflow
-      '@aipehub/workflow-assistant':
-        specifier: workspace:*
-        version: link:../workflow-assistant
       '@anthropic-ai/sdk':
         specifier: ^0.96.0
         version: 0.96.0(zod@4.4.3)
+      '@gotong/a2a':
+        specifier: workspace:*
+        version: link:../a2a
+      '@gotong/acp-agent':
+        specifier: workspace:*
+        version: link:../acp-agent
+      '@gotong/core':
+        specifier: workspace:*
+        version: link:../core
+      '@gotong/evals':
+        specifier: workspace:*
+        version: link:../evals
+      '@gotong/hub-steward':
+        specifier: workspace:*
+        version: link:../hub-steward
+      '@gotong/identity':
+        specifier: workspace:*
+        version: link:../identity
+      '@gotong/im-adapter':
+        specifier: workspace:*
+        version: link:../im-adapter
+      '@gotong/im-lark':
+        specifier: workspace:*
+        version: link:../im-lark
+      '@gotong/im-qq':
+        specifier: workspace:*
+        version: link:../im-qq
+      '@gotong/im-slack':
+        specifier: workspace:*
+        version: link:../im-slack
+      '@gotong/im-telegram':
+        specifier: workspace:*
+        version: link:../im-telegram
+      '@gotong/inbox':
+        specifier: workspace:*
+        version: link:../inbox
+      '@gotong/llm':
+        specifier: workspace:*
+        version: link:../llm
+      '@gotong/llm-anthropic':
+        specifier: workspace:*
+        version: link:../llm-anthropic
+      '@gotong/llm-openai':
+        specifier: workspace:*
+        version: link:../llm-openai
+      '@gotong/mcp-client':
+        specifier: workspace:*
+        version: link:../mcp-client
+      '@gotong/personal-butler':
+        specifier: workspace:*
+        version: link:../personal-butler
+      '@gotong/personal-memory':
+        specifier: workspace:*
+        version: link:../personal-memory
+      '@gotong/protocol':
+        specifier: workspace:*
+        version: link:../protocol
+      '@gotong/saml':
+        specifier: workspace:*
+        version: link:../saml
+      '@gotong/service-artifact-file':
+        specifier: workspace:*
+        version: link:../service-artifact-file
+      '@gotong/service-datastore-sqlite':
+        specifier: workspace:*
+        version: link:../service-datastore-sqlite
+      '@gotong/service-memory-file':
+        specifier: workspace:*
+        version: link:../service-memory-file
+      '@gotong/services-sdk':
+        specifier: workspace:*
+        version: link:../services-sdk
+      '@gotong/transport-ws':
+        specifier: workspace:*
+        version: link:../transport-ws
+      '@gotong/web':
+        specifier: workspace:*
+        version: link:../web
+      '@gotong/workflow':
+        specifier: workspace:*
+        version: link:../workflow
+      '@gotong/workflow-assistant':
+        specifier: workspace:*
+        version: link:../workflow-assistant
       better-sqlite3:
         specifier: ^12.10.0
         version: 12.10.0
@@ -858,10 +858,10 @@ importers:
         specifier: ^8.20.1
         version: 8.20.1
     devDependencies:
-      '@aipehub/cli-agent':
+      '@gotong/cli-agent':
         specifier: workspace:*
         version: link:../cli-agent
-      '@aipehub/sdk-node':
+      '@gotong/sdk-node':
         specifier: workspace:*
         version: link:../sdk-node
       '@types/ws':
@@ -873,13 +873,13 @@ importers:
 
   packages/hub-steward:
     dependencies:
-      '@aipehub/core':
+      '@gotong/core':
         specifier: workspace:*
         version: link:../core
-      '@aipehub/identity':
+      '@gotong/identity':
         specifier: workspace:*
         version: link:../identity
-      '@aipehub/llm':
+      '@gotong/llm':
         specifier: workspace:*
         version: link:../llm
     devDependencies:
@@ -907,7 +907,7 @@ importers:
 
   packages/im-discord:
     dependencies:
-      '@aipehub/im-adapter':
+      '@gotong/im-adapter':
         specifier: workspace:*
         version: link:../im-adapter
     devDependencies:
@@ -917,7 +917,7 @@ importers:
 
   packages/im-lark:
     dependencies:
-      '@aipehub/im-adapter':
+      '@gotong/im-adapter':
         specifier: workspace:*
         version: link:../im-adapter
       '@larksuiteoapi/node-sdk':
@@ -930,7 +930,7 @@ importers:
 
   packages/im-matrix:
     dependencies:
-      '@aipehub/im-adapter':
+      '@gotong/im-adapter':
         specifier: workspace:*
         version: link:../im-adapter
     devDependencies:
@@ -940,7 +940,7 @@ importers:
 
   packages/im-qq:
     dependencies:
-      '@aipehub/im-adapter':
+      '@gotong/im-adapter':
         specifier: workspace:*
         version: link:../im-adapter
     devDependencies:
@@ -950,7 +950,7 @@ importers:
 
   packages/im-slack:
     dependencies:
-      '@aipehub/im-adapter':
+      '@gotong/im-adapter':
         specifier: workspace:*
         version: link:../im-adapter
     devDependencies:
@@ -960,7 +960,7 @@ importers:
 
   packages/im-telegram:
     dependencies:
-      '@aipehub/im-adapter':
+      '@gotong/im-adapter':
         specifier: workspace:*
         version: link:../im-adapter
     devDependencies:
@@ -970,7 +970,7 @@ importers:
 
   packages/inbox:
     dependencies:
-      '@aipehub/core':
+      '@gotong/core':
         specifier: workspace:*
         version: link:../core
     devDependencies:
@@ -980,10 +980,10 @@ importers:
 
   packages/llm:
     dependencies:
-      '@aipehub/core':
+      '@gotong/core':
         specifier: workspace:*
         version: link:../core
-      '@aipehub/services-sdk':
+      '@gotong/services-sdk':
         specifier: workspace:*
         version: link:../services-sdk
     devDependencies:
@@ -993,7 +993,7 @@ importers:
 
   packages/llm-anthropic:
     dependencies:
-      '@aipehub/llm':
+      '@gotong/llm':
         specifier: workspace:*
         version: link:../llm
     devDependencies:
@@ -1006,7 +1006,7 @@ importers:
 
   packages/llm-openai:
     dependencies:
-      '@aipehub/llm':
+      '@gotong/llm':
         specifier: workspace:*
         version: link:../llm
     devDependencies:
@@ -1045,17 +1045,17 @@ importers:
 
   packages/personal-butler:
     dependencies:
-      '@aipehub/core':
+      '@gotong/core':
         specifier: workspace:*
         version: link:../core
-      '@aipehub/llm':
+      '@gotong/llm':
         specifier: workspace:*
         version: link:../llm
-      '@aipehub/personal-memory':
+      '@gotong/personal-memory':
         specifier: workspace:*
         version: link:../personal-memory
     devDependencies:
-      '@aipehub/services-sdk':
+      '@gotong/services-sdk':
         specifier: workspace:*
         version: link:../services-sdk
       vitest:
@@ -1064,13 +1064,13 @@ importers:
 
   packages/personal-memory:
     dependencies:
-      '@aipehub/core':
+      '@gotong/core':
         specifier: workspace:*
         version: link:../core
-      '@aipehub/llm':
+      '@gotong/llm':
         specifier: workspace:*
         version: link:../llm
-      '@aipehub/services-sdk':
+      '@gotong/services-sdk':
         specifier: workspace:*
         version: link:../services-sdk
     devDependencies:
@@ -1102,20 +1102,20 @@ importers:
 
   packages/sdk-node:
     dependencies:
-      '@aipehub/core':
+      '@gotong/core':
         specifier: workspace:*
         version: link:../core
-      '@aipehub/protocol':
+      '@gotong/protocol':
         specifier: workspace:*
         version: link:../protocol
-      '@aipehub/services-sdk':
+      '@gotong/services-sdk':
         specifier: workspace:*
         version: link:../services-sdk
       ws:
         specifier: ^8.20.1
         version: 8.20.1
     devDependencies:
-      '@aipehub/transport-ws':
+      '@gotong/transport-ws':
         specifier: workspace:*
         version: link:../transport-ws
       '@types/ws':
@@ -1127,10 +1127,10 @@ importers:
 
   packages/service-artifact-file:
     dependencies:
-      '@aipehub/core':
+      '@gotong/core':
         specifier: workspace:*
         version: link:../core
-      '@aipehub/services-sdk':
+      '@gotong/services-sdk':
         specifier: workspace:*
         version: link:../services-sdk
     devDependencies:
@@ -1140,10 +1140,10 @@ importers:
 
   packages/service-datastore-sqlite:
     dependencies:
-      '@aipehub/core':
+      '@gotong/core':
         specifier: workspace:*
         version: link:../core
-      '@aipehub/services-sdk':
+      '@gotong/services-sdk':
         specifier: workspace:*
         version: link:../services-sdk
     devDependencies:
@@ -1159,10 +1159,10 @@ importers:
 
   packages/service-memory-file:
     dependencies:
-      '@aipehub/core':
+      '@gotong/core':
         specifier: workspace:*
         version: link:../core
-      '@aipehub/services-sdk':
+      '@gotong/services-sdk':
         specifier: workspace:*
         version: link:../services-sdk
     devDependencies:
@@ -1172,7 +1172,7 @@ importers:
 
   packages/services-sdk:
     dependencies:
-      '@aipehub/core':
+      '@gotong/core':
         specifier: workspace:*
         version: link:../core
     devDependencies:
@@ -1182,10 +1182,10 @@ importers:
 
   packages/transport-ws:
     dependencies:
-      '@aipehub/core':
+      '@gotong/core':
         specifier: workspace:*
         version: link:../core
-      '@aipehub/protocol':
+      '@gotong/protocol':
         specifier: workspace:*
         version: link:../protocol
       ws:
@@ -1201,20 +1201,20 @@ importers:
 
   packages/web:
     dependencies:
-      '@aipehub/core':
+      '@gotong/core':
         specifier: workspace:*
         version: link:../core
-      '@aipehub/protocol':
+      '@gotong/protocol':
         specifier: workspace:*
         version: link:../protocol
       yaml:
         specifier: ^2.6.0
         version: 2.9.0
     devDependencies:
-      '@aipehub/identity':
+      '@gotong/identity':
         specifier: workspace:*
         version: link:../identity
-      '@aipehub/workflow':
+      '@gotong/workflow':
         specifier: workspace:*
         version: link:../workflow
       esbuild:
@@ -1226,7 +1226,7 @@ importers:
 
   packages/workflow:
     dependencies:
-      '@aipehub/core':
+      '@gotong/core':
         specifier: workspace:*
         version: link:../core
       yaml:
@@ -1239,16 +1239,16 @@ importers:
 
   packages/workflow-assistant:
     dependencies:
-      '@aipehub/core':
+      '@gotong/core':
         specifier: workspace:*
         version: link:../core
-      '@aipehub/evals':
+      '@gotong/evals':
         specifier: workspace:*
         version: link:../evals
-      '@aipehub/llm':
+      '@gotong/llm':
         specifier: workspace:*
         version: link:../llm
-      '@aipehub/workflow':
+      '@gotong/workflow':
         specifier: workspace:*
         version: link:../workflow
     devDependencies:

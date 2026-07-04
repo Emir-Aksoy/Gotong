@@ -1,6 +1,6 @@
-# aipehub (Python SDK)
+# gotong (Python SDK)
 
-Connect Python agents to an [AipeHub](https://github.com/emir-aksoy/AipeHub) Hub over WebSocket.
+Connect Python agents to an [Gotong](https://github.com/emir-aksoy/Gotong) Hub over WebSocket.
 
 The Hub is the TypeScript reference implementation; this SDK speaks the same wire protocol (`docs/PROTOCOL.md`) so Python agents register into the same registry, get scheduled by the same scheduler, and appear in the same transcript as TypeScript or in-process agents.
 
@@ -11,8 +11,8 @@ The Hub is the TypeScript reference implementation; this SDK speaks the same wir
 pip install -e python-sdk/
 
 # from PyPI — NOT yet published, decision tracked in
-# https://github.com/Emir-Aksoy/AipeHub/blob/main/.github/RELEASE-CHECKLIST.md
-# pip install aipehub
+# https://github.com/Emir-Aksoy/Gotong/blob/main/.github/RELEASE-CHECKLIST.md
+# pip install gotong
 ```
 
 Requires Python ≥ 3.10.
@@ -21,7 +21,7 @@ Requires Python ≥ 3.10.
 
 ```python
 import asyncio
-from aipehub import AgentParticipant, connect
+from gotong import AgentParticipant, connect
 
 
 class WriterAgent(AgentParticipant):
@@ -50,12 +50,12 @@ Subclass `AgentParticipant`, give it an `id` + `capabilities`, override `handle_
 
 ## Adapters — bring your own agent framework
 
-`aipehub.adapters` wraps an external framework's object as an `AgentParticipant`, so the Hub routes Tasks to it like any other agent. The framework is a **peer dependency** — importing the adapter never pulls in `langgraph` / `crewai`; you install those yourself only for real graphs.
+`gotong.adapters` wraps an external framework's object as an `AgentParticipant`, so the Hub routes Tasks to it like any other agent. The framework is a **peer dependency** — importing the adapter never pulls in `langgraph` / `crewai`; you install those yourself only for real graphs.
 
 ```python
 from langgraph.graph import StateGraph
-from aipehub import connect
-from aipehub.adapters import langgraph_participant
+from gotong import connect
+from gotong.adapters import langgraph_participant
 
 graph = build_graph().compile()          # any compiled StateGraph
 
@@ -63,7 +63,7 @@ agent = langgraph_participant(
     graph,
     id="researcher-lg",
     capabilities=["research"],
-    # map the AipeHub task <-> the graph's state dict (defaults pass the
+    # map the Gotong task <-> the graph's state dict (defaults pass the
     # payload straight through and return the whole final state)
     to_state=lambda task: {"question": task["payload"]["question"]},
     from_state=lambda state: {"answer": state["answer"]},
@@ -78,7 +78,7 @@ A **CrewAI** crew wraps the same way — duck-typed on `.kickoff(inputs)`, `.kic
 
 ```python
 from crewai import Crew
-from aipehub.adapters import crewai_participant
+from gotong.adapters import crewai_participant
 
 crew = Crew(agents=[...], tasks=[...])
 agent = crewai_participant(

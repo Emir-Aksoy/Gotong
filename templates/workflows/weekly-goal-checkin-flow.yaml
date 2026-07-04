@@ -1,6 +1,6 @@
 # =============================================================================
 # Workflow: 每周目标复盘(member-facing 示例)
-# Schema: aipehub.workflow/v1
+# Schema: gotong.workflow/v1
 #
 # 第二个「成员工作台」示例 —— 故意用**替代 scope key** `owner_user_id`
 # (而不是默认的 case_id),演示 surface.me.user_scope_field 的通用性。
@@ -18,7 +18,7 @@
 # 真正出结果。
 # =============================================================================
 
-schema: aipehub.workflow/v1
+schema: gotong.workflow/v1
 
 workflow:
   id: weekly-goal-checkin-flow

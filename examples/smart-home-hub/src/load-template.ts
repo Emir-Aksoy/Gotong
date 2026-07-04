@@ -45,7 +45,7 @@ interface LoadedTemplate {
 }
 
 function main(): void {
-  console.log('\n=== AipeHub case: smart-home-hub — load the template ===\n')
+  console.log('\n=== Gotong case: smart-home-hub — load the template ===\n')
 
   // --- [1] LOAD: the config is a FILE, parsed live (not a built-in literal) ---
   section('[1] load the config from a FILE')
@@ -99,7 +99,7 @@ function main(): void {
   // with a human: step + a when-gated secure step, and intentionally NO KB slot.
   const ids = new Set(agents.map((a) => a.id))
   const wf = workflows.find((w) => w.id === 'home-goodnight')
-  if (doc.schema !== 'aipehub.template/v1') throw new Error('expected schema aipehub.template/v1')
+  if (doc.schema !== 'gotong.template/v1') throw new Error('expected schema gotong.template/v1')
   if (!ids.has('home-steward')) throw new Error('expected a home-steward agent in the loaded template')
   const steward = agents.find((a) => a.id === 'home-steward')!
   if (!(steward.mcpServers ?? []).some((s) => s.name === 'homeassistant')) {

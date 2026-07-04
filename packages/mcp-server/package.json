@@ -1,12 +1,12 @@
 {
-  "name": "@aipehub/mcp-server",
+  "name": "@gotong/mcp-server",
   "version": "1.0.0",
   "type": "module",
-  "description": "MCP (Model Context Protocol) bridge for AipeHub — lets Claude Desktop / Cursor / any MCP client dispatch tasks, read participants, and review leaderboards on a running Hub.",
+  "description": "MCP (Model Context Protocol) bridge for Gotong — lets Claude Desktop / Cursor / any MCP client dispatch tasks, read participants, and review leaderboards on a running Hub.",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/Emir-Aksoy/AipeHub.git",
+    "url": "https://github.com/Emir-Aksoy/Gotong.git",
     "directory": "packages/mcp-server"
   },
   "publishConfig": {
@@ -15,7 +15,7 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "bin": {
-    "aipehub-mcp": "./bin/aipehub-mcp.js"
+    "gotong-mcp": "./bin/gotong-mcp.js"
   },
   "exports": {
     ".": {

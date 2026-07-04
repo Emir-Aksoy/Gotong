@@ -1,8 +1,8 @@
-# @aipehub/identity
+# @gotong/identity
 
-AipeHub **v4** identity layer — users, credentials, memberships, sessions.
+Gotong **v4** identity layer — users, credentials, memberships, sessions.
 SQLite-backed, zero-dep on other workspace packages so it can be wired into
-`@aipehub/host` / `@aipehub/web` (and later `@aipehub/cli`) without pulling
+`@gotong/host` / `@gotong/web` (and later `@gotong/cli`) without pulling
 the rest of the runtime into a circular dependency.
 
 ## Why this exists
@@ -40,7 +40,7 @@ This package is **deliberately small**. It is:
 What it is **not**:
 
 - Not an OAuth server. SSO / OIDC providers come in a later phase as
-  separate `@aipehub/identity-oauth-*` packages plugging in via the
+  separate `@gotong/identity-oauth-*` packages plugging in via the
   `credentials` table's `kind` column.
 - Not a permission engine. We model **role assignment**; the host /
   web layer maps roles to feature gates. (Why: permission semantics
@@ -50,15 +50,15 @@ What it is **not**:
 ## Quick start
 
 ```ts
-import { openIdentityStore } from '@aipehub/identity'
+import { openIdentityStore } from '@gotong/identity'
 
-// One file per host, lives alongside the existing .aipehub/ workspace.
-const store = openIdentityStore({ dbPath: '.aipehub/identity.sqlite' })
+// One file per host, lives alongside the existing .gotong/ workspace.
+const store = openIdentityStore({ dbPath: '.gotong/identity.sqlite' })
 
 // First-run bootstrap: takes the v3 admin token (if there is one) and
 // turns it into a real user with role 'owner'. Idempotent — running it
 // twice with the same token does nothing on the second call.
-store.bootstrap({ adminToken: process.env.AIPE_LEGACY_ADMIN_TOKEN })
+store.bootstrap({ adminToken: process.env.GOTONG_LEGACY_ADMIN_TOKEN })
 
 // Create a new user with a password.
 const alice = store.createUser({
@@ -125,7 +125,7 @@ packages/identity/
 
 ## Concurrency
 
-Same constraints as `@aipehub/service-datastore-sqlite`: one host
+Same constraints as `@gotong/service-datastore-sqlite`: one host
 process per workspace, WAL mode on, FK enforced. Multiple processes
 pointing at the same `identity.sqlite` is unsupported.
 

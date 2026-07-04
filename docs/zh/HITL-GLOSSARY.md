@@ -1,6 +1,6 @@
 # HITL 术语表（Human-in-the-Loop / 人在回路）
 
-> 本文件是 AipeHub 项目内 HITL 相关术语的**唯一权威定义**。代码注释、
+> 本文件是 Gotong 项目内 HITL 相关术语的**唯一权威定义**。代码注释、
 > prompt、文档、commit message 全部用这里定的写法，不要再混用 "HUMAN-
 > IN-THE-LOOP"、"人在回路"、"用户介入" 等多种说法。
 
@@ -16,7 +16,7 @@
 
 ## 2. 四种 HITL 模式
 
-参考 LangChain / Permit.io 的业界共识，AipeHub 把 HITL 场景分成四类。
+参考 LangChain / Permit.io 的业界共识，Gotong 把 HITL 场景分成四类。
 **新加 HITL 行为时，先确认它属于哪一类**，并在代码注释里点名：
 
 ### 2.1 `approve` — 审批模式

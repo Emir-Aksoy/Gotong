@@ -22,7 +22,7 @@
  * that wants pretty names can fetch on demand.
  */
 
-import type { ImAttachment, ImMessage, ImUser } from '@aipehub/im-adapter'
+import type { ImAttachment, ImMessage, ImUser } from '@gotong/im-adapter'
 
 import type {
   LarkAudioContent,
@@ -63,7 +63,7 @@ import type {
  *
  * The `lark-` prefix is private to this package — same reasoning as
  * Telegram's `telegram-file:`. Downstream code that wants bytes must
- * depend on @aipehub/im-lark (or roll its own `getFile` dance).
+ * depend on @gotong/im-lark (or roll its own `getFile` dance).
  */
 export const LARK_URI_PREFIXES = {
   image: 'lark-image:',

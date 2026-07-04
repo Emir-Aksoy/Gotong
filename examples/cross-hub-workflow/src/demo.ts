@@ -57,9 +57,9 @@ import {
   type ParticipantId,
   type Task,
   type TaskResult,
-} from '@aipehub/core'
-import { FileInboxStore, NEVER_RESUME_AT, type InboxDecision, type InboxItem } from '@aipehub/inbox'
-import { parseWorkflow, WorkflowRunner } from '@aipehub/workflow'
+} from '@gotong/core'
+import { FileInboxStore, NEVER_RESUME_AT, type InboxDecision, type InboxItem } from '@gotong/inbox'
+import { parseWorkflow, WorkflowRunner } from '@gotong/workflow'
 
 const WORKFLOWS_DIR = fileURLToPath(new URL('../workflows', import.meta.url))
 const OWNER = 'org-a-owner' as ParticipantId // approves outbound sends from their /me inbox
@@ -181,9 +181,9 @@ class OutboundApprovalGate {
 }
 
 async function main(): Promise<void> {
-  console.log('\n=== AipeHub case: cross-hub-workflow — 跨 hub 工作流编排 (北极星 第 2 层) ===\n')
+  console.log('\n=== Gotong case: cross-hub-workflow — 跨 hub 工作流编排 (北极星 第 2 层) ===\n')
 
-  const tmp = mkdtempSync(join(tmpdir(), 'aipehub-cross-hub-wf-'))
+  const tmp = mkdtempSync(join(tmpdir(), 'gotong-cross-hub-wf-'))
   const parked = new Map<string, ParkedRow>()
   const inbox = new FileInboxStore(tmp)
   inbox.ensureDirs()

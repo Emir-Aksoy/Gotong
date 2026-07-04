@@ -39,8 +39,8 @@
 
   const T = {
     zh: {
-      docTitle: 'AipeHub · 接受邀请',
-      h1: 'AipeHub · 接受邀请',
+      docTitle: 'Gotong · 接受邀请',
+      h1: 'Gotong · 接受邀请',
       intro: '设置密码后立即激活账号并跳转到你的工作流页面。',
       verifying: '正在验证邀请链接…',
       emailLabel: '邀请邮箱:',
@@ -72,8 +72,8 @@
       activateFailPrefix: '激活失败: ',
     },
     en: {
-      docTitle: 'AipeHub · Accept invitation',
-      h1: 'AipeHub · Accept invitation',
+      docTitle: 'Gotong · Accept invitation',
+      h1: 'Gotong · Accept invitation',
       intro: 'Set a password to activate your account and jump straight to your workflows.',
       verifying: 'Verifying the invite link…',
       emailLabel: 'Invited email:',

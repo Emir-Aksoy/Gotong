@@ -1,25 +1,25 @@
-# @aipehub/transport-ws
+# @gotong/transport-ws
 
-Hub-side WebSocket transport for [AipeHub](https://github.com/Emir-Aksoy/AipeHub). Lets remote agents — running in another Node process, on another machine, or written in another language (Python via `aipehub`, more SDKs coming) — register into the same Hub as local in-process agents.
+Hub-side WebSocket transport for [Gotong](https://github.com/Emir-Aksoy/Gotong). Lets remote agents — running in another Node process, on another machine, or written in another language (Python via `gotong`, more SDKs coming) — register into the same Hub as local in-process agents.
 
 ## Install
 
 ```bash
-pnpm add @aipehub/transport-ws
+pnpm add @gotong/transport-ws
 ```
 
 ## Use
 
 ```ts
-import { Hub } from '@aipehub/core'
-import { serveWebSocket } from '@aipehub/transport-ws'
+import { Hub } from '@gotong/core'
+import { serveWebSocket } from '@gotong/transport-ws'
 
 const hub = new Hub()
 await hub.start()
 
 const ws = await serveWebSocket(hub, {
   port: 4000,
-  authenticate: (apiKey) => apiKey === process.env.AIPE_API_KEY,
+  authenticate: (apiKey) => apiKey === process.env.GOTONG_API_KEY,
 })
 // hub.dispatch(...) just works — remote agents look identical to local ones
 // await ws.close() to shut down gracefully
@@ -42,7 +42,7 @@ await serveWebSocket(hub, {
 
 ### Admin-approval gating (v1.1+)
 
-Hold every connecting agent in a pending queue until an admin approves it. Combine with `@aipehub/web`'s admin console for an interactive approval surface.
+Hold every connecting agent in a pending queue until an admin approves it. Combine with `@gotong/web`'s admin console for an interactive approval surface.
 
 ```ts
 await serveWebSocket(hub, { port: 4000, gating: 'admin-approval' })
@@ -58,7 +58,7 @@ Default is `gating: 'open'`, the pre-v1.1 behaviour.
 
 ## Wire protocol
 
-Full spec: [docs/PROTOCOL.md](https://github.com/Emir-Aksoy/AipeHub/blob/main/docs/PROTOCOL.md).
+Full spec: [docs/PROTOCOL.md](https://github.com/Emir-Aksoy/Gotong/blob/main/docs/PROTOCOL.md).
 
 ## License
 

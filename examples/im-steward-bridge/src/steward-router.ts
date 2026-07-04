@@ -2,7 +2,7 @@
  * Steward-aware IM router — `ImMessage` in, `StewardPort.plan` / `.apply` out.
  *
  * This is a FORK of `examples/im-bridge-host/src/router.ts`, not a reuse, and the
- * reason is instructive: the shared `parseImCommand` (`@aipehub/im-adapter`) only
+ * reason is instructive: the shared `parseImCommand` (`@gotong/im-adapter`) only
  * knows `/help` `/bind` `/unbind` `/agents` `/workflow` — `/steward` and `/apply`
  * are UNKNOWN verbs to it, so they fall through to `{ kind: 'free' }`. The plan
  * (D-D) calls for exactly this: a steward bridge forks the router with its own
@@ -12,7 +12,7 @@
  *
  * The other fork: this router routes to a `StewardPort` (plan / apply — mirroring
  * the host's `MeHubStewardSurface`), NOT to `hub.dispatch`. So it needs no
- * `@aipehub/core` Hub at all — the steward is reached the same way from the admin
+ * `@gotong/core` Hub at all — the steward is reached the same way from the admin
  * console, the `/me` SPA, and here (one steward, three transports).
  *
  * North-star fit: the steward only ever PROPOSES; the human applies. Dangerous /
@@ -27,8 +27,8 @@ import type {
   ImBindingResolver,
   ImMessage,
   ImUser,
-} from '@aipehub/im-adapter'
-import { parseImCommand } from '@aipehub/im-adapter'
+} from '@gotong/im-adapter'
+import { parseImCommand } from '@gotong/im-adapter'
 
 import type {
   StewardClassifiedAction,
@@ -54,10 +54,10 @@ export interface StewardImRouterConfig {
 }
 
 export const defaultStewardHelpText = [
-  'AipeHub 管家 (hub steward) — 在这里用大白话管你的助手和工作流：',
+  'Gotong 管家 (hub steward) — 在这里用大白话管你的助手和工作流：',
   '',
   '  /help              — 显示这份帮助',
-  '  /bind <code>       — 绑定你的 AipeHub 账号（在个人界面 → 绑定 IM 取 6 位码）',
+  '  /bind <code>       — 绑定你的 Gotong 账号（在个人界面 → 绑定 IM 取 6 位码）',
   '  /unbind            — 解绑',
   '  /steward <大白话>  — 让管家把你的话变成一组「待你确认」的动作',
   '  /apply <编号>      — 执行管家刚提议的第 N 个动作',
@@ -162,7 +162,7 @@ export class StewardImRouter {
     if (userId === null) {
       await this.reply(
         msg,
-        '你还没绑定 AipeHub 账号。去个人界面 → 绑定 IM 取一个 6 位码，然后发我 `/bind <code>`。',
+        '你还没绑定 Gotong 账号。去个人界面 → 绑定 IM 取一个 6 位码，然后发我 `/bind <code>`。',
       )
       return
     }

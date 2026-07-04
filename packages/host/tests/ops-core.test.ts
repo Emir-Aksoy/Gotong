@@ -137,8 +137,8 @@ describe('runOpsCommand — read tier', () => {
     const res = await runOpsCommand('inventory', [], CLI, depsWith({
       backupDir: '/backups',
       readdirImpl: async () => [
-        'aipehub-myspace-20260101T000000Z.tar.gz',
-        'aipehub-myspace-20260626T101530Z.tar.gz',
+        'gotong-myspace-20260101T000000Z.tar.gz',
+        'gotong-myspace-20260626T101530Z.tar.gz',
         'not-a-backup.txt',
       ],
       statSizeImpl: async () => 4096,
@@ -207,14 +207,14 @@ describe('fixMissingDirs', () => {
   })
 })
 
-// ── workspaceFixDirs honours AIPE_WORKFLOWS_DIR ──────────────────────────────
+// ── workspaceFixDirs honours GOTONG_WORKFLOWS_DIR ──────────────────────────────
 
 describe('workspaceFixDirs', () => {
   it('defaults to <space> + <space>/workflows/definitions', () => {
     expect(workspaceFixDirs('/space')).toEqual(['/space', '/space/workflows/definitions'])
   })
-  it('uses AIPE_WORKFLOWS_DIR override when set', () => {
-    expect(workspaceFixDirs('/space', { AIPE_WORKFLOWS_DIR: '/elsewhere/defs' })).toEqual([
+  it('uses GOTONG_WORKFLOWS_DIR override when set', () => {
+    expect(workspaceFixDirs('/space', { GOTONG_WORKFLOWS_DIR: '/elsewhere/defs' })).toEqual([
       '/space',
       '/elsewhere/defs',
     ])
@@ -234,9 +234,9 @@ describe('readBackupInventory', () => {
   it('parses label + sortable timestamp and sorts newest-first', async () => {
     const inv = await readBackupInventory('/b', {
       readdirImpl: async () => [
-        'aipehub-prod-20260315T120000Z.tar.gz',
-        'aipehub-prod-20260101T000000Z.tar.gz',
-        'aipehub-prod-20260626T235959Z.tar.gz',
+        'gotong-prod-20260315T120000Z.tar.gz',
+        'gotong-prod-20260101T000000Z.tar.gz',
+        'gotong-prod-20260626T235959Z.tar.gz',
       ],
       statSizeImpl: async () => 10,
     })
@@ -251,7 +251,7 @@ describe('readBackupInventory', () => {
 
   it('keeps a dash-containing label intact (timestamp anchored at the tail)', async () => {
     const inv = await readBackupInventory('/b', {
-      readdirImpl: async () => ['aipehub-my-fancy-space-20260101T000000Z.tar.gz'],
+      readdirImpl: async () => ['gotong-my-fancy-space-20260101T000000Z.tar.gz'],
     })
     expect(inv.items[0]!.label).toBe('my-fancy-space')
     expect(inv.items[0]!.timestamp).toBe('20260101T000000Z')
@@ -259,7 +259,7 @@ describe('readBackupInventory', () => {
 
   it('counts non-matching files as ignored, omits size on a stat fault', async () => {
     const inv = await readBackupInventory('/b', {
-      readdirImpl: async () => ['aipehub-a-20260101T000000Z.tar.gz', 'README.md', 'aipehub-incomplete.tar.gz'],
+      readdirImpl: async () => ['gotong-a-20260101T000000Z.tar.gz', 'README.md', 'gotong-incomplete.tar.gz'],
       statSizeImpl: async () => undefined,
     })
     expect(inv.items).toHaveLength(1)

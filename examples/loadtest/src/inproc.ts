@@ -25,11 +25,11 @@
  * scheduling layer itself.
  *
  * Usage:
- *   pnpm --filter @aipehub/example-loadtest inproc -- --workers 50 --duration 30s
- *   pnpm --filter @aipehub/example-loadtest inproc -- --workers 100 --duration 5m --output runs/baseline.json
+ *   pnpm --filter @gotong/example-loadtest inproc -- --workers 50 --duration 30s
+ *   pnpm --filter @gotong/example-loadtest inproc -- --workers 100 --duration 5m --output runs/baseline.json
  */
 
-import { AgentParticipant, Hub, type Task } from '@aipehub/core'
+import { AgentParticipant, Hub, type Task } from '@gotong/core'
 
 import {
   MemorySampler,

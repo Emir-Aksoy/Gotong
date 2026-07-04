@@ -12,7 +12,7 @@
       }
     ]
   },
-  "description": "AipeHub overview — host health, task throughput, agent inventory, service-call latency. Designed to fit on one screen as the primary on-call surface for a single-node deployment.",
+  "description": "Gotong overview — host health, task throughput, agent inventory, service-call latency. Designed to fit on one screen as the primary on-call surface for a single-node deployment.",
   "editable": true,
   "fiscalYearStartMonth": 0,
   "graphTooltip": 1,
@@ -37,7 +37,7 @@
       },
       "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false } },
       "targets": [
-        { "expr": "up{job=\"aipehub\"}", "refId": "A", "legendFormat": "{{instance}}" }
+        { "expr": "up{job=\"gotong\"}", "refId": "A", "legendFormat": "{{instance}}" }
       ]
     },
     {
@@ -57,7 +57,7 @@
       },
       "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false } },
       "targets": [
-        { "expr": "aipehub_pending_applications", "refId": "A" }
+        { "expr": "gotong_pending_applications", "refId": "A" }
       ]
     },
     {
@@ -68,7 +68,7 @@
       "gridPos": { "h": 4, "w": 12, "x": 12, "y": 0 },
       "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "value_and_name" },
       "targets": [
-        { "expr": "aipehub_participants", "refId": "A", "legendFormat": "{{kind}}" }
+        { "expr": "gotong_participants", "refId": "A", "legendFormat": "{{kind}}" }
       ]
     },
     {
@@ -85,7 +85,7 @@
       },
       "options": { "legend": { "displayMode": "list", "placement": "bottom" } },
       "targets": [
-        { "expr": "sum by (kind) (rate(aipehub_tasks_total[5m]))", "refId": "A", "legendFormat": "{{kind}}" }
+        { "expr": "sum by (kind) (rate(gotong_tasks_total[5m]))", "refId": "A", "legendFormat": "{{kind}}" }
       ]
     },
     {
@@ -106,7 +106,7 @@
         }
       },
       "targets": [
-        { "expr": "sum(rate(aipehub_tasks_total{kind!=\"ok\"}[5m]))", "refId": "A", "legendFormat": "failures/sec" }
+        { "expr": "sum(rate(gotong_tasks_total{kind!=\"ok\"}[5m]))", "refId": "A", "legendFormat": "failures/sec" }
       ]
     },
     {
@@ -123,7 +123,7 @@
       },
       "targets": [
         {
-          "expr": "increase(aipehub_service_call_duration_ms_sum[5m]) / clamp_min(increase(aipehub_service_call_duration_ms_count[5m]), 1)",
+          "expr": "increase(gotong_service_call_duration_ms_sum[5m]) / clamp_min(increase(gotong_service_call_duration_ms_count[5m]), 1)",
           "refId": "A",
           "legendFormat": "{{type}}/{{impl}}"
         }
@@ -142,7 +142,7 @@
         }
       },
       "targets": [
-        { "expr": "sum by (outcome) (rate(aipehub_service_calls_total[5m]))", "refId": "A", "legendFormat": "{{outcome}}" }
+        { "expr": "sum by (outcome) (rate(gotong_service_calls_total[5m]))", "refId": "A", "legendFormat": "{{outcome}}" }
       ]
     },
     {
@@ -165,7 +165,7 @@
       },
       "options": { "legend": { "displayMode": "list", "placement": "bottom" } },
       "targets": [
-        { "expr": "sum by (class) (rate(aipehub_http_responses_total[5m]))", "refId": "A", "legendFormat": "{{class}}" }
+        { "expr": "sum by (class) (rate(gotong_http_responses_total[5m]))", "refId": "A", "legendFormat": "{{class}}" }
       ]
     },
     {
@@ -182,7 +182,7 @@
       },
       "options": { "legend": { "displayMode": "list", "placement": "bottom" } },
       "targets": [
-        { "expr": "sum by (model) (increase(aipehub_llm_cost_micros_total[1h])) / 1e6", "refId": "A", "legendFormat": "{{model}}" }
+        { "expr": "sum by (model) (increase(gotong_llm_cost_micros_total[1h])) / 1e6", "refId": "A", "legendFormat": "{{model}}" }
       ]
     },
     {
@@ -193,7 +193,7 @@
       "gridPos": { "h": 4, "w": 8, "x": 0, "y": 28 },
       "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "value_and_name" },
       "targets": [
-        { "expr": "aipehub_workflow_runs", "refId": "A", "legendFormat": "{{status}}" }
+        { "expr": "gotong_workflow_runs", "refId": "A", "legendFormat": "{{status}}" }
       ]
     },
     {
@@ -213,7 +213,7 @@
       },
       "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false } },
       "targets": [
-        { "expr": "aipehub_suspended_tasks", "refId": "A" }
+        { "expr": "gotong_suspended_tasks", "refId": "A" }
       ]
     },
     {
@@ -224,14 +224,14 @@
       "gridPos": { "h": 4, "w": 8, "x": 16, "y": 28 },
       "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "value_and_name" },
       "targets": [
-        { "expr": "sum by (model) (increase(aipehub_llm_calls_total[1h]))", "refId": "A", "legendFormat": "{{model}}" }
+        { "expr": "sum by (model) (increase(gotong_llm_calls_total[1h]))", "refId": "A", "legendFormat": "{{model}}" }
       ]
     }
   ],
   "refresh": "30s",
   "schemaVersion": 38,
   "style": "dark",
-  "tags": ["aipehub", "ops"],
+  "tags": ["gotong", "ops"],
   "templating": {
     "list": [
       {
@@ -254,8 +254,8 @@
   "time": { "from": "now-3h", "to": "now" },
   "timepicker": {},
   "timezone": "",
-  "title": "AipeHub — Overview",
-  "uid": "aipehub-overview",
+  "title": "Gotong — Overview",
+  "uid": "gotong-overview",
   "version": 1,
   "weekStart": ""
 }

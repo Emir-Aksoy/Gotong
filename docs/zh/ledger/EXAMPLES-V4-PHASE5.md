@@ -15,7 +15,7 @@
 **方案**(不写新 example,改 agent 配置即可):
 
 ```jsonc
-// .aipehub/agents/<user>/agents/research.json
+// .gotong/agents/<user>/agents/research.json
 {
   "id": "research",
   "managed": {
@@ -26,7 +26,7 @@
     "mcpServers": [{
       "name": "personal",
       "command": "uvx",
-      "args": ["chroma-mcp", "--persist-dir", "/Users/you/.aipehub-rag/personal"]
+      "args": ["chroma-mcp", "--persist-dir", "/Users/you/.gotong-rag/personal"]
     }]
   }
 }
@@ -66,7 +66,7 @@ json 即可。
 
 **用到的 Phase 5 feature**:
 - B3 (RAG via MCP) 的 "公共只读 corpus"模式 —— 见 `docs/zh/RAG-VIA-MCP.md` §6-bis 模式 A
-- D3 (跨 hub knowledge)的解决方案 —— 不在 aipehub 加 ACL 层,走 MCP server 自身
+- D3 (跨 hub knowledge)的解决方案 —— 不在 gotong 加 ACL 层,走 MCP server 自身
 
 **没有 org-handbook/ 目录,因为同上**。chroma server 是单独基础设施,不在
 monorepo;agent 端只是一个 mcpServers entry。
@@ -82,8 +82,8 @@ monorepo;agent 端只是一个 mcpServers entry。
 
 ```bash
 # 1. host 启 + 设 inbound 共享 token
-AIPE_PEER_INBOUND_TOKEN=shared-demo-token \
-  AIPE_LLM_KEY=$ANTHROPIC_KEY \
+GOTONG_PEER_INBOUND_TOKEN=shared-demo-token \
+  GOTONG_LLM_KEY=$ANTHROPIC_KEY \
   npm run host
 
 # 2. owner 登录后到 "配额" tab 设个 org-level cap
@@ -97,13 +97,13 @@ AIPE_PEER_INBOUND_TOKEN=shared-demo-token \
 
 ```bash
 # 1. host 启
-AIPE_LLM_KEY=$ANTHROPIC_KEY npm run host
+GOTONG_LLM_KEY=$ANTHROPIC_KEY npm run host
 
 # 2. owner 登录 → "用户" tab 没动 → "配额" tab 跳过 → "Peers" tab 加 Hub A:
 #    peerId:    hub_<A's selfHubId>
 #    endpoint:  ws://hub-a-host:4000
 #    label:     Supplier
-#    token:     shared-demo-token   (跟 A 的 AIPE_PEER_INBOUND_TOKEN 对得上)
+#    token:     shared-demo-token   (跟 A 的 GOTONG_PEER_INBOUND_TOKEN 对得上)
 
 # 3. 几秒后 peer 列表里 connected=true(D1 5s tick reconcile)
 
@@ -128,7 +128,7 @@ AIPE_LLM_KEY=$ANTHROPIC_KEY npm run host
 
 | Phase 5 feature | 怎么触发 |
 |---|---|
-| A1 vault | 第一次启动看 `.aipehub/master.key` 自动生成 + mode 0600 |
+| A1 vault | 第一次启动看 `.gotong/master.key` 自动生成 + mode 0600 |
 | A2.3 setup wizard | `npm run host` → `localhost:3000` → 弹设置 owner 密码表单 |
 | B2.1 用户配额 | "用户" tab 选个 member 设 `llm_requests/daily=10`,member 派发 11 次第 11 次 deny |
 | B2.3 自动 sweep | 设上面 quota 后等 1h,看 host log 出现 `usage counters rolled` |
@@ -137,7 +137,7 @@ AIPE_LLM_KEY=$ANTHROPIC_KEY npm run host
 | D1 Peer Registry | 在 "Peers" tab 加一个不存在的 peer(假 token),看 backoff 5s/15s/30s/60s ladder |
 | E1 软上限告警 | 上面 C2 同事;跨 80% / 100% 时看 audit_log 输出 `org_quota_warn` / `over` |
 | D2 跨 hub HITL | 需要双 host;按 §3 setup |
-| E2 reputation | 看 `.aipehub/feedback/reputation/*.json`(D2 跑过几次就有数据) |
+| E2 reputation | 看 `.gotong/feedback/reputation/*.json`(D2 跑过几次就有数据) |
 
 ## 5. 路径补全:每个 example 用到哪些 Phase 5 feature
 
@@ -155,7 +155,7 @@ AIPE_LLM_KEY=$ANTHROPIC_KEY npm run host
 
 ## 6. 为什么没新建 personal-rag/ org-handbook/ 目录
 
-总体设计哲学:**aipehub 的核心是 hub + agent + workflow,RAG / knowledge
+总体设计哲学:**gotong 的核心是 hub + agent + workflow,RAG / knowledge
 是 MCP 生态的事**。如果给每种 MCP 用法都建一个 example 目录,monorepo
 会被 chroma-mcp / qdrant-mcp / pinecone-mcp / brave-search-mcp /
 github-mcp / sqlite-mcp ... 灌满,但每个目录的核心其实只是改一行

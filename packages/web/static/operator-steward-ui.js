@@ -24,14 +24,14 @@
  * SPA started it). We render a deep-link to the home tab rather than duplicate
  * the inbox view here (the inline admin inbox is explicitly deferred).
  *
- * i18n: reads the live dict off window.AipeHub.t at call time (app-core.js runs
+ * i18n: reads the live dict off window.Gotong.t at call time (app-core.js runs
  * before this panel is injected). Op-specific strings are `opSteward*`; the
  * tier badges + common labels reuse the proven `meSteward*` / `meWf*` keys.
  */
 ;(function () {
   'use strict'
 
-  const AH = window.AipeHub
+  const AH = window.Gotong
   function t() {
     return AH.t
   }

@@ -5,7 +5,7 @@
  * test. It drives the real `scripts/backup/*.sh` end-to-end and proves the
  * chain an operator would actually run after losing a box:
  *
- *   seed a realistic space   →  backup.sh   →  aipehub-<label>-<ts>.tar.gz
+ *   seed a realistic space   →  backup.sh   →  gotong-<label>-<ts>.tar.gz
  *   tar.gz  →  restore.sh (which runs verify.sh internally)  →  restored dir
  *   boot the RESTORED space  →  HTTP smoke (admin token + agents survived)
  *
@@ -42,9 +42,9 @@ import { fileURLToPath } from 'node:url'
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
-import { Hub, Space } from '@aipehub/core'
-import { loadOrCreateMasterKey, openIdentityStore } from '@aipehub/identity'
-import { serveWeb, type WebServerHandle } from '@aipehub/web'
+import { Hub, Space } from '@gotong/core'
+import { loadOrCreateMasterKey, openIdentityStore } from '@gotong/identity'
+import { serveWeb, type WebServerHandle } from '@gotong/web'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const repoRoot = join(here, '..', '..', '..')
@@ -86,7 +86,7 @@ maybe('Phase 19 P3-M2 — backup → restore → verify → boot round-trip', ()
   let web: WebServerHandle | undefined
 
   beforeAll(async () => {
-    workRoot = await mkdtemp(join(tmpdir(), 'aipe-dr-'))
+    workRoot = await mkdtemp(join(tmpdir(), 'gotong-dr-'))
     spaceDir = join(workRoot, 'space')
     backupDir = join(workRoot, 'backups')
     restoreDir = join(workRoot, 'restored')
@@ -141,7 +141,7 @@ maybe('Phase 19 P3-M2 — backup → restore → verify → boot round-trip', ()
   it('backup.sh packages the space, excluding the secret key', () => {
     execFileSync('bash', [BACKUP, spaceDir, backupDir], { encoding: 'utf8' })
     const tarballs = readdirSync(backupDir).filter(
-      (f) => f.startsWith('aipehub-') && f.endsWith('.tar.gz'),
+      (f) => f.startsWith('gotong-') && f.endsWith('.tar.gz'),
     )
     expect(tarballs).toHaveLength(1)
 

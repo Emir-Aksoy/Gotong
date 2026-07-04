@@ -1,7 +1,7 @@
 /**
  * RAG via MCP — end-to-end demo.
  *
- * This example shows how an AipeHub agent uses a knowledge MCP server
+ * This example shows how an Gotong agent uses a knowledge MCP server
  * (chroma-mcp) for retrieval-augmented generation. The flow:
  *
  *   1. Boot an in-memory Hub
@@ -21,7 +21,7 @@
  * alternative RAG server options (qdrant, pinecone, pgvector).
  */
 
-import { Hub, createLogger } from '@aipehub/core'
+import { Hub, createLogger } from '@gotong/core'
 
 const log = createLogger('rag-demo')
 
@@ -32,7 +32,7 @@ async function main() {
   log.info('  2. DEEPSEEK_API_KEY or OPENAI_API_KEY in environment')
   log.info('')
   log.info('To run with a live host instead of this script:')
-  log.info('  1. aipehub init')
+  log.info('  1. gotong init')
   log.info('  2. Import agents/rag-researcher.yaml via the admin UI')
   log.info('  3. Chat with the agent — ask it to ingest content, then query')
   log.info('')
@@ -48,7 +48,7 @@ async function main() {
     log.info('')
     log.info('Quick start with a real host:')
     log.info('  export DEEPSEEK_API_KEY=sk-...')
-    log.info('  aipehub init --space-dir=.aipehub')
+    log.info('  gotong init --space-dir=.gotong')
     log.info('  # Import agents/rag-researcher.yaml via admin UI agents tab')
     log.info('  # The mcpServers config auto-spawns chroma-mcp alongside the agent')
     return
@@ -64,9 +64,9 @@ async function main() {
   log.info('  3. Wire MCP tools into the LlmAgent tool-use loop')
   log.info('  4. The agent can then ingest + query the knowledge base')
   log.info('')
-  log.info('The key insight: AipeHub never touches vectors or embeddings.')
+  log.info('The key insight: Gotong never touches vectors or embeddings.')
   log.info('The MCP server (chroma-mcp) handles all RAG internals.')
-  log.info('AipeHub just routes messages and manages the agent lifecycle.')
+  log.info('Gotong just routes messages and manages the agent lifecycle.')
 
   await hub.stop()
   log.info('Done.')

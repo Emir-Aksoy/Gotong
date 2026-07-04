@@ -29,10 +29,10 @@ import {
   type ParticipantId,
   type Task,
   type TaskResult,
-} from '@aipehub/core'
+} from '@gotong/core'
 
 /** Fixed id of the singleton heartbeat broker participant. */
-export const HEARTBEAT_BROKER_ID: ParticipantId = 'aipehub:heartbeat'
+export const HEARTBEAT_BROKER_ID: ParticipantId = 'gotong:heartbeat'
 
 /** Deterministic `suspended_tasks.task_id` prefix → exactly one row per agent. */
 export const HEARTBEAT_TASK_PREFIX = 'heartbeat:'

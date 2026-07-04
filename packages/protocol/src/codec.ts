@@ -17,7 +17,7 @@ export type DecodeResult<F extends Frame = Frame> =
  *
  * This is defence in depth — the transport layer should already cap
  * payloads via `WebSocketServer.maxPayload` (see
- * `@aipehub/transport-ws` finding C1). The check here protects:
+ * `@gotong/transport-ws` finding C1). The check here protects:
  *
  *   - Test harnesses and SDK consumers that decode frames without
  *     going through the WS server.
@@ -80,8 +80,8 @@ export function decodeFrame(text: string, options: DecodeFrameOptions = {}): Dec
  * production hot path stays on `decodeFrame` for cost reasons
  * (validation is O(n) on object size).
  *
- * Gated by callers via `AIPE_PROTOCOL_STRICT=1` env (see
- * `@aipehub/transport-ws` for the wire-up). The function itself reads
+ * Gated by callers via `GOTONG_PROTOCOL_STRICT=1` env (see
+ * `@gotong/transport-ws` for the wire-up). The function itself reads
  * nothing from the environment so it remains a pure function safe for
  * unit-testing.
  *
@@ -111,7 +111,7 @@ export function decodeFrameStrict(text: string, options: DecodeFrameOptions = {}
  *
  * Closed mode breaks the forward-compatibility promise the lax /
  * strict paths make. Don't ship this on the production hot path; gate
- * it behind `AIPE_PROTOCOL_STRICT=closed`. See AUDIT-v3.3.md finding H15.
+ * it behind `GOTONG_PROTOCOL_STRICT=closed`. See AUDIT-v3.3.md finding H15.
  */
 export function decodeFrameClosed(text: string, options: DecodeFrameOptions = {}): DecodeResult {
   const lax = decodeFrame(text, options)
@@ -129,7 +129,7 @@ export function encodeFrame(frame: Frame): string {
 // Frame validation — strict-mode only
 // ---------------------------------------------------------------------------
 //
-// Hand-written field checks (no zod / no schema lib) so `@aipehub/protocol`
+// Hand-written field checks (no zod / no schema lib) so `@gotong/protocol`
 // stays zero-runtime-deps. Each branch covers ONLY the fields the type
 // signature declares as required; optional fields and unknown extras pass
 // through (forward-compat rule).
@@ -137,7 +137,7 @@ export function encodeFrame(frame: Frame): string {
 // Returns null when the frame is well-formed under its discriminator, or
 // a human-readable diagnostic string otherwise. Callers don't enumerate
 // reasons — the string is fed back to the operator who set
-// `AIPE_PROTOCOL_STRICT=1` because they were debugging a bad-frame
+// `GOTONG_PROTOCOL_STRICT=1` because they were debugging a bad-frame
 // situation in the first place.
 //
 // H14 — strict mode now recurses one layer into `TASK.task`,

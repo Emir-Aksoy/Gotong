@@ -22,7 +22,7 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { Hub, Space } from '@aipehub/core'
+import { Hub, Space } from '@gotong/core'
 
 import { serveWeb, type WebServerHandle, type WorkflowSurface } from '../src/server.js'
 
@@ -38,7 +38,7 @@ interface Boot {
 let b: Boot
 
 beforeEach(async () => {
-  const tmp = await mkdtemp(join(tmpdir(), 'aipehub-gallery-install-'))
+  const tmp = await mkdtemp(join(tmpdir(), 'gotong-gallery-install-'))
   const init = await Space.init(tmp, { name: 'gallery-install-test' })
   const space = init.space
   const hub = new Hub({ space })

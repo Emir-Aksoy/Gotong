@@ -45,18 +45,18 @@ import {
   MASTER_KEY_LEN_BYTES,
   openIdentityStore,
   resolveMasterKeyProvider,
-} from '@aipehub/identity'
+} from '@gotong/identity'
 
 /** Workspace-relative filenames, kept in sync with the boot path in main.ts. */
 export const MASTER_KEY_FILENAME = 'identity-master.key'
 export const IDENTITY_DB_FILENAME = 'identity.sqlite'
 
 export interface RotateMasterKeyInput {
-  /** Workspace directory (AIPE_SPACE). */
+  /** Workspace directory (GOTONG_SPACE). */
   spaceDir: string
-  /** AIPE_MASTER_KEY_PROVIDER — undefined / '' → local-file. */
+  /** GOTONG_MASTER_KEY_PROVIDER — undefined / '' → local-file. */
   providerKind?: string
-  /** AIPE_MASTER_KEY — current env material (only consulted for env provider). */
+  /** GOTONG_MASTER_KEY — current env material (only consulted for env provider). */
   envKeyMaterial?: string
   /** Encoding of `envKeyMaterial`; default 'hex'. */
   envKeyEncoding?: 'hex' | 'base64'
@@ -83,7 +83,7 @@ export function rotateMasterKey(input: RotateMasterKeyInput): RotateMasterKeyRes
     // has no way to load on next boot.
     throw new Error(
       `rotate-master-key supports the local-file provider only; ` +
-        `AIPE_MASTER_KEY_PROVIDER='${input.providerKind}' is managed outside the ` +
+        `GOTONG_MASTER_KEY_PROVIDER='${input.providerKind}' is managed outside the ` +
         `workspace — rotate the injected key material out of band.`,
     )
   }

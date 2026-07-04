@@ -17,8 +17,8 @@
  */
 
 import { join } from 'node:path'
-import type { Owner } from '@aipehub/services-sdk'
-import { assertSafeOwnerId } from '@aipehub/services-sdk'
+import type { Owner } from '@gotong/services-sdk'
+import { assertSafeOwnerId } from '@gotong/services-sdk'
 
 /**
  * Absolute path to an owner's directory under `<rootDir>`.

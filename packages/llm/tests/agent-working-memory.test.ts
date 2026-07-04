@@ -32,7 +32,7 @@ import {
   isSuspendTaskError,
   type ParticipantId,
   type Task,
-} from '@aipehub/core'
+} from '@gotong/core'
 
 import {
   LlmAgent,

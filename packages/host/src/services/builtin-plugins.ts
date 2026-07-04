@@ -23,7 +23,7 @@
  *
  * What's NOT included
  * -------------------
- * `@aipehub/service-datastore-sqlite` is deliberately excluded. It
+ * `@gotong/service-datastore-sqlite` is deliberately excluded. It
  * depends on `better-sqlite3`, which ships native `.node` bindings.
  * `bun build --compile` can embed plain JS, but native modules cannot
  * be loaded out of the embedded FS — bun would error at runtime when
@@ -34,8 +34,8 @@
  * expected when the plugin appears in `plugins.json`.
  */
 
-import * as memoryFile from '@aipehub/service-memory-file'
-import * as artifactFile from '@aipehub/service-artifact-file'
+import * as memoryFile from '@gotong/service-memory-file'
+import * as artifactFile from '@gotong/service-artifact-file'
 
 /**
  * Map of fully-qualified package name → its loaded module namespace.
@@ -43,8 +43,8 @@ import * as artifactFile from '@aipehub/service-artifact-file'
  * `import.meta.resolve(...)`.
  */
 export const BUILTIN_PLUGINS: Readonly<Record<string, unknown>> = Object.freeze({
-  '@aipehub/service-memory-file': memoryFile,
-  '@aipehub/service-artifact-file': artifactFile,
+  '@gotong/service-memory-file': memoryFile,
+  '@gotong/service-artifact-file': artifactFile,
 })
 
 /**
@@ -56,12 +56,12 @@ export const BUILTIN_PLUGINS: Readonly<Record<string, unknown>> = Object.freeze(
  *
  * Used only when {@link isCompiledBinary} returns true. In `node` /
  * `tsx` mode we let `loadPlugins` fall back to its full default seed
- * (which includes `@aipehub/service-datastore-sqlite`) — those runtimes
+ * (which includes `@gotong/service-datastore-sqlite`) — those runtimes
  * can resolve `better-sqlite3` normally.
  */
 export const BINARY_SAFE_PLUGINS: readonly string[] = Object.freeze([
-  '@aipehub/service-memory-file',
-  '@aipehub/service-artifact-file',
+  '@gotong/service-memory-file',
+  '@gotong/service-artifact-file',
 ])
 
 /**

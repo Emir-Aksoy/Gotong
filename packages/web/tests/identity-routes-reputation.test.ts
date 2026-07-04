@@ -23,12 +23,12 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { Hub, Space } from '@aipehub/core'
+import { Hub, Space } from '@gotong/core'
 import {
   MASTER_KEY_LEN_BYTES,
   openIdentityStore,
   type IdentityStore,
-} from '@aipehub/identity'
+} from '@gotong/identity'
 
 import {
   serveWeb,
@@ -50,7 +50,7 @@ interface BootResult {
 }
 
 async function boot(opts: { withAdapter: boolean } = { withAdapter: true }): Promise<BootResult> {
-  const tmp = await mkdtemp(join(tmpdir(), 'aipehub-web-reputation-'))
+  const tmp = await mkdtemp(join(tmpdir(), 'gotong-web-reputation-'))
   const init = await Space.init(tmp, { name: 'reputation-test' })
   const space = init.space
   const hub = new Hub({ space })

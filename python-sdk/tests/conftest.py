@@ -1,4 +1,4 @@
-"""Pytest fixtures for AipeHub Python SDK tests.
+"""Pytest fixtures for Gotong Python SDK tests.
 
 We stand up a real ``websockets`` server inside each test that plays the
 role of the Hub: validates HELLO, sends WELCOME (or REJECT), forwards
@@ -16,7 +16,7 @@ from typing import Any, AsyncIterator, Awaitable, Callable
 import pytest_asyncio
 import websockets
 
-from aipehub.protocol import PROTOCOL_VERSION
+from gotong.protocol import PROTOCOL_VERSION
 
 
 class FakeHub:

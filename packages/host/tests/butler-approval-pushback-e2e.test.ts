@@ -44,16 +44,16 @@ import {
   type ManagedAgentLifecycle,
   type ParticipantId,
   type TaskResult,
-} from '@aipehub/core'
+} from '@gotong/core'
 import {
   MASTER_KEY_LEN_BYTES,
   openIdentityStore,
   type IdentityStore,
-} from '@aipehub/identity'
-import { FileInboxStore, HUMAN_CAPABILITY, HumanInboxParticipant, type InboxItem } from '@aipehub/inbox'
-import { PersonalButlerAgent } from '@aipehub/personal-butler'
-import type { LlmMessage, LlmProvider, LlmRequest, LlmStreamChunk } from '@aipehub/llm'
-import type { MemoryHandle } from '@aipehub/services-sdk'
+} from '@gotong/identity'
+import { FileInboxStore, HUMAN_CAPABILITY, HumanInboxParticipant, type InboxItem } from '@gotong/inbox'
+import { PersonalButlerAgent } from '@gotong/personal-butler'
+import type { LlmMessage, LlmProvider, LlmRequest, LlmStreamChunk } from '@gotong/llm'
+import type { MemoryHandle } from '@gotong/services-sdk'
 
 import { buildButlerGovernedToolset } from '../src/personal-butler-governed.js'
 import { butlerApprovalItemFor, butlerResolvePushback } from '../src/personal-butler-escalation.js'
@@ -138,7 +138,7 @@ interface Rig {
 }
 
 async function boot(): Promise<Rig> {
-  const tmp = await mkdtemp(join(tmpdir(), 'aipe-butler-pushback-e2e-'))
+  const tmp = await mkdtemp(join(tmpdir(), 'gotong-butler-pushback-e2e-'))
   const { space } = await Space.init(tmp, { name: 'butler-pushback-e2e' })
   const identity = openIdentityStore({
     dbPath: join(tmp, 'identity.sqlite'),

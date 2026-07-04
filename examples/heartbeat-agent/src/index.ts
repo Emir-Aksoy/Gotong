@@ -52,12 +52,12 @@ import {
   type ParticipantId,
   type Task,
   type TaskResult,
-} from '@aipehub/core'
+} from '@gotong/core'
 
 // --- Mirror of packages/host/src/heartbeat.ts (the canonical engine) --------
 
 /** Fixed id of the singleton heartbeat broker. */
-const BROKER_ID: ParticipantId = 'aipehub:heartbeat'
+const BROKER_ID: ParticipantId = 'gotong:heartbeat'
 /** Deterministic task id → exactly one self-renewing row per agent. */
 const TASK_PREFIX = 'heartbeat:'
 /** The reply an agent sends when nothing needs attention → suppressed. */
@@ -215,7 +215,7 @@ async function runSweep(hub: Hub): Promise<number> {
 // --- main --------------------------------------------------------------------
 
 async function main(): Promise<void> {
-  console.log('\n=== AipeHub demo: heartbeat-agent (v5 Stream D) ===\n')
+  console.log('\n=== Gotong demo: heartbeat-agent (v5 Stream D) ===\n')
 
   let fired = 0
   const hub = Hub.inMemory({

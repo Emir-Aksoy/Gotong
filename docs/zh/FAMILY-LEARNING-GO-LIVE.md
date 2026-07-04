@@ -46,19 +46,19 @@
 
 | 层 | 跑什么 | 要 key？ | 证明什么 |
 |---|---|---|---|
-| **Tier 0 — hermetic demos** | `pnpm demo:family-learning-hub`（6 剧情）/ `:federation`（真 ws）/ `:im`（IM 审批回推）+ `pnpm --filter @aipehub/host test family-child-me-e2e` | 否 | 四道闸 + 分层审核 + 真 ws 握手/鉴权 + 孩子 `/me` 自助 dispatch 契约全绿 |
+| **Tier 0 — hermetic demos** | `pnpm demo:family-learning-hub`（6 剧情）/ `:federation`（真 ws）/ `:im`（IM 审批回推）+ `pnpm --filter @gotong/host test family-child-me-e2e` | 否 | 四道闸 + 分层审核 + 真 ws 握手/鉴权 + 孩子 `/me` 自助 dispatch 契约全绿 |
 | **Tier 1 — 真引擎单机** | `FL_REAL=1 DEEPSEEK_API_KEY=sk-… pnpm demo:family-learning-hub:real` | DeepSeek key | 真 `LlmAgent` 导师接进真工作流，链条跑通（导师被调 / 课记主副本 / fork 投家长 / 闸生效） |
-| **Tier 2 — 两台主权机** | 两个 `aipehub start` + 真 ws 联邦（本文 §2） | DeepSeek key + 两台机 | 真家庭部署：孩子机发起 → 跨真 socket 到家长机导师 → 白名单外 / flagged 家长批 → 回流 + 记录 + fork |
+| **Tier 2 — 两台主权机** | 两个 `gotong start` + 真 ws 联邦（本文 §2） | DeepSeek key + 两台机 | 真家庭部署：孩子机发起 → 跨真 socket 到家长机导师 → 白名单外 / flagged 家长批 → 回流 + 记录 + fork |
 
 **先把 Tier 0 跑绿**（看清骨架、确认闸真生效），再上 Tier 1（你的 key 验真模型），最后 Tier 2
 （两机真部署）。每一层后端零改，只是换前端 / 换网络。
 
 > **诚实边界（example-first）**：导师（`teach.lesson`）+ 工作流 + KB 槽位**经模板导入进真
-> `aipehub start`**（一等公民）。但**确定性闸参与者**（`topic.screen` / `content.moderate` /
+> `gotong start`**（一等公民）。但**确定性闸参与者**（`topic.screen` / `content.moderate` /
 > `records.append` / `report.to-guardian` / `explore.local`）是**运行时接线的 example 代码**
 > （[`src/participants.ts`](../../examples/family-learning-hub/src/participants.ts)）——它们是确定性
 > capability 参与者，**不能**当模板里的托管 agent（同 CLI / ACP 编码 agent 不能进模板）。所以
-> Tier 2 的家长 / 孩子 host 是「`aipehub start` + 复制 / 适配 `src/participants.ts` 的薄接线」。把
+> Tier 2 的家长 / 孩子 host 是「`gotong start` + 复制 / 适配 `src/participants.ts` 的薄接线」。把
 > 这个垂直 fold 进生产 host `main.ts` 是**显式推迟**项（设计 §十二 ④，北极星 example-first：模板
 > 即产品化载体）。`src/index.real.ts` 已是这层薄接线的可跑参照。
 
@@ -70,7 +70,7 @@
 
 ### Step 1 — 家长机：起 host + 导入导师模板 + 接真 DeepSeek / Obsidian
 
-家长机起一个生产 host（`aipehub start`），按 [`HANDS-ON-HUBS.md §三`](HANDS-ON-HUBS.md) 准备
+家长机起一个生产 host（`gotong start`），按 [`HANDS-ON-HUBS.md §三`](HANDS-ON-HUBS.md) 准备
 DeepSeek key + 连你自己的 Obsidian vault 到 `learning_records` KB 槽位，然后**导入家长模板**：
 
 ```
@@ -107,7 +107,7 @@ admin UI → 模板 → 导入 → 贴 examples/family-learning-hub/template/fam
 
 ### Step 3 — 孩子机：起 host + 导入孩子模板 + 接 records.append / explore.local
 
-孩子机起一个生产 host（`aipehub start`），**导入孩子模板**：
+孩子机起一个生产 host（`gotong start`），**导入孩子模板**：
 
 ```
 admin UI → 模板 → 导入 → 贴 examples/family-learning-hub/template/child-desk.template.yaml
@@ -281,8 +281,8 @@ member 就是孩子在 `/me` 的身份。**多孩子** = 同一孩子 hub 加多
 | 真 ws 联邦 + bearer + per-link 契约 | `src/federation.ts`（14 断言） | `pnpm demo:family-learning-hub:federation` |
 | 家长 IM 审批回推 + 跨家长隔离 | `src/im-oversight.ts` | `pnpm demo:family-learning-hub:im` |
 | 真 DeepSeek 导师接进真工作流 | `src/index.real.ts`（opt-in key） | `FL_REAL=1 DEEPSEEK_API_KEY=… pnpm demo:family-learning-hub:real` |
-| 孩子 `/me` 自助 dispatch 契约 | `packages/host/tests/family-child-me-e2e.test.ts` | `pnpm --filter @aipehub/host test family-child-me-e2e` |
-| 家长 / 孩子模板防腐门 | `packages/web/tests/{family-tutor,child-desk}-template.test.ts` | `pnpm --filter @aipehub/web test` |
+| 孩子 `/me` 自助 dispatch 契约 | `packages/host/tests/family-child-me-e2e.test.ts` | `pnpm --filter @gotong/host test family-child-me-e2e` |
+| 家长 / 孩子模板防腐门 | `packages/web/tests/{family-tutor,child-desk}-template.test.ts` | `pnpm --filter @gotong/web test` |
 
 ---
 

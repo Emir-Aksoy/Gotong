@@ -15,7 +15,7 @@ import type {
   MemoryKind,
   MemoryQuery,
   NewMemoryEntry,
-} from '@aipehub/services-sdk'
+} from '@gotong/services-sdk'
 
 import {
   formatCaseContextBlock,

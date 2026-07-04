@@ -49,9 +49,9 @@ import {
   SuspendTaskError,
   type Logger,
   type Task,
-} from '@aipehub/core'
-import { openIdentityStore, type IdentityStore } from '@aipehub/identity'
-import { FileInboxStore, NEVER_RESUME_AT } from '@aipehub/inbox'
+} from '@gotong/core'
+import { openIdentityStore, type IdentityStore } from '@gotong/identity'
+import { FileInboxStore, NEVER_RESUME_AT } from '@gotong/inbox'
 
 import { A2aServer } from '../src/a2a-server.js'
 import { A2aOutboundManager } from '../src/a2a-outbound.js'
@@ -93,7 +93,7 @@ function textOf(payload: unknown): string {
 // `external-review` capability is served by a remote A2A agent OR that the agent
 // is gated behind an outbound approval.
 const WORKFLOW_YAML = `
-schema: aipehub.workflow/v1
+schema: gotong.workflow/v1
 workflow:
   id: ${WORKFLOW_ID}
   name: a2a outbound approval flow
@@ -267,7 +267,7 @@ describe('v5 Item 2 Y-M2 — A2A outbound approval closed loop (workflow path)',
   })
 
   /** Fire the workflow trigger on hub A. */
-  async function fireTrigger(text = 'hello'): Promise<import('@aipehub/core').TaskResult> {
+  async function fireTrigger(text = 'hello'): Promise<import('@gotong/core').TaskResult> {
     return hubA.dispatch({
       from: 'admin',
       strategy: { kind: 'capability', capabilities: ['ax:start'] },

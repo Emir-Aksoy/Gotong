@@ -28,19 +28,19 @@
  * doing, so a quiet review makes no noise (the host suppresses `HEARTBEAT_OK`).
  */
 
-import { AgentParticipant, type ParticipantId, type Task } from '@aipehub/core'
-import type { MemoryEntry, MemoryHandle } from '@aipehub/services-sdk'
+import { AgentParticipant, type ParticipantId, type Task } from '@gotong/core'
+import type { MemoryEntry, MemoryHandle } from '@gotong/services-sdk'
 
 /**
  * Idle sentinel — byte-identical to Stream D's `HEARTBEAT_OK` so the host's
  * existing heartbeat suppression treats a quiet review as silence. Duplicated
- * (not imported from `@aipehub/host`) because this leaf package must not
+ * (not imported from `@gotong/host`) because this leaf package must not
  * depend on the host; the value is a wire constant, not logic.
  */
 export const HEARTBEAT_OK = 'HEARTBEAT_OK'
 
 /** Default participant id for the review broker. */
-export const MEMORY_REVIEW_ID: ParticipantId = 'aipehub:memory-review'
+export const MEMORY_REVIEW_ID: ParticipantId = 'gotong:memory-review'
 
 /** Default episodic-backlog size that triggers a review. */
 export const DEFAULT_REVIEW_MIN_EPISODIC = 8

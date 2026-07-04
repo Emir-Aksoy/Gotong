@@ -1,7 +1,7 @@
 /**
  * chroma-retriever.ts — the "走 chroma-MCP" path for the butler's semantic recall.
  *
- * `embeddingRetriever` (in `@aipehub/personal-memory`) embeds a recency window
+ * `embeddingRetriever` (in `@gotong/personal-memory`) embeds a recency window
  * in-process on every recall — simple, local, fine for a consolidated and
  * budget-bounded butler. But for an unbounded corpus you want a real vector
  * store that holds the index and does embedding + ANN server-side. That store is
@@ -24,8 +24,8 @@
  * as `examples/rag-mcp`, which is a config-preview, not a live run).
  */
 
-import type { MemoryRetriever } from '@aipehub/personal-memory'
-import type { MemoryEntry, MemoryKind, MemoryQuery } from '@aipehub/services-sdk'
+import type { MemoryRetriever } from '@gotong/personal-memory'
+import type { MemoryEntry, MemoryKind, MemoryQuery } from '@gotong/services-sdk'
 
 /**
  * Forward a semantic query to the vector store (chroma via chroma-mcp). The
@@ -68,7 +68,7 @@ export function chromaRetriever(opts: { query: ChromaQuery }): MemoryRetriever {
  * config spawns `chroma-mcp`; you build a `ChromaQuery` over an `McpToolset`:
  *
  * ```ts
- * import { McpToolset } from '@aipehub/mcp-client'
+ * import { McpToolset } from '@gotong/mcp-client'
  *
  * const chroma = new McpToolset({  spawn chroma-mcp, see examples/rag-mcp  })
  * const query: ChromaQuery = async ({ text, k, kinds }) => {

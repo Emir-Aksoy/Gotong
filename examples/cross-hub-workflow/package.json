@@ -1,5 +1,5 @@
 {
-  "name": "@aipehub/example-cross-hub-workflow",
+  "name": "@gotong/example-cross-hub-workflow",
   "version": "0.0.0",
   "type": "module",
   "private": true,
@@ -9,8 +9,8 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@aipehub/core": "workspace:*",
-    "@aipehub/workflow": "workspace:*",
-    "@aipehub/inbox": "workspace:*"
+    "@gotong/core": "workspace:*",
+    "@gotong/workflow": "workspace:*",
+    "@gotong/inbox": "workspace:*"
   }
 }

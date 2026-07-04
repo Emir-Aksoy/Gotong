@@ -19,7 +19,7 @@ import { Space } from '../src/space.js'
  *     side-channel leak about which case failed)
  *   - Refuse to decrypt tampered ciphertext
  *   - Generate a fresh master key on first call and reuse it after
- *   - Prefer AIPE_SECRET_KEY env over the on-disk key
+ *   - Prefer GOTONG_SECRET_KEY env over the on-disk key
  *
  * The Space wrapper must:
  *   - Persist encrypted secrets to secrets.enc.json on a roundtrip
@@ -100,7 +100,7 @@ describe('encryptSecret / decryptSecret', () => {
 
 describe('loadOrCreateMasterKey', () => {
   it('generates a fresh 32-byte key on first call and reuses it after', async () => {
-    const dir = makeTempDir('aipehub-secrets-')
+    const dir = makeTempDir('gotong-secrets-')
     const path = join(dir, 'secret.key')
     const k1 = await loadOrCreateMasterKey(path)
     expect(k1.length).toBe(32)
@@ -108,37 +108,37 @@ describe('loadOrCreateMasterKey', () => {
     expect(k2.toString('hex')).toBe(k1.toString('hex'))
   })
 
-  it('prefers AIPE_SECRET_KEY env over the on-disk key', async () => {
-    const dir = makeTempDir('aipehub-secrets-')
+  it('prefers GOTONG_SECRET_KEY env over the on-disk key', async () => {
+    const dir = makeTempDir('gotong-secrets-')
     const path = join(dir, 'secret.key')
     await loadOrCreateMasterKey(path)                  // writes random
     const envHex = '00'.repeat(32)
-    const prev = process.env.AIPE_SECRET_KEY
-    process.env.AIPE_SECRET_KEY = envHex
+    const prev = process.env.GOTONG_SECRET_KEY
+    process.env.GOTONG_SECRET_KEY = envHex
     try {
       const k = await loadOrCreateMasterKey(path)
       expect(k.toString('hex')).toBe(envHex)
     } finally {
-      if (prev === undefined) delete process.env.AIPE_SECRET_KEY
-      else process.env.AIPE_SECRET_KEY = prev
+      if (prev === undefined) delete process.env.GOTONG_SECRET_KEY
+      else process.env.GOTONG_SECRET_KEY = prev
     }
   })
 
-  it('rejects bad-length AIPE_SECRET_KEY', async () => {
-    const prev = process.env.AIPE_SECRET_KEY
-    process.env.AIPE_SECRET_KEY = 'too-short'
+  it('rejects bad-length GOTONG_SECRET_KEY', async () => {
+    const prev = process.env.GOTONG_SECRET_KEY
+    process.env.GOTONG_SECRET_KEY = 'too-short'
     try {
       await expect(loadOrCreateMasterKey('/tmp/never')).rejects.toThrow(/64 hex chars/)
     } finally {
-      if (prev === undefined) delete process.env.AIPE_SECRET_KEY
-      else process.env.AIPE_SECRET_KEY = prev
+      if (prev === undefined) delete process.env.GOTONG_SECRET_KEY
+      else process.env.GOTONG_SECRET_KEY = prev
     }
   })
 })
 
 describe('Space secret methods', () => {
   it('persists, lists, and reads back a workspace provider key (no plaintext leak)', async () => {
-    const root = makeTempDir('aipehub-space-secrets-')
+    const root = makeTempDir('gotong-space-secrets-')
     const { space } = await Space.init(root, { name: 'test' })
 
     expect(await space.listProviderApiKeys()).toEqual({})
@@ -158,7 +158,7 @@ describe('Space secret methods', () => {
   })
 
   it('per-agent key is preferred and is dropped when the agent is removed', async () => {
-    const root = makeTempDir('aipehub-space-agentkey-')
+    const root = makeTempDir('gotong-space-agentkey-')
     const { space } = await Space.init(root, { name: 'test' })
 
     await space.upsertAgent({ id: 'alice', allowedCapabilities: ['x'] })
@@ -176,7 +176,7 @@ describe('Space secret methods', () => {
   })
 
   it('round-trips secrets across two Space instances (on-disk file is canonical)', async () => {
-    const root = makeTempDir('aipehub-space-cross-')
+    const root = makeTempDir('gotong-space-cross-')
     const { space } = await Space.init(root, { name: 'test' })
     await space.setProviderApiKey('openai', 'sk-openai-x')
 
@@ -187,7 +187,7 @@ describe('Space secret methods', () => {
   })
 
   it('empty plaintext is rejected (you can\'t set "" as a key)', async () => {
-    const root = makeTempDir('aipehub-empty-')
+    const root = makeTempDir('gotong-empty-')
     const { space } = await Space.init(root, { name: 'test' })
     await expect(space.setProviderApiKey('anthropic', '')).rejects.toThrow(/non-empty/)
     await expect(space.setAgentApiKey('alice', '')).rejects.toThrow(/non-empty/)

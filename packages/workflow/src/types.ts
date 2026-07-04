@@ -1,5 +1,5 @@
 /**
- * Core types for `@aipehub/workflow`.
+ * Core types for `@gotong/workflow`.
  *
  * A workflow is a YAML/JSON file that declares:
  *   - a `trigger` capability — admin dispatches to this cap to start the flow
@@ -17,7 +17,7 @@
  * The resolver substitutes these at runtime; see `resolver.ts`.
  *
  * Schemas:
- *   schema: aipehub.workflow/v1
+ *   schema: gotong.workflow/v1
  *   workflow:
  *     id: string                        # required, unique within a space
  *     name?: string
@@ -29,9 +29,9 @@
  *     onFailure?: 'halt' | 'continue'   # default: 'halt'
  */
 
-import type { AncestryNode, DispatchStrategy } from '@aipehub/core'
+import type { AncestryNode, DispatchStrategy } from '@gotong/core'
 
-export const WORKFLOW_SCHEMA_V1 = 'aipehub.workflow/v1'
+export const WORKFLOW_SCHEMA_V1 = 'gotong.workflow/v1'
 
 // --- Workflow definition ---------------------------------------------------
 
@@ -153,7 +153,7 @@ export interface PayloadFieldSpec {
 
 /**
  * Role literal for `MeSurfaceSpec.allowedRoles`. Mirrors the identity role
- * set WITHOUT importing `@aipehub/identity` — the workflow package stays
+ * set WITHOUT importing `@gotong/identity` — the workflow package stays
  * free of any identity runtime dep (the same posture the web layer takes
  * with its own role mirror). Kept in sync by convention, not by type.
  */
@@ -211,7 +211,7 @@ export interface MeSurfaceSpec {
 
 /**
  * Coarse data-sensitivity band a workflow handles, worst-case. Ordered
- * least→most sensitive. A local literal (no `@aipehub/identity` dep) like
+ * least→most sensitive. A local literal (no `@gotong/identity` dep) like
  * `WorkflowRole` — the workflow package stays identity-free.
  */
 export type DataSensitivity = 'public' | 'internal' | 'confidential' | 'pii'
@@ -349,7 +349,7 @@ export interface Branch {
 /**
  * What to declare inside `dispatch:` for one step / branch.
  *
- * `strategy` is the same shape AipeHub uses everywhere — and is interpreted
+ * `strategy` is the same shape Gotong uses everywhere — and is interpreted
  * directly (`{kind: 'capability', capabilities: [...]}` etc.).
  *
  * `payload` may contain `$ref` strings anywhere in its tree; they're resolved
@@ -383,7 +383,7 @@ export type StepFailurePolicy =
   | { action: 'continue' }
   | { action: 'retry'; max: number }
 
-// --- Runtime state (persisted to .aipehub/workflows/runs/<id>.json) --------
+// --- Runtime state (persisted to .gotong/workflows/runs/<id>.json) --------
 
 export type RunStatus = 'running' | 'done' | 'failed' | 'cancelled'
 
@@ -419,7 +419,7 @@ export interface RunState {
    * actual user, not the runner's synthetic id).
    *
    * Untyped here (`Record<string, unknown>`) deliberately — pulling
-   * `TaskOrigin` from `@aipehub/core` would invert the dependency
+   * `TaskOrigin` from `@gotong/core` would invert the dependency
    * direction; the runner type-checks it structurally via the
    * `HubLike.dispatch` opts.
    */

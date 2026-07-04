@@ -48,7 +48,7 @@ function fakeCreate(result: MeWorkflowCreateResult | Error): {
 const OK: MeWorkflowCreateResult = {
   ok: true,
   workflowId: 'daily-todo',
-  yaml: 'schema: aipehub.workflow/v1\nworkflow:\n  id: daily-todo\n',
+  yaml: 'schema: gotong.workflow/v1\nworkflow:\n  id: daily-todo\n',
   explanation: '每天早上把你的待办整理成要点发给你。',
 }
 
@@ -156,7 +156,7 @@ describe('butler-workflow-create — no-leak', () => {
 // ---------------------------------------------------------------------------
 
 describe('butler-workflow-create — wizard YAML hand-off (WIZ-M4c)', () => {
-  const WIZ_YAML = 'schema: aipehub.workflow/v1\nworkflow:\n  id: weekly-report\n'
+  const WIZ_YAML = 'schema: gotong.workflow/v1\nworkflow:\n  id: weekly-report\n'
 
   function fakeWithYaml(fromYamlResult: MeWorkflowCreateResult): {
     surface: ButlerWorkflowCreateSource

@@ -1,4 +1,4 @@
-schema: aipehub.agent/v1
+schema: gotong.agent/v1
 agent:
   id: rag-researcher
   displayName: RAG Researcher
@@ -30,4 +30,4 @@ agent:
       args:
         - chroma-mcp
         - --persist-dir
-        - .aipehub/knowledge/research
+        - .gotong/knowledge/research

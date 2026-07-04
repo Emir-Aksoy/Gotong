@@ -1,4 +1,4 @@
-/* AipeHub admin — Managed Agents tab (local/cloud agent CRUD, provider
+/* Gotong admin — Managed Agents tab (local/cloud agent CRUD, provider
  * API keys, paste / file / GitHub import).
  *
  * Second ES-module split of the admin console (P3 admin.js split, Phase 2),
@@ -14,11 +14,11 @@
  * maApiKeyClear handler in main.js sets `ma._clearKeyOnSubmit`, which
  * submitAgentForm reads here.
  *
- * Shared utilities (t / escapeHtml / fetchJson) come off window.AipeHub,
+ * Shared utilities (t / escapeHtml / fetchJson) come off window.Gotong,
  * same source as services.js / admin-wf-assist.js.
  */
 
-const { t, escapeHtml, fetchJson } = window.AipeHub
+const { t, escapeHtml, fetchJson } = window.Gotong
 
 export function createManagedAgents({ ma, openBundleImportModal }) {
   // Injected once after resolveDom() — see module header.
@@ -71,7 +71,7 @@ export function createManagedAgents({ ma, openBundleImportModal }) {
     if (list.length === 0) {
       // Empty space — offer the one-click onboarding bundle alongside
       // the bare "no agents yet" message. Acts as the "is this thing on?"
-      // wizard for non-technical users who just installed AipeHub.
+      // wizard for non-technical users who just installed Gotong.
       dom.maList.innerHTML = `<div class="empty-state" style="padding: 1.2rem; line-height: 1.7;">
         <p style="margin: 0 0 0.6rem; font-weight: 600;">${escapeHtml(t.maEmpty)}</p>
         <p style="margin: 0 0 0.8rem; color: #555;">${escapeHtml(t.admOnboardPgPrompt)}</p>
@@ -468,7 +468,7 @@ export function createManagedAgents({ ma, openBundleImportModal }) {
       // 504 (timeout) / 400 / network — fetchJson throws the server's error
       // string. Run it through the friendly-error classifier too so a timeout
       // or refused connection reads as plain words + a fix, not a raw stack.
-      const d = window.AipeHub.describeError(err && err.message ? err.message : String(err))
+      const d = window.Gotong.describeError(err && err.message ? err.message : String(err))
       dom.maQcStatus.textContent = t.quickChatFailed(d.fix ? `${d.text} ${d.fix}` : d.text)
       dom.maQcStatus.classList.remove('ok')
       dom.maQcStatus.classList.add('err')
@@ -516,7 +516,7 @@ export function createManagedAgents({ ma, openBundleImportModal }) {
     const raw = result.kind === 'ok'
       ? (out && typeof out.text === 'string' ? out.text : '')
       : (result.error || result.reason || result.kind || '')
-    const d = window.AipeHub.describeError(raw)
+    const d = window.Gotong.describeError(raw)
     const friendly = d.fix ? `${d.text} ${d.fix}` : d.text
     if (dom.maQcReply) { dom.maQcReply.hidden = true; dom.maQcReply.textContent = '' }
     dom.maQcStatus.textContent = t.quickChatAgentFailed(friendly)
@@ -638,7 +638,7 @@ export function createManagedAgents({ ma, openBundleImportModal }) {
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ provider, apiKey, model, baseURL }),
       })
-      const d = window.AipeHub.describeKeyTest(verdict)
+      const d = window.Gotong.describeKeyTest(verdict)
       dom.maTestMsg.textContent = d.text
       dom.maTestMsg.classList.add(d.level === 'ok' ? 'ok' : 'err')
     } catch (err) {

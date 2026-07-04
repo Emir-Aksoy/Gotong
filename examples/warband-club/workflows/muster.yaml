@@ -1,6 +1,6 @@
 # 提议集结 — 成员发起一次集结 (对战夜 / 涂装会 / 锦标赛), 战团长确认纳入日程 (HITL)。
 # 这是 "合作" 那条:成员发起 → 传令官拟章程 → 战团长 human: 拍板 → 上日程。
-schema: aipehub.workflow/v1
+schema: gotong.workflow/v1
 workflow:
   id: warband-muster
   name: 提议集结 + 战团长确认

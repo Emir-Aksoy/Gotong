@@ -26,12 +26,12 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { Hub, Space } from '@aipehub/core'
+import { Hub, Space } from '@gotong/core'
 import {
   MASTER_KEY_LEN_BYTES,
   openIdentityStore,
   type IdentityStore,
-} from '@aipehub/identity'
+} from '@gotong/identity'
 
 import { serveWeb, type WebServerHandle } from '../src/server.js'
 
@@ -49,7 +49,7 @@ interface BootResult {
 }
 
 async function boot(): Promise<BootResult> {
-  const tmp = await mkdtemp(join(tmpdir(), 'aipehub-web-quotas-'))
+  const tmp = await mkdtemp(join(tmpdir(), 'gotong-web-quotas-'))
   const init = await Space.init(tmp, { name: 'quotas-test' })
   const space = init.space
   const hub = new Hub({ space })

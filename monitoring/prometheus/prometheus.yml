@@ -1,11 +1,11 @@
-# Ready-to-run Prometheus config for an AipeHub host (Route B P0-M7).
+# Ready-to-run Prometheus config for an Gotong host (Route B P0-M7).
 #
 # This is the file the one-click stack (../docker-compose.yml) mounts at
 # /etc/prometheus/prometheus.yml. It wires three things an operator otherwise
 # has to assemble by hand:
 #   - scrape the Hub's /metrics (the non-admin-gated route, P0-M7-M1) with a
 #     bearer token — NO machine-admin minting;
-#   - load the alert rules in aipehub.alerts.yml;
+#   - load the alert rules in gotong.alerts.yml;
 #   - hand firing alerts to Alertmanager for routing.
 #
 # For a hand-rolled Prometheus (not the compose stack) the scrape block alone
@@ -18,7 +18,7 @@ global:
 
 # Alert rules live in a sibling file so they can be edited / linted alone.
 rule_files:
-  - /etc/prometheus/aipehub.alerts.yml
+  - /etc/prometheus/gotong.alerts.yml
 
 # Firing alerts go to Alertmanager (severity-routed — see alertmanager.yml).
 alerting:
@@ -29,17 +29,17 @@ alerting:
 
 scrape_configs:
   # --------------------------------------------------------------------
-  # The AipeHub Hub — the internal /metrics scrape route (P0-M7-M1).
+  # The Gotong Hub — the internal /metrics scrape route (P0-M7-M1).
   # --------------------------------------------------------------------
-  # /metrics is gated by AIPE_METRICS_TOKEN, NOT the admin session. Put the
-  # same token the host was started with in ./secrets/aipehub.token (mounted
+  # /metrics is gated by GOTONG_METRICS_TOKEN, NOT the admin session. Put the
+  # same token the host was started with in ./secrets/gotong.token (mounted
   # read-only at the path below). Rotation = swap the file; no Prometheus
   # restart needed. Unset on the host → the route 404s (fail-closed) and this
-  # job shows as `up == 0` → AipehubHostDown fires (an honest "not wired yet").
-  - job_name: aipehub
+  # job shows as `up == 0` → GotongHostDown fires (an honest "not wired yet").
+  - job_name: gotong
     metrics_path: /metrics
     scheme: http # → https when the Hub is fronted by TLS (Caddy/nginx on 443)
-    bearer_token_file: /etc/prometheus/aipehub.token
+    bearer_token_file: /etc/prometheus/gotong.token
     static_configs:
       - targets:
           # Docker Desktop / Linux (with the compose extra_hosts gateway):
@@ -50,8 +50,8 @@ scrape_configs:
   # --------------------------------------------------------------------
   # OS-level metrics — disk, memory, process RSS (node_exporter).
   # --------------------------------------------------------------------
-  # AipeHub does NOT export these (the binary stays small + focused). The
-  # `aipehub-host` alert group keys off this job being named "node". Install
+  # Gotong does NOT export these (the binary stays small + focused). The
+  # `gotong-host` alert group keys off this job being named "node". Install
   # node_exporter on the Hub box; on Docker Desktop it's reachable via the
   # host gateway, on Linux compose uses the extra_hosts mapping below.
   - job_name: node

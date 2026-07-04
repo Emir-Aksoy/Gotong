@@ -16,10 +16,10 @@ import {
  * "untrusted YAML from the internet" and the supervisor — every reject
  * needs a clear, human-friendly message so the admin UI can show it.
  */
-describe('parseManifest (aipehub.agent/v1)', () => {
+describe('parseManifest (gotong.agent/v1)', () => {
   it('parses a minimal agent manifest from YAML', () => {
     const yaml = `
-schema: aipehub.agent/v1
+schema: gotong.agent/v1
 agent:
   id: writer
   capabilities: [draft]
@@ -42,7 +42,7 @@ agent:
 
   it('parses the equivalent JSON manifest', () => {
     const json = JSON.stringify({
-      schema: 'aipehub.agent/v1',
+      schema: 'gotong.agent/v1',
       agent: {
         id: 'writer',
         capabilities: ['draft'],
@@ -58,7 +58,7 @@ agent:
 
   it('accepts displayName + weightDefault and round-trips them', () => {
     const yaml = `
-schema: aipehub.agent/v1
+schema: gotong.agent/v1
 agent:
   id: writer
   displayName: 中文写作助手
@@ -75,7 +75,7 @@ agent:
 
   it('defaults missing kind to llm (the only supported value today)', () => {
     const yaml = `
-schema: aipehub.agent/v1
+schema: gotong.agent/v1
 agent:
   id: w
   capabilities: [x]
@@ -87,10 +87,10 @@ agent:
   })
 })
 
-describe('parseManifest (aipehub.team/v1)', () => {
+describe('parseManifest (gotong.team/v1)', () => {
   it('parses a team with multiple agents', () => {
     const yaml = `
-schema: aipehub.team/v1
+schema: gotong.team/v1
 team:
   name: editorial
   description: writer + reviewer
@@ -116,7 +116,7 @@ team:
 
   it('rejects duplicate ids inside a team', () => {
     const yaml = `
-schema: aipehub.team/v1
+schema: gotong.team/v1
 team:
   agents:
     - { id: w, capabilities: [a], provider: mock, system: x }
@@ -127,7 +127,7 @@ team:
 
   it('rejects empty team.agents', () => {
     const yaml = `
-schema: aipehub.team/v1
+schema: gotong.team/v1
 team:
   agents: []
 `
@@ -145,12 +145,12 @@ describe('parseManifest — error surface', () => {
   })
 
   it('throws on unknown schema', () => {
-    expect(() => parseManifest('schema: aipehub.future/v9')).toThrow(/unknown schema/)
+    expect(() => parseManifest('schema: gotong.future/v9')).toThrow(/unknown schema/)
   })
 
   it('rejects unsafe id characters', () => {
     const yaml = `
-schema: aipehub.agent/v1
+schema: gotong.agent/v1
 agent: { id: "writer/../etc/passwd", capabilities: [x], provider: mock, system: hi }
 `
     expect(() => parseManifest(yaml)).toThrow(/only contain letters, digits/)
@@ -158,7 +158,7 @@ agent: { id: "writer/../etc/passwd", capabilities: [x], provider: mock, system: 
 
   it('rejects empty capabilities array', () => {
     const yaml = `
-schema: aipehub.agent/v1
+schema: gotong.agent/v1
 agent: { id: w, capabilities: "draft", provider: mock, system: hi }
 `
     expect(() => parseManifest(yaml)).toThrow(/capabilities must be an array/)
@@ -166,7 +166,7 @@ agent: { id: w, capabilities: "draft", provider: mock, system: hi }
 
   it('rejects unknown provider', () => {
     const yaml = `
-schema: aipehub.agent/v1
+schema: gotong.agent/v1
 agent: { id: w, capabilities: [x], provider: bedrock, system: hi }
 `
     expect(() => parseManifest(yaml)).toThrow(/provider must be/)
@@ -174,7 +174,7 @@ agent: { id: w, capabilities: [x], provider: bedrock, system: hi }
 
   it('rejects missing system prompt', () => {
     const yaml = `
-schema: aipehub.agent/v1
+schema: gotong.agent/v1
 agent: { id: w, capabilities: [x], provider: mock }
 `
     expect(() => parseManifest(yaml)).toThrow(/system is required/)
@@ -232,7 +232,7 @@ describe('renderAgentManifest', () => {
 describe('parseManifest — uses: (Hub Services)', () => {
   it('parses a minimal uses array', () => {
     const yaml = `
-schema: aipehub.agent/v1
+schema: gotong.agent/v1
 agent:
   id: w
   capabilities: [x]
@@ -266,7 +266,7 @@ agent:
 
   it('an agent without uses parses cleanly and reports undefined', () => {
     const yaml = `
-schema: aipehub.agent/v1
+schema: gotong.agent/v1
 agent: { id: w, capabilities: [x], provider: mock, system: hi }
 `
     const m = parseManifest(yaml)
@@ -275,7 +275,7 @@ agent: { id: w, capabilities: [x], provider: mock, system: hi }
 
   it('rejects uses that is not an array', () => {
     const yaml = `
-schema: aipehub.agent/v1
+schema: gotong.agent/v1
 agent:
   id: w
   capabilities: [x]
@@ -288,7 +288,7 @@ agent:
 
   it('rejects a uses entry missing type', () => {
     const yaml = `
-schema: aipehub.agent/v1
+schema: gotong.agent/v1
 agent:
   id: w
   capabilities: [x]
@@ -302,7 +302,7 @@ agent:
 
   it('rejects a uses entry missing impl', () => {
     const yaml = `
-schema: aipehub.agent/v1
+schema: gotong.agent/v1
 agent:
   id: w
   capabilities: [x]
@@ -316,7 +316,7 @@ agent:
 
   it('rejects non-object config', () => {
     const yaml = `
-schema: aipehub.agent/v1
+schema: gotong.agent/v1
 agent:
   id: w
   capabilities: [x]
@@ -332,7 +332,7 @@ agent:
 
   it('rejects duplicate memory entries (singular type)', () => {
     const yaml = `
-schema: aipehub.agent/v1
+schema: gotong.agent/v1
 agent:
   id: w
   capabilities: [x]
@@ -349,7 +349,7 @@ agent:
 
   it('rejects duplicate artifact entries (singular type)', () => {
     const yaml = `
-schema: aipehub.agent/v1
+schema: gotong.agent/v1
 agent:
   id: w
   capabilities: [x]
@@ -366,7 +366,7 @@ agent:
 
   it('allows repeated datastore entries (each keyed by config.name)', () => {
     const yaml = `
-schema: aipehub.agent/v1
+schema: gotong.agent/v1
 agent:
   id: w
   capabilities: [x]
@@ -429,7 +429,7 @@ agent:
 describe('parseManifest — mcpServers: (third-party MCP tools)', () => {
   function withMcpServers(extra: string): string {
     return `
-schema: aipehub.agent/v1
+schema: gotong.agent/v1
 agent:
   id: writer
   capabilities: [draft]
@@ -673,7 +673,7 @@ agent:
 
   it('parses useMcpServers as a list of registry names', () => {
     const yaml = `
-schema: aipehub.agent/v1
+schema: gotong.agent/v1
 agent:
   id: writer
   capabilities: [draft]
@@ -688,7 +688,7 @@ agent:
 
   it('rejects a useMcpServers entry with a bad name', () => {
     const yaml = `
-schema: aipehub.agent/v1
+schema: gotong.agent/v1
 agent:
   id: writer
   capabilities: [draft]
@@ -702,7 +702,7 @@ agent:
 
   it('accepts a cross-hub <peer>:<server> ref (#2-M3)', () => {
     const yaml = `
-schema: aipehub.agent/v1
+schema: gotong.agent/v1
 agent:
   id: writer
   capabilities: [draft]
@@ -720,7 +720,7 @@ agent:
 
   it('rejects a cross-hub ref whose server segment is malformed (#2-M3)', () => {
     const yaml = `
-schema: aipehub.agent/v1
+schema: gotong.agent/v1
 agent:
   id: writer
   capabilities: [draft]
@@ -734,7 +734,7 @@ agent:
 
   it('renderAgentManifest round-trips useMcpServers', () => {
     const yaml = `
-schema: aipehub.agent/v1
+schema: gotong.agent/v1
 agent:
   id: writer
   capabilities: [draft]
@@ -760,7 +760,7 @@ agent:
 
   it('renderAgentManifest round-trips a heartbeat block (v5 D-M4)', () => {
     const yaml = `
-schema: aipehub.agent/v1
+schema: gotong.agent/v1
 agent:
   id: watcher
   capabilities: [watch]
@@ -789,7 +789,7 @@ agent:
 
   it('rejects a heartbeat with a non-positive intervalMs', () => {
     const yaml = `
-schema: aipehub.agent/v1
+schema: gotong.agent/v1
 agent:
   id: bad
   capabilities: [x]
@@ -802,7 +802,7 @@ agent:
 
   it('absent mcpServers (the common case) yields undefined, not []', () => {
     const yaml = `
-schema: aipehub.agent/v1
+schema: gotong.agent/v1
 agent:
   id: writer
   capabilities: [draft]

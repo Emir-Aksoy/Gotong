@@ -1,6 +1,6 @@
-# AipeHub v3.0 dev journal
+# Gotong v3.0 dev journal
 
-> Archived development log for AipeHub v3.0.0 — the per-PR / per-checkpoint
+> Archived development log for Gotong v3.0.0 — the per-PR / per-checkpoint
 > notes that fed into the consolidated `## 3.0.0 — 2026-05-17 — Services`
 > entry in [`CHANGELOG.md`](./CHANGELOG.md). Split out in v3.2 because
 > the main file had grown past 1600 lines, which made the changelog
@@ -77,7 +77,7 @@ leaked entries in the process-wide runtime allowlist.
 
 - 459 tests workspace-wide green (+1 over v1.2.5). No new public
   API. No wire shape changes.
-- The only remaining v1.2.4-deferred item is the `__isAipehubBridge`
+- The only remaining v1.2.4-deferred item is the `__isGotongBridge`
   brand-vs-Symbol choice — left for v1.3 federation work where
   more brand fields will land at once.
 
@@ -102,7 +102,7 @@ docstring clarifying that `register_service_methods` /
 
 ### Fixed — Python SDK docstring clarifies host-side scope
 
-- `python-sdk/src/aipehub/services.py` module docstring now says
+- `python-sdk/src/gotong/services.py` module docstring now says
   explicitly that the Python SDK is **client-side only**, and that
   the TypeScript host SDK's `registerServiceMethods` /
   `unregisterServiceMethods` have no Python counterpart by design
@@ -163,7 +163,7 @@ that v1.2 had quietly introduced.
 
 ### Fixed — `parseVersion` recognises pre-release tags
 
-- `@aipehub/sdk-node` was parsing protocol version strings via
+- `@gotong/sdk-node` was parsing protocol version strings via
   `Number('2-beta')` which is `NaN` → fallback `0`, so a server
   reporting `'1.2-beta'` looked like v1.0 to a v1.2 client and
   produced a spurious cross-version warning. New `parseDigits` helper
@@ -188,8 +188,8 @@ that v1.2 had quietly introduced.
 
 - `connect()` recognised `TeamBridgeAgent` via `instanceof`, which
   fails across pnpm peer-mismatch or workspace-override edge cases
-  where two copies of `@aipehub/sdk-node` resolve into the same
-  graph. Added a `__isAipehubBridge = true as const` brand and an
+  where two copies of `@gotong/sdk-node` resolve into the same
+  graph. Added a `__isGotongBridge = true as const` brand and an
   `isTeamBridge(a)` helper that checks `instanceof` first (fast path)
   then falls back to the brand. Existing federation tests pass
   unchanged — the new check is strictly more permissive.
@@ -233,7 +233,7 @@ that v1.2 had quietly introduced.
 - 453 tests across the workspace green on this patch (+3 over v1.2.2:
   pre-release parse, dotted parse, unregister throw-symmetric).
 - No wire shape changes. No new API on the SDK surface beyond
-  exporting `isTeamBridge` from `@aipehub/sdk-node`.
+  exporting `isTeamBridge` from `@gotong/sdk-node`.
 
 ---
 
@@ -246,7 +246,7 @@ all are additive on the SDK / runtime surface.
 
 ### Added — plugin lifecycle: `unregisterServiceMethods`
 
-- `@aipehub/protocol` gains `unregisterServiceMethods(type, methods)`,
+- `@gotong/protocol` gains `unregisterServiceMethods(type, methods)`,
   symmetric with `registerServiceMethods`. Designed for plugin hot-
   reload and clean host shutdown — a long-lived process that mounts
   and unmounts service plugins can now drop their wire methods from
@@ -257,7 +257,7 @@ all are additive on the SDK / runtime surface.
   cover symmetric remove, the built-in floor invariant, the empty-
   set collapse to `undefined`, and the no-op-on-bad-input contract.
 
-### Added — cross-version safety warning in `@aipehub/sdk-node`
+### Added — cross-version safety warning in `@gotong/sdk-node`
 
 - The SDK now reads `WELCOME.protocolVersion` and, if it's older than
   the SDK's own `PROTOCOL_VERSION` on the same major, **and** the
@@ -274,7 +274,7 @@ all are additive on the SDK / runtime surface.
 
 ### Fixed — `renderMetrics` clamps negative `durationMs`
 
-- `aipehub_service_call_duration_ms_sum` is a Prometheus counter and
+- `gotong_service_call_duration_ms_sum` is a Prometheus counter and
   must be monotonic. The previous code summed `Number.isFinite(d)
   ? d : 0`, which let a negative duration (mid-call clock skew, or
   a buggy client) drag the counter down across scrapes — breaking
@@ -301,9 +301,9 @@ v1.2 release ships a self-consistent story.
 ### Fixed — protocol version constant actually reaches `'1.2'`
 
 - `packages/protocol/src/constants.ts` and
-  `python-sdk/src/aipehub/protocol.py` both **stayed on `'1.1'`** even
+  `python-sdk/src/gotong/protocol.py` both **stayed on `'1.1'`** even
   after the v1.2 docs went live, so the server's WELCOME frame and the
-  `aipehub_protocol_version` info-metric both reported the wrong
+  `gotong_protocol_version` info-metric both reported the wrong
   number. Bumped to `'1.2'` in both SDKs. The wire payload changes
   zero shape; this just makes the self-advertised version match the
   feature set described in `docs/PROTOCOL.md`.
@@ -330,7 +330,7 @@ v1.2 release ships a self-consistent story.
 - The bridge held two new fields (`forwardUpstreamServices`,
   `upstreamServices`) but no host code read them; users following the
   RFC saw the option silently swallowed. v1.2.1's `connect()`
-  (`@aipehub/sdk-node`) now:
+  (`@gotong/sdk-node`) now:
   1. Scans `agents` for `TeamBridgeAgent` instances and merges every
      bridge's `forwardUpstreamServices` into the connection's HELLO
      services list (de-duplicated by reference, never lossy).
@@ -342,7 +342,7 @@ v1.2 release ships a self-consistent story.
   and the negative path (bridges without `forwardUpstreamServices`
   leave `upstreamServices` undefined — no phantom client).
 
-### Fixed — `aipehub new python-agent` produces a runnable layout
+### Fixed — `gotong new python-agent` produces a runnable layout
 
 - The template's `pyproject.toml` had `packages = ["src/<modName>"]`
   but the scaffolder wrote source to `src/agent.py`, so `pip install
@@ -362,7 +362,7 @@ v1.2 release ships a self-consistent story.
 - All four fixes are additive on v1.2 wire/API and back-compat with
   v1.1 — the existing v1.2 cross-version reasoning at the bottom of
   the v1.2 section below still holds.
-- 441 tests across `@aipehub/{core,services-sdk,transport-ws,sdk-node,host,cli,web}`
+- 441 tests across `@gotong/{core,services-sdk,transport-ws,sdk-node,host,cli,web}`
   green on this patch. The Python SDK's `PROTOCOL_VERSION` bump is
   picked up automatically by tests that compare against the imported
   constant; no test-side changes were needed.
@@ -379,7 +379,7 @@ that lets sidecar authors skip the boilerplate.
 
 ### Added — protocol v1.2 (additive on v1.1, fully back-compat)
 
-- **`registerServiceMethods(type, methods)`** in `@aipehub/protocol`
+- **`registerServiceMethods(type, methods)`** in `@gotong/protocol`
   — third-party service plugins extend the SERVICE_CALL allowlist at
   host bootstrap by declaring a `wireMethods` array on their
   `ServicePlugin`. Built-ins (`memory` / `artifact` / `datastore`)
@@ -423,17 +423,17 @@ that lets sidecar authors skip the boilerplate.
   ApplicationServiceDecl[]` to `PendingApplication`; the transport-ws
   session pipes HELLO.services through `hub.requestAdmission`.
 - **`GET /api/admin/metrics`** — Prometheus / OpenMetrics text
-  exposition. Series: `aipehub_protocol_version` (info),
-  `aipehub_participants{kind}` (gauge), `aipehub_tasks_total{kind}`
-  (counter), `aipehub_pending_applications` (gauge),
-  `aipehub_service_calls_total{type,impl,outcome}` (counter),
-  `aipehub_service_call_duration_ms_{sum,count}{type,impl}` (counter
+  exposition. Series: `gotong_protocol_version` (info),
+  `gotong_participants{kind}` (gauge), `gotong_tasks_total{kind}`
+  (counter), `gotong_pending_applications` (gauge),
+  `gotong_service_calls_total{type,impl,outcome}` (counter),
+  `gotong_service_call_duration_ms_{sum,count}{type,impl}` (counter
   pair). Aggregated lazily from the transcript on each scrape — no
   extra in-memory bookkeeping.
 
 ### Added — Python SDK feature parity
 
-- **`aipehub.services` module** mirroring `@aipehub/sdk-node`'s
+- **`gotong.services` module** mirroring `@gotong/sdk-node`'s
   `ServiceClient`:
   - `ServiceClient.memory_for(impl, owner)` /
     `.artifact_for(...)` / `.datastore_for(...)` factories.
@@ -446,7 +446,7 @@ that lets sidecar authors skip the boilerplate.
 - `Session.services` populated when services declared; `None`
   otherwise. Pending calls reject with `session_not_ready` on close
   / disconnect.
-- `PROTOCOL_VERSION` in `aipehub.protocol` bumped to `'1.2'`. (Same
+- `PROTOCOL_VERSION` in `gotong.protocol` bumped to `'1.2'`. (Same
   caveat as the TypeScript constant above — the bump itself landed in
   v1.2.1.)
 - 5 new pytest tests cover HELLO.services on the wire, memory
@@ -469,18 +469,18 @@ that lets sidecar authors skip the boilerplate.
   existing agent to a running Hub as a sidecar. Covers the 5-line
   happy path, services declaration, migration from in-process,
   cancellation / disconnect / reattach, and the mistake gallery.
-- **`@aipehub/cli`** (`npx @aipehub/cli`, bin: `aipehub`) — new
+- **`@gotong/cli`** (`npx @gotong/cli`, bin: `gotong`) — new
   package. Subcommands:
-  - `aipehub new agent <name> [--capabilities=…] [--id=…] [--no-services]`
+  - `gotong new agent <name> [--capabilities=…] [--id=…] [--no-services]`
     — scaffold a TypeScript sidecar project (`package.json`,
     `tsconfig.json`, `src/index.ts`, `README.md`). Self-contained;
     `npm install && npm start` and you're online.
-  - `aipehub new python-agent <name> [...]` — same for Python
+  - `gotong new python-agent <name> [...]` — same for Python
     (`pyproject.toml`, module-aware names).
-  - `aipehub ping <ws-url> [--api-key=…] [--timeout=…]` — handshake-
+  - `gotong ping <ws-url> [--api-key=…] [--timeout=…]` — handshake-
     only probe of a Hub for diagnostics. Uses `ws` directly to keep
     the CLI's transitive dep graph small.
-  - `aipehub help [cmd]`, `aipehub --version`.
+  - `gotong help [cmd]`, `gotong --version`.
 - 15 unit tests cover template rendering + CLI dispatch.
 
 ### Added — design docs (for v1.3+)
@@ -555,7 +555,7 @@ decisions).
   (server-substituted to the calling agent's id; agents only), `id:
   '*'` (any concrete id of that kind). Per-prefix matching deferred
   to v1.2.
-- **Method allowlist** hardcoded in `@aipehub/protocol`:
+- **Method allowlist** hardcoded in `@gotong/protocol`:
   - `memory`: recall / remember / list / forget / clear
   - `artifact`: write / read / list / exists / remove
   - `datastore`: kv.get / kv.set / kv.del / kv.keys / sql.exec / sql.query
@@ -570,7 +570,7 @@ decisions).
   `unknown_method` / `bad_args` / `unknown_agent` / `session_not_ready`
   / `unknown_service` / `internal_error`.
 
-### Added — server (`@aipehub/transport-ws`)
+### Added — server (`@gotong/transport-ws`)
 
 - **`ServiceCallRouter`** (new module) — per-session router with a
   `(type, impl, ownerKey)` handle cache. Lazy attach on first call;
@@ -579,7 +579,7 @@ decisions).
   `workflow-run`, `shared` — survive per RFC §6).
 - **`ServiceCallGateway`** interface in `server.ts` — narrow shape
   (`attach` + `detachFor`) so transport-ws stays free of
-  `@aipehub/host` and `@aipehub/services-sdk` dependencies. Production
+  `@gotong/host` and `@gotong/services-sdk` dependencies. Production
   hosts pass `HubServices` directly (structurally satisfies it).
 - **`WebSocketTransportOptions.services?: ServiceCallGateway`** — when
   present, sessions get a router; when absent, every SERVICE_CALL
@@ -588,24 +588,24 @@ decisions).
   in `handleHello`; SERVICE_CALL handled in `onMessage`; dispose on
   `cleanup`. Malformed decls return `REJECT bad_hello` before WELCOME.
 
-### Added — SDK (`@aipehub/sdk-node`)
+### Added — SDK (`@gotong/sdk-node`)
 
 - **`ServiceClient`** (new type) — exposes `memory`, `artifact`,
   `datastore: Record<name, …>` static-owner handles + `memoryFor` /
   `artifactFor` / `datastoreFor` factories for dynamic owners. The
   handle wrappers faithfully implement
-  `@aipehub/services-sdk`'s `MemoryHandle` / `ArtifactHandle` /
+  `@gotong/services-sdk`'s `MemoryHandle` / `ArtifactHandle` /
   `DatastoreHandle` contracts (incl. `DatastoreHandle.name` /
   `kv` / `sql` sub-namespaces), so agent code reads identically to
   in-process LlmAgent.
 - **`ServiceCallError`** — surfaces `SERVICE_RESULT.ok: false` as a
   thrown `Error` subclass with `code` from the wire enum.
 - **`ConnectOptions.services?: ServiceUseRequest[]`** + **`Session.services?: ServiceClient`** — agent author wires `coach.services = session.services` once after `await connect()` resolves.
-- **`@aipehub/services-sdk`** added as runtime dep so SDK users don't have to install services-sdk separately for the handle types. Type-only imports — no runtime size impact.
+- **`@gotong/services-sdk`** added as runtime dep so SDK users don't have to install services-sdk separately for the handle types. Type-only imports — no runtime size impact.
 - Disconnect fails all pending RPCs with `session_not_ready` —
   consistent with how in-flight TASK frames are handled.
 
-### Added — host wire-up (`@aipehub/host`)
+### Added — host wire-up (`@gotong/host`)
 
 - `main.ts` passes the bootstrapped `HubServices` into `serveWebSocket`
   as the gateway. When `bootstrapServices` fails the services field
@@ -682,7 +682,7 @@ downstream agents automatically see those interjections.
   - Storage convention: owner `{kind:'workflow-run', id: caseId}`, kind
     `episodic`, topic / source / stepId encoded in `meta`. Filtering
     happens helper-side (the file backend doesn't take meta queries).
-- **Exported under `@aipehub/host/services`** alongside the existing
+- **Exported under `@gotong/host/services`** alongside the existing
   `bootstrapServices` / `LifecycleSweeper` surface — examples and
   third-party hosts can `import { recordCaseConversation, ... }`
   directly without touching internals.
@@ -737,7 +737,7 @@ downstream agents automatically see those interjections.
   body) never retry. The motivating case: real DeepSeek runs would
   occasionally fail with `Premature close` on the largest
   `finalize` step; with `maxRetries: 3` the example now self-heals.
-- **`isTransientError`** exported from `@aipehub/llm-openai` for
+- **`isTransientError`** exported from `@gotong/llm-openai` for
   callers building their own retry layer on top.
 - **`retryBackoffMs`** opt — injectable backoff function (tests use
   `() => 1` to keep the suite instant).
@@ -779,12 +779,12 @@ A pluggable per-agent state layer. Agents declare what they want
 (`memory`, `artifact`, `datastore`) in their yaml; the host attaches
 typed handles at spawn time and keeps the bookkeeping. The Hub itself
 gains nothing — Hub stays a "dumb dispatcher". All wiring sits in
-`@aipehub/services-sdk` + per-implementation plugin packages + the
+`@gotong/services-sdk` + per-implementation plugin packages + the
 host's integration layer.
 
 ### Added — services SDK + first-party plugins
 
-- **`@aipehub/services-sdk`** — the plugin contract. `ServicePlugin`
+- **`@gotong/services-sdk`** — the plugin contract. `ServicePlugin`
   with lifecycle (`init` / `validateConfig` / `attach` / `detach` /
   `softDelete` / `restore` / `hardDelete` / `describe` / `shutdown`),
   `ServiceRegistry`, `loadPlugins` dynamic-import loader with auto-seed
@@ -792,13 +792,13 @@ host's integration layer.
   vitest factory, typed errors (`PluginNotFoundError`,
   `TrashRestoreConflictError`, `ServiceConfigError`, …), and the
   `ServiceCtx` type the LlmAgent constructor accepts.
-- **`@aipehub/service-memory-file`** — JSONL files per
+- **`@gotong/service-memory-file`** — JSONL files per
   `(owner, kind)`. `recall` is case-insensitive substring + kinds /
   since / k filters. Trash lives under the plugin's local `.trash/`.
-- **`@aipehub/service-artifact-file`** — per-owner directories with
+- **`@gotong/service-artifact-file`** — per-owner directories with
   path-traversal defense, MIME allow-list, byte caps. List, exists,
   remove, recursive walk for `list({ prefix })`.
-- **`@aipehub/service-datastore-sqlite`** — one `.sqlite` per declared
+- **`@gotong/service-datastore-sqlite`** — one `.sqlite` per declared
   `config.name` per owner. KV mode (backed by a `_kv` table) + raw SQL
   with prepared-statement caching. WAL + foreign-keys ON by default.
 
@@ -811,7 +811,7 @@ host's integration layer.
   Resolution is **host-anchored** via `import.meta.resolve` from
   `bootstrap.ts`, so plugins declared as host dependencies are visible
   even under pnpm's isolated module graph (where
-  `services-sdk/node_modules/@aipehub/` only contains `core`). Test
+  `services-sdk/node_modules/@gotong/` only contains `core`). Test
   runners that don't implement `import.meta.resolve` (vite-node) fall
   back to a plain `import(pkg)`.
 - **`LocalAgentPool`** spawn-time wiring: reads `record.managed.uses`,
@@ -835,8 +835,8 @@ host's integration layer.
   /api/admin/services/trash/:t/:i/:id/restore`, `DELETE
   /api/admin/services/trash/:t/:i/:id`, `POST
   /api/admin/services/sweep`. Wired through a plain-data
-  `ServicesAdminSurface` interface in `@aipehub/core` so
-  `@aipehub/web` never has to import the SDK.
+  `ServicesAdminSurface` interface in `@gotong/core` so
+  `@gotong/web` never has to import the SDK.
 - **SSE events**: `service_trashed` (every soft-delete) and
   `service_purged` (every expired-trash auto-cleanup) flow through
   the hub transcript and the admin SSE stream.
@@ -849,8 +849,8 @@ host's integration layer.
 
 ### Added — agent yaml schema
 
-- **`ManagedAgentSpec.uses?: ServiceUseSpec[]`** in `@aipehub/core` and
-  `parseManifest` validation in `@aipehub/web`. Yaml authors declare
+- **`ManagedAgentSpec.uses?: ServiceUseSpec[]`** in `@gotong/core` and
+  `parseManifest` validation in `@gotong/web`. Yaml authors declare
   `{ type, impl, config }` per service. The same validator runs on the
   admin POST/PUT form path. `memory` and `artifact` are singular per
   agent; `datastore` (and third-party types) may repeat.
@@ -879,11 +879,11 @@ host's integration layer.
 - core gets a single new file (`services-admin.ts`, type-only) plus a
   `paths.services` string on `Space`. The `services-sdk → core` type
   dependency that already existed isn't reversed; HubServices lives in
-  `@aipehub/host`.
+  `@gotong/host`.
 - All three first-party plugin packages
   (`service-memory-file`, `service-artifact-file`,
   `service-datastore-sqlite`) are declared as **runtime dependencies**
-  of `@aipehub/host`, not devDependencies — without this the
+  of `@gotong/host`, not devDependencies — without this the
   pnpm-isolated module graph hides them from the production resolver.
   Third-party plugins still resolve fine as long as they're installed
   somewhere reachable from the host package (`pnpm add` in the host
@@ -896,13 +896,13 @@ host's integration layer.
 ## 3.0.0 dev journal — workflow engine + CI (v2.1)
 
 The pluggable workflow layer the Hub deliberately doesn't bundle. The
-Hub stays "dumb dispatcher"; `@aipehub/workflow` is a separate package
+Hub stays "dumb dispatcher"; `@gotong/workflow` is a separate package
 the host loads at boot. Workflows are YAML files; their runtime state is
 JSON on disk; nothing about the Hub had to change.
 
-### Added — `@aipehub/workflow` (new package, file-first)
+### Added — `@gotong/workflow` (new package, file-first)
 
-- **YAML schema `aipehub.workflow/v1`** with: `trigger.capability`,
+- **YAML schema `gotong.workflow/v1`** with: `trigger.capability`,
   ordered `steps[]`, optional `output` expression, optional
   workflow-level `onFailure` (`halt` / `continue`). Steps are either
   simple (one `dispatch`) or `parallel: true` with fan-out branches.
@@ -938,13 +938,13 @@ JSON on disk; nothing about the Hub had to change.
 
 ### Added — host integration
 
-- **`@aipehub/host`** scans `AIPE_WORKFLOWS_DIR` (default
+- **`@gotong/host`** scans `GOTONG_WORKFLOWS_DIR` (default
   `<space>/workflows/definitions/`) at boot and registers a runner per
   file. Default participant id is `workflow:<id>`.
 - **`WorkflowController`** is the duck-typed `WorkflowSurface` the Web
   layer talks to. Methods: `list`, `importFromText`, `remove`,
   `listRuns`, `readRun`, `resumeRunningRuns`. The Web package does NOT
-  take a runtime dependency on `@aipehub/workflow` — the controller is
+  take a runtime dependency on `@gotong/workflow` — the controller is
   passed in via `serveWeb({ workflows })`.
 - **HTTP API**:
   - `GET    /api/admin/workflows`              — list loaded workflows
@@ -988,22 +988,22 @@ cancels in-flight PR runs; `main` post-merge runs always finish.
 
 ### Tests
 
-- `@aipehub/workflow`: 82 tests (schema, resolver, runner, predicate,
+- `@gotong/workflow`: 82 tests (schema, resolver, runner, predicate,
   run-store, template parse smoke-check).
-- `@aipehub/host`: 19 tests (loader, controller — import / remove /
+- `@gotong/host`: 19 tests (loader, controller — import / remove /
   history / resume orchestration).
 - Workspace total: **316 passed / 2 skipped**.
 
 ### Distribution
 
 - **No `npm publish` at this stage.** The earlier "queued for v2.1"
-  plan to push `@aipehub/*` to npmjs.com has been **descoped**. Source
+  plan to push `@gotong/*` to npmjs.com has been **descoped**. Source
   (`pnpm install && pnpm build && pnpm host`) and Docker
   (`docker compose up`) are the two supported install paths — both
   documented in [README](README.md) Quick start.
 - **Open decision** — which JS registry, if any: stay source-only, JSR
   (jsr.io — GitHub OAuth, no separate account, native TS), or GitHub
-  Packages (`@aipehub` scope same as the GitHub org but users must
+  Packages (`@gotong` scope same as the GitHub org but users must
   configure `.npmrc`). Tracked in
   [RELEASE-CHECKLIST](.github/RELEASE-CHECKLIST.md).
 - **Pre-built single-file binaries** for macOS (arm64 + x64) and
@@ -1011,7 +1011,7 @@ cancels in-flight PR runs; `main` post-merge runs always finish.
   covers the cross-platform "click and run" case. Bun `--compile` is
   the leading candidate; requires inlining `packages/web/static/*`
   before the binary is self-contained.
-- **PyPI**: `aipehub` is similarly source-only at this stage
+- **PyPI**: `gotong` is similarly source-only at this stage
   (`pip install -e python-sdk/`). PyPI publish decision moves alongside
   the JS-registry call.
 
@@ -1037,7 +1037,7 @@ community-shared agent + team configs.
   (anthropic, openai, …) and optional per-agent overrides, all encrypted
   with AES-256-GCM.
 - **`<space>/runtime/secret.key`** holds the AES master key (32 bytes,
-  hex, `0600`). Operators can override with `AIPE_SECRET_KEY` env (64
+  hex, `0600`). Operators can override with `GOTONG_SECRET_KEY` env (64
   hex chars) for KMS-mounted setups.
 - **Two-tier resolution at spawn** in priority order: (1) per-agent key
   → (2) workspace default → (3) `ANTHROPIC_API_KEY` / `OPENAI_API_KEY`
@@ -1069,22 +1069,22 @@ community-shared agent + team configs.
   `agents.json`. `kind: 'llm'` agents carry `provider` (anthropic /
   openai / mock), `model`, `system` prompt, and `weightDefault`. API
   keys never go to disk — only the provider name; keys stay in `process.env`.
-- **`AgentSupervisor`** in `@aipehub/host`: on boot, replays `agents.json`
+- **`AgentSupervisor`** in `@gotong/host`: on boot, replays `agents.json`
   into live `LlmAgent` participants registered on the Hub. Same on
   every create / edit. `displayName` field added for human-friendly
   identifiers.
-- **`ManagedAgentLifecycle`** interface exported from `@aipehub/core` so
+- **`ManagedAgentLifecycle`** interface exported from `@gotong/core` so
   the Web layer talks to the supervisor without importing
-  `@aipehub/llm-*` directly. `serveWeb({ lifecycle })` plugs the host's
+  `@gotong/llm-*` directly. `serveWeb({ lifecycle })` plugs the host's
   supervisor in.
-- **Host package** now depends on `@aipehub/llm`, `@aipehub/llm-anthropic`,
-  `@aipehub/llm-openai` so a single `pnpm host` brings everything online.
+- **Host package** now depends on `@gotong/llm`, `@gotong/llm-anthropic`,
+  `@gotong/llm-openai` so a single `pnpm host` brings everything online.
 
 ### Added — manifest format + parser
 
-- **`aipehub.agent/v1`** (single agent) and **`aipehub.team/v1`**
+- **`gotong.agent/v1`** (single agent) and **`gotong.team/v1`**
   (multiple agents bundled) schemas, accepted as YAML or JSON.
-- Parser in `@aipehub/web/manifest.ts` returns a typed `ParsedManifest`,
+- Parser in `@gotong/web/manifest.ts` returns a typed `ParsedManifest`,
   fails loudly with `ManifestError`-class messages that the admin UI
   surfaces verbatim. New `yaml` dependency.
 
@@ -1137,7 +1137,7 @@ URL paste in the admin UI.
   or unlicensed.
 - **Adaptation rules** documented in `templates/community/README.md`:
   removed conversational openers ("my first request is …"), reshaped
-  for AipeHub's single-turn task-payload → TaskResult model, added
+  for Gotong's single-turn task-payload → TaskResult model, added
   structured output sections, tuned capabilities + model + weight.
 - **Files**: `linux-terminal`, `javascript-console`, `sql-terminal`,
   `english-improver`, `storyteller`, `math-tutor`, `tech-writer`,
@@ -1258,14 +1258,14 @@ Targets the "open-source it + run a public体验版" milestone.
 - `POST /api/admin/admins { displayName }` mints a fresh admin and returns the plaintext token exactly once. Used for inviting more admins without redeploying.
 - `DELETE /api/admin/admins/:id` revokes another admin. Refuses to remove the last admin or to remove yourself (use `logout` for the latter).
 
-### Added — new package `@aipehub/host`
+### Added — new package `@gotong/host`
 - Production binary that runs Hub + WebSocket + Web from environment variables. No demo agents, no test traffic.
-- `aipehub-host` bin entry; runnable via `pnpm host`.
-- Env vars: `AIPE_SPACE`, `AIPE_HOST`, `AIPE_WEB_PORT`, `AIPE_WS_PORT`, `AIPE_GATING`, `AIPE_COOKIE_SECURE`, `AIPE_ALLOWED_HOSTS`, `AIPE_ADMIN_RATE_MAX`, `AIPE_ADMIN_RATE_SEC`, `AIPE_DEFAULT_LANG`, `AIPE_HEARTBEAT_MS`, `AIPE_SPACE_NAME`, `AIPE_ADMIN_DISPLAY_NAME`.
+- `gotong-host` bin entry; runnable via `pnpm host`.
+- Env vars: `GOTONG_SPACE`, `GOTONG_HOST`, `GOTONG_WEB_PORT`, `GOTONG_WS_PORT`, `GOTONG_GATING`, `GOTONG_COOKIE_SECURE`, `GOTONG_ALLOWED_HOSTS`, `GOTONG_ADMIN_RATE_MAX`, `GOTONG_ADMIN_RATE_SEC`, `GOTONG_DEFAULT_LANG`, `GOTONG_HEARTBEAT_MS`, `GOTONG_SPACE_NAME`, `GOTONG_ADMIN_DISPLAY_NAME`.
 - Graceful shutdown on SIGINT / SIGTERM: drains SSE clients, closes WS, calls `hub.stop()` before exit.
 
 ### Added — federation
-- `TeamBridgeAgent` in `@aipehub/sdk-node`: wraps a local Hub as one agent on an upstream Hub. Forwards tasks downward, reframes results upward with provenance (`localBy`, `localTaskId` in `output`). Optional `mapTask` callback to rewrite dispatch strategy.
+- `TeamBridgeAgent` in `@gotong/sdk-node`: wraps a local Hub as one agent on an upstream Hub. Forwards tasks downward, reframes results upward with provenance (`localBy`, `localTaskId` in `output`). Optional `mapTask` callback to rewrite dispatch strategy.
 - New example `examples/federated-team` with `upstream-host`, `team-host`, `driver`, and a launcher. Demo target: `pnpm demo:federated-team`.
 - New 4-test suite `packages/sdk-node/tests/bridge.test.ts` covers ok / failed / no_participant / mapTask paths in-process (no WS).
 

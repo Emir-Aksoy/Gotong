@@ -2,7 +2,7 @@
 
 Phase 13 M5 — end-to-end demo of the AI workflow editor pipeline.
 
-Runs the **`WorkflowAssistantAgent`** (M1) against a real LLM, then walks each draft through `parseWorkflow` (M1) and the M4 deep checker (`@aipehub/evals/checkers/workflow-structure`) so you can see exactly what a human admin would see in the web editor.
+Runs the **`WorkflowAssistantAgent`** (M1) against a real LLM, then walks each draft through `parseWorkflow` (M1) and the M4 deep checker (`@gotong/evals/checkers/workflow-structure`) so you can see exactly what a human admin would see in the web editor.
 
 ## What it shows
 
@@ -21,21 +21,21 @@ The synthetic "hub inventory" in `src/index.ts` (`DEMO_HINTS`) is what a real ho
 
 ```bash
 # Real DeepSeek (cheapest, default — needs DEEPSEEK_API_KEY in .env.local)
-pnpm --filter @aipehub/example-workflow-assistant start
+pnpm --filter @gotong/example-workflow-assistant start
 
 # Real Anthropic
-AIPE_DEMO_PROVIDER=anthropic ANTHROPIC_API_KEY=sk-ant-... \
-  pnpm --filter @aipehub/example-workflow-assistant start
+GOTONG_DEMO_PROVIDER=anthropic ANTHROPIC_API_KEY=sk-ant-... \
+  pnpm --filter @gotong/example-workflow-assistant start
 
 # Real OpenAI
-AIPE_DEMO_PROVIDER=openai OPENAI_API_KEY=sk-... \
-  pnpm --filter @aipehub/example-workflow-assistant start
+GOTONG_DEMO_PROVIDER=openai OPENAI_API_KEY=sk-... \
+  pnpm --filter @gotong/example-workflow-assistant start
 
 # Mock — no network, no keys, deterministic
-pnpm --filter @aipehub/example-workflow-assistant start:mock
+pnpm --filter @gotong/example-workflow-assistant start:mock
 ```
 
-Override the model with `AIPE_DEMO_MODEL=...` (defaults: `deepseek-v4-flash` / `claude-3-5-haiku-latest` / `gpt-4o-mini`).
+Override the model with `GOTONG_DEMO_MODEL=...` (defaults: `deepseek-v4-flash` / `claude-3-5-haiku-latest` / `gpt-4o-mini`).
 
 ## What you'll see
 

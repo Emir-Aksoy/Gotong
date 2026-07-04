@@ -10,16 +10,16 @@
  *
  *   local web : 3300       (Alice's private cockpit)
  *   upstream  : ws://127.0.0.1:4200   (configurable)
- *   space dir : .aipehub-team
+ *   space dir : .gotong-team
  */
 
-import { AgentParticipant, Hub, Space, type Task, type TranscriptEntry } from '@aipehub/core'
-import { serveWeb } from '@aipehub/web'
-import { connect, TeamBridgeAgent } from '@aipehub/sdk-node'
+import { AgentParticipant, Hub, Space, type Task, type TranscriptEntry } from '@gotong/core'
+import { serveWeb } from '@gotong/web'
+import { connect, TeamBridgeAgent } from '@gotong/sdk-node'
 
-const SPACE_DIR = process.env.AIPE_TEAM_SPACE ?? '.aipehub-team'
-const UPSTREAM_URL = process.env.AIPE_UPSTREAM_URL ?? 'ws://127.0.0.1:4200'
-const BRIDGE_ID = process.env.AIPE_BRIDGE_ID ?? 'alice-team'
+const SPACE_DIR = process.env.GOTONG_TEAM_SPACE ?? '.gotong-team'
+const UPSTREAM_URL = process.env.GOTONG_UPSTREAM_URL ?? 'ws://127.0.0.1:4200'
+const BRIDGE_ID = process.env.GOTONG_BRIDGE_ID ?? 'alice-team'
 
 // --- two trivial sub-agents (stand in for any local team members) ---------
 class WriterBot extends AgentParticipant {

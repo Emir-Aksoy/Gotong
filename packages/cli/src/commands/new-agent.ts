@@ -1,12 +1,12 @@
 /**
- * `aipehub new agent <name>` / `aipehub new python-agent <name>`.
+ * `gotong new agent <name>` / `gotong new python-agent <name>`.
  *
  * Scaffolds a self-contained sidecar agent project under `<cwd>/<name>/`.
  * Writes a minimal `package.json` (or `pyproject.toml`) + one source
  * file + a README pointing at `docs/SIDECAR.md`.
  *
  * The generated project deliberately depends on the **published** SDK
- * (not workspace:*) so it works outside the AipeHub monorepo. We do
+ * (not workspace:*) so it works outside the Gotong monorepo. We do
  * NOT run `npm install` for the user — the README tells them how.
  */
 
@@ -34,7 +34,7 @@ export async function newAgent(opts: NewAgentOpts): Promise<number> {
 
   const target = resolve(process.cwd(), parsed.name)
   if (await pathExists(target)) {
-    console.error(`[aipehub] target directory already exists: ${target}`)
+    console.error(`[gotong] target directory already exists: ${target}`)
     return 1
   }
   await mkdir(target, { recursive: true })
@@ -81,7 +81,7 @@ function parseArgs(args: readonly string[]): ParsedOpts | null {
     } else if (arg.startsWith('--capabilities=')) {
       capabilities = arg.slice('--capabilities='.length)
     } else if (arg.startsWith('--')) {
-      console.error(`[aipehub] unknown option: ${arg}`)
+      console.error(`[gotong] unknown option: ${arg}`)
       return null
     } else {
       positional.push(arg)
@@ -89,14 +89,14 @@ function parseArgs(args: readonly string[]): ParsedOpts | null {
   }
   const name = positional[0]
   if (!name) {
-    console.error('[aipehub] missing <name> argument')
+    console.error('[gotong] missing <name> argument')
     return null
   }
   // Light validation — npm package names accept hyphens / lowercase /
   // digits. Reject upper-case / spaces / shell metacharacters early
   // so the user gets a useful error before npm does.
   if (!/^[a-z][a-z0-9-]*$/.test(name)) {
-    console.error(`[aipehub] invalid name '${name}': use lowercase letters, digits, and hyphens`)
+    console.error(`[gotong] invalid name '${name}': use lowercase letters, digits, and hyphens`)
     return null
   }
   return { name, id: id ?? name, capabilities, includeServices }

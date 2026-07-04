@@ -9,7 +9,7 @@ import {
   MASTER_KEY_LEN_BYTES,
   openIdentityStore,
   type IdentityStore,
-} from '@aipehub/identity'
+} from '@gotong/identity'
 
 import {
   RETENTION_TABLES,
@@ -43,10 +43,10 @@ describe('parseRetentionPolicies', () => {
   it('maps each keep-days knob to a `before` cutoff anchored at now', () => {
     const policies = parseRetentionPolicies(
       {
-        AIPE_LEDGER_KEEP_DAYS: '30',
-        AIPE_AUDIT_KEEP_DAYS: '365',
-        AIPE_PEER_SUMMARY_KEEP_DAYS: '7',
-        AIPE_ALERT_FIRINGS_KEEP_DAYS: '0.5', // fractional days are valid arithmetic
+        GOTONG_LEDGER_KEEP_DAYS: '30',
+        GOTONG_AUDIT_KEEP_DAYS: '365',
+        GOTONG_PEER_SUMMARY_KEEP_DAYS: '7',
+        GOTONG_ALERT_FIRINGS_KEEP_DAYS: '0.5', // fractional days are valid arithmetic
       },
       NOW,
     )
@@ -61,7 +61,7 @@ describe('parseRetentionPolicies', () => {
   })
 
   it('a single knob configures a single table', () => {
-    const policies = parseRetentionPolicies({ AIPE_AUDIT_KEEP_DAYS: '90' }, NOW)
+    const policies = parseRetentionPolicies({ GOTONG_AUDIT_KEEP_DAYS: '90' }, NOW)
     expect(policies).toHaveLength(1)
     expect(policies[0]!.spec.table).toBe('audit_log')
   })
@@ -86,7 +86,7 @@ describe('applyRetentionPolicies (real IdentityStore)', () => {
   const D17 = Date.UTC(2026, 3, 17, 9, 0, 0)
 
   beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), 'aipe-retention-'))
+    dir = mkdtempSync(join(tmpdir(), 'gotong-retention-'))
     store = openIdentityStore({
       dbPath: join(dir, 'identity.sqlite'),
       masterKey: randomBytes(MASTER_KEY_LEN_BYTES),
@@ -108,7 +108,7 @@ describe('applyRetentionPolicies (real IdentityStore)', () => {
     // now anchored so the 1-day cutoff lands exactly on D16 ⇒ D15 pruned, D16 kept.
     const results = applyRetentionPolicies(
       store,
-      policiesFor({ AIPE_LEDGER_KEEP_DAYS: '1' }, D16 + MS_PER_DAY),
+      policiesFor({ GOTONG_LEDGER_KEEP_DAYS: '1' }, D16 + MS_PER_DAY),
     )
     expect(results).toEqual([{ table: 'usage_ledger', before: D16, pruned: 1 }])
     expect(store.queryLedger({}).map((r) => r.ts).sort()).toEqual([D16, D17])
@@ -141,7 +141,7 @@ describe('applyRetentionPolicies (real IdentityStore)', () => {
 
     const results = applyRetentionPolicies(
       store,
-      policiesFor({ AIPE_ALERT_FIRINGS_KEEP_DAYS: '1' }, D17 + MS_PER_DAY),
+      policiesFor({ GOTONG_ALERT_FIRINGS_KEEP_DAYS: '1' }, D17 + MS_PER_DAY),
     )
     expect(results[0]).toMatchObject({ table: 'peer_summary_alert_firings', pruned: 1 })
     const left = store.listPeerSummaryAlertFirings({})
@@ -155,7 +155,7 @@ describe('applyRetentionPolicies (real IdentityStore)', () => {
     }
     const results = applyRetentionPolicies(
       store,
-      policiesFor({ AIPE_PEER_SUMMARY_KEEP_DAYS: '1' }, D16 + MS_PER_DAY),
+      policiesFor({ GOTONG_PEER_SUMMARY_KEEP_DAYS: '1' }, D16 + MS_PER_DAY),
     )
     expect(results[0]).toMatchObject({ table: 'peer_summary_snapshots', pruned: 1 })
   })
@@ -171,7 +171,7 @@ describe('applyRetentionPolicies (real IdentityStore)', () => {
     }
     const results = applyRetentionPolicies(
       failing,
-      policiesFor({ AIPE_AUDIT_KEEP_DAYS: '1', AIPE_LEDGER_KEEP_DAYS: '1' }, D17),
+      policiesFor({ GOTONG_AUDIT_KEEP_DAYS: '1', GOTONG_LEDGER_KEEP_DAYS: '1' }, D17),
     )
     const byTable = Object.fromEntries(results.map((r) => [r.table, r]))
     expect(byTable.audit_log!.error).toBe(boom)

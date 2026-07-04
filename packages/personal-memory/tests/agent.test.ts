@@ -1,4 +1,4 @@
-import type { Task } from '@aipehub/core'
+import type { Task } from '@gotong/core'
 import type {
   LlmAgentToolset,
   LlmProvider,
@@ -6,7 +6,7 @@ import type {
   LlmStreamChunk,
   LlmToolCallResult,
   LlmToolDefinition,
-} from '@aipehub/llm'
+} from '@gotong/llm'
 import { describe, expect, it } from 'vitest'
 
 import { DEFAULT_TIERS, MemoryAugmentedAgent, PersonalMemoryError } from '../src/index.js'
@@ -62,7 +62,7 @@ describe('MemoryAugmentedAgent', () => {
     expect(res.kind).toBe('ok')
 
     const sys = provider.requests[0]!.system!
-    expect(sys.startsWith('<!-- aipehub:memory:begin -->')).toBe(true)
+    expect(sys.startsWith('<!-- gotong:memory:begin -->')).toBe(true)
     expect(sys).toContain('user likes tea')
     // The agent's own system prompt follows the memory block.
     expect(sys.indexOf('You are a helpful butler.')).toBeGreaterThan(sys.indexOf('user likes tea'))
@@ -107,7 +107,7 @@ describe('MemoryAugmentedAgent', () => {
   it('renders the frozen block grouped by cluster when tierConfig is set', async () => {
     const mem = makeFakeMemory([
       entry('a', 'semantic', 'likes tea', 100, { tier: 'persona', importance: 5 }),
-      entry('b', 'semantic', 'building aipehub', 101, { tier: 'projects', importance: 4 }),
+      entry('b', 'semantic', 'building gotong', 101, { tier: 'projects', importance: 4 }),
     ])
     const provider = new CaptureProvider()
     const agent = new MemoryAugmentedAgent({

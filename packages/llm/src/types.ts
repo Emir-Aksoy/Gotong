@@ -1,6 +1,6 @@
 /**
  * Provider-neutral types for LLM completion. Concrete provider packages
- * (e.g. @aipehub/llm-anthropic) translate these to/from their vendor SDK.
+ * (e.g. @gotong/llm-anthropic) translate these to/from their vendor SDK.
  *
  * Design goals:
  * - Smallest useful surface for v0.2 — non-streaming chat completion only.
@@ -83,7 +83,7 @@ export interface LlmToolResultBlock {
  * `LlmMessage`. Three first-class shapes (RFC §1):
  *
  * - `base64` — inline bytes. Capped at 1 MB by default (env
- *   `AIPE_MULTIMODAL_MAX_INLINE_MB`); larger uploads SHOULD land
+ *   `GOTONG_MULTIMODAL_MAX_INLINE_MB`); larger uploads SHOULD land
  *   in an artifact and be referenced via `artifact_ref` instead.
  *   `mime` is required so providers know which API endpoint to pick
  *   without sniffing.
@@ -173,7 +173,7 @@ export type LlmContentBlock =
  * `{ kind: 'artifact_ref', artifactId, mime }` instead. The default
  * is conservative on purpose — large inline base64 bloats the
  * transcript jsonl and slows down replay / grep. Override at runtime
- * with env `AIPE_MULTIMODAL_MAX_INLINE_MB`.
+ * with env `GOTONG_MULTIMODAL_MAX_INLINE_MB`.
  */
 export const DEFAULT_MULTIMODAL_INLINE_BYTE_CAP = 1024 * 1024 // 1 MB
 
@@ -182,7 +182,7 @@ export const DEFAULT_MULTIMODAL_INLINE_BYTE_CAP = 1024 * 1024 // 1 MB
  * source on an `LlmImageBlock` / `LlmAudioBlock`, or any
  * `LlmFileRefBlock`. The host wires this to a per-task / per-owner
  * `ArtifactHandle.readBytes` so the provider can stay decoupled from
- * `@aipehub/services-sdk`.
+ * `@gotong/services-sdk`.
  *
  * Returning `bytes` + `mime`:
  * - `bytes` is what the provider will base64-encode into the vendor
@@ -218,7 +218,7 @@ export function readMultimodalInlineCapFromEnv(
     ? process.env
     : {}) as Record<string, string | undefined>,
 ): number {
-  const raw = env.AIPE_MULTIMODAL_MAX_INLINE_MB
+  const raw = env.GOTONG_MULTIMODAL_MAX_INLINE_MB
   if (!raw) return DEFAULT_MULTIMODAL_INLINE_BYTE_CAP
   const mb = Number.parseFloat(raw)
   if (!Number.isFinite(mb) || mb <= 0) return DEFAULT_MULTIMODAL_INLINE_BYTE_CAP
@@ -584,7 +584,7 @@ export async function drainStream(
  *
  * Library users who want to expose non-MCP tools (a hand-rolled function
  * registry, an HTTP API wrapper, etc) can implement this interface
- * directly without depending on `@aipehub/mcp-client`.
+ * directly without depending on `@gotong/mcp-client`.
  *
  * `callTool` returns a shape that matches MCP's `CallToolResult` so the
  * adapter is zero-cost — that means a `content` array of `{type,text,...}`
@@ -612,7 +612,7 @@ export interface LlmAgentToolset {
    * race-free option for "set context for this task only".
    *
    * The task shape is kept permissive to avoid pulling
-   * `@aipehub/core` into this contract; concrete consumers cast /
+   * `@gotong/core` into this contract; concrete consumers cast /
    * pick fields they need.
    */
   runForTask?<T>(

@@ -25,12 +25,12 @@
  * resume scan that runs afterwards sees the post-archive layout.
  */
 
-import type { ArchiveRunsOptions } from '@aipehub/workflow'
+import type { ArchiveRunsOptions } from '@gotong/workflow'
 
 /** Keep this many of the newest TERMINAL runs on the active scan path. */
-export const RUN_KEEP_ENV = 'AIPE_RUN_KEEP'
+export const RUN_KEEP_ENV = 'GOTONG_RUN_KEEP'
 /** Archive terminal runs that ended more than this many days ago. */
-export const RUN_ARCHIVE_DAYS_ENV = 'AIPE_RUN_ARCHIVE_DAYS'
+export const RUN_ARCHIVE_DAYS_ENV = 'GOTONG_RUN_ARCHIVE_DAYS'
 
 const MS_PER_DAY = 86_400_000
 

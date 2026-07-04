@@ -1,5 +1,5 @@
 {
-  "name": "@aipehub/example-web-demo",
+  "name": "@gotong/example-web-demo",
   "version": "0.0.0",
   "type": "module",
   "private": true,
@@ -9,7 +9,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@aipehub/core": "workspace:*",
-    "@aipehub/web": "workspace:*"
+    "@gotong/core": "workspace:*",
+    "@gotong/web": "workspace:*"
   }
 }

@@ -20,7 +20,7 @@
  * before purge. Tunable via constructor.
  */
 
-import { createLogger, type Logger } from '@aipehub/core'
+import { createLogger, type Logger } from '@gotong/core'
 
 import type { HubServices } from './hub-services.js'
 

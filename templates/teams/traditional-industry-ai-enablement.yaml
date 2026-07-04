@@ -20,7 +20,7 @@
 #   capability=risk-explain    → 顾虑回应员（员工 / 老板 / 客户的担心）
 #   capability=explain-ai      → AI 通俗教练（小白问题随便问）
 #
-# 通常的走法（admin 在 admin 控制台手动派发，AipeHub 不内置 workflow）：
+# 通常的走法（admin 在 admin 控制台手动派发，Gotong 不内置 workflow）：
 #   step 1  intake          先说说你日常工作流和最烦的事
 #   step 2  ai-opportunity  → 出一张"机会清单"（quick-win / mid / strategic）
 #   step 3  tool-recommend  挑里头 1-2 个机会，问"用什么工具"
@@ -32,7 +32,7 @@
 # Provider 默认 anthropic + claude-opus-4-7；要省钱可以全部改成
 # claude-sonnet-4-6（智能度 80%、成本 60%）或 claude-haiku-4-5。
 
-schema: aipehub.team/v1
+schema: gotong.team/v1
 
 team:
   name: 传统行业 AI 赋能梳理团队

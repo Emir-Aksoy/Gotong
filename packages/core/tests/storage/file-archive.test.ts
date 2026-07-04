@@ -35,7 +35,7 @@ let dir: string
 let path: string
 
 beforeEach(() => {
-  dir = mkdtempSync(join(tmpdir(), 'aipe-arch-'))
+  dir = mkdtempSync(join(tmpdir(), 'gotong-arch-'))
   path = join(dir, 'transcript.jsonl')
 })
 afterEach(async () => {

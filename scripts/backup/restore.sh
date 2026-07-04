@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# AipeHub restore — extract a backup tarball into a fresh workspace dir.
+# Gotong restore — extract a backup tarball into a fresh workspace dir.
 #
 # The flow is intentionally cautious:
 #
@@ -104,7 +104,7 @@ mkdir -p "$TARGET"
 
 # --- extract ----------------------------------------------------------------
 
-# The archive contains a single leaf directory (e.g. ".aipehub/" or
+# The archive contains a single leaf directory (e.g. ".gotong/" or
 # "spc-staging/"). Strip the leading component so contents land in
 # $TARGET regardless of the source name.
 
@@ -137,7 +137,7 @@ Next steps (REQUIRED before the host will be functional):
        The archive does NOT contain it on purpose. Without it,
        LLM-provider API keys in secrets.enc.json cannot be decrypted.
        If you don't have one, you can rotate by setting
-       AIPE_SECRET_KEY=<32-byte hex> on the host and re-running
+       GOTONG_SECRET_KEY=<32-byte hex> on the host and re-running
        \`space.setProviderApiKey\` for each provider.
 
   2. Verify space.json metadata matches your expectations:
@@ -148,7 +148,7 @@ Next steps (REQUIRED before the host will be functional):
        should always start fresh after a recovery event.
 
   4. Restart the host:
-       systemctl start aipehub-host
+       systemctl start gotong-host
        # or: pnpm host
 
   5. Open the admin URL and confirm:

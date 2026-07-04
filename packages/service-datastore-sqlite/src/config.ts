@@ -20,7 +20,7 @@
  * restrictions as agent ids (URL- + filesystem-safe).
  */
 
-import { ServiceConfigError } from '@aipehub/services-sdk'
+import { ServiceConfigError } from '@gotong/services-sdk'
 
 export interface DatastoreSqliteConfig {
   /**

@@ -3,7 +3,7 @@
  *
  * A Prometheus scraper is a server-to-server client: no browser session, can't
  * satisfy the admin cookie or the CSRF Origin check. So `/metrics` lives in its
- * own bearer-token domain (`AIPE_METRICS_TOKEN` → serveWeb `metricsToken`),
+ * own bearer-token domain (`GOTONG_METRICS_TOKEN` → serveWeb `metricsToken`),
  * letting an operator pull the SAME body as `/api/admin/metrics` WITHOUT minting
  * a machine admin (which would widen the admin surface to a scraper credential).
  *
@@ -27,7 +27,7 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { Hub, Space } from '@aipehub/core'
+import { Hub, Space } from '@gotong/core'
 
 import { serveWeb, type WebServerHandle } from '../src/server.js'
 
@@ -41,7 +41,7 @@ interface Booted {
 }
 
 async function boot(opts: { metricsToken?: string } = {}): Promise<Booted> {
-  const tmp = await mkdtemp(join(tmpdir(), 'aipehub-web-metrics-'))
+  const tmp = await mkdtemp(join(tmpdir(), 'gotong-web-metrics-'))
   const init = await Space.init(tmp, { name: 'metrics-test' })
   const hub = new Hub({ space: init.space })
   await hub.start()
@@ -75,7 +75,7 @@ describe('internal /metrics scrape route (Route B P0-M7)', () => {
       const body = await r.text()
       // A metric that always renders — proves the real renderMetrics ran, not
       // an empty 200. (Same family the admin route serves.)
-      expect(body).toContain('aipehub_protocol_version')
+      expect(body).toContain('gotong_protocol_version')
     })
 
     it('wrong bearer → 401 (no metrics leak)', async () => {
@@ -83,7 +83,7 @@ describe('internal /metrics scrape route (Route B P0-M7)', () => {
         headers: { authorization: 'Bearer wrong-token-totally' },
       })
       expect(r.status).toBe(401)
-      expect(await r.text()).not.toContain('aipehub_protocol_version')
+      expect(await r.text()).not.toContain('gotong_protocol_version')
     })
 
     it('absent Authorization header → 401', async () => {

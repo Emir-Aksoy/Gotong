@@ -1,6 +1,6 @@
 # hello-collab
 
-The minimum demo that proves the AipeHub abstraction holds. Two agents and one human pass a writing task back and forth.
+The minimum demo that proves the Gotong abstraction holds. Two agents and one human pass a writing task back and forth.
 
 ## Run
 
@@ -10,7 +10,7 @@ From the repo root:
 pnpm demo
 ```
 
-(Equivalent to `pnpm --filter @aipehub/example-hello-collab start`.)
+(Equivalent to `pnpm --filter @gotong/example-hello-collab start`.)
 
 ## Scenario
 

@@ -1,14 +1,14 @@
-# @aipehub/personal-butler
+# @gotong/personal-butler
 
 The resident **personal butler** — a `MemoryAugmentedAgent` with ONE addition:
 a bounded tool-loop whose **sensitive** tool calls are approval-gated. M4 of the
 butler build (see `docs/zh/PERSONAL-BUTLER-DESIGN.md`). 对标 OpenClaw / Hermes
 那种「一直在的智能管家」：有记忆、能灵活调用、危险动作先问人。
 
-Leaf package — depends only on `@aipehub/core`, `@aipehub/llm`,
-`@aipehub/personal-memory`. No host, no identity, no LLM credentials. The real
+Leaf package — depends only on `@gotong/core`, `@gotong/llm`,
+`@gotong/personal-memory`. No host, no identity, no LLM credentials. The real
 risk policy (classifier) and the real side effects (executor) are **injected**
-by the host — same discipline as `MemorySummarizer` in `@aipehub/personal-memory`.
+by the host — same discipline as `MemorySummarizer` in `@gotong/personal-memory`.
 
 ## What's in the box
 
@@ -46,8 +46,8 @@ what lets the butler suspend **before** the side effect, then run the very same
                                               └─ deny    → fail-closed isError
 ```
 
-This is the same suspend/resume machinery as `@aipehub/inbox` (human steps) and
-`@aipehub/acp-agent`'s permission gate — adapted from a live subprocess to a
+This is the same suspend/resume machinery as `@gotong/inbox` (human steps) and
+`@gotong/acp-agent`'s permission gate — adapted from a live subprocess to a
 **re-runnable** conversation, so a butler park is durable across a hub restart.
 
 ## Three verdicts
@@ -68,7 +68,7 @@ hub-steward's `classifyStewardAction` for real four-tier policy
 ## Usage
 
 ```ts
-import { PersonalButlerAgent, GovernedActionToolset } from '@aipehub/personal-butler'
+import { PersonalButlerAgent, GovernedActionToolset } from '@gotong/personal-butler'
 
 const governed = new GovernedActionToolset({
   tools: [

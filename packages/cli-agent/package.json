@@ -1,8 +1,8 @@
 {
-  "name": "@aipehub/cli-agent",
+  "name": "@gotong/cli-agent",
   "version": "0.1.0",
   "type": "module",
-  "description": "AipeHub outbound CLI shell-out adapter — wraps a self-hosted coding-agent CLI (Claude Code / Codex / OpenCode / Aider …) as a hub Participant, with a checkpoint loop + cooperative on-demand park so a person can observe / intercept / hand off / resume / terminate the task (AGENT-ADAPTER-CONTRACT).",
+  "description": "Gotong outbound CLI shell-out adapter — wraps a self-hosted coding-agent CLI (Claude Code / Codex / OpenCode / Aider …) as a hub Participant, with a checkpoint loop + cooperative on-demand park so a person can observe / intercept / hand off / resume / terminate the task (AGENT-ADAPTER-CONTRACT).",
   "license": "MIT",
   "private": true,
   "main": "./dist/index.js",
@@ -25,7 +25,7 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "@aipehub/core": "workspace:*"
+    "@gotong/core": "workspace:*"
   },
   "devDependencies": {
     "vitest": "^3.2.4"

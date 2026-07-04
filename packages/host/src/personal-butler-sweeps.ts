@@ -19,7 +19,7 @@
  * sweeper modules themselves.
  */
 
-import type { Logger } from '@aipehub/core'
+import type { Logger } from '@gotong/core'
 
 import type { ButlerRunSurface } from './personal-butler-observe.js'
 import {

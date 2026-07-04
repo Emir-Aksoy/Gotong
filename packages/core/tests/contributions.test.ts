@@ -478,7 +478,7 @@ describe('Per-task contribution opt-out', () => {
 
 describe('Space.setAdminContributionOptOut / setWorkerContributionOptOut', () => {
   it('persists and round-trips per-record opt-out flags', async () => {
-    const root = makeTempDir('aipehub-optout-')
+    const root = makeTempDir('gotong-optout-')
     const { space } = await Space.init(root, { name: 'test', adminDisplayName: 'Op' })
     const admins = await space.admins()
     const adminId = admins[0]!.id

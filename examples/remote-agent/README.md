@@ -12,10 +12,10 @@ pnpm demo:remote
 
 ```bash
 # Terminal 1 — start the Hub on ws://127.0.0.1:4001
-pnpm --filter @aipehub/example-remote-agent host
+pnpm --filter @gotong/example-remote-agent host
 
 # Terminal 2 — connect the worker
-pnpm --filter @aipehub/example-remote-agent worker
+pnpm --filter @gotong/example-remote-agent worker
 ```
 
 ## Scenario

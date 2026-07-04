@@ -17,7 +17,7 @@
 
 import { describe, expect, it } from 'vitest'
 
-import { WORKFLOW_SCHEMA_V1, type WorkflowDefinition, type Step } from '@aipehub/workflow'
+import { WORKFLOW_SCHEMA_V1, type WorkflowDefinition, type Step } from '@gotong/workflow'
 
 import { crossHubStepsOf } from '../src/workflow-controller.js'
 

@@ -18,7 +18,7 @@ import {
   validateIdToken,
   type IdTokenClaims,
   type Jwks,
-} from '@aipehub/identity'
+} from '@gotong/identity'
 
 export interface OidcProviderConfig {
   /** The IdP issuer URL — both the discovery base and the expected `iss`. */

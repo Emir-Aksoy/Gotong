@@ -1,8 +1,8 @@
 // H20 regression: the admin token URL must NEVER appear in process
 // stdout. Pre-3.4 the host banner did `console.log(adminUrl)` on first
 // boot, and `mint-admin-token` did the same. Anyone with read access
-// to `journalctl -u aipehub.service`, `docker logs <ctr>`, or
-// `pm2 logs aipehub` could mine the plaintext token from the captured
+// to `journalctl -u gotong.service`, `docker logs <ctr>`, or
+// `pm2 logs gotong` could mine the plaintext token from the captured
 // boot stream.
 //
 // v3.4 writes the URL to `<space>/runtime/admin-link.txt` (mode 0o600)
@@ -34,7 +34,7 @@ describe('admin link file (H20)', () => {
   let root: string
 
   beforeEach(async () => {
-    root = await mkdtemp(join(tmpdir(), 'aipehub-link-'))
+    root = await mkdtemp(join(tmpdir(), 'gotong-link-'))
   })
 
   afterEach(async () => {

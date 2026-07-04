@@ -106,7 +106,7 @@ function sentFrames(ws: FakeWebSocket): Array<{ op: number; d?: unknown }> {
 function makeReady(over: Partial<DiscordReadyData> = {}): DiscordReadyData {
   return {
     v: 10,
-    user: { id: 'bot-id-1', username: 'aipehub-bot', global_name: 'aipehub' },
+    user: { id: 'bot-id-1', username: 'gotong-bot', global_name: 'gotong' },
     session_id: 'session-abc',
     resume_gateway_url: 'wss://gateway.discord.gg/resume',
     application: { id: 'app-1' },
@@ -235,7 +235,7 @@ describe('DiscordBridge gateway handshake', () => {
 describe('DiscordBridge inbound MESSAGE_CREATE', () => {
   it('delivers a guild text message to listeners', async () => {
     const { bridge, ws } = makeBridge()
-    const received: import('@aipehub/im-adapter').ImMessage[] = []
+    const received: import('@gotong/im-adapter').ImMessage[] = []
     bridge.onMessage((m) => {
       received.push(m)
     })
@@ -267,7 +267,7 @@ describe('DiscordBridge inbound MESSAGE_CREATE', () => {
 
   it('strips <@BOT_ID> mentions by default before dispatching', async () => {
     const { bridge, ws } = makeBridge()
-    const received: import('@aipehub/im-adapter').ImMessage[] = []
+    const received: import('@gotong/im-adapter').ImMessage[] = []
     bridge.onMessage((m) => {
       received.push(m)
     })
@@ -297,7 +297,7 @@ describe('DiscordBridge inbound MESSAGE_CREATE', () => {
 
   it('drops messages from the bot itself (anti-loop)', async () => {
     const { bridge, ws } = makeBridge()
-    const received: import('@aipehub/im-adapter').ImMessage[] = []
+    const received: import('@gotong/im-adapter').ImMessage[] = []
     bridge.onMessage((m) => {
       received.push(m)
     })
@@ -327,7 +327,7 @@ describe('DiscordBridge inbound MESSAGE_CREATE', () => {
 
   it('drops messages from other bots / webhooks', async () => {
     const { bridge, ws } = makeBridge()
-    const received: import('@aipehub/im-adapter').ImMessage[] = []
+    const received: import('@gotong/im-adapter').ImMessage[] = []
     bridge.onMessage((m) => {
       received.push(m)
     })
@@ -356,7 +356,7 @@ describe('DiscordBridge inbound MESSAGE_CREATE', () => {
 
   it('drops system messages (type !== 0/19)', async () => {
     const { bridge, ws } = makeBridge()
-    const received: import('@aipehub/im-adapter').ImMessage[] = []
+    const received: import('@gotong/im-adapter').ImMessage[] = []
     bridge.onMessage((m) => {
       received.push(m)
     })
@@ -386,7 +386,7 @@ describe('DiscordBridge inbound MESSAGE_CREATE', () => {
 
   it('passes type=19 (REPLY) through as a normal message', async () => {
     const { bridge, ws } = makeBridge()
-    const received: import('@aipehub/im-adapter').ImMessage[] = []
+    const received: import('@gotong/im-adapter').ImMessage[] = []
     bridge.onMessage((m) => {
       received.push(m)
     })

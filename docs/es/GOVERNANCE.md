@@ -1,16 +1,16 @@
-# Gobernanza de AipeHub
+# Gobernanza de Gotong
 
 <!-- doc-version: 1.0 -->
 > **Versión del documento 1.0** · Traducción al español · Actualizado el 2026-06-27 · Fuente autorizada: [English](../../GOVERNANCE.md). Si la traducción entra en conflicto con la versión en inglés, prevalece la versión en inglés.
 
-Este documento describe **cómo se toman las decisiones** en AipeHub: quién mantiene
+Este documento describe **cómo se toman las decisiones** en Gotong: quién mantiene
 el proyecto, cómo llega un cambio, cómo una plantilla de la comunidad entra en la galería oficial,
 y qué ocurre cuando la gente no está de acuerdo. Es deliberadamente pequeño —
 el proyecto es joven, y una estructura de gobernanza pesada en un proyecto pequeño es
 solo ceremonial. Haremos crecer este documento a medida que crezca la comunidad, no antes.
 
 Este documento se enmarca bajo la constitución del proyecto, [`CHARTER.md`](../../CHARTER.md):
-la carta dice *qué* es AipeHub y en qué se niega a convertirse; esto dice *cómo*
+la carta dice *qué* es Gotong y en qué se niega a convertirse; esto dice *cómo*
 decidimos. Donde los dos se encuentran — por ejemplo, "el framework no ejecuta el LLM" — la
 carta es la fuente y este es la aplicación.
 
@@ -105,7 +105,7 @@ intencionadamente:
 
 ## Cómo una plantilla entra en la galería oficial
 
-AipeHub incluye **plantillas** (`aipehub.template/v1` — un YAML autocontenido que
+Gotong incluye **plantillas** (`gotong.template/v1` — un YAML autocontenido que
 lleva un equipo de agentes + workflows + *referencias* a bases de conocimiento, pero nunca
 secretos, contenido de conocimiento ni personal). El umbral para ser *enviado con el
 framework* — para aparecer en la galería de un clic en la admin UI y en el
@@ -178,8 +178,8 @@ Las disputas de conducta se manejan por separado — ver
 
 ## Lo único no negociable
 
-AipeHub tiene exactamente un compromiso arquitectónico que un PR no puede eliminar por votación,
-porque cambiarlo significa que el proyecto ya no es AipeHub:
+Gotong tiene exactamente un compromiso arquitectónico que un PR no puede eliminar por votación,
+porque cambiarlo significa que el proyecto ya no es Gotong:
 
 > **El framework no ejecuta el LLM.** El Hub enruta mensajes, despacha
 > tareas, escribe el transcript y emite eventos. Cada decisión permanece en los
@@ -227,17 +227,17 @@ Un capítulo es **soberano, no una franquicia.** Posee su sala y no responde a n
 propietario central. No se requiere el permiso de nadie para *iniciar* uno — eso
 contradiría toda la premisa de "ninguna parte única cuyo permiso necesitas para seguir funcionando"
 sobre la que descansa el proyecto. Puedes levantar un hub, reunir una comunidad local y
-curar plantillas para ellos hoy, y llamarlo un capítulo de AipeHub.
+curar plantillas para ellos hoy, y llamarlo un capítulo de Gotong.
 
 Lo que un capítulo **no** es:
 
 - **No es la voz oficial del proyecto.** Un capítulo habla por su propia comunidad,
-  no por AipeHub. No establece la línea de diseño, no ratifica la carta, ni decide
+  no por Gotong. No establece la línea de diseño, no ratifica la carta, ni decide
   qué se promueve a referencia — esas cosas permanecen con los mantenedores y el administrador en
   el repositorio canónico ([`MAINTAINERS.md`](../../MAINTAINERS.md)).
 - **No es un fork que mantiene la línea.** Un capítulo puede ejecutar una compilación modificada para su propia
   gente, pero la carta, el protocolo y el conjunto de referencia autorizados viven en el
-  repositorio canónico. Un capítulo que quiere que sus cambios sean *el* AipeHub los envía
+  repositorio canónico. Un capítulo que quiere que sus cambios sean *el* Gotong los envía
   upstream como pull requests, como cualquier otro.
 
 ### El reconocimiento es opcional y ligero
@@ -264,7 +264,7 @@ es una decisión ligera de mantenedor.
 
 ---
 
-## Uso del nombre AipeHub
+## Uso del nombre Gotong
 
 El código es [MIT](../../LICENSE) — puedes embebido, modificarlo y enviarlo en productos comerciales o
 de código cerrado, con la licencia y el aviso de copyright conservados. La **licencia
@@ -272,18 +272,18 @@ cubre el código; no entrega el nombre e identidad del proyecto.** No hay aquí
 una marca registrada, y no fingiremos lo contrario — lo que sigue es una
 **norma comunitaria**, pedida de buena fe, no una amenaza legal:
 
-- **El uso descriptivo es bienvenido.** "Construido sobre AipeHub", "un hub de AipeHub", "el capítulo
-  AipeHub Malaysia" — di estas cosas libremente. Son verdaderas, y nos alegra que las digas.
+- **El uso descriptivo es bienvenido.** "Construido sobre Gotong", "un hub de Gotong", "el capítulo
+  Gotong Malaysia" — di estas cosas libremente. Son verdaderas, y nos alegra que las digas.
 - **No impliques un respaldo que no tienes.** No nombres un producto, fork o
-  servicio de una manera que lo presente *como* AipeHub-el-proyecto o como oficialmente bendecido
-  por él — sin "AipeHub Oficial", sin un clon que se presenta como la descarga canónica.
+  servicio de una manera que lo presente *como* Gotong-el-proyecto o como oficialmente bendecido
+  por él — sin "Gotong Oficial", sin un clon que se presenta como la descarga canónica.
 - **No rebrandices el proyecto canónico.** Una distribución modificada es tuya para enviar,
-  pero el "AipeHub" autorizado — la carta, la línea de diseño, el conjunto de referencia — es
+  pero el "Gotong" autorizado — la carta, la línea de diseño, el conjunto de referencia — es
   el que está en el repositorio canónico. Si tu fork diverge en espíritu, dale tu propio
   nombre; la licencia MIT garantiza que puedes, y un nombre honesto sirve mejor a tus usuarios
   que uno prestado.
 
-Esta es la versión más ligera de protección de nombre que funciona: suficiente para que "AipeHub" siga
+Esta es la versión más ligera de protección de nombre que funciona: suficiente para que "Gotong" siga
 significando lo que la carta describe — gobernado, file-first, humano en el bucle — y nada
 más.
 

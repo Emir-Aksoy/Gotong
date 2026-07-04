@@ -1,5 +1,5 @@
 /**
- * @aipehub/im-qq — public surface.
+ * @gotong/im-qq — public surface.
  *
  * Official QQ Bot API (https://bot.q.qq.com) over HTTP webhook. Replaces
  * the former third-party OneBot v11 implementation. See README for the

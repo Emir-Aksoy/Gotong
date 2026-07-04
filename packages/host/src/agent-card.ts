@@ -8,7 +8,7 @@
  *
  * Conservative by default: the card advertises identity + auth scheme and
  * NO skills unless the operator explicitly opts in (C-M1 — host gates skill
- * advertisement behind `AIPE_A2A_ADVERTISE_SKILLS`, off by default, because
+ * advertisement behind `GOTONG_A2A_ADVERTISE_SKILLS`, off by default, because
  * this endpoint is public + unauthenticated). It never auto-enumerates the
  * hub's participants / managed-agent capabilities.
  *
@@ -84,7 +84,7 @@ export interface BuildAgentCardOpts {
    * the hub's capabilities unless the operator explicitly passes them (an
    * opt-in, because this endpoint is public + unauthenticated). The host
    * derives these from its local capability manifest only when
-   * `AIPE_A2A_ADVERTISE_SKILLS` is on.
+   * `GOTONG_A2A_ADVERTISE_SKILLS` is on.
    */
   skills?: readonly AgentCardSkill[]
 }
@@ -100,7 +100,7 @@ export function buildAgentCard(opts: BuildAgentCardOpts): AgentCard {
   const description =
     opts.description && opts.description.trim().length > 0
       ? opts.description
-      : `AipeHub federation hub "${opts.name}" — humans and agents on one Participant bus.`
+      : `Gotong federation hub "${opts.name}" — humans and agents on one Participant bus.`
 
   const card: AgentCard = {
     name: opts.name,
@@ -120,7 +120,7 @@ export function buildAgentCard(opts: BuildAgentCardOpts): AgentCard {
     defaultInputModes: ['text/plain'],
     defaultOutputModes: ['text/plain'],
     // Conservative: `[]` unless the caller explicitly opts in. The host gates
-    // that behind AIPE_A2A_ADVERTISE_SKILLS — this endpoint is public.
+    // that behind GOTONG_A2A_ADVERTISE_SKILLS — this endpoint is public.
     skills: opts.skills ? [...opts.skills] : [],
   }
 

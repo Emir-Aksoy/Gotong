@@ -20,13 +20,13 @@ i18n 引擎已经存在，住在 [`packages/web/static/app-core.js`](../../packa
 | `onLangChange(fn)` | app-core.js:904 | 动态面板订阅，切语言时重渲染 |
 | `syncLangFromConfig(d)` | app-core.js:1345 | 页面 boot 后按服务器 `config.defaultLang` 同步一次 |
 | lang-toggle 按钮 | app.html:46 + app-core.js:1355 | DOMContentLoaded 接 click → `setLang` 翻转 |
-| `window.AipeHub` | app-core.js:1314 | 暴露 `t` / `setLang` / `onLangChange` / `applyStaticI18n` / `escapeHtml`… |
+| `window.Gotong` | app-core.js:1314 | 暴露 `t` / `setLang` / `onLangChange` / `applyStaticI18n` / `escapeHtml`… |
 
 **结论**：retrofit 不是造新系统，是把**硬编码中文**接到这套现成机制上。
 
 ## 二、缺口盘点（硬编码中文 CJK 行数）
 
-全部住 `packages/web/static/`，全部在 unified SPA `app.html` 里加载，全部能访问 `window.AipeHub`。
+全部住 `packages/web/static/`，全部在 unified SPA `app.html` 里加载，全部能访问 `window.Gotong`。
 
 ### REL-7 — 成员 `/me` SPA
 | 文件 | CJK 行 | 性质 |
@@ -42,7 +42,7 @@ i18n 引擎已经存在，住在 [`packages/web/static/app-core.js`](../../packa
 | `admin-src/workflows.js` | 13 |
 | `admin-src/managed-agents.js` | 7 |
 
-**独立 IIFE 面板**（`<script>` 直挂，多数还没碰 `window.AipeHub`）：
+**独立 IIFE 面板**（`<script>` 直挂，多数还没碰 `window.Gotong`）：
 | 文件 | CJK 行 | 面向 |
 |---|---|---|
 | `peer-summary-ui.js` | 162 | 控制面摘要/趋势/告警 |
@@ -52,7 +52,7 @@ i18n 引擎已经存在，住在 [`packages/web/static/app-core.js`](../../packa
 | `acp-ui.js` | 51 | 出站 ACP agent |
 | `saml-ui.js` | 48 | SAML IdP |
 | `oidc-ui.js` | 44 | OIDC IdP |
-| `admin-wf-assist.js` | 34 | 工作流 AI 助手（已用 AipeHub×4）|
+| `admin-wf-assist.js` | 34 | 工作流 AI 助手（已用 Gotong×4）|
 | `peer-manifest-ui.js` | 28 | peer 能力 manifest |
 | `usage-ui.js` | 25 | 用量/成本看板 |
 | `quotas-ui.js` | 25 | 配额 |
@@ -65,8 +65,8 @@ i18n 引擎已经存在，住在 [`packages/web/static/app-core.js`](../../packa
 **每个文件同一套手法**，不发明第二套：
 
 1. **加 key**：在 app-core.js `I18N.zh` **和** `I18N.en` 各加对应 key（两边必须平齐——CI 无校验，靠 `pnpm -C packages/web build:assets` 后人工核 + 已有 363-key parity 习惯）。命名沿用既有前缀风格（`tabHome` / `wfRunStatus` / `peerPolicy…`）。
-2. **动态 JS 渲染** → 硬编码中文换 `window.AipeHub.t.<key>`（IIFE 面板取 `const AH = window.AipeHub; const t = () => AH.t`，渲染时读 `t().<key>` 拿当前语言）。
-3. **切语言重渲染** → 每个有动态内容的面板加 `window.AipeHub.onLangChange(() => rerender())`。
+2. **动态 JS 渲染** → 硬编码中文换 `window.Gotong.t.<key>`（IIFE 面板取 `const AH = window.Gotong; const t = () => AH.t`，渲染时读 `t().<key>` 拿当前语言）。
+3. **切语言重渲染** → 每个有动态内容的面板加 `window.Gotong.onLangChange(() => rerender())`。
 4. **静态 HTML markup** → `data-i18n` / `data-i18n-placeholder` 属性（app.html 已是这模式）。
 5. **admin.js** 改 `admin-src/*.js` 源 → `pnpm -C packages/web build:admin` 重建（**绝不**手改生成的 admin.js）。
 
@@ -110,7 +110,7 @@ REL-7（成员 SPA，用户首屏，优先）→ REL-8（admin，按用户面优
 
 **跨表面一致**：独立的 invite/offline/worker 页（REL-8e）读的是**同一个** `lang` cookie（同款正则，`decodeURIComponent` + 小写），故成员的语言选择跟着他们走遍所有页面。cookie 值由 `encodeURIComponent('zh'|'en')` 写、`decodeURIComponent` 读，两端格式一致。
 
-**PWA 缓存**：`sw.js` 的 `CACHE` 从 `aipehub-shell-v1` → `v2`。精简壳（`app-core.js`/`app.js`/`offline.html`）现内嵌完整双语引擎 + cookie 优先级；bump 让返客越过 stale-while-revalidate 窗口，在下一次 activate 就拿到新语言机制，而非晚一个 load。
+**PWA 缓存**：`sw.js` 的 `CACHE` 从 `gotong-shell-v1` → `v2`。精简壳（`app-core.js`/`app.js`/`offline.html`）现内嵌完整双语引擎 + cookie 优先级；bump 让返客越过 stale-while-revalidate 窗口，在下一次 activate 就拿到新语言机制，而非晚一个 load。
 
 **验证结果**：
 - `lang` 优先级 11/11 用例过（直接驱动 `app-core.js` 里**真实**的 `readLangCookie`/`navigatorSeed`/`setLang`/`syncLangFromConfig`，mock `document.cookie`+`navigator.language`：cookie 压一切 / nav 压 config / config 仅兜底 / toggle 写 cookie / config 不写 cookie）。

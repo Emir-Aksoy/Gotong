@@ -1,5 +1,5 @@
 /**
- * Error taxonomy for @aipehub/identity.
+ * Error taxonomy for @gotong/identity.
  *
  * Every failure throws an `IdentityError` whose `code` discriminates
  * the failure mode for callers that want to map to HTTP status / UI
@@ -102,7 +102,7 @@ export type IdentityErrorCode =
   | 'invitation_pending_exists'
   /**
    * Phase 6 #9: createInvitation refused because the org-wide active-
-   * pending invites count has reached `AIPE_MAX_PENDING_INVITES` (default
+   * pending invites count has reached `GOTONG_MAX_PENDING_INVITES` (default
    * 1000). The hard cap guards against table-blowup from an owner /
    * script bug. Operator must revoke some pending invites (or wait for
    * expiry) before creating new ones.

@@ -188,14 +188,14 @@
   vault 或 suspended-tasks 是最干净的第一刀。
 - **工作量**：L
 
-**R14. [P1] app.js 绕开它自己加载的 `window.AipeHub` 共享层 → tab/escape 逻辑脑裂**
-- `packages/web/static/app.js`：仅 2 处 AipeHub 引用且都在注释（471/473）；自带
+**R14. [P1] app.js 绕开它自己加载的 `window.Gotong` 共享层 → tab/escape 逻辑脑裂**
+- `packages/web/static/app.js`：仅 2 处 Gotong 引用且都在注释（471/473）；自带
   `escape()`（488）`formatBytes()`（493），而 app-core.js 已导出 `escapeHtml`（648）且
   先加载；又用裸 `fetch()` 而非导出的 `fetchJson`（带 401/JSON 处理）。`formatBytes` 现
   3 份源拷贝（app.js:493 / services.js:263 / main.js:1361）。`setActiveTab`+tab-nav 实现
   两遍（app.js:212 / main.js:1909），两个 hashchange 监听每次都 fire（注释自承）。这是
-  B2 那个 duplicate setActiveTab 的根因——app.js 当初没接进 window.AipeHub。
-- **修法**：app.js 从 `window.AipeHub` 解构 `escapeHtml/fetchJson/t`，删本地副本；把
+  B2 那个 duplicate setActiveTab 的根因——app.js 当初没接进 window.Gotong。
+- **修法**：app.js 从 `window.Gotong` 解构 `escapeHtml/fetchJson/t`，删本地副本；把
   `formatBytes/formatTs` 提进 app-core.js 的导出（3 份塌成 1）；抽
   `createTabRouter({adminTabs,c1Tabs,...})` 进共享层，两 shell 各传自己 tab 集，全局
   一个 hashchange。（这是 CLAUDE.md 提到"故意留 main.js 的 workflow-start 共享渲染层"
@@ -238,9 +238,9 @@
 - `host/src/main.ts` `main()` 740 行组合根（330-1070）：抽 `startResumeSweep`/
   `installHitlResolver` 进 `runtime-loops.ts`（sweep loop 正是持久化模式要替换的东西）。S-M
 - `web/src/me-routes.ts:321` 孤立 `console.error`（兄弟都用 `createLogger`）。S
-  （附：logger 实际在 `@aipehub/core` 的 `createLogger`，CLAUDE.md §4.2 写成 `@aipehub/host`
+  （附：logger 实际在 `@gotong/core` 的 `createLogger`，CLAUDE.md §4.2 写成 `@gotong/host`
   是笔误；host/src 自身零非 banner console。）
-- `protocol/src/types.ts:51` `TaskOrigin` 是 AipeHub 内部 orgId/userId 形状，A2A 互操作
+- `protocol/src/types.ts:51` `TaskOrigin` 是 Gotong 内部 orgId/userId 形状，A2A 互操作
   需入向边缘加翻译 shim（verifyPeerToken 成功 → 由 A2A principal 合成 TaskOrigin）。随 R1 后做。
 - `resumeTask` 重入绕开调度器 load shaping（`hub.ts:689-765`，按设计，记录在模板文档即可）。
 - 过度 export：`identity-routes.ts:61 roleAtLeast`、`me-routes.ts:448

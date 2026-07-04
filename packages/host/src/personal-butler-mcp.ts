@@ -41,13 +41,13 @@ import {
   GovernedActionToolset,
   type GovernedToolSpec,
   type GovernedVerdict,
-} from '@aipehub/personal-butler'
+} from '@gotong/personal-butler'
 import type {
   LlmAgentToolset,
   LlmContentBlock,
   LlmToolCallResult,
   LlmToolDefinition,
-} from '@aipehub/llm'
+} from '@gotong/llm'
 
 /** The double-underscore namespacing `McpToolset` uses (`<server>__<tool>`). */
 const NAME_SEP = '__'

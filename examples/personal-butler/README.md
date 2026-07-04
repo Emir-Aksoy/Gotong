@@ -74,4 +74,4 @@ what's injected.
   registered in the host with a per-user memory namespace, which is exactly M6's
   scope. They're sequenced there rather than split awkwardly across M5/M6.
 - **Example-first.** This is runtime-wired example code (`src/`), not folded into
-  `aipehub start`. Folding the butler into the host CLI is the M6 host-wiring step.
+  `gotong start`. Folding the butler into the host CLI is the M6 host-wiring step.

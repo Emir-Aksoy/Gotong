@@ -1,14 +1,14 @@
 /**
- * `aipehub ping <ws-url>` — open a WebSocket, send HELLO, await
+ * `gotong ping <ws-url>` — open a WebSocket, send HELLO, await
  * WELCOME (or REJECT), report. Exits 0 on WELCOME, non-zero on any
  * failure with a meaningful message.
  *
- * Avoids depending on `@aipehub/sdk-node` to keep the CLI's transitive
+ * Avoids depending on `@gotong/sdk-node` to keep the CLI's transitive
  * dep graph small. Uses `ws` directly with a hand-rolled state machine
  * that only cares about the first server frame.
  */
 
-import { PROTOCOL_VERSION, HELLO_TIMEOUT_MS } from '@aipehub/protocol'
+import { PROTOCOL_VERSION, HELLO_TIMEOUT_MS } from '@gotong/protocol'
 
 interface ParsedPing {
   url: string
@@ -49,7 +49,7 @@ export async function ping(args: readonly string[]): Promise<number> {
       const hello: Record<string, unknown> = {
         type: 'HELLO',
         protocolVersion: PROTOCOL_VERSION,
-        client: { name: 'aipehub-cli', version: '0.1.0' },
+        client: { name: 'gotong-cli', version: '0.1.0' },
         agents: [{ id: parsed.agentId, capabilities: [] }],
       }
       if (parsed.apiKey) hello.apiKey = parsed.apiKey
@@ -103,21 +103,21 @@ function parseArgs(args: readonly string[]): ParsedPing | null {
   const positional: string[] = []
   let apiKey: string | undefined
   let timeoutMs = HELLO_TIMEOUT_MS
-  let agentId = 'aipehub-cli-ping'
+  let agentId = 'gotong-cli-ping'
   for (const arg of args) {
     if (arg.startsWith('--api-key=')) {
       apiKey = arg.slice('--api-key='.length)
     } else if (arg.startsWith('--timeout=')) {
       const n = Number(arg.slice('--timeout='.length))
       if (!Number.isFinite(n) || n <= 0) {
-        console.error('[aipehub] --timeout must be a positive number of ms')
+        console.error('[gotong] --timeout must be a positive number of ms')
         return null
       }
       timeoutMs = n
     } else if (arg.startsWith('--agent-id=')) {
       agentId = arg.slice('--agent-id='.length)
     } else if (arg.startsWith('--')) {
-      console.error(`[aipehub] unknown option: ${arg}`)
+      console.error(`[gotong] unknown option: ${arg}`)
       return null
     } else {
       positional.push(arg)
@@ -125,11 +125,11 @@ function parseArgs(args: readonly string[]): ParsedPing | null {
   }
   const url = positional[0]
   if (!url) {
-    console.error('[aipehub] missing <ws-url> argument')
+    console.error('[gotong] missing <ws-url> argument')
     return null
   }
   if (!/^wss?:\/\//.test(url)) {
-    console.error('[aipehub] url must start with ws:// or wss://')
+    console.error('[gotong] url must start with ws:// or wss://')
     return null
   }
   const r: ParsedPing = { url, timeoutMs, agentId }

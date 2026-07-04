@@ -95,7 +95,7 @@ describe('loadOrCreateMasterKey', () => {
   let tmp: string
 
   beforeEach(() => {
-    tmp = mkdtempSync(join(tmpdir(), 'aipehub-vault-test-'))
+    tmp = mkdtempSync(join(tmpdir(), 'gotong-vault-test-'))
   })
   afterEach(() => {
     rmSync(tmp, { recursive: true, force: true })

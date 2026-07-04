@@ -1,6 +1,6 @@
 import { parse as parseYaml } from 'yaml'
 
-import type { ManagedAgentSpec, McpServerSpec } from '@aipehub/core'
+import type { ManagedAgentSpec, McpServerSpec } from '@gotong/core'
 
 import { isEncryptedBlob, type EncryptedBlob } from './template-crypto.js'
 import {
@@ -17,7 +17,7 @@ import {
 } from './manifest.js'
 
 /**
- * `aipehub.template/v1` — the v5 Stream B template format (decision #4).
+ * `gotong.template/v1` — the v5 Stream B template format (decision #4).
  *
  * A template is a single, human-readable, diffable manifest (YAML or JSON)
  * describing a reusable *architecture*: a set of agents, one-or-more
@@ -33,14 +33,14 @@ import {
  *
  * Shape:
  *
- *   schema: aipehub.template/v1
+ *   schema: gotong.template/v1
  *   template:
  *     name: 客服知识助手
  *     description: 一个客服 agent + 工单工作流 + 指向你自己 KB 的接线
  *     version: 1                       # optional integer, default 1
- *     agents:                          # same agent shape as aipehub.team/v1
+ *     agents:                          # same agent shape as gotong.team/v1
  *       - { id, capabilities, kind, provider, model, system, useMcpServers, … }
- *     workflows:                       # 0..N — each an aipehub.workflow/v1 block
+ *     workflows:                       # 0..N — each an gotong.workflow/v1 block
  *       - { id, trigger, steps, … }
  *     knowledgeBases:                  # 0..N addressable KB slots (the new bit)
  *       - name: kb-support             # addressable id — Stream C.1 links to this
@@ -56,7 +56,7 @@ import {
  *     defaults:                        # optional UI hints (same as bundle)
  *       apiKeyPrompt: { provider, baseURL?, label? }
  *
- * Why a *new* schema rather than extending `aipehub.bundle/v1`: a bundle is
+ * Why a *new* schema rather than extending `gotong.bundle/v1`: a bundle is
  * one team + one workflow + a key prompt — an import convenience. A template
  * is the export/share unit for a whole architecture (N workflows) and it makes
  * knowledge bases **addressable by name**, which is the dependency Stream C.1
@@ -66,10 +66,10 @@ import {
  * The parser stays deliberately dumb about workflow internals — each workflow
  * block is re-serialized verbatim (the same opaque-blob trick `parseBundle`
  * uses) so the workflow runtime remains the one source of truth for
- * `aipehub.workflow/v1` validation. Agent validation is delegated wholesale to
+ * `gotong.workflow/v1` validation. Agent validation is delegated wholesale to
  * `parseManifest` (the team path) so there is exactly one agent trust boundary.
  */
-export const TEMPLATE_SCHEMA_V1 = 'aipehub.template/v1'
+export const TEMPLATE_SCHEMA_V1 = 'gotong.template/v1'
 
 /** A pointer to a packaged knowledge-base snapshot. Never inline content. */
 export interface TemplatePresetData {
@@ -100,7 +100,7 @@ export interface TemplateKnowledgeBase {
 export interface ParsedTemplateWorkflow {
   /** Workflow id (pulled out for listing + duplicate detection). */
   id: string
-  /** Re-serialized `aipehub.workflow/v1` yaml the workflow importer consumes. */
+  /** Re-serialized `gotong.workflow/v1` yaml the workflow importer consumes. */
   yaml: string
 }
 
@@ -297,7 +297,7 @@ function parseTemplateProvenance(raw: unknown): TemplateProvenance | undefined {
 
 /**
  * Validate `template.agents`. Delegates wholesale to `parseManifest`'s team
- * path by re-wrapping into an `aipehub.team/v1` document — one agent trust
+ * path by re-wrapping into an `gotong.team/v1` document — one agent trust
  * boundary, no re-implemented agent rules. Absent / empty → no agents.
  */
 function parseTemplateAgents(raw: unknown): ParsedAgent[] {
@@ -317,7 +317,7 @@ function parseTemplateAgents(raw: unknown): ParsedAgent[] {
 
 /**
  * Validate `template.workflows`. Each block must carry a string `id` (so we
- * can list + dedup) and is re-serialized verbatim as an `aipehub.workflow/v1`
+ * can list + dedup) and is re-serialized verbatim as an `gotong.workflow/v1`
  * yaml for the workflow importer — the parser never inspects steps/triggers.
  */
 function parseTemplateWorkflows(raw: unknown): ParsedTemplateWorkflow[] {
@@ -342,7 +342,7 @@ function parseTemplateWorkflows(raw: unknown): ParsedTemplateWorkflow[] {
     }
     seen.add(id)
     const yaml =
-      `schema: aipehub.workflow/v1\nworkflow:\n` + indentYaml(stringifyYamlSafe(wf), 2)
+      `schema: gotong.workflow/v1\nworkflow:\n` + indentYaml(stringifyYamlSafe(wf), 2)
     out.push({ id, yaml })
   }
   return out
@@ -466,7 +466,7 @@ export interface RenderTemplateInput {
 
 export interface RenderTemplateResult {
   /**
-   * The `aipehub.template/v1` manifest object — structure-safe and shareable
+   * The `gotong.template/v1` manifest object — structure-safe and shareable
    * as-is: every literal MCP secret is replaced by a `${ENV_KEY}` placeholder.
    */
   template: Record<string, unknown>
@@ -482,7 +482,7 @@ export interface RenderTemplateResult {
 }
 
 /**
- * Render selected hub structure into an `aipehub.template/v1` manifest object
+ * Render selected hub structure into an `gotong.template/v1` manifest object
  * (v5 B-M2). This is the structure-safe DEFAULT export (decision #5):
  *
  *   - NO personnel info — by construction. The input carries no owner / grant /

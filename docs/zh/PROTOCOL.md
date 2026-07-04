@@ -1,4 +1,4 @@
-# AipeHub Wire Protocol v1.2
+# Gotong Wire Protocol v1.2
 
 > 同步自英文版 [`docs/PROTOCOL.md`](../PROTOCOL.md) @ 2026-05-17
 
@@ -13,7 +13,7 @@
 - **拓扑**：Hub 是 server，agent 是 client。每个 TCP 连接可以
   承载来自同一客户端进程的一个或多个 agent。
 - **版本号**：`protocolVersion` 是 SemVer 风格。主版本必须一致。
-  AipeHub v0.1 出货协议 `1.0`；v0.4 升 `1.1`（services-over-ws，
+  Gotong v0.1 出货协议 `1.0`；v0.4 升 `1.1`（services-over-ws，
   additive）；v0.5 升 `1.2`（per-method ACL + 第三方白名单扩展 +
   审计 transcript，全部 additive —— v1.0 / v1.1 / v1.2 双向互通）。
 - **序列化**：JSON over WebSocket text frame。每个 frame 是一个
@@ -136,7 +136,7 @@ HELLO 通过后发。两边都进入 `READY`。
 }
 ```
 
-**`forbidden_agent`**（在协议 1.0 的小修订引入，AipeHub v0.4）：
+**`forbidden_agent`**（在协议 1.0 的小修订引入，Gotong v0.4）：
 server 的 `authenticate` 钩子返回了 `{ ok: true, allowedAgents: [...] }`，
 但 `HELLO.agents` 里至少有一个 id 不在那个白名单里。
 用它把一个 API key 绑死到一组固定的 agent 身份 —— 这样泄漏的 key

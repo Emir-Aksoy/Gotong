@@ -3,12 +3,12 @@
  *
  * Layout (under the space root, alongside `transcript.jsonl` / `workflows/`):
  *
- *   .aipehub/
+ *   .gotong/
  *     inbox/
  *       <itemId>.json     — one item per file, written atomically
  *       …
  *
- * Mirrors `@aipehub/workflow`'s `RunStore`: atomic `<file>.tmp` + rename so a
+ * Mirrors `@gotong/workflow`'s `RunStore`: atomic `<file>.tmp` + rename so a
  * `kill -9` mid-write can never leave a half-formed item, and zero deps on the
  * Hub — only paths + file IO. Drop the directory → drop the inbox.
  */
@@ -52,7 +52,7 @@ export class FileInboxStore implements InboxStore {
   private readonly itemLocks = new Map<string, Promise<unknown>>()
 
   /**
-   * @param spaceRoot The space root directory (e.g. `.aipehub`).
+   * @param spaceRoot The space root directory (e.g. `.gotong`).
    *                  The store keeps items under `inbox/` beneath it.
    */
   constructor(spaceRoot: string) {

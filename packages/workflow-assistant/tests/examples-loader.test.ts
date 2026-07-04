@@ -39,7 +39,7 @@ describe('loadBundledExamples', () => {
       expect(typeof e.description).toBe('string')
       expect(e.description.length).toBeGreaterThan(0)
       expect(typeof e.yaml).toBe('string')
-      expect(e.yaml).toContain('schema: aipehub.workflow/v1')
+      expect(e.yaml).toContain('schema: gotong.workflow/v1')
       expect(e.yaml).toContain('workflow:')
     }
   })
@@ -69,7 +69,7 @@ describe('loadExamplesFromDir', () => {
   let dir: string
 
   beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), 'aipehub-examples-test-'))
+    dir = mkdtempSync(join(tmpdir(), 'gotong-examples-test-'))
   })
   afterEach(() => {
     rmSync(dir, { recursive: true, force: true })
@@ -79,7 +79,7 @@ describe('loadExamplesFromDir', () => {
     writeFileSync(join(dir, name), content, 'utf8')
   }
 
-  const GOOD_YAML = `schema: aipehub.workflow/v1
+  const GOOD_YAML = `schema: gotong.workflow/v1
 workflow:
   id: tiny
   description: A trivial one-step flow
@@ -103,7 +103,7 @@ workflow:
   it('uses workflow.name when description is missing', () => {
     write(
       'named.yaml',
-      `schema: aipehub.workflow/v1
+      `schema: gotong.workflow/v1
 workflow:
   id: with-name
   name: Friendly Name
@@ -122,7 +122,7 @@ workflow:
   it('falls back to filename basename when neither description nor name is present', () => {
     write(
       'fallback-shape.yaml',
-      `schema: aipehub.workflow/v1
+      `schema: gotong.workflow/v1
 workflow:
   id: bare
   trigger: { capability: c }
@@ -154,7 +154,7 @@ workflow:
 
   it('skips malformed YAML with a warning, does NOT throw', () => {
     write('good.yaml', GOOD_YAML)
-    write('bad.yaml', 'schema: aipehub.workflow/v1\nworkflow: this-is-not-an-object\n')
+    write('bad.yaml', 'schema: gotong.workflow/v1\nworkflow: this-is-not-an-object\n')
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     const ex = loadExamplesFromDir(dir)
     expect(ex).toHaveLength(1)

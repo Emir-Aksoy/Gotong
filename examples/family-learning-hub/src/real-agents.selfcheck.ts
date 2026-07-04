@@ -10,7 +10,7 @@
  * inventing a flag either way (the rule-engine layer + whitelist + transcript fork remain
  * the stronger floor regardless). No API key — pure function, runs hermetic.
  *
- * Run:  pnpm --filter @aipehub/example-family-learning-hub real-agents:selfcheck
+ * Run:  pnpm --filter @gotong/example-family-learning-hub real-agents:selfcheck
  */
 
 import { coerceLesson } from './real-agents.js'

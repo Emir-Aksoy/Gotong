@@ -1,4 +1,4 @@
-# 门店运营 (奶茶 / 咖啡店) — 可载入模板 (aipehub.template/v1)
+# 门店运营 (奶茶 / 咖啡店) — 可载入模板 (gotong.template/v1)
 #
 # 这是第一个**组织 hub** 模板,也是第一个 template.workflows[] 非空的模板。
 #
@@ -12,7 +12,7 @@
 # 装走的是「能干活的骨架」:
 #   - 2 个托管 LLM agent (培训师 + 运营助手),覆盖三条工作流派发的全部 capability
 #     (cafe.train-position / cafe.overtime-policy / cafe.schedule-draft);
-#     工作流里的 human: 步骤派到 aipehub.human/v1 —— 那是 host 自带的收件箱 broker,
+#     工作流里的 human: 步骤派到 gotong.human/v1 —— 那是 host 自带的收件箱 broker,
 #     不是模板 agent。
 #   - 1 个可寻址知识库槽位 (店面运营手册 / mcp-obsidian):岗位 SOP、规范、加班政策、
 #     排班规则都从这里读。
@@ -27,7 +27,7 @@
 #     -H 'content-type: application/json' \
 #     -d "$(jq -Rs '{template: .}' examples/cafe-ops/template/cafe-ops.template.yaml)" \
 #     http://127.0.0.1:8745/api/admin/templates/import
-schema: aipehub.template/v1
+schema: gotong.template/v1
 template:
   name: 门店运营(奶茶 / 咖啡店)
   description: |-
@@ -105,10 +105,10 @@ template:
             OBSIDIAN_PORT: ${OBSIDIAN_PORT}
 
   # ── 3 条声明式工作流 ───────────────────────────────────────────────────────────
-  # 每条都是一个 aipehub.workflow/v1 的内层 block(id / trigger / steps / …);导入时
+  # 每条都是一个 gotong.workflow/v1 的内层 block(id / trigger / steps / …);导入时
   # parseTemplate 会逐条重新序列化成完整 workflow yaml 交给 workflow runtime 校验 + 注册。
   # surface.me 让成员能在 /me 自助发起(角色门 + 用户作用域由 /me 层强制);human: 步骤
-  # 派到 aipehub.human/v1 → host 收件箱 broker 挂起任务,店长批了才恢复(Phase 14 + 16)。
+  # 派到 gotong.human/v1 → host 收件箱 broker 挂起任务,店长批了才恢复(Phase 14 + 16)。
   workflows:
     # (1) 新员工岗位上手 — 成员自助, 无审批。
     - id: cafe-staff-onboarding

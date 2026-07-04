@@ -1,5 +1,5 @@
 /**
- * `@aipehub/inbox` — member task inbox.
+ * `@gotong/inbox` — member task inbox.
  *
  * Public surface:
  *   - protocol constants (capability, broker id, never-resume sentinel)

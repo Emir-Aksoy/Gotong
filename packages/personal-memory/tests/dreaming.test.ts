@@ -13,7 +13,7 @@
 
 import { describe, expect, it, vi } from 'vitest'
 
-import type { MemoryEntry } from '@aipehub/services-sdk'
+import type { MemoryEntry } from '@gotong/services-sdk'
 
 import {
   DEFAULT_DREAM_STALE_MS,

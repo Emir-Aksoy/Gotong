@@ -8,11 +8,11 @@
 
 - **不是**框架功能,**不是**内置文件。它是一份**内容**(知识),通过模板的
   `presetData` 指针被引用 —— 模板只带「接线 + 指针」,不带知识本身
-  (AipeHub Stream B 决策 #4)。
+  (Gotong Stream B 决策 #4)。
 - 你把这些 `.md` 文件丢进自己的 Obsidian vault(或托管成一个快照,让
   `presetData.ref` 指过去),mentor agent 就能用 `obsidian__search` /
   `obsidian__get_file_contents` 查它。
-- AipeHub **永远不读你的 vault**:查询走 `mcp-obsidian` 子进程 → Obsidian 的
+- Gotong **永远不读你的 vault**:查询走 `mcp-obsidian` 子进程 → Obsidian 的
   Local REST API 插件。
 
 ## 跟 personal-coding-hub 的方法论库的区别

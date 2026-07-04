@@ -47,7 +47,7 @@ import type {
   SimpleStep,
   Step,
   WorkflowDefinition,
-} from '@aipehub/workflow'
+} from '@gotong/workflow'
 
 // Re-imported here (rather than from workflow) because workflow keeps it
 // internal. Mirror of `REF_RE` in `packages/workflow/src/resolver.ts` —

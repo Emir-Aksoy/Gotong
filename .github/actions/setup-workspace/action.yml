@@ -27,7 +27,7 @@
 #   tj-actions/changed-files compromise (March 2025) for the canonical
 #   horror story.
 
-name: Setup AipeHub workspace
+name: Setup Gotong workspace
 description: >-
   Install pnpm, set up Node with pnpm cache, and run
   `pnpm install --frozen-lockfile`. Caller must check out the repo

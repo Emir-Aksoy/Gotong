@@ -25,8 +25,8 @@
  * Run:  pnpm demo:personal-butler
  */
 
-import { SuspendTaskError, type Task } from '@aipehub/core'
-import type { LlmAgentToolset, LlmToolCallResult, LlmToolDefinition } from '@aipehub/llm'
+import { SuspendTaskError, type Task } from '@gotong/core'
+import type { LlmAgentToolset, LlmToolCallResult, LlmToolDefinition } from '@gotong/llm'
 import {
   activeProcedures,
   buildInvertedIndex,
@@ -71,13 +71,13 @@ import {
   type MemoryValidityWriter,
   type ProcedureDrafter,
   type RetrieverOptions,
-} from '@aipehub/personal-memory'
+} from '@gotong/personal-memory'
 import {
   GovernedActionToolset,
   PersonalButlerAgent,
   readButlerGateState,
   type ButlerDecision,
-} from '@aipehub/personal-butler'
+} from '@gotong/personal-butler'
 
 import { inMemoryHandle, type DemoMemory } from './memory.js'
 import { ButlerMockProvider } from './provider.js'

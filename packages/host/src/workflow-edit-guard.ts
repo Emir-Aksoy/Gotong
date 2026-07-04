@@ -33,7 +33,7 @@
  * peer is down is a deliberate follow-up, not in this pass.
  */
 
-import type { DispatchSpec, WorkflowDefinition } from '@aipehub/workflow'
+import type { DispatchSpec, WorkflowDefinition } from '@gotong/workflow'
 
 import { crossHubStepsOf } from './workflow-controller.js'
 
@@ -119,7 +119,7 @@ function sameClasses(a: readonly string[], b: readonly string[]): boolean {
 }
 
 /** The synthetic peer id used to reactivate sticky (offline-peer) egress caps. */
-const STICKY_OFFLINE_PEER = '__aipehub_sticky_offline__'
+const STICKY_OFFLINE_PEER = '__gotong_sticky_offline__'
 
 /**
  * Reactivate sticky cross-hub capabilities as one synthetic OFFLINE peer entry.

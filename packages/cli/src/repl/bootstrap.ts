@@ -1,12 +1,12 @@
 /**
  * REPL hub bootstrap — spin up an in-memory `Hub` with a small set of
- * default agents so `aipehub repl` is useful out of the box.
+ * default agents so `gotong repl` is useful out of the box.
  *
  * Design choices:
  *
  *   1. **In-memory only.** No `space:` config — REPL state is
  *      ephemeral by design (transcript dies with the process). Users
- *      who want persistence should run the full `aipehub host` and
+ *      who want persistence should run the full `gotong host` and
  *      connect via M13 remote REPL (TODO Phase 13).
  *
  *   2. **Default echo agent.** Capability `chat`, matches what the
@@ -31,7 +31,7 @@ import {
   Hub,
   type Participant,
   type Task,
-} from '@aipehub/core'
+} from '@gotong/core'
 
 export interface ReplHubHandle {
   hub: Hub

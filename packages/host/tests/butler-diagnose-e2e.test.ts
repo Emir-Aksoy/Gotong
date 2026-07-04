@@ -34,17 +34,17 @@ import {
   type Logger,
   type ManagedAgentLifecycle,
   type ParticipantId,
-} from '@aipehub/core'
+} from '@gotong/core'
 import {
   MASTER_KEY_LEN_BYTES,
   openIdentityStore,
   userPrincipal,
   type IdentityStore,
-} from '@aipehub/identity'
-import { FileInboxStore } from '@aipehub/inbox'
-import { PersonalButlerAgent } from '@aipehub/personal-butler'
-import type { LlmMessage, LlmProvider, LlmRequest, LlmStreamChunk } from '@aipehub/llm'
-import type { MemoryHandle } from '@aipehub/services-sdk'
+} from '@gotong/identity'
+import { FileInboxStore } from '@gotong/inbox'
+import { PersonalButlerAgent } from '@gotong/personal-butler'
+import type { LlmMessage, LlmProvider, LlmRequest, LlmStreamChunk } from '@gotong/llm'
+import type { MemoryHandle } from '@gotong/services-sdk'
 
 import { buildButlerDiagnoseToolset } from '../src/personal-butler-diagnose.js'
 import { buildButlerGovernedToolset } from '../src/personal-butler-governed.js'
@@ -162,7 +162,7 @@ interface Rig {
 }
 
 async function boot(): Promise<Rig> {
-  const tmp = await mkdtemp(join(tmpdir(), 'aipe-butler-diag-e2e-'))
+  const tmp = await mkdtemp(join(tmpdir(), 'gotong-butler-diag-e2e-'))
   const { space } = await Space.init(tmp, { name: 'butler-diag-e2e' })
   const identity = openIdentityStore({
     dbPath: join(tmp, 'identity.sqlite'),

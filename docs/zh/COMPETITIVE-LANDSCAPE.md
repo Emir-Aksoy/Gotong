@@ -5,7 +5,7 @@
 
 
 > 调研日期 2026-05-29。覆盖 30+ 项目/协议，分四赛道。给 agent 与人类读者共用。
-> 一句话结论：**没有任何单一竞品同时具备 AipeHub 的四根支柱**——哑 hub（决策在参与者）/
+> 一句话结论：**没有任何单一竞品同时具备 Gotong 的四根支柱**——哑 hub（决策在参与者）/
 > 人=agent 统一 `Participant` / 文件即状态 / 组织主权联邦。市场被切成四块，每块各占
 > 一两根、缺其余。
 >
@@ -28,7 +28,7 @@
 ## 二、定位
 
 > 别人要么「**框架即大脑**」(①)，要么「**LLM 焊进画布、人是审批节点**」(③)，要么
-> 「**只是后端引擎 / 只是消息桥**」(④)。AipeHub 是「**哑 hub + 人即 participant +
+> 「**只是后端引擎 / 只是消息桥**」(④)。Gotong 是「**哑 hub + 人即 participant +
 > 文件即状态 + 组织主权联邦**」——一个**协作底座**，不是又一个 in-process 编排器。
 
 ---
@@ -80,7 +80,7 @@
 
 ## 五、互操作协议层（最可执行的对齐目标）
 
-2025 下半年，互操作协议集体收编进 Linux Foundation，分成两层，AipeHub 横跨两层：
+2025 下半年，互操作协议集体收编进 Linux Foundation，分成两层，Gotong 横跨两层：
 
 - **工具层（agent↔工具）：MCP 完胜。** 2025-12 Anthropic 捐给 LF 旗下 **Agentic AI
   Foundation (AAIF)**（与 OpenAI/Block 共建），~9700 万月下载、~1 万 server。
@@ -98,7 +98,7 @@
 | NANDA | 发现+身份+经济 | MIT Media Lab | DID+可验证凭证+AgentFacts | 语义(注册表) | 研究/未上线 |
 | Matrix | 联邦消息**传输** | Matrix.org | homeserver 联邦 MXID | 传输 | 60M+ 用户 |
 
-**AipeHub 联邦原语 → 标准映射**：
+**Gotong 联邦原语 → 标准映射**：
 
 | 我们的原语 | 对齐标准 | 结论 |
 |---|---|---|
@@ -116,8 +116,8 @@
 
 **🔴 高杠杆**
 1. **向 A2A 对齐（单点最高价值）**——暴露 `/.well-known/agent-card.json`、把 `peerToken`
-   重表达成 A2A 声明的 Bearer/OAuth2/mTLS scheme，使 AipeHub hub 能与 150+ 组织的 A2A
-   生态联邦，而不只是 AipeHub↔AipeHub。`Task.origin` 全程 provenance 其实领先 A2A 现规范。
+   重表达成 A2A 声明的 Bearer/OAuth2/mTLS scheme，使 Gotong hub 能与 150+ 组织的 A2A
+   生态联邦，而不只是 Gotong↔Gotong。`Task.origin` 全程 provenance 其实领先 A2A 现规范。
 2. **用 MCP 生态补集成广度**，而非自造连接器——MCP 已是 LF 旗下、~1 万 server。把
    "接入能力 = 装 MCP server"做成一等 onboarding，把对面"8000 连接器"护城河转成"拥抱开放标准"。
 3. **dispatch 原语升级成可复用编排模板**——supervisor/worker、辩论、swarm 并行做进

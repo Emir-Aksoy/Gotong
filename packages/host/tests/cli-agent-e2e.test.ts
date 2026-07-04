@@ -33,15 +33,15 @@ import { join } from 'node:path'
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { Hub, InMemoryStorage, type Task } from '@aipehub/core'
+import { Hub, InMemoryStorage, type Task } from '@gotong/core'
 import {
   CliParticipant,
   TakeoverController,
   dangerousCommandGate,
   CLI_NEVER_RESUME_AT,
-} from '@aipehub/cli-agent'
-import { openIdentityStore, type IdentityStore } from '@aipehub/identity'
-import { FileInboxStore } from '@aipehub/inbox'
+} from '@gotong/cli-agent'
+import { openIdentityStore, type IdentityStore } from '@gotong/identity'
+import { FileInboxStore } from '@gotong/inbox'
 
 // A deterministic mock CLI: read the prompt from stdin, stream a planning line,
 // then echo the prompt back as the "result". `process.execPath -e <this>` is a

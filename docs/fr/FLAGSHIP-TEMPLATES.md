@@ -11,10 +11,10 @@
 
 ## Pourquoi ceux-là
 
-Le différenciateur d'AipeHub n'est pas « peut appeler l'IA » — c'est partout. C'est que **vous osez pointer l'IA vers votre maison, votre famille, votre argent**, parce que les limites sont réelles et elles vous appartiennent :
+Le différenciateur d'Gotong n'est pas « peut appeler l'IA » — c'est partout. C'est que **vous osez pointer l'IA vers votre maison, votre famille, votre argent**, parce que les limites sont réelles et elles vous appartiennent :
 
 - **Un humain fait office de porte pour les actions critiques.** Les actions réversibles (éteindre une lumière) se font simplement ; les irréversibles (verrouiller une porte, dépenser de l'argent, envoyer les données d'un enfant) se suspendent et attendent qu'un humain confirme dans la boîte de réception — le workflow **ne peut pas passer outre** cette porte.
-- **Les clés et les données sont sur votre propre disque.** Les identifiants sont chiffrés dans votre répertoire `.aipehub/`. La fédération avec un autre hub partage une **capacité**, pas votre coffre.
+- **Les clés et les données sont sur votre propre disque.** Les identifiants sont chiffrés dans votre répertoire `.gotong/`. La fédération avec un autre hub partage une **capacité**, pas votre coffre.
 - **Aucune décision en boîte noire.** Chaque dispatch et résultat est un transcript lisible et en lecture seule. Le framework ne fait jamais tourner le modèle ; il n'y a pas de jugements cachés.
 
 Chaque modèle ci-dessous représente ces trois principes **appliqués à une chose concrète**.

@@ -3,14 +3,14 @@
  * (no fetch involved) so we control the sync-loop's view of the world.
  */
 
-import type { ImMessage } from '@aipehub/im-adapter'
+import type { ImMessage } from '@gotong/im-adapter'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { MatrixApiError, type MatrixCallOptions, type MatrixClient } from '../src/client.js'
 import { MatrixBridge } from '../src/bridge.js'
 import type { MatrixRoomEvent, MatrixSyncResponse } from '../src/types.js'
 
-const BOT = '@aipe_bot:matrix.org'
+const BOT = '@gotong_bot:matrix.org'
 const ALICE = '@alice:matrix.org'
 const ROOM = '!room:matrix.org'
 

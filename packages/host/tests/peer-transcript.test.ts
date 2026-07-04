@@ -12,7 +12,7 @@
 
 import { describe, expect, it } from 'vitest'
 
-import type { HubLink, TranscriptEntry } from '@aipehub/core'
+import type { HubLink, TranscriptEntry } from '@gotong/core'
 
 import {
   PeerTranscriptHost,

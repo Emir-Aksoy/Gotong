@@ -1,5 +1,5 @@
 /**
- * `bootstrapServices` — wire `@aipehub/services-sdk` into a live host.
+ * `bootstrapServices` — wire `@gotong/services-sdk` into a live host.
  *
  * Run once during host startup, after `Space.openOrInit` returns but
  * before any agent is spawned. The function:
@@ -24,8 +24,8 @@
  * logged and added to `errors[]`.
  */
 
-import { createLogger, type Hub, type Logger, type Space } from '@aipehub/core'
-import { registerServiceMethods } from '@aipehub/protocol'
+import { createLogger, type Hub, type Logger, type Space } from '@gotong/core'
+import { registerServiceMethods } from '@gotong/protocol'
 import {
   loadPlugins,
   PluginLoadError,
@@ -33,7 +33,7 @@ import {
   type HubSurfaceForPlugins,
   type ServiceInitCtx,
   type ServicePlugin,
-} from '@aipehub/services-sdk'
+} from '@gotong/services-sdk'
 import { join } from 'node:path'
 
 import { BUILTIN_PLUGINS } from './builtin-plugins.js'
@@ -42,7 +42,7 @@ import { ensurePluginRootDir, HubServices } from './hub-services.js'
 /**
  * Host-anchored ESM importer. Anchors `import()` resolution to **this
  * file's** location rather than `services-sdk/dist/loader.js`'s — pnpm's
- * isolated module graph means `services-sdk/node_modules/@aipehub/` only
+ * isolated module graph means `services-sdk/node_modules/@gotong/` only
  * contains `core`, so a naive `import(pkg)` from inside services-sdk
  * cannot find first-party plugin packages even when they're declared as
  * host dependencies.
@@ -54,11 +54,11 @@ import { ensurePluginRootDir, HubServices } from './hub-services.js'
  * fails on `exports`-only packages with `ERR_PACKAGE_PATH_NOT_EXPORTED`.
  *
  * Because `bootstrap.ts` lives inside the host package, the resolution
- * walk reaches the host's own `node_modules/@aipehub/` tree where pnpm
+ * walk reaches the host's own `node_modules/@gotong/` tree where pnpm
  * has laid down symlinks for every declared service plugin.
  *
  * Plugins that live OUTSIDE the host's dep tree (e.g. third-party
- * `my-org/aipehub-redis-memory` installed by an operator into the
+ * `my-org/gotong-redis-memory` installed by an operator into the
  * space directory) won't resolve via this path. RFC §8 covers a future
  * `manifestPath`-anchored resolution; for now those plugins should be
  * installed alongside the host.
@@ -76,7 +76,7 @@ async function hostAnchoredImport(pkg: string): Promise<unknown> {
 
   // Prefer `import.meta.resolve` (sync, Node 20.6+) — it returns the
   // resolved `file://` URL string anchored to *this module's* location,
-  // which is what gives us access to the host's `node_modules/@aipehub/`
+  // which is what gives us access to the host's `node_modules/@gotong/`
   // tree. Honours `exports.import` so pure-ESM plugin packages work.
   //
   // Test runners (vite-node / vitest) don't implement
@@ -113,7 +113,7 @@ export interface BootstrapServicesOpts {
   importPackage?: (pkg: string) => Promise<unknown>
   /**
    * Auto-seed `plugins.json` on first run. Default true. Disabled by
-   * the env var `AIPE_SERVICES_NO_SEED=1`, which propagates into the
+   * the env var `GOTONG_SERVICES_NO_SEED=1`, which propagates into the
    * loader if this opt is unset.
    */
   seedDefaults?: boolean
@@ -121,7 +121,7 @@ export interface BootstrapServicesOpts {
    * Override the package list written into a freshly-seeded
    * `plugins.json`. When omitted, `loadPlugins` uses
    * `DEFAULT_FIRST_PARTY_PLUGINS`. The binary-build host uses this to
-   * exclude `@aipehub/service-datastore-sqlite` (its `better-sqlite3`
+   * exclude `@gotong/service-datastore-sqlite` (its `better-sqlite3`
    * native binding cannot be embedded by `bun --compile`).
    */
   seedPlugins?: readonly string[]

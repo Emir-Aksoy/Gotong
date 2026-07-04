@@ -19,7 +19,7 @@ import type {
   ParticipantId,
   Task,
   TaskResult,
-} from '@aipehub/core'
+} from '@gotong/core'
 
 import {
   DispatchToolset,

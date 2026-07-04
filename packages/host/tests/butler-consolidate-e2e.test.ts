@@ -27,10 +27,10 @@ import { join } from 'node:path'
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import type { Logger } from '@aipehub/core'
-import { MockLlmProvider, type LlmProvider } from '@aipehub/llm'
-import { levelOf, type MemoryEntry } from '@aipehub/personal-memory'
-import type { MemoryHandle } from '@aipehub/services-sdk'
+import type { Logger } from '@gotong/core'
+import { MockLlmProvider, type LlmProvider } from '@gotong/llm'
+import { levelOf, type MemoryEntry } from '@gotong/personal-memory'
+import type { MemoryHandle } from '@gotong/services-sdk'
 
 import { buildButlerConsolidateToolset } from '../src/personal-butler-consolidate.js'
 import { openButlerMemory } from '../src/personal-butler-memory.js'
@@ -82,7 +82,7 @@ describe('S2-M2 — butler on-demand "整理一下记忆" tool', () => {
   let memRoot: string
 
   beforeEach(async () => {
-    root = await mkdtemp(join(tmpdir(), 'aipe-butler-consolidate-'))
+    root = await mkdtemp(join(tmpdir(), 'gotong-butler-consolidate-'))
     memRoot = join(root, 'butler', 'memory')
   })
   afterEach(async () => {

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
- * AipeHub MCP server — stdio bridge that lets any MCP client
- * (Claude Desktop, Cursor, Cline, …) operate on a running AipeHub Hub.
+ * Gotong MCP server — stdio bridge that lets any MCP client
+ * (Claude Desktop, Cursor, Cline, …) operate on a running Gotong Hub.
  *
  * Connection model: MCP server is a **client** of the Hub's HTTP admin
  * API. It never holds a WebSocket. Configuration is a base URL + a
@@ -9,13 +9,13 @@
  * (env wins, so MCP client configs that hardcode args can still be
  * overridden in CI).
  *
- *   aipehub-mcp --hub http://127.0.0.1:3000 --token <BEARER>
+ *   gotong-mcp --hub http://127.0.0.1:3000 --token <BEARER>
  *
  * Or:
  *
- *   AIPE_HUB_URL=http://127.0.0.1:3000 \
- *   AIPE_ADMIN_TOKEN=<BEARER> \
- *   aipehub-mcp
+ *   GOTONG_HUB_URL=http://127.0.0.1:3000 \
+ *   GOTONG_ADMIN_TOKEN=<BEARER> \
+ *   gotong-mcp
  *
  * Operational notes:
  *   - stdio is reserved for MCP protocol traffic. ALL logs go to stderr.
@@ -60,30 +60,30 @@ function flag(name: string): string | undefined {
 }
 
 function printUsage(): void {
-  process.stdout.write(`Usage: aipehub-mcp [options]
+  process.stdout.write(`Usage: gotong-mcp [options]
 
-AipeHub MCP (Model Context Protocol) bridge. Lets MCP clients —
-Claude Desktop, Cursor, Cline, etc. — operate on a running AipeHub
+Gotong MCP (Model Context Protocol) bridge. Lets MCP clients —
+Claude Desktop, Cursor, Cline, etc. — operate on a running Gotong
 Hub: list participants, dispatch tasks, read the contribution
 leaderboard, evaluate completed work.
 
 OPTIONS
   --hub <URL>        Hub base URL (e.g. http://127.0.0.1:3000). Required.
-                     Or set AIPE_HUB_URL.
+                     Or set GOTONG_HUB_URL.
   --token <BEARER>   Admin token. Required.
-                     Or set AIPE_ADMIN_TOKEN.
+                     Or set GOTONG_ADMIN_TOKEN.
   -h, --help         Show this help.
   -V, --version      Print version.
 
 CLAUDE DESKTOP / CURSOR CONFIG (~/Library/Application Support/Claude/claude_desktop_config.json):
   {
     "mcpServers": {
-      "aipehub": {
+      "gotong": {
         "command": "npx",
-        "args": ["-y", "@aipehub/mcp-server"],
+        "args": ["-y", "@gotong/mcp-server"],
         "env": {
-          "AIPE_HUB_URL": "http://127.0.0.1:3000",
-          "AIPE_ADMIN_TOKEN": "<your-bearer-token>"
+          "GOTONG_HUB_URL": "http://127.0.0.1:3000",
+          "GOTONG_ADMIN_TOKEN": "<your-bearer-token>"
         }
       }
     }
@@ -97,17 +97,17 @@ TOOLS PROVIDED
   evaluate_task      — attach a rating + comment to a completed task
 
 DOCS
-  https://github.com/Emir-Aksoy/AipeHub/blob/main/docs/MCP.md
+  https://github.com/Emir-Aksoy/Gotong/blob/main/docs/MCP.md
 `)
 }
 
 async function main(): Promise<void> {
-  const hubUrl = (flag('--hub') ?? process.env.AIPE_HUB_URL ?? '').replace(/\/+$/, '')
-  const token = flag('--token') ?? process.env.AIPE_ADMIN_TOKEN ?? ''
+  const hubUrl = (flag('--hub') ?? process.env.GOTONG_HUB_URL ?? '').replace(/\/+$/, '')
+  const token = flag('--token') ?? process.env.GOTONG_ADMIN_TOKEN ?? ''
   if (!hubUrl || !token) {
     process.stderr.write(
-      '[aipehub-mcp] Missing config: pass --hub <URL> --token <BEARER> ' +
-        'or set AIPE_HUB_URL / AIPE_ADMIN_TOKEN. Run --help for details.\n',
+      '[gotong-mcp] Missing config: pass --hub <URL> --token <BEARER> ' +
+        'or set GOTONG_HUB_URL / GOTONG_ADMIN_TOKEN. Run --help for details.\n',
     )
     process.exit(2)
   }
@@ -119,14 +119,14 @@ async function main(): Promise<void> {
   const ok = await client.ping()
   if (!ok) {
     process.stderr.write(
-      `[aipehub-mcp] Hub at ${hubUrl} did not answer /healthz. ` +
+      `[gotong-mcp] Hub at ${hubUrl} did not answer /healthz. ` +
         `Check the URL and that the host is running.\n`,
     )
     process.exit(3)
   }
 
   const server = new McpServer({
-    name: 'aipehub-mcp-server',
+    name: 'gotong-mcp-server',
     version: pkgVersion(),
   })
 
@@ -135,7 +135,7 @@ async function main(): Promise<void> {
   const transport = new StdioServerTransport()
   await server.connect(transport)
 
-  process.stderr.write(`[aipehub-mcp] connected to ${hubUrl} (5 tools registered)\n`)
+  process.stderr.write(`[gotong-mcp] connected to ${hubUrl} (5 tools registered)\n`)
 }
 
 main().catch((err) => {
@@ -150,10 +150,10 @@ main().catch((err) => {
   // for the generic `Bearer …` regex, which is also harmless.
   //
   // See AUDIT-v3.3.md finding H3.
-  const token = process.env.AIPE_ADMIN_TOKEN ?? flag('--token') ?? ''
+  const token = process.env.GOTONG_ADMIN_TOKEN ?? flag('--token') ?? ''
   const safe = redactError(err, token)
   process.stderr.write(
-    `[aipehub-mcp] fatal: ${safe.stack ?? safe.message}\n`,
+    `[gotong-mcp] fatal: ${safe.stack ?? safe.message}\n`,
   )
   process.exit(1)
 })

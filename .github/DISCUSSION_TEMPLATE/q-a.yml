@@ -32,8 +32,8 @@ body:
     id: version
     attributes:
       label: Version / commit
-      description: "`git rev-parse HEAD` or the `@aipehub/host` version. Skip if you haven't installed yet."
-      placeholder: "e.g. 1f3a2c4 or @aipehub/host@3.1.0"
+      description: "`git rev-parse HEAD` or the `@gotong/host` version. Skip if you haven't installed yet."
+      placeholder: "e.g. 1f3a2c4 or @gotong/host@3.1.0"
   - type: dropdown
     id: shape
     attributes:
@@ -46,7 +46,7 @@ body:
         - "LAN / home server"
         - "Cloud VPS"
         - "Docker"
-        - "Embedded library (my own binary using @aipehub/core)"
+        - "Embedded library (my own binary using @gotong/core)"
         - "Other / unsure"
     validations:
       required: true

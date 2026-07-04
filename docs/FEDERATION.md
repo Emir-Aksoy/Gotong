@@ -1,6 +1,6 @@
 # Federation — joining Hubs together
 
-AipeHub Hubs are dumb on purpose: they don't run LLMs and they don't
+Gotong Hubs are dumb on purpose: they don't run LLMs and they don't
 care whether a connecting agent is a single Python script or another
 whole Hub. That's all the federation primitive needs. Wrap a local Hub
 as one agent on a bigger Hub and you have a leader-led team that
@@ -26,7 +26,7 @@ participates upward as a single voice.
 
 ## What the bridge is
 
-`TeamBridgeAgent` (in `@aipehub/sdk-node`) is an ordinary
+`TeamBridgeAgent` (in `@gotong/sdk-node`) is an ordinary
 `AgentParticipant` you connect outward to an upstream Hub. Instead of
 doing the work itself, its `onTask` re-dispatches to the **local Hub**
 you hand it, waits for the local team's `TaskResult`, then returns the
@@ -45,13 +45,13 @@ The bridge surface to the upstream:
 ## Minimal code
 
 ```ts
-import { Hub, Space } from '@aipehub/core'
-import { serveWeb } from '@aipehub/web'
-import { connect, TeamBridgeAgent } from '@aipehub/sdk-node'
+import { Hub, Space } from '@gotong/core'
+import { serveWeb } from '@gotong/web'
+import { connect, TeamBridgeAgent } from '@gotong/sdk-node'
 import { WriterBot, ReviewerBot } from './bots.js'
 
 // 1. local team Hub (Alice's private cockpit)
-const { space } = await Space.openOrInit('.aipehub-team', {
+const { space } = await Space.openOrInit('.gotong-team', {
   name: 'Alice team',
   adminDisplayName: 'Alice',
   config: { webPort: 3300, gating: 'open' },
@@ -75,7 +75,7 @@ await connect({
 ```
 
 That's it. No new protocol — the bridge speaks ordinary
-`@aipehub/protocol` over the same WebSocket transport every other agent
+`@gotong/protocol` over the same WebSocket transport every other agent
 uses.
 
 ## Why this is useful
@@ -179,6 +179,6 @@ team Hub as `TASK alice-team "[upstream] draft about …" via capability`
 — and the result come back as `RESULT ok by alice-team` upstream and
 `RESULT ok by writer-bot` locally.
 
-Both `.aipehub-upstream/transcript.jsonl` and
-`.aipehub-team/transcript.jsonl` keep the full audit trail of their own
+Both `.gotong-upstream/transcript.jsonl` and
+`.gotong-team/transcript.jsonl` keep the full audit trail of their own
 side.

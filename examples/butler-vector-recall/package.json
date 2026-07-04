@@ -1,5 +1,5 @@
 {
-  "name": "@aipehub/example-butler-vector-recall",
+  "name": "@gotong/example-butler-vector-recall",
   "version": "0.0.0",
   "type": "module",
   "private": true,
@@ -9,8 +9,8 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@aipehub/personal-memory": "workspace:*",
-    "@aipehub/services-sdk": "workspace:*"
+    "@gotong/personal-memory": "workspace:*",
+    "@gotong/services-sdk": "workspace:*"
   },
   "devDependencies": {
     "tsx": "^4.7.0"

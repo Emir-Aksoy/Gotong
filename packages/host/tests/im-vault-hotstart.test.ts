@@ -20,13 +20,13 @@ import { randomBytes } from 'node:crypto'
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { Hub, type Logger } from '@aipehub/core'
+import { Hub, type Logger } from '@gotong/core'
 import {
   MASTER_KEY_LEN_BYTES,
   openIdentityStore,
   type IdentityStore,
-} from '@aipehub/identity'
-import type { ImAttachment, ImBridge, ImMessage, ImUser } from '@aipehub/im-adapter'
+} from '@gotong/identity'
+import type { ImAttachment, ImBridge, ImMessage, ImUser } from '@gotong/im-adapter'
 
 import {
   resolveImCreds,
@@ -81,9 +81,9 @@ class FakeBridge implements ImBridge {
 // Every env var the telegram/lark gates read — cleared per test so a dev
 // shell exporting a real token can't flip outcomes.
 const KEYS = [
-  'AIPE_TELEGRAM_BOT_TOKEN',
-  'AIPE_LARK_APP_ID',
-  'AIPE_LARK_APP_SECRET',
+  'GOTONG_TELEGRAM_BOT_TOKEN',
+  'GOTONG_LARK_APP_ID',
+  'GOTONG_LARK_APP_SECRET',
 ]
 const saved: Record<string, string | undefined> = {}
 
@@ -135,7 +135,7 @@ describe('resolveImCreds — env first, vault fallback, never a mix', () => {
 
   it('env wins over a vault row (telegram)', () => {
     putVaultRow({ platform: 'telegram', secret: 'vault-token' })
-    process.env.AIPE_TELEGRAM_BOT_TOKEN = 'env-token'
+    process.env.GOTONG_TELEGRAM_BOT_TOKEN = 'env-token'
     expect(resolveImCreds('telegram', identity)).toEqual({
       source: 'env',
       fields: { token: 'env-token' },
@@ -175,7 +175,7 @@ describe('resolveImCreds — env first, vault fallback, never a mix', () => {
   it('a lone env half never pairs with vault (lark falls through whole)', () => {
     // Env has only the app id — not enough. The vault row must win WHOLE
     // (both fields), never "env appId + vault secret".
-    process.env.AIPE_LARK_APP_ID = 'cli_env'
+    process.env.GOTONG_LARK_APP_ID = 'cli_env'
     putVaultRow({ platform: 'lark', secret: 'vault-secret', appId: 'cli_vault' })
     expect(resolveImCreds('lark', identity)).toEqual({
       source: 'vault',

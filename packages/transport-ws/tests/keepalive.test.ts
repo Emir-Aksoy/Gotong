@@ -23,7 +23,7 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { WebSocketServer } from 'ws'
 
-import type { HubLink } from '@aipehub/core'
+import type { HubLink } from '@gotong/core'
 
 import { acceptHubLinks, connectHubLink } from '../src/hub-link.js'
 

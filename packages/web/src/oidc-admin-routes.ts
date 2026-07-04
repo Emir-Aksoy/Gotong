@@ -11,14 +11,14 @@
  *   PATCH  /api/admin/oidc/providers/:id    targeted update (rotate/clear secret)
  *   DELETE /api/admin/oidc/providers/:id    remove + revoke its secret
  *
- * Backed by a host-injected surface (web has no @aipehub/identity dep). Absent
+ * Backed by a host-injected surface (web has no @gotong/identity dep). Absent
  * (no identity store) → every route 503s. The client_secret is accepted on
  * input but NEVER echoed back: the public view only carries `hasClientSecret`.
  */
 
 import type { IncomingMessage, ServerResponse } from 'node:http'
-import type { AdminRecord } from '@aipehub/core'
-import { createLogger } from '@aipehub/core'
+import type { AdminRecord } from '@gotong/core'
+import { createLogger } from '@gotong/core'
 
 import { readJsonBody, sendJson } from './http-helpers.js'
 

@@ -25,7 +25,7 @@
  * shared what with whom — a fault in the audit write never blocks the mutation.
  */
 
-import { createLogger } from '@aipehub/core'
+import { createLogger } from '@gotong/core'
 import {
   AUDIT_ACTIONS,
   GRANT_PERMS,
@@ -39,8 +39,8 @@ import {
   type ResourceKind,
   type SetResourceGrantInput,
   type WriteAuditLogInput,
-} from '@aipehub/identity'
-import type { WebServerOptions } from '@aipehub/web'
+} from '@gotong/identity'
+import type { WebServerOptions } from '@gotong/web'
 
 import { assertResourceGrant } from './resource-access.js'
 

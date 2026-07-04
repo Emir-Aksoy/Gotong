@@ -48,12 +48,12 @@ import {
   createInprocHubLinkPair,
   installPeerLink,
   type HubLink,
-} from '@aipehub/core'
+} from '@gotong/core'
 import {
   MASTER_KEY_LEN_BYTES,
   openIdentityStore,
   type IdentityStore,
-} from '@aipehub/identity'
+} from '@gotong/identity'
 
 import {
   PeerSummaryHost,
@@ -181,7 +181,7 @@ describe('v5 Stream F day-3 M7 — control-plane alert delivery over two hubs', 
   }
 
   beforeEach(async () => {
-    tmp = await mkdtemp(join(tmpdir(), 'aipe-alert-delivery-e2e-'))
+    tmp = await mkdtemp(join(tmpdir(), 'gotong-alert-delivery-e2e-'))
     providerStore = openIdentityStore({
       dbPath: join(tmp, 'provider.sqlite'),
       masterKey: randomBytes(MASTER_KEY_LEN_BYTES),
@@ -301,7 +301,7 @@ describe('v5 Stream F day-3 M7 — control-plane alert delivery over two hubs', 
     expect(calls).toHaveLength(1)
     expect(calls[0].url).toBe(url)
     const openedBody = calls[0].body
-    expect(openedBody.type).toBe('aipehub.peer_summary_alert/v1')
+    expect(openedBody.type).toBe('gotong.peer_summary_alert/v1')
     expect(openedBody.event).toBe('opened')
     expect(openedBody.firingId).toBe(firing.id)
     expect(openedBody.ruleId).toBe(rule.id)
@@ -491,7 +491,7 @@ describe('v5 Stream F day-3 M7 — control-plane alert delivery over two hubs', 
     expect(tgCall.url).toBe('https://api.telegram.org/bottg-bot-secret-987/sendMessage')
     const tgBody = tgCall.body as { chat_id: string; text: string }
     expect(tgBody.chat_id).toBe('chat-555')
-    expect(tgBody.text.startsWith('[aipehub] alert firing:')).toBe(true)
+    expect(tgBody.text.startsWith('[gotong] alert firing:')).toBe(true)
     expect(tgBody.text).toContain('太多 agent')
     expect(tgBody.text).toContain('assets.agents gte 3')
     expect(tgBody.text).toContain('(observed 3)')
@@ -508,7 +508,7 @@ describe('v5 Stream F day-3 M7 — control-plane alert delivery over two hubs', 
     expect(emailCall.url).toBe(emailUrl)
     const emailBody = emailCall.body as { to: string; subject: string; text: string }
     expect(emailBody.to).toBe('ops@cp.example')
-    expect(emailBody.subject).toBe('[aipehub] alert opened: assets.agents')
+    expect(emailBody.subject).toBe('[gotong] alert opened: assets.agents')
     expect(emailBody.text).toBe(tgBody.text)
 
     // no leak: every platform body carries ONLY counts / ids / the rule label.

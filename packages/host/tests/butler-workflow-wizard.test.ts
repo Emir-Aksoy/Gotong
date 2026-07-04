@@ -46,7 +46,7 @@ function fakeWizard(result: WizardComposeResult | Error): {
 
 const GREEN: WizardComposeResult = {
   ok: true,
-  yaml: 'schema: aipehub.workflow/v1\nworkflow:\n  id: weekly-report\n',
+  yaml: 'schema: gotong.workflow/v1\nworkflow:\n  id: weekly-report\n',
   explanation: '每周五整理周报,你确认后发出。',
   gapAnalysis: { ok: true, needs: [] },
   gapText: '✓ 起草 — 主笔手能接\n✓ 审批 — 你自己',

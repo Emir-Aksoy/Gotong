@@ -3,7 +3,7 @@
 <!-- doc-version: 1.0 -->
 > **Versión del documento 1.0** · Traducción al español · Actualizado el 2026-06-27 · Fuente autorizada: [English](../../CONTRIBUTORS.md). Si la traducción entra en conflicto con la versión en inglés, prevalece la versión en inglés.
 
-Este archivo registra a las personas que construyen AipeHub — y **todo tipo de
+Este archivo registra a las personas que construyen Gotong — y **todo tipo de
 contribución cuenta, grande o pequeña, no solo código.** Escribir el tutorial
 que por fin hace que la federación encaje, dar la charla que trae a cincuenta
 personas al proyecto, traducir la documentación a un idioma que el equipo
@@ -69,7 +69,7 @@ tabla** que 💻 código. El punto del pilar ⑤ es que no son una columna infer
    ceremonia.
 
 Si tu contribución es una pieza de **material de aprendizaje** — un vídeo,
-tutorial, o charla que enseña AipeHub bien — también puede ser curada en
+tutorial, o charla que enseña Gotong bien — también puede ser curada en
 [`LEARN.md`](LEARN.md), el escaparate al que se dirige a los nuevos usuarios.
 Estar registrado aquí y estar curado allí son dos actos de reconocimiento
 distintos; un gran tutorial merece los dos.

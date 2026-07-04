@@ -12,7 +12,7 @@
  *
  * The (idpEntityId, NameID) is assumed already validated — the signature /
  * Issuer / Audience / time / Recipient / InResponseTo checks live in
- * @aipehub/saml. M5b is pure mapping + session mint.
+ * @gotong/saml. M5b is pure mapping + session mint.
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'

@@ -5,7 +5,7 @@
  *
  * OpenClaw runs a silent "save-before-compact" round by default: just before the
  * live working context is summarized-and-dropped, it prompts the agent to write
- * the important bits to durable memory so nothing is lost. AipeHub had no
+ * the important bits to durable memory so nothing is lost. Gotong had no
  * equivalent — `capture.ts` records only the FINAL user prompt + reply of a turn
  * (extractive, no model), so everything that surfaced *inside* a long tool-loop
  * turn — decisions made, facts the user stated mid-conversation, commitments —
@@ -32,14 +32,14 @@
  * # No LLM import, fail-soft
  *
  * Like {@link consolidate} / {@link reconcile} this takes a
- * {@link MemorySummarizer} callback, never importing `@aipehub/llm`, and is
+ * {@link MemorySummarizer} callback, never importing `@gotong/llm`, and is
  * trivially testable with a deterministic fake. A bad / empty / throwing model
  * response yields ZERO facts (never corrupts memory on a hiccup). The drop point
  * is infrequent (session end / before truncating working memory), so a single
  * extra model call there is cheap.
  */
 
-import type { MemoryHandle, MemoryKind, NewMemoryEntry } from '@aipehub/services-sdk'
+import type { MemoryHandle, MemoryKind, NewMemoryEntry } from '@gotong/services-sdk'
 
 import type { MemorySummarizer } from './consolidate.js'
 import { clampImportance, META_IMPORTANCE, type Importance } from './importance.js'
@@ -65,7 +65,7 @@ export interface DurableFact {
 /**
  * One conversation message, duck-typed so callers can pass an `LlmMessage[]`
  * (or any `{ role, content }`-ish list) without this leaf package importing
- * `@aipehub/llm`. `content` is read defensively (string or content-block array).
+ * `@gotong/llm`. `content` is read defensively (string or content-block array).
  */
 export interface CompactionMessage {
   readonly role?: string

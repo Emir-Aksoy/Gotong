@@ -1,6 +1,6 @@
 # AI Workflow Editor — Phase 13 收尾
 
-> Phase 13 给 AipeHub 加了 **「自然语言 → workflow YAML」** 这一条编辑路径。
+> Phase 13 给 Gotong 加了 **「自然语言 → workflow YAML」** 这一条编辑路径。
 > 老路径（admin 手写 YAML 上传）还在，但现在 admin UI 里多了一个「AI 助手」
 > 对话框：写一句话描述，LLM 出 YAML 草稿，hub 自己 parse + 深度校验，再决定
 > 是不是要保存为正式 workflow。
@@ -13,10 +13,10 @@
 
 | Milestone | Commit | 关键产物 |
 |---|---|---|
-| M1 | `823c49a` / `0b59a21` | `@aipehub/workflow-assistant` 新包 + `WorkflowAssistantAgent`（capability=`workflow:assist`）+ 内嵌 v1 schema 完整系统 prompt + `extractYamlAndExplanation` 三级降级解析 + `verdictForYaml` 自 validate + `draftStatus`（`valid` / `no_yaml` / `invalid`）+ 31 测试 |
-| 审计整改 | `2026-05-27` | 把 assistant 从 `@aipehub/workflow` 拆出来（保 runner 包零 LLM 依赖）；protocol↔core 依赖反转（协议层零运行时）；`audits/` 归档约定；`test:python` 一键脚本修复 |
+| M1 | `823c49a` / `0b59a21` | `@gotong/workflow-assistant` 新包 + `WorkflowAssistantAgent`（capability=`workflow:assist`）+ 内嵌 v1 schema 完整系统 prompt + `extractYamlAndExplanation` 三级降级解析 + `verdictForYaml` 自 validate + `draftStatus`（`valid` / `no_yaml` / `invalid`）+ 31 测试 |
+| 审计整改 | `2026-05-27` | 把 assistant 从 `@gotong/workflow` 拆出来（保 runner 包零 LLM 依赖）；protocol↔core 依赖反转（协议层零运行时）；`audits/` 归档约定；`test:python` 一键脚本修复 |
 | M3 | `d70acdb` | Host 注册 `WorkflowAssistantAgent`（`createWorkflowAssistAgent` + `resolveWorkflowAssistConfig`）+ `POST /api/admin/workflows/assist` route（duck-typed `WorkflowAssistSurface` 注入，web 零 workflow-assistant dep）+ admin UI 对话框（描述 → 生成 → status chip → 保存为 workflow）+ 23 测试 |
-| M4 | `a5afe5a` | `@aipehub/evals/checkers/workflow-structure` 深度检查器 — 6 类 violation（`unknown_agent` / `unknown_capability` / `bad_ref` / `forward_ref` / `self_trigger_cycle` / `id_collision`）；assistant 自动注入 `output.deepCheck`；admin UI 黄色 warnings panel + 列表；+40 测试 |
+| M4 | `a5afe5a` | `@gotong/evals/checkers/workflow-structure` 深度检查器 — 6 类 violation（`unknown_agent` / `unknown_capability` / `bad_ref` / `forward_ref` / `self_trigger_cycle` / `id_collision`）；assistant 自动注入 `output.deepCheck`；admin UI 黄色 warnings panel + 列表；+40 测试 |
 | M5 | (this commit) | `examples/workflow-assistant/` 端到端 demo（DeepSeek / Anthropic / OpenAI / mock 四模式）+ 本文档 |
 
 总改动: 4 个功能 commit + 1 个审计整改 + 1 个 docs/example commit。新增源码 ~2500 行；测试 +94 跨 4 个包（workflow-assistant +44, host +14, web +12, evals +24）。
@@ -25,7 +25,7 @@
 
 ## 二、为什么做这阶段
 
-写 workflow YAML 不是一个友好的入门动作。以 `aipehub.workflow/v1` 现在的形态来看：
+写 workflow YAML 不是一个友好的入门动作。以 `gotong.workflow/v1` 现在的形态来看：
 
 - 顶层 `schema` / `workflow.id` / `trigger.capability` 三件套必须严格
 - `steps[].dispatch.strategy` 三种 kind（`capability` / `explicit` / `broadcast`）
@@ -70,20 +70,20 @@
 得跟着改。我们用 round-trip 测试做哨兵 —— 系统 prompt 例子里的 yaml 必须能
 `parseWorkflow` 通过；schema 漂移会直接让测试爆炸，迫使更新 prompt。
 
-### 3.2 拆 `@aipehub/workflow-assistant` 包（runner 零 LLM dep）
+### 3.2 拆 `@gotong/workflow-assistant` 包（runner 零 LLM dep）
 
-Codex 2026-05-27 审计的第二大刀。原先 `@aipehub/workflow` 引了
-`@aipehub/llm`，意味着用 workflow runner 的项目（非 AI authoring 路径）
+Codex 2026-05-27 审计的第二大刀。原先 `@gotong/workflow` 引了
+`@gotong/llm`，意味着用 workflow runner 的项目（非 AI authoring 路径）
 也得装 llm + provider SDK 一堆依赖。
 
-整改：拆出 `@aipehub/workflow-assistant`，runner 重新零 LLM。
+整改：拆出 `@gotong/workflow-assistant`，runner 重新零 LLM。
 依赖图变成：
 
 ```
-@aipehub/workflow             ← runner，零 LLM
+@gotong/workflow             ← runner，零 LLM
        ↑
-@aipehub/workflow-assistant   ← assistant，依赖 workflow + llm + evals
-@aipehub/evals                ← 深度检查器，type-only 依赖 workflow
+@gotong/workflow-assistant   ← assistant，依赖 workflow + llm + evals
+@gotong/evals                ← 深度检查器，type-only 依赖 workflow
 ```
 
 这样：
@@ -113,7 +113,7 @@ M1.5 把状态显式化：
 
 ### 3.4 Web 层 duck-typed surface 注入（zero workflow-assistant dep）
 
-`@aipehub/web` **没有** `@aipehub/workflow-assistant` runtime 依赖。它定义
+`@gotong/web` **没有** `@gotong/workflow-assistant` runtime 依赖。它定义
 一个 `WorkflowAssistSurface` interface：
 
 ```ts
@@ -132,7 +132,7 @@ Web 只依赖 interface 形状。
 
 好处：
 
-- 关掉 AI authoring 的 host（`AIPE_ASSISTANT_DISABLED=1` 或没 API key）web
+- 关掉 AI authoring 的 host（`GOTONG_ASSISTANT_DISABLED=1` 或没 API key）web
   能完整 boot，route 返 503 — 而不是装不上
 - 替换 surface 实现（e.g. proxy 到远程服务 / 上游 OpenAI batch endpoint）
   不动 web 代码
@@ -174,14 +174,14 @@ Admin UI submitWorkflowAssist 把当前 hub 的 `participants() + workflow ids`
 ### 3.7 Provider 选择走 host env，跟 LocalAgentPool 同套 key 解析
 
 ```
-AIPE_ASSISTANT_PROVIDER  'anthropic' (默认) | 'openai' | 'openai-compatible' | 'mock'
-AIPE_ASSISTANT_MODEL     可选 provider-specific model id
+GOTONG_ASSISTANT_PROVIDER  'anthropic' (默认) | 'openai' | 'openai-compatible' | 'mock'
+GOTONG_ASSISTANT_MODEL     可选 provider-specific model id
                          (openai-compatible 强烈建议设 — OpenAI 默认模型在别家端点不存在)
-AIPE_ASSISTANT_MAX_TOKENS 可选 (默认 4096)
-AIPE_ASSISTANT_BASE_URL  仅 openai-compatible — 兼容端点 (如 https://api.deepseek.com/v1)
-AIPE_ASSISTANT_API_KEY_ENV 仅 openai-compatible — 存放该厂商 key 的环境变量**名**
+GOTONG_ASSISTANT_MAX_TOKENS 可选 (默认 4096)
+GOTONG_ASSISTANT_BASE_URL  仅 openai-compatible — 兼容端点 (如 https://api.deepseek.com/v1)
+GOTONG_ASSISTANT_API_KEY_ENV 仅 openai-compatible — 存放该厂商 key 的环境变量**名**
                          (指针不是 key 本体，tokenEnv 纪律)
-AIPE_ASSISTANT_DISABLED  '1' / 'true' → 跳过注册，route 转 503
+GOTONG_ASSISTANT_DISABLED  '1' / 'true' → 跳过注册，route 转 503
 ```
 
 API key 解析链（与 `LocalAgentPool.resolveApiKey` 同套，减 per-agent /
@@ -193,7 +193,7 @@ workspace 两层 — 这是 host 内置 agent 不是用户 agent）：
 
 `openai-compatible`（S1-M4，让 MiMo / DeepSeek 等端点也能跑 assistant，从而
 让常驻管家在这类 hub 上露出 `edit_workflow`）**跳过上面两层**：每个 baseURL
-是不同厂商，key 只从 `AIPE_ASSISTANT_API_KEY_ENV` 指名的环境变量读——绝不
+是不同厂商，key 只从 `GOTONG_ASSISTANT_API_KEY_ENV` 指名的环境变量读——绝不
 把 `OPENAI_API_KEY` 静默发给第三方端点。缺 baseURL 或 key → 同样不注册。
 
 Mock provider 不需要 key，永远可用（CI 跑、本地无 key 演示都靠它）。
@@ -297,10 +297,10 @@ token 消耗 ~700 in / 100–2500 out（看 workflow 复杂度）。
 
 | 包 | 新增 | 总数 | 覆盖 |
 |---|---|---|---|
-| `@aipehub/workflow-assistant` | 44 | 44 | M1 helpers + assistant + verdictForYaml + verdictForYamlWithDeepCheck + inventoryFromContextHints + parseResponse 集成 + bad-payload 路径 |
-| `@aipehub/evals` | 24 | 45 | checkWorkflowStructure 全 violation 矩阵：happy path × 7 + id_collision × 2 + unknown_agent × 3 + unknown_capability × 5 + self_trigger_cycle × 3 + bad_ref/forward_ref × 6 + aggregation × 1 |
-| `@aipehub/host` | 14 | 253 | resolveWorkflowAssistConfig (env vars × 7) + createWorkflowAssistAgent (provider/key resolution × 7) |
-| `@aipehub/web` | 12 | 329 | /api/admin/workflows/assist route：503 / 401 / 400 × 2 / 200 happy / invalid + validationError forward / no_yaml forward / 500 surface throws / omits hints / deepCheck.ok=true forward / deepCheck.ok=false 多 violation forward / omits deepCheck |
+| `@gotong/workflow-assistant` | 44 | 44 | M1 helpers + assistant + verdictForYaml + verdictForYamlWithDeepCheck + inventoryFromContextHints + parseResponse 集成 + bad-payload 路径 |
+| `@gotong/evals` | 24 | 45 | checkWorkflowStructure 全 violation 矩阵：happy path × 7 + id_collision × 2 + unknown_agent × 3 + unknown_capability × 5 + self_trigger_cycle × 3 + bad_ref/forward_ref × 6 + aggregation × 1 |
+| `@gotong/host` | 14 | 253 | resolveWorkflowAssistConfig (env vars × 7) + createWorkflowAssistAgent (provider/key resolution × 7) |
+| `@gotong/web` | 12 | 329 | /api/admin/workflows/assist route：503 / 401 / 400 × 2 / 200 happy / invalid + validationError forward / no_yaml forward / 500 surface throws / omits hints / deepCheck.ok=true forward / deepCheck.ok=false 多 violation forward / omits deepCheck |
 
 Zero regressions across full sweep.
 
@@ -312,13 +312,13 @@ Zero regressions across full sweep.
 
 ```bash
 # 启用（默认，需 ANTHROPIC_API_KEY 或 OPENAI_API_KEY 或 vault 里有 entry）
-pnpm --filter @aipehub/host start
+pnpm --filter @gotong/host start
 
 # 显式禁用
-AIPE_ASSISTANT_DISABLED=1 pnpm --filter @aipehub/host start
+GOTONG_ASSISTANT_DISABLED=1 pnpm --filter @gotong/host start
 
 # 切换 provider
-AIPE_ASSISTANT_PROVIDER=openai pnpm --filter @aipehub/host start
+GOTONG_ASSISTANT_PROVIDER=openai pnpm --filter @gotong/host start
 
 # DeepSeek（用 OpenAI provider + baseURL；见 examples/workflow-assistant 写法）
 # 直接对 assistant agent 用 DeepSeek 还未一线支持 — 走 examples 路径即可

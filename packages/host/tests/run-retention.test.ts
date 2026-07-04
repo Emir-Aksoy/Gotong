@@ -4,7 +4,7 @@ import { join } from 'node:path'
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { RunStore, type RunState } from '@aipehub/workflow'
+import { RunStore, type RunState } from '@gotong/workflow'
 
 import {
   RUN_ARCHIVE_DAYS_ENV,
@@ -78,7 +78,7 @@ describe('applyRunRetention (Route B P0-M3 M3-M2)', () => {
   let store: RunStore
 
   beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), 'aipe-run-retain-'))
+    dir = mkdtempSync(join(tmpdir(), 'gotong-run-retain-'))
     store = new RunStore(dir)
     store.ensureDirs()
   })

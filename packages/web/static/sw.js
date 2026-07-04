@@ -1,4 +1,4 @@
-/* AipeHub PWA service worker — app-shell cache (Phase 12 M9).
+/* Gotong PWA service worker — app-shell cache (Phase 12 M9).
  *
  * Deliberately conservative for a token-gated admin tool:
  *
@@ -23,7 +23,7 @@
 // "上次复盘" line + its i18n key. Bumping forces returning members past the
 // stale-while-revalidate window so they get the new shell on the next activate,
 // not one load later.
-const CACHE = 'aipehub-shell-v3'
+const CACHE = 'gotong-shell-v3'
 
 // Stable, role-agnostic static shell. app.html is excluded on purpose
 // (role-injected); admin.js / identity-ui.js etc. are left to the runtime

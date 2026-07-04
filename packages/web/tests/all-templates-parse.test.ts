@@ -3,14 +3,14 @@
  *
  * Every per-example template test (cafe-ops-template.test.ts, …) pins ONE
  * file's specifics. This gate is the opposite: it sweeps EVERY
- * `aipehub.template/v1` manifest in the repo — the shipped flagship examples AND
+ * `gotong.template/v1` manifest in the repo — the shipped flagship examples AND
  * any community submission under templates/community/templates/ — through the
  * REAL parseTemplate, and every embedded workflow block through the REAL
  * parseWorkflow.
  *
  * It is the merge bar a contributor's `pnpm check:templates` runs locally and
  * (opt-in) CI runs on a template PR. A submission whose manifest is malformed,
- * or that carries a workflow block that isn't valid aipehub.workflow/v1, fails
+ * or that carries a workflow block that isn't valid gotong.workflow/v1, fails
  * HERE — named by file — instead of blowing up on someone's hub at one-click
  * install. That's the whole point: GitHub hosts the substance (templates are
  * files), so the only gate a template PR needs is "license-clear + actually
@@ -23,7 +23,7 @@
  *
  * Scope note: the OLDER templates/community/{agents,teams}/ contributions are
  * single-agent / team manifests that go through different parsers — they are
- * out of scope for THIS gate, which is specifically the `aipehub.template/v1`
+ * out of scope for THIS gate, which is specifically the `gotong.template/v1`
  * one-file-装一整套 format the gallery installs.
  */
 
@@ -32,7 +32,7 @@ import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { join, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { parseWorkflow } from '@aipehub/workflow'
+import { parseWorkflow } from '@gotong/workflow'
 
 import { parseTemplate } from '../src/template-manifest.js'
 
@@ -61,7 +61,7 @@ function walk(dir: string, onFile: (abs: string) => void): void {
   }
 }
 
-// The two roots that hold aipehub.template/v1 manifests:
+// The two roots that hold gotong.template/v1 manifests:
 //   examples/*/template/*.template.yaml  — the shipped flagship templates
 //   templates/community/templates/**     — where community submissions land
 function collectTemplateFiles(): string[] {
@@ -91,7 +91,7 @@ const templateFiles = collectTemplateFiles()
 // false-positive.
 const SECRET_LITERAL = /\b(sk-[A-Za-z0-9]{20,}|AKIA[0-9A-Z]{16}|gh[pousr]_[A-Za-z0-9]{30,})\b/
 
-describe('repo-wide aipehub.template/v1 validation gate', () => {
+describe('repo-wide gotong.template/v1 validation gate', () => {
   it('finds the shipped template manifests (sanity — the sweep is non-empty)', () => {
     // If this drops to zero the glob broke and the gate would pass vacuously.
     // The repo ships at least the flagship examples; pin a floor, not an exact
@@ -109,7 +109,7 @@ describe('repo-wide aipehub.template/v1 validation gate', () => {
       expect(t.version, `${rel} version`).toBe(1)
       expect(t.name.length, `${rel} name`).toBeGreaterThan(0)
 
-      // Every embedded workflow block is itself valid aipehub.workflow/v1 — the
+      // Every embedded workflow block is itself valid gotong.workflow/v1 — the
       // SAME parser the host runs on import, so the opaque-blob round-trip holds
       // and a broken block fails loudly instead of importing a dead workflow.
       for (const w of t.workflows) {

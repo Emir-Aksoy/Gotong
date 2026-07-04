@@ -23,7 +23,7 @@
  * doesn't fetch.
  */
 
-import type { ImAttachment, ImMessage, ImUser } from '@aipehub/im-adapter'
+import type { ImAttachment, ImMessage, ImUser } from '@gotong/im-adapter'
 
 import type { DiscordAttachment, DiscordMessage } from './types.js'
 

@@ -1,5 +1,5 @@
 # DeepSeek Coder — openai-compatible 示例模板
-# AipeHub agent v1 manifest
+# Gotong agent v1 manifest
 #
 # 用法：
 #   1. admin 控制台 → 智能体 → 导入 ▾ → 上传 / 粘贴 YAML
@@ -9,7 +9,7 @@
 #
 # openai-compatible 不走工作区默认 key —— 每个 baseURL 是不同厂商，
 # 必须给这个 agent 单独配 key。
-schema: aipehub.agent/v1
+schema: gotong.agent/v1
 
 agent:
   id: deepseek-coder

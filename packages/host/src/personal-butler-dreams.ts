@@ -1,7 +1,7 @@
 /**
  * personal-butler-dreams.ts — the host side of the dream diary (MR2 §五.3).
  *
- * The dreaming sweep (`dreamingReviewer` in `@aipehub/personal-memory`) is a pure
+ * The dreaming sweep (`dreamingReviewer` in `@gotong/personal-memory`) is a pure
  * leaf reviewer: it scores, promotes and prunes, then hands a structured
  * {@link DreamRecord} to an injected {@link DreamDiaryWriter} — it deliberately
  * doesn't touch the filesystem. This module is that writer: it appends one
@@ -28,16 +28,16 @@
 import { appendFile, mkdir, readFile, rm } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 
-import type { Logger } from '@aipehub/core'
-import type { DreamDiaryWriter, DreamRecord } from '@aipehub/personal-memory'
-import { ownerDir } from '@aipehub/service-memory-file'
-import type { Owner } from '@aipehub/services-sdk'
+import type { Logger } from '@gotong/core'
+import type { DreamDiaryWriter, DreamRecord } from '@gotong/personal-memory'
+import { ownerDir } from '@gotong/service-memory-file'
+import type { Owner } from '@gotong/services-sdk'
 
 /** Filename of the per-user dream diary, written inside the user's memory dir. */
 export const DREAMS_FILE = 'DREAMS.md'
 
 /** The stable machine marker that opens every diary block (`readLatest` keys off it). */
-const MARKER_PREFIX = '<!-- aipehub-dream '
+const MARKER_PREFIX = '<!-- gotong-dream '
 const MARKER_SUFFIX = ' -->'
 /** Max chars of an entry's text shown in the diary (a diary, not a dump). */
 const TEXT_CLIP = 120

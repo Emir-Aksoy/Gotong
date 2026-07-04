@@ -59,7 +59,7 @@ describe('createDiscordClient', () => {
     expect(url).toBe('https://discord.com/api/v10/channels/1/messages')
     const headers = init.headers as Record<string, string>
     expect(headers.authorization).toBe('Bot xyz')
-    expect(headers['user-agent']).toMatch(/aipehub-im-discord/)
+    expect(headers['user-agent']).toMatch(/gotong-im-discord/)
   })
 
   it('honours configured baseUrl + strips trailing slash', async () => {

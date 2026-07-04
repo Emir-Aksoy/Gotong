@@ -12,7 +12,7 @@ issues.** Use a private channel:
 
 Open a private advisory at:
 
-> **<https://github.com/Emir-Aksoy/AipeHub/security/advisories/new>**
+> **<https://github.com/Emir-Aksoy/Gotong/security/advisories/new>**
 
 GitHub's built-in form gives you:
 
@@ -26,7 +26,7 @@ free GitHub account; that's the only prerequisite.
 ### No email channel (pre-1.0)
 
 There is deliberately **no security email** during the v0.x period.
-`security@aipehub.dev` appears in older revisions of this repo as an
+`security@gotong.dev` appears in older revisions of this repo as an
 *aspirational* address — the domain isn't registered and the mailbox
 isn't activated, so mail to it goes nowhere. We've stopped advertising
 it as a fallback rather than dangle a dead contact someone might trust
@@ -83,7 +83,7 @@ content), tagging a maintainer.
 
 ## Supported versions
 
-AipeHub is pre-1.0 internally (the v2.0 / v2.1 labels you see in
+Gotong is pre-1.0 internally (the v2.0 / v2.1 labels you see in
 `CHANGELOG.md` refer to the file-first rewrite generation, not the
 SemVer 1.0 threshold). We patch security issues on the current `main`
 branch only. There is **no LTS branch**.
@@ -95,7 +95,7 @@ budget for in-place patches; we can't backport indefinitely.
 
 ## Threat model
 
-AipeHub is designed for **small, trusted, single-tenant** deployments —
+Gotong is designed for **small, trusted, single-tenant** deployments —
 a research lab, a project team, a small public-preview group. The
 defaults assume the room is operated by people who trust each other.
 
@@ -140,21 +140,21 @@ When evaluating an issue, check whether one of these already covers it:
   before being written to disk. Plaintext is shown exactly once on mint.
   Verification uses constant-time comparison.
 - **Cookie storage**: HttpOnly always; `SameSite=Strict` + `Secure` when
-  `AIPE_COOKIE_SECURE=1` (required behind HTTPS).
-- **CSRF**: `AIPE_ALLOWED_HOSTS` enforces both `Host:` and `Origin:`
+  `GOTONG_COOKIE_SECURE=1` (required behind HTTPS).
+- **CSRF**: `GOTONG_ALLOWED_HOSTS` enforces both `Host:` and `Origin:`
   checks on every state-changing method. **Set it on every production
   deployment.** Unset means "loopback only is safe".
-- **Rate limiting**: `AIPE_ADMIN_RATE_MAX` / `_SEC` caps admin-token
+- **Rate limiting**: `GOTONG_ADMIN_RATE_MAX` / `_SEC` caps admin-token
   verification attempts per IP per sliding window. Defaults 10 / 60s.
 - **Security headers**: `X-Frame-Options: DENY`, a strict CSP,
   `Referrer-Policy: no-referrer`, `X-Content-Type-Options: nosniff`
   on every response.
-- **Admission gating**: `AIPE_GATING=admin-approval` (default) requires
+- **Admission gating**: `GOTONG_GATING=admin-approval` (default) requires
   every remote agent to be human-approved before joining. `gating=open`
   is **dev only** and is rejected in production with a startup warning.
 - **API-key encryption**: workspace and per-agent API keys live in
   `<space>/secrets.enc.json`, AES-256-GCM, master key in
-  `<space>/runtime/secret.key` (0600) or `AIPE_SECRET_KEY` env. The
+  `<space>/runtime/secret.key` (0600) or `GOTONG_SECRET_KEY` env. The
   encrypted file alone is not enough to recover keys.
 - **Per-agent identity binding (v0.4)**: `authenticate()` can return
   `{ ok: true, allowedAgents: [...] }` so a leaked API key can't
@@ -191,11 +191,11 @@ deployment-side hardening checklist lives in
 
 In short:
 
-- [ ] `AIPE_COOKIE_SECURE=1` when fronted by HTTPS
-- [ ] `AIPE_ALLOWED_HOSTS` set to your real hostnames
-- [ ] `AIPE_GATING=admin-approval` (never `open` on the public internet)
+- [ ] `GOTONG_COOKIE_SECURE=1` when fronted by HTTPS
+- [ ] `GOTONG_ALLOWED_HOSTS` set to your real hostnames
+- [ ] `GOTONG_GATING=admin-approval` (never `open` on the public internet)
 - [ ] Caddy / nginx terminates TLS; backend bound to `127.0.0.1`
-- [ ] `runtime/secret.key` (chmod 600) or `AIPE_SECRET_KEY` env is set
+- [ ] `runtime/secret.key` (chmod 600) or `GOTONG_SECRET_KEY` env is set
 - [ ] Backups exist for the `<space>/` directory
 - [ ] At least 2 admin accounts so you can recover a lockout
 - [ ] `/healthz` monitored

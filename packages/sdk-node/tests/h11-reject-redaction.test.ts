@@ -21,7 +21,7 @@
  *
  *   - `sk-...` (OpenAI / Anthropic / DeepSeek)
  *   - `Bearer ...` (HTTP Authorization header)
- *   - `aipe-...` (AipeHub-issued tokens)
+ *   - `gotong-...` (Gotong-issued tokens)
  *
  * See AUDIT-v3.3.md finding H11.
  */
@@ -67,9 +67,9 @@ describe('H11 — redactSecrets()', () => {
   describe('Bearer ... headers', () => {
     it('redacts a literal Bearer header echoed back by an upstream proxy', () => {
       const out = redactSecrets(
-        'upstream said 502: Authorization: Bearer aipe-tok-abc-xyz-def',
+        'upstream said 502: Authorization: Bearer gotong-tok-abc-xyz-def',
       )
-      expect(out).not.toContain('aipe-tok-abc-xyz-def')
+      expect(out).not.toContain('gotong-tok-abc-xyz-def')
       expect(out).toContain('Authorization: <redacted>')
     })
 
@@ -79,10 +79,10 @@ describe('H11 — redactSecrets()', () => {
     })
   })
 
-  describe('aipe-... admin / agent tokens', () => {
-    it('redacts a literal AipeHub admin token', () => {
-      const out = redactSecrets('rejected: token aipe-admin-deadbeef invalid')
-      expect(out).not.toContain('aipe-admin')
+  describe('gotong-... admin / agent tokens', () => {
+    it('redacts a literal Gotong admin token', () => {
+      const out = redactSecrets('rejected: token gotong-admin-deadbeef invalid')
+      expect(out).not.toContain('gotong-admin')
       expect(out).toContain('<redacted>')
     })
   })

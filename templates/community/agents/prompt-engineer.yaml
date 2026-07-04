@@ -4,8 +4,8 @@
 # Adapted:    2026-05-12 — heavily restructured: original "Prompt Generator"
 #             was multi-section interactive. Compressed to a single-turn
 #             generator that takes a topic + constraints and produces one
-#             AipeHub-shaped system prompt. Renamed to "prompt-engineer".
-schema: aipehub.agent/v1
+#             Gotong-shaped system prompt. Renamed to "prompt-engineer".
+schema: gotong.agent/v1
 agent:
   id: prompt-engineer
   displayName: Prompt 工程师（元 Prompt 生成器）
@@ -36,7 +36,7 @@ agent:
 
     Reply with ONLY the system prompt body (no surrounding YAML, no
     headings like "Generated Prompt:"). The user will paste it directly
-    into an AipeHub manifest's `system:` field.
+    into an Gotong manifest's `system:` field.
 
     Keep the generated prompt under ~300 words unless the role genuinely
     requires more detail (rare).

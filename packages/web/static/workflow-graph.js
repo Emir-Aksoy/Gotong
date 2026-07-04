@@ -17,7 +17,7 @@
 // translation object.
 //
 // Loaded via <script src="/workflow-graph.js" defer> in app.html, BEFORE
-// app-core.js / app.js — so window.AipeHubWorkflowGraph exists before either
+// app-core.js / app.js — so window.GotongWorkflowGraph exists before either
 // front-end (and before admin.js, which app.js injects later) ever calls it.
 ;(function () {
   'use strict'
@@ -193,5 +193,5 @@
     return 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(standalone)
   }
 
-  window.AipeHubWorkflowGraph = { renderWorkflowGraphSvg, graphLegend, svgDownloadHref }
+  window.GotongWorkflowGraph = { renderWorkflowGraphSvg, graphLegend, svgDownloadHref }
 })()

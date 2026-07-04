@@ -1,7 +1,7 @@
 /**
- * `@aipehub/mcp-client` stand-alone quickstart.
+ * `@gotong/mcp-client` stand-alone quickstart.
  *
- * No Hub, no LLM, no AipeHub agents — just the toolset. Spawns the
+ * No Hub, no LLM, no Gotong agents — just the toolset. Spawns the
  * official filesystem MCP server (via `npx -y`) against the example
  * package's own directory, lists its tools, calls `read_file` on a
  * known file in this repo, and disconnects.
@@ -9,7 +9,7 @@
  * Run:
  *
  *   pnpm install
- *   pnpm --filter @aipehub/example-mcp-tools-quickstart start
+ *   pnpm --filter @gotong/example-mcp-tools-quickstart start
  *
  * Expected output (truncated):
  *
@@ -21,11 +21,11 @@
  *       - fs__list_directory
  *       …
  *   ✓ called fs__read_file on package.json:
- *      { "name": "@aipehub/example-mcp-tools-quickstart", … }
+ *      { "name": "@gotong/example-mcp-tools-quickstart", … }
  *   → disconnected
  */
 
-import { McpToolset } from '@aipehub/mcp-client'
+import { McpToolset } from '@gotong/mcp-client'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 

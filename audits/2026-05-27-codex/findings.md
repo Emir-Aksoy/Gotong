@@ -1,12 +1,12 @@
 # Findings
 
-## P1: `@aipehub/protocol` 不再是 zero-runtime 底层契约
+## P1: `@gotong/protocol` 不再是 zero-runtime 底层契约
 
 证据:
 
 - `packages/protocol/package.json` 的 description 写着 `Zero runtime`。
-- 同一文件的 dependencies 包含 `@aipehub/core`。
-- `packages/protocol/src/frames.ts` 从 `@aipehub/core` import `ChannelId`, `Message`, `ParticipantId`, `Task`, `TaskId`, `TaskResult`。
+- 同一文件的 dependencies 包含 `@gotong/core`。
+- `packages/protocol/src/frames.ts` 从 `@gotong/core` import `ChannelId`, `Message`, `ParticipantId`, `Task`, `TaskId`, `TaskResult`。
 
 影响:
 
@@ -16,8 +16,8 @@
 
 建议:
 
-- 把 wire-level primitives 和 frame payload types 下沉到 `@aipehub/protocol`。
-- 或新增 `@aipehub/types` 作为无 runtime shared type 包, 由 core 和 protocol 同时依赖。
+- 把 wire-level primitives 和 frame payload types 下沉到 `@gotong/protocol`。
+- 或新增 `@gotong/types` 作为无 runtime shared type 包, 由 core 和 protocol 同时依赖。
 - 迁移后删除 protocol 对 core 的 dependency, 并加一条 dependency-boundary 测试或脚本。
 
 ## P1: 架构文档真相源失效
@@ -41,11 +41,11 @@
 - 把 `docs/zh/V4-ARCH.md` 标记为 historical, 新建或更新一个当前架构总览。
 - 在文档中把 Phase 13 M1 记录为已开始, 并同步 package / example 数量。
 
-## P2: `@aipehub/workflow` 混入 AI authoring 职责
+## P2: `@gotong/workflow` 混入 AI authoring 职责
 
 证据:
 
-- `packages/workflow/package.json` runtime dependencies 包含 `@aipehub/llm`。
+- `packages/workflow/package.json` runtime dependencies 包含 `@gotong/llm`。
 - `packages/workflow/src/index.ts` 导出 `WorkflowAssistantAgent`。
 - `packages/workflow/src/assistant.ts` 实现 natural-language 到 workflow YAML 的 LLM agent。
 
@@ -57,8 +57,8 @@
 
 建议:
 
-- 拆出 `@aipehub/workflow-assistant`, 由它依赖 `@aipehub/workflow` 和 `@aipehub/llm`。
-- `@aipehub/workflow` 保留 `parseWorkflow`, `WorkflowRunner`, `RunStore`, resolver / predicate 等纯 workflow 能力。
+- 拆出 `@gotong/workflow-assistant`, 由它依赖 `@gotong/workflow` 和 `@gotong/llm`。
+- `@gotong/workflow` 保留 `parseWorkflow`, `WorkflowRunner`, `RunStore`, resolver / predicate 等纯 workflow 能力。
 - host/web 需要 assistant 时显式接入新包。
 
 ## P2: Workflow assistant 成功语义偏松
@@ -84,8 +84,8 @@
 证据:
 
 - `package.json` 的 `test:python` 是 `cd python-sdk && .venv/bin/python -m pytest -q`。
-- 当前直接运行失败: `ModuleNotFoundError: No module named 'aipehub'`。
-- `python-sdk` 是 src-layout, 包位于 `python-sdk/src/aipehub`。
+- 当前直接运行失败: `ModuleNotFoundError: No module named 'gotong'`。
+- `python-sdk` 是 src-layout, 包位于 `python-sdk/src/gotong`。
 - 带 `PYTHONPATH=src .venv/bin/python -m pytest -q` 后 57 个测试通过。
 
 影响:

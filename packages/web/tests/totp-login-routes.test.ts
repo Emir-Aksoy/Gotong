@@ -20,13 +20,13 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { randomBytes } from 'node:crypto'
 
-import { Hub, Space } from '@aipehub/core'
+import { Hub, Space } from '@gotong/core'
 import {
   openIdentityStore,
   type IdentityStore,
   MASTER_KEY_LEN_BYTES,
-} from '@aipehub/identity'
-import { base32Decode, totpCodeAt } from '@aipehub/identity'
+} from '@gotong/identity'
+import { base32Decode, totpCodeAt } from '@gotong/identity'
 
 import { serveWeb, type WebServerHandle } from '../src/server.js'
 
@@ -55,7 +55,7 @@ function liveCode(secret: string, offsetSeconds = 0): string {
 }
 
 async function boot(rateLimit?: { max: number; windowSec: number }): Promise<Boot> {
-  const tmp = await mkdtemp(join(tmpdir(), 'aipehub-totp-login-'))
+  const tmp = await mkdtemp(join(tmpdir(), 'gotong-totp-login-'))
   const init = await Space.init(tmp, { name: 'totp-login-test' })
   const hub = new Hub({ space: init.space })
   await hub.start()
@@ -75,7 +75,7 @@ async function boot(rateLimit?: { max: number; windowSec: number }): Promise<Boo
   const enrollment = identity.enrollTotp({
     userId: member.id,
     account: MEMBER_EMAIL,
-    issuer: 'AipeHub',
+    issuer: 'Gotong',
   })
   // Confirm with a code for the wall clock → factor becomes ACTIVE.
   const ok = identity.confirmTotp({
@@ -134,7 +134,7 @@ describe('login route — TOTP challenge (P1-M3d)', () => {
       totpCode: liveCode(b.secret, 30),
     })
     expect(r.status).toBe(200)
-    expect(r.headers.get('set-cookie') ?? '').toContain('aipehub_identity=')
+    expect(r.headers.get('set-cookie') ?? '').toContain('gotong_identity=')
     const j = (await r.json()) as { ok?: boolean }
     expect(j.ok).toBe(true)
   })

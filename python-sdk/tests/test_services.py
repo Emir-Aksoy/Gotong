@@ -17,14 +17,14 @@ import json
 
 import pytest
 
-from aipehub import (
+from gotong import (
     AgentParticipant,
     ServiceCallError,
     ServiceOwner,
     ServiceUseRequest,
     connect,
 )
-from aipehub.protocol import PROTOCOL_VERSION
+from gotong.protocol import PROTOCOL_VERSION
 
 from .conftest import serve_hub
 

@@ -9,10 +9,10 @@
  *     template agent serves — it resolves to a franchise-shop PEER at runtime. The
  *     template carries only the HQ-side skeleton; WHICH / HOW MANY shops is runtime
  *     peer config.
- *   - Unlike cafe-ops (whose workflows desugar `human:` to `aipehub.human/v1`),
+ *   - Unlike cafe-ops (whose workflows desugar `human:` to `gotong.human/v1`),
  *     this workflow has NO human step: the cross-org approval is the runtime
  *     outbound gate (Stream G), so the embedded block must NOT mention
- *     `aipehub.human/v1`.
+ *     `gotong.human/v1`.
  *
  * It reads the SHIPPED
  * `examples/tea-chain-hq/template/chain-hq.template.yaml` off disk → real
@@ -26,8 +26,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { Hub, Space } from '@aipehub/core'
-import { parseWorkflow } from '@aipehub/workflow'
+import { Hub, Space } from '@gotong/core'
+import { parseWorkflow } from '@gotong/workflow'
 
 import { serveWeb, type WebServerHandle, type WorkflowSurface } from '../src/server.js'
 import { parseTemplate } from '../src/template-manifest.js'
@@ -45,7 +45,7 @@ beforeEach(async () => {
 })
 
 describe('examples/tea-chain-hq/template (HQ2)', () => {
-  it('parses as a valid aipehub.template/v1 manifest', () => {
+  it('parses as a valid gotong.template/v1 manifest', () => {
     const t = parseTemplate(templateText)
     expect(t.name).toBe('连锁奶茶店总部(跨组织指令下发)')
     expect(t.version).toBe(1)
@@ -94,8 +94,8 @@ describe('examples/tea-chain-hq/template (HQ2)', () => {
 
     // ★ The teaching invariant: the cross-org approval is the RUNTIME outbound
     // gate, NOT a workflow human step. So unlike cafe-ops, this block must carry
-    // NO `aipehub.human/v1` capability anywhere.
-    expect(JSON.stringify(rollout)).not.toContain('aipehub.human/v1')
+    // NO `gotong.human/v1` capability anywhere.
+    expect(JSON.stringify(rollout)).not.toContain('gotong.human/v1')
 
     // Governance is a declarative risk summary (not a gate).
     expect(rollout.governance?.dataSensitivity).toBe('internal')
@@ -114,7 +114,7 @@ describe('examples/tea-chain-hq/template (HQ2)', () => {
   })
 
   it('imports end-to-end: 1 agent lands, 1 workflow imports (re-validated), KB reported inline', async () => {
-    const tmp = await mkdtemp(join(tmpdir(), 'aipehub-chain-hq-'))
+    const tmp = await mkdtemp(join(tmpdir(), 'gotong-chain-hq-'))
     const { space } = await Space.init(tmp, { name: 'chain-hq-test' })
     const hub = new Hub({ space })
     await hub.start()

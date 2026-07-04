@@ -1,14 +1,14 @@
-# MCP — bridging AipeHub and the wider MCP ecosystem
+# MCP — bridging Gotong and the wider MCP ecosystem
 
-AipeHub speaks [Model Context Protocol](https://modelcontextprotocol.io)
+Gotong speaks [Model Context Protocol](https://modelcontextprotocol.io)
 in **both directions**:
 
-- **Inbound** (`@aipehub/mcp-server`) — any MCP-aware client
+- **Inbound** (`@gotong/mcp-server`) — any MCP-aware client
   (Claude Desktop, Cursor, Cline, Continue, …) can dispatch tasks
   into a Hub, browse the contribution leaderboard, and attach
   evaluations without touching the admin web UI. Chapters 1–5 below.
 
-- **Outbound** (`@aipehub/mcp-client`) — your AipeHub agents can
+- **Outbound** (`@gotong/mcp-client`) — your Gotong agents can
   attach a fleet of third-party MCP servers (Filesystem, GitHub,
   Slack, Postgres, …) and use their tools natively from inside
   `handleTask`. Chapter 6 at the bottom.
@@ -36,13 +36,13 @@ This document covers:
 Once configured, your MCP client gets five new tools next to whatever
 else is already installed. Example prompts:
 
-> *"Use AipeHub to dispatch a draft task to anyone with `draft`
+> *"Use Gotong to dispatch a draft task to anyone with `draft`
 > capability about 'why TypeScript', then evaluate the result with a
 > 4.5 rating."*
 
-> *"Show me the AipeHub leaderboard for this week, who's leading?"*
+> *"Show me the Gotong leaderboard for this week, who's leading?"*
 
-> *"List AipeHub participants. Are any humans online?"*
+> *"List Gotong participants. Are any humans online?"*
 
 The LLM calls the right tools in sequence, the Hub does the work, you
 see the result back in your chat. Useful for:
@@ -58,14 +58,14 @@ see the result back in your chat. Useful for:
 
 ### 2a. Prerequisites
 
-- A running AipeHub host — either `pnpm host` (from source) or
+- A running Gotong host — either `pnpm host` (from source) or
   `docker compose up`. Both work; pick whichever fits your setup.
 - Its admin Bearer token. Printed once at first launch (search the
   host stdout for `First-run admin URL`). Subsequent admins can be
   minted via [`POST /api/admin/admins`](DEPLOY.md#c8-onboard-more-admins).
 
-> ⚠️ **`@aipehub/mcp-server` is currently source-only.** The
-> `"command": "npx", "args": ["-y", "@aipehub/mcp-server"]` style
+> ⚠️ **`@gotong/mcp-server` is currently source-only.** The
+> `"command": "npx", "args": ["-y", "@gotong/mcp-server"]` style
 > shown in every client example below will start working once a JS
 > registry is picked (see
 > [RELEASE-CHECKLIST](../.github/RELEASE-CHECKLIST.md) "Distribution
@@ -74,7 +74,7 @@ see the result back in your chat. Useful for:
 >
 > ```json
 > "command": "node",
-> "args": ["/absolute/path/to/AipeHub/packages/mcp-server/bin/aipehub-mcp.js"]
+> "args": ["/absolute/path/to/Gotong/packages/mcp-server/bin/gotong-mcp.js"]
 > ```
 >
 > The substitution applies in Claude Desktop, Cursor, Cline, and any
@@ -92,12 +92,12 @@ Edit your Claude Desktop config:
 ```json
 {
   "mcpServers": {
-    "aipehub": {
+    "gotong": {
       "command": "npx",
-      "args": ["-y", "@aipehub/mcp-server"],
+      "args": ["-y", "@gotong/mcp-server"],
       "env": {
-        "AIPE_HUB_URL": "http://127.0.0.1:3000",
-        "AIPE_ADMIN_TOKEN": "<paste your bearer token here>"
+        "GOTONG_HUB_URL": "http://127.0.0.1:3000",
+        "GOTONG_ADMIN_TOKEN": "<paste your bearer token here>"
       }
     }
   }
@@ -105,7 +105,7 @@ Edit your Claude Desktop config:
 ```
 
 Restart Claude Desktop. Look for a 🔌 indicator next to the input box —
-clicking it lists registered MCP servers; `aipehub` should be there
+clicking it lists registered MCP servers; `gotong` should be there
 with **5 tools available**.
 
 ### 2c. Cursor
@@ -129,7 +129,7 @@ Any MCP-spec-compliant client works — pass the `command` /  `args` /
 ## 3. Tools
 
 All tools translate one-to-one to HTTP calls against the Hub's admin
-API. The Bearer token in `AIPE_ADMIN_TOKEN` authorises every call.
+API. The Bearer token in `GOTONG_ADMIN_TOKEN` authorises every call.
 
 ### `list_participants`
 
@@ -253,11 +253,11 @@ the rating. The Hub clamps `rating` to `[0, 5]`.
         │
         │ stdio (JSON-RPC 2.0 / MCP spec)
         │
-   aipehub-mcp  (this package, started by the MCP client)
+   gotong-mcp  (this package, started by the MCP client)
         │
         │ HTTP + Bearer admin token
         │
-   AipeHub host  (your already-running Hub)
+   Gotong host  (your already-running Hub)
         │
    ├── Hub state (transcript, agents.json, secrets.enc.json, …)
    ├── LocalAgentPool (host-managed LLM agents)
@@ -290,16 +290,16 @@ the rating. The Hub clamps `rating` to `[0, 5]`.
 
 | Symptom | Likely cause |
 |---|---|
-| MCP client says "aipehub server failed to start" | Wrong `AIPE_HUB_URL` — `aipehub-mcp` pings `/healthz` on startup. Check the URL and that the host is running. |
-| Tools list shows up but every call errors `401` | `AIPE_ADMIN_TOKEN` is wrong or expired. Re-mint an admin token via the admin UI. |
+| MCP client says "gotong server failed to start" | Wrong `GOTONG_HUB_URL` — `gotong-mcp` pings `/healthz` on startup. Check the URL and that the host is running. |
+| Tools list shows up but every call errors `401` | `GOTONG_ADMIN_TOKEN` is wrong or expired. Re-mint an admin token via the admin UI. |
 | `dispatch_task` always returns `no_participant` | No agent has the capability you asked for. Run `list_participants` first to see what's available, or use `direct` with a specific id. |
-| Tools list is empty | The MCP client connected but `tools/list` returned `[]`. Usually means an older `@aipehub/mcp-server` cached by `npx`. Try `npx -y @aipehub/mcp-server@latest` in the client config. |
-| Claude Desktop log shows `Cannot find module '@modelcontextprotocol/sdk'` | `npx -y` should fix this transient. If persistent, install globally: `npm i -g @aipehub/mcp-server` and change `"command"` to `"aipehub-mcp"`, drop the `args` array. |
+| Tools list is empty | The MCP client connected but `tools/list` returned `[]`. Usually means an older `@gotong/mcp-server` cached by `npx`. Try `npx -y @gotong/mcp-server@latest` in the client config. |
+| Claude Desktop log shows `Cannot find module '@modelcontextprotocol/sdk'` | `npx -y` should fix this transient. If persistent, install globally: `npm i -g @gotong/mcp-server` and change `"command"` to `"gotong-mcp"`, drop the `args` array. |
 
 For deeper debugging run the server directly in a terminal:
 
 ```bash
-AIPE_HUB_URL=http://127.0.0.1:3000 AIPE_ADMIN_TOKEN=<token> aipehub-mcp
+GOTONG_HUB_URL=http://127.0.0.1:3000 GOTONG_ADMIN_TOKEN=<token> gotong-mcp
 ```
 
 Then type JSON-RPC messages by hand (`{"jsonrpc":"2.0","id":1,"method":"tools/list"}` + Enter). Stderr shows what happened.
@@ -308,7 +308,7 @@ Then type JSON-RPC messages by hand (`{"jsonrpc":"2.0","id":1,"method":"tools/li
 
 ## 6. Outbound — using third-party MCP tools from your agent
 
-`@aipehub/mcp-client` lets your AipeHub agents drive the MCP server
+`@gotong/mcp-client` lets your Gotong agents drive the MCP server
 ecosystem from the inside. Where chapters 1–5 cover "Claude Desktop
 controls my Hub", this chapter covers "my Hub's `writer-bot` reads
 the repo via Filesystem MCP, opens a PR via GitHub MCP, posts a
@@ -317,7 +317,7 @@ notification via Slack MCP — in one task."
 ### 6a. Install
 
 ```bash
-pnpm add @aipehub/mcp-client
+pnpm add @gotong/mcp-client
 ```
 
 That's it for the client. The servers themselves are typically
@@ -326,7 +326,7 @@ fetched on-demand via `npx -y`, so they don't go in `package.json`.
 ### 6b. Quick start (no LLM, just the toolset)
 
 ```ts
-import { McpToolset } from '@aipehub/mcp-client'
+import { McpToolset } from '@gotong/mcp-client'
 
 const toolset = new McpToolset({
   servers: [
@@ -371,22 +371,22 @@ There's a runnable demo at
 
 ```bash
 pnpm install
-pnpm --filter @aipehub/example-mcp-tools-quickstart start
+pnpm --filter @gotong/example-mcp-tools-quickstart start
 ```
 
 ### 6c. Wiring into an `LlmAgent` (the easy path, v0.3+)
 
-`LlmAgent` (in `@aipehub/llm`) has a built-in multi-turn tool-use loop.
+`LlmAgent` (in `@gotong/llm`) has a built-in multi-turn tool-use loop.
 Pass an `McpToolset` (or anything satisfying `LlmAgentToolset`) as
 `tools:` and it'll declare the tools to the LLM, execute every
 `tool_use` block, feed the results back, and loop until the model is
 done — all inside one `hub.dispatch(...)`.
 
 ```ts
-import { Hub } from '@aipehub/core'
-import { LlmAgent } from '@aipehub/llm'
-import { AnthropicProvider } from '@aipehub/llm-anthropic'
-import { McpToolset } from '@aipehub/mcp-client'
+import { Hub } from '@gotong/core'
+import { LlmAgent } from '@gotong/llm'
+import { AnthropicProvider } from '@gotong/llm-anthropic'
+import { McpToolset } from '@gotong/mcp-client'
 
 // 1) Spawn the MCP servers
 const toolset = new McpToolset({
@@ -437,8 +437,8 @@ const out = result.output as { text: string; toolRounds?: number }
 console.log(`Model answered after ${out.toolRounds ?? 0} tool call(s)`)
 ```
 
-Provider support: **Anthropic** (`@aipehub/llm-anthropic`) and
-**OpenAI / OpenAI-compatible** (`@aipehub/llm-openai`) both wire
+Provider support: **Anthropic** (`@gotong/llm-anthropic`) and
+**OpenAI / OpenAI-compatible** (`@gotong/llm-openai`) both wire
 through to their native tool-use APIs. Custom providers (DeepSeek,
 Qwen, Zhipu via `baseURL` override) inherit OpenAI's tool-use shape
 as long as the upstream supports `tool_calls`.
@@ -451,12 +451,12 @@ read README.md unprompted:
 ```bash
 export ANTHROPIC_API_KEY=sk-ant-…
 pnpm install
-pnpm --filter @aipehub/example-mcp-tools-llm-agent start
+pnpm --filter @gotong/example-mcp-tools-llm-agent start
 ```
 
 #### Bring-your-own toolset
 
-`LlmAgent` accepts any `LlmAgentToolset` (from `@aipehub/llm`):
+`LlmAgent` accepts any `LlmAgentToolset` (from `@gotong/llm`):
 
 ```ts
 interface LlmAgentToolset {
@@ -469,18 +469,18 @@ interface LlmAgentToolset {
 ```
 
 …so you can plug in a hand-rolled function registry, an internal HTTP
-API wrapper, etc., without depending on `@aipehub/mcp-client`. The
+API wrapper, etc., without depending on `@gotong/mcp-client`. The
 MCP toolset already implements this shape — it's a drop-in.
 
 ### 6c-yaml. Declaring servers in an agent template (no code)
 
-If your agent ships as a `aipehub.agent/v1` manifest (host-managed via
+If your agent ships as a `gotong.agent/v1` manifest (host-managed via
 the admin UI), drop the `mcpServers:` field into the agent block —
 the host's `LocalAgentPool` will spawn the toolset at boot and inject
 it into the `LlmAgent` for you. No code required.
 
 ```yaml
-schema: aipehub.agent/v1
+schema: gotong.agent/v1
 agent:
   id: repo-reader
   displayName: 仓库阅读助手
@@ -531,7 +531,7 @@ canonical loop.
 
 ### 6d. Server lifecycle, security, debugging
 
-`@aipehub/mcp-client`'s README covers operational details:
+`@gotong/mcp-client`'s README covers operational details:
 
 - **Lifecycle** — servers spawn at `connect()`, get `kill()`-ed at
   `disconnect()`. A server that crashes mid-session is marked `dead`;

@@ -7,7 +7,7 @@
  * on its own local Hub (where a team of sub-agents and/or human workers
  * live), waits for the local result, and forwards that result back up.
  *
- * This is how AipeHub federates: any Hub is a participant on a bigger Hub
+ * This is how Gotong federates: any Hub is a participant on a bigger Hub
  * just by wrapping it in a bridge. The local team's leader keeps their own
  * admin/worker UI on the local Hub; the upstream room sees a single agent
  * named, e.g., "alice-team" with capabilities ["draft","review"].
@@ -25,10 +25,10 @@
  *
  * Usage:
  *
- *   import { Hub, Space } from '@aipehub/core'
- *   import { connect, TeamBridgeAgent } from '@aipehub/sdk-node'
+ *   import { Hub, Space } from '@gotong/core'
+ *   import { connect, TeamBridgeAgent } from '@gotong/sdk-node'
  *
- *   const { space } = await Space.openOrInit('.aipehub-local-team', { ... })
+ *   const { space } = await Space.openOrInit('.gotong-local-team', { ... })
  *   const localHub = new Hub({ space })
  *   await localHub.start()
  *   localHub.register(new WriterBot())
@@ -52,7 +52,7 @@ import {
   type Task,
   type TaskResult,
   type DispatchStrategy,
-} from '@aipehub/core'
+} from '@gotong/core'
 import type { ServiceClient, ServiceUseRequest } from './service-client.js'
 
 export interface TeamBridgeOptions {
@@ -94,7 +94,7 @@ export interface TeamBridgeOptions {
 /**
  * Brand-check helper used by `connect()` to spot bridges even when
  * `instanceof TeamBridgeAgent` would falsely return `false` (multiple copies
- * of `@aipehub/sdk-node` resolved into the same dep graph — rare but
+ * of `@gotong/sdk-node` resolved into the same dep graph — rare but
  * possible under pnpm peer mismatch or workspace overrides).
  *
  * Exported so external integrations can do the same recognition trick;
@@ -105,7 +105,7 @@ export function isTeamBridge(agent: unknown): agent is TeamBridgeAgent {
   return (
     typeof agent === 'object' &&
     agent !== null &&
-    (agent as { __isAipehubBridge?: unknown }).__isAipehubBridge === true
+    (agent as { __isGotongBridge?: unknown }).__isGotongBridge === true
   )
 }
 
@@ -148,12 +148,12 @@ export class TeamBridgeAgent extends AgentParticipant {
   /**
    * Brand for cross-package / cross-version detection. `connect()` uses
    * this in addition to `instanceof` so that bridges built against a
-   * different copy of `@aipehub/sdk-node` (pnpm peer mismatch, monorepo
+   * different copy of `@gotong/sdk-node` (pnpm peer mismatch, monorepo
    * override edge cases) still get their `forwardUpstreamServices` honored.
    *
    * Never read this directly — call `isTeamBridge(agent)` instead.
    */
-  readonly __isAipehubBridge = true as const
+  readonly __isGotongBridge = true as const
 
   constructor(opts: TeamBridgeOptions) {
     super({ id: opts.id, capabilities: opts.capabilities ?? [] })

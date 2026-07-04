@@ -57,7 +57,7 @@ describe('resolveOwner', () => {
   })
 
   // ========================================================================
-  // A3 (v4 Phase 5) — identity-rooted kinds aligned with @aipehub/identity.
+  // A3 (v4 Phase 5) — identity-rooted kinds aligned with @gotong/identity.
   // user / org / peer values must mirror identity's vault `OwnerKind` so a
   // single (kind, id) tuple round-trips between vault rows and service
   // attach calls.

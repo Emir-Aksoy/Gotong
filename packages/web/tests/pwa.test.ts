@@ -25,7 +25,7 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { Hub, Space } from '@aipehub/core'
+import { Hub, Space } from '@gotong/core'
 
 import { serveWeb, type WebServerHandle } from '../src/server.js'
 
@@ -38,7 +38,7 @@ interface Booted {
 }
 
 async function boot(): Promise<Booted> {
-  const tmp = await mkdtemp(join(tmpdir(), 'aipehub-web-pwa-'))
+  const tmp = await mkdtemp(join(tmpdir(), 'gotong-web-pwa-'))
   const init = await Space.init(tmp, { name: 'pwa-test' })
   const space = init.space
   const hub = new Hub({ space })
@@ -47,7 +47,7 @@ async function boot(): Promise<Booted> {
   const { admin } = await space.createAdmin('PwaAdmin')
   const sid = 'pwa-sid-' + Math.random().toString(36).slice(2)
   await space.addAdminSession(sid, admin.id)
-  const adminCookie = `aipehub_admin=${sid}`
+  const adminCookie = `gotong_admin=${sid}`
 
   const server = await serveWeb(hub, { host: '127.0.0.1', port: 0 })
   return { tmp, hub, server, baseUrl: server.url, adminCookie }
@@ -72,7 +72,7 @@ describe('PWA assets (Phase 12 M9)', () => {
       display?: string
       icons?: Array<{ src: string; type?: string }>
     }
-    expect(m.name).toBe('AipeHub')
+    expect(m.name).toBe('Gotong')
     expect(m.start_url).toBe('/')
     expect(m.display).toBe('standalone')
     expect(Array.isArray(m.icons)).toBe(true)

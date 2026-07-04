@@ -1,8 +1,8 @@
 {
-  "name": "@aipehub/personal-memory",
+  "name": "@gotong/personal-memory",
   "version": "0.1.0",
   "type": "module",
-  "description": "AipeHub personal-butler memory — file-first MemorySession + prefix-cache-preserving frozen block + remember/recall/forget MemoryToolset + MemoryAugmentedAgent. The memory engine the resident butler stands on (对标 OpenClaw / Hermes).",
+  "description": "Gotong personal-butler memory — file-first MemorySession + prefix-cache-preserving frozen block + remember/recall/forget MemoryToolset + MemoryAugmentedAgent. The memory engine the resident butler stands on (对标 OpenClaw / Hermes).",
   "license": "MIT",
   "private": true,
   "main": "./dist/index.js",
@@ -25,9 +25,9 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "@aipehub/core": "workspace:*",
-    "@aipehub/llm": "workspace:*",
-    "@aipehub/services-sdk": "workspace:*"
+    "@gotong/core": "workspace:*",
+    "@gotong/llm": "workspace:*",
+    "@gotong/services-sdk": "workspace:*"
   },
   "devDependencies": {
     "vitest": "^3.2.4"

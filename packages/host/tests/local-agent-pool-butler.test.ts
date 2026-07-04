@@ -26,8 +26,8 @@ import {
   type AgentRecord,
   type ManagedAgentSpec,
   type Task,
-} from '@aipehub/core'
-import type { LlmAgentOptions } from '@aipehub/llm'
+} from '@gotong/core'
+import type { LlmAgentOptions } from '@gotong/llm'
 
 import { LocalAgentPool, type ButlerFactory } from '../src/local-agent-pool.js'
 
@@ -67,7 +67,7 @@ describe('LocalAgentPool — butler fold-in (BF-M3)', () => {
   let hub: Hub
 
   beforeEach(async () => {
-    root = await mkdtemp(join(tmpdir(), 'aipe-lap-butler-'))
+    root = await mkdtemp(join(tmpdir(), 'gotong-lap-butler-'))
     await rm(root, { recursive: true, force: true })
     const opened = await Space.init(root, { name: 'test' })
     space = opened.space

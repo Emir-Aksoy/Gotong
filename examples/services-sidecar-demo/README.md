@@ -5,7 +5,7 @@ Hub Services over WebSocket, driven by **external** sidecar agents. Two agents (
 ## Run
 
 ```bash
-pnpm --filter @aipehub/example-services-sidecar-demo start
+pnpm --filter @gotong/example-services-sidecar-demo start
 ```
 
 Zero env vars — uses `MockLlmProvider` so no API key is needed.
@@ -28,7 +28,7 @@ Zero env vars — uses `MockLlmProvider` so no API key is needed.
         └───────────────────────────────────────────────────────────┘
 ```
 
-Both sidecar agents co-locate in this single process for demo brevity. In production they'd be separate OS processes (or even Python, via `pip install aipehub`).
+Both sidecar agents co-locate in this single process for demo brevity. In production they'd be separate OS processes (or even Python, via `pip install gotong`).
 
 ## What this proves
 

@@ -17,8 +17,8 @@
  * notify-back, generalised to cover IM resolves too.)
  */
 
-import type { ImBridge, ImBindingResolver, ImMessage, ImUser } from '@aipehub/im-adapter'
-import { parseImCommand } from '@aipehub/im-adapter'
+import type { ImBridge, ImBindingResolver, ImMessage, ImUser } from '@gotong/im-adapter'
+import { parseImCommand } from '@gotong/im-adapter'
 
 import type {
   FamilyOversightPort,
@@ -44,10 +44,10 @@ export interface OversightImRouterConfig {
 }
 
 export const defaultOversightHelpText = [
-  'AipeHub 家长监督 — 你的孩子要学白名单外（或被规则标记）的课题时，会先来这里等你批准：',
+  'Gotong 家长监督 — 你的孩子要学白名单外（或被规则标记）的课题时，会先来这里等你批准：',
   '',
   '  /help            — 显示这份帮助',
-  '  /bind <code>     — 绑定你的 AipeHub 账号（在个人界面 → 绑定 IM 取 6 位码）',
+  '  /bind <code>     — 绑定你的 Gotong 账号（在个人界面 → 绑定 IM 取 6 位码）',
   '  /unbind          — 解绑',
   '  /pending         — 列出等你批准的课程',
   '  /approve <编号>  — 批准第 N 节课（孩子才能上）',
@@ -137,7 +137,7 @@ export class OversightImRouter {
     if (userId === null) {
       await this.reply(
         msg,
-        '你还没绑定 AipeHub 账号。去个人界面 → 绑定 IM 取一个 6 位码，然后发我 `/bind <code>`。',
+        '你还没绑定 Gotong 账号。去个人界面 → 绑定 IM 取一个 6 位码，然后发我 `/bind <code>`。',
       )
       return
     }

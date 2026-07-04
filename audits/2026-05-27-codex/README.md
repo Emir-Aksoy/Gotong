@@ -1,6 +1,6 @@
 # Codex Audit
 
-审计范围: AipeHub 当前工作区 `/Users/emiraksoy/Desktop/AipeHub`
+审计范围: Gotong 当前工作区 `/Users/emiraksoy/Desktop/AipeHub`
 
 审计目标:
 
@@ -10,13 +10,13 @@
 
 ## 总结
 
-总体没有偏离到"已经不是 AipeHub"的程度。`@aipehub/core` 仍主要承担 Hub / scheduler / transcript / participant 职责, LLM 执行仍在 `@aipehub/llm`、`@aipehub/host` 和 agent 层。
+总体没有偏离到"已经不是 Gotong"的程度。`@gotong/core` 仍主要承担 Hub / scheduler / transcript / participant 职责, LLM 执行仍在 `@gotong/llm`、`@gotong/host` 和 agent 层。
 
 但边界已有几处明显变软:
 
-1. `@aipehub/protocol` 宣称 zero runtime, 但 runtime 依赖 `@aipehub/core`。
+1. `@gotong/protocol` 宣称 zero runtime, 但 runtime 依赖 `@gotong/core`。
 2. 架构文档作为真相源已经滞后, 与当前 HEAD / Phase 13 状态不一致。
-3. `@aipehub/workflow` 开始承载 AI authoring, 不再只是 workflow schema / runner / validator。
+3. `@gotong/workflow` 开始承载 AI authoring, 不再只是 workflow schema / runner / validator。
 4. Python SDK 的根级测试脚本不能一键复现, 依赖隐式 `PYTHONPATH` 或 editable install。
 5. `web/server.ts`、`web/static/admin.js`、`host/main.ts` 等文件持续膨胀, 增加审查成本。
 

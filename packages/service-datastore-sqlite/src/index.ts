@@ -1,5 +1,5 @@
 /**
- * `@aipehub/service-datastore-sqlite`
+ * `@gotong/service-datastore-sqlite`
  *
  * First-party `datastore:sqlite` ServicePlugin. Default export is a
  * factory matching the loader convention (see

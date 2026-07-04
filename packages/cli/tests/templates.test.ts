@@ -1,5 +1,5 @@
 /**
- * Template generator tests. We don't shell out to `aipehub new` here —
+ * Template generator tests. We don't shell out to `gotong new` here —
  * `templates/{ts,py}-agent.ts` are pure functions, so we can assert on
  * the rendered strings directly. The fs side of `new-agent.ts` is
  * exercised by hand in CI when needed.
@@ -57,12 +57,12 @@ describe('ts-agent template', () => {
       includeServices: true,
     })
     const pkg = JSON.parse(out.packageJson) as { dependencies?: Record<string, string>, bin?: unknown }
-    expect(pkg.dependencies?.['@aipehub/sdk-node']).toMatch(/^[\^~]?\d/)
+    expect(pkg.dependencies?.['@gotong/sdk-node']).toMatch(/^[\^~]?\d/)
   })
 
   // P2: the template used to hard-code `^2.0.0` and never get bumped
   // alongside sdk-node majors. After v3.0 shipped, every new user who
-  // ran `aipehub new ts-agent` got an ERESOLVE failure on first
+  // ran `gotong new ts-agent` got an ERESOLVE failure on first
   // `pnpm install`. Pin the template's spec to the current sdk-node
   // major so the test fails the moment they drift again.
   it('sdk-node pin tracks the current workspace major', async () => {
@@ -78,7 +78,7 @@ describe('ts-agent template', () => {
       name: 'echo', id: 'echo', capabilities: 'x', includeServices: false,
     })
     const pkg = JSON.parse(out.packageJson) as { dependencies?: Record<string, string> }
-    const spec = pkg.dependencies?.['@aipehub/sdk-node'] ?? ''
+    const spec = pkg.dependencies?.['@gotong/sdk-node'] ?? ''
     expect(spec).toBe(`^${currentMajor}.0.0`)
   })
 
@@ -106,12 +106,12 @@ describe('py-agent template', () => {
     expect(out.pyproject).toContain('packages = ["src/industry_coach"]')
   })
 
-  // P3: the template's `aipehub>=1.1.0` pin must be at or below the
+  // P3: the template's `gotong>=1.1.0` pin must be at or below the
   // shipped wheel's version. Pre-3.1 the wheel was 1.0.0 while the
   // template demanded >=1.1.0 — every new user's `pip install -e .`
   // failed with "no matching distribution". Assert the constraint
   // floor never exceeds the wheel version.
-  it('aipehub pin floor is satisfied by the shipped wheel', async () => {
+  it('gotong pin floor is satisfied by the shipped wheel', async () => {
     const { readFileSync } = await import('node:fs')
     const { fileURLToPath } = await import('node:url')
     const { dirname, join } = await import('node:path')
@@ -126,7 +126,7 @@ describe('py-agent template', () => {
     const out = renderPyTemplate({
       name: 'echo', id: 'echo', capabilities: 'x', includeServices: false,
     })
-    const floorMatch = /aipehub>=([0-9.]+)/.exec(out.pyproject)
+    const floorMatch = /gotong>=([0-9.]+)/.exec(out.pyproject)
     expect(floorMatch).not.toBeNull()
     const floor = floorMatch![1]!
     expect(compareVer(floor, wheelVersion)).toBeLessThanOrEqual(0)
@@ -154,14 +154,14 @@ describe('py-agent template', () => {
     expect(out.source).not.toContain('ServiceUseRequest')
   })
 
-  it('depends on aipehub >=1.1 (Python SDK with services)', () => {
+  it('depends on gotong >=1.1 (Python SDK with services)', () => {
     const out = renderPyTemplate({
       name: 'p',
       id: 'p',
       capabilities: 'x',
       includeServices: true,
     })
-    expect(out.pyproject).toMatch(/aipehub>=1\.1/)
+    expect(out.pyproject).toMatch(/gotong>=1\.1/)
   })
 
   it('emits __init__.py and __main__.py for `python -m <pkg>` to work', () => {

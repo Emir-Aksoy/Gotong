@@ -33,7 +33,7 @@ import {
   type IdTokenClaims,
   type Session,
   type User,
-} from '@aipehub/identity'
+} from '@gotong/identity'
 import type { OidcProviderConfig } from './oidc-client.js'
 
 /** The narrow identity facade this service needs (the real IdentityStore satisfies it). */

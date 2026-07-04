@@ -20,7 +20,7 @@
  * hub wiring is identical (see `real-agents.ts`).
  */
 
-import type { LlmProvider, LlmRequest, LlmStreamChunk } from '@aipehub/llm'
+import type { LlmProvider, LlmRequest, LlmStreamChunk } from '@gotong/llm'
 
 import {
   dispatchPrompt,

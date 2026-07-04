@@ -1,14 +1,14 @@
-# `@aipehub/mcp-client`
+# `@gotong/mcp-client`
 
 > Attach a fleet of [Model Context Protocol](https://modelcontextprotocol.io)
-> servers to an AipeHub agent so its tool-use loop can drive
+> servers to an Gotong agent so its tool-use loop can drive
 > GitHub / Filesystem / Slack / Postgres / arbitrary stdio-MCP
 > servers natively.
 
-The complement to [`@aipehub/mcp-server`](../mcp-server). That package
+The complement to [`@gotong/mcp-server`](../mcp-server). That package
 lets an MCP **client** (Claude Desktop / Cursor / Cline / Continue)
-drive your AipeHub Hub from the outside. This package lets your
-AipeHub **agents** drive third-party MCP servers from the inside — so
+drive your Gotong Hub from the outside. This package lets your
+Gotong **agents** drive third-party MCP servers from the inside — so
 your `writer-bot` can read repo files via the Filesystem MCP, open a
 GitHub issue via the GitHub MCP, post a Slack notification via the
 Slack MCP, all in one task.
@@ -20,13 +20,13 @@ into your Hub from either end.
 
 ## Why this matters
 
-AipeHub's Hub stays dumb on purpose — it routes tasks, it doesn't run
+Gotong's Hub stays dumb on purpose — it routes tasks, it doesn't run
 LLMs. Tool use lives inside individual agents. The MCP ecosystem
 (hundreds of officially-maintained servers as of writing) is
 how those agents get their tool surface.
 
 Before this package an agent that wanted a GitHub tool had to hand-
-roll a GitHub API client. With `@aipehub/mcp-client`, the agent
+roll a GitHub API client. With `@gotong/mcp-client`, the agent
 declares which MCP servers it wants and gets a unified, namespaced
 tool list ready to hand to whatever LLM provider it uses:
 
@@ -59,7 +59,7 @@ straight to the Anthropic / OpenAI / DeepSeek tool-use API.
 ## Install
 
 ```bash
-pnpm add @aipehub/mcp-client
+pnpm add @gotong/mcp-client
 # also need a real MCP server to talk to, e.g.:
 pnpm add -D @modelcontextprotocol/server-filesystem @modelcontextprotocol/server-github
 ```
@@ -72,7 +72,7 @@ You don't need to install the MCP servers themselves if you use
 ## Quick start
 
 ```ts
-import { McpToolset } from '@aipehub/mcp-client'
+import { McpToolset } from '@gotong/mcp-client'
 
 const toolset = new McpToolset({
   servers: [
@@ -106,16 +106,16 @@ runs end-to-end against the in-tree fake server (no npm download).
 
 ## Wiring into an `LlmAgent` (the easy path)
 
-`LlmAgent` (in `@aipehub/llm`, v0.3+) has a built-in multi-turn
+`LlmAgent` (in `@gotong/llm`, v0.3+) has a built-in multi-turn
 tool-use loop. Hand it an `McpToolset` and Claude / GPT will decide
 when to call tools, parse the results, and respond — all in one
 `hub.dispatch(...)`:
 
 ```ts
-import { Hub } from '@aipehub/core'
-import { LlmAgent } from '@aipehub/llm'
-import { AnthropicProvider } from '@aipehub/llm-anthropic'
-import { McpToolset } from '@aipehub/mcp-client'
+import { Hub } from '@gotong/core'
+import { LlmAgent } from '@gotong/llm'
+import { AnthropicProvider } from '@gotong/llm-anthropic'
+import { McpToolset } from '@gotong/mcp-client'
 
 const toolset = new McpToolset({
   servers: [
@@ -153,8 +153,8 @@ The agent does **not** own the toolset's lifecycle — connect /
 disconnect is the caller's responsibility, so a single toolset can be
 shared across many agents in the same host.
 
-Provider coverage: **Anthropic** (`@aipehub/llm-anthropic`) and
-**OpenAI / OpenAI-compatible** (`@aipehub/llm-openai`, also covers
+Provider coverage: **Anthropic** (`@gotong/llm-anthropic`) and
+**OpenAI / OpenAI-compatible** (`@gotong/llm-openai`, also covers
 DeepSeek / Qwen / Zhipu / Moonshot via `baseURL` override) both wire
 through to their native tool-use APIs.
 
@@ -164,7 +164,7 @@ There's an end-to-end runnable demo at
 ```bash
 export ANTHROPIC_API_KEY=sk-ant-…
 pnpm install
-pnpm --filter @aipehub/example-mcp-tools-llm-agent start
+pnpm --filter @gotong/example-mcp-tools-llm-agent start
 ```
 
 ## Wiring into a custom `AgentParticipant` (if you can't use `LlmAgent`)
@@ -173,8 +173,8 @@ If you've subclassed `AgentParticipant` directly and run your own LLM
 driver, the canonical pattern is:
 
 ```ts
-import { AgentParticipant, type Task } from '@aipehub/core'
-import { McpToolset } from '@aipehub/mcp-client'
+import { AgentParticipant, type Task } from '@gotong/core'
+import { McpToolset } from '@gotong/mcp-client'
 
 class WriterBot extends AgentParticipant {
   private readonly toolset = new McpToolset({
@@ -218,7 +218,7 @@ specialized agent.
 | `servers` | `McpServerConfig[]` | (required, ≥1) | Each entry is a local `stdio` child process or a remote `http`/`sse` endpoint (see below). Names must be unique and match `/^[a-zA-Z][a-zA-Z0-9_-]*$/`. |
 | `listToolsTimeoutMs` | `number` | `10_000` | Per-server `tools/list` timeout. |
 | `callToolTimeoutMs` | `number` | `60_000` | Per-call `tools/call` timeout. Bump for long-running tools (DB queries, builds). |
-| `clientInfo` | `{ name, version }` | `@aipehub/mcp-client / 0.1.0` | Identity advertised to the MCP server during handshake. |
+| `clientInfo` | `{ name, version }` | `@gotong/mcp-client / 0.1.0` | Identity advertised to the MCP server during handshake. |
 
 #### Transports
 
@@ -239,7 +239,7 @@ specialized agent.
 
 `http`/`sse` spawn no child process — `headers` is where a bearer token
 goes. This package does **not** expand `${ENV}` placeholders; resolve
-credentials before constructing the toolset (the AipeHub host expands
+credentials before constructing the toolset (the Gotong host expands
 `${ENV}` refs in `env`/`headers` at agent-spawn time). A remote server
 with a missing/invalid `url` is marked `dead` (`bad_config`) at
 `connect()` rather than throwing — same graceful-degradation contract as
@@ -294,7 +294,7 @@ crash again, and an auto-respawn loop would mask the real problem.
 ### Security
 
 The toolset spawns whatever `command` you give it. **The supplied
-`command` runs with the same privileges as your AipeHub host
+`command` runs with the same privileges as your Gotong host
 process.** For an SDK worker running on a user's laptop this is fine
 (it's their laptop); for a hosted Hub serving multiple admins,
 treat the server commands as carefully as you'd treat any other
@@ -315,7 +315,7 @@ arbitrary-code-execution vector. In practice this means:
 to tail every line of stderr from every spawned MCP server:
 
 ```ts
-import { McpToolset } from '@aipehub/mcp-client'
+import { McpToolset } from '@gotong/mcp-client'
 
 const toolset = new McpToolset({ servers: [/* … */] })
 

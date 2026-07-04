@@ -40,14 +40,14 @@
  * Run:  pnpm demo:workflow-architect   (exits 0 iff every assertion holds)
  */
 
-import { Hub } from '@aipehub/core'
-import { MockLlmProvider, type LlmRequest } from '@aipehub/llm'
+import { Hub } from '@gotong/core'
+import { MockLlmProvider, type LlmRequest } from '@gotong/llm'
 import {
   parseWorkflow,
   projectWorkflowGraph,
   type WorkflowDefinition,
   type WorkflowGraphView,
-} from '@aipehub/workflow'
+} from '@gotong/workflow'
 import {
   detailInstruction,
   WorkflowAssistantAgent,
@@ -55,7 +55,7 @@ import {
   type WorkflowAssistantOutput,
   type WorkflowAssistantPayload,
   type WorkflowDetailLevel,
-} from '@aipehub/workflow-assistant'
+} from '@gotong/workflow-assistant'
 
 // ── tiny self-assert harness (examples have no vitest) ──────────────────────
 
@@ -75,7 +75,7 @@ function assertEqual<T>(actual: T, expected: T, msg: string): void {
 // ── deterministic workflow YAMLs (real text → real parseWorkflow) ───────────
 
 /** What the architect "authors" — a 2-step local workflow (4 nodes, 4 edges). */
-const AUTHOR_YAML = `schema: aipehub.workflow/v1
+const AUTHOR_YAML = `schema: gotong.workflow/v1
 workflow:
   id: morning-digest
   name: 晨间摘要
@@ -94,7 +94,7 @@ workflow:
 `
 
 /** The EXISTING workflow we ask the architect to EXPLAIN (the subject). */
-const EXISTING_YAML = `schema: aipehub.workflow/v1
+const EXISTING_YAML = `schema: gotong.workflow/v1
 workflow:
   id: existing-review
   trigger:
@@ -116,7 +116,7 @@ workflow:
  * agent (wrongly) trusted the LLM echo, `out.yaml` would become this. It must
  * NOT: explain mode keeps `subjectYaml` authoritative.
  */
-const DECOY_YAML = `schema: aipehub.workflow/v1
+const DECOY_YAML = `schema: gotong.workflow/v1
 workflow:
   id: decoy-flow
   trigger:
@@ -129,7 +129,7 @@ workflow:
 `
 
 /** A member-authored workflow whose second step leaves the hub (an off-hub hop). */
-const CROSS_HUB_YAML = `schema: aipehub.workflow/v1
+const CROSS_HUB_YAML = `schema: gotong.workflow/v1
 workflow:
   id: member-cross
   trigger:

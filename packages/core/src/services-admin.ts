@@ -3,13 +3,13 @@
  * uses to drive the Hub Services admin REST API.
  *
  * Why a separate, narrowed surface (instead of letting the web layer
- * import `HubServices` from `@aipehub/host`):
+ * import `HubServices` from `@gotong/host`):
  *
- *   1. `@aipehub/web` lives upstream of `@aipehub/host` in the
+ *   1. `@gotong/web` lives upstream of `@gotong/host` in the
  *      dependency graph (host already depends on web). Reversing
  *      that would close a workspace cycle.
  *   2. The surface stays plain-data — no types from
- *      `@aipehub/services-sdk` leak through. The web layer's only
+ *      `@gotong/services-sdk` leak through. The web layer's only
  *      knowledge of services is what's described here.
  *
  * The host's `HubServices` implements this interface. Web's

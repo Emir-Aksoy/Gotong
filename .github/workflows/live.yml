@@ -26,7 +26,7 @@
 #
 # Cost: tiny prompts, a small max-tokens cap, and cheap models by default
 # (Claude Haiku / gpt-4o-mini). Point the OpenAI-compatible provider at
-# DeepSeek for the cheapest path — set OPENAI_BASE_URL + AIPE_LIVE_OPENAI_MODEL.
+# DeepSeek for the cheapest path — set OPENAI_BASE_URL + GOTONG_LIVE_OPENAI_MODEL.
 #
 # Supply-chain hardening mirrors ci.yml: all third-party actions pinned to a
 # 40-char commit SHA (with `# vX.Y.Z` for humans); harden-runner runs first in
@@ -74,7 +74,7 @@ jobs:
         uses: ./.github/actions/setup-workspace
 
       - name: Build
-        # Live tests import the built dist of @aipehub/llm and the provider
+        # Live tests import the built dist of @gotong/llm and the provider
         # packages, so the workspace must be built before vitest runs.
         run: pnpm -r build
 
@@ -100,6 +100,6 @@ jobs:
           # Optional: point the OpenAI-compatible provider at DeepSeek etc.
           OPENAI_BASE_URL: ${{ secrets.OPENAI_BASE_URL }}
           # Optional model overrides (repo/Actions variables, not secrets).
-          AIPE_LIVE_ANTHROPIC_MODEL: ${{ vars.AIPE_LIVE_ANTHROPIC_MODEL }}
-          AIPE_LIVE_OPENAI_MODEL: ${{ vars.AIPE_LIVE_OPENAI_MODEL }}
+          GOTONG_LIVE_ANTHROPIC_MODEL: ${{ vars.GOTONG_LIVE_ANTHROPIC_MODEL }}
+          GOTONG_LIVE_OPENAI_MODEL: ${{ vars.GOTONG_LIVE_OPENAI_MODEL }}
           CI: "true"

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { AgentParticipant, Hub, type Task } from '@aipehub/core'
+import { AgentParticipant, Hub, type Task } from '@gotong/core'
 
 import { TeamBridgeAgent } from '../src/bridge.js'
 

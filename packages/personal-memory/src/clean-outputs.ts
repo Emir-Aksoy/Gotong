@@ -28,7 +28,7 @@
  * framework-friendly (北极星: 框架不跑 LLM) and trivially deterministic.
  */
 
-import type { MemoryEntry, MemoryHandle, MemoryKind } from '@aipehub/services-sdk'
+import type { MemoryEntry, MemoryHandle, MemoryKind } from '@gotong/services-sdk'
 
 import type { MemoryReviewer, ReviewContext, ReviewOutcome } from './review.js'
 

@@ -20,7 +20,7 @@
 | M5 | `3650578` | `examples/architect-team` 端到端 demo (architect + writer/reviewer/tester) |
 | M6 | (this commit) | 本文 + CLAUDE.md 标 Phase 10 完 |
 
-总改动: 6 commits + 1 fix。+12 example/fix 文件 (Phase 8 残留) + 5 新文件 (M5 example) +若干新建测试。`@aipehub/llm` 加 2 个导出 (`DispatchToolset`, `ComposedToolset`)，`@aipehub/core` 加 1 个 type (`AncestryNode`)。
+总改动: 6 commits + 1 fix。+12 example/fix 文件 (Phase 8 残留) + 5 新文件 (M5 example) +若干新建测试。`@gotong/llm` 加 2 个导出 (`DispatchToolset`, `ComposedToolset`)，`@gotong/core` 加 1 个 type (`AncestryNode`)。
 
 ---
 
@@ -60,7 +60,7 @@ Phase 10 把这层翻转：agent 通过 `dispatch_task` tool 主动调度，aggr
 | 不暴露给 LLM 的字段 | `weight`、`countContribution`、`origin` | 这些是 publisher / federation 政策，agent 没资格自己设 |
 | Ancestry 字段语义 | `{ taskId, by }` 不是 `{ taskId, from }` | `by` = 实际执行者，才是 cycle 检测要看的对象。`from` 是 dispatcher（agent 可以正常递归自调） |
 | Ancestry 透传 | dispatcher 显式传，Hub 不查 task registry | Hub 不持有所有历史 task 对象 |
-| Depth gate 默认值 | 5 | architect-team 实际需要 2 跳；超过基本是 runaway。env `AIPE_MAX_DISPATCH_DEPTH=N` 可覆盖 |
+| Depth gate 默认值 | 5 | architect-team 实际需要 2 跳；超过基本是 runaway。env `GOTONG_MAX_DISPATCH_DEPTH=N` 可覆盖 |
 | 拒收时落 transcript | 创建 task + 立即 failed 结果 | 跟 deadline_expired 一致；审计有迹可循 |
 | Cycle gate 范围 | 只查 explicit target，不查 from / capability | self-dispatch 是合理范式；capability 不知谁会接，留给 depth gate |
 | Toolset task 隔离 | `runForTask(task, fn)` + ALS.run | `enterWith` 会污染兄弟 async chain；`run` 是 push/pop 正解 |
@@ -137,7 +137,7 @@ Phase 10 把这层翻转：agent 通过 `dispatch_task` tool 主动调度，aggr
 
 ### 环境变量
 
-- `AIPE_MAX_DISPATCH_DEPTH` —— 默认 5；范围 1-50；out-of-range 静默
+- `GOTONG_MAX_DISPATCH_DEPTH` —— 默认 5；范围 1-50；out-of-range 静默
   fallback 到 5。用于在生产把 cap 调严（深度 limit 2 让任何 multi-hop
   调度全部被拒），也可用于偶尔需要 deeper chains 的研发场景。
 

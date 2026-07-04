@@ -1,4 +1,4 @@
-# 配对编码导师 — 可载入模板 (aipehub.template/v1)
+# 配对编码导师 — 可载入模板 (gotong.template/v1)
 #
 # codex-deepseek-hub 的「方法论大脑」做成一个**可载入文件**(不是内置 TS):
 #   1 个配对导师 agent  +  1 个可寻址知识库槽位(配对编码方法论 / Obsidian)。
@@ -20,7 +20,7 @@
 #     -H 'content-type: application/json' \
 #     -d "$(jq -Rs '{template: .}' examples/codex-deepseek-hub/template/codex-deepseek-hub.template.yaml)" \
 #     http://127.0.0.1:8745/api/admin/templates/import
-schema: aipehub.template/v1
+schema: gotong.template/v1
 template:
   name: 配对编码导师(Codex × DeepSeek TUI)
   description: |-

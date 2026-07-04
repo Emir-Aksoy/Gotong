@@ -10,8 +10,8 @@
 
 import { describe, it, expect } from 'vitest'
 
-import type { Task } from '@aipehub/core'
-import { acpParkState } from '@aipehub/acp-agent'
+import type { Task } from '@gotong/core'
+import { acpParkState } from '@gotong/acp-agent'
 
 import { acpApprovalItemFor } from '../src/acp-escalation.js'
 

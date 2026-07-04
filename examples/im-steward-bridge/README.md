@@ -1,4 +1,4 @@
-# `@aipehub/example-im-steward-bridge`
+# `@gotong/example-im-steward-bridge`
 
 v5 Stream SW **Phase D** demo — reach the hub steward (管家) from an IM
 client (Telegram, Slack, …). The same steward you talk to in the admin
@@ -17,11 +17,11 @@ routes into the steward's **`plan` / `apply` seam** (mirroring the
 host's `MeHubStewardSurface`), so IM becomes a transport for
 *managing your hub*. Two consequences:
 
-1. **No `@aipehub/core` Hub needed.** The steward is reached the same
+1. **No `@gotong/core` Hub needed.** The steward is reached the same
    way from the admin console, the `/me` SPA, and here — one steward,
-   three transports. This bridge depends only on `@aipehub/identity`
-   (the binding flow), `@aipehub/im-adapter` (the bridge + router
-   contract), and `@aipehub/hub-steward` (the **real** classifier, so
+   three transports. This bridge depends only on `@gotong/identity`
+   (the binding flow), `@gotong/im-adapter` (the bridge + router
+   contract), and `@gotong/hub-steward` (the **real** classifier, so
    the tier badges are honest).
 
 2. **It forks the router.** `parseImCommand` only knows `/help`
@@ -37,7 +37,7 @@ member would experience over Telegram:
 
 1. **`/help` before binding** — anyone can read the command list.
 2. **Free text before binding** — nudged to `/bind <code>`.
-3. **`/bind <code>`** — links the IM identity to an AipeHub user (the
+3. **`/bind <code>`** — links the IM identity to an Gotong user (the
    code is minted with `IdentityStore.issueImBindingCode`, exactly like
    `im-bridge-host`).
 4. **"帮我建一个客服助手"** — the steward proposes a **SAFE**
@@ -62,9 +62,9 @@ touches the chat transcript** (the demo asserts both).
 
 | Part | Real or faked? |
 |------|----------------|
-| Risk **tier** of each action | **Real** — `classifyStewardAction` from `@aipehub/hub-steward`. A `delete_agent` honestly tiers `dangerous`; `edit_workflow` on a cross-hub workflow honestly tiers `cross_hub`; a sensitive ask tiers `forbidden` for a member. |
+| Risk **tier** of each action | **Real** — `classifyStewardAction` from `@gotong/hub-steward`. A `delete_agent` honestly tiers `dangerous`; `edit_workflow` on a cross-hub workflow honestly tiers `cross_hub`; a sensitive ask tiers `forbidden` for a member. |
 | `apply` **re-classifies** server-side | **Real discipline** — `apply` never trusts the tier `plan` returned. A forged tier can't make a dangerous action run inline. |
-| Binding flow | **Real** — `@aipehub/identity` `im_bindings`. |
+| Binding flow | **Real** — `@gotong/identity` `im_bindings`. |
 | The "LLM" turning an instruction into actions | **Faked** — `proposeActions` is a deterministic keyword router (the only faked part, exactly like every other example that stands in a provider). The host's real steward is an `LlmAgent`. |
 | Inbox + notify-back | **Stand-in** — `FakeStewardPort` keeps an in-memory inbox so the park → resolve → notify-back loop is demonstrable. Production points this at `HostInboxService` + the multi-channel inbox/alert delivery (F day-3 `im` channel, MC-M1..M7). |
 
@@ -100,7 +100,7 @@ green assertions.
    resources.
 
 2. **Pick the real bridge.** Swap `FakeBridge` for
-   `new TelegramBridge({ token })` (or any `@aipehub/im-*`); the router
+   `new TelegramBridge({ token })` (or any `@gotong/im-*`); the router
    doesn't care which `ImBridge` impl it talks to. See
    `docs/zh/IM-BRIDGES.md`.
 

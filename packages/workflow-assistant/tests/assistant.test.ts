@@ -25,9 +25,9 @@
  */
 
 import { describe, expect, it } from 'vitest'
-import { Hub } from '@aipehub/core'
-import { MockLlmProvider } from '@aipehub/llm'
-import { parseWorkflow, projectWorkflowGraph } from '@aipehub/workflow'
+import { Hub } from '@gotong/core'
+import { MockLlmProvider } from '@gotong/llm'
+import { parseWorkflow, projectWorkflowGraph } from '@gotong/workflow'
 
 import {
   buildSystemPrompt,
@@ -48,10 +48,10 @@ import {
 
 // ---------------------------------------------------------------------------
 // Sample YAML the mock will pretend the LLM generated. Real, parseable
-// against `aipehub.workflow/v1`.
+// against `gotong.workflow/v1`.
 // ---------------------------------------------------------------------------
 
-const SAMPLE_YAML = `schema: aipehub.workflow/v1
+const SAMPLE_YAML = `schema: gotong.workflow/v1
 
 workflow:
   id: news-digest
@@ -102,16 +102,16 @@ describe('extractYamlAndExplanation', () => {
   })
 
   it('accepts ```yml fence too', () => {
-    const raw = 'prefix\n```yml\nschema: aipehub.workflow/v1\n```\nsuffix'
+    const raw = 'prefix\n```yml\nschema: gotong.workflow/v1\n```\nsuffix'
     const { yaml, explanation } = extractYamlAndExplanation(raw)
-    expect(yaml).toBe('schema: aipehub.workflow/v1')
+    expect(yaml).toBe('schema: gotong.workflow/v1')
     expect(explanation).toBe('prefix\n\nsuffix')
   })
 
   it('falls back to plain ``` fence if no yaml lang tag', () => {
-    const raw = 'desc\n```\nschema: aipehub.workflow/v1\n```\n'
+    const raw = 'desc\n```\nschema: gotong.workflow/v1\n```\n'
     const { yaml, explanation } = extractYamlAndExplanation(raw)
-    expect(yaml).toBe('schema: aipehub.workflow/v1')
+    expect(yaml).toBe('schema: gotong.workflow/v1')
     expect(explanation).toBe('desc')
   })
 
@@ -192,7 +192,7 @@ describe('buildSystemPrompt', () => {
 
   it('appends each example as a User/Assistant pair with yaml fence', () => {
     const examples: WorkflowExample[] = [
-      { description: 'edit Chinese articles', yaml: 'schema: aipehub.workflow/v1\nworkflow:\n  id: editorial' },
+      { description: 'edit Chinese articles', yaml: 'schema: gotong.workflow/v1\nworkflow:\n  id: editorial' },
     ]
     const out = buildSystemPrompt('BASE', examples)
     expect(out).toContain('BASE')
@@ -271,7 +271,7 @@ describe('WorkflowAssistantAgent — request building', () => {
     expect(result.kind).toBe('ok')
     expect(captured.userMsg).toBe('Crawl 3 news sources and summarize')
     // System prompt should carry the schema doc.
-    expect(captured.system).toContain('aipehub.workflow/v1')
+    expect(captured.system).toContain('gotong.workflow/v1')
     expect(captured.system).toContain('trigger:')
     expect(captured.system).toContain('steps:')
     expect(captured.system).toContain('$trigger.payload')
@@ -323,7 +323,7 @@ describe('WorkflowAssistantAgent — request building', () => {
         examples: [
           {
             description: 'simple 2-step draft + review',
-            yaml: 'schema: aipehub.workflow/v1\nworkflow:\n  id: example-1',
+            yaml: 'schema: gotong.workflow/v1\nworkflow:\n  id: example-1',
           },
         ],
       }),
@@ -379,7 +379,7 @@ describe('WorkflowAssistantAgent — response parsing', () => {
 
     expect(result.kind).toBe('ok')
     const out = (result as { output: WorkflowAssistantOutput }).output
-    expect(out.yaml).toContain('schema: aipehub.workflow/v1')
+    expect(out.yaml).toContain('schema: gotong.workflow/v1')
     expect(out.yaml).toContain('id: news-digest')
     expect(out.explanation).toContain('3 步的新闻摘要')
     expect(out.raw).toBe(SAMPLE_RESPONSE_TEXT)
@@ -431,7 +431,7 @@ describe('WorkflowAssistantAgent — response parsing', () => {
   it('yaml fence with invalid workflow → draftStatus=invalid + validationError', async () => {
     // LLM produced a yaml fence but the schema is wrong: no trigger
     // capability, which `parseWorkflow` rejects.
-    const badYaml = `schema: aipehub.workflow/v1
+    const badYaml = `schema: gotong.workflow/v1
 workflow:
   id: broken-flow
   trigger: {}
@@ -481,7 +481,7 @@ describe('verdictForYaml', () => {
   })
 
   it('wrong schema header → invalid', () => {
-    const v = verdictForYaml('schema: aipehub.workflow/v2\nworkflow: { id: x }')
+    const v = verdictForYaml('schema: gotong.workflow/v2\nworkflow: { id: x }')
     expect(v.status).toBe('invalid')
     expect(v.validationError).toContain('schema')
   })
@@ -670,7 +670,7 @@ describe('WorkflowAssistantAgent — deep check via parseResponse', () => {
   })
 
   it('omits deepCheck on invalid YAML even when hints are present', async () => {
-    const badYaml = `schema: aipehub.workflow/v1
+    const badYaml = `schema: gotong.workflow/v1
 workflow:
   id: broken
   trigger: {}
@@ -850,7 +850,7 @@ describe('WorkflowAssistantAgent — explain mode', () => {
   it('echoes the subject YAML + graph deterministically, ignoring the LLM yaml echo', async () => {
     // The mock returns prose AND a bogus, DIFFERENT yaml fence. Explain mode
     // must ignore that fence entirely: yaml + graph come from subjectYaml.
-    const bogus = `Here is what it does.\n\n\`\`\`yaml\nschema: aipehub.workflow/v1\nworkflow:\n  id: WRONG\n  trigger: { capability: nope }\n  steps:\n    - id: x\n      dispatch: { strategy: { kind: capability, capabilities: [nope] }, payload: {} }\n\`\`\``
+    const bogus = `Here is what it does.\n\n\`\`\`yaml\nschema: gotong.workflow/v1\nworkflow:\n  id: WRONG\n  trigger: { capability: nope }\n  steps:\n    - id: x\n      dispatch: { strategy: { kind: capability, capabilities: [nope] }, payload: {} }\n\`\`\``
     let userMsg = ''
     const provider = new MockLlmProvider({
       reply: (req) => {
@@ -883,7 +883,7 @@ describe('WorkflowAssistantAgent — explain mode', () => {
   })
 
   it('reports draftStatus=invalid when the subject YAML is itself broken', async () => {
-    const broken = 'schema: aipehub.workflow/v1\nworkflow:\n  id: broken\n  trigger: {}\n  steps: []\n'
+    const broken = 'schema: gotong.workflow/v1\nworkflow:\n  id: broken\n  trigger: {}\n  steps: []\n'
     const provider = new MockLlmProvider({ reply: 'It looks broken.' })
     const hub = Hub.inMemory()
     await hub.start()

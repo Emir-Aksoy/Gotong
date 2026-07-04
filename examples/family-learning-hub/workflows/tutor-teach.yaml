@@ -1,4 +1,4 @@
-schema: aipehub.workflow/v1
+schema: gotong.workflow/v1
 workflow:
   id: tutor-teach
   name: AI 导师上课 (主题白名单 + 分层内容审核 + 家长审批)

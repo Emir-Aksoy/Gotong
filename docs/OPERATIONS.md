@@ -1,22 +1,22 @@
 # Operations playbook
 
-Day-2 runbook for an AipeHub deployment. Covers what's on disk, how to
+Day-2 runbook for an Gotong deployment. Covers what's on disk, how to
 back it up safely, and how to recover from "the disk is gone."
 
 The scope is the same as the rest of the project: **dozens of users,
 single-node**. Multi-region, multi-tenant, cluster failover are
-outside what AipeHub is built for — if that's your story, the
+outside what Gotong is built for — if that's your story, the
 storage layer needs to change before any of this matters.
 
 ---
 
-## 1. What's in `.aipehub/`
+## 1. What's in `.gotong/`
 
 A workspace is a single directory. Everything the Hub remembers across
 restarts lives here.
 
 ```
-.aipehub/
+.gotong/
 ├── space.json                 # workspace metadata (name, created_at)
 ├── config.json                # workspace config
 ├── admins.json                # admin records + bcrypt-hashed tokens
@@ -84,13 +84,13 @@ Three small bash scripts under `scripts/backup/`:
 
 ```bash
 # Online (host can stay running)
-bash scripts/backup/backup.sh /var/lib/aipehub/.aipehub /var/backups/aipehub/
+bash scripts/backup/backup.sh /var/lib/gotong/.gotong /var/backups/gotong/
 
 # Atomic (briefly stops the host)
-bash scripts/backup/backup.sh /var/lib/aipehub/.aipehub /var/backups/aipehub/ --stop-host
+bash scripts/backup/backup.sh /var/lib/gotong/.gotong /var/backups/gotong/ --stop-host
 ```
 
-Output: `aipehub-<workspace>-<UTC-timestamp>.tar.gz`.
+Output: `gotong-<workspace>-<UTC-timestamp>.tar.gz`.
 
 ### Recommended cron
 
@@ -99,11 +99,11 @@ A reasonable starting cadence: **hourly online snapshots, kept for
 a write-heavy room.
 
 ```cron
-# /etc/cron.d/aipehub-backup  — runs as the aipehub user
+# /etc/cron.d/gotong-backup  — runs as the gotong user
 # m h dom mon dow user      command
-  17 *  *   *   *  aipehub  /opt/aipehub/scripts/backup/backup.sh /var/lib/aipehub/.aipehub /var/backups/aipehub
-  0  3  *   *   *  aipehub  /opt/aipehub/scripts/backup/prune.sh /var/backups/aipehub 14
-  0  4  *   *   *  aipehub  rclone copy /var/backups/aipehub remote:aipehub-backups/
+  17 *  *   *   *  gotong  /opt/gotong/scripts/backup/backup.sh /var/lib/gotong/.gotong /var/backups/gotong
+  0  3  *   *   *  gotong  /opt/gotong/scripts/backup/prune.sh /var/backups/gotong 14
+  0  4  *   *   *  gotong  rclone copy /var/backups/gotong remote:gotong-backups/
 ```
 
 There's no built-in `prune.sh`; here's a 3-liner that does it:
@@ -111,7 +111,7 @@ There's no built-in `prune.sh`; here's a 3-liner that does it:
 ```bash
 #!/usr/bin/env bash
 # scripts/backup/prune.sh <dir> <keep-days>
-find "$1" -name "aipehub-*.tar.gz" -mtime "+$2" -print -delete
+find "$1" -name "gotong-*.tar.gz" -mtime "+$2" -print -delete
 ```
 
 ### Master key handling
@@ -132,7 +132,7 @@ Recommended places for **both** keys (each as its own entry):
 - **Sealed offsite paper copy** for the worst-case "everything else
   is gone" recovery.
 
-Rotate the **v3** key by setting `AIPE_SECRET_KEY=<32 hex bytes>` on
+Rotate the **v3** key by setting `GOTONG_SECRET_KEY=<32 hex bytes>` on
 the host and re-saving each provider key through the admin UI; then
 delete old `secret.key` copies. Rotate the **v4** KEK online with the
 host `rotate-master-key` subcommand — it re-wraps the vault DEK under a
@@ -153,7 +153,7 @@ shape (new VPS, new disk layout, new backup destination).
 # Programmatic init — see scripts/backup/drill-init.example.mjs for
 # the canonical version of this snippet.
 node <<'EOF'
-import { Space } from '/path/to/aipehub/packages/core/dist/index.js'
+import { Space } from '/path/to/gotong/packages/core/dist/index.js'
 const { space } = await Space.init('/tmp/drill/space', {
   name: 'drill-workspace',
   adminDisplayName: 'DrillAdmin',
@@ -169,8 +169,8 @@ EOF
 
 ```bash
 $ bash scripts/backup/backup.sh /tmp/drill/space /tmp/drill/backups
-→ archiving /tmp/drill/space → /tmp/drill/backups/aipehub-space-20260519T063818Z.tar.gz
-✓ backup written: /tmp/drill/backups/aipehub-space-20260519T063818Z.tar.gz (4.0K)
+→ archiving /tmp/drill/space → /tmp/drill/backups/gotong-space-20260519T063818Z.tar.gz
+✓ backup written: /tmp/drill/backups/gotong-space-20260519T063818Z.tar.gz (4.0K)
 
 Reminder: secret.key was intentionally NOT included. […]
 ```
@@ -179,7 +179,7 @@ The tarball **does not** contain `secret.key`, `admin-sessions.json`,
 or `worker-sessions.json`:
 
 ```bash
-$ tar -tzf /tmp/drill/backups/aipehub-space-20260519T063818Z.tar.gz | sort
+$ tar -tzf /tmp/drill/backups/gotong-space-20260519T063818Z.tar.gz | sort
 space/
 space/admins.json
 space/agents.json
@@ -221,7 +221,7 @@ $ mv /tmp/drill/space /tmp/drill/space.lost
 
 ```bash
 $ bash scripts/backup/restore.sh \
-    /tmp/drill/backups/aipehub-space-20260519T063818Z.tar.gz \
+    /tmp/drill/backups/gotong-space-20260519T063818Z.tar.gz \
     /tmp/drill/space
 → extracting … → /tmp/drill/space
 → running verify.sh...
@@ -250,7 +250,7 @@ $ cp /tmp/drill/secret.key.offsite /tmp/drill/space/runtime/secret.key
 
 ```bash
 $ node <<'EOF'
-import { Space } from '/path/to/aipehub/packages/core/dist/index.js'
+import { Space } from '/path/to/gotong/packages/core/dist/index.js'
 const space = await Space.open('/tmp/drill/space')
 console.log('decrypted-key:', await space.getProviderApiKey('anthropic'))
 console.log('admins:',  (await space.admins()).length)
@@ -274,7 +274,7 @@ agents: [ 'writer', 'reviewer' ]
 $ : > /tmp/drill/space/runtime/admin-sessions.json
 $ : > /tmp/drill/space/runtime/worker-sessions.json
 # In production, ssh to the new box and:
-$ AIPE_SPACE=/tmp/drill/space pnpm host
+$ GOTONG_SPACE=/tmp/drill/space pnpm host
 ```
 
 When the host comes up, the admin token printed in step 1 still
@@ -296,10 +296,10 @@ You can verify a backup **without** restoring it:
 
 ```bash
 # Extract to a scratch dir, run verify, throw away.
-mkdir -p /tmp/aipehub-verify
-tar -xzf /var/backups/aipehub/aipehub-space-20260519T063818Z.tar.gz \
-    -C /tmp/aipehub-verify --strip-components=1
-bash scripts/backup/verify.sh /tmp/aipehub-verify
+mkdir -p /tmp/gotong-verify
+tar -xzf /var/backups/gotong/gotong-space-20260519T063818Z.tar.gz \
+    -C /tmp/gotong-verify --strip-components=1
+bash scripts/backup/verify.sh /tmp/gotong-verify
 ```
 
 What `verify.sh` checks (all without Node):
@@ -341,7 +341,7 @@ head -n -1 transcript.jsonl > transcript.jsonl.fixed && mv transcript.jsonl.fixe
 **"I lost the secret.key entirely."** All `secrets.enc.json` entries
 are unrecoverable. Re-mint each provider key in the upstream
 dashboards (OpenAI / Anthropic / DeepSeek / …), set
-`AIPE_SECRET_KEY=<32 hex bytes>` on the host as the new master, and
+`GOTONG_SECRET_KEY=<32 hex bytes>` on the host as the new master, and
 re-save every key through the admin UI. The admins / workers / agents
 / transcript / services data is all unaffected.
 
@@ -354,7 +354,7 @@ skipping — the data is intact but the file shape isn't. Fix with the
 
 ## 6. Retention
 
-Everything AipeHub persists is append-only by default — the
+Everything Gotong persists is append-only by default — the
 transcript, workflow run records, and the identity DB's ledger /
 audit / control-plane tables all grow until you say otherwise. The
 retention knobs below are **all off unless set** (the host never
@@ -363,27 +363,27 @@ fails the boot loudly instead of being ignored.
 
 | Env | What it bounds | Semantics |
 |---|---|---|
-| `AIPE_TRANSCRIPT_KEEP_SEGMENTS` | transcript boot-load path | Keep the N newest sealed segments active; older ones move to `<AIPE_SPACE>/archive/` (bytes stay on disk for audit/export). |
-| `AIPE_TRANSCRIPT_ARCHIVE_DAYS` | transcript | Archive sealed segments whose newest entry is older than N days. Combinable with `KEEP_SEGMENTS` (both must hold). |
-| `AIPE_RUN_KEEP` | workflow run scans | Keep the N newest **terminal** runs active; older ones move to `workflows/runs/archive/`. A `running` run is never archived. |
-| `AIPE_RUN_ARCHIVE_DAYS` | workflow runs | Archive terminal runs that ended more than N days ago. Combinable with `AIPE_RUN_KEEP`. |
-| `AIPE_LEDGER_KEEP_DAYS` | `usage_ledger` (billing) | Prune rows older than N days at boot. The retained window stays exportable (CSV/JSONL). |
-| `AIPE_AUDIT_KEEP_DAYS` | `audit_log` | Same prune-at-boot semantics. |
-| `AIPE_PEER_SUMMARY_KEEP_DAYS` | `peer_summary_snapshots` | Same — bounds control-plane trend history. |
-| `AIPE_ALERT_FIRINGS_KEEP_DAYS` | `peer_summary_alert_firings` | Same, **resolved firings only** — an open firing is never pruned. |
+| `GOTONG_TRANSCRIPT_KEEP_SEGMENTS` | transcript boot-load path | Keep the N newest sealed segments active; older ones move to `<GOTONG_SPACE>/archive/` (bytes stay on disk for audit/export). |
+| `GOTONG_TRANSCRIPT_ARCHIVE_DAYS` | transcript | Archive sealed segments whose newest entry is older than N days. Combinable with `KEEP_SEGMENTS` (both must hold). |
+| `GOTONG_RUN_KEEP` | workflow run scans | Keep the N newest **terminal** runs active; older ones move to `workflows/runs/archive/`. A `running` run is never archived. |
+| `GOTONG_RUN_ARCHIVE_DAYS` | workflow runs | Archive terminal runs that ended more than N days ago. Combinable with `GOTONG_RUN_KEEP`. |
+| `GOTONG_LEDGER_KEEP_DAYS` | `usage_ledger` (billing) | Prune rows older than N days at boot. The retained window stays exportable (CSV/JSONL). |
+| `GOTONG_AUDIT_KEEP_DAYS` | `audit_log` | Same prune-at-boot semantics. |
+| `GOTONG_PEER_SUMMARY_KEEP_DAYS` | `peer_summary_snapshots` | Same — bounds control-plane trend history. |
+| `GOTONG_ALERT_FIRINGS_KEEP_DAYS` | `peer_summary_alert_firings` | Same, **resolved firings only** — an open firing is never pruned. |
 
 Practical starting point for a small-team host:
 
 ```bash
-AIPE_TRANSCRIPT_KEEP_SEGMENTS=50
-AIPE_RUN_KEEP=2000
-AIPE_LEDGER_KEEP_DAYS=400     # > 1 year for billing reconciliation
-AIPE_AUDIT_KEEP_DAYS=400
-AIPE_PEER_SUMMARY_KEEP_DAYS=90
-AIPE_ALERT_FIRINGS_KEEP_DAYS=90
+GOTONG_TRANSCRIPT_KEEP_SEGMENTS=50
+GOTONG_RUN_KEEP=2000
+GOTONG_LEDGER_KEEP_DAYS=400     # > 1 year for billing reconciliation
+GOTONG_AUDIT_KEEP_DAYS=400
+GOTONG_PEER_SUMMARY_KEEP_DAYS=90
+GOTONG_ALERT_FIRINGS_KEEP_DAYS=90
 ```
 
 Archives (`archive/`, `runs/archive/`) are immutable once rotated —
 gzip or ship them to cold storage on your own schedule. The
-`AipehubDiskAlmostFull` alert runbook in
+`GotongDiskAlmostFull` alert runbook in
 [`docs/MONITORING.md`](MONITORING.md) points back here.

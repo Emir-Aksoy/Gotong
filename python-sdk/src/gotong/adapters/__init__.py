@@ -1,7 +1,7 @@
-"""Optional adapters that bridge external agent frameworks into an AipeHub Hub.
+"""Optional adapters that bridge external agent frameworks into an Gotong Hub.
 
 Each adapter is duck-typed and dependency-light: it wraps a framework object
-(a LangGraph graph, a CrewAI crew, ...) as an AipeHub ``AgentParticipant`` so
+(a LangGraph graph, a CrewAI crew, ...) as an Gotong ``AgentParticipant`` so
 the Hub routes Tasks to it like any other agent. The framework itself is a
 peer dependency you install separately — importing this subpackage never pulls
 in langgraph / crewai, which keeps the core SDK install light and lets the

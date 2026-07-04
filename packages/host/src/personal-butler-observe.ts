@@ -37,7 +37,7 @@ import type {
   LlmAgentToolset,
   LlmToolCallResult,
   LlmToolDefinition,
-} from '@aipehub/llm'
+} from '@gotong/llm'
 
 // ---------------------------------------------------------------------------
 // Narrow, duck-typed surfaces — each satisfied structurally by an existing host

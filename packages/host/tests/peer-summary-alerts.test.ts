@@ -12,7 +12,7 @@
 
 import { describe, expect, it } from 'vitest'
 
-import type { PeerSummaryAlertRule } from '@aipehub/identity'
+import type { PeerSummaryAlertRule } from '@gotong/identity'
 
 import {
   evaluatePeerSummaryAlerts,

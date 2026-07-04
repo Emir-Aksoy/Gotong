@@ -22,13 +22,13 @@ import { join } from 'node:path'
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { createLogger, Hub, Space, type AgentRecord } from '@aipehub/core'
-import { MockLlmProvider } from '@aipehub/llm'
+import { createLogger, Hub, Space, type AgentRecord } from '@gotong/core'
+import { MockLlmProvider } from '@gotong/llm'
 import {
   MASTER_KEY_LEN_BYTES,
   openIdentityStore,
   type IdentityStore,
-} from '@aipehub/identity'
+} from '@gotong/identity'
 
 import { LocalAgentPool } from '../src/local-agent-pool.js'
 import { OrgApiPool } from '../src/org-api-pool.js'
@@ -52,7 +52,7 @@ describe('LocalAgentPool — token budget counts cache tokens (audit M7)', () =>
   let identity: IdentityStore
 
   beforeEach(async () => {
-    root = await mkdtemp(join(tmpdir(), 'aipe-lap-cachetok-'))
+    root = await mkdtemp(join(tmpdir(), 'gotong-lap-cachetok-'))
     await rm(root, { recursive: true, force: true })
     const opened = await Space.init(root, { name: 'test' })
     space = opened.space

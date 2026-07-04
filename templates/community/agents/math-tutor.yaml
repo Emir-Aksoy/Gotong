@@ -5,7 +5,7 @@
 #             works"); added structured response template (intuition → steps →
 #             worked example → check); renamed "teacher" → "tutor" (more
 #             aligned with single-turn assistant model).
-schema: aipehub.agent/v1
+schema: gotong.agent/v1
 agent:
   id: math-tutor
   displayName: 数学辅导

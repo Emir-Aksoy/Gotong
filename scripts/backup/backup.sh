@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# AipeHub backup — package a `.aipehub/` workspace into a single tar.gz.
+# Gotong backup — package a `.gotong/` workspace into a single tar.gz.
 #
 # Design choices:
 #
@@ -41,8 +41,8 @@
 #     scripts can lexicographic-sort to find old ones.
 #
 # Usage:
-#   ./backup.sh /path/to/.aipehub /path/to/backup-dir
-#   ./backup.sh /path/to/.aipehub /path/to/backup-dir --stop-host
+#   ./backup.sh /path/to/.gotong /path/to/backup-dir
+#   ./backup.sh /path/to/.gotong /path/to/backup-dir --stop-host
 #
 # Exit codes:
 #   0 — backup written
@@ -57,13 +57,13 @@ usage() {
 Usage: $(basename "$0") <space-dir> <backup-dir> [--stop-host]
 
 Arguments:
-  <space-dir>   Path to .aipehub/ workspace directory.
+  <space-dir>   Path to .gotong/ workspace directory.
   <backup-dir>  Where to write the .tar.gz. Created if missing.
 
 Flags:
-  --stop-host   Run \`systemctl stop aipehub-host\` before the snapshot
+  --stop-host   Run \`systemctl stop gotong-host\` before the snapshot
                 and \`systemctl start\` after. Requires that the unit
-                is named aipehub-host (see docs/DEPLOY.md). Online
+                is named gotong-host (see docs/DEPLOY.md). Online
                 backup is the default.
 
 Always excluded from the archive (security / freshness):
@@ -118,7 +118,7 @@ if [ ! -d "$SPACE_DIR" ]; then
   exit 2
 fi
 if [ ! -f "$SPACE_DIR/space.json" ]; then
-  echo "✖ '$SPACE_DIR' does not look like an AipeHub workspace (no space.json found)" >&2
+  echo "✖ '$SPACE_DIR' does not look like an Gotong workspace (no space.json found)" >&2
   exit 2
 fi
 
@@ -131,9 +131,9 @@ if [ "$STOP_HOST" -eq 1 ]; then
     echo "✖ --stop-host requested but systemctl is not available on this host" >&2
     exit 1
   fi
-  echo "→ stopping aipehub-host.service for atomic snapshot..."
-  systemctl stop aipehub-host
-  trap 'echo "→ restarting aipehub-host.service..."; systemctl start aipehub-host || true' EXIT
+  echo "→ stopping gotong-host.service for atomic snapshot..."
+  systemctl stop gotong-host
+  trap 'echo "→ restarting gotong-host.service..."; systemctl start gotong-host || true' EXIT
 fi
 
 # --- compute output name -----------------------------------------------------
@@ -144,7 +144,7 @@ TIMESTAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 LABEL="$(basename "$(cd "$SPACE_DIR" && pwd)")"
 [ -z "$LABEL" ] || [ "$LABEL" = "/" ] && LABEL="space"
 
-OUT="$BACKUP_DIR/aipehub-${LABEL}-${TIMESTAMP}.tar.gz"
+OUT="$BACKUP_DIR/gotong-${LABEL}-${TIMESTAMP}.tar.gz"
 
 # --- archive -----------------------------------------------------------------
 

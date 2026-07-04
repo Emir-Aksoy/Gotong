@@ -1,5 +1,5 @@
 /**
- * Public types for `@aipehub/mcp-client`. Re-exports a curated slice
+ * Public types for `@gotong/mcp-client`. Re-exports a curated slice
  * of `@modelcontextprotocol/sdk` types so library users don't need to
  * pull the SDK in directly to satisfy TypeScript.
  */
@@ -15,7 +15,7 @@ import type { Tool, CallToolResult } from '@modelcontextprotocol/sdk/types.js'
  *   - `http`  — MCP **Streamable HTTP** transport: connect to a remote
  *     URL over HTTPS (POST to send, GET+SSE to receive). This is what
  *     most *hosted* MCP servers expose, so it's the one that lets an
- *     AipeHub agent "borrow" the managed-MCP ecosystem.
+ *     Gotong agent "borrow" the managed-MCP ecosystem.
  *   - `sse`   — the legacy HTTP+SSE transport. Deprecated upstream but
  *     still served by a long tail of remote servers, so we keep it.
  */
@@ -41,7 +41,7 @@ export interface McpStdioServerConfig {
    * Executable to spawn. Typically `npx` for installed-on-demand
    * servers, or an absolute path for site-installed ones. Don't ship
    * a workspace-relative path — the agent's CWD is not the workspace
-   * root in production (the host runs from `/opt/aipehub`).
+   * root in production (the host runs from `/opt/gotong`).
    */
   command: string
 
@@ -65,7 +65,7 @@ export interface McpStdioServerConfig {
   env?: Record<string, string>
 
   /**
-   * Working directory for the child process. Defaults to the AipeHub
+   * Working directory for the child process. Defaults to the Gotong
    * agent process's CWD. Set this when the server needs a specific
    * project root (e.g. some `git`-based MCPs look at `process.cwd()`
    * to find the repo).

@@ -3,7 +3,7 @@
 > 决策 ③「多级长期记忆架构」× ⑤「重要性区分」, 用户拍板**两者结合** —— 主题分卷
 > (topic clusters) × 卷内重要性分级晋升 (digest → profile)。这是把 Personal Butler
 > 的记忆从「一摊扁平 episodic + 一份策展 profile」升级成**金字塔**: 按主题分卷, 每卷
-> 内按重要性沉淀。作为 `@aipehub/personal-memory` 的**加性**能力, 与既有平铺路径并存。
+> 内按重要性沉淀。作为 `@gotong/personal-memory` 的**加性**能力, 与既有平铺路径并存。
 >
 > Last updated: 2026-06-29
 
@@ -24,7 +24,7 @@
 ## 二、北极星对齐(全程守住)
 
 - **框架不跑 LLM**。分卷路由 + 蒸馏是注入的 `MemorySummarizer` 回调 (与 `consolidate`
-  同源), `consolidate-tiered.ts` 从不 `import @aipehub/llm`。测试用确定性 fake 返
+  同源), `consolidate-tiered.ts` 从不 `import @gotong/llm`。测试用确定性 fake 返
   路由 JSON / profile 文本, 零 key。
 - **状态即文件**。卷 / 层 / 重要度全是 per-user jsonl 里 entry 的 `meta`, 复制目录
   = 搬走「分卷大脑」。重启透明。

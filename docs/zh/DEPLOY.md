@@ -1,8 +1,8 @@
-# 部署 AipeHub
+# 部署 Gotong
 
 > 同步自英文版 [`docs/DEPLOY.md`](../DEPLOY.md) @ 2026-05-17
 
-本文是部署 AipeHub 到你笔记本之外的指南 —— LAN、单台 VPS、或一个小型机群。目标规模是**几十个用户、单节点**，不是全球 SaaS。一旦超出这个规模，第一个你会想替换的就是 file-first 存储。
+本文是部署 Gotong 到你笔记本之外的指南 —— LAN、单台 VPS、或一个小型机群。目标规模是**几十个用户、单节点**，不是全球 SaaS。一旦超出这个规模，第一个你会想替换的就是 file-first 存储。
 
 部署形态有三种。挑能满足你需求的最小那一档 —— 后面每一档都是前一档的严格超集。
 
@@ -12,7 +12,7 @@
 | **B. LAN** | 可信办公室 / WiFi | 几分钟 —— 改 `host` | 无 | 仅局域网 |
 | **C. 公网** | 公网体验版（小规模） | ~1 小时 —— Caddy + systemd | 是 | 任意位置 |
 
-三种形态用的是同一个 `@aipehub/host` 二进制，区别只在环境变量。
+三种形态用的是同一个 `@gotong/host` 二进制，区别只在环境变量。
 
 ---
 
@@ -27,27 +27,27 @@ pnpm build                  # 生成 packages/*/dist
 pnpm host                   # 用默认配置跑 packages/host
 
 # 或者发布后：
-pnpm install -g @aipehub/host
-aipehub-host
+pnpm install -g @gotong/host
+gotong-host
 ```
 
 ### 环境变量
 
 | 变量 | 默认值 | 说明 |
 |---|---|---|
-| `AIPE_SPACE` | `.aipehub` | 工作区目录（首次运行自动创建） |
-| `AIPE_HOST` | `127.0.0.1` | 绑定地址（在反向代理之后保持 loopback 是对的） |
-| `AIPE_WEB_PORT` | `3000` | 浏览器 + admin API 的 HTTP 端口 |
-| `AIPE_WS_PORT` | `4000` | remote agent 的 WebSocket 端口 |
-| `AIPE_GATING` | `admin-approval` | `open` 跳过准入审核（**绝对不要**在公网用） |
-| `AIPE_COOKIE_SECURE` | `0` | `1` 加 `Secure`+`SameSite=Strict`。HTTPS 前置时必须 |
-| `AIPE_ALLOWED_HOSTS` | (未设) | 逗号列表。`Host:` 或 `Origin:` 不在列表里的 POST/DELETE 直接 reject。生产必设。 |
-| `AIPE_ADMIN_RATE_MAX` | `10` | admin token 校验的每 IP 每窗口尝试次数上限（0 关闭） |
-| `AIPE_ADMIN_RATE_SEC` | `60` | 速率窗口长度（秒） |
-| `AIPE_DEFAULT_LANG` | `zh` | `zh` 或 `en` |
-| `AIPE_HEARTBEAT_MS` | `30000` | transport 心跳间隔 |
-| `AIPE_SPACE_NAME` | `AipeHub` | 写入 `space.json` 的工作区标签（仅首次初始化） |
-| `AIPE_ADMIN_DISPLAY_NAME` | `Operator` | 第一个 admin 的显示名（仅首次初始化） |
+| `GOTONG_SPACE` | `.gotong` | 工作区目录（首次运行自动创建） |
+| `GOTONG_HOST` | `127.0.0.1` | 绑定地址（在反向代理之后保持 loopback 是对的） |
+| `GOTONG_WEB_PORT` | `3000` | 浏览器 + admin API 的 HTTP 端口 |
+| `GOTONG_WS_PORT` | `4000` | remote agent 的 WebSocket 端口 |
+| `GOTONG_GATING` | `admin-approval` | `open` 跳过准入审核（**绝对不要**在公网用） |
+| `GOTONG_COOKIE_SECURE` | `0` | `1` 加 `Secure`+`SameSite=Strict`。HTTPS 前置时必须 |
+| `GOTONG_ALLOWED_HOSTS` | (未设) | 逗号列表。`Host:` 或 `Origin:` 不在列表里的 POST/DELETE 直接 reject。生产必设。 |
+| `GOTONG_ADMIN_RATE_MAX` | `10` | admin token 校验的每 IP 每窗口尝试次数上限（0 关闭） |
+| `GOTONG_ADMIN_RATE_SEC` | `60` | 速率窗口长度（秒） |
+| `GOTONG_DEFAULT_LANG` | `zh` | `zh` 或 `en` |
+| `GOTONG_HEARTBEAT_MS` | `30000` | transport 心跳间隔 |
+| `GOTONG_SPACE_NAME` | `Gotong` | 写入 `space.json` 的工作区标签（仅首次初始化） |
+| `GOTONG_ADMIN_DISPLAY_NAME` | `Operator` | 第一个 admin 的显示名（仅首次初始化） |
 
 二进制启动时**仅一次**打印首启 admin URL。务必存下来。后续启动只打印 `/admin` URL，因为 admin 的 token（hash 形式）已经写在 `admins.json` 里。
 
@@ -55,25 +55,25 @@ aipehub-host
 
 ## 0.5 单文件二进制（无需 Node 运行时）
 
-`aipehub-host` 也以 `bun build --compile` 产出的自包含可执行文件形式分发。当你想在一台干净机器上跑 hub、不想装 Node.js / pnpm / 整个 workspace 时，用这个。
+`gotong-host` 也以 `bun build --compile` 产出的自包含可执行文件形式分发。当你想在一台干净机器上跑 hub、不想装 Node.js / pnpm / 整个 workspace 时，用这个。
 
 ```bash
 # Linux x64 —— 换成 -darwin-arm64 / -darwin-x64 / -windows-x64.exe
 # / -linux-arm64 即可对应其它平台。
-curl -L -o aipehub-host \
-  https://github.com/Emir-Aksoy/AipeHub/releases/latest/download/aipehub-host-linux-x64
-chmod +x aipehub-host
-./aipehub-host
+curl -L -o gotong-host \
+  https://github.com/Emir-Aksoy/Gotong/releases/latest/download/gotong-host-linux-x64
+chmod +x gotong-host
+./gotong-host
 ```
 
-二进制读的还是同样那套 `AIPE_*` 环境变量，所以下面（A / B / C）的所有方案都直接适用 —— 把 `pnpm host` 或 `aipehub-host`（npm 安装版）替换成 `./aipehub-host` 就行。
+二进制读的还是同样那套 `GOTONG_*` 环境变量，所以下面（A / B / C）的所有方案都直接适用 —— 把 `pnpm host` 或 `gotong-host`（npm 安装版）替换成 `./gotong-host` 就行。
 
 二进制**里面**有什么：
-- 整个 `@aipehub/host` workspace —— Hub、WebSocket transport、Web UI（HTML/CSS/JS 静态资源在 build 时已经 embed 进二进制，不再从磁盘读）、各 LLM 适配器。
-- 两个不依赖 native 代码的 first-party plugin：`@aipehub/service-memory-file` 和 `@aipehub/service-artifact-file`。
+- 整个 `@gotong/host` workspace —— Hub、WebSocket transport、Web UI（HTML/CSS/JS 静态资源在 build 时已经 embed 进二进制，不再从磁盘读）、各 LLM 适配器。
+- 两个不依赖 native 代码的 first-party plugin：`@gotong/service-memory-file` 和 `@gotong/service-artifact-file`。
 
 二进制**没有**包含的：
-- `@aipehub/service-datastore-sqlite` —— 依赖 `better-sqlite3`，后者带 native `.node` binding，bundler 没办法 embed。二进制运行时会自我识别身份，写出一份**不含 sqlite** 的默认 `plugins.json`，首启零 warning。要 SQL 后端的 datastore，请走 npm 或 docker 安装路径。
+- `@gotong/service-datastore-sqlite` —— 依赖 `better-sqlite3`，后者带 native `.node` binding，bundler 没办法 embed。二进制运行时会自我识别身份，写出一份**不含 sqlite** 的默认 `plugins.json`，首启零 warning。要 SQL 后端的 datastore，请走 npm 或 docker 安装路径。
 - 安装到 space 里的第三方 plugin —— 二进制无法解析自己 embedded module graph 外的包。要做 plugin 开发，走 npm 路径。
 
 二进制大小约 60 MB（所有平台都差不多）。启动比 `tsx src/main.ts` 快 5 倍左右，因为没有 module loader walk。
@@ -89,7 +89,7 @@ pnpm host
 # （首启 admin URL 在这里打印）
 ```
 
-打开 admin URL，cookie 写入浏览器，你就进去了。`Ctrl-C` 停止。工作区在 `./.aipehub/`。
+打开 admin URL，cookie 写入浏览器，你就进去了。`Ctrl-C` 停止。工作区在 `./.gotong/`。
 
 这个跟 `pnpm demo:open-space` 功能上等价，只是没有 demo agent —— 想从干净的房间开始、自己挂 agent 的场景用它。
 
@@ -100,14 +100,14 @@ pnpm host
 继续走 HTTP，但绑定到所有网卡 + 开防火墙。
 
 ```bash
-AIPE_HOST=0.0.0.0 \
-AIPE_WEB_PORT=3000 \
-AIPE_WS_PORT=4000 \
-AIPE_ALLOWED_HOSTS=192.168.1.42:3000 \
+GOTONG_HOST=0.0.0.0 \
+GOTONG_WEB_PORT=3000 \
+GOTONG_WS_PORT=4000 \
+GOTONG_ALLOWED_HOSTS=192.168.1.42:3000 \
 pnpm host
 ```
 
-> 为什么 LAN 上也要 `AIPE_ALLOWED_HOSTS`？纵深防御：一个同事在登录你的 Hub 同时访问了 `evil.com`，你的 Hub 会拒绝伪造的 admin POST，因为外来 `Origin:` 不在 allow-list 里。
+> 为什么 LAN 上也要 `GOTONG_ALLOWED_HOSTS`？纵深防御：一个同事在登录你的 Hub 同时访问了 `evil.com`，你的 Hub 会拒绝伪造的 admin POST，因为外来 `Origin:` 不在 allow-list 里。
 
 macOS 首次运行会弹「node 想接收外来连接」—— 点 Allow。同 WiFi 上的其他设备访问：
 
@@ -123,10 +123,10 @@ ws://192.168.1.42:4000            ← remote agent
 
 ## C. 公网 —— VPS 上的 Caddy + systemd
 
-模式：AipeHub 仍然绑 `127.0.0.1`，所有外部请求只能通过 Caddy。Caddy 在 `:443` 做 TLS 终结然后反向代理到内部。下面假设 Debian/Ubuntu，其他发行版自行调整路径。
+模式：Gotong 仍然绑 `127.0.0.1`，所有外部请求只能通过 Caddy。Caddy 在 `:443` 做 TLS 终结然后反向代理到内部。下面假设 Debian/Ubuntu，其他发行版自行调整路径。
 
 > **懒人路径**：§C.1–C.4 的机械部分（取码 → Node/pnpm → 服务用户 → build → env 模板 →
-> systemd unit）有脚本一次做完——裸机 `curl -fsSL https://raw.githubusercontent.com/Emir-Aksoy/AipeHub/main/deploy/cloud-quickstart.sh | sudo bash -s -- --clone`
+> systemd unit）有脚本一次做完——裸机 `curl -fsSL https://raw.githubusercontent.com/Emir-Aksoy/Gotong/main/deploy/cloud-quickstart.sh | sudo bash -s -- --clone`
 > （先看不动手加 `--dry-run`）。unit 与本节 §C.4 逐字一致；跑完回来做 §C.5 Caddy + §C.6 防火墙。
 >
 > **容器路径**：宿主机不想装 Node 工具链的话，仓库根目录自带 `Dockerfile` +
@@ -139,65 +139,65 @@ ws://192.168.1.42:4000            ← remote agent
 - 你能控的域名，DNS 指向 VPS。比如 `hub.example.com` 和 `hub-ws.example.com`。
 - Node 20 LTS + pnpm 9
 - Caddy 2（`apt install caddy`）
-- 一个非 root 的系统用户（`aipehub`）持有 `/srv/aipehub-data`
+- 一个非 root 的系统用户（`gotong`）持有 `/srv/gotong-data`
 
 ### C.2 文件系统布局
 
 ```bash
-sudo useradd --system --create-home --shell /usr/sbin/nologin aipehub
-sudo mkdir -p /srv/aipehub-data
-sudo chown aipehub:aipehub /srv/aipehub-data
-sudo mkdir -p /opt/aipehub && sudo chown aipehub:aipehub /opt/aipehub
+sudo useradd --system --create-home --shell /usr/sbin/nologin gotong
+sudo mkdir -p /srv/gotong-data
+sudo chown gotong:gotong /srv/gotong-data
+sudo mkdir -p /opt/gotong && sudo chown gotong:gotong /opt/gotong
 
-# 切换到 aipehub 用户
-sudo -u aipehub -H git clone https://github.com/Emir-Aksoy/AipeHub.git /opt/aipehub
-sudo -u aipehub -H bash -lc 'cd /opt/aipehub && pnpm install && pnpm build'
+# 切换到 gotong 用户
+sudo -u gotong -H git clone https://github.com/Emir-Aksoy/Gotong.git /opt/gotong
+sudo -u gotong -H bash -lc 'cd /opt/gotong && pnpm install && pnpm build'
 ```
 
 ### C.3 环境配置文件
 
-`/etc/aipehub.env`（chmod 640，归属 `aipehub:aipehub`）：
+`/etc/gotong.env`（chmod 640，归属 `gotong:gotong`）：
 
 ```bash
-AIPE_SPACE=/srv/aipehub-data
-AIPE_HOST=127.0.0.1
-AIPE_WEB_PORT=3000
-AIPE_WS_PORT=4000
-AIPE_GATING=admin-approval
-AIPE_COOKIE_SECURE=1
-AIPE_ALLOWED_HOSTS=hub.example.com,hub-ws.example.com
-AIPE_ADMIN_RATE_MAX=10
-AIPE_ADMIN_RATE_SEC=60
-AIPE_SPACE_NAME=Hub Beta
-AIPE_ADMIN_DISPLAY_NAME=Operator
+GOTONG_SPACE=/srv/gotong-data
+GOTONG_HOST=127.0.0.1
+GOTONG_WEB_PORT=3000
+GOTONG_WS_PORT=4000
+GOTONG_GATING=admin-approval
+GOTONG_COOKIE_SECURE=1
+GOTONG_ALLOWED_HOSTS=hub.example.com,hub-ws.example.com
+GOTONG_ADMIN_RATE_MAX=10
+GOTONG_ADMIN_RATE_SEC=60
+GOTONG_SPACE_NAME=Hub Beta
+GOTONG_ADMIN_DISPLAY_NAME=Operator
 ```
 
 > ⚠️ **每一个**会被用到的主机名都要列出来 —— Caddy 用 Host 改写，上游看到的是原始 Host header。Web 域名和 WS 域名（如果分开）都必须在列表里。Caddy 把 Host header 重写成客户端发来的那个（`hub.example.com`），不是 `127.0.0.1`，所以 allow-list 对的是用户看到的那个名字。
 
 ### C.4 systemd unit
 
-`/etc/systemd/system/aipehub.service`：
+`/etc/systemd/system/gotong.service`：
 
 ```ini
 [Unit]
-Description=AipeHub host
+Description=Gotong host
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=simple
-User=aipehub
-Group=aipehub
-WorkingDirectory=/opt/aipehub
-EnvironmentFile=/etc/aipehub.env
+User=gotong
+Group=gotong
+WorkingDirectory=/opt/gotong
+EnvironmentFile=/etc/gotong.env
 # 跑构建产物 dist/main.js。`pnpm build`（步骤 C.2）已经生成 dist/。
 # 这是推荐路径：零运行时转换、组件最少、不挑 Node 版本。
-ExecStart=/usr/bin/env node /opt/aipehub/packages/host/dist/main.js
+ExecStart=/usr/bin/env node /opt/gotong/packages/host/dist/main.js
 Restart=always
 RestartSec=5
 NoNewPrivileges=true
 ProtectSystem=strict
-ReadWritePaths=/srv/aipehub-data
+ReadWritePaths=/srv/gotong-data
 ProtectHome=true
 PrivateTmp=true
 MemoryMax=512M
@@ -212,14 +212,14 @@ WantedBy=multi-user.target
 > 三种**可选**的 ExecStart —— 上面的默认是推荐项，下面这些有特殊场景才用：
 >
 > ```ini
-> # 如果你 `pnpm install -g @aipehub/host`（或将来发布到 registry 之后）：
-> ExecStart=/usr/bin/env aipehub-host
+> # 如果你 `pnpm install -g @gotong/host`（或将来发布到 registry 之后）：
+> ExecStart=/usr/bin/env gotong-host
 >
 > # 想完全跳过构建步骤 —— 要求 Node 22+：
-> ExecStart=/usr/bin/env node --experimental-strip-types /opt/aipehub/packages/host/src/main.ts
+> ExecStart=/usr/bin/env node --experimental-strip-types /opt/gotong/packages/host/src/main.ts
 >
 > # 走 tsx 从源码跑（兼容 Node 20，但多一个全局依赖）：
-> ExecStart=/usr/bin/env tsx /opt/aipehub/packages/host/src/main.ts
+> ExecStart=/usr/bin/env tsx /opt/gotong/packages/host/src/main.ts
 > ```
 >
 > `--experimental-strip-types` 要求 **Node 22+** —— 在 Node 20 上启动就 `bad option: --experimental-strip-types`，除非你已经部署了 Node 22 否则别选它。
@@ -256,7 +256,7 @@ hub.example.com {
     # 标准 hardening
     header {
         Strict-Transport-Security "max-age=63072000; includeSubDomains; preload"
-        # AipeHub 在应用层已经设了 X-Frame-Options + CSP；这里再加一次
+        # Gotong 在应用层已经设了 X-Frame-Options + CSP；这里再加一次
         # 是纵深防御。
         X-Frame-Options "DENY"
         Referrer-Policy "no-referrer"
@@ -297,9 +297,9 @@ sudo ufw --force enable
 
 ```bash
 sudo systemctl daemon-reload
-sudo systemctl enable --now aipehub
+sudo systemctl enable --now gotong
 sudo systemctl enable --now caddy
-sudo journalctl -u aipehub -f
+sudo journalctl -u gotong -f
 ```
 
 在日志里找这一行：
@@ -309,17 +309,17 @@ First-run admin URL (shown ONCE — save it):
   http://127.0.0.1:3000/admin?token=<HEX>
 ```
 
-把 `http://127.0.0.1:3000` 替换成 `https://hub.example.com`，在浏览器里打开。`AIPE_COOKIE_SECURE=1` 加 TLS，cookie 黏住。后续重启 systemd service 不会重新打印 token —— admin 已经持久化在 `admins.json` 里。
+把 `http://127.0.0.1:3000` 替换成 `https://hub.example.com`，在浏览器里打开。`GOTONG_COOKIE_SECURE=1` 加 TLS，cookie 黏住。后续重启 systemd service 不会重新打印 token —— admin 已经持久化在 `admins.json` 里。
 
 > **URL 丢了？** 如果错过 bootstrap 那行日志（终端关掉、log shipper 过滤掉、scrollback 翻过去），用下面这条**不启动 listener** 的恢复命令：
 >
 > ```bash
-> sudo -u aipehub -H AIPE_SPACE=/srv/aipehub-data \
->   AIPE_HOST=hub.example.com AIPE_COOKIE_SECURE=1 \
->   /opt/aipehub/packages/host/bin/aipehub-host.js mint-admin-token
+> sudo -u gotong -H GOTONG_SPACE=/srv/gotong-data \
+>   GOTONG_HOST=hub.example.com GOTONG_COOKIE_SECURE=1 \
+>   /opt/gotong/packages/host/bin/gotong-host.js mint-admin-token
 > ```
 >
-> 它不启动 Hub / WebSocket / Web listener，只 open `AIPE_SPACE`，往 `admins.json` 加一个新 admin，按 `AIPE_HOST` / `AIPE_WEB_PORT` / `AIPE_COOKIE_SECURE` 打印一次性 URL（公网 hostname 直接对得上），然后退出。已存在的 admin、cookie、session 都不动。可选传 display name 给新 admin 加标签：`mint-admin-token "Carol"`。
+> 它不启动 Hub / WebSocket / Web listener，只 open `GOTONG_SPACE`，往 `admins.json` 加一个新 admin，按 `GOTONG_HOST` / `GOTONG_WEB_PORT` / `GOTONG_COOKIE_SECURE` 打印一次性 URL（公网 hostname 直接对得上），然后退出。已存在的 admin、cookie、session 都不动。可选传 display name 给新 admin 加标签：`mint-admin-token "Carol"`。
 
 ### C.8 邀请更多 admin
 
@@ -340,7 +340,7 @@ curl -X POST -H "Authorization: Bearer <YOUR_TOKEN>" \
 ### C.9 Remote agent
 
 ```ts
-import { connect, AgentParticipant } from '@aipehub/sdk-node'
+import { connect, AgentParticipant } from '@gotong/sdk-node'
 
 class MyAgent extends AgentParticipant {
   constructor() { super({ id: 'my-agent', capabilities: ['draft'] }) }
@@ -357,11 +357,11 @@ await connect({
 
 ### C.10 备份
 
-整个状态就是一棵目录树（`/srv/aipehub-data`）。每晚一次 `rsync` 就够：
+整个状态就是一棵目录树（`/srv/gotong-data`）。每晚一次 `rsync` 就够：
 
 ```cron
-30 03 * * * /usr/bin/rsync -a --delete /srv/aipehub-data/ \
-  backup-host:/srv/aipehub-backup/$(date +\%F)/
+30 03 * * * /usr/bin/rsync -a --delete /srv/gotong-data/ \
+  backup-host:/srv/gotong-backup/$(date +\%F)/
 ```
 
 恢复：停 systemd，替换目录，启 systemd。备份里包含 `runtime/admin-sessions.json` 的话，恢复前签发的 cookie 仍然能用。
@@ -370,17 +370,17 @@ await connect({
 
 `transcript.jsonl` 是 append-only 的，会一直涨。体验版规模通常不是问题（每个活跃用户每天 KB 量级），但量大了配 `logrotate`：
 
-`/etc/logrotate.d/aipehub`：
+`/etc/logrotate.d/gotong`：
 
 ```
-/srv/aipehub-data/transcript.jsonl {
+/srv/gotong-data/transcript.jsonl {
     monthly
     rotate 24
     missingok
     notifempty
     compress
     delaycompress
-    create 640 aipehub aipehub
+    create 640 gotong gotong
     copytruncate
 }
 ```
@@ -399,8 +399,8 @@ curl -fsS https://hub.example.com/healthz
 ### C.13 更新部署
 
 ```bash
-sudo -u aipehub -H bash -lc 'cd /opt/aipehub && git pull && pnpm install && pnpm build'
-sudo systemctl restart aipehub
+sudo -u gotong -H bash -lc 'cd /opt/gotong && git pull && pnpm install && pnpm build'
+sudo systemctl restart gotong
 ```
 
 `hub.stop()` 在 SIGTERM 上 drain 当前 inflight Task + 让 SSE 客户端断开干净，再启动新进程。
@@ -411,9 +411,9 @@ sudo systemctl restart aipehub
 
 把 URL 给用户之前：
 
-- [ ] `AIPE_COOKIE_SECURE=1` 已设
-- [ ] `AIPE_ALLOWED_HOSTS` 精确列出所有面向用户的 hostname
-- [ ] `AIPE_GATING=admin-approval`（公网**绝不**用 `open`）
+- [ ] `GOTONG_COOKIE_SECURE=1` 已设
+- [ ] `GOTONG_ALLOWED_HOSTS` 精确列出所有面向用户的 hostname
+- [ ] `GOTONG_GATING=admin-approval`（公网**绝不**用 `open`）
 - [ ] Caddy 已签发 TLS 并发送 HSTS
 - [ ] systemd 自动重启已开（`Restart=always`）
 - [ ] 3000 / 4000 是 loopback；防火墙只开 80 / 443

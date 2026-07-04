@@ -1,22 +1,22 @@
 /**
  * Friendly boot-failure hints (ease-of-use ⑥-M2, extended ❸-M1).
  *
- * The host binds two ports on startup — the admin UI / API port (AIPE_WEB_PORT,
- * via `serveWeb`) and the agent WebSocket port (AIPE_WS_PORT, via
- * `serveWebSocket`) — and opens its workspace (AIPE_SPACE) plus the identity
+ * The host binds two ports on startup — the admin UI / API port (GOTONG_WEB_PORT,
+ * via `serveWeb`) and the agent WebSocket port (GOTONG_WS_PORT, via
+ * `serveWebSocket`) — and opens its workspace (GOTONG_SPACE) plus the identity
  * vault (master key) before the hub is up. When any of those fail the raw error
  * reaches the operator as a structured-fatal dump from the top-level boot catch,
  * which explains nothing actionable.
  *
  * `friendlyBootError` turns the common, recoverable boot failures into short,
- * actionable messages — which env var to change, plus a pointer at `aipehub
+ * actionable messages — which env var to change, plus a pointer at `gotong
  * doctor` (its ⑥-M1 sibling). It recognises, in order:
  *
  *   • EADDRINUSE                 a listen port is taken (the original ⑥-M2 case)
  *   • EACCES/EPERM on `listen`   not allowed to bind a privileged port (<1024) —
  *                                disambiguated from a workspace-permission
  *                                problem by the `listen` syscall, so a port-80
- *                                user is NOT wrongly told to fix AIPE_SPACE
+ *                                user is NOT wrongly told to fix GOTONG_SPACE
  *   • "master key" failures      the identity vault key is missing / wrong
  *                                length / unreadable (identity throws an
  *                                IdentityError whose message always names it)
@@ -43,23 +43,23 @@ function intOr(raw: string | undefined, fallback: number): number {
 /** Resolve the two listen ports from the env (same keys/defaults as the host config). */
 export function bootPortsFromEnv(env: Record<string, string | undefined> = process.env): BootPorts {
   return {
-    webPort: intOr(env.AIPE_WEB_PORT, 3000),
-    wsPort: intOr(env.AIPE_WS_PORT, 4000),
+    webPort: intOr(env.GOTONG_WEB_PORT, 3000),
+    wsPort: intOr(env.GOTONG_WS_PORT, 4000),
   }
 }
 
-/** Resolve the workspace directory from the env (same key/default as the host: `.aipehub`). */
+/** Resolve the workspace directory from the env (same key/default as the host: `.gotong`). */
 export function bootSpaceFromEnv(env: Record<string, string | undefined> = process.env): string {
-  const dir = (env.AIPE_SPACE ?? '').trim()
-  return dir.length > 0 ? dir : '.aipehub'
+  const dir = (env.GOTONG_SPACE ?? '').trim()
+  return dir.length > 0 ? dir : '.gotong'
 }
 
 /** A boot error widened to read the runtime-only fields Node attaches to errno errors. */
 type ErrnoLike = NodeJS.ErrnoException & { port?: number; path?: string }
 
-const BANNER = '✖ AipeHub could not start'
-const DOCTOR_PORTS = 'Run `aipehub doctor` to check ports and settings.'
-const DOCTOR_SPACE = 'Run `aipehub doctor` to check your workspace and settings.'
+const BANNER = '✖ Gotong could not start'
+const DOCTOR_PORTS = 'Run `gotong doctor` to check ports and settings.'
+const DOCTOR_SPACE = 'Run `gotong doctor` to check your workspace and settings.'
 
 /** The path Node names on a filesystem error, else the env-resolved workspace dir. */
 function spaceTarget(e: ErrnoLike, env: Record<string, string | undefined>): string {
@@ -80,21 +80,21 @@ function portInUseHint(e: ErrnoLike, env: Record<string, string | undefined>): s
   if (port === webPort) {
     body = [
       `  Port ${webPort} (admin UI / API) is already in use. Either:`,
-      `    • another AipeHub may already be running — open http://127.0.0.1:${webPort}/`,
-      `    • or set AIPE_WEB_PORT to a free port (e.g. ${webPort + 1}) and relaunch`,
+      `    • another Gotong may already be running — open http://127.0.0.1:${webPort}/`,
+      `    • or set GOTONG_WEB_PORT to a free port (e.g. ${webPort + 1}) and relaunch`,
     ]
   } else if (port === wsPort) {
     body = [
       `  Port ${wsPort} (agent WebSocket) is already in use. Either:`,
-      `    • another AipeHub may already be running`,
-      `    • or set AIPE_WS_PORT to a free port (e.g. ${wsPort + 1}) and relaunch`,
+      `    • another Gotong may already be running`,
+      `    • or set GOTONG_WS_PORT to a free port (e.g. ${wsPort + 1}) and relaunch`,
     ]
   } else {
     const where = port ? `Port ${port}` : 'A port the host needs'
     body = [
-      `  ${where} is already in use. AipeHub listens on two ports:`,
-      `    • AIPE_WEB_PORT  admin UI / API    (now ${webPort})`,
-      `    • AIPE_WS_PORT   agent WebSocket   (now ${wsPort})`,
+      `  ${where} is already in use. Gotong listens on two ports:`,
+      `    • GOTONG_WEB_PORT  admin UI / API    (now ${webPort})`,
+      `    • GOTONG_WS_PORT   agent WebSocket   (now ${wsPort})`,
       `  Set whichever collides to a free port and relaunch.`,
     ]
   }
@@ -107,10 +107,10 @@ function listenPermissionHint(e: ErrnoLike, env: Record<string, string | undefin
   const port = typeof e.port === 'number' ? e.port : undefined
   const which =
     port === webPort
-      ? 'AIPE_WEB_PORT'
+      ? 'GOTONG_WEB_PORT'
       : port === wsPort
-        ? 'AIPE_WS_PORT'
-        : 'AIPE_WEB_PORT / AIPE_WS_PORT'
+        ? 'GOTONG_WS_PORT'
+        : 'GOTONG_WEB_PORT / GOTONG_WS_PORT'
   const where = port ? `Port ${port}` : 'A port the host needs'
   return frame('it is not allowed to bind a port it needs.', [
     `  ${where} requires elevated privileges — ports below 1024 are`,
@@ -137,30 +137,30 @@ function isMasterKeyError(e: ErrnoLike): boolean {
 function masterKeyHint(e: Error, env: Record<string, string | undefined>): string {
   const space = bootSpaceFromEnv(env)
   return frame('the identity vault master key is missing or invalid.', [
-    '  AipeHub encrypts stored secrets (LLM keys, peer tokens) with a master key.',
+    '  Gotong encrypts stored secrets (LLM keys, peer tokens) with a master key.',
     `  details: ${e.message}`,
     '  Depending on how you run it:',
     `    • default (local-file): the key lives at ${space}/identity-master.key —`,
     '      if it was moved or truncated, restore it from your backup (a NEW key',
     '      cannot decrypt secrets written under the old one)',
-    '    • env provider: set AIPE_MASTER_KEY to the 64-hex-char key and',
-    '      AIPE_MASTER_KEY_PROVIDER=env',
+    '    • env provider: set GOTONG_MASTER_KEY to the 64-hex-char key and',
+    '      GOTONG_MASTER_KEY_PROVIDER=env',
   ], DOCTOR_SPACE)
 }
 
-/** EACCES/EPERM/EROFS writing the workspace — fix perms or point AIPE_SPACE elsewhere. */
+/** EACCES/EPERM/EROFS writing the workspace — fix perms or point GOTONG_SPACE elsewhere. */
 function spacePermissionHint(e: ErrnoLike, env: Record<string, string | undefined>): string {
   const target = spaceTarget(e, env)
   const readOnly = e.code === 'EROFS'
   const cause = readOnly
-    ? '  AipeHub stores all state under AIPE_SPACE, but that path is on a'
-    : '  AipeHub stores all state under AIPE_SPACE; it could not write to:'
+    ? '  Gotong stores all state under GOTONG_SPACE, but that path is on a'
+    : '  Gotong stores all state under GOTONG_SPACE; it could not write to:'
   const body = readOnly
     ? [
         cause,
         '  read-only filesystem:',
         `    ${target}`,
-        '  Point AIPE_SPACE at a writable directory (or remount read-write) and relaunch.',
+        '  Point GOTONG_SPACE at a writable directory (or remount read-write) and relaunch.',
       ]
     : [
         cause,
@@ -168,7 +168,7 @@ function spacePermissionHint(e: ErrnoLike, env: Record<string, string | undefine
         '  Either:',
         '    • fix the directory owner/permissions so this process can write it',
         '      (e.g. chown/chmod, or run as the owning user)',
-        '    • or point AIPE_SPACE at a directory you own and relaunch',
+        '    • or point GOTONG_SPACE at a directory you own and relaunch',
       ]
   return frame('its workspace directory is not writable.', body, DOCTOR_SPACE)
 }
@@ -179,8 +179,8 @@ function diskFullHint(e: ErrnoLike, env: Record<string, string | undefined>): st
   const quota = e.code === 'EDQUOT'
   return frame('there is no space left to write its workspace.', [
     quota
-      ? '  The disk holding AIPE_SPACE is over quota while writing:'
-      : '  The disk holding AIPE_SPACE is full while writing:',
+      ? '  The disk holding GOTONG_SPACE is over quota while writing:'
+      : '  The disk holding GOTONG_SPACE is full while writing:',
     `    ${target}`,
     quota ? '  Raise the quota (or free up space), then relaunch.' : '  Free up space, then relaunch.',
   ], DOCTOR_SPACE)

@@ -13,8 +13,8 @@
  */
 
 import { describe, expect, it } from 'vitest'
-import { Hub } from '@aipehub/core'
-import { MockLlmProvider } from '@aipehub/llm'
+import { Hub } from '@gotong/core'
+import { MockLlmProvider } from '@gotong/llm'
 
 import {
   buildOperatorStewardSystemPrompt,

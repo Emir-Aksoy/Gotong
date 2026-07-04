@@ -7,7 +7,7 @@
  * config-write(owner) command).
  *
  * Why a host service (not web calling ops-core directly): web takes ZERO runtime
- * dependency on `@aipehub/host` — it consumes this as a duck-typed surface, exactly
+ * dependency on `@gotong/host` — it consumes this as a duck-typed surface, exactly
  * like `AdminHealthSurface`. The host owns the deps + the audit binding; web stays a
  * thin requireAdmin → resolveActor → echo.
  *
@@ -19,7 +19,7 @@
  * the asymmetry stays in the single chokepoint, driven by the flag web supplies.
  */
 
-import { AUDIT_ACTIONS } from '@aipehub/identity'
+import { AUDIT_ACTIONS } from '@gotong/identity'
 
 import type { AdminHealthSurface } from './admin-health.js'
 import {
@@ -58,7 +58,7 @@ export interface SettingAuditSink {
 }
 
 export interface SettingOpsServiceDeps {
-  /** Workspace root (AIPE_SPACE). */
+  /** Workspace root (GOTONG_SPACE). */
   spaceDir: string
   /** Env the read/config views report on. Defaults to process.env. */
   env?: Record<string, string | undefined>
@@ -66,9 +66,9 @@ export interface SettingOpsServiceDeps {
    * `createAdminHealthService` instance the overview panel uses so they never
    * disagree. */
   health?: AdminHealthSurface
-  /** Directory `inventory` scans. Defaults to env.AIPE_BACKUP_DIR (read-only). */
+  /** Directory `inventory` scans. Defaults to env.GOTONG_BACKUP_DIR (read-only). */
   backupDir?: string
-  /** Managed env file `config-set` writes. Defaults to <space>/aipehub.env. */
+  /** Managed env file `config-set` writes. Defaults to <space>/gotong.env. */
   envFilePath?: string
   /** Pricing override file `config-price` writes. Defaults to <space>/pricing.json. */
   pricingPath?: string

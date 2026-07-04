@@ -31,7 +31,7 @@ import {
   Hub,
   Space,
   type AdminRecord,
-} from '@aipehub/core'
+} from '@gotong/core'
 
 import {
   serveWeb,
@@ -62,7 +62,7 @@ interface BootOpts {
 }
 
 async function boot(opts: BootOpts = {}): Promise<BootResult> {
-  const tmp = await mkdtemp(join(tmpdir(), 'aipehub-web-hygiene-'))
+  const tmp = await mkdtemp(join(tmpdir(), 'gotong-web-hygiene-'))
   const init = await Space.init(tmp, { name: 'hygiene-test' })
   const space = init.space
   const hub = new Hub({ space })
@@ -71,7 +71,7 @@ async function boot(opts: BootOpts = {}): Promise<BootResult> {
   const { admin, token: adminToken } = await space.createAdmin('TestAdmin')
   const adminSid = 'a-test-sid-' + Math.random().toString(36).slice(2)
   await space.addAdminSession(adminSid, admin.id)
-  const adminCookie = `aipehub_admin=${adminSid}`
+  const adminCookie = `gotong_admin=${adminSid}`
 
   const server = await serveWeb(hub, {
     host: '127.0.0.1',
@@ -104,7 +104,7 @@ describe('H18: redact err.message in 500 responses', () => {
     // `findAdminFromRequest` cookie path calls `space.admins()` once
     // the sid resolves to a session, so any GET that uses
     // `requireAdmin` will hit our injected throw.
-    const SENSITIVE_PATH = '/var/lib/aipehub/SECRET_PATH_THAT_MUST_NOT_LEAK'
+    const SENSITIVE_PATH = '/var/lib/gotong/SECRET_PATH_THAT_MUST_NOT_LEAK'
     const SENSITIVE_SQL = 'SELECT * FROM admin_tokens WHERE hash='
     const original = b.space.admins.bind(b.space)
     let calls = 0
@@ -262,7 +262,7 @@ describe('H21: cookie path is rate-limited (failed lookups only)', () => {
   it('returns 429 after enough invalid cookie sids from the same IP', async () => {
     const get = (sid: string) =>
       fetch(`${b.baseUrl}/api/admin/metrics`, {
-        headers: { cookie: `aipehub_admin=${sid}` },
+        headers: { cookie: `gotong_admin=${sid}` },
       })
     // First two bogus sids: lookup fails, limiter records each failure;
     // the response is 401 ("admin auth required") because the sid
@@ -295,7 +295,7 @@ describe('H21: cookie path is rate-limited (failed lookups only)', () => {
     // Exhaust the cookie slot with two failures...
     const bogus = (sid: string) =>
       fetch(`${b.baseUrl}/api/admin/metrics`, {
-        headers: { cookie: `aipehub_admin=${sid}` },
+        headers: { cookie: `gotong_admin=${sid}` },
       })
     await bogus('aa')
     await bogus('bb')

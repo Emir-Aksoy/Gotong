@@ -1,5 +1,5 @@
 /**
- * profile — PRO-M1. The `AIPE_PROFILE` mapping layer is a presentation lens with
+ * profile — PRO-M1. The `GOTONG_PROFILE` mapping layer is a presentation lens with
  * one non-negotiable property: **unset must be byte-identical to today**. These
  * tests pin that (the unset/empty path produces NO id, NO descriptor, NO banner
  * lines), plus the parse aliases, the typo-vs-unset distinction, and the shape of

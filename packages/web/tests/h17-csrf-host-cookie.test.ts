@@ -41,7 +41,7 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { Hub, Space, type AdminRecord } from '@aipehub/core'
+import { Hub, Space, type AdminRecord } from '@gotong/core'
 
 import { serveWeb, type WebServerHandle } from '../src/server.js'
 
@@ -67,7 +67,7 @@ interface BootResult {
 }
 
 async function boot(opts: BootOpts = {}): Promise<BootResult> {
-  const tmp = await mkdtemp(join(tmpdir(), 'aipehub-h17-'))
+  const tmp = await mkdtemp(join(tmpdir(), 'gotong-h17-'))
   const init = await Space.init(tmp, { name: 'h17-test' })
   const space = init.space
   const hub = new Hub({ space })
@@ -76,7 +76,7 @@ async function boot(opts: BootOpts = {}): Promise<BootResult> {
   const { admin, token: adminToken } = await space.createAdmin('TestAdmin')
   const adminSid = 'h17-admin-sid-' + Math.random().toString(36).slice(2)
   await space.addAdminSession(adminSid, admin.id)
-  const adminCookie = `aipehub_admin=${adminSid}`
+  const adminCookie = `gotong_admin=${adminSid}`
 
   const server = await serveWeb(hub, {
     host: '127.0.0.1',
@@ -496,7 +496,7 @@ describe('H17 — cookie attributes: cookieSecure=false (dev / HTTP)', () => {
     })
     expect(r.status).toBe(302)
     const c = parseSetCookie(firstSetCookie(r.headers))
-    expect(c.name).toBe('aipehub_admin')
+    expect(c.name).toBe('gotong_admin')
     expect(c.value.length).toBeGreaterThan(0)
     expect(c.attrs.get('httponly')).toBe(true)
     expect(c.attrs.get('samesite')).toBe('Lax')
@@ -513,7 +513,7 @@ describe('H17 — cookie attributes: cookieSecure=false (dev / HTTP)', () => {
     })
     expect(r.status).toBe(200)
     const c = parseSetCookie(firstSetCookie(r.headers))
-    expect(c.name).toBe('aipehub_admin')
+    expect(c.name).toBe('gotong_admin')
     expect(c.value).toBe('')                     // cookie value cleared
     expect(c.attrs.get('httponly')).toBe(true)
     expect(c.attrs.get('samesite')).toBe('Lax')
@@ -530,7 +530,7 @@ describe('H17 — cookie attributes: cookieSecure=false (dev / HTTP)', () => {
     })
     expect(r.status).toBe(200)
     const c = parseSetCookie(firstSetCookie(r.headers))
-    expect(c.name).toBe('aipehub_worker')
+    expect(c.name).toBe('gotong_worker')
     expect(c.value.length).toBeGreaterThan(0)
     expect(c.attrs.get('httponly')).toBe(true)
     expect(c.attrs.get('samesite')).toBe('Lax')
@@ -557,7 +557,7 @@ describe('H17 — cookie attributes: cookieSecure=false (dev / HTTP)', () => {
     })
     expect(r.status).toBe(200)
     const c = parseSetCookie(firstSetCookie(r.headers))
-    expect(c.name).toBe('aipehub_worker')
+    expect(c.name).toBe('gotong_worker')
     expect(c.value).toBe('')
     expect(c.attrs.get('max-age')).toBe('0')
     expect(c.attrs.get('samesite')).toBe('Lax')

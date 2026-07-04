@@ -18,7 +18,7 @@
  * mistake.
  *
  * A3 (v4 Phase 5) — `'user' | 'org' | 'peer'` were added to align with
- * `@aipehub/identity`'s vault `OwnerKind`. The three new kinds enable
+ * `@gotong/identity`'s vault `OwnerKind`. The three new kinds enable
  * higher-level services (B1 OrgApiPool, B3 Knowledge, D1 Peer Registry)
  * to file data by identity-rooted ownership without re-inventing the
  * vocabulary. The original three kinds remain valid — they answer
@@ -30,7 +30,7 @@ export type OwnerKind =
   | 'workflow-run'
   | 'shared'
   // A3 (v4 Phase 5) — identity-rooted owners. Values mirror
-  // `@aipehub/identity`'s `OwnerKind` so the two packages can pass
+  // `@gotong/identity`'s `OwnerKind` so the two packages can pass
   // (kind, id) tuples to each other without translation.
   | 'user'
   | 'org'
@@ -38,12 +38,12 @@ export type OwnerKind =
 
 /**
  * Sentinel id for the `'org'` kind. The host IS the implicit org owner
- * (a single AipeHub install == one organisation), so there's no real
+ * (a single Gotong install == one organisation), so there's no real
  * org id to scope by. We use `'self'` as the path segment so the
  * filesystem layout (`<rootDir>/org/self/...`) stays readable instead
  * of producing an awkward bare `<rootDir>/org/` directory.
  *
- * Mirrors how `@aipehub/identity`'s vault stores ownerKind='org' rows
+ * Mirrors how `@gotong/identity`'s vault stores ownerKind='org' rows
  * with `owner_id IS NULL`: the absence is real in the data model, but
  * the filesystem path needs *something*.
  */

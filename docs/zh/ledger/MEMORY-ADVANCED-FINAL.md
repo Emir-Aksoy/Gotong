@@ -1,7 +1,7 @@
 # 个人管家记忆 — 五项长期增强 (收口, C/F/E/G/D + Z 全完)
 
 > 用户指令「C/D/E/F/G 都做, 一起做一个计划先」+「定了我就一路做到底不再打断」——
-> 一次把 Personal Butler 记忆引擎 `@aipehub/personal-memory` 还缺的五项长期能力做实,
+> 一次把 Personal Butler 记忆引擎 `@gotong/personal-memory` 还缺的五项长期能力做实,
 > 再用一个收口里程碑 **Z** 把它们接进 host + example + `/me` 隐私视图。承接
 > [`MEMORY-TIERS-FINAL.md`](./MEMORY-TIERS-FINAL.md) (③ 多级长期 × ⑤ 重要性) 与
 > [`PERSONAL-BUTLER-FINAL.md`](./PERSONAL-BUTLER-FINAL.md) (管家骨架)。
@@ -36,7 +36,7 @@
 
 - **框架不跑 LLM**。调和 (E/D 的 reconcile) 与蒸馏走注入的 `MemorySummarizer` 回调,
   `reconcile.ts`/`link-pass.ts`/`salience.ts`/`bitemporal.ts`/`procedure.ts` 从不
-  `import @aipehub/llm`; 衰减/强化/建链/有效性判定全是**纯函数**。测试用确定性 fake。
+  `import @gotong/llm`; 衰减/强化/建链/有效性判定全是**纯函数**。测试用确定性 fake。
 - **状态即文件**。五项全是 per-user jsonl 里 entry 的 `meta`。复制目录 = 搬走「大脑」,
   连同它的链、强化计数、时间边。重启透明。
 - **不需要向前兼容, 但默认零回归**。每一项都是 **opt-in, 默认字节不变**:

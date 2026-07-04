@@ -6,7 +6,7 @@ import asyncio
 
 import pytest
 
-from aipehub import AgentParticipant, connect
+from gotong import AgentParticipant, connect
 
 from .conftest import FakeHub, serve_hub
 

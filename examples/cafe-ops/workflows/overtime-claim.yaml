@@ -1,7 +1,7 @@
 # 加班申报 + 店长审批 (HITL) — 这是 "管理加班费" 那条。
 # 店员报加班 → 助手按店面加班政策给建议金额 → 店长 human: 审批 → 完成。
 # 钱的事: 助手只给 "建议金额", 最终必须店长 approve (LLM 建议, 人定钱)。
-schema: aipehub.workflow/v1
+schema: gotong.workflow/v1
 workflow:
   id: cafe-overtime-claim
   name: 加班申报 + 店长审批
@@ -57,7 +57,7 @@ workflow:
           hours: $trigger.payload.hours
           date: $trigger.payload.date
           day_kind: $trigger.payload.day_kind
-    # human: 糖 → 派到 aipehub.human/v1 → HumanInboxParticipant 挂起任务,
+    # human: 糖 → 派到 gotong.human/v1 → HumanInboxParticipant 挂起任务,
     # 落成店长 /me 收件箱里一条 approval, 店长批了才恢复后续 (Phase 16)。
     - id: manager-approval
       description: 店长复核加班申报与建议金额, 决定是否批准。

@@ -6,7 +6,7 @@
  * declarative workflow whose security action is held behind a `human:` step. So
  * beyond the usual "agent lands" check it runs the embedded workflow block through
  * the REAL `parseWorkflow`, proving the opaque re-serialization round-trips: the
- * `human:` HITL sugar desugars to `aipehub.human/v1`, `surface.me` survives, and
+ * `human:` HITL sugar desugars to `gotong.human/v1`, `surface.me` survives, and
  * the `when:`-gated secure step stays gated.
  *
  * It reads the SHIPPED
@@ -21,8 +21,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { Hub, Space } from '@aipehub/core'
-import { parseWorkflow } from '@aipehub/workflow'
+import { Hub, Space } from '@gotong/core'
+import { parseWorkflow } from '@gotong/workflow'
 
 import { serveWeb, type WebServerHandle, type WorkflowSurface } from '../src/server.js'
 import { parseTemplate } from '../src/template-manifest.js'
@@ -38,7 +38,7 @@ beforeEach(async () => {
 })
 
 describe('examples/smart-home-hub/template', () => {
-  it('parses as a valid aipehub.template/v1 manifest (1 agent, 1 workflow, no KB)', () => {
+  it('parses as a valid gotong.template/v1 manifest (1 agent, 1 workflow, no KB)', () => {
     const t = parseTemplate(templateText)
     expect(t.name).toBe('智能家居(小米 / Home Assistant)')
     expect(t.version).toBe(1)
@@ -64,7 +64,7 @@ describe('examples/smart-home-hub/template', () => {
   it('the embedded workflow round-trips through the real parseWorkflow (human: + when gates survive)', () => {
     const t = parseTemplate(templateText)
     // The opaque-blob trick is only sound if the re-serialized block is in fact a
-    // valid aipehub.workflow/v1 — assert it against the SAME parser the host runs.
+    // valid gotong.workflow/v1 — assert it against the SAME parser the host runs.
     const wf = parseWorkflow(t.workflows[0]!.yaml)
     expect(wf.id).toBe('home-goodnight')
     expect(wf.trigger.capability).toBe('home.run-goodnight')
@@ -72,7 +72,7 @@ describe('examples/smart-home-hub/template', () => {
     expect(wf.surface?.me?.enabled).toBe(true)
     expect(wf.surface?.me?.userScopeField).toBe('resident_id')
     // The `human:` security step desugared to the inbox capability.
-    expect(JSON.stringify(wf)).toContain('aipehub.human/v1')
+    expect(JSON.stringify(wf)).toContain('gotong.human/v1')
     // The secure step is gated on the approval — reject → it is skipped (fail-closed).
     const secure = wf.steps.find((s) => s.id === 'secure')!
     expect(secure.when).toBe('$confirm-lock.output.approved == true')
@@ -84,7 +84,7 @@ describe('examples/smart-home-hub/template', () => {
   })
 
   it('imports end-to-end: 1 agent lands, 1 workflow imports (re-validated), no KB', async () => {
-    const tmp = await mkdtemp(join(tmpdir(), 'aipehub-smart-home-'))
+    const tmp = await mkdtemp(join(tmpdir(), 'gotong-smart-home-'))
     const { space } = await Space.init(tmp, { name: 'smart-home-test' })
     const hub = new Hub({ space })
     await hub.start()

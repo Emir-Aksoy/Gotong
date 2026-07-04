@@ -25,7 +25,7 @@
  * `consolidate-tiered.ts`.
  */
 
-import type { MemoryEntry } from '@aipehub/services-sdk'
+import type { MemoryEntry } from '@gotong/services-sdk'
 
 export const META_TIER = 'tier'
 export const META_LEVEL = 'level'

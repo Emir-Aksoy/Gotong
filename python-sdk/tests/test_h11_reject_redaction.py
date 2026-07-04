@@ -6,7 +6,7 @@ threat model is identical: a misconfigured Hub or upstream proxy puts
 the client's own credentials back into the REJECT message body,
 :class:`ConnectionRejected` carries the message into the user's
 exception path, and from there it's typically logged. The redactor
-scrubs `sk-...`, `Bearer ...`, and `aipe-...` token shapes before
+scrubs `sk-...`, `Bearer ...`, and `gotong-...` token shapes before
 the message is stored.
 
 See AUDIT-v3.3.md finding H11.
@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import pytest
 
-from aipehub.session import ConnectionRejected, _redact_secrets
+from gotong.session import ConnectionRejected, _redact_secrets
 
 
 class TestRedactSecrets:
@@ -43,18 +43,18 @@ class TestRedactSecrets:
 
     def test_redacts_bearer_header(self) -> None:
         out = _redact_secrets(
-            "upstream said 502: Authorization: Bearer aipe-tok-abc-xyz-def",
+            "upstream said 502: Authorization: Bearer gotong-tok-abc-xyz-def",
         )
-        assert "aipe-tok-abc-xyz-def" not in out
+        assert "gotong-tok-abc-xyz-def" not in out
         assert "<redacted>" in out
 
     def test_bearer_is_case_insensitive(self) -> None:
         out = _redact_secrets("bearer my-token-here")
         assert "my-token-here" not in out
 
-    def test_redacts_aipe_admin_token(self) -> None:
-        out = _redact_secrets("rejected: token aipe-admin-deadbeef invalid")
-        assert "aipe-admin" not in out
+    def test_redacts_gotong_admin_token(self) -> None:
+        out = _redact_secrets("rejected: token gotong-admin-deadbeef invalid")
+        assert "gotong-admin" not in out
         assert "<redacted>" in out
 
     def test_no_false_positive_on_prose(self) -> None:
@@ -93,8 +93,8 @@ class TestConnectionRejectedRedaction:
         # User code reads `.message` to surface the rejection into
         # higher-level error reporting — that path MUST see redacted
         # text too.
-        err = ConnectionRejected("auth_failed", "Bearer aipe-tok-secret-xyz failed")
-        assert "aipe-tok-secret-xyz" not in err.message
+        err = ConnectionRejected("auth_failed", "Bearer gotong-tok-secret-xyz failed")
+        assert "gotong-tok-secret-xyz" not in err.message
         assert "<redacted>" in err.message
 
     def test_code_field_is_NOT_redacted(self) -> None:
@@ -113,7 +113,7 @@ class TestConnectionRejectedRedaction:
         "raw_message,must_not_contain",
         [
             ("apiKey 'sk-tok123abc' invalid", "sk-tok123abc"),
-            ("Authorization: Bearer aipe-x-y-z bad", "aipe-x-y-z"),
+            ("Authorization: Bearer gotong-x-y-z bad", "gotong-x-y-z"),
             ("first sk-aaa then sk-bbb", "sk-aaa"),
         ],
     )

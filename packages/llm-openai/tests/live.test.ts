@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { drainStream, type LlmToolDefinition } from '@aipehub/llm'
+import { drainStream, type LlmToolDefinition } from '@gotong/llm'
 
 import { OpenAIProvider } from '../src/index.js'
 
@@ -13,10 +13,10 @@ import { OpenAIProvider } from '../src/index.js'
  * it at DeepSeek (or any compatible endpoint):
  *   OPENAI_API_KEY=<deepseek key>
  *   OPENAI_BASE_URL=https://api.deepseek.com
- *   AIPE_LIVE_OPENAI_MODEL=deepseek-chat
+ *   GOTONG_LIVE_OPENAI_MODEL=deepseek-chat
  * Left unset, it talks to OpenAI with the cheap gpt-4o-mini default.
  */
-const MODEL = process.env.AIPE_LIVE_OPENAI_MODEL ?? 'gpt-4o-mini'
+const MODEL = process.env.GOTONG_LIVE_OPENAI_MODEL ?? 'gpt-4o-mini'
 const BASE_URL = process.env.OPENAI_BASE_URL // undefined → OpenAI default
 
 function makeProvider(): OpenAIProvider {

@@ -33,7 +33,7 @@ afterEach(() => {
 
 describe('identity.sqlite file mode (V4-AUDIT-02)', () => {
   it.runIf(isPosix)('is created with mode 0o600 (owner-only)', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'aipehub-id-mode-'))
+    const dir = mkdtempSync(join(tmpdir(), 'gotong-id-mode-'))
     tmpDirs.push(dir)
     const path = join(dir, 'identity.sqlite')
     const store = openIdentityStore({ dbPath: path })
@@ -47,7 +47,7 @@ describe('identity.sqlite file mode (V4-AUDIT-02)', () => {
   })
 
   it.runIf(isPosix)('keeps mode 0o600 across a re-open', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'aipehub-id-mode-reopen-'))
+    const dir = mkdtempSync(join(tmpdir(), 'gotong-id-mode-reopen-'))
     tmpDirs.push(dir)
     const path = join(dir, 'identity.sqlite')
     openIdentityStore({ dbPath: path }).close()

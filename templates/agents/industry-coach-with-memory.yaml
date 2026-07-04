@@ -1,5 +1,5 @@
 # 行业陪练教练 — 带 Hub Services 的示范 agent
-# AipeHub agent v1 manifest (v2.2 — uses Hub Services)
+# Gotong agent v1 manifest (v2.2 — uses Hub Services)
 #
 # 用法：admin 控制台 → 智能体 → 导入 → 粘贴本文件
 #
@@ -13,7 +13,7 @@
 #
 # 想换 provider 把 `provider` 改成 `openai` / `mock` 即可。
 # 跑端到端 demo 时建议用 `provider: mock` —— 不需要 API key。
-schema: aipehub.agent/v1
+schema: gotong.agent/v1
 
 agent:
   id: industry-coach

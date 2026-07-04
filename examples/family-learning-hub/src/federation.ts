@@ -67,10 +67,10 @@ import {
   type ParticipantId,
   type Task,
   type TaskResult,
-} from '@aipehub/core'
-import { acceptHubLinks, bearerAuth, connectHubLink } from '@aipehub/transport-ws'
-import { FileInboxStore, NEVER_RESUME_AT, type InboxDecision, type InboxItem } from '@aipehub/inbox'
-import { parseWorkflow, WorkflowRunner } from '@aipehub/workflow'
+} from '@gotong/core'
+import { acceptHubLinks, bearerAuth, connectHubLink } from '@gotong/transport-ws'
+import { FileInboxStore, NEVER_RESUME_AT, type InboxDecision, type InboxItem } from '@gotong/inbox'
+import { parseWorkflow, WorkflowRunner } from '@gotong/workflow'
 import { WebSocketServer } from 'ws'
 
 import {
@@ -101,7 +101,7 @@ const TOPIC_WHITELIST = ['分数运算', '数学', '英语阅读', '科学常识
 // `cross_org_policy_denied` is proven over a real socket in host/tests/peer-isolation-ws-e2e.test.ts.
 const PER_LINK_QUOTA_BUDGET = 50
 
-// In production this is minted by `aipehub mint-peer-token` (256-bit base64url) and handed
+// In production this is minted by `gotong mint-peer-token` (256-bit base64url) and handed
 // to the other operator out-of-band (FEDERATION-RUNBOOK.md). A fixed constant keeps the demo
 // deterministic — NEVER reuse a literal token like this for real.
 const PEER_TOKEN = 'demo-family-shared-peer-token-do-not-reuse'
@@ -226,9 +226,9 @@ class TopicWhitelistGate {
 }
 
 async function main(): Promise<void> {
-  console.log('\n=== AipeHub case: family-learning-hub — 孩子 hub 过真 WebSocket 借家长订阅的 AI 导师 ===\n')
+  console.log('\n=== Gotong case: family-learning-hub — 孩子 hub 过真 WebSocket 借家长订阅的 AI 导师 ===\n')
 
-  const tmp = mkdtempSync(join(tmpdir(), 'aipehub-family-fed-'))
+  const tmp = mkdtempSync(join(tmpdir(), 'gotong-family-fed-'))
   const childRecordsRoot = join(tmp, 'child-hub')
   const parked = new Map<string, ParkedRow>()
   const inbox = new FileInboxStore(tmp)

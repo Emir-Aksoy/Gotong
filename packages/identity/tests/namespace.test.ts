@@ -7,8 +7,8 @@
  * (b) two stores opened at distinct on-disk paths (the shape a multi-tenant
  * host produces) never share rows, each reporting its own namespace.
  *
- * `@aipehub/identity` has zero runtime deps on purpose, so this test does NOT
- * import `@aipehub/core` — it reproduces the `<base>/tenants/<id>/` layout by
+ * `@gotong/identity` has zero runtime deps on purpose, so this test does NOT
+ * import `@gotong/core` — it reproduces the `<base>/tenants/<id>/` layout by
  * hand (core already owns the `tenantRoot` contract test).
  */
 
@@ -48,7 +48,7 @@ describe('identity store namespace (Route B P0-M1)', () => {
     let b: IdentityStore
 
     beforeEach(async () => {
-      base = await mkdtemp(join(tmpdir(), 'aipehub-id-tenant-'))
+      base = await mkdtemp(join(tmpdir(), 'gotong-id-tenant-'))
       // The layout a multi-tenant host resolves via core's `tenantRoot`.
       a = openIdentityStore({
         dbPath: join(base, 'tenants', 'alpha', 'identity.sqlite'),

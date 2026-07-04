@@ -1,11 +1,11 @@
 # Caddyfile for the production docker-compose blueprint.
 #
 # Two virtual hosts:
-#   - {$AIPE_DOMAIN}     — the admin / worker web UI (HTTP)
-#   - {$AIPE_WS_DOMAIN}  — the WebSocket port for remote agents
+#   - {$GOTONG_DOMAIN}     — the admin / worker web UI (HTTP)
+#   - {$GOTONG_WS_DOMAIN}  — the WebSocket port for remote agents
 #
-# Letting them share the same hostname is fine — set AIPE_WS_DOMAIN
-# to the same value as AIPE_DOMAIN (the compose file does this by
+# Letting them share the same hostname is fine — set GOTONG_WS_DOMAIN
+# to the same value as GOTONG_DOMAIN (the compose file does this by
 # default) and the second block becomes a no-op duplicate; Caddy
 # tolerates it.
 #
@@ -20,22 +20,22 @@
     email {$ACME_EMAIL}
     servers {
         # Trust XFF only from the loopback interface (Caddy itself).
-        # The aipehub container sees Caddy's IP as the source; this
+        # The gotong container sees Caddy's IP as the source; this
         # tells Caddy to populate X-Forwarded-For from the real client
         # so the host's per-IP rate limiter keys correctly when
-        # AIPE_TRUST_PROXY=1.
+        # GOTONG_TRUST_PROXY=1.
         trusted_proxies static private_ranges
     }
 }
 
-{$AIPE_DOMAIN} {
+{$GOTONG_DOMAIN} {
     encode gzip
 
-    # Web UI + admin API. The aipehub container is on the default
-    # compose network as `aipehub`; resolve it via Docker DNS.
-    reverse_proxy aipehub:3000 {
+    # Web UI + admin API. The gotong container is on the default
+    # compose network as `gotong`; resolve it via Docker DNS.
+    reverse_proxy gotong:3000 {
         # Standard X-Forwarded-* headers; the host honours these
-        # because AIPE_TRUST_PROXY=1.
+        # because GOTONG_TRUST_PROXY=1.
         header_up X-Forwarded-Proto https
         # Don't trust client-supplied XFF — overwrite with the real one.
         header_up -X-Forwarded-For
@@ -58,14 +58,14 @@
     }
 }
 
-{$AIPE_WS_DOMAIN} {
+{$GOTONG_WS_DOMAIN} {
     encode gzip
 
     # WebSocket transport. Caddy auto-detects the Upgrade header and
     # tunnels the connection — no special directive needed beyond the
     # bare reverse_proxy. Bumping the read/write timeouts because
     # idle agents may sit between heartbeats for up to a minute.
-    reverse_proxy aipehub:4000 {
+    reverse_proxy gotong:4000 {
         header_up X-Forwarded-Proto https
         header_up -X-Forwarded-For
         transport http {

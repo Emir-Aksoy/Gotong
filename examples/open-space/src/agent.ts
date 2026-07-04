@@ -5,9 +5,9 @@
  * Once approved, it answers `draft` tasks with a one-line sentence.
  */
 
-import { AgentParticipant, connect, type Task } from '@aipehub/sdk-node'
+import { AgentParticipant, connect, type Task } from '@gotong/sdk-node'
 
-const WS_URL = process.env.AIPE_WS_URL ?? 'ws://127.0.0.1:4100'
+const WS_URL = process.env.GOTONG_WS_URL ?? 'ws://127.0.0.1:4100'
 
 class WriterAgent extends AgentParticipant {
   private n = 0

@@ -27,14 +27,14 @@ import {
   lexicalRetriever,
   type Embedder,
   type MemoryRetriever,
-} from '@aipehub/personal-memory'
+} from '@gotong/personal-memory'
 import type {
   MemoryEntry,
   MemoryHandle,
   MemoryKind,
   MemoryQuery,
   NewMemoryEntry,
-} from '@aipehub/services-sdk'
+} from '@gotong/services-sdk'
 
 import { chromaRetriever, type ChromaQuery } from './chroma-retriever.js'
 
@@ -122,7 +122,7 @@ async function main(): Promise<void> {
     entry('tea', '我在经营一家卖奶茶的小店', 100, { importance: 4 }),
     entry('coffee', '早上习惯先来一杯拿铁咖啡', 200),
     entry('ball', '周末喜欢打篮球放松', 300),
-    entry('proj', '正在做一个叫 AipeHub 的项目', 400, { importance: 5 }),
+    entry('proj', '正在做一个叫 Gotong 的项目', 400, { importance: 5 }),
   ]
 
   // === Scene 1: embeddingRetriever (local embed + in-frame cosine) ============

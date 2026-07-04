@@ -2,7 +2,7 @@
 
 > 同步自英文版 [`docs/FEDERATION.md`](../FEDERATION.md) @ 2026-05-17
 
-AipeHub 的 Hub 故意做得很笨：不跑 LLM，也不关心来连接的 agent
+Gotong 的 Hub 故意做得很笨：不跑 LLM，也不关心来连接的 agent
 到底是一个 Python 脚本，还是另一整个 Hub。这一条就够支撑联邦原语。
 把一个本地 Hub **包装成"一个 agent"** 连到上游 Hub 上，你就有了一支
 "以单一身份对外说话"的领头小队。
@@ -27,7 +27,7 @@ AipeHub 的 Hub 故意做得很笨：不跑 LLM，也不关心来连接的 agent
 
 ## 什么是 bridge
 
-`TeamBridgeAgent`（在 `@aipehub/sdk-node` 里）就是一个普通的
+`TeamBridgeAgent`（在 `@gotong/sdk-node` 里）就是一个普通的
 `AgentParticipant`，你把它**向外**连到上游 Hub。它的 `onTask` 不
 自己做活，而是**把任务转派给你交给它的那个本地 Hub**，等本地队伍
 出 `TaskResult`，再包装成"一个干净的 TaskResult"返回给上游，
@@ -45,13 +45,13 @@ bridge 对上游呈现的接口：
 ## 最小代码
 
 ```ts
-import { Hub, Space } from '@aipehub/core'
-import { serveWeb } from '@aipehub/web'
-import { connect, TeamBridgeAgent } from '@aipehub/sdk-node'
+import { Hub, Space } from '@gotong/core'
+import { serveWeb } from '@gotong/web'
+import { connect, TeamBridgeAgent } from '@gotong/sdk-node'
 import { WriterBot, ReviewerBot } from './bots.js'
 
 // 1. 本地队伍 Hub（Alice 的私人驾驶舱）
-const { space } = await Space.openOrInit('.aipehub-team', {
+const { space } = await Space.openOrInit('.gotong-team', {
   name: 'Alice team',
   adminDisplayName: 'Alice',
   config: { webPort: 3300, gating: 'open' },
@@ -75,7 +75,7 @@ await connect({
 ```
 
 就这些。**没有新协议** —— bridge 走的还是其他所有 agent 都在用的
-`@aipehub/protocol` over WebSocket 传输。
+`@gotong/protocol` over WebSocket 传输。
 
 ## 为什么有用
 
@@ -172,5 +172,5 @@ pnpm demo:federated-team
 `TASK alice-team "[upstream] draft about …" via capability` —— 然后
 结果上游回成 `RESULT ok by alice-team`，本地回成 `RESULT ok by writer-bot`。
 
-`.aipehub-upstream/transcript.jsonl` 和 `.aipehub-team/transcript.jsonl`
+`.gotong-upstream/transcript.jsonl` 和 `.gotong-team/transcript.jsonl`
 各自保留自己侧的完整审计轨迹。

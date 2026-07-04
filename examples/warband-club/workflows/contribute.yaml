@@ -1,6 +1,6 @@
 # 贡献档案 — 成员把涂装方案 / 战报交进战团**共享档案库** (surface.me 自助, 无审批)。
 # 这是 "共享资源" 那条:任何成员的贡献都进同一个库, 别的成员都能查到 (合作的底座)。
-schema: aipehub.workflow/v1
+schema: gotong.workflow/v1
 workflow:
   id: warband-contribute
   name: 贡献档案 — 涂装方案 / 战报

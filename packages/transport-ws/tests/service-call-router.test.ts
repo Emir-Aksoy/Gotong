@@ -10,7 +10,7 @@ import type {
   ServiceCallFrame,
   ServiceOwner,
   ServiceUseDecl,
-} from '@aipehub/protocol'
+} from '@gotong/protocol'
 
 import { ServiceCallRouter, ownerPatternMatches } from '../src/service-call-router.js'
 import type { ServiceCallGateway } from '../src/server.js'

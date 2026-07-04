@@ -11,14 +11,14 @@
 #
 # Why bun --compile:
 #   Operators who don't want to install Node.js / pnpm just to run a
-#   chat server can `curl -L .../aipehub-host-linux-x64 -o aipehub-host
-#   && chmod +x aipehub-host && ./aipehub-host`. The Web UI's static
+#   chat server can `curl -L .../gotong-host-linux-x64 -o gotong-host
+#   && chmod +x gotong-host && ./gotong-host`. The Web UI's static
 #   assets are embedded at build time (see packages/web/scripts/
 #   build-static-assets.mjs) so there's no companion `static/` directory
 #   to ship alongside.
 #
 # What's NOT in the binary:
-#   `@aipehub/service-datastore-sqlite` depends on `better-sqlite3`,
+#   `@gotong/service-datastore-sqlite` depends on `better-sqlite3`,
 #   whose native `.node` binding can't be embedded by bun's bundler.
 #   The host detects binary mode via `isCompiledBinary()` and writes a
 #   default plugins.json without sqlite so first-run is warning-free.
@@ -94,7 +94,7 @@ jobs:
           - label: darwin-arm64
             runner: macos-latest
             bunTarget: bun-darwin-arm64
-            artifact: aipehub-host-darwin-arm64
+            artifact: gotong-host-darwin-arm64
             canRun: true
           - label: darwin-x64
             # Cross-compiled from the arm64 macos-latest runner. The
@@ -107,12 +107,12 @@ jobs:
             # linux-arm64.
             runner: macos-latest
             bunTarget: bun-darwin-x64
-            artifact: aipehub-host-darwin-x64
+            artifact: gotong-host-darwin-x64
             canRun: false
           - label: linux-x64
             runner: ubuntu-latest
             bunTarget: bun-linux-x64
-            artifact: aipehub-host-linux-x64
+            artifact: gotong-host-linux-x64
             canRun: true
           - label: linux-arm64
             # Cross-compiled from x64. GitHub Actions has arm64 runners
@@ -122,13 +122,13 @@ jobs:
             # Real arm64 hardware reports separately at install time.
             runner: ubuntu-latest
             bunTarget: bun-linux-arm64
-            artifact: aipehub-host-linux-arm64
+            artifact: gotong-host-linux-arm64
             canRun: true
             qemu: true
           - label: windows-x64
             runner: windows-latest
             bunTarget: bun-windows-x64
-            artifact: aipehub-host-windows-x64.exe
+            artifact: gotong-host-windows-x64.exe
             canRun: true
     steps:
       - name: Harden runner
@@ -166,14 +166,14 @@ jobs:
         uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3.7.0
         with:
           # `arm64` registers the aarch64 binfmt handler so the kernel
-          # routes `./aipehub-host-linux-arm64 --version` through
+          # routes `./gotong-host-linux-arm64 --version` through
           # qemu-aarch64-static automatically.
           platforms: arm64
 
       - name: Compile ${{ matrix.target.label }} binary
         shell: bash
         run: |
-          bun build packages/host/bin/aipehub-host.js \
+          bun build packages/host/bin/gotong-host.js \
             --compile \
             --target=${{ matrix.target.bunTarget }} \
             --outfile=${{ matrix.target.artifact }}
@@ -256,7 +256,7 @@ jobs:
   # checksums — produce a single SHA256SUMS file covering every binary.
   #
   # Consumers verify a single download with:
-  #   curl -LO .../aipehub-host-linux-x64
+  #   curl -LO .../gotong-host-linux-x64
   #   curl -LO .../SHA256SUMS
   #   sha256sum --check --ignore-missing SHA256SUMS
   # ---------------------------------------------------------------------------
@@ -278,7 +278,7 @@ jobs:
           # Each matrix leg uploaded under its own artefact name (the
           # binary filename). `merge-multiple: true` flattens them into
           # one directory rather than one-subdir-per-artefact.
-          pattern: aipehub-host-*
+          pattern: gotong-host-*
           merge-multiple: true
           path: binaries
 
@@ -291,7 +291,7 @@ jobs:
           # `sha256sum` on Ubuntu emits `<hash>  <filename>` in the
           # standard format that `sha256sum --check` consumes. Sort by
           # filename so the manifest is reproducible across runs.
-          sha256sum aipehub-host-* | LC_ALL=C sort -k2 > SHA256SUMS
+          sha256sum gotong-host-* | LC_ALL=C sort -k2 > SHA256SUMS
           echo "--- SHA256SUMS ---"
           cat SHA256SUMS
 
@@ -353,7 +353,7 @@ jobs:
       - name: Download all binary artefacts
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
-          pattern: aipehub-host-*
+          pattern: gotong-host-*
           merge-multiple: true
           path: binaries
 
@@ -364,7 +364,7 @@ jobs:
           # digest of every match and emits one attestation covering
           # all subjects (the bundle is much cheaper than per-binary
           # attestations).
-          subject-path: "binaries/aipehub-host-*"
+          subject-path: "binaries/gotong-host-*"
 
   # ---------------------------------------------------------------------------
   # sbom — CycloneDX SBOM of the source workspace.
@@ -405,8 +405,8 @@ jobs:
           # path; the next step picks it up for the release upload.
           # `artifact-name` controls the workflow-artefact name (what
           # downloads call themselves in the Actions UI).
-          output-file: aipehub-sbom.cdx.json
-          artifact-name: aipehub-sbom.cdx.json
+          output-file: gotong-sbom.cdx.json
+          artifact-name: gotong-sbom.cdx.json
           # Don't post a GitHub-native Dependency Graph snapshot. This
           # repo has the Dependency graph feature disabled (it's off by
           # default on user-owned private repos), so the upload 404s
@@ -431,7 +431,7 @@ jobs:
         with:
           # sbom-action wrote the file to the path we passed via
           # `output-file` above.
-          files: aipehub-sbom.cdx.json
+          files: gotong-sbom.cdx.json
           fail_on_unmatched_files: true
 
   # ---------------------------------------------------------------------------

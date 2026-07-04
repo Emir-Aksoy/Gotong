@@ -1,6 +1,6 @@
 # IM Bridges — 部署 + 调试 cookbook
 
-> 本文是把 6 个 `@aipehub/im-*` bridge 真接到生产 host 的现场手册。
+> 本文是把 6 个 `@gotong/im-*` bridge 真接到生产 host 的现场手册。
 >
 > **2026-06：IM 桥官方化。** 有官方 API 的平台全切官方直连——QQ 走官方 Bot
 > webhook（替代第三方 OneBot v11）、Lark 走官方长连接、Slack 走 Socket Mode
@@ -20,12 +20,12 @@
 
 |  Bridge | 协议 / Transport | 入站机制 | 出站机制 | 凭证形态 | 网络要求 |
 |---------|-----------------|---------|---------|---------|---------|
-| `@aipehub/im-telegram` | Bot API (HTTPS) | `getUpdates` 长轮询 | `sendMessage` | bot token | 出站 HTTPS 到 `api.telegram.org`（可走 proxy） |
-| `@aipehub/im-matrix` | Client-Server API | `/sync` 长轮询 (timeout 30s) | `PUT .../send/m.room.message/<txn>` | access_token | 出站 HTTPS 到 homeserver |
-| `@aipehub/im-lark` | 官方长连接（SDK `WSClient`） | 出站持久 WS（`im.message.receive_v1`） | `POST .../im/v1/messages` | app_id + app_secret | **出站**·免穿透 到 `open.feishu.cn` |
-| `@aipehub/im-discord` | Gateway (WSS) | WebSocket gateway 持久连 + heartbeat | `POST /channels/.../messages` | bot token + intents | 出站 WSS + HTTPS 到 `discord.com` |
-| `@aipehub/im-slack` | Socket Mode（WSS） | 出站持久 WS（`xapp-` token） | `chat.postMessage` (HTTPS) | `xapp-` + `xoxb-` 两 token | **出站**·免穿透 到 `slack.com` |
-| `@aipehub/im-qq` | 官方 Bot API + Webhook | **HTTPS webhook（入向需公网 + TLS）** | 被动回复 REST（带 `msg_id`） | AppID + AppSecret | **入向公网 + 出站 HTTPS** 到 `bots.qq.com` |
+| `@gotong/im-telegram` | Bot API (HTTPS) | `getUpdates` 长轮询 | `sendMessage` | bot token | 出站 HTTPS 到 `api.telegram.org`（可走 proxy） |
+| `@gotong/im-matrix` | Client-Server API | `/sync` 长轮询 (timeout 30s) | `PUT .../send/m.room.message/<txn>` | access_token | 出站 HTTPS 到 homeserver |
+| `@gotong/im-lark` | 官方长连接（SDK `WSClient`） | 出站持久 WS（`im.message.receive_v1`） | `POST .../im/v1/messages` | app_id + app_secret | **出站**·免穿透 到 `open.feishu.cn` |
+| `@gotong/im-discord` | Gateway (WSS) | WebSocket gateway 持久连 + heartbeat | `POST /channels/.../messages` | bot token + intents | 出站 WSS + HTTPS 到 `discord.com` |
+| `@gotong/im-slack` | Socket Mode（WSS） | 出站持久 WS（`xapp-` token） | `chat.postMessage` (HTTPS) | `xapp-` + `xoxb-` 两 token | **出站**·免穿透 到 `slack.com` |
+| `@gotong/im-qq` | 官方 Bot API + Webhook | **HTTPS webhook（入向需公网 + TLS）** | 被动回复 REST（带 `msg_id`） | AppID + AppSecret | **入向公网 + 出站 HTTPS** 到 `bots.qq.com` |
 
 **两种部署模式**（按是否需要公网入口分）：
 
@@ -49,14 +49,14 @@
 
 ```bash
 # 填哪个平台的 env，就起哪个桥（独立 gate；全不填 = IM 关闭，零行为变化）
-export AIPE_TELEGRAM_BOT_TOKEN=123456:AAE...        # Telegram（出站免穿透）
-export AIPE_LARK_APP_ID=cli_a1b2c3d4                # Lark（出站长连接）
-export AIPE_LARK_APP_SECRET=...
-export AIPE_SLACK_APP_TOKEN=xapp-...                # Slack（Socket Mode）
-export AIPE_SLACK_BOT_TOKEN=xoxb-...
-export AIPE_QQ_BOT_APPID=102000000                  # QQ（官方 webhook，需反代 + 公网）
-export AIPE_QQ_BOT_SECRET=...
-aipehub start
+export GOTONG_TELEGRAM_BOT_TOKEN=123456:AAE...        # Telegram（出站免穿透）
+export GOTONG_LARK_APP_ID=cli_a1b2c3d4                # Lark（出站长连接）
+export GOTONG_LARK_APP_SECRET=...
+export GOTONG_SLACK_APP_TOKEN=xapp-...                # Slack（Socket Mode）
+export GOTONG_SLACK_BOT_TOKEN=xoxb-...
+export GOTONG_QQ_BOT_APPID=102000000                  # QQ（官方 webhook，需反代 + 公网）
+export GOTONG_QQ_BOT_SECRET=...
+gotong start
 ```
 
 > `startImBridges` 当前 env-gate **Telegram / Lark / Slack / QQ** 4 个平台。
@@ -146,9 +146,9 @@ services:
 # 5. 权限管理 → 添加：im:message（收）+ im:message:send_as_bot（回）+ im:resource（附件，可选）
 # 6. 版本管理与发布 → 发布
 
-export AIPE_LARK_APP_ID=cli_a1b2c3d4
-export AIPE_LARK_APP_SECRET=...
-aipehub start
+export GOTONG_LARK_APP_ID=cli_a1b2c3d4
+export GOTONG_LARK_APP_SECRET=...
+gotong start
 ```
 
 bridge 用官方 `@larksuiteoapi/node-sdk` 的 `WSClient` 拨出一条持久 WS 收事件，出站发
@@ -188,19 +188,19 @@ bridge 连 `wss://gateway.discord.gg` 持久 WebSocket。
 ```bash
 # 1. 在 https://api.slack.com/apps 建 App（From scratch）
 # 2. Socket Mode → Enable Socket Mode → 引导创建 App-Level Token（connections:write 作用域）
-#    → 拿 xapp-... → 填 AIPE_SLACK_APP_TOKEN
+#    → 拿 xapp-... → 填 GOTONG_SLACK_APP_TOKEN
 # 3. Event Subscriptions → 开启 → Subscribe to bot events:
 #    message.channels, message.groups, message.im, message.mpim
 #    （Socket Mode 下不需要 Request URL —— 事件从 socket 推下来）
 # 4. OAuth & Permissions → Bot Token Scopes:
 #    chat:write, app_mentions:read, channels:history, groups:history, im:history, mpim:history,
 #    files:read（可选）
-# 5. Install to Workspace → 拿 Bot User OAuth Token (xoxb-...) → 填 AIPE_SLACK_BOT_TOKEN
+# 5. Install to Workspace → 拿 Bot User OAuth Token (xoxb-...) → 填 GOTONG_SLACK_BOT_TOKEN
 # 6. 重新邀请 bot 进 channel：/invite @你的Bot
 
-export AIPE_SLACK_APP_TOKEN=xapp-...    # 开 Socket Mode 连接（入站）
-export AIPE_SLACK_BOT_TOKEN=xoxb-...    # chat.postMessage（出站）
-aipehub start
+export GOTONG_SLACK_APP_TOKEN=xapp-...    # 开 Socket Mode 连接（入站）
+export GOTONG_SLACK_BOT_TOKEN=xoxb-...    # chat.postMessage（出站）
+gotong start
 ```
 
 bridge 用 `xapp-` token 调 `apps.connections.open` 拿 WSS URL 再拨出，事件经 socket
@@ -226,11 +226,11 @@ bridge 用 `xapp-` token 调 `apps.connections.open` 拿 WSS URL 再拨出，事
 # 2. 配置 bot 的「回调地址」为你的公网 HTTPS 端点，如 https://bot.example.com/qq/webhook
 #    保存时 QQ 发一次性回调校验（op:13），桥用 AppSecret 派生的 Ed25519 密钥自动应答。
 # 3. 启 host（桥自起本地 HTTP 监听，反代转发到它）：
-export AIPE_QQ_BOT_APPID=102000000
-export AIPE_QQ_BOT_SECRET=...
-export AIPE_QQ_WEBHOOK_PORT=9092          # 可选，默认 9092；反代转发到这个端口
-export AIPE_QQ_WEBHOOK_PATH=/qq/webhook   # 可选，默认 /qq/webhook
-aipehub start
+export GOTONG_QQ_BOT_APPID=102000000
+export GOTONG_QQ_BOT_SECRET=...
+export GOTONG_QQ_WEBHOOK_PORT=9092          # 可选，默认 9092；反代转发到这个端口
+export GOTONG_QQ_WEBHOOK_PATH=/qq/webhook   # 可选，默认 /qq/webhook
+gotong start
 ```
 
 反代终止 TLS（nginx 示例），两个 `X-Signature-*` header 必须原样到达桥：
@@ -266,7 +266,7 @@ QQ，给主 `docker-compose.yml` 旁边加一个 Caddy 终止 TLS、把 `/qq/web
 services:
   caddy:
     image: caddy:2
-    container_name: aipehub-caddy
+    container_name: gotong-caddy
     restart: unless-stopped
     ports:
       - "80:80"
@@ -276,7 +276,7 @@ services:
       - ./caddy-data:/data
       - ./caddy-config:/config
     depends_on:
-      - aipehub
+      - gotong
 ```
 
 Caddy 配置（自动 ACME 签发证书 + 转发 QQ webhook；T3 直连 IP 顺带反代 web）：
@@ -287,10 +287,10 @@ your.host {
   encode gzip
 
   handle /qq/webhook* {
-    reverse_proxy aipehub:9092
+    reverse_proxy gotong:9092
   }
   handle {
-    reverse_proxy aipehub:3000   # T3 直连 IP 的 web/PWA；纯 T2 + QQ 可省
+    reverse_proxy gotong:3000   # T3 直连 IP 的 web/PWA；纯 T2 + QQ 可省
   }
 }
 ```
@@ -322,7 +322,7 @@ your.host {
 1. router 是否真的派发了？看 hub transcript：
    ```sql
    -- 假设 host 用文件 transcript：
-   tail -50 .aipehub/transcript.jsonl | grep '"kind":"task"'
+   tail -50 .gotong/transcript.jsonl | grep '"kind":"task"'
    ```
 2. agent 是否真的注册成功？
    ```ts
@@ -381,16 +381,16 @@ bridge 的 anti-loop 都做了 3-4 层防线，但仍可能在以下情况漏：
 
 |  Phase 12 milestone | 状态 |
 |--------------------|------|
-| M1 — `@aipehub/im-adapter` + IM bindings | ✓ |
-| M2 — `@aipehub/im-telegram` | ✓ |
-| M3 — `@aipehub/im-matrix` | ✓ |
-| M4 — `@aipehub/im-lark` | ✓ |
-| M5 — `@aipehub/im-discord` | ✓ |
-| M6 — `@aipehub/im-slack` | ✓ |
-| M7 — `@aipehub/im-qq` | ✓ |
+| M1 — `@gotong/im-adapter` + IM bindings | ✓ |
+| M2 — `@gotong/im-telegram` | ✓ |
+| M3 — `@gotong/im-matrix` | ✓ |
+| M4 — `@gotong/im-lark` | ✓ |
+| M5 — `@gotong/im-discord` | ✓ |
+| M6 — `@gotong/im-slack` | ✓ |
+| M7 — `@gotong/im-qq` | ✓ |
 | **M8 — 本文 + `examples/im-bridge-host/`** | **✓ (本 milestone)** |
 | M9-M11 — PWA + mobile shell | next |
-| M12 — `@aipehub/cli` REPL | next |
+| M12 — `@gotong/cli` REPL | next |
 | M13 — Phase 12 release notes | next |
 
 **更新（2026-06）**：host 现在通过 `startImBridges()` env-gate 了 Telegram / Lark /

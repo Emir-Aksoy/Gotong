@@ -22,7 +22,7 @@
  *     open once on breach, resolve once on clear) read from /firings, and webhook
  *     channels (CRUD + 测试) over /channels. A channel stores an env-var NAME, not
  *     a secret; proactive delivery rides an opt-in host sweep
- *     (AIPE_PEER_SUMMARY_ALERT_SWEEP_MS) — until that's set, channels only fire on
+ *     (GOTONG_PEER_SUMMARY_ALERT_SWEEP_MS) — until that's set, channels only fire on
  *     the 测试 button. Still counts-only end to end: a delivered payload carries
  *     numbers / ids / threshold, never a name or a row.
  *
@@ -38,10 +38,10 @@
 ;(function () {
   'use strict'
 
-  // i18n — read the live dict off window.AipeHub at call time (app-core.js runs
-  // synchronously before this panel is injected, so AipeHub is always defined).
+  // i18n — read the live dict off window.Gotong at call time (app-core.js runs
+  // synchronously before this panel is injected, so Gotong is always defined).
   // `t()` returns the current-language dict; re-render on language change.
-  const AH = window.AipeHub
+  const AH = window.Gotong
   function t() { return AH.t }
 
   const LIST_API = '/api/admin/peer-summaries'

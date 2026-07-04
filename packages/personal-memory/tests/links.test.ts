@@ -36,8 +36,8 @@ describe('defaultLinkScorer', () => {
   })
 
   it('is symmetric — relatedness is mutual', () => {
-    const a = entry('a', 'semantic', '在做 AipeHub 项目', 100)
-    const b = entry('b', 'semantic', 'AipeHub 项目进度', 100)
+    const a = entry('a', 'semantic', '在做 Gotong 项目', 100)
+    const b = entry('b', 'semantic', 'Gotong 项目进度', 100)
     expect(defaultLinkScorer(a, b)).toBe(defaultLinkScorer(b, a))
   })
 

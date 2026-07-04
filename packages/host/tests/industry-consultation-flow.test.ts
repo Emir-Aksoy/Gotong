@@ -42,15 +42,15 @@ import {
   Space,
   type Task,
   type TaskResult,
-} from '@aipehub/core'
-import { LlmAgent, MockLlmProvider, drainStream, type LlmAgentOptions } from '@aipehub/llm'
+} from '@gotong/core'
+import { LlmAgent, MockLlmProvider, drainStream, type LlmAgentOptions } from '@gotong/llm'
 import type {
   ArtifactHandle,
   DatastoreHandle,
   MemoryHandle,
   ServiceCtx,
-} from '@aipehub/services-sdk'
-import { parseWorkflow, WorkflowRunner } from '@aipehub/workflow'
+} from '@gotong/services-sdk'
+import { parseWorkflow, WorkflowRunner } from '@gotong/workflow'
 
 import { bootstrapServices, type HubServices } from '../src/services/index.js'
 
@@ -59,7 +59,7 @@ const logger = createLogger('consult-e2e', { disabled: true })
 // ── 工作流 YAML —— 测试里直接内联，与 templates/workflows/industry-consultation-flow.yaml
 //    形状完全一致（手工保持同步）。改 yaml 时记得 mirror 这里。
 const WORKFLOW_YAML = `
-schema: aipehub.workflow/v1
+schema: gotong.workflow/v1
 workflow:
   id: industry-consultation-flow
   name: 传统行业咨询
@@ -137,7 +137,7 @@ workflow:
  * memory.remember / artifact.write / datastore.sql.exec）。
  *
  * 真实部署里这个类会放到一个独立的 npm 包（比如
- * @aipehub/agent-industry-coach），通过 yaml 的 `kind: custom` +
+ * @gotong/agent-industry-coach），通过 yaml 的 `kind: custom` +
  * `class:` 字段（v2.3 计划）由 LocalAgentPool 实例化。当下 LocalAgentPool
  * 只认 `kind: llm`，所以我们这里手工 register。
  */
@@ -246,7 +246,7 @@ describe('industry consultation flow — e2e (services + human review)', () => {
   let researcherCtx: ServiceCtx
 
   beforeEach(async () => {
-    root = await mkdtemp(join(tmpdir(), 'aipe-consult-e2e-'))
+    root = await mkdtemp(join(tmpdir(), 'gotong-consult-e2e-'))
     await rm(root, { recursive: true, force: true })
     const opened = await Space.init(root, { name: 'consult-test' })
     space = opened.space
@@ -260,9 +260,9 @@ describe('industry consultation flow — e2e (services + human review)', () => {
       JSON.stringify(
         {
           plugins: [
-            '@aipehub/service-memory-file',
-            '@aipehub/service-artifact-file',
-            '@aipehub/service-datastore-sqlite',
+            '@gotong/service-memory-file',
+            '@gotong/service-artifact-file',
+            '@gotong/service-datastore-sqlite',
           ],
         },
         null,

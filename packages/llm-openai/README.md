@@ -1,19 +1,19 @@
-# @aipehub/llm-openai
+# @gotong/llm-openai
 
-OpenAI `LlmProvider` for [AipeHub](https://github.com/Emir-Aksoy/AipeHub). Plug into [`@aipehub/llm`](https://www.npmjs.com/package/@aipehub/llm)'s `LlmAgent`.
+OpenAI `LlmProvider` for [Gotong](https://github.com/Emir-Aksoy/Gotong). Plug into [`@gotong/llm`](https://www.npmjs.com/package/@gotong/llm)'s `LlmAgent`.
 
 ## Install
 
 ```bash
-pnpm add @aipehub/llm-openai openai
+pnpm add @gotong/llm-openai openai
 # openai is a peer dependency — install the version you want
 ```
 
 ## Use
 
 ```ts
-import { LlmAgent } from '@aipehub/llm'
-import { OpenAIProvider } from '@aipehub/llm-openai'
+import { LlmAgent } from '@gotong/llm'
+import { OpenAIProvider } from '@gotong/llm-openai'
 
 const provider = new OpenAIProvider({
   // apiKey: '...'         // defaults to process.env.OPENAI_API_KEY

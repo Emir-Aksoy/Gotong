@@ -5,7 +5,7 @@
 #             example request; converted multi-turn assistant into structured
 #             single-turn advisory output; added explicit "no medical / legal
 #             advice" guardrail.
-schema: aipehub.agent/v1
+schema: gotong.agent/v1
 agent:
   id: career-counselor
   displayName: 职业咨询顾问

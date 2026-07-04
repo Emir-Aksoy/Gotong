@@ -1,5 +1,5 @@
 /**
- * codex-deepseek-hub — a case AipeHub can carry: one router LLM actively manages
+ * codex-deepseek-hub — a case Gotong can carry: one router LLM actively manages
  * Codex + a DeepSeek-backed TUI coding agent, routing the RIGHT coder for each
  * goal, and the two share project-level files.
  *
@@ -30,9 +30,9 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { Hub, InMemoryStorage, type Task, type TaskId } from '@aipehub/core'
-import { DispatchToolset, LlmAgent } from '@aipehub/llm'
-import { dangerousCommandGate } from '@aipehub/cli-agent'
+import { Hub, InMemoryStorage, type Task, type TaskId } from '@gotong/core'
+import { DispatchToolset, LlmAgent } from '@gotong/llm'
+import { dangerousCommandGate } from '@gotong/cli-agent'
 
 import { setupSharedWorkspace, readProgress, type SharedWorkspace } from './workspace.js'
 import { SharedWorkspaceCli } from './shared-workspace-cli.js'
@@ -150,7 +150,7 @@ const SCENARIOS: RoutingScenario[] = [
 ]
 
 async function main(): Promise<void> {
-  console.log('\n=== AipeHub case: codex-deepseek-hub ===')
+  console.log('\n=== Gotong case: codex-deepseek-hub ===')
   console.log('  路由结合「任务分析 × 用户的安排」合理分派编码 agent —— Codex 快手实现, DeepSeek TUI 推理领设计/审查。\n')
 
   for (const s of SCENARIOS) await runRouting(s)
@@ -165,7 +165,7 @@ async function main(): Promise<void> {
 
 /** Run one routing scenario in its own repo + hub, assert the dispatched set. */
 async function runRouting(s: RoutingScenario): Promise<void> {
-  const dir = mkdtempSync(join(tmpdir(), 'aipe-codex-deepseek-'))
+  const dir = mkdtempSync(join(tmpdir(), 'gotong-codex-deepseek-'))
   const ws = setupSharedWorkspace(dir)
 
   // 用大白话改总分工层: apply the natural-language edit, persist it to a policy
@@ -228,7 +228,7 @@ async function runRouting(s: RoutingScenario): Promise<void> {
 
 /** The safety gate: a destructive task parks before spawning and fails closed. */
 async function runActionGate(): Promise<void> {
-  const dir = mkdtempSync(join(tmpdir(), 'aipe-codex-deepseek-'))
+  const dir = mkdtempSync(join(tmpdir(), 'gotong-codex-deepseek-'))
   const ws = setupSharedWorkspace(dir)
   const parked = new Map<TaskId, { task: Task; state: unknown }>()
   const hub = new Hub({

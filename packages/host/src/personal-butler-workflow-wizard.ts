@@ -34,7 +34,7 @@ import type {
   LlmAgentToolset,
   LlmToolCallResult,
   LlmToolDefinition,
-} from '@aipehub/llm'
+} from '@gotong/llm'
 
 import type { WizardComposeResult } from './workflow-wizard.js'
 

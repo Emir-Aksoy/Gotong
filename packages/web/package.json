@@ -1,12 +1,12 @@
 {
-  "name": "@aipehub/web",
+  "name": "@gotong/web",
   "version": "3.1.0",
   "type": "module",
-  "description": "AipeHub reference web UI — embeddable HTTP + SSE server with a vanilla-JS frontend.",
+  "description": "Gotong reference web UI — embeddable HTTP + SSE server with a vanilla-JS frontend.",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/Emir-Aksoy/AipeHub.git",
+    "url": "https://github.com/Emir-Aksoy/Gotong.git",
     "directory": "packages/web"
   },
   "publishConfig": {
@@ -40,13 +40,13 @@
     "prepack": "node scripts/build-admin-ui.mjs && node scripts/build-static-assets.mjs && node scripts/build-builtin-templates.mjs && tsc -p tsconfig.json"
   },
   "dependencies": {
-    "@aipehub/core": "workspace:*",
-    "@aipehub/protocol": "workspace:*",
+    "@gotong/core": "workspace:*",
+    "@gotong/protocol": "workspace:*",
     "yaml": "^2.6.0"
   },
   "devDependencies": {
-    "@aipehub/identity": "workspace:*",
-    "@aipehub/workflow": "workspace:*",
+    "@gotong/identity": "workspace:*",
+    "@gotong/workflow": "workspace:*",
     "esbuild": "^0.25.0",
     "vitest": "^3.2.4"
   }

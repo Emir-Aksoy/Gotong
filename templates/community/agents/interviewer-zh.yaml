@@ -5,7 +5,7 @@
 #             改造成单次回合：根据职位生成一**整套**面试问题清单 + 评分维度，
 #             供面试官（人或 agent）实际使用；岗位从 Android 工程师泛化为
 #             任意岗位（通过 task payload 指定）；增加结构化输出。
-schema: aipehub.agent/v1
+schema: gotong.agent/v1
 agent:
   id: interviewer-zh
   displayName: 中文技术面试官

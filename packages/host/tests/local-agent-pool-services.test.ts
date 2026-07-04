@@ -30,9 +30,9 @@ import { join } from 'node:path'
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { createLogger, Hub, Space, type AgentRecord } from '@aipehub/core'
-import { LlmAgent, MockLlmProvider } from '@aipehub/llm'
-import { EMPTY_SERVICE_CTX, type ServiceCtx } from '@aipehub/services-sdk'
+import { createLogger, Hub, Space, type AgentRecord } from '@gotong/core'
+import { LlmAgent, MockLlmProvider } from '@gotong/llm'
+import { EMPTY_SERVICE_CTX, type ServiceCtx } from '@gotong/services-sdk'
 
 import { LocalAgentPool } from '../src/local-agent-pool.js'
 import { bootstrapServices, type HubServices } from '../src/services/index.js'
@@ -61,7 +61,7 @@ describe('LocalAgentPool — services attach (PR-8)', () => {
   let hub: Hub
   let services: HubServices
   beforeEach(async () => {
-    root = await mkdtemp(join(tmpdir(), 'aipe-lap-services-'))
+    root = await mkdtemp(join(tmpdir(), 'gotong-lap-services-'))
     await rm(root, { recursive: true, force: true })
     const opened = await Space.init(root, { name: 'test' })
     space = opened.space
@@ -71,7 +71,7 @@ describe('LocalAgentPool — services attach (PR-8)', () => {
     // the workspace. Same pattern as services-e2e.test.ts.
     await writeFile(
       join(space.paths.services, 'plugins.json'),
-      JSON.stringify({ plugins: ['@aipehub/service-memory-file'] }, null, 2) + '\n',
+      JSON.stringify({ plugins: ['@gotong/service-memory-file'] }, null, 2) + '\n',
       'utf8',
     )
     const boot = await bootstrapServices({ space, hub, logger })

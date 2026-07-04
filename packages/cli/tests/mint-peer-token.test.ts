@@ -1,5 +1,5 @@
 /**
- * `aipehub mint-peer-token` tests — exercise the pure helpers directly
+ * `gotong mint-peer-token` tests — exercise the pure helpers directly
  * (token format / entropy, pairing-hint wording) plus runCli smoke
  * checks for the command wiring and output discipline.
  */

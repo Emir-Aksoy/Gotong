@@ -3,7 +3,7 @@ import { mkdtemp, rm, readFile, stat, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 
-import { createLogger } from '@aipehub/core'
+import { createLogger } from '@gotong/core'
 import { MemoryFileHandle } from '../src/handle.js'
 import type { MemoryFileConfig } from '../src/config.js'
 import { kindFile } from '../src/paths.js'
@@ -16,7 +16,7 @@ const owner = { kind: 'agent', id: 'writer-zh' } as const
 
 let rootDir: string
 beforeEach(async () => {
-  rootDir = await mkdtemp(join(tmpdir(), 'aipe-mem-handle-'))
+  rootDir = await mkdtemp(join(tmpdir(), 'gotong-mem-handle-'))
 })
 afterEach(async () => {
   await rm(rootDir, { recursive: true, force: true })

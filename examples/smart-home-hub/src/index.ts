@@ -2,8 +2,8 @@
  * smart-home-hub — a SMALL runnable demo of a smart-home hub.
  *
  * 小米设备经 Home Assistant 接进来 (米家 → ha_xiaomi_home → HA MCP Server →
- * AipeHub), 一个家居管家 (home-steward) 跑一条「晚安例程」。它演示的不是「能不能
- * 控制设备」(HA 早就能), 而是 AipeHub 加在上面的那一层 **治理**:
+ * Gotong), 一个家居管家 (home-steward) 跑一条「晚安例程」。它演示的不是「能不能
+ * 控制设备」(HA 早就能), 而是 Gotong 加在上面的那一层 **治理**:
  *
  *   可逆的动作 (关灯、空调切睡眠) —— 直接做。
  *   不可逆的物理/安防动作 (锁门、布防) —— 挂起, 等住户在收件箱确认。
@@ -27,9 +27,9 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { Hub, InMemoryStorage, type ParticipantId, type Task, type TaskResult } from '@aipehub/core'
-import { FileInboxStore, HumanInboxParticipant, type InboxDecision } from '@aipehub/inbox'
-import { parseWorkflow, WorkflowRunner } from '@aipehub/workflow'
+import { Hub, InMemoryStorage, type ParticipantId, type Task, type TaskResult } from '@gotong/core'
+import { FileInboxStore, HumanInboxParticipant, type InboxDecision } from '@gotong/inbox'
+import { parseWorkflow, WorkflowRunner } from '@gotong/workflow'
 
 import { HomeStewardStandin } from './standins.js'
 
@@ -43,9 +43,9 @@ interface ParkedRow {
 }
 
 async function main(): Promise<void> {
-  console.log('\n=== AipeHub case: smart-home-hub — 小米经 Home Assistant 的晚安例程 ===\n')
+  console.log('\n=== Gotong case: smart-home-hub — 小米经 Home Assistant 的晚安例程 ===\n')
 
-  const tmp = mkdtempSync(join(tmpdir(), 'aipehub-smart-home-'))
+  const tmp = mkdtempSync(join(tmpdir(), 'gotong-smart-home-'))
   const parked = new Map<string, ParkedRow>()
   const inbox = new FileInboxStore(tmp)
   inbox.ensureDirs()
@@ -61,7 +61,7 @@ async function main(): Promise<void> {
   })
   await hub.start()
 
-  // The human-inbox broker (serves `aipehub.human/v1`) + the deterministic
+  // The human-inbox broker (serves `gotong.human/v1`) + the deterministic
   // home-steward stand-in (serves home.apply-scene / home.secure).
   hub.register(new HumanInboxParticipant({ store: inbox }))
   const home = new HomeStewardStandin()

@@ -27,9 +27,9 @@
  *     OpenClaw-style human-in-the-loop the inbox enables.
  */
 
-import { AcpParticipant, dangerousToolGate } from '@aipehub/acp-agent'
-import type { Hub, Logger } from '@aipehub/core'
-import type { AcpOutboundAgent } from '@aipehub/identity'
+import { AcpParticipant, dangerousToolGate } from '@gotong/acp-agent'
+import type { Hub, Logger } from '@gotong/core'
+import type { AcpOutboundAgent } from '@gotong/identity'
 
 import { FixedWindowLimiter } from './peer-registry.js'
 
@@ -66,7 +66,7 @@ export interface AcpOutboundManagerOptions {
   /**
    * Item 2 — window for the per-agent OUTBOUND quota counter
    * (`outboundQuotaBudget` sends per window). Default 60_000. Main.ts passes
-   * `AIPE_ACP_OUTBOUND_QUOTA_WINDOW_MS`; tests inject a small value.
+   * `GOTONG_ACP_OUTBOUND_QUOTA_WINDOW_MS`; tests inject a small value.
    */
   quotaWindowMs?: number
 }

@@ -3,7 +3,7 @@
 <!-- doc-version: 1.0 -->
 > **Versión del documento 1.0** · Traducción al español · Actualizado el 2026-06-27 · Fuente autorizada: [English](../../CODE_OF_CONDUCT.md). Si la traducción entra en conflicto con la versión en inglés, prevalece la versión en inglés.
 
-AipeHub es un proyecto pequeño que quiere seguir siendo un buen lugar para estar. Este documento
+Gotong es un proyecto pequeño que quiere seguir siendo un buen lugar para estar. Este documento
 dice lo que esperamos, lo que no toleraremos y lo que ocurre cuando alguien
 cruza la línea. Está escrito con nuestras propias palabras de manera intencional — es breve
 porque las reglas son breves.

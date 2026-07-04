@@ -6,15 +6,15 @@
  * address, typically behind (or instead of) a reverse proxy — but forgets the
  * defenses that only start to matter once traffic crosses a wire:
  *
- *   - AIPE_ALLOWED_HOSTS  Host/Origin allowlist on state-changing requests.
+ *   - GOTONG_ALLOWED_HOSTS  Host/Origin allowlist on state-changing requests.
  *                         Unset → the CSRF / DNS-rebinding defense is OFF.
- *   - AIPE_COOKIE_SECURE  Secure + SameSite=Strict on the session cookie.
+ *   - GOTONG_COOKIE_SECURE  Secure + SameSite=Strict on the session cookie.
  *                         Off → the cookie can ride a plain-HTTP request.
  *
  * Until now these gaps were silent — the boot banner even printed "loopback
  * only is safe" while bound to 0.0.0.0. This module makes the gap LOUD and
  * fail-closed: an exposed host with a missing defense refuses to start, unless
- * the operator explicitly accepts the risk via AIPE_ALLOW_INSECURE=1 (which
+ * the operator explicitly accepts the risk via GOTONG_ALLOW_INSECURE=1 (which
  * downgrades the refusal to a loud warning — the escape hatch for "my reverse
  * proxy terminates TLS and validates Host upstream").
  *
@@ -42,9 +42,9 @@ export interface BootSecurityInput {
   host: string
   /** Whether the Secure cookie flag is on (SpaceConfig.cookieSecure). */
   cookieSecure: boolean
-  /** Parsed AIPE_ALLOWED_HOSTS (undefined / empty = unset). */
+  /** Parsed GOTONG_ALLOWED_HOSTS (undefined / empty = unset). */
   allowedHosts: string[] | undefined
-  /** AIPE_ALLOW_INSECURE — downgrade fatal violations to warnings. */
+  /** GOTONG_ALLOW_INSECURE — downgrade fatal violations to warnings. */
   allowInsecure: boolean
 }
 
@@ -82,11 +82,11 @@ export function auditBootSecurity(input: BootSecurityInput): BootSecurityViolati
       code: 'host_check_disabled_while_exposed',
       severity,
       message:
-        `bound to a non-loopback address (${input.host}) but AIPE_ALLOWED_HOSTS ` +
+        `bound to a non-loopback address (${input.host}) but GOTONG_ALLOWED_HOSTS ` +
         `is unset — the Host/Origin check on state-changing requests is ` +
         `disabled (CSRF / DNS-rebinding risk).`,
       remediation:
-        `set AIPE_ALLOWED_HOSTS=your.domain[,your-ws.domain] (the public ` +
+        `set GOTONG_ALLOWED_HOSTS=your.domain[,your-ws.domain] (the public ` +
         `host[:port] clients connect to).`,
     })
   }
@@ -98,7 +98,7 @@ export function auditBootSecurity(input: BootSecurityInput): BootSecurityViolati
       message:
         `bound to a non-loopback address (${input.host}) but the session ` +
         `cookie has no Secure flag — it can ride a plain-HTTP request.`,
-      remediation: `set AIPE_COOKIE_SECURE=1 (serve over HTTPS / behind a TLS proxy).`,
+      remediation: `set GOTONG_COOKIE_SECURE=1 (serve over HTTPS / behind a TLS proxy).`,
     })
   }
 
@@ -107,7 +107,7 @@ export function auditBootSecurity(input: BootSecurityInput): BootSecurityViolati
 
 /**
  * Render a human-facing report for stderr / the boot banner. `fatal` toggles
- * the heading and appends the AIPE_ALLOW_INSECURE escape-hatch note.
+ * the heading and appends the GOTONG_ALLOW_INSECURE escape-hatch note.
  */
 export function formatBootSecurityReport(
   violations: BootSecurityViolation[],
@@ -117,7 +117,7 @@ export function formatBootSecurityReport(
   lines.push(
     opts.fatal
       ? 'FATAL: refusing to start — this host is network-exposed but missing security defenses:'
-      : 'WARNING: network-exposed host is missing security defenses (AIPE_ALLOW_INSECURE accepted the risk):',
+      : 'WARNING: network-exposed host is missing security defenses (GOTONG_ALLOW_INSECURE accepted the risk):',
   )
   for (const v of violations) {
     lines.push(`  - [${v.code}] ${v.message}`)
@@ -127,7 +127,7 @@ export function formatBootSecurityReport(
     lines.push(
       `  To accept this risk anyway (e.g. a reverse proxy validates Host and terminates TLS),`,
     )
-    lines.push(`  set AIPE_ALLOW_INSECURE=1 to downgrade these to warnings.`)
+    lines.push(`  set GOTONG_ALLOW_INSECURE=1 to downgrade these to warnings.`)
   }
   return lines.join('\n')
 }

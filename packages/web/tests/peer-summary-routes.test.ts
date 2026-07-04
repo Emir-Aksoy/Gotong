@@ -23,7 +23,7 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { Hub, Space } from '@aipehub/core'
+import { Hub, Space } from '@gotong/core'
 
 import {
   serveWeb,
@@ -92,7 +92,7 @@ interface Boot {
 
 async function boot(opts: { withFederation?: boolean } = {}): Promise<Boot> {
   const withFederation = opts.withFederation ?? true
-  const tmp = await mkdtemp(join(tmpdir(), 'aipehub-web-peer-summary-'))
+  const tmp = await mkdtemp(join(tmpdir(), 'gotong-web-peer-summary-'))
   const init = await Space.init(tmp, { name: 'peer-summary-route-test' })
   const hub = new Hub({ space: init.space })
   await hub.start()

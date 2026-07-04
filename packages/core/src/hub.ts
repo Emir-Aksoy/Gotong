@@ -48,12 +48,12 @@ import type {
  * before it reaches the scheduler. Default is intentionally low (5) —
  * the architect-team workflow needs maybe 2 hops in practice; anything
  * past that is almost certainly a runaway loop or a mis-instrumented
- * agent. Override via `AIPE_MAX_DISPATCH_DEPTH=N` (clamped to [1, 50]).
+ * agent. Override via `GOTONG_MAX_DISPATCH_DEPTH=N` (clamped to [1, 50]).
  */
 const DEFAULT_MAX_DISPATCH_DEPTH = 5
 
 export function readMaxDispatchDepth(): number {
-  const raw = process.env.AIPE_MAX_DISPATCH_DEPTH
+  const raw = process.env.GOTONG_MAX_DISPATCH_DEPTH
   if (!raw) return DEFAULT_MAX_DISPATCH_DEPTH
   const n = Number(raw)
   if (!Number.isInteger(n) || n < 1 || n > 50) {
@@ -355,7 +355,7 @@ export class Hub {
    * admin (or any caller of `approveApplication` / `rejectApplication`) acts
    * on it — or rejects with `'hub_stopped'` if the hub stops first.
    *
-   * Transport layers (e.g. `@aipehub/transport-ws` with
+   * Transport layers (e.g. `@gotong/transport-ws` with
    * `gating: 'admin-approval'`) call this on every HELLO and gate WELCOME on
    * the decision. The application id is also appended to the transcript as
    * an `agent_pending` event so observers see it in real time.

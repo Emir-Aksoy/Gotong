@@ -1,9 +1,9 @@
-# Gouvernance d'AipeHub
+# Gouvernance d'Gotong
 
 <!-- doc-version: 1.0 -->
 > **Version du document 1.0** · Traduction française · Mis à jour le 2026-06-27 · Source faisant autorité : [English](../../GOVERNANCE.md). En cas de divergence entre la traduction et la version anglaise, la version anglaise prévaut.
 
-Ce document décrit **comment les décisions sont prises** dans AipeHub : qui maintient
+Ce document décrit **comment les décisions sont prises** dans Gotong : qui maintient
 le projet, comment un changement aboutit, comment un modèle communautaire entre dans la
 galerie officielle, et ce qui se passe en cas de désaccord. Il est délibérément court —
 le projet est jeune, et une structure de gouvernance lourde sur un petit projet n'est
@@ -11,7 +11,7 @@ que de la cérémonie. Nous ferons évoluer ce document à mesure que la communa
 pas avant.
 
 Ce document est placé sous la constitution du projet, [`CHARTER.md`](../../CHARTER.md) :
-la charte dit *ce qu'*AipeHub est et ce qu'il refuse de devenir ; ce document dit *comment*
+la charte dit *ce qu'*Gotong est et ce qu'il refuse de devenir ; ce document dit *comment*
 nous décidons. Là où les deux se rejoignent — par exemple « le framework ne fait pas tourner
 le LLM » — la charte est la source et ce document est l'application.
 
@@ -107,7 +107,7 @@ délibérément :
 
 ## Comment un modèle entre dans la galerie officielle
 
-AipeHub livre des **modèles** (`aipehub.template/v1` — un YAML autonome qui transporte
+Gotong livre des **modèles** (`gotong.template/v1` — un YAML autonome qui transporte
 une équipe d'agents + des workflows + des *références* de bases de connaissances, mais
 jamais de secrets, de contenu de connaissance ou de personnel). La barre pour être *livré
 avec le framework* — pour apparaître dans la galerie en un clic de l'interface admin et
@@ -183,8 +183,8 @@ Les conflits de conduite sont traités séparément — voir
 
 ## L'unique non-négociable
 
-AipeHub a exactement un engagement architectural qu'une PR ne peut pas voter pour
-supprimer, parce que le changer signifie que le projet n'est plus AipeHub :
+Gotong a exactement un engagement architectural qu'une PR ne peut pas voter pour
+supprimer, parce que le changer signifie que le projet n'est plus Gotong :
 
 > **Le framework ne fait pas tourner le LLM.** Le Hub route les messages, répartit
 > les tâches, écrit la transcription, et émet des événements. Chaque décision reste
@@ -234,18 +234,18 @@ comptes à aucun propriétaire central. La permission de personne n'est requise 
 démarrer un* — ce serait contraire à toute la prémisse « aucune partie unique dont vous
 avez besoin de la permission pour continuer à fonctionner » sur laquelle repose le projet.
 Vous pouvez lancer un hub, rassembler une communauté locale et sélectionner des modèles
-pour elle aujourd'hui, et l'appeler un chapitre AipeHub.
+pour elle aujourd'hui, et l'appeler un chapitre Gotong.
 
 Ce qu'un chapitre **n'est pas** :
 
 - **Pas une voix officielle du projet.** Un chapitre parle pour sa propre communauté,
-  pas pour AipeHub. Il ne fixe pas la ligne de conception, ne ratifie pas la charte, et
+  pas pour Gotong. Il ne fixe pas la ligne de conception, ne ratifie pas la charte, et
   ne décide pas de ce qui est promu au statut de phare — tout cela reste avec les
   mainteneurs et le garant dans le dépôt canonique ([`MAINTAINERS.md`](../../MAINTAINERS.md)).
 - **Pas un fork qui tient la ligne.** Un chapitre peut faire tourner une version modifiée
   pour sa propre communauté, mais la charte, le protocole et l'ensemble des phares
   faisant autorité vivent dans le dépôt canonique. Un chapitre qui veut que ses
-  changements soient *le* AipeHub les envoie en amont comme des pull requests, comme
+  changements soient *le* Gotong les envoie en amont comme des pull requests, comme
   n'importe qui d'autre.
 
 ### La reconnaissance est optionnelle et légère
@@ -272,7 +272,7 @@ naturelle de son mandat ; jusqu'alors c'est une décision légère de mainteneur
 
 ---
 
-## Utiliser le nom AipeHub
+## Utiliser le nom Gotong
 
 Le code est [MIT](../../LICENSE) — vous pouvez l'intégrer, le modifier et le livrer dans
 des produits commerciaux ou à source fermée, avec la ligne de licence et de copyright
@@ -280,21 +280,21 @@ préservée. **La licence couvre le code ; elle ne cède pas le nom et l'identit
 Il n'y a pas de marque déposée ici, et nous ne prétendrons pas le contraire — ce qui suit
 est une **norme communautaire**, demandée de bonne foi, pas une menace juridique :
 
-- **L'utilisation descriptive est la bienvenue.** « Construit sur AipeHub », « un hub
-  AipeHub », « le chapitre AipeHub Malaisie » — dites-le librement. C'est vrai, et nous
+- **L'utilisation descriptive est la bienvenue.** « Construit sur Gotong », « un hub
+  Gotong », « le chapitre Gotong Malaisie » — dites-le librement. C'est vrai, et nous
   sommes heureux que vous le disiez.
 - **Ne laissez pas entendre une approbation que vous n'avez pas.** Ne nommez pas un
-  produit, un fork ou un service d'une façon qui le présente *comme* AipeHub-le-projet ou
-  comme officiellement approuvé par lui — pas de « AipeHub Officiel », pas d'imposteur
+  produit, un fork ou un service d'une façon qui le présente *comme* Gotong-le-projet ou
+  comme officiellement approuvé par lui — pas de « Gotong Officiel », pas d'imposteur
   qui se fait passer pour le téléchargement canonique.
 - **Ne rebaptisez pas le projet canonique.** Une distribution modifiée vous appartient
-  pour être livrée, mais le « AipeHub » faisant autorité — la charte, la ligne de
+  pour être livrée, mais le « Gotong » faisant autorité — la charte, la ligne de
   conception, l'ensemble des phares — est celui du dépôt canonique. Si votre fork diverge
   en esprit, donnez-lui votre propre nom ; la licence MIT vous garantit que vous pouvez le
   faire, et un nom honnête sert mieux vos utilisateurs qu'un nom emprunté.
 
 C'est la version la plus légère de protection du nom qui fonctionne : suffisamment pour
-que « AipeHub » continue de signifier la chose gouvernée, axée sur les fichiers, humain
+que « Gotong » continue de signifier la chose gouvernée, axée sur les fichiers, humain
 dans la boucle que décrit la charte, et rien de plus.
 
 ---

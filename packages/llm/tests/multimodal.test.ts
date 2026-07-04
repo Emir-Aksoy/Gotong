@@ -1,7 +1,7 @@
 /**
  * Phase 9 M1 — multimodal content block types + helpers.
  *
- * Tests the additions to `@aipehub/llm/types`:
+ * Tests the additions to `@gotong/llm/types`:
  *   - LlmImageBlock / LlmAudioBlock / LlmFileRefBlock are valid
  *     LlmContentBlock union members
  *   - extractInlineBase64Size byte math + edge cases
@@ -231,14 +231,14 @@ describe('Phase 9 M1: multimodal content blocks', () => {
 
     it('parses a positive MB value into floored bytes', () => {
       expect(
-        readMultimodalInlineCapFromEnv({ AIPE_MULTIMODAL_MAX_INLINE_MB: '2.5' }),
+        readMultimodalInlineCapFromEnv({ GOTONG_MULTIMODAL_MAX_INLINE_MB: '2.5' }),
       ).toBe(Math.floor(2.5 * 1024 * 1024))
     })
 
     it('falls back to the default for zero / negative / garbage values', () => {
       for (const raw of ['0', '-3', 'abc', 'NaN', 'Infinity']) {
         expect(
-          readMultimodalInlineCapFromEnv({ AIPE_MULTIMODAL_MAX_INLINE_MB: raw }),
+          readMultimodalInlineCapFromEnv({ GOTONG_MULTIMODAL_MAX_INLINE_MB: raw }),
         ).toBe(DEFAULT_MULTIMODAL_INLINE_BYTE_CAP)
       }
     })

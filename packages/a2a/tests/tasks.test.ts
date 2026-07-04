@@ -97,7 +97,7 @@ describe('a2aGetTask (Route B P1-M8a)', () => {
     const body = JSON.parse(calls[0]!.init.body as string)
     expect(body).toEqual({ jsonrpc: '2.0', id: 1, method: 'tasks/get', params: { id: 'a2a-9' } })
     const headers = calls[0]!.init.headers as Record<string, string>
-    expect(headers['x-aipe-peer-id']).toBe('hubA')
+    expect(headers['x-gotong-peer-id']).toBe('hubA')
     expect(headers.authorization).toBe('Bearer tok')
   })
 

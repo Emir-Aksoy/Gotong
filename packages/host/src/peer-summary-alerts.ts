@@ -12,7 +12,7 @@
  * breach history (a fired alert is a fact about NOW, recomputed each request).
  */
 
-import type { PeerSummaryAlertComparator, PeerSummaryAlertRule } from '@aipehub/identity'
+import type { PeerSummaryAlertComparator, PeerSummaryAlertRule } from '@gotong/identity'
 
 import { projectPeerSummaryMetric } from './peer-summary-metrics.js'
 import type { PeerSummary } from './peer-summary.js'

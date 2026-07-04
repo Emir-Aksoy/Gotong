@@ -1,6 +1,6 @@
 /**
  * Discriminated error class for everything that can go wrong wiring an
- * MCP server into an AipeHub agent.
+ * MCP server into an Gotong agent.
  *
  * The `kind` field is stable so callers can branch on it without
  * string-matching `.message`:

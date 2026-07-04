@@ -15,9 +15,9 @@
 
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 
-import { Hub, AgentParticipant, type Logger, type Task } from '@aipehub/core'
-import { AcpParticipant } from '@aipehub/acp-agent'
-import { openIdentityStore, type IdentityStore } from '@aipehub/identity'
+import { Hub, AgentParticipant, type Logger, type Task } from '@gotong/core'
+import { AcpParticipant } from '@gotong/acp-agent'
+import { openIdentityStore, type IdentityStore } from '@gotong/identity'
 
 import { AcpOutboundManager } from '../src/acp-outbound.js'
 

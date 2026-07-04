@@ -16,7 +16,7 @@ Today every service plugin loaded via `plugins.json` runs in the
 - Access to `process.env`, including secrets the host loaded.
 - Ability to throw `process.exit()` and bring down the host.
 
-This is fine for first-party plugins shipped by AipeHub. It is **not
+This is fine for first-party plugins shipped by Gotong. It is **not
 fine** for the open-ecosystem story sidecar agents enable:
 
 - An organisation lets external developers contribute service
@@ -153,14 +153,14 @@ Add to `plugins.json`:
 ```jsonc
 { "plugins": [
   // First-party / trusted: no sandbox.
-  "@aipehub/service-memory-file",
+  "@gotong/service-memory-file",
   // Untrusted: opt into worker sandbox.
   { "package": "third-party/notion-artifact", "sandbox": true },
 ]}
 ```
 
 Default for unknown plugins is conservative: `sandbox: true` if the
-package name doesn't match an `@aipehub/*` first-party prefix.
+package name doesn't match an `@gotong/*` first-party prefix.
 First-party packages are always allowed full host access — they're
 shipped in the same release as the host binary, so the trust
 boundary is already drawn there.
@@ -173,7 +173,7 @@ that need higher throughput.
 
 Trigger for landing Phase 2: someone trying to run an actively
 hostile plugin and needing real defence (probably an SaaS deployment
-of AipeHub).
+of Gotong).
 
 ---
 

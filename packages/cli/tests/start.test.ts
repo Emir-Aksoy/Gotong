@@ -1,7 +1,7 @@
 /**
- * `aipehub start` tests — the delegating launcher.
+ * `gotong start` tests — the delegating launcher.
  *
- * `start` never imports `@aipehub/host` at build time (it's not a CLI dep);
+ * `start` never imports `@gotong/host` at build time (it's not a CLI dep);
  * it resolves it lazily and only boots it if present. So the two branches —
  * host present → launch, host absent → install hint + non-zero — are driven
  * through INJECTED seams (`resolveHost` / `importHost`) so the suite stays
@@ -10,7 +10,7 @@
  * The presence-probe MECHANISM (`resolveModule`) needs a real-Node check too:
  * the injected seams bypass it, and a regression there (e.g. reverting to a
  * CJS `createRequire().resolve`) would mis-report the ESM-only host as ABSENT
- * so `aipehub start` would NEVER launch an installed host. `resolveModule`
+ * so `gotong start` would NEVER launch an installed host. `resolveModule`
  * uses `import.meta.resolve`, which Vitest's module context does NOT implement
  * — so we exercise the REAL `resolveModule` in a Node subprocess (via tsx)
  * where `import.meta.resolve` is available, plus the env-independent
@@ -44,8 +44,8 @@ try {
 // against a present ESM-only workspace dep and a bogus name.
 const PROBE_SCRIPT = `
 const { resolveModule } = await import(process.env.PROBE_TARGET)
-const present = resolveModule('@aipehub/core')
-const absent = resolveModule('@aipehub/definitely-not-a-real-package-xyz')
+const present = resolveModule('@gotong/core')
+const absent = resolveModule('@gotong/definitely-not-a-real-package-xyz')
 process.stdout.write(JSON.stringify({
   presentLooksRight: typeof present === 'string' && present.startsWith('file:') && present.includes('core'),
   absentIsNull: absent === null,
@@ -56,7 +56,7 @@ describe('resolveModule (presence probe)', () => {
   it('returns null for a package that is not installed', () => {
     // Env-independent invariant: an unresolvable spec is always null (the
     // import.meta.resolve throw is swallowed), so this holds under Vitest too.
-    expect(resolveModule('@aipehub/definitely-not-a-real-package-xyz')).toBeNull()
+    expect(resolveModule('@gotong/definitely-not-a-real-package-xyz')).toBeNull()
   })
 
   it.skipIf(!tsxAvailable)(
@@ -73,7 +73,7 @@ describe('resolveModule (presence probe)', () => {
         },
       )
       const out = JSON.parse(raw) as { presentLooksRight: boolean; absentIsNull: boolean }
-      // @aipehub/host is ESM-only (its `exports` map has only `import`). The
+      // @gotong/host is ESM-only (its `exports` map has only `import`). The
       // old CJS createRequire probe threw ERR_PACKAGE_PATH_NOT_EXPORTED on such
       // packages → "absent" → start would never launch the installed host.
       // import.meta.resolve honors the `import` condition → present.
@@ -90,7 +90,7 @@ describe('start — host present', () => {
     const err: string[] = []
 
     const code = await start([], {
-      resolveHost: () => '/fake/node_modules/@aipehub/host/dist/index.js',
+      resolveHost: () => '/fake/node_modules/@gotong/host/dist/index.js',
       importHost,
       out: (l) => out.push(l),
       err: (l) => err.push(l),
@@ -118,10 +118,10 @@ describe('start — host absent', () => {
     expect(code).toBe(1)
     expect(importHost).not.toHaveBeenCalled()
     const text = err.join('\n')
-    expect(text).toContain('@aipehub/host is not installed')
+    expect(text).toContain('@gotong/host is not installed')
     // Points the user at both the run-directly and install-once paths.
-    expect(text).toContain('npx @aipehub/host')
-    expect(text).toContain('npm i -g @aipehub/host')
+    expect(text).toContain('npx @gotong/host')
+    expect(text).toContain('npm i -g @gotong/host')
   })
 })
 
@@ -137,7 +137,7 @@ describe('start — flags', () => {
 
     expect(code).toBe(0)
     expect(importHost).not.toHaveBeenCalled()
-    expect(out.join('')).toContain('aipehub start')
+    expect(out.join('')).toContain('gotong start')
   })
 
   it('rejects a stray argument with code 2 (env is the only knob, never imports)', async () => {
@@ -174,7 +174,7 @@ describe('runCli start wiring', () => {
     })
     runCli(['help', 'start'])
     out.mockRestore()
-    expect(writes.join('')).toContain('aipehub start')
-    expect(writes.join('')).toContain('@aipehub/host')
+    expect(writes.join('')).toContain('gotong start')
+    expect(writes.join('')).toContain('@gotong/host')
   })
 })

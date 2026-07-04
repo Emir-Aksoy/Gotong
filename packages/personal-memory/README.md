@@ -1,11 +1,11 @@
-# @aipehub/personal-memory
+# @gotong/personal-memory
 
 The memory engine the resident **personal butler** stands on. M1 of the
 butler build (see `docs/zh/PERSONAL-BUTLER-DESIGN.md`). 对标 OpenClaw /
 Hermes 的文件优先记忆 + 前缀缓存友好的冻结块。
 
-Leaf package — depends only on `@aipehub/core`, `@aipehub/llm`,
-`@aipehub/services-sdk`. No host, no identity, no LLM credentials.
+Leaf package — depends only on `@gotong/core`, `@gotong/llm`,
+`@gotong/services-sdk`. No host, no identity, no LLM credentials.
 
 ## What's in the box
 
@@ -26,7 +26,7 @@ draws from curated `semantic` memory (the profile); raw `episodic` history is
 fetched on demand via the `recall` tool, not poured into every prompt.
 
 ```ts
-import { MemoryAugmentedAgent } from '@aipehub/personal-memory'
+import { MemoryAugmentedAgent } from '@gotong/personal-memory'
 
 const butler = new MemoryAugmentedAgent({
   id: 'butler',
@@ -47,7 +47,7 @@ sensitive actions wait for a human.
 ## Tests
 
 ```sh
-pnpm --filter @aipehub/personal-memory test
+pnpm --filter @gotong/personal-memory test
 ```
 
 Covers: frozen-block determinism + cap, session memoization + mid-session

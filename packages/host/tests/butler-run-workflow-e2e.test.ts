@@ -34,10 +34,10 @@ import { fileURLToPath } from 'node:url'
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { Hub, HumanParticipant, Space, type Logger } from '@aipehub/core'
-import { PersonalButlerAgent } from '@aipehub/personal-butler'
-import type { LlmProvider, LlmRequest, LlmStreamChunk } from '@aipehub/llm'
-import type { MemoryHandle } from '@aipehub/services-sdk'
+import { Hub, HumanParticipant, Space, type Logger } from '@gotong/core'
+import { PersonalButlerAgent } from '@gotong/personal-butler'
+import type { LlmProvider, LlmRequest, LlmStreamChunk } from '@gotong/llm'
+import type { MemoryHandle } from '@gotong/services-sdk'
 
 import {
   buildButlerWorkflowsToolset,
@@ -242,7 +242,7 @@ interface Rig {
 }
 
 async function boot(): Promise<Rig> {
-  const root = await mkdtemp(join(tmpdir(), 'aipe-butler-run-wf-'))
+  const root = await mkdtemp(join(tmpdir(), 'gotong-butler-run-wf-'))
   const { space } = await Space.init(root, { name: 'butler-run-wf' })
   const hub = new Hub({ space })
   await hub.start()

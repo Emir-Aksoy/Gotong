@@ -3,7 +3,7 @@
  *
  * Persists the config that makes a local capability dispatch reach OUT to an
  * external A2A agent (the mirror of the inbound A2aServer). Replaces the
- * `AIPE_A2A_AGENTS` env blob with admin-editable, restart-surviving rows.
+ * `GOTONG_A2A_AGENTS` env blob with admin-editable, restart-surviving rows.
  *
  * Modeled on SamlProviderStore, NOT OidcProviderStore: there is no vault here.
  * The one credential — the bearer the remote demands — is deliberately NOT

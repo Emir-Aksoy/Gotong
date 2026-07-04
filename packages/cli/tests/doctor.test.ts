@@ -1,5 +1,5 @@
 /**
- * `aipehub doctor` tests — the pre-flight environment check.
+ * `gotong doctor` tests — the pre-flight environment check.
  *
  * The CHECK LOGIC (Node version, port/space/master-key/LLM-key verdicts, exit
  * codes) is driven through INJECTED seams (`env` / `nodeVersion` / `resolveHost`
@@ -40,11 +40,11 @@ function greenDeps(over: Partial<DoctorDeps> = {}): DoctorDeps {
   return {
     env: { ANTHROPIC_API_KEY: 'present' },
     nodeVersion: '20.11.0',
-    resolveHost: () => '/fake/node_modules/@aipehub/host/dist/index.js',
+    resolveHost: () => '/fake/node_modules/@gotong/host/dist/index.js',
     probePort: async () => ({ status: 'free' }),
     probePath: async () => 'writable',
     // The deep definitions check needs the host package; in CLI tests that's
-    // injected so the default (which imports @aipehub/host/check, unavailable
+    // injected so the default (which imports @gotong/host/check, unavailable
     // here) never runs. Clean by default — individual tests dirty one knob.
     runWorkspaceCheck: async () => ({ workflows: { ok: 1, bad: 0 }, agents: { ok: 1, bad: 0 } }),
     ...over,
@@ -65,10 +65,10 @@ describe('collectChecks — verdicts', () => {
     const labels = checks.map((c) => c.label)
     expect(labels).toEqual([
       'Node.js',
-      '@aipehub/host',
+      '@gotong/host',
       'Web port',
       'Agent WS port',
-      'Data dir (AIPE_SPACE)',
+      'Data dir (GOTONG_SPACE)',
       'Master key',
       'LLM provider key',
     ])
@@ -82,13 +82,13 @@ describe('collectChecks — verdicts', () => {
 
   it('host absent is a warning (npx still works), not a blocker', async () => {
     const checks = await collectChecks(greenDeps({ resolveHost: () => null }))
-    expect(levelOf(checks, '@aipehub/host')).toBe('warn')
+    expect(levelOf(checks, '@gotong/host')).toBe('warn')
   })
 
   it('port in-use is a warning (may be the running hub); EACCES is a blocker', async () => {
     const busy = await collectChecks(greenDeps({ probePort: async () => ({ status: 'in-use' }) }))
     expect(levelOf(busy, 'Web port')).toBe('warn')
-    expect(busy.find((c) => c.label === 'Web port')?.fix).toContain('AIPE_WEB_PORT')
+    expect(busy.find((c) => c.label === 'Web port')?.fix).toContain('GOTONG_WEB_PORT')
 
     const eacces = await collectChecks(greenDeps({ probePort: async () => ({ status: 'error', code: 'EACCES' }) }))
     expect(levelOf(eacces, 'Web port')).toBe('error')
@@ -96,16 +96,16 @@ describe('collectChecks — verdicts', () => {
   })
 
   it('space verdicts: writable/creatable ok, read-only/not-a-dir/blocked are blockers', async () => {
-    expect(levelOf(await collectChecks(greenDeps({ probePath: async () => 'writable' })), 'Data dir (AIPE_SPACE)')).toBe('ok')
-    expect(levelOf(await collectChecks(greenDeps({ probePath: async () => 'creatable' })), 'Data dir (AIPE_SPACE)')).toBe('ok')
-    expect(levelOf(await collectChecks(greenDeps({ probePath: async () => 'exists-readonly' })), 'Data dir (AIPE_SPACE)')).toBe('error')
-    expect(levelOf(await collectChecks(greenDeps({ probePath: async () => 'not-a-dir' })), 'Data dir (AIPE_SPACE)')).toBe('error')
-    expect(levelOf(await collectChecks(greenDeps({ probePath: async () => 'blocked' })), 'Data dir (AIPE_SPACE)')).toBe('error')
+    expect(levelOf(await collectChecks(greenDeps({ probePath: async () => 'writable' })), 'Data dir (GOTONG_SPACE)')).toBe('ok')
+    expect(levelOf(await collectChecks(greenDeps({ probePath: async () => 'creatable' })), 'Data dir (GOTONG_SPACE)')).toBe('ok')
+    expect(levelOf(await collectChecks(greenDeps({ probePath: async () => 'exists-readonly' })), 'Data dir (GOTONG_SPACE)')).toBe('error')
+    expect(levelOf(await collectChecks(greenDeps({ probePath: async () => 'not-a-dir' })), 'Data dir (GOTONG_SPACE)')).toBe('error')
+    expect(levelOf(await collectChecks(greenDeps({ probePath: async () => 'blocked' })), 'Data dir (GOTONG_SPACE)')).toBe('error')
   })
 
-  it('master key: provider=env without AIPE_MASTER_KEY is a blocker; with it, or file default, is ok', async () => {
-    expect(levelOf(await collectChecks(greenDeps({ env: { AIPE_MASTER_KEY_PROVIDER: 'env' } })), 'Master key')).toBe('error')
-    expect(levelOf(await collectChecks(greenDeps({ env: { AIPE_MASTER_KEY_PROVIDER: 'env', AIPE_MASTER_KEY: 'k' } })), 'Master key')).toBe('ok')
+  it('master key: provider=env without GOTONG_MASTER_KEY is a blocker; with it, or file default, is ok', async () => {
+    expect(levelOf(await collectChecks(greenDeps({ env: { GOTONG_MASTER_KEY_PROVIDER: 'env' } })), 'Master key')).toBe('error')
+    expect(levelOf(await collectChecks(greenDeps({ env: { GOTONG_MASTER_KEY_PROVIDER: 'env', GOTONG_MASTER_KEY: 'k' } })), 'Master key')).toBe('ok')
     expect(levelOf(await collectChecks(greenDeps({ env: {} })), 'Master key')).toBe('ok') // file-based default
   })
 
@@ -115,7 +115,7 @@ describe('collectChecks — verdicts', () => {
   })
 
   it('reads the configured ports/host into the check detail', async () => {
-    const checks = await collectChecks(greenDeps({ env: { ANTHROPIC_API_KEY: 'x', AIPE_HOST: '0.0.0.0', AIPE_WEB_PORT: '8080' } }))
+    const checks = await collectChecks(greenDeps({ env: { ANTHROPIC_API_KEY: 'x', GOTONG_HOST: '0.0.0.0', GOTONG_WEB_PORT: '8080' } }))
     expect(checks.find((c) => c.label === 'Web port')?.detail).toContain('0.0.0.0:8080')
   })
 })
@@ -127,7 +127,7 @@ describe('doctor — exit codes + output', () => {
     expect(code).toBe(0)
     const text = out.join('')
     expect(text).toContain('✓ all checks passed')
-    expect(text).toContain('aipehub start')
+    expect(text).toContain('gotong start')
   })
 
   it('warnings only → exit 0 (advisory)', async () => {
@@ -150,7 +150,7 @@ describe('doctor — exit codes + output', () => {
     const out: string[] = []
     const code = await doctor(['--help'], greenDeps({ out: (l) => out.push(l) }))
     expect(code).toBe(0)
-    expect(out.join('')).toContain('aipehub doctor')
+    expect(out.join('')).toContain('gotong doctor')
   })
 
   it('rejects a stray argument with code 2', async () => {
@@ -172,7 +172,7 @@ describe('doctor — exit codes + output', () => {
     const out: string[] = []
     const code = await doctor(
       [],
-      greenDeps({ env: { ANTHROPIC_API_KEY: 'x', AIPE_SPACE: '/x/.aipehub' }, out: (l) => out.push(l) }),
+      greenDeps({ env: { ANTHROPIC_API_KEY: 'x', GOTONG_SPACE: '/x/.gotong' }, out: (l) => out.push(l) }),
     )
     const text = out.join('')
     expect(text).toContain('Definitions (workflows + agents):')
@@ -186,7 +186,7 @@ describe('doctor — exit codes + output', () => {
     const code = await doctor(
       [],
       greenDeps({
-        env: { ANTHROPIC_API_KEY: 'x', AIPE_SPACE: '/x/.aipehub' },
+        env: { ANTHROPIC_API_KEY: 'x', GOTONG_SPACE: '/x/.gotong' },
         runWorkspaceCheck: async () => ({ workflows: { ok: 0, bad: 1 }, agents: { ok: 1, bad: 0 } }),
         out: (l) => out.push(l),
       }),
@@ -207,20 +207,20 @@ describe('doctor — exit codes + output', () => {
 })
 
 describe('collectDefinitionChecks — deep workspace check (gated, best-effort)', () => {
-  const present = () => '/fake/node_modules/@aipehub/host/dist/index.js'
+  const present = () => '/fake/node_modules/@gotong/host/dist/index.js'
   const clean = async (): Promise<{ workflows: { ok: number; bad: number }; agents: { ok: number; bad: number } }> => ({
     workflows: { ok: 1, bad: 0 },
     agents: { ok: 1, bad: 0 },
   })
 
-  // Definitions live UNDER AIPE_SPACE: on a fresh box there's nothing to parse
+  // Definitions live UNDER GOTONG_SPACE: on a fresh box there's nothing to parse
   // yet, so the check skips entirely (and never even runs the validators).
   it.each(['creatable', 'blocked', 'not-a-dir'] as const)(
     'returns [] when the space probe is %s (fresh box — nothing loaded)',
     async (probe) => {
       const ran = vi.fn(clean)
       const checks = await collectDefinitionChecks({
-        env: { AIPE_SPACE: '/x/.aipehub' },
+        env: { GOTONG_SPACE: '/x/.gotong' },
         probePath: async () => probe,
         resolveHost: present,
         runWorkspaceCheck: ran,
@@ -230,10 +230,10 @@ describe('collectDefinitionChecks — deep workspace check (gated, best-effort)'
     },
   )
 
-  it('returns [] when @aipehub/host is not resolvable here', async () => {
+  it('returns [] when @gotong/host is not resolvable here', async () => {
     const ran = vi.fn(clean)
     const checks = await collectDefinitionChecks({
-      env: { AIPE_SPACE: '/x/.aipehub' },
+      env: { GOTONG_SPACE: '/x/.gotong' },
       probePath: async () => 'writable',
       resolveHost: () => null,
       runWorkspaceCheck: ran,
@@ -244,7 +244,7 @@ describe('collectDefinitionChecks — deep workspace check (gated, best-effort)'
 
   it('two ✓ checks when the seeded space loads clean', async () => {
     const checks = await collectDefinitionChecks({
-      env: { AIPE_SPACE: '/x/.aipehub' },
+      env: { GOTONG_SPACE: '/x/.gotong' },
       probePath: async () => 'writable',
       resolveHost: present,
       runWorkspaceCheck: clean,
@@ -255,9 +255,9 @@ describe('collectDefinitionChecks — deep workspace check (gated, best-effort)'
     ])
   })
 
-  it('a broken workflow file → a ✖ on "Workflow definitions" pointing at `aipehub check`', async () => {
+  it('a broken workflow file → a ✖ on "Workflow definitions" pointing at `gotong check`', async () => {
     const checks = await collectDefinitionChecks({
-      env: { AIPE_SPACE: '/x/.aipehub' },
+      env: { GOTONG_SPACE: '/x/.gotong' },
       probePath: async () => 'writable',
       resolveHost: present,
       runWorkspaceCheck: async () => ({ workflows: { ok: 2, bad: 1 }, agents: { ok: 1, bad: 0 } }),
@@ -265,14 +265,14 @@ describe('collectDefinitionChecks — deep workspace check (gated, best-effort)'
     const wf = checks.find((c) => c.label === 'Workflow definitions')!
     expect(wf.level).toBe('error')
     expect(wf.detail).toContain("1 of 3 won't parse")
-    expect(wf.fix).toContain('aipehub check')
+    expect(wf.fix).toContain('gotong check')
     // one bad domain does NOT taint the other — a clean agents file stays ✓.
     expect(checks.find((c) => c.label === 'Agents (agents.json)')?.level).toBe('ok')
   })
 
   it('a broken agents row → a ✖ on "Agents (agents.json)", workflows "none yet"', async () => {
     const checks = await collectDefinitionChecks({
-      env: { AIPE_SPACE: '/x/.aipehub' },
+      env: { GOTONG_SPACE: '/x/.gotong' },
       probePath: async () => 'writable',
       resolveHost: present,
       runWorkspaceCheck: async () => ({ workflows: { ok: 0, bad: 0 }, agents: { ok: 1, bad: 2 } }),
@@ -285,7 +285,7 @@ describe('collectDefinitionChecks — deep workspace check (gated, best-effort)'
 
   it('degrades to one ⚠ (never throws) when the validator run blows up', async () => {
     const checks = await collectDefinitionChecks({
-      env: { AIPE_SPACE: '/x/.aipehub' },
+      env: { GOTONG_SPACE: '/x/.gotong' },
       probePath: async () => 'writable',
       resolveHost: present,
       runWorkspaceCheck: async () => {
@@ -296,13 +296,13 @@ describe('collectDefinitionChecks — deep workspace check (gated, best-effort)'
     expect(checks[0].level).toBe('warn')
     expect(checks[0].label).toBe('Definitions')
     expect(checks[0].detail).toContain('host check exploded')
-    expect(checks[0].fix).toContain('aipehub check')
+    expect(checks[0].fix).toContain('gotong check')
   })
 
   it('still runs on an exists-readonly space (a seeded read-only mount still parses)', async () => {
     const ran = vi.fn(clean)
     await collectDefinitionChecks({
-      env: { AIPE_SPACE: '/x/.aipehub' },
+      env: { GOTONG_SPACE: '/x/.gotong' },
       probePath: async () => 'exists-readonly',
       resolveHost: present,
       runWorkspaceCheck: ran,
@@ -314,9 +314,9 @@ describe('collectDefinitionChecks — deep workspace check (gated, best-effort)'
 describe('applyFixes — safe, reversible repairs only (--fix)', () => {
   it('creates a missing data dir (creatable) and reports it fixed', async () => {
     const mkdirp = vi.fn(async () => {})
-    const actions = await applyFixes({ env: { AIPE_SPACE: '/data/.aipehub' }, probePath: async () => 'creatable', mkdirp })
-    expect(mkdirp).toHaveBeenCalledWith('/data/.aipehub')
-    expect(actions).toEqual([{ outcome: 'fixed', text: expect.stringContaining('Created data dir /data/.aipehub') }])
+    const actions = await applyFixes({ env: { GOTONG_SPACE: '/data/.gotong' }, probePath: async () => 'creatable', mkdirp })
+    expect(mkdirp).toHaveBeenCalledWith('/data/.gotong')
+    expect(actions).toEqual([{ outcome: 'fixed', text: expect.stringContaining('Created data dir /data/.gotong') }])
   })
 
   it('attempts a blocked dir too (mkdir -p can build a missing chain) and reports failure honestly', async () => {
@@ -325,7 +325,7 @@ describe('applyFixes — safe, reversible repairs only (--fix)', () => {
       e.code = 'EACCES'
       throw e
     })
-    const actions = await applyFixes({ env: { AIPE_SPACE: '/root/.aipehub' }, probePath: async () => 'blocked', mkdirp })
+    const actions = await applyFixes({ env: { GOTONG_SPACE: '/root/.gotong' }, probePath: async () => 'blocked', mkdirp })
     expect(mkdirp).toHaveBeenCalledOnce()
     expect(actions[0].outcome).toBe('failed')
     expect(actions[0].text).toContain('EACCES')
@@ -396,7 +396,7 @@ describe('probePathReal (real mechanism)', () => {
   })
 
   it('writable for an existing dir, creatable under it, not-a-dir for a file', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'aipe-doctor-'))
+    const dir = await mkdtemp(join(tmpdir(), 'gotong-doctor-'))
     tmps.push(dir)
 
     expect(await probePathReal(dir)).toBe('writable')
@@ -415,9 +415,9 @@ describe('mkdirpReal (real mechanism)', () => {
   })
 
   it('creates a missing dir AND its missing parents, idempotently', async () => {
-    const base = await mkdtemp(join(tmpdir(), 'aipe-fix-'))
+    const base = await mkdtemp(join(tmpdir(), 'gotong-fix-'))
     tmps.push(base)
-    const nested = join(base, 'a', 'b', '.aipehub')
+    const nested = join(base, 'a', 'b', '.gotong')
 
     expect(await probePathReal(nested)).toBe('blocked') // whole parent chain absent
     await mkdirpReal(nested)
@@ -441,7 +441,7 @@ describe('runCli doctor wiring', () => {
     } finally {
       ;(process.stdout as unknown as { write: typeof orig }).write = orig
     }
-    expect(writes.join('')).toContain('aipehub doctor')
+    expect(writes.join('')).toContain('gotong doctor')
   })
 
   it('`help doctor` documents the command', () => {
@@ -457,7 +457,7 @@ describe('runCli doctor wiring', () => {
     } finally {
       ;(process.stdout as unknown as { write: typeof orig }).write = orig
     }
-    expect(writes.join('')).toContain('aipehub doctor')
+    expect(writes.join('')).toContain('gotong doctor')
     expect(writes.join('')).toContain('Pre-flight')
   })
 })

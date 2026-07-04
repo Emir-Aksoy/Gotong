@@ -50,7 +50,7 @@ describe('checkHostConfig — 主机配置体检', () => {
     }
   })
 
-  it('AIPE_ALLOW_INSECURE downgrades exposure findings to warnings', () => {
+  it('GOTONG_ALLOW_INSECURE downgrades exposure findings to warnings', () => {
     const out = checkHostConfig(
       goodConfig({ host: '0.0.0.0', allowInsecure: true, allowedHosts: undefined }),
     )
@@ -73,7 +73,7 @@ describe('checkHostConfig — 主机配置体检', () => {
     expect(codes(checkHostConfig(goodConfig({ webPort: 5000, wsPort: 5000 })))).toContain('config.port_collision')
   })
 
-  it('requires AIPE_MASTER_KEY when provider=env', () => {
+  it('requires GOTONG_MASTER_KEY when provider=env', () => {
     expect(codes(checkHostConfig(goodConfig({ masterKeyProvider: 'env', masterKeyPresent: false })))).toContain(
       'config.master_key_missing',
     )
@@ -295,7 +295,7 @@ describe('runCheckCli — exit codes', () => {
     const o = sink()
     const code = await runCheckCli({ argv: ['--help'], out: o.write, validate: async () => ok })
     expect(code).toBe(0)
-    expect(o.lines.join('\n')).toContain('aipehub check')
+    expect(o.lines.join('\n')).toContain('gotong check')
   })
 
   it('a clean workspace exits 0', async () => {
@@ -315,9 +315,9 @@ describe('runCheckCli — exit codes', () => {
     expect(await runCheckCli({ argv: ['--what'], env: {}, err: () => {}, validate: async () => ok })).toBe(2)
   })
 
-  it('passes AIPE_SPACE through to the validator', async () => {
+  it('passes GOTONG_SPACE through to the validator', async () => {
     let seen = ''
-    await runCheckCli({ argv: [], env: { AIPE_SPACE: '/custom' }, out: () => {}, validate: async (o) => { seen = o.spaceDir; return ok } })
+    await runCheckCli({ argv: [], env: { GOTONG_SPACE: '/custom' }, out: () => {}, validate: async (o) => { seen = o.spaceDir; return ok } })
     expect(seen).toBe('/custom')
   })
 })

@@ -1,9 +1,9 @@
-# Learn AipeHub
+# Learn Gotong
 
 <!-- doc-version: 1.0 -->
 > **Doc version 1.0** · English (authoritative source) · Updated 2026-06-27 · Translations: [中文](docs/zh/LEARN.md) · [日本語](docs/ja/LEARN.md) · [Русский](docs/ru/LEARN.md) · [Français](docs/fr/LEARN.md) · [Español](docs/es/LEARN.md) · [한국어](docs/ko/LEARN.md). If a translation conflicts with this English version, the English version governs.
 
-A curated showcase of the best community-made material for learning AipeHub —
+A curated showcase of the best community-made material for learning Gotong —
 videos, talks, tutorials, and writeups. **Start here if you learn better by
 watching than by reading docs.**
 
@@ -37,7 +37,7 @@ not people; pillar ⑤ curates *what's worth learning from*, not audience size.
 ## Videos
 
 _No entries yet — this showcase ships ready, not pre-filled._ The first
-accurate, genuinely useful AipeHub video gets curated here and its author
+accurate, genuinely useful Gotong video gets curated here and its author
 credited. We would rather show an honest empty shelf than seed it with
 placeholders.
 
@@ -49,7 +49,7 @@ placeholders.
 
 ## Talks & conference sessions
 
-_No entries yet._ Gave a talk that brought people to AipeHub? Add it (or let us
+_No entries yet._ Gave a talk that brought people to Gotong? Add it (or let us
 know) — see [How to submit](#how-to-submit).
 
 ## Tutorials & writeups
@@ -81,7 +81,7 @@ open the PR; that's it.
 ## Honest boundary
 
 - **We link and credit; we don't host or pay.** Inclusion is editorial
-  recognition that *this specific piece* teaches AipeHub well — not an
+  recognition that *this specific piece* teaches Gotong well — not an
   endorsement of everything its author says or sells elsewhere.
 - **Entries can be removed.** As the design moves, material goes stale. We will
   drop an entry that no longer teaches the current design accurately, with a note

@@ -40,15 +40,15 @@ import { fileURLToPath } from 'node:url'
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
-import { Hub, Space, type Logger } from '@aipehub/core'
+import { Hub, Space, type Logger } from '@gotong/core'
 import {
   AUDIT_ACTIONS,
   loadOrCreateMasterKey,
   openIdentityStore,
   type IdentityStore,
-} from '@aipehub/identity'
-import type { ImAttachment, ImBridge, ImMessage, ImUser } from '@aipehub/im-adapter'
-import { serveWeb, type WebServerHandle } from '@aipehub/web'
+} from '@gotong/identity'
+import type { ImAttachment, ImBridge, ImMessage, ImUser } from '@gotong/im-adapter'
+import { serveWeb, type WebServerHandle } from '@gotong/web'
 
 import {
   handleImMessage,
@@ -132,7 +132,7 @@ maybe('setting-ops M6 — physical tier boundary across CLI / web / IM (real sta
   let cfgPricing: string // web config-price target (isolated from the seed)
   let adminToken: string
 
-  // The shared deterministic env the three faces report on (empty = no AIPE_*
+  // The shared deterministic env the three faces report on (empty = no GOTONG_*
   // leaking from process.env, so the read snapshot is identical everywhere).
   const opsEnv: Record<string, string | undefined> = {}
   const cliCaller: OpsCaller = { surface: 'cli', allowConfigWrite: true }
@@ -155,13 +155,13 @@ maybe('setting-ops M6 — physical tier boundary across CLI / web / IM (real sta
   let restoredWeb: WebServerHandle | undefined
 
   beforeAll(async () => {
-    workRoot = await mkdtemp(join(tmpdir(), 'aipe-setting-m6-'))
+    workRoot = await mkdtemp(join(tmpdir(), 'gotong-setting-m6-'))
     spaceDir = join(workRoot, 'space')
     backupDir = join(workRoot, 'backups')
     restoreDir = join(workRoot, 'restored')
     const cfgDir = join(workRoot, 'cfg')
     mkdirSync(cfgDir, { recursive: true })
-    cfgEnv = join(cfgDir, 'aipehub.env')
+    cfgEnv = join(cfgDir, 'gotong.env')
     cfgPricing = join(cfgDir, 'pricing.json')
 
     // --- seed a realistic mini-space (mirrors backup-restore-smoke) ----------
@@ -378,15 +378,15 @@ maybe('setting-ops M6 — physical tier boundary across CLI / web / IM (real sta
   // ④ ─────────────────────────────────────────────────────────────────────────
   it('④ config-write lands + audits on CLI and web; IM refuses; secret-name refused', async () => {
     // CLI: a legal owner write of a whitelisted non-secret knob lands + audits.
-    const set = await runOpsCommand('config-set', ['AIPE_MODE', 'team'], cliCaller, {
+    const set = await runOpsCommand('config-set', ['GOTONG_MODE', 'team'], cliCaller, {
       spaceDir,
       env: opsEnv,
       envFilePath: cfgEnv,
       audit: (m) => cliAuditRows.push(m),
     })
     expect(set.tier).toBe('config-write')
-    expect(readFileSync(cfgEnv, 'utf8')).toContain('AIPE_MODE=team')
-    expect(cliAuditRows.some((m) => m.key === 'AIPE_MODE' && m.value === 'team')).toBe(true)
+    expect(readFileSync(cfgEnv, 'utf8')).toContain('GOTONG_MODE=team')
+    expect(cliAuditRows.some((m) => m.key === 'GOTONG_MODE' && m.value === 'team')).toBe(true)
 
     // Web (owner): config-price lands in pricing.json + audits as setting_config_write.
     webAuditRows.length = 0
@@ -402,7 +402,7 @@ maybe('setting-ops M6 — physical tier boundary across CLI / web / IM (real sta
 
     // IM: config-write is never on the IM surface — refused with an owner hint.
     await bridge.inject(msgFrom(ALICE, '/setting'))
-    await bridge.inject(msgFrom(ALICE, 'config-set AIPE_WEB_PORT 8080'))
+    await bridge.inject(msgFrom(ALICE, 'config-set GOTONG_WEB_PORT 8080'))
     expect(last(bridge)).toContain('✗')
     expect(last(bridge)).toMatch(/owner/i)
     await bridge.inject(msgFrom(ALICE, 'exit'))

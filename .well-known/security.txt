@@ -1,22 +1,22 @@
-# AipeHub — security contact (RFC 9116)
+# Gotong — security contact (RFC 9116)
 #
 # This file follows the security.txt convention so automated scanners
 # (Open Bug Bounty, security crawlers, internal tooling) can find a
 # reliable disclosure channel.
 #
 # The canonical source lives at:
-#   https://github.com/Emir-Aksoy/AipeHub/blob/main/.well-known/security.txt
+#   https://github.com/Emir-Aksoy/Gotong/blob/main/.well-known/security.txt
 #
-# When AipeHub is deployed behind a custom domain you should ALSO host a
+# When Gotong is deployed behind a custom domain you should ALSO host a
 # copy at https://<your-hub>/.well-known/security.txt so reporters can
 # find it from your hub URL.
 
-Contact: https://github.com/Emir-Aksoy/AipeHub/security/advisories/new
+Contact: https://github.com/Emir-Aksoy/Gotong/security/advisories/new
 Expires: 2027-05-12T00:00:00.000Z
 Preferred-Languages: en, zh
-Policy: https://github.com/Emir-Aksoy/AipeHub/blob/main/SECURITY.md
-Acknowledgments: https://github.com/Emir-Aksoy/AipeHub/security/advisories
-Canonical: https://github.com/Emir-Aksoy/AipeHub/.well-known/security.txt
+Policy: https://github.com/Emir-Aksoy/Gotong/blob/main/SECURITY.md
+Acknowledgments: https://github.com/Emir-Aksoy/Gotong/security/advisories
+Canonical: https://github.com/Emir-Aksoy/Gotong/.well-known/security.txt
 
 # Notes for operators:
 # 1. GitHub Private Vulnerability Reporting is the SOLE channel pre-1.0.

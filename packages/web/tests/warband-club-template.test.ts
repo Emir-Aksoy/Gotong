@@ -6,7 +6,7 @@
  * storefront's top-down approvals, warband-club models collaboration over a
  * SHARED resource — so this gate proves the same opaque-blob round-trip holds:
  * each embedded workflow block runs through the REAL `parseWorkflow`, the
- * `human:` muster gate desugars to `aipehub.human/v1`, `surface.me` member
+ * `human:` muster gate desugars to `gotong.human/v1`, `surface.me` member
  * self-service survives, and a broken block would fail loudly instead of
  * importing a dead workflow.
  *
@@ -22,8 +22,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { Hub, Space } from '@aipehub/core'
-import { parseWorkflow } from '@aipehub/workflow'
+import { Hub, Space } from '@gotong/core'
+import { parseWorkflow } from '@gotong/workflow'
 
 import { serveWeb, type WebServerHandle, type WorkflowSurface } from '../src/server.js'
 import { parseTemplate } from '../src/template-manifest.js'
@@ -43,7 +43,7 @@ beforeEach(async () => {
 })
 
 describe('examples/warband-club/template (W2)', () => {
-  it('parses as a valid aipehub.template/v1 manifest', () => {
+  it('parses as a valid gotong.template/v1 manifest', () => {
     const t = parseTemplate(templateText)
     expect(t.name).toBe('战团同好会(共享档案库)')
     expect(t.version).toBe(1)
@@ -74,7 +74,7 @@ describe('examples/warband-club/template (W2)', () => {
   it('every embedded workflow block round-trips through the real parseWorkflow', () => {
     const t = parseTemplate(templateText)
     // The opaque-blob trick is only sound if each re-serialized block is in fact
-    // a valid aipehub.workflow/v1 — assert it against the SAME parser the host
+    // a valid gotong.workflow/v1 — assert it against the SAME parser the host
     // would run on import, not parseTemplate (which never inspects steps).
     const byId = new Map(t.workflows.map((w) => [w.id, parseWorkflow(w.yaml)]))
 
@@ -91,7 +91,7 @@ describe('examples/warband-club/template (W2)', () => {
     const muster = byId.get('warband-muster')!
     expect(muster.trigger.capability).toBe('warband.propose-muster')
     // The `human:` leader-confirm step desugared to the inbox capability.
-    expect(JSON.stringify(muster)).toContain('aipehub.human/v1')
+    expect(JSON.stringify(muster)).toContain('gotong.human/v1')
     expect(muster.surface?.me?.userScopeField).toBe('proposer_id')
   })
 
@@ -108,7 +108,7 @@ describe('examples/warband-club/template (W2)', () => {
   })
 
   it('imports end-to-end: 2 agents land, 3 workflows import (each re-validated)', async () => {
-    const tmp = await mkdtemp(join(tmpdir(), 'aipehub-warband-'))
+    const tmp = await mkdtemp(join(tmpdir(), 'gotong-warband-'))
     const { space } = await Space.init(tmp, { name: 'warband-test' })
     const hub = new Hub({ space })
     await hub.start()

@@ -1,6 +1,6 @@
-import type { Task } from '@aipehub/core'
-import type { LlmProvider, LlmRequest, LlmStreamChunk } from '@aipehub/llm'
-import type { MemoryEntry, MemoryHandle } from '@aipehub/services-sdk'
+import type { Task } from '@gotong/core'
+import type { LlmProvider, LlmRequest, LlmStreamChunk } from '@gotong/llm'
+import type { MemoryEntry, MemoryHandle } from '@gotong/services-sdk'
 import { describe, expect, it } from 'vitest'
 
 import { MemoryAugmentedAgent } from '../src/index.js'

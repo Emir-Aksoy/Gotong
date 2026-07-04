@@ -28,7 +28,7 @@ function makeStub(type: string, impl: string, version = '0.1.0'): ServicePlugin 
 }
 
 async function setup() {
-  const dir = await mkdtemp(join(tmpdir(), 'aipe-loader-'))
+  const dir = await mkdtemp(join(tmpdir(), 'gotong-loader-'))
   const manifestPath = join(dir, 'plugins.json')
   return { dir, manifestPath, cleanup: () => rm(dir, { recursive: true, force: true }) }
 }

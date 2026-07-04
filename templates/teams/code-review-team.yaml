@@ -4,7 +4,7 @@
 #   capability=code-review     → reviewer 找 Bug
 #   capability=test-suggestion → tester 提出测试用例
 #   capability=docs-check      → doc-checker 检查注释 / docstring
-schema: aipehub.team/v1
+schema: gotong.team/v1
 
 team:
   name: 代码审查团队

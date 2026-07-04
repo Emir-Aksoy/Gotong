@@ -4,7 +4,7 @@
 # Adapted:    2026-05-12 — removed sample request ("interesting story on
 #             perseverance"); added explicit length cap (300–600 words) so
 #             cost stays predictable; clarified audience-driven tone control.
-schema: aipehub.agent/v1
+schema: gotong.agent/v1
 agent:
   id: storyteller
   displayName: 故事讲述者

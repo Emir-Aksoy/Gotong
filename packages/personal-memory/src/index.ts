@@ -1,5 +1,5 @@
 /**
- * `@aipehub/personal-memory` — the memory engine for the resident butler.
+ * `@gotong/personal-memory` — the memory engine for the resident butler.
  *
  * Public surface:
  *   - `renderFrozenBlock`        pure, byte-stable memory → markdown renderer

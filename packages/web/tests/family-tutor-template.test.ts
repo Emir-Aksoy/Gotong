@@ -13,7 +13,7 @@
  *      LOCAL user of the 家长 hub — a local human step can only assign to a same-hub
  *      user, which is exactly why these approvals must live in the 家长 hub workflow
  *      (the design's key correctness constraint). So unlike tea-shop, the embedded
- *      block MUST contain `aipehub.human/v1`.
+ *      block MUST contain `gotong.human/v1`.
  *   2. The `teach` step carries `dataClasses: [child-learning]` — the data-class
  *      tag survives the template→workflow opaque re-serialization (same vocabulary
  *      as the per-link OUTBOUND data-class contract).
@@ -37,8 +37,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { Hub, Space } from '@aipehub/core'
-import { parseWorkflow } from '@aipehub/workflow'
+import { Hub, Space } from '@gotong/core'
+import { parseWorkflow } from '@gotong/workflow'
 
 import { serveWeb, type WebServerHandle, type WorkflowSurface } from '../src/server.js'
 import { parseTemplate } from '../src/template-manifest.js'
@@ -59,7 +59,7 @@ beforeEach(async () => {
 })
 
 describe('examples/family-learning-hub/template (FL-M2)', () => {
-  it('parses as a valid aipehub.template/v1 manifest', () => {
+  it('parses as a valid gotong.template/v1 manifest', () => {
     const t = parseTemplate(templateText)
     expect(t.name).toBe('家长 AI 导师(家庭学习 hub · 家长侧)')
     expect(t.version).toBe(1)
@@ -116,18 +116,18 @@ describe('examples/family-learning-hub/template (FL-M2)', () => {
 
     // ★ Inversion vs tea-shop #1: the whitelist approval IS a workflow human step,
     // because the approver (家长) is a LOCAL user of this hub. The `human:` sugar
-    // desugars to a dispatch to `aipehub.human/v1`.
+    // desugars to a dispatch to `gotong.human/v1`.
     const approval = wf.steps.find((s) => s.id === 'guardian-approval')!
     expect(approval.dispatch?.strategy).toMatchObject({
       kind: 'capability',
-      capabilities: ['aipehub.human/v1'],
+      capabilities: ['gotong.human/v1'],
     })
     // The approval is conditional: only off-whitelist topics park for the parent.
     expect(approval.when).toBe('$screen.output.allowed == false')
     // The assignee rides as a portable $ref (same pattern as cafe-ops' manager_id).
     expect(JSON.stringify(approval.dispatch?.payload)).toContain('$trigger.payload.guardian_id')
     // So the whole block DOES mention the human inbox capability (opposite of tea-shop).
-    expect(JSON.stringify(wf)).toContain('aipehub.human/v1')
+    expect(JSON.stringify(wf)).toContain('gotong.human/v1')
 
     // ★ Inversion vs tea-shop #2: the teach step tags the lesson content with the
     // `child-learning` data class — the field survives the template re-serialization.
@@ -155,14 +155,14 @@ describe('examples/family-learning-hub/template (FL-M2)', () => {
     const modApproval = wf.steps.find((s) => s.id === 'mod-approval')!
     expect(modApproval.dispatch?.strategy).toMatchObject({
       kind: 'capability',
-      capabilities: ['aipehub.human/v1'],
+      capabilities: ['gotong.human/v1'],
     })
     expect(modApproval.when).toContain('flagged')
-    // So there are exactly TWO human (aipehub.human/v1) steps in this workflow now.
+    // So there are exactly TWO human (gotong.human/v1) steps in this workflow now.
     const humanStepIds = wf.steps
       .filter((s) =>
         (s.dispatch?.strategy as { capabilities?: string[] } | undefined)?.capabilities?.includes(
-          'aipehub.human/v1',
+          'gotong.human/v1',
         ),
       )
       .map((s) => s.id)
@@ -191,7 +191,7 @@ describe('examples/family-learning-hub/template (FL-M2)', () => {
   })
 
   it('imports end-to-end: 1 tutor lands, 1 workflow imports (re-validated), KB reported inline', async () => {
-    const tmp = await mkdtemp(join(tmpdir(), 'aipehub-family-tutor-'))
+    const tmp = await mkdtemp(join(tmpdir(), 'gotong-family-tutor-'))
     const { space } = await Space.init(tmp, { name: 'family-tutor-test' })
     const hub = new Hub({ space })
     await hub.start()

@@ -16,7 +16,7 @@
  *
  * The default table carries representative public list prices as of
  * early 2026; they WILL drift. Operators override per-model via
- * `<AIPE_SPACE>/pricing.json` (merged over the defaults at boot — see
+ * `<GOTONG_SPACE>/pricing.json` (merged over the defaults at boot — see
  * {@link loadPricingTable}). An unknown model is not an error: tokens are
  * still recorded, cost is 0, and the row is flagged `unpriced` so a
  * dashboard can surface "counted, but not priced" rather than a silent $0.
@@ -66,7 +66,7 @@ export interface CostEstimate {
  * are omitted where they follow the standard derivation.
  *
  * Representative early-2026 list prices (USD / 1M tokens). OVERRIDE in
- * production via `<AIPE_SPACE>/pricing.json` — do not treat these as
+ * production via `<GOTONG_SPACE>/pricing.json` — do not treat these as
  * billing-accurate.
  */
 export const DEFAULT_PRICING: PricingTable = {

@@ -1,4 +1,4 @@
-# AipeHub Hub Services — RFC
+# Gotong Hub Services — RFC
 
 > Status: **DRAFT — PR-1 of 13**. This document defines the design.
 > Implementation lands in PR-2 through PR-13. Sign-off required before PR-2.
@@ -114,7 +114,7 @@ export type ServiceType = 'memory' | 'artifact' | 'datastore' | (string & {})
 
 export interface ServiceInitCtx {
   rootDir: string                                  // e.g. <space>/services/memory/file
-  logger: Logger                                   // from @aipehub/core
+  logger: Logger                                   // from @gotong/core
   hub: {                                           // read-only hub surface
     now(): number
     publishEvent(kind: string, data: unknown): void   // for trash_added etc
@@ -210,15 +210,15 @@ A single plugin cannot serve two types.
 
 ### 3.2 Loading: same path for first-party and third-party
 
-`.aipehub-demo/services/plugins.json` declares what the Hub loads at startup:
+`.gotong-demo/services/plugins.json` declares what the Hub loads at startup:
 
 ```json
 {
   "plugins": [
-    "@aipehub/service-memory-file",
-    "@aipehub/service-artifact-file",
-    "@aipehub/service-datastore-sqlite",
-    "my-org/aipehub-notion-artifact"
+    "@gotong/service-memory-file",
+    "@gotong/service-artifact-file",
+    "@gotong/service-datastore-sqlite",
+    "my-org/gotong-notion-artifact"
   ]
 }
 ```
@@ -229,7 +229,7 @@ If absent, the Hub seeds it with the three first-party plugins. Hub does
 
 **First-party = third-party at the loader level.** No `internal: true` flag, no
 private API. The three first-party plugins are just packages whose maintainer
-happens to be the AipeHub team.
+happens to be the Gotong team.
 
 ### 3.3 Failure to load is non-fatal
 
@@ -259,7 +259,7 @@ unintentionally must be impossible from the yaml side.
 ## 5. Trash + lifecycle (Q3 = A)
 
 Default retention: **30 days**. Configurable per space via
-`.aipehub-demo/space.json` → `services.trashRetentionDays`.
+`.gotong-demo/space.json` → `services.trashRetentionDays`.
 
 Lifecycle events:
 
@@ -379,7 +379,7 @@ runner code.
 ## 9. Persistence layout
 
 ```
-.aipehub-demo/
+.gotong-demo/
 ├─ services/
 │  ├─ plugins.json                  # which plugins to load (above)
 │  ├─ registry.json                 # live: { (type, impl, ownerKind, ownerId) → { size, lastAccess, configHash } }

@@ -1,6 +1,6 @@
 # 问询档案库 — 成员向战团共享档案库提问 (surface.me 自助, 无审批)。
 # 这是 "共享资源被复用" 那条:你问的答案可能来自别的兄弟早先的贡献 = 合作。
-schema: aipehub.workflow/v1
+schema: gotong.workflow/v1
 workflow:
   id: warband-consult
   name: 问询战团档案库

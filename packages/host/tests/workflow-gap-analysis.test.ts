@@ -6,7 +6,7 @@
  *      同时具备全部能力才算满足——「各会一半」的并集不算
  *   2. explicit 按 id 精确命中；broadcast 不带能力过滤 = 零承接者也满足
  *   3. parallel 分支逐个展开成 `stepId.branchId` 需求；human: 糖走普通
- *      capability 判定（aipehub.human/v1），成员即承接者
+ *      capability 判定（gotong.human/v1），成员即承接者
  *   4. 三条补法各有门槛：装模板要求模板里**单个 agent** 全覆盖；新建 agent 要求
  *      有燃料（provider / 端点）；派成员要求 hub 里真有人。都提不出=如实空
  *   5. 渲染：结论行 + 缩进补法行；空补法如实说「暂无现成补法」
@@ -16,7 +16,7 @@
 
 import { describe, expect, it } from 'vitest'
 
-import { parseWorkflow } from '@aipehub/workflow'
+import { parseWorkflow } from '@gotong/workflow'
 
 import { buildComponentCatalog } from '../src/component-catalog.js'
 import { analyzeWorkflowGaps, renderGapAnalysis } from '../src/workflow-gap-analysis.js'
@@ -29,7 +29,7 @@ import { analyzeWorkflowGaps, renderGapAnalysis } from '../src/workflow-gap-anal
 const CATALOG = buildComponentCatalog({
   participants: [
     { id: 'writer', kind: 'agent', capabilities: ['draft', 'revise'] },
-    { id: 'alice', kind: 'human', capabilities: ['approve', 'aipehub.human/v1'] },
+    { id: 'alice', kind: 'human', capabilities: ['approve', 'gotong.human/v1'] },
   ],
   resources: {
     llmKeys: [{ provider: 'deepseek', envSet: true, vaultConfigured: false }],
@@ -44,7 +44,7 @@ const CATALOG = buildComponentCatalog({
 
 function wf(stepsYaml: string) {
   return parseWorkflow(`
-schema: aipehub.workflow/v1
+schema: gotong.workflow/v1
 workflow:
   id: gap-demo
   trigger:
@@ -146,7 +146,7 @@ describe('analyzeWorkflowGaps — 满足判定（镜像深检语义）', () => {
         prompt: 请审批
 `)
     const a = analyzeWorkflowGaps(def, CATALOG)
-    expect(a.needs[0]!.need.capabilities).toEqual(['aipehub.human/v1'])
+    expect(a.needs[0]!.need.capabilities).toEqual(['gotong.human/v1'])
     expect(a.needs[0]!.satisfied).toBe(true)
     expect(a.needs[0]!.satisfiedBy).toEqual([{ id: 'alice', kind: 'human' }])
   })

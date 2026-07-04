@@ -37,9 +37,9 @@
  * the service is unit-testable with light fakes (no Hub, no LLM, no sqlite).
  */
 
-import { parseWorkflow } from '@aipehub/workflow'
-import type { WorkflowDefinition, WorkflowGraphView } from '@aipehub/workflow'
-import type { WorkflowAssistantOutput, WorkflowDetailLevel } from '@aipehub/workflow-assistant'
+import { parseWorkflow } from '@gotong/workflow'
+import type { WorkflowDefinition, WorkflowGraphView } from '@gotong/workflow'
+import type { WorkflowAssistantOutput, WorkflowDetailLevel } from '@gotong/workflow-assistant'
 
 import { workflowBoundary, type PeerCapEntry } from './workflow-edit-guard.js'
 import { sanitizeEditHistory, type MeWorkflowEditTurn } from './me-workflow-edit-service.js'
@@ -511,7 +511,7 @@ function composeCreatePrompt(instruction: string, history: ReadonlyArray<MeWorkf
       ]
     : []
   return [
-    '请根据用户的描述新建一个 AipeHub 工作流,然后输出**完整的** YAML。',
+    '请根据用户的描述新建一个 Gotong 工作流,然后输出**完整的** YAML。',
     '只能用这个 hub 本地已有的能力(见 contextHints 里列出的 agent 能力),**不要**派发到别的 hub。',
     ...conversation,
     '',

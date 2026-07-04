@@ -1,6 +1,6 @@
-# @aipehub/workflow
+# @gotong/workflow
 
-> **Pluggable, file-first workflow runner for AipeHub.**
+> **Pluggable, file-first workflow runner for Gotong.**
 > The Hub is intentionally dumb — it only dispatches single tasks. This package adds
 > **multi-step orchestration on top**, without touching Hub core. A workflow is just
 > an `AgentParticipant` that, when it receives a task, internally calls
@@ -9,11 +9,11 @@
 
 ## Why a separate package?
 
-AipeHub keeps the Hub small on purpose ([ARCHITECTURE.md](../../docs/ARCHITECTURE.md)).
+Gotong keeps the Hub small on purpose ([ARCHITECTURE.md](../../docs/ARCHITECTURE.md)).
 Workflows are **a layer above** routing, not part of routing. By living in a
 separate package:
 
-- You can use AipeHub **without** workflows (it's still just a routing hub).
+- You can use Gotong **without** workflows (it's still just a routing hub).
 - You can **swap or replace** the workflow engine without touching Hub code.
 - The Hub stays auditable: every step still goes through `hub.dispatch()`, every
   result still lands in the transcript.
@@ -24,7 +24,7 @@ separate package:
 |---|---|
 | **Is** | A YAML/JSON schema + a runner that turns one inbound task into N sequential / parallel `hub.dispatch()` calls and returns the last step's output |
 | **Is** | An `AgentParticipant` — registered with the Hub like any other agent |
-| **Is** | File-first — workflow definitions are `.yaml` files; running state is `.json` files under `.aipehub/workflows/runs/` |
+| **Is** | File-first — workflow definitions are `.yaml` files; running state is `.json` files under `.gotong/workflows/runs/` |
 | **Isn't** | A general-purpose DAG compiler — workflows are a list of steps with optional fan-out, not arbitrary graphs |
 | **Isn't** | A long-running scheduler (no cron, no delays) |
 | **Isn't** | A modification to Hub core |
@@ -35,7 +35,7 @@ separate package:
 
    ```yaml
    # workflows/editorial-flow.yaml
-   schema: aipehub.workflow/v1
+   schema: gotong.workflow/v1
    workflow:
      id: editorial-flow
      name: 中文编辑流水线
@@ -56,11 +56,11 @@ separate package:
 2. Register the runner:
 
    ```ts
-   import { Hub, Space } from '@aipehub/core'
-   import { WorkflowRunner, parseWorkflow } from '@aipehub/workflow'
+   import { Hub, Space } from '@gotong/core'
+   import { WorkflowRunner, parseWorkflow } from '@gotong/workflow'
    import { readFileSync } from 'node:fs'
 
-   const { space } = await Space.openOrInit('.aipehub', { name: 'demo' })
+   const { space } = await Space.openOrInit('.gotong', { name: 'demo' })
    const hub = new Hub({ space })
    await hub.start()
 
@@ -87,7 +87,7 @@ appears in the transcript with `from: workflow:editorial-flow`.
 ## File layout
 
 ```
-.aipehub/
+.gotong/
   workflows/
     runs/
       <runId>.json        ← per-run state file (start ts, steps progress, outputs)

@@ -20,7 +20,7 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { Hub, Space } from '@aipehub/core'
+import { Hub, Space } from '@gotong/core'
 
 import {
   serveWeb,
@@ -44,7 +44,7 @@ interface BootResult {
 }
 
 async function boot(opts: { withAssist: boolean } = { withAssist: true }): Promise<BootResult> {
-  const tmp = await mkdtemp(join(tmpdir(), 'aipehub-web-wfassist-'))
+  const tmp = await mkdtemp(join(tmpdir(), 'gotong-web-wfassist-'))
   const init = await Space.init(tmp, { name: 'wfassist-test' })
   const space = init.space
   const hub = new Hub({ space })
@@ -60,7 +60,7 @@ async function boot(opts: { withAssist: boolean } = { withAssist: true }): Promi
     adminId: admin.id,
     assistCalls,
     assistResponse: {
-      yaml: 'schema: aipehub.workflow/v1\nworkflow:\n  id: stub\n  trigger:\n    capability: chat\n  steps:\n    - id: a\n      dispatch:\n        strategy: { kind: capability, capabilities: [chat] }\n',
+      yaml: 'schema: gotong.workflow/v1\nworkflow:\n  id: stub\n  trigger:\n    capability: chat\n  steps:\n    - id: a\n      dispatch:\n        strategy: { kind: capability, capabilities: [chat] }\n',
       explanation: 'A stubbed two-line workflow.',
       raw: '```yaml\n...\n```',
       draftStatus: 'valid',
@@ -171,7 +171,7 @@ describe('POST /api/admin/workflows/assist', () => {
     const j = await r.json()
     expect(j.ok).toBe(true)
     // Echoes the stub's response fields verbatim.
-    expect(j.yaml).toContain('schema: aipehub.workflow/v1')
+    expect(j.yaml).toContain('schema: gotong.workflow/v1')
     expect(j.draftStatus).toBe('valid')
     expect(j.explanation).toMatch(/stubbed two-line/)
     expect(j.by).toBe('mock-provider')
@@ -224,7 +224,7 @@ describe('POST /api/admin/workflows/assist', () => {
   it('200 forwards `invalid` draftStatus + validationError verbatim', async () => {
     b = await boot()
     b.assistResponse = {
-      yaml: 'schema: aipehub.workflow/v1\nworkflow: { id: x }',
+      yaml: 'schema: gotong.workflow/v1\nworkflow: { id: x }',
       explanation: 'Tried.',
       raw: '...',
       draftStatus: 'invalid',
@@ -389,7 +389,7 @@ describe('POST /api/admin/workflows/assist', () => {
   it('forwards mode/detail/subjectYaml to the surface (explain mode)', async () => {
     b = await boot()
     const subject =
-      'schema: aipehub.workflow/v1\nworkflow:\n  id: subj\n  trigger:\n    capability: go\n  steps:\n    - id: s\n      dispatch:\n        strategy: { kind: capability, capabilities: [go] }\n'
+      'schema: gotong.workflow/v1\nworkflow:\n  id: subj\n  trigger:\n    capability: go\n  steps:\n    - id: s\n      dispatch:\n        strategy: { kind: capability, capabilities: [go] }\n'
     const r = await fetch(`${b.baseUrl}/api/admin/workflows/assist`, {
       method: 'POST',
       headers: {
@@ -455,7 +455,7 @@ describe('POST /api/admin/workflows/assist', () => {
   it('explain mode does not require a description (subject suffices)', async () => {
     b = await boot()
     const subject =
-      'schema: aipehub.workflow/v1\nworkflow:\n  id: subj\n  trigger:\n    capability: go\n  steps:\n    - id: s\n      dispatch:\n        strategy: { kind: capability, capabilities: [go] }\n'
+      'schema: gotong.workflow/v1\nworkflow:\n  id: subj\n  trigger:\n    capability: go\n  steps:\n    - id: s\n      dispatch:\n        strategy: { kind: capability, capabilities: [go] }\n'
     const r = await fetch(`${b.baseUrl}/api/admin/workflows/assist`, {
       method: 'POST',
       headers: {

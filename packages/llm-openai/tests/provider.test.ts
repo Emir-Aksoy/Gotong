@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { drainStream, type LlmRequest, type LlmStreamChunk } from '@aipehub/llm'
+import { drainStream, type LlmRequest, type LlmStreamChunk } from '@gotong/llm'
 
 import { OpenAIProvider, isTransientError } from '../src/index.js'
 

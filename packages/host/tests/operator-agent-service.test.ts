@@ -22,8 +22,8 @@ import { join } from 'node:path'
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { Space, type AgentRecord, type ManagedAgentLifecycle, type ParticipantId } from '@aipehub/core'
-import { userPrincipal, type Principal } from '@aipehub/identity'
+import { Space, type AgentRecord, type ManagedAgentLifecycle, type ParticipantId } from '@gotong/core'
+import { userPrincipal, type Principal } from '@gotong/identity'
 
 import {
   HostOperatorAgentService,
@@ -87,7 +87,7 @@ interface Rig {
 }
 
 async function boot(): Promise<Rig> {
-  const tmp = await mkdtemp(join(tmpdir(), 'aipe-operator-agent-'))
+  const tmp = await mkdtemp(join(tmpdir(), 'gotong-operator-agent-'))
   const { space } = await Space.init(tmp, { name: 'operator-agent' })
   const lifecycle = new FakeLifecycle()
   const grants = new RecordingGrants()

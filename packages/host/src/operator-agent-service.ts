@@ -34,9 +34,9 @@ import type {
   ManagedAgentLifecycle,
   ManagedAgentSpec,
   Space,
-} from '@aipehub/core'
-import { createLogger } from '@aipehub/core'
-import { userPrincipal, type Principal } from '@aipehub/identity'
+} from '@gotong/core'
+import { createLogger } from '@gotong/core'
+import { userPrincipal, type Principal } from '@gotong/identity'
 
 import type { StewardAgentDirectory, StewardOwnedAgent } from './hub-steward-service.js'
 

@@ -2,7 +2,7 @@
  * Phase 6 #12 — FixedWindowLimiter unit tests.
  *
  * The limiter lives inline in peer-registry.ts (no external dep on
- * @aipehub/web's RateLimiter — that would create a dep cycle), so we
+ * @gotong/web's RateLimiter — that would create a dep cycle), so we
  * test it directly here. PeerRegistry wires it via the
  * onConnectionAttempt hook on acceptHubLinks; the gate is exercised
  * in transport-ws's hub-link-rate-limit.test.ts.

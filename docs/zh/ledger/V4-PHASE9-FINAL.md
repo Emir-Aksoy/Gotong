@@ -59,13 +59,13 @@ type LlmContentBlock =
 同包加了:
 - `LlmArtifactResolver = (artifactId) => Promise<{bytes, mime}>` 类型
 - `MultimodalNotSupportedError` / `MultimodalInlineSizeError` 错误类
-- `DEFAULT_MULTIMODAL_INLINE_BYTE_CAP = 1 MB`(env `AIPE_MULTIMODAL_MAX_INLINE_MB` 覆盖)
+- `DEFAULT_MULTIMODAL_INLINE_BYTE_CAP = 1 MB`(env `GOTONG_MULTIMODAL_MAX_INLINE_MB` 覆盖)
 - `isMultimodalBlock` / `extractInlineBase64Size` / `readMultimodalInlineCapFromEnv` helpers
 
 附带改动:
-- `@aipehub/services-sdk` 的 `ArtifactHandle` 加 `readBytes(refOrPath)` 方法
-- `@aipehub/service-artifact-file` 实现 `readBytes`(Buffer fast path)
-- `@aipehub/sdk-node` 的 RPC ArtifactHandle 显式 reject `readBytes`(SDK 远程客户端
+- `@gotong/services-sdk` 的 `ArtifactHandle` 加 `readBytes(refOrPath)` 方法
+- `@gotong/service-artifact-file` 实现 `readBytes`(Buffer fast path)
+- `@gotong/sdk-node` 的 RPC ArtifactHandle 显式 reject `readBytes`(SDK 远程客户端
   本期不支持二进制 RPC; 文档明示)
 
 ### M2 — Anthropic provider 三块翻译 + artifact resolver fan-out
@@ -111,15 +111,15 @@ trigger:
       maxSizeMb: 5
 ```
 
-`@aipehub/workflow` 加 `'file'` 到 `PayloadFieldSpec.type` 判别联合, 加
+`@gotong/workflow` 加 `'file'` 到 `PayloadFieldSpec.type` 判别联合, 加
 `accept?: string[]` / `maxSizeMb?: number`(都是 UI hint, schema 验证).
 
-`@aipehub/web` 加:
+`@gotong/web` 加:
 - `UploadSurface` 注入接口(`put({bytes, declaredMime, filename?, by})`)
 - `POST /api/admin/uploads` 路由(raw octet-stream body, **无 multipart 解析依赖**),
   返回 `{artifactId, mime, size}`. 状态码 503/401/400/413 矩阵完整
 
-`@aipehub/host` 新模块 `uploads.ts` — `createUploadSurface` 把 artifact-file 插件
+`@gotong/host` 新模块 `uploads.ts` — `createUploadSurface` 把 artifact-file 插件
 attach 到 `{kind: 'shared', id: 'uploads'}` owner, artifactId 命名规范
 `uploads/<YYYY-MM-DD>/<rand>.<ext>`. 上传出错降级到 503, host 不崩.
 
@@ -159,7 +159,7 @@ admin SPA `admin.js` 新加:
 
 #### 1. `LlmTaskPayload.messages` — LlmAgent 多模态入口
 
-`@aipehub/llm` 的 `LlmTaskPayload` 加 `messages?: LlmMessage[]`. `buildRequest()`
+`@gotong/llm` 的 `LlmTaskPayload` 加 `messages?: LlmMessage[]`. `buildRequest()`
 里 `messages` 路径优先:
 
 ```ts
@@ -290,13 +290,13 @@ Phase 9 是**纯加法**, 没破坏 v3 / v8 surface. 几个值得标记的微行
 
 | 包 | Phase 9 新增 | 总数 |
 |---|---|---|
-| `@aipehub/llm` | +4 (M6 agent multimodal) | 114 |
-| `@aipehub/llm-anthropic` | +14 (M2) | 44 + 1 skipped |
-| `@aipehub/llm-openai` | +19 (M3) | 68 + 1 skipped |
-| `@aipehub/workflow` | +9 (M4 schema) | 107 |
-| `@aipehub/web` | +17 (M4 POST + M5 GET) | 317 |
-| `@aipehub/host` | +8 (uploads 单元+ e2e) | 236 |
-| `@aipehub/service-artifact-file` | +2 (readBytes) | 89 |
+| `@gotong/llm` | +4 (M6 agent multimodal) | 114 |
+| `@gotong/llm-anthropic` | +14 (M2) | 44 + 1 skipped |
+| `@gotong/llm-openai` | +19 (M3) | 68 + 1 skipped |
+| `@gotong/workflow` | +9 (M4 schema) | 107 |
+| `@gotong/web` | +17 (M4 POST + M5 GET) | 317 |
+| `@gotong/host` | +8 (uploads 单元+ e2e) | 236 |
+| `@gotong/service-artifact-file` | +2 (readBytes) | 89 |
 
 总: **+73 测试, workspace 2002 → 2075 passing, 0 回归.**
 
@@ -322,7 +322,7 @@ RFC 待写; 入口在 `docs/zh/ledger/V4-PHASE7-13-PLAN.md` 的 Phase 10 段.
 
 ## 八、运维 checklist (Phase 9 操作员侧)
 
-1. **env**: `AIPE_MULTIMODAL_MAX_INLINE_MB`(默认 1) 控 inline base64 cap. 这个
+1. **env**: `GOTONG_MULTIMODAL_MAX_INLINE_MB`(默认 1) 控 inline base64 cap. 这个
    只影响 provider 侧的硬上限, 跟 web 上传那 50 MB ceiling 是两个独立旋钮.
 2. **磁盘**: `<space>/services/artifact/file/shared/uploads/<YYYY-MM-DD>/...`. 一年
    后开始累积; 操作员可以写个 cron 删 > 90 天的目录(本期不内置 sweep — RFC §3

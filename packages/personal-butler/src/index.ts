@@ -1,7 +1,7 @@
 /**
- * `@aipehub/personal-butler` — a resident butler agent (OpenClaw / Hermes style).
+ * `@gotong/personal-butler` — a resident butler agent (OpenClaw / Hermes style).
  *
- * Builds on `@aipehub/personal-memory` (frozen-block memory + turn capture) and
+ * Builds on `@gotong/personal-memory` (frozen-block memory + turn capture) and
  * adds a bounded, governance-gated tool-loop: benign tools run inline, sensitive
  * ones park for a human (`SuspendTaskError` → `/me` inbox) before any side
  * effect. The framework still never decides — it routes, suspends, and resumes;
@@ -9,7 +9,7 @@
  *
  * Leaf package: no host / identity dependency. The classifier (real tiering) and
  * executor (real side effects) are INJECTED by the host, same discipline as the
- * `MemorySummarizer` in `@aipehub/personal-memory`.
+ * `MemorySummarizer` in `@gotong/personal-memory`.
  */
 
 export { ButlerError, type ButlerErrorCode } from './errors.js'

@@ -6,7 +6,7 @@
  *   1. A **lifecycle state machine** — a workflow moves through
  *      draft → review → published → deprecated → archived. Only the pure
  *      `transition()` function and its legality table live in this module;
- *      persistence is the host service's job (see `@aipehub/host`
+ *      persistence is the host service's job (see `@gotong/host`
  *      workflow-versioning).
  *
  *   2. **Immutable revisions** — every time a workflow's content is locked

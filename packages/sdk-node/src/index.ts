@@ -2,7 +2,7 @@ export { connect } from './session.js'
 export type { ConnectOptions, Session, SessionState } from './session.js'
 
 // Hub Services over WebSocket (protocol v1.1). The ServiceClient surface
-// mirrors `@aipehub/services-sdk`'s in-process `ServiceCtx` so agent code
+// mirrors `@gotong/services-sdk`'s in-process `ServiceCtx` so agent code
 // reads identically across deployment shapes.
 export {
   ServiceCallError,
@@ -16,8 +16,8 @@ export { TeamBridgeAgent } from './bridge.js'
 export type { TeamBridgeOptions, LocalDispatchPlan } from './bridge.js'
 
 // re-export the base class so SDK users have a single import surface
-export { AgentParticipant } from '@aipehub/core'
-export type { AgentOptions } from '@aipehub/core'
+export { AgentParticipant } from '@gotong/core'
+export type { AgentOptions } from '@gotong/core'
 
 // useful types
 export type {
@@ -27,4 +27,4 @@ export type {
   Task,
   TaskId,
   TaskResult,
-} from '@aipehub/core'
+} from '@gotong/core'

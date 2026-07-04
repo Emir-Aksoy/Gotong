@@ -17,7 +17,7 @@
  * Cost discipline: one run, two one-word prompts, a 64-token cap, cheap
  * models by default (Claude Haiku / gpt-4o-mini). Point it at DeepSeek with
  * OPENAI_API_KEY + OPENAI_BASE_URL=https://api.deepseek.com +
- * AIPE_LIVE_OPENAI_MODEL=deepseek-chat for the cheapest path.
+ * GOTONG_LIVE_OPENAI_MODEL=deepseek-chat for the cheapest path.
  */
 
 import { mkdtemp, rm } from 'node:fs/promises'
@@ -26,11 +26,11 @@ import { join } from 'node:path'
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
-import { Hub, Space, type TaskResult } from '@aipehub/core'
-import { LlmAgent, type LlmAgentOptions, type LlmProvider } from '@aipehub/llm'
-import { AnthropicProvider } from '@aipehub/llm-anthropic'
-import { OpenAIProvider } from '@aipehub/llm-openai'
-import { parseWorkflow, WorkflowRunner } from '@aipehub/workflow'
+import { Hub, Space, type TaskResult } from '@gotong/core'
+import { LlmAgent, type LlmAgentOptions, type LlmProvider } from '@gotong/llm'
+import { AnthropicProvider } from '@gotong/llm-anthropic'
+import { OpenAIProvider } from '@gotong/llm-openai'
+import { parseWorkflow, WorkflowRunner } from '@gotong/workflow'
 
 const HAS_KEY = Boolean(process.env.ANTHROPIC_API_KEY || process.env.OPENAI_API_KEY)
 
@@ -44,7 +44,7 @@ function liveProvider(): { provider: LlmProvider; label: string } {
     return {
       label: 'anthropic',
       provider: new AnthropicProvider({
-        defaultModel: process.env.AIPE_LIVE_ANTHROPIC_MODEL ?? 'claude-3-5-haiku-latest',
+        defaultModel: process.env.GOTONG_LIVE_ANTHROPIC_MODEL ?? 'claude-3-5-haiku-latest',
         defaultMaxTokens: 64,
       }),
     }
@@ -52,7 +52,7 @@ function liveProvider(): { provider: LlmProvider; label: string } {
   return {
     label: 'openai',
     provider: new OpenAIProvider({
-      defaultModel: process.env.AIPE_LIVE_OPENAI_MODEL ?? 'gpt-4o-mini',
+      defaultModel: process.env.GOTONG_LIVE_OPENAI_MODEL ?? 'gpt-4o-mini',
       ...(process.env.OPENAI_BASE_URL ? { baseURL: process.env.OPENAI_BASE_URL } : {}),
     }),
   }
@@ -62,7 +62,7 @@ function liveProvider(): { provider: LlmProvider; label: string } {
 // step `wrap` consumes `$echo.output` (proving the runner threads refs into
 // a live prompt). Inlined here, no template file needed.
 const WORKFLOW_YAML = `
-schema: aipehub.workflow/v1
+schema: gotong.workflow/v1
 workflow:
   id: live-smoke-flow
   name: Live LLM smoke
@@ -95,7 +95,7 @@ describe.skipIf(!HAS_KEY)('live workflow — real LLM end to end', () => {
   let hub: Hub
 
   beforeAll(async () => {
-    root = await mkdtemp(join(tmpdir(), 'aipe-live-wf-'))
+    root = await mkdtemp(join(tmpdir(), 'gotong-live-wf-'))
     const { space } = await Space.init(root, { name: 'live-smoke' })
     hub = new Hub({ space })
     await hub.start()

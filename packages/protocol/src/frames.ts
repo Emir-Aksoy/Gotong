@@ -16,14 +16,14 @@ import type {
 // WebSocket they already use for tasks. Design: docs/services-over-ws-rfc.md.
 //
 // IMPORTANT: `OwnerKind` and `ServiceType` are intentionally string-typed
-// aliases that mirror `@aipehub/services-sdk`'s own `OwnerKind` and the
-// plugin-contract `type` field. `@aipehub/protocol` deliberately does NOT
-// depend on `@aipehub/services-sdk` — the wire protocol stays decoupled from
+// aliases that mirror `@gotong/services-sdk`'s own `OwnerKind` and the
+// plugin-contract `type` field. `@gotong/protocol` deliberately does NOT
+// depend on `@gotong/services-sdk` — the wire protocol stays decoupled from
 // the implementation layer. If `services-sdk` adds a new OwnerKind, update
 // this file too (and verify all routers / SDKs are aware).
 
 /**
- * Mirror of `@aipehub/services-sdk` `OwnerKind`. Keep in sync.
+ * Mirror of `@gotong/services-sdk` `OwnerKind`. Keep in sync.
  */
 export type OwnerKind = 'agent' | 'workflow-run' | 'shared'
 
@@ -165,7 +165,7 @@ export type ServiceResultFrame =
 
 
 /**
- * Wire frames for the AipeHub network protocol. See docs/PROTOCOL.md for
+ * Wire frames for the Gotong network protocol. See docs/PROTOCOL.md for
  * semantics, state machine, and disconnect behaviour. This module is
  * type-only at heart; the small encode/decode helpers are the only runtime.
  */

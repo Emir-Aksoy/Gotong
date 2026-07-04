@@ -1,6 +1,6 @@
 /**
- * `WorkflowController` — bridge between `@aipehub/web`'s admin HTTP API and the
- * `@aipehub/workflow` runtime, now mediated by {@link WorkflowVersioning}.
+ * `WorkflowController` — bridge between `@gotong/web`'s admin HTTP API and the
+ * `@gotong/workflow` runtime, now mediated by {@link WorkflowVersioning}.
  *
  * Implements the `WorkflowSurface` duck type the Web layer declares so the Web
  * package itself doesn't take a runtime dep on the workflow runtime.
@@ -27,8 +27,8 @@ import { existsSync, mkdirSync, unlinkSync } from 'node:fs'
 import { readFile, rename, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
-import { createLogger, extractRequiredCapabilities, type Hub, type HubLink } from '@aipehub/core'
-import { NEVER_RESUME_AT } from '@aipehub/inbox'
+import { createLogger, extractRequiredCapabilities, type Hub, type HubLink } from '@gotong/core'
+import { NEVER_RESUME_AT } from '@gotong/inbox'
 
 import { scrubSecrets } from './scrub-secrets.js'
 
@@ -52,12 +52,12 @@ import {
   type StepRecord,
   type WorkflowDefinition,
   type WorkflowGraphView,
-} from '@aipehub/workflow'
+} from '@gotong/workflow'
 import {
   checkWorkflowStructure,
   type WorkflowInventory,
   type WorkflowStructureViolation,
-} from '@aipehub/evals/checkers/workflow-structure'
+} from '@gotong/evals/checkers/workflow-structure'
 
 import type { LoadReport } from './workflow-loader.js'
 import { assertNoSelfTriggerCycle } from './workflow-guards.js'
@@ -127,7 +127,7 @@ export interface CrossHubStep {
   peerLabel: string | null
   /**
    * What kind of off-hub destination this step reaches:
-   *   - `'peer'` — a connected MESH peer (AipeHub↔AipeHub). It may carry an
+   *   - `'peer'` — a connected MESH peer (Gotong↔Gotong). It may carry an
    *     outbound approval gate, so the step can pause for inbox approval.
    *   - `'a2a'` — an EXTERNAL A2A agent (the Phase 18 C-M4 outbound edge). It
    *     fires immediately; there is no approval gate.

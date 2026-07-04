@@ -24,13 +24,13 @@
  * Run:  pnpm demo:architect-team
  */
 
-import { Hub, AgentParticipant, type Task, type TranscriptEntry } from '@aipehub/core'
+import { Hub, AgentParticipant, type Task, type TranscriptEntry } from '@gotong/core'
 import {
   DispatchToolset,
   LlmAgent,
   MockLlmProvider,
   type LlmStreamChunk,
-} from '@aipehub/llm'
+} from '@gotong/llm'
 
 // --- Sub-agents — plain echo-style AgentParticipants -------------------------
 
@@ -200,7 +200,7 @@ async function main(): Promise<void> {
     }),
   )
 
-  console.log('\n=== AipeHub demo: architect-team (Phase 10) ===\n')
+  console.log('\n=== Gotong demo: architect-team (Phase 10) ===\n')
 
   // Kick off the plan request. Dispatch is capability-routed, so the
   // hub picks the architect (the sole 'plan' agent). The architect's

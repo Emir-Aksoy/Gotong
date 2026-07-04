@@ -12,7 +12,7 @@
  * deterministic stand-ins that serve the SAME capabilities with real, assertable
  * logic — so the demo runs with no API key and the hub wiring is identical to
  * production. The supplier lives on a SEPARATE hub; in production that's another
- * org's AipeHub, reached over a federation link (the link is runtime peer config,
+ * org's Gotong, reached over a federation link (the link is runtime peer config,
  * never part of the template — that's the whole point of this example).
  *
  * The little price book below stands in for the supplier's own inventory /
@@ -22,7 +22,7 @@
  * only drafts, the supplier prices.
  */
 
-import { AgentParticipant, type Task } from '@aipehub/core'
+import { AgentParticipant, type Task } from '@gotong/core'
 
 // --- supplier-side inventory / price book (lives on org B, not in any template) ---
 

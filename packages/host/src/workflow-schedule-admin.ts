@@ -23,7 +23,7 @@ import { writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 
-import type { Logger } from '@aipehub/core'
+import type { Logger } from '@gotong/core'
 
 import {
   normalizeWorkflowSchedule,

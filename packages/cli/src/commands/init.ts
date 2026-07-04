@@ -1,21 +1,21 @@
 /**
- * `aipehub init` — bootstrap a new workspace on disk.
+ * `gotong init` — bootstrap a new workspace on disk.
  *
- * Creates the `.aipehub/` directory tree with personal-mode defaults.
+ * Creates the `.gotong/` directory tree with personal-mode defaults.
  * The identity layer (SQLite, owner user, org_mode=personal) is
- * bootstrapped on first `aipehub host` / `@aipehub/host` start, not
+ * bootstrapped on first `gotong host` / `@gotong/host` start, not
  * here — keeping the CLI free of the `better-sqlite3` native dep.
  *
  * Typical flow:
- *   1. `aipehub init`            ← creates workspace
+ *   1. `gotong init`            ← creates workspace
  *   2. `export ANTHROPIC_API_KEY=sk-...`
- *   3. `npx @aipehub/host`      ← starts host, bootstraps identity
+ *   3. `npx @gotong/host`      ← starts host, bootstraps identity
  *   4. open the admin URL in a browser
  */
 
 import { existsSync } from 'node:fs'
 import { resolve } from 'node:path'
-import { Space } from '@aipehub/core'
+import { Space } from '@gotong/core'
 
 // ── arg parsing ─────────────────────────────────────────────────────
 
@@ -26,7 +26,7 @@ interface ParsedInit {
 }
 
 function parseArgs(args: readonly string[]): ParsedInit | null {
-  let spaceDir = '.aipehub'
+  let spaceDir = '.gotong'
   let adminName = 'Operator'
   let pinTeam = false
 
@@ -39,13 +39,13 @@ function parseArgs(args: readonly string[]): ParsedInit | null {
     } else if (arg === '--pin-team') {
       pinTeam = true
     } else {
-      console.error(`[aipehub init] unknown option: ${arg}`)
+      console.error(`[gotong init] unknown option: ${arg}`)
       return null
     }
   }
 
   if (!spaceDir) {
-    console.error('[aipehub init] --space-dir must be non-empty')
+    console.error('[gotong init] --space-dir must be non-empty')
     return null
   }
   return { spaceDir, adminName, pinTeam }
@@ -63,14 +63,14 @@ export async function init(args: readonly string[]): Promise<number> {
   const root = resolve(parsed.spaceDir)
 
   if (existsSync(resolve(root, 'space.json'))) {
-    console.error(`[aipehub init] workspace already exists at ${root}`)
+    console.error(`[gotong init] workspace already exists at ${root}`)
     console.error('  Use the host to start the existing workspace.')
     return 1
   }
 
   try {
     const { adminToken } = await Space.init(root, {
-      name: 'AipeHub',
+      name: 'Gotong',
       adminDisplayName: parsed.adminName,
     })
 
@@ -91,10 +91,10 @@ export async function init(args: readonly string[]): Promise<number> {
     console.log('')
     if (parsed.pinTeam) {
       console.log('    2. Start the hub (team mode pinned):')
-      console.log(`       AIPE_MODE=team AIPE_SPACE=${parsed.spaceDir} npx @aipehub/host`)
+      console.log(`       GOTONG_MODE=team GOTONG_SPACE=${parsed.spaceDir} npx @gotong/host`)
     } else {
       console.log('    2. Start the hub:')
-      console.log(`       AIPE_SPACE=${parsed.spaceDir} npx @aipehub/host`)
+      console.log(`       GOTONG_SPACE=${parsed.spaceDir} npx @gotong/host`)
     }
     console.log('')
     console.log('    3. Open the admin URL printed by the host.')
@@ -102,29 +102,29 @@ export async function init(args: readonly string[]): Promise<number> {
     return 0
   } catch (err) {
     console.error(
-      `[aipehub init] ${err instanceof Error ? err.message : String(err)}`,
+      `[gotong init] ${err instanceof Error ? err.message : String(err)}`,
     )
     return 1
   }
 }
 
 function printInitHelp(): void {
-  process.stdout.write(`aipehub init [options]
+  process.stdout.write(`gotong init [options]
 
-Initializes a new AipeHub workspace. Creates the directory structure,
+Initializes a new Gotong workspace. Creates the directory structure,
 a bootstrap admin, and initial configuration. On first host start the
 identity layer auto-detects single-user and enters personal mode
 ("my AI desktop").
 
 Options:
-  --space-dir=<path>      Workspace root (default: .aipehub)
+  --space-dir=<path>      Workspace root (default: .gotong)
   --admin-name=<name>     First admin display name (default: Operator)
   --pin-team              Force team mode instead of personal auto-detect
   --help / -h             Show this message
 
 Examples:
-  aipehub init
-  aipehub init --space-dir=/opt/aipehub --admin-name="Alice"
-  aipehub init --pin-team
+  gotong init
+  gotong init --space-dir=/opt/gotong --admin-name="Alice"
+  gotong init --pin-team
 `)
 }

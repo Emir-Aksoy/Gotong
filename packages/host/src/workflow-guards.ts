@@ -1,5 +1,5 @@
-import type { DispatchStrategy } from '@aipehub/core'
-import type { ParallelStep, Step, WorkflowDefinition } from '@aipehub/workflow'
+import type { DispatchStrategy } from '@gotong/core'
+import type { ParallelStep, Step, WorkflowDefinition } from '@gotong/workflow'
 
 export function assertNoSelfTriggerCycle(def: WorkflowDefinition): void {
   const triggerCap = def.trigger.capability

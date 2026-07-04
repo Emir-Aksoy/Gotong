@@ -1,6 +1,6 @@
-# Alertmanager routing for AipeHub alerts (Route B P0-M7).
+# Alertmanager routing for Gotong alerts (Route B P0-M7).
 #
-# The alert rules in ../prometheus/aipehub.alerts.yml stamp every alert with a
+# The alert rules in ../prometheus/gotong.alerts.yml stamp every alert with a
 # `severity` label of exactly two values — `page` (wake someone) and `ticket`
 # (next-business-day). This config routes each to its own receiver so nothing
 # fires into the void. Wire your real on-call into the receivers below: each is
@@ -39,6 +39,6 @@ receivers:
   - name: tickets
     # slack_configs:
     #   - api_url: <your-slack-webhook-url>
-    #     channel: '#aipehub-alerts'
+    #     channel: '#gotong-alerts'
     # email_configs:
     #   - to: oncall@example.com

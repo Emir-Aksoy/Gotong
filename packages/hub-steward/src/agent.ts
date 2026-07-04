@@ -23,8 +23,8 @@ import {
   type LlmRequest,
   type LlmResponse,
   type LlmTaskOutput,
-} from '@aipehub/llm'
-import type { Task } from '@aipehub/core'
+} from '@gotong/llm'
+import type { Task } from '@gotong/core'
 
 import type { HubStewardPayload, StewardAction, StewardParseStatus } from './types.js'
 import { buildStewardSystemPrompt, parseStewardProposal, renderStewardUserMessage } from './prompt.js'

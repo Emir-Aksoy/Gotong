@@ -1,5 +1,5 @@
 /**
- * Config for `@aipehub/service-memory-file`. Authored by yaml:
+ * Config for `@gotong/service-memory-file`. Authored by yaml:
  *
  *   uses:
  *     - type: memory
@@ -14,7 +14,7 @@
  * yaml scope string. See `services-sdk/src/owner.ts`.
  */
 
-import { ServiceConfigError, type MemoryKind } from '@aipehub/services-sdk'
+import { ServiceConfigError, type MemoryKind } from '@gotong/services-sdk'
 
 export interface MemoryFileConfig {
   /**

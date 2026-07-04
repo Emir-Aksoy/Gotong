@@ -1,4 +1,4 @@
-# @aipehub/im-qq
+# @gotong/im-qq
 
 `ImBridge` for QQ over the **official** QQ Bot API
 ([bot.q.qq.com](https://bot.q.qq.com)) — HTTP webhook transport +
@@ -32,12 +32,12 @@ Ed25519 callback validation. No SDK dep (`fetch` + Node built-in
 ## What you get
 
 ```ts
-import { QqBridge } from '@aipehub/im-qq'
-import { parseImCommand } from '@aipehub/im-adapter'
+import { QqBridge } from '@gotong/im-qq'
+import { parseImCommand } from '@gotong/im-adapter'
 
 const bridge = new QqBridge({
-  appId: process.env.AIPE_QQ_BOT_APPID!,    // 机器人 AppID
-  secret: process.env.AIPE_QQ_BOT_SECRET!,  // ClientSecret/AppSecret
+  appId: process.env.GOTONG_QQ_BOT_APPID!,    // 机器人 AppID
+  secret: process.env.GOTONG_QQ_BOT_SECRET!,  // ClientSecret/AppSecret
   webhookPort: 9092,                        // 反代转发到这个端口
   webhookPath: '/qq/webhook',
   onError: (err) => console.error('[qq]', err),
@@ -154,7 +154,7 @@ signature, op:0 tamper → 401, event dispatch + dedup, and the
 proactive-push honest-fail.
 
 ```bash
-pnpm --filter @aipehub/im-qq test
+pnpm --filter @gotong/im-qq test
 ```
 
 All hermetic — no real AppID / secret, no network. Live integration is

@@ -16,7 +16,7 @@
 // (`GET https://registry.modelcontextprotocol.io/v0/servers?search=<kw>`)。零自研
 // 注册表、不赌第三方搜索器、指向的是官方权威源;agent 挂上即可实时搜几万个 server。
 
-import type { McpServerSpec } from '@aipehub/core'
+import type { McpServerSpec } from '@gotong/core'
 
 /**
  * 允许的连接器分类。导出当单一真相源 —— 防腐测试拿它校验每条 `category` 合法,
@@ -60,7 +60,7 @@ export interface BuiltinMcpConnector {
 }
 
 /**
- * 内置连接器目录。`discovery` 一条(fetch 配方)+ 若干 AipeHub 已演示过的开箱
+ * 内置连接器目录。`discovery` 一条(fetch 配方)+ 若干 Gotong 已演示过的开箱
  * 组件。保持精简、可信、可装 —— 不追求覆盖全生态(那是 `discovery` 去主流注册站
  * 搜的事)。
  *
@@ -105,7 +105,7 @@ export const BUILTIN_MCP_CONNECTORS: BuiltinMcpConnector[] = [
     spec: {
       name: 'knowledge',
       command: 'uvx',
-      args: ['chroma-mcp', '--persist-dir', '.aipehub/knowledge/research'],
+      args: ['chroma-mcp', '--persist-dir', '.gotong/knowledge/research'],
     },
   },
 
@@ -166,7 +166,7 @@ export const BUILTIN_MCP_CONNECTORS: BuiltinMcpConnector[] = [
     name: '本地文件系统',
     category: 'files',
     whatFor:
-      '读写指定目录下的文件(默认沙箱 .aipehub/files,相对 host 工作目录)。' +
+      '读写指定目录下的文件(默认沙箱 .gotong/files,相对 host 工作目录)。' +
       '官方参考实现,常用于让 agent 读项目文件 / 产出物落盘。',
     homepage: 'https://github.com/modelcontextprotocol/servers',
     caveat:
@@ -176,7 +176,7 @@ export const BUILTIN_MCP_CONNECTORS: BuiltinMcpConnector[] = [
     spec: {
       name: 'files',
       command: 'npx',
-      args: ['-y', '@modelcontextprotocol/server-filesystem', '.aipehub/files'],
+      args: ['-y', '@modelcontextprotocol/server-filesystem', '.gotong/files'],
     },
   },
 ]

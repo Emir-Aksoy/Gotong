@@ -25,8 +25,8 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { Hub, InMemoryStorage } from '@aipehub/core'
-import { CliParticipant, dangerousCommandGate } from '@aipehub/cli-agent'
+import { Hub, InMemoryStorage } from '@gotong/core'
+import { CliParticipant, dangerousCommandGate } from '@gotong/cli-agent'
 
 import { setupSharedWorkspace, type SharedWorkspace } from './workspace.js'
 import { setupConsultBoard } from './consult-board.js'
@@ -75,7 +75,7 @@ const SCENARIOS: Scenario[] = [
 ]
 
 async function main(): Promise<void> {
-  console.log('\n=== AipeHub case: personal-coding-hub — 会诊 (multi-agent consult) ===')
+  console.log('\n=== Gotong case: personal-coding-hub — 会诊 (multi-agent consult) ===')
   console.log('  发现问题 → 一起读 → 各自盲诊 → 相互质证 → 收敛到真实根因 / 升级给人。\n')
 
   for (const s of SCENARIOS) await runScenario(s)
@@ -87,7 +87,7 @@ async function main(): Promise<void> {
 }
 
 async function runScenario(s: Scenario): Promise<void> {
-  const dir = mkdtempSync(join(tmpdir(), 'aipe-consult-'))
+  const dir = mkdtempSync(join(tmpdir(), 'gotong-consult-'))
   const ws = setupSharedWorkspace(dir)
   const board = setupConsultBoard(ws.dir)
   const hub = new Hub({ storage: new InMemoryStorage() })

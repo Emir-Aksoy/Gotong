@@ -1,4 +1,4 @@
-# 一键模板示例 — 客服知识助手 (aipehub.template/v1)
+# 一键模板示例 — 客服知识助手 (gotong.template/v1)
 #
 # 这是 v5 Stream B「模板系统」的端到端样例:一个文件描述一整套架构 ——
 #   1 个客服 agent  +  1 个工单工作流  +  1 个可寻址知识库槽位。
@@ -11,7 +11,7 @@
 #     -H 'content-type: application/json' \
 #     -d "$(jq -Rs '{template: .}' examples/oneclick-template/template.yaml)" \
 #     http://127.0.0.1:8745/api/admin/templates/import
-schema: aipehub.template/v1
+schema: gotong.template/v1
 template:
   name: 客服知识助手(一键模板)
   description: |-
@@ -44,7 +44,7 @@ template:
       mcpServers:
         - name: company_kb
           command: uvx
-          args: [chroma-mcp, --persist-dir, .aipehub/knowledge/company-kb]
+          args: [chroma-mcp, --persist-dir, .gotong/knowledge/company-kb]
           # 本机持久化模式不需要鉴权。若你换成「有鉴权的托管 KB」,把密钥写成
           # ${ENV} 占位(如 CHROMA_TOKEN: ${COMPANY_KB_TOKEN})—— 导出模板时
           # 字面 secret 会被自动脱敏成占位符,真值只在 includeSecrets 的加密
@@ -73,7 +73,7 @@ template:
       mcpServer:
         name: company_kb
         command: uvx
-        args: [chroma-mcp, --persist-dir, .aipehub/knowledge/company-kb]
+        args: [chroma-mcp, --persist-dir, .gotong/knowledge/company-kb]
       presetData:
         kind: url
         ref: https://example.com/company-kb-seed.tar.zst

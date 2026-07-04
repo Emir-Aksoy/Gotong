@@ -2,7 +2,7 @@
  * D1 (v4 Phase 5) — Peer Registry.
  *
  * Bridges the durable `peers` table in identity.sqlite to live HubLinks.
- * Runs a 5-second reconciliation tick (override with AIPE_PEER_POLL_MS):
+ * Runs a 5-second reconciliation tick (override with GOTONG_PEER_POLL_MS):
  * each tick diffs the current `enabled` rows against the live link map
  * and dials new ones / drops vanished ones. Plus a one-time `acceptHubLinks`
  * setup on the shared transport-ws server so inbound peer HELLOs land here.
@@ -10,7 +10,7 @@
  * Token storage:
  *   - Outbound: per-peer, in vault (decrypt via identity.getPeerToken).
  *   - Inbound:  one shared secret across all incoming peers, supplied via
- *               `sharedInboundPeerToken` (host main reads AIPE_PEER_INBOUND_TOKEN).
+ *               `sharedInboundPeerToken` (host main reads GOTONG_PEER_INBOUND_TOKEN).
  *               Inbound HELLOs whose claimed peerId isn't in our peers table
  *               are accepted at the wire level but immediately closed.
  *
@@ -32,10 +32,10 @@ import type {
   ParticipantId,
   RemoteHubViaLink,
   Task,
-} from '@aipehub/core'
-import { installPeerLink, type InstalledPeerLink } from '@aipehub/core'
-import type { IdentityStore, PeerRegistration } from '@aipehub/identity'
-import { acceptHubLinks, bearerAuth, connectHubLink } from '@aipehub/transport-ws'
+} from '@gotong/core'
+import { installPeerLink, type InstalledPeerLink } from '@gotong/core'
+import type { IdentityStore, PeerRegistration } from '@gotong/identity'
+import { acceptHubLinks, bearerAuth, connectHubLink } from '@gotong/transport-ws'
 import { gateKnowledgeBaseRpc, type RpcResponder } from './peer-kb-gate.js'
 import { denyPeerSummaryRpc } from './peer-summary.js'
 import { denyPeerTranscriptRpc } from './peer-transcript.js'
@@ -100,7 +100,7 @@ export interface PeerRegistryOptions {
    * peer under the proxy's loopback IP. Pick to match the topology.
    */
   trustProxy?: boolean
-  /** Default 5000ms. AIPE_PEER_POLL_MS override lives in main.ts. */
+  /** Default 5000ms. GOTONG_PEER_POLL_MS override lives in main.ts. */
   pollIntervalMs?: number
   /** Optional logger; defaults to console-style noop-on-debug. */
   logger?: Logger
@@ -155,7 +155,7 @@ const BACKOFF_LADDER_MS = [5_000, 15_000, 30_000, 60_000]
  *   - No timer / background sweep — buckets get rebuilt lazily on
  *     access; idle keys age out only when re-touched, but the cost
  *     of a stale entry is one small object until next GC
- *   - No external deps; avoids pulling @aipehub/web's RateLimiter
+ *   - No external deps; avoids pulling @gotong/web's RateLimiter
  *     (which would create a host→web dependency cycle)
  *
  * The window resets fully on first hit past `windowMs` since the
@@ -839,7 +839,7 @@ export class PeerRegistry {
  * IdentityStore, so tests can stub one method at a time.
  */
 export type PeerTokenResolverIdentity = Pick<
-  import('@aipehub/identity').IdentityStore,
+  import('@gotong/identity').IdentityStore,
   'getPeerByPeerId' | 'getPeerToken'
 >
 

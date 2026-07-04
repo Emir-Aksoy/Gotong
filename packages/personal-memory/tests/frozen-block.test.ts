@@ -6,8 +6,8 @@ import { entry } from './fake-memory.js'
 describe('renderFrozenBlock', () => {
   it('emits a stable empty block with markers when there are no entries', () => {
     const block = renderFrozenBlock([])
-    expect(block).toContain('<!-- aipehub:memory:begin -->')
-    expect(block).toContain('<!-- aipehub:memory:end -->')
+    expect(block).toContain('<!-- gotong:memory:begin -->')
+    expect(block).toContain('<!-- gotong:memory:end -->')
     expect(block).toContain('no memories yet')
     // Deterministic across calls.
     expect(renderFrozenBlock([])).toBe(block)

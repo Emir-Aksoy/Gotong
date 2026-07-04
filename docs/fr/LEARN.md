@@ -1,9 +1,9 @@
-# Apprendre AipeHub
+# Apprendre Gotong
 
 <!-- doc-version: 1.0 -->
 > **Version du document 1.0** · Traduction française · Mis à jour le 2026-06-27 · Source faisant autorité : [English](../../LEARN.md). En cas de divergence entre la traduction et la version anglaise, la version anglaise prévaut.
 
-Une vitrine sélectionnée des meilleurs matériels communautaires pour apprendre AipeHub —
+Une vitrine sélectionnée des meilleurs matériels communautaires pour apprendre Gotong —
 vidéos, conférences, tutoriels et articles. **Commencez ici si vous apprenez mieux en
 regardant qu'en lisant la documentation.**
 
@@ -38,7 +38,7 @@ pas la taille de l'audience.
 ## Vidéos
 
 _Pas encore d'entrées — cette vitrine est livrée prête, pas pré-remplie._ La première
-vidéo AipeHub précise et vraiment utile sera mise en valeur ici et son auteur crédité.
+vidéo Gotong précise et vraiment utile sera mise en valeur ici et son auteur crédité.
 Nous préférons montrer une étagère vide honnête plutôt que la remplir d'entrées
 fictives.
 
@@ -50,7 +50,7 @@ fictives.
 
 ## Conférences & sessions
 
-_Pas encore d'entrées._ Vous avez donné une conférence qui a amené des gens à AipeHub ?
+_Pas encore d'entrées._ Vous avez donné une conférence qui a amené des gens à Gotong ?
 Ajoutez-la (ou dites-le nous) — voir [Comment soumettre](#comment-soumettre).
 
 ## Tutoriels & articles
@@ -82,7 +82,7 @@ Ajoutez votre entrée dans le format et ouvrez le PR ; c'est tout.
 ## Limite honnête
 
 - **Nous lions et créditons ; nous n'hébergeons pas et ne payons pas.** L'inclusion est
-  une reconnaissance éditoriale que *ce contenu spécifique* enseigne bien AipeHub — pas
+  une reconnaissance éditoriale que *ce contenu spécifique* enseigne bien Gotong — pas
   un cautionnement de tout ce que son auteur dit ou vend ailleurs.
 - **Les entrées peuvent être supprimées.** Au fil de l'évolution du design, le matériel
   devient obsolète. Nous retirerons une entrée qui n'enseigne plus le design actuel

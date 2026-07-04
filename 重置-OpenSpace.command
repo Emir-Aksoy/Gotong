@@ -4,10 +4,10 @@
 
 cd "$(dirname "$0")"
 
-TARGET="examples/open-space/.aipehub-open-space"
+TARGET="examples/open-space/.gotong-open-space"
 
 echo "============================================"
-echo "  AipeHub Open Space — 重置工作区"
+echo "  Gotong Open Space — 重置工作区"
 echo "============================================"
 echo ""
 echo "将删除：$(pwd)/$TARGET"

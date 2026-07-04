@@ -1,6 +1,6 @@
 # =============================================================================
 # Workflow: 研发 issue 分诊 (R&D issue triage with parallel analysis)
-# Schema: aipehub.workflow/v1
+# Schema: gotong.workflow/v1
 #
 # 行业模板 #3 (Phase 19 P5-M7). 演示「分类 → 并行多面分析 → 汇总建议」:
 #   1) 分类 issue (bug / feature / question, 组件, 初判)
@@ -21,7 +21,7 @@
 #   (另接一个 github-mcp agent, 见 examples/rag-mcp 的 MCP 桥思路)。
 # =============================================================================
 
-schema: aipehub.workflow/v1
+schema: gotong.workflow/v1
 
 workflow:
   id: issue-triage-flow

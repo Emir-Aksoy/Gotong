@@ -36,7 +36,7 @@
 import type {
   PeerSummaryAlertChannel,
   PeerSummaryAlertFiring,
-} from '@aipehub/identity'
+} from '@gotong/identity'
 
 import type { PeerSummaryAlertBreach } from './peer-summary-alerts.js'
 
@@ -96,7 +96,7 @@ export type AlertDeliveryEvent = 'opened' | 'resolved'
 /** The wire shape a webhook receives. Every field is a count / id / threshold. */
 export interface AlertWebhookPayload {
   /** Schema tag so a receiver can branch on version. */
-  type: 'aipehub.peer_summary_alert/v1'
+  type: 'gotong.peer_summary_alert/v1'
   event: AlertDeliveryEvent
   firingId: number
   ruleId: string
@@ -118,7 +118,7 @@ export function renderWebhookPayload(
   event: AlertDeliveryEvent,
 ): AlertWebhookPayload {
   return {
-    type: 'aipehub.peer_summary_alert/v1',
+    type: 'gotong.peer_summary_alert/v1',
     event,
     firingId: firing.id,
     ruleId: firing.ruleId,
@@ -148,7 +148,7 @@ export function renderAlertText(payload: AlertWebhookPayload): string {
   const verb = payload.event === 'opened' ? 'firing' : 'resolved'
   const who = payload.label ? `${payload.label} (${payload.ruleId})` : payload.ruleId
   return (
-    `[aipehub] alert ${verb}: ${who} — ` +
+    `[gotong] alert ${verb}: ${who} — ` +
     `${payload.metric} ${payload.comparator} ${payload.threshold} ` +
     `(observed ${payload.value}) on source ${payload.source}`
   )
@@ -246,7 +246,7 @@ function buildEmailRequest(
   if (!channel.target) return null // recipient required
   const headers = { ...JSON_HEADERS }
   if (secret) headers.authorization = secret
-  const subject = `[aipehub] alert ${payload.event}: ${payload.metric}`
+  const subject = `[gotong] alert ${payload.event}: ${payload.metric}`
   return {
     url: channel.url,
     headers,

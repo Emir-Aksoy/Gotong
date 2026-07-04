@@ -3,7 +3,7 @@
 <!-- doc-version: 1.0 -->
 > **文档版本 1.0** · 中文译本 · 最后更新 2026-06-27 · 权威源：[English](../LICENSE-FAQ.md)。如译文与英文版冲突，以英文版为准。
 
-> **AipeHub 整体使用 [MIT License](../../LICENSE)**。这一页用 FAQ 形式回答
+> **Gotong 整体使用 [MIT License](../../LICENSE)**。这一页用 FAQ 形式回答
 > "我能不能 / 我必须做 / 我注意什么" 几个常见问题。不是法律意见，
 > 真有公司级合规要走，请咨询自己的法务。
 >
@@ -11,17 +11,17 @@
 
 ---
 
-## 1. 我能不能把 AipeHub 嵌进我的闭源产品 / SaaS / 内部工具？
+## 1. 我能不能把 Gotong 嵌进我的闭源产品 / SaaS / 内部工具？
 
 **能。** MIT 是最宽松的几个 OSS 协议之一。允许：
 
-- ✅ 商业使用，包括把整个 AipeHub 重新打包卖钱
-- ✅ 改源码、改名（虽然改名后请说明"基于 AipeHub"）
+- ✅ 商业使用，包括把整个 Gotong 重新打包卖钱
+- ✅ 改源码、改名（虽然改名后请说明"基于 Gotong"）
 - ✅ 闭源派生 — 你的修改**不需要**开源回来
-- ✅ 把 `@aipehub/core` 当 npm dep 拉进闭源 SaaS
+- ✅ 把 `@gotong/core` 当 npm dep 拉进闭源 SaaS
 
 **唯一硬要求**：保留 LICENSE 文件 + copyright notice（在你的产品的
-NOTICE / Third-Party-Licenses 之类的页面里列出 AipeHub 即可）。
+NOTICE / Third-Party-Licenses 之类的页面里列出 Gotong 即可）。
 
 ---
 
@@ -72,41 +72,41 @@ PR 流程见 [`CONTRIBUTING.md`](../../CONTRIBUTING.md)。
 - ✅ 你的派生品可以叫 `BobHub`，可以是 Apache-2.0 / proprietary / 你自己写一个
 - ✅ 你可以在自己的 LICENSE 文件里写自己的版权
 - ⚠️ 但你**必须在某个地方**（比如 NOTICE.md 或 THIRD-PARTY.md）
-  保留 AipeHub 的 MIT 原文 + 上游 copyright 行
-- ❌ **不能**说"AipeHub 是我们的原创" — 那是欺诈，跟 license 无关
+  保留 Gotong 的 MIT 原文 + 上游 copyright 行
+- ❌ **不能**说"Gotong 是我们的原创" — 那是欺诈，跟 license 无关
 
 ---
 
 ## 5. 我导入了一个公司同事用 GPT 写的私有 prompt 当 agent，这有 license 风险吗？
 
-**没有 AipeHub 这一侧的风险。** 你写的 / 公司内部的 prompt 是你们
-公司自己的资产，AipeHub 只是个运行容器。但你应该确认：
+**没有 Gotong 这一侧的风险。** 你写的 / 公司内部的 prompt 是你们
+公司自己的资产，Gotong 只是个运行容器。但你应该确认：
 
 - 那位同事用的 GPT 输出是否符合 OpenAI 的服务条款（OpenAI 历史上
   对模型输出的"所有权"政策松紧不一，问问法务）
 - 如果同事在 prompt 里**引用了**别人的代码 / 文章片段，该引用本身
   的 license 是否允许
 
-这两条都不是 AipeHub 项目要管的事 —— MIT 给的是软件本身的许可，
+这两条都不是 Gotong 项目要管的事 —— MIT 给的是软件本身的许可，
 不是你用它生成的内容的许可。
 
 ---
 
-## 6. 我把 AipeHub 嵌进客户的内网部署，要给客户什么 license 文件？
+## 6. 我把 Gotong 嵌进客户的内网部署，要给客户什么 license 文件？
 
 最低限度：
 
-- AipeHub 仓库根目录的 `LICENSE` 文件
+- Gotong 仓库根目录的 `LICENSE` 文件
 - 如果你用了 `templates/community/`：也把 `LICENSE-NOTICES.md` 一起带上
-- 如果你嵌的是 `@aipehub/core` npm 包：npm 安装时该包自带 license，
-  下游再分发时只要保留 `node_modules/@aipehub/*/LICENSE` 不删就行
+- 如果你嵌的是 `@gotong/core` npm 包：npm 安装时该包自带 license，
+  下游再分发时只要保留 `node_modules/@gotong/*/LICENSE` 不删就行
 
 一个常见做法是产品里有一个 "Third-Party Licenses" 页面，
-列出所有上游 OSS 包的 license 文本。AipeHub 的 MIT 加进去即可。
+列出所有上游 OSS 包的 license 文本。Gotong 的 MIT 加进去即可。
 
 ---
 
-## 7. AipeHub 用到的运行时依赖有 GPL/AGPL 这种 copyleft 病毒吗？
+## 7. Gotong 用到的运行时依赖有 GPL/AGPL 这种 copyleft 病毒吗？
 
 目前没有。主要依赖：
 
@@ -125,7 +125,7 @@ PR 流程见 [`CONTRIBUTING.md`](../../CONTRIBUTING.md)。
 
 ---
 
-## 8. AipeHub 的 wire protocol 算不算 license 的一部分？
+## 8. Gotong 的 wire protocol 算不算 license 的一部分？
 
 不算。`docs/PROTOCOL.md` 描述的 JSON 帧格式是**事实标准**，任何人
 都可以实现一个自己的 hub server 或自己的 SDK，**不需要任何许可**。
@@ -142,7 +142,7 @@ license 即可。
 
 ---
 
-## 10. 我能否在公司内部 fork 一份 AipeHub 但不开源 fork 内容？
+## 10. 我能否在公司内部 fork 一份 Gotong 但不开源 fork 内容？
 
 **完全可以**。MIT 不传染。你可以：
 
@@ -150,7 +150,7 @@ license 即可。
 - 把 fork 改名后给客户私有部署
 - 把 fork 编译产物作为闭源 binary 卖钱
 
-只要**最终交付物里某处保留 AipeHub 原始 MIT license**（一般放在
+只要**最终交付物里某处保留 Gotong 原始 MIT license**（一般放在
 "开源声明"页面里），就齐活了。
 
 ---

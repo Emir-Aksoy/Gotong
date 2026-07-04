@@ -34,7 +34,7 @@ import {
   type FeedbackEntryDraft,
   type HubLink,
   type Task,
-} from '@aipehub/core'
+} from '@gotong/core'
 
 import { acceptHubLinks, connectHubLink } from '../src/hub-link.js'
 

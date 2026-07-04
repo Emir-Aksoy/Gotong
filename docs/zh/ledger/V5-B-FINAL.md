@@ -15,7 +15,7 @@ admin UI 里手搓 agent / 工作流 / 知识库接线——但**搬不走、分
 能打包「1 团队 + 1 工作流」，可它装不下「N 个 agent + N 个工作流 + 可寻址知识库 +
 一键 API key 提示」这种**一整套架构**。
 
-模板（`aipehub.template/v1`）就是这个分享单元:
+模板（`gotong.template/v1`）就是这个分享单元:
 
 > 一个文件描述一整套架构。导出端把自己 hub 上选中的 agent / 工作流 / KB 接线渲染成
 > 结构清单；导入端拿这个文件，一键把架构落地到自己的 hub——凭证、数据、知识各归各家。
@@ -42,7 +42,7 @@ admin UI 里手搓 agent / 工作流 / 知识库接线——但**搬不走、分
 
 | M | commit | 干了啥 |
 |---|---|---|
-| **B-M1** | `6298ae0` | `aipehub.template/v1` manifest 格式 + `parseTemplate` + validate。agent 校验整段委托给 `parseManifest` 的 team 路径（一个 agent 信任边界，不重写规则）；workflow 块当不透明 yaml 原样保留（workflow runtime 仍是唯一 schema 权威）；KB 槽位 `name`（`KB_NAME_RE`）+ `mcpServer` 内联 XOR `useMcpServer` 引用 + `presetData` 指针；`defaults.apiKeyPrompt`。 |
+| **B-M1** | `6298ae0` | `gotong.template/v1` manifest 格式 + `parseTemplate` + validate。agent 校验整段委托给 `parseManifest` 的 team 路径（一个 agent 信任边界，不重写规则）；workflow 块当不透明 yaml 原样保留（workflow runtime 仍是唯一 schema 权威）；KB 槽位 `name`（`KB_NAME_RE`）+ `mcpServer` 内联 XOR `useMcpServer` 引用 + `presetData` 指针；`defaults.apiKeyPrompt`。 |
 | **B-M2** | `9db56c2` | 结构导出（`renderTemplate` = `parseTemplate` 的逆）。`POST /api/admin/templates/export` 从 Space 拉 agent config、从 host 拉工作流授权 yaml，渲染成 manifest，再过 `parseTemplate` 当**完整性闸**。默认结构安全:无人员（按构造）、无知识内容（只 MCP 接线）、无字面 secret（`scrubAgentSecrets` 把非 `${...}` 值占位成 `${KEY}`）。 |
 | **B-M3** | `898b788` | 敏感（opt-in）导出权限闸。`includeSecrets` / `includePersonnel` → 把脱敏 secret（MCP-first 模型里「知识内容」≈ 到达知识源的字面密钥）+ 人员（`resource_grants` 归属）收进 `{secrets?, personnel?}`，AES-256-GCM 加密成边车 `template.encrypted`，密钥 `encryptionKey` **单独**在响应里返回（永不进文件）。每次敏感导出写 `template_export` 审计。 |
 | **B-M4** | `dbadb23` | 模板导入（B-M2/B-M3 的逆）。`POST /api/admin/templates/import`:`parseTemplate` → 拿另传的密钥解密边车 → upsert 每个 agent（skip-existing、`lifecycle.start`、注入 secret） → import N 工作流（逐 id 软上报） → 上报 KB 槽位（**不**自动接线，决策 #4） → `reconcileHeartbeats`。**人员永不还原**（principal id 是 hub 本地的，跨 hub 不通用），只置 `personnelOmitted`。 |
@@ -81,11 +81,11 @@ admin UI 里手搓 agent / 工作流 / 知识库接线——但**搬不走、分
 ## 四、关键设计决策
 
 1. **agent 校验只有一个信任边界。** `parseTemplateAgents` 把 agent 数组重新包成
-   `aipehub.team/v1` 文档丢给 `parseManifest`——id 规则 / provider 白名单 / mcpServers
+   `gotong.team/v1` 文档丢给 `parseManifest`——id 规则 / provider 白名单 / mcpServers
    形状 / 重名检测全复用，模板解析器一行 agent 规则都不重写。
 
 2. **workflow 块不透明。** 模板从不看 workflow 的 trigger / steps，只抽 `id` 去重，
-   其余原样 re-serialize 成 `aipehub.workflow/v1` yaml 交给 workflow importer。
+   其余原样 re-serialize 成 `gotong.workflow/v1` yaml 交给 workflow importer。
    workflow runtime 仍是唯一 schema 权威，schema 演进零波及模板层。
 
 3. **「知识内容」在 MCP-first 模型里 = 字面 MCP 密钥。** Hub 不存知识内容（D3），

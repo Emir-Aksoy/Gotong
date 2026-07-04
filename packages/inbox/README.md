@@ -1,9 +1,9 @@
-# @aipehub/inbox
+# @gotong/inbox
 
-Member task inbox — the file-first half of AipeHub's human-in-the-loop (HITL)
+Member task inbox — the file-first half of Gotong's human-in-the-loop (HITL)
 workflow steps.
 
-A workflow step (or any agent) dispatches a Task to the `aipehub.human/v1`
+A workflow step (or any agent) dispatches a Task to the `gotong.human/v1`
 capability with a `HumanTaskPayload`. The `HumanInboxParticipant` broker
 records an `InboxItem` and **suspends** the task (Phase 11 suspend/resume). The
 assigned member sees the item in their `/me` inbox, submits an `InboxDecision`,
@@ -12,7 +12,7 @@ parent workflow (Phase 15 revision-bound, so no drift across re-publishes)
 continues.
 
 This package is pure data + the `InboxStore` contract + the broker. The host
-(`@aipehub/host`) wires the two-step resume (`HostInboxService`); the web layer
+(`@gotong/host`) wires the two-step resume (`HostInboxService`); the web layer
 exposes `/me/inbox` over a duck-typed `InboxSurface` with no runtime dep on
 this package.
 
@@ -26,7 +26,7 @@ this package.
 ## Layout
 
 ```
-.aipehub/
+.gotong/
   inbox/
     <itemId>.json     # one item per file, atomic tmp+rename
 ```

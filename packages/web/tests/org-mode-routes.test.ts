@@ -18,8 +18,8 @@ import { join } from 'node:path'
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { Hub, Space } from '@aipehub/core'
-import { MASTER_KEY_LEN_BYTES, openIdentityStore } from '@aipehub/identity'
+import { Hub, Space } from '@gotong/core'
+import { MASTER_KEY_LEN_BYTES, openIdentityStore } from '@gotong/identity'
 import { randomBytes } from 'node:crypto'
 
 import { serveWeb, type WebServerHandle } from '../src/index.js'
@@ -34,7 +34,7 @@ interface Bench {
 }
 
 async function boot(): Promise<Bench> {
-  const tmp = await mkdtemp(join(tmpdir(), 'aipehub-web-org-mode-'))
+  const tmp = await mkdtemp(join(tmpdir(), 'gotong-web-org-mode-'))
   const init = await Space.init(tmp, { name: 'mode-test' })
   const space = init.space
   const hub = new Hub({ space })
@@ -62,9 +62,9 @@ async function boot(): Promise<Bench> {
   })
   if (!loginRes.ok) throw new Error(`login failed: ${loginRes.status}`)
   const setCookie = loginRes.headers.get('set-cookie') ?? ''
-  const m = /aipehub_identity=([^;]+)/.exec(setCookie)
+  const m = /gotong_identity=([^;]+)/.exec(setCookie)
   if (!m) throw new Error('no identity cookie in login response')
-  const ownerCookie = `aipehub_identity=${m[1]}`
+  const ownerCookie = `gotong_identity=${m[1]}`
   return { baseUrl, server, hub, tmpDir: tmp, ownerCookie, identity }
 }
 

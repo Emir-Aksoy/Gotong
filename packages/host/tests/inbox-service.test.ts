@@ -16,9 +16,9 @@ import { join } from 'node:path'
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { Hub, InMemoryStorage, SuspendTaskError, type Participant, type Task } from '@aipehub/core'
-import { openIdentityStore, type IdentityStore } from '@aipehub/identity'
-import { FileInboxStore, HumanInboxParticipant, HUMAN_CAPABILITY, NEVER_RESUME_AT } from '@aipehub/inbox'
+import { Hub, InMemoryStorage, SuspendTaskError, type Participant, type Task } from '@gotong/core'
+import { openIdentityStore, type IdentityStore } from '@gotong/identity'
+import { FileInboxStore, HumanInboxParticipant, HUMAN_CAPABILITY, NEVER_RESUME_AT } from '@gotong/inbox'
 
 import { HostInboxService } from '../src/inbox-service.js'
 

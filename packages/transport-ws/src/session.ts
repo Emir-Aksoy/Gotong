@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 
-import type { Hub, ParticipantId } from '@aipehub/core'
+import type { Hub, ParticipantId } from '@gotong/core'
 import {
   AWAIT_APPROVAL_TIMEOUT_MS,
   decodeFrame,
@@ -19,7 +19,7 @@ import {
   type ServerFrame,
   type ServiceCallFrame,
   type ServiceUseDecl,
-} from '@aipehub/protocol'
+} from '@gotong/protocol'
 import type { WebSocket } from 'ws'
 
 import { RemoteAgentParticipant } from './remote-participant.js'
@@ -89,7 +89,7 @@ export class Session {
    * Inbound-frame decoder picked at session construction.
    *
    * H13 — captured ONCE here, not re-read per message. Pre-3.4 the
-   * hot path read `process.env.AIPE_PROTOCOL_STRICT` for every
+   * hot path read `process.env.GOTONG_PROTOCOL_STRICT` for every
    * inbound frame. `process.env` lookups go through a Node binding
    * (linear scan over a string-keyed object) and the env is
    * effectively immutable at the host's runtime — there's no
@@ -117,7 +117,7 @@ export class Session {
     private readonly hub: Hub,
     private readonly opts: SessionOptions,
   ) {
-    this.decode = pickDecoder(process.env.AIPE_PROTOCOL_STRICT)
+    this.decode = pickDecoder(process.env.GOTONG_PROTOCOL_STRICT)
     ws.on('message', (data, isBinary) => {
       // The protocol is text/JSON; a binary frame is either a client
       // bug or a probe trying to feed us non-UTF-8 bytes. Pre-3.1 we
@@ -179,8 +179,8 @@ export class Session {
     if (this.state === 'DEAD') return
     // H13 / H15 — decoder was chosen at construction (`this.decode`).
     // Production hot path is `decodeFrame` (envelope only). Operators
-    // chasing a bad-frame regression can set `AIPE_PROTOCOL_STRICT=1`
-    // (deep field checks) or `AIPE_PROTOCOL_STRICT=closed` (deep
+    // chasing a bad-frame regression can set `GOTONG_PROTOCOL_STRICT=1`
+    // (deep field checks) or `GOTONG_PROTOCOL_STRICT=closed` (deep
     // checks + reject unknown discriminators) BEFORE starting the
     // host; the value is captured once per session.
     const r = this.decode(text)
@@ -566,7 +566,7 @@ export class Session {
     this.startHeartbeat()
   }
 
-  private handleResult(result: import('@aipehub/core').TaskResult): void {
+  private handleResult(result: import('@gotong/core').TaskResult): void {
     for (const p of this.participants.values()) {
       if (p.tryResolveTask(result)) return
     }
@@ -752,7 +752,7 @@ function validateServiceDecls(
 }
 
 /**
- * Pick the decode function based on the `AIPE_PROTOCOL_STRICT` env value
+ * Pick the decode function based on the `GOTONG_PROTOCOL_STRICT` env value
  * captured at session construction (H13 / H15).
  *
  *   - `'1'`      → strict: envelope + per-type required fields, recurses

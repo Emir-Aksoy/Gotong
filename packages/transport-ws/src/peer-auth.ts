@@ -26,7 +26,7 @@
 
 import { timingSafeEqual } from 'node:crypto'
 
-import type { ParticipantId } from '@aipehub/core'
+import type { ParticipantId } from '@gotong/core'
 
 /**
  * The credential envelope carried in MESH_HELLO / MESH_HELLO_ACK.

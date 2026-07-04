@@ -4,11 +4,11 @@ import { parseWorkflow, WorkflowSchemaError } from '../src/index.js'
 
 /**
  * `human:` step sugar (Phase 16 M6). A human-in-the-loop step desugars at
- * parse time into a plain dispatch to the `aipehub.human/v1` capability, so
+ * parse time into a plain dispatch to the `gotong.human/v1` capability, so
  * the runner / resolver / deepCheck see a normal dispatch and need no changes.
  */
 
-const HUMAN_CAP = 'aipehub.human/v1'
+const HUMAN_CAP = 'gotong.human/v1'
 
 function firstDispatch(yaml: string): { strategy: unknown; payload: unknown } {
   const wf = parseWorkflow(yaml)
@@ -19,7 +19,7 @@ function firstDispatch(yaml: string): { strategy: unknown; payload: unknown } {
 
 function wrap(stepBody: string): string {
   return `
-schema: aipehub.workflow/v1
+schema: gotong.workflow/v1
 workflow:
   id: human-demo
   trigger: { capability: start }
@@ -29,7 +29,7 @@ ${stepBody}
 }
 
 describe('human: step sugar', () => {
-  it('desugars an approval step into a dispatch to aipehub.human/v1', () => {
+  it('desugars an approval step into a dispatch to gotong.human/v1', () => {
     const d = firstDispatch(
       wrap(`    - id: gate
       human:

@@ -23,9 +23,9 @@ import { join } from 'node:path'
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { Hub, InMemoryStorage, createLogger } from '@aipehub/core'
-import { MockLlmProvider } from '@aipehub/llm'
-import { FileInboxStore } from '@aipehub/inbox'
+import { Hub, InMemoryStorage, createLogger } from '@gotong/core'
+import { MockLlmProvider } from '@gotong/llm'
+import { FileInboxStore } from '@gotong/inbox'
 
 import {
   createHubStewardService,
@@ -80,7 +80,7 @@ describe('A-M1 — member + operator steward instances coexist disjointly', () =
   let operator: HubStewardSurface
 
   beforeEach(async () => {
-    tmp = await mkdtemp(join(tmpdir(), 'aipe-steward-ids-'))
+    tmp = await mkdtemp(join(tmpdir(), 'gotong-steward-ids-'))
     hub = new Hub({ storage: new InMemoryStorage() })
     await hub.start()
     inbox = new FileInboxStore(tmp)

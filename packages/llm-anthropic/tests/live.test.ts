@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { drainStream, type LlmToolDefinition } from '@aipehub/llm'
+import { drainStream, type LlmToolDefinition } from '@gotong/llm'
 
 import { AnthropicProvider } from '../src/index.js'
 
@@ -10,10 +10,10 @@ import { AnthropicProvider } from '../src/index.js'
  * key is supplied, via repo secrets; normal `pnpm -r test` skips them.
  *
  * Cost discipline: tiny prompts, a small max-tokens cap, and a cheap model
- * by default (Claude Haiku). Override the model with AIPE_LIVE_ANTHROPIC_MODEL
+ * by default (Claude Haiku). Override the model with GOTONG_LIVE_ANTHROPIC_MODEL
  * if an account doesn't have Haiku enabled.
  */
-const MODEL = process.env.AIPE_LIVE_ANTHROPIC_MODEL ?? 'claude-3-5-haiku-latest'
+const MODEL = process.env.GOTONG_LIVE_ANTHROPIC_MODEL ?? 'claude-3-5-haiku-latest'
 
 describe.skipIf(!process.env.ANTHROPIC_API_KEY)('AnthropicProvider — live API', () => {
   it('returns non-empty text for a tiny prompt', async () => {

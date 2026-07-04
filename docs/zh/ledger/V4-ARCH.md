@@ -1,4 +1,4 @@
-# AipeHub v4 架构 ——「灵活组织级 agent 框架」
+# Gotong v4 架构 ——「灵活组织级 agent 框架」
 
 > Status: **historical** —— 本文是 v4 启动 (Phase 1) 时的架构设计文档,
 > 记录"为什么这么决策"。最新进度看项目根 `CLAUDE.md` 第二节(Phase 表)
@@ -14,7 +14,7 @@
 
 v3.1 是一个**单 admin 的工作流引擎**:
 
-- 一个 host 进程 = 一个 `.aipehub/` workspace
+- 一个 host 进程 = 一个 `.gotong/` workspace
 - 启动时 mint **一个** admin token,所有 web/api 访问都靠它
 - 没有用户概念,没有角色,没有审计单位
 
@@ -31,9 +31,9 @@ v3.1 是一个**单 admin 的工作流引擎**:
 ```
    组织 acme.local          组织 widgets.local        组织 personal.bob
    ┌──────────────┐         ┌──────────────┐         ┌──────────────┐
-   │ aipehub-host │ ◀──HubLink──▶ │ aipehub-host │ ◀──▶ │ aipehub-host │
+   │ gotong-host │ ◀──HubLink──▶ │ gotong-host │ ◀──▶ │ gotong-host │
    │  ( m users ) │         │   ( n users ) │         │   ( 1 user ) │
-   │  .aipehub/   │         │   .aipehub/   │         │   .aipehub/  │
+   │  .gotong/   │         │   .gotong/   │         │   .gotong/  │
    └──────────────┘         └──────────────┘         └──────────────┘
 ```
 
@@ -78,14 +78,14 @@ revoke,credential 也可以单独 revoke,两者互不影响。
 
 ## 三、Phase 1 已落地(本提交)
 
-### 新增 package:`@aipehub/identity` (v0.1.0)
+### 新增 package:`@gotong/identity` (v0.1.0)
 
 - 零 workspace 依赖(纯领域库,host/web 来 import 它,不反过来)
-- 唯一外部依赖:`better-sqlite3`(peer dep,与 `@aipehub/service-datastore-sqlite`
+- 唯一外部依赖:`better-sqlite3`(peer dep,与 `@gotong/service-datastore-sqlite`
   共用)
 - 51 个单元测试全 pass
 
-### Schema(SQLite,`.aipehub/identity.sqlite`)
+### Schema(SQLite,`.gotong/identity.sqlite`)
 
 ```
 users           id PK, email UNIQUE COLLATE NOCASE, display_name, created_at, last_login_at
@@ -100,7 +100,7 @@ schema_migrations  version PK, name, applied_at
 本 host。当未来需要"一个 host 服务多 org"时,这就是要加 `org_id` 列的地方。
 其他三张表保持 org-agnostic。)
 
-### 公共 API(`@aipehub/identity` 导出)
+### 公共 API(`@gotong/identity` 导出)
 
 ```ts
 openIdentityStore({ dbPath, defaultSessionTtlMs? }) → IdentityStore
@@ -154,7 +154,7 @@ admin URL 继续工作**,用户不需要重新登录。
 
 ## 四、Phase 2 计划(下一刀)
 
-集成 `@aipehub/identity` 到 host / web:
+集成 `@gotong/identity` 到 host / web:
 
 1. **host 启动序列**
    - `packages/host/src/index.ts` 加载 `openIdentityStore({ dbPath: <space>/identity.sqlite })`
@@ -257,7 +257,7 @@ Phase 2 的 `/me` 只对**单一**工作流(`personal-growth-flow`)开放,allowl
 - **federation 与 identity 衔接** —— HubLink 跨 org 调用时,带上发起方
   org + user 的 verifiable claim(可能需要简单的 JWT 签名,共用 host 的
   master key)
-- **OAuth / SSO 插件** —— `@aipehub/identity-oauth-google` / `-lark` /
+- **OAuth / SSO 插件** —— `@gotong/identity-oauth-google` / `-lark` /
   `-azure-ad`,通过新增 `credentials.kind` 接入
 - **审计日志** —— `audit_log` 表,记录每次"谁 / 什么时候 / 对谁 / 做了什么"
 - **配额 / 计费** —— per-user / per-org 的 token 用量统计 + 软上限

@@ -13,7 +13,7 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { Hub, Space } from '@aipehub/core'
+import { Hub, Space } from '@gotong/core'
 
 import {
   serveWeb,
@@ -46,7 +46,7 @@ function snap(over: Partial<HealthSnapshot> = {}): HealthSnapshot {
     ],
     mcpUnwired: 1,
     spaceWritable: true,
-    spacePath: '/data/.aipehub',
+    spacePath: '/data/.gotong',
     checkedAt: '2026-06-23T00:00:00.000Z',
     ...over,
   }
@@ -54,7 +54,7 @@ function snap(over: Partial<HealthSnapshot> = {}): HealthSnapshot {
 
 async function boot(opts: { wired?: boolean } = {}): Promise<Boot> {
   const wired = opts.wired ?? true
-  const tmp = await mkdtemp(join(tmpdir(), 'aipehub-web-admin-health-'))
+  const tmp = await mkdtemp(join(tmpdir(), 'gotong-web-admin-health-'))
   const init = await Space.init(tmp, { name: 'admin-health-route-test' })
   const hub = new Hub({ space: init.space })
   await hub.start()

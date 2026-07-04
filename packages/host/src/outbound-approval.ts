@@ -49,8 +49,8 @@ import {
   type ParticipantId,
   type Task,
   type TaskResult,
-} from '@aipehub/core'
-import { NEVER_RESUME_AT, type InboxItem, type InboxStore } from '@aipehub/inbox'
+} from '@gotong/core'
+import { NEVER_RESUME_AT, type InboxItem, type InboxStore } from '@gotong/inbox'
 
 /**
  * The slice of the inner outbound participant the gate drives. `RemoteHubViaLink`

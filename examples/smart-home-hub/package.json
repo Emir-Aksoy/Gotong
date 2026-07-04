@@ -1,5 +1,5 @@
 {
-  "name": "@aipehub/example-smart-home-hub",
+  "name": "@gotong/example-smart-home-hub",
   "version": "0.0.0",
   "type": "module",
   "private": true,
@@ -9,9 +9,9 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@aipehub/core": "workspace:*",
-    "@aipehub/workflow": "workspace:*",
-    "@aipehub/inbox": "workspace:*",
+    "@gotong/core": "workspace:*",
+    "@gotong/workflow": "workspace:*",
+    "@gotong/inbox": "workspace:*",
     "yaml": "^2.6.0"
   }
 }

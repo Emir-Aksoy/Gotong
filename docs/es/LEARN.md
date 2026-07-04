@@ -1,9 +1,9 @@
-# Aprende AipeHub
+# Aprende Gotong
 
 <!-- doc-version: 1.0 -->
 > **Versión del documento 1.0** · Traducción al español · Actualizado el 2026-06-27 · Fuente autorizada: [English](../../LEARN.md). Si la traducción entra en conflicto con la versión en inglés, prevalece la versión en inglés.
 
-Un escaparate curado del mejor material comunitario para aprender AipeHub —
+Un escaparate curado del mejor material comunitario para aprender Gotong —
 vídeos, charlas, tutoriales y artículos. **Empieza aquí si aprendes mejor
 viendo que leyendo documentación.**
 
@@ -40,7 +40,7 @@ pena aprender*, no el tamaño de la audiencia.
 ## Vídeos
 
 _Sin entradas aún — este escaparate se entrega listo, no prerelleno._ El
-primer vídeo de AipeHub preciso y genuinamente útil se curará aquí y su autor
+primer vídeo de Gotong preciso y genuinamente útil se curará aquí y su autor
 será acreditado. Preferimos mostrar una estantería honestamente vacía antes
 que rellenarla con marcadores de posición.
 
@@ -52,7 +52,7 @@ que rellenarla con marcadores de posición.
 
 ## Charlas y sesiones de conferencia
 
-_Sin entradas aún._ ¿Diste una charla que trajo personas a AipeHub? Añádela
+_Sin entradas aún._ ¿Diste una charla que trajo personas a Gotong? Añádela
 (o cuéntanoslo) — véase [Cómo enviar](#cómo-enviar).
 
 ## Tutoriales y artículos
@@ -84,7 +84,7 @@ entrada con el formato y abre el PR; eso es todo.
 ## Límite honesto
 
 - **Enlazamos y acreditamos; no alojamos ni pagamos.** La inclusión es un
-  reconocimiento editorial de que *esta pieza específica* enseña AipeHub bien
+  reconocimiento editorial de que *esta pieza específica* enseña Gotong bien
   — no es un respaldo de todo lo que su autor dice o vende en otros lugares.
 - **Las entradas pueden eliminarse.** A medida que el diseño avanza, el material
   queda obsoleto. Eliminaremos una entrada que ya no enseñe el diseño actual con

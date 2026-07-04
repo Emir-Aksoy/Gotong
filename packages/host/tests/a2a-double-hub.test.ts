@@ -22,8 +22,8 @@ import type { AddressInfo } from 'node:net'
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { AgentParticipant, Hub, type Task, type TaskResult } from '@aipehub/core'
-import { A2aRemoteParticipant } from '@aipehub/a2a'
+import { AgentParticipant, Hub, type Task, type TaskResult } from '@gotong/core'
+import { A2aRemoteParticipant } from '@gotong/a2a'
 
 import { A2aServer } from '../src/a2a-server.js'
 

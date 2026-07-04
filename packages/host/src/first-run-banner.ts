@@ -15,7 +15,7 @@ import { spawn as nodeSpawn } from 'node:child_process'
 export type OpenBrowserMode = 'auto' | 'always' | 'never'
 
 /**
- * Read `AIPE_OPEN_BROWSER`:
+ * Read `GOTONG_OPEN_BROWSER`:
  *   - '0' / 'false' / 'off' / 'no'  → never
  *   - '1' / 'true'  / 'on'  / 'yes' → always
  *   - unset / anything else         → auto (first run only)

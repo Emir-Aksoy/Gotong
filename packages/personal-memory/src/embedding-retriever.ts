@@ -26,7 +26,7 @@
  * query-dependent, so it never enters the prompt-cache prefix).
  */
 
-import type { MemoryEntry, MemoryHandle, MemoryQuery } from '@aipehub/services-sdk'
+import type { MemoryEntry, MemoryHandle, MemoryQuery } from '@gotong/services-sdk'
 
 import { compareByImportanceThenRecency } from './importance.js'
 import type { MemoryRetriever } from './retriever.js'

@@ -22,7 +22,7 @@
  * same per-user handle, the view is simply empty.
  */
 
-import type { Logger } from '@aipehub/core'
+import type { Logger } from '@gotong/core'
 import {
   formOf,
   importanceOf,
@@ -36,9 +36,9 @@ import {
   tierOf,
   validFromOf,
   validToOf,
-} from '@aipehub/personal-memory'
-import type { MemoryEntry, MemoryHandle } from '@aipehub/services-sdk'
-import type { WebServerOptions } from '@aipehub/web'
+} from '@gotong/personal-memory'
+import type { MemoryEntry, MemoryHandle } from '@gotong/services-sdk'
+import type { WebServerOptions } from '@gotong/web'
 
 import { openButlerDreamDiary, type ButlerDreamDiary } from './personal-butler-dreams.js'
 import { openButlerMemory } from './personal-butler-memory.js'

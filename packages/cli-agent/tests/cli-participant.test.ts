@@ -8,7 +8,7 @@
  * the task id), and the terminate seam (onTaskCancelled → failed).
  */
 
-import type { Task, TaskId } from '@aipehub/core'
+import type { Task, TaskId } from '@gotong/core'
 import { describe, expect, it } from 'vitest'
 
 import { CliParticipant, payloadToText } from '../src/cli-participant.js'
@@ -97,7 +97,7 @@ describe('CliParticipant — outbound shell-out adapter', () => {
     const p = new CliParticipant({
       id: 'coder',
       capabilities: ['code'],
-      command: 'aipe-no-such-cmd-xyz',
+      command: 'gotong-no-such-cmd-xyz',
     })
     const result = await p.onTask(makeTask({ prompt: 'x' }))
     expect(result.kind).toBe('failed')

@@ -1,31 +1,31 @@
-# @aipehub/mcp-server
+# @gotong/mcp-server
 
-MCP (Model Context Protocol) bridge for [AipeHub](https://github.com/Emir-Aksoy/AipeHub). Lets any MCP client — Claude Desktop, Cursor, Cline, Zed, the official `@modelcontextprotocol/inspector` — operate on a running Hub: list participants, dispatch tasks, read the contribution leaderboard, evaluate completed work.
+MCP (Model Context Protocol) bridge for [Gotong](https://github.com/Emir-Aksoy/Gotong). Lets any MCP client — Claude Desktop, Cursor, Cline, Zed, the official `@modelcontextprotocol/inspector` — operate on a running Hub: list participants, dispatch tasks, read the contribution leaderboard, evaluate completed work.
 
 ## Install
 
 > ⚠️ **Source-only at this stage.** `npm publish` is descoped — see
 > [`.github/RELEASE-CHECKLIST.md`](../../.github/RELEASE-CHECKLIST.md)
-> "Distribution decision". The `npx -y @aipehub/mcp-server` invocations
+> "Distribution decision". The `npx -y @gotong/mcp-server` invocations
 > shown in the **Configure your MCP client** examples below will start
 > working once a JS registry is picked; until then, substitute
-> `npx -y @aipehub/mcp-server` with the absolute path:
+> `npx -y @gotong/mcp-server` with the absolute path:
 >
 > ```
 > "command": "node",
-> "args": ["/absolute/path/to/AipeHub/packages/mcp-server/bin/server.js"]
+> "args": ["/absolute/path/to/Gotong/packages/mcp-server/bin/server.js"]
 > ```
 
 ```bash
 # 1. Build from source
-git clone https://github.com/Emir-Aksoy/AipeHub.git && cd AipeHub
+git clone https://github.com/Emir-Aksoy/Gotong.git && cd Gotong
 pnpm install && pnpm build
 
 # 2. (Future, after npm publish — NOT available yet)
 # As an MCP client config (no global install needed):
-#   "command": "npx", "args": ["-y", "@aipehub/mcp-server"]
+#   "command": "npx", "args": ["-y", "@gotong/mcp-server"]
 # Or globally:
-# npm i -g @aipehub/mcp-server
+# npm i -g @gotong/mcp-server
 ```
 
 ## Configure your MCP client
@@ -37,12 +37,12 @@ Edit `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS) o
 ```json
 {
   "mcpServers": {
-    "aipehub": {
+    "gotong": {
       "command": "npx",
-      "args": ["-y", "@aipehub/mcp-server"],
+      "args": ["-y", "@gotong/mcp-server"],
       "env": {
-        "AIPE_HUB_URL": "http://127.0.0.1:3000",
-        "AIPE_ADMIN_TOKEN": "<your-admin-bearer-token>"
+        "GOTONG_HUB_URL": "http://127.0.0.1:3000",
+        "GOTONG_ADMIN_TOKEN": "<your-admin-bearer-token>"
       }
     }
   }
@@ -70,24 +70,24 @@ All tools translate to ordinary HTTP calls against the Hub's `/api/*` admin surf
 ## CLI flags
 
 ```bash
-aipehub-mcp                  # reads AIPE_HUB_URL + AIPE_ADMIN_TOKEN env
-aipehub-mcp --hub <URL> --token <BEARER>
-aipehub-mcp --help
-aipehub-mcp --version
+gotong-mcp                  # reads GOTONG_HUB_URL + GOTONG_ADMIN_TOKEN env
+gotong-mcp --hub <URL> --token <BEARER>
+gotong-mcp --help
+gotong-mcp --version
 ```
 
 `--hub` accepts `http://` or `https://`. Trailing slashes are stripped. The server pings `/healthz` on startup and exits with code `3` if the Hub is unreachable.
 
 ## Where do I get the admin token?
 
-When you first launch the AipeHub host (`pnpm host` or `docker compose up`), stdout prints:
+When you first launch the Gotong host (`pnpm host` or `docker compose up`), stdout prints:
 
 ```
 First-run admin URL (shown ONCE — save it):
   http://127.0.0.1:3000/admin?token=<HEX>
 ```
 
-That `<HEX>` is the token. Subsequent admin invites can be minted via [the API](https://github.com/Emir-Aksoy/AipeHub/blob/main/docs/DEPLOY.md#c8-onboard-more-admins).
+That `<HEX>` is the token. Subsequent admin invites can be minted via [the API](https://github.com/Emir-Aksoy/Gotong/blob/main/docs/DEPLOY.md#c8-onboard-more-admins).
 
 The token must belong to an **admin** account — worker tokens cannot dispatch tasks.
 

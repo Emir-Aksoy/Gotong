@@ -35,12 +35,12 @@
  * builds one per `origin.userId`, bound to that member's id.
  */
 
-import type { TaskResult } from '@aipehub/core'
+import type { TaskResult } from '@gotong/core'
 import type {
   LlmAgentToolset,
   LlmToolCallResult,
   LlmToolDefinition,
-} from '@aipehub/llm'
+} from '@gotong/llm'
 
 /** One owned agent the switchboard can reach — id + optional display label/liveness. */
 export interface ButlerAskAgent {

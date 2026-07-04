@@ -1,5 +1,5 @@
 # 案主任务管家（Case Manager）—— 全程"插话入口"
-# AipeHub agent v1 manifest (v2.3 — case conversation router)
+# Gotong agent v1 manifest (v2.3 — case conversation router)
 #
 # 用法：admin 控制台 → 智能体 → 导入 → 粘贴本文件
 #
@@ -58,7 +58,7 @@
 #
 # 默认 provider=anthropic + claude-opus-4-7，跑省钱版改 sonnet-4-6，
 # 跑离线 demo 改 mock。
-schema: aipehub.agent/v1
+schema: gotong.agent/v1
 
 agent:
   id: case-manager

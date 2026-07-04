@@ -16,8 +16,8 @@
 // (receive_id_type=chat_id, an oc_… id).
 //
 // Inputs (all via env, except the message text):
-//   AIPE_LARK_APP_ID              Feishu app id      (required)
-//   AIPE_LARK_APP_SECRET          Feishu app secret  (required; never printed)
+//   GOTONG_LARK_APP_ID              Feishu app id      (required)
+//   GOTONG_LARK_APP_SECRET          Feishu app secret  (required; never printed)
 //   FEISHU_ALERT_RECEIVE_ID       open_id (ou_…) or chat_id (oc_…)  (required)
 //   FEISHU_ALERT_RECEIVE_ID_TYPE  open_id (default) | chat_id | user_id |
 //                                 union_id | email
@@ -27,8 +27,8 @@
 // Exit codes: 0 = delivered (Feishu code 0). Non-zero = misconfig or send
 // failure (a sanitized reason on stderr — never the secret or the token).
 
-const appId = (process.env.AIPE_LARK_APP_ID || '').trim()
-const appSecret = (process.env.AIPE_LARK_APP_SECRET || '').trim()
+const appId = (process.env.GOTONG_LARK_APP_ID || '').trim()
+const appSecret = (process.env.GOTONG_LARK_APP_SECRET || '').trim()
 const receiveId = (process.env.FEISHU_ALERT_RECEIVE_ID || '').trim()
 const receiveIdType = (process.env.FEISHU_ALERT_RECEIVE_ID_TYPE || 'open_id').trim()
 const base = (process.env.FEISHU_BASE_URL || 'https://open.feishu.cn').replace(/\/+$/, '')
@@ -39,7 +39,7 @@ function die(reason) {
   process.exit(1)
 }
 
-if (!appId || !appSecret) die('AIPE_LARK_APP_ID / AIPE_LARK_APP_SECRET not set')
+if (!appId || !appSecret) die('GOTONG_LARK_APP_ID / GOTONG_LARK_APP_SECRET not set')
 if (!receiveId) die('FEISHU_ALERT_RECEIVE_ID not set')
 
 async function readText() {

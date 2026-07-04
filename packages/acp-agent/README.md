@@ -1,4 +1,4 @@
-# @aipehub/acp-agent
+# @gotong/acp-agent
 
 Outbound **ACP (Agent Client Protocol)** adapter — the OpenClaw-style way for the
 hub to **directly manage the full lifecycle** of a coding agent: spawn it once,
@@ -6,9 +6,9 @@ hold a long-lived session, and dispatch many tasks to the **same** session with
 context preserved.
 
 It is the **complement** (not a replacement) to the one-shot
-[`@aipehub/cli-agent`](../cli-agent):
+[`@gotong/cli-agent`](../cli-agent):
 
-| | `@aipehub/cli-agent` | `@aipehub/acp-agent` (this package) |
+| | `@gotong/cli-agent` | `@gotong/acp-agent` (this package) |
 |---|---|---|
 | process model | `spawn('claude', ['-p', prompt])` per task, exits | spawn **once**, stdin/stdout held open, dispatch many |
 | protocol | none (argv + stdout text) | ACP = JSON-RPC 2.0 over NDJSON on the child's stdio |
@@ -44,4 +44,4 @@ no longer live — re-dispatch") rather than hanging. Durable mid-permission res
 Most permissions resolve **inline** through the synchronous gate (no park), so the
 fragile parked path is the exception, not the rule.
 
-This is a **core-only leaf package** (`@aipehub/core` is its only dependency).
+This is a **core-only leaf package** (`@gotong/core` is its only dependency).

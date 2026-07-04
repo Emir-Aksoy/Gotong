@@ -1,5 +1,5 @@
 /**
- * `WorkflowAssistantAgent` — natural-language → `aipehub.workflow/v1` YAML.
+ * `WorkflowAssistantAgent` — natural-language → `gotong.workflow/v1` YAML.
  *
  * Phase 13 M1. The user describes what they want in plain language
  * (English / 中文 / mixed); the agent produces a YAML draft + short
@@ -39,8 +39,8 @@ import {
   type LlmRequest,
   type LlmResponse,
   type LlmTaskOutput,
-} from '@aipehub/llm'
-import type { Task } from '@aipehub/core'
+} from '@gotong/llm'
+import type { Task } from '@gotong/core'
 
 import {
   parseWorkflow,
@@ -48,13 +48,13 @@ import {
   WORKFLOW_SCHEMA_V1,
   WorkflowSchemaError,
   type WorkflowGraphView,
-} from '@aipehub/workflow'
+} from '@gotong/workflow'
 import {
   checkWorkflowStructure,
   type WorkflowInventory,
   type WorkflowStructureCheckResult,
   type WorkflowStructureViolation,
-} from '@aipehub/evals/checkers/workflow-structure'
+} from '@gotong/evals/checkers/workflow-structure'
 
 // ---------------------------------------------------------------------------
 // Public payload / output shapes — exported so callers and HTTP routes can
@@ -191,7 +191,7 @@ export interface WorkflowAssistantOutput extends LlmTaskOutput {
    * The check surfaces things `parseWorkflow` can't see, like dispatching
    * to an agent id that doesn't exist on this hub, or to a capability no
    * registered agent satisfies, or `$stepId.output` refs to nonexistent
-   * steps. See `@aipehub/evals/checkers/workflow-structure` for the full
+   * steps. See `@gotong/evals/checkers/workflow-structure` for the full
    * violation taxonomy.
    *
    * UI convention: when `deepCheck.ok === false` but `draftStatus ===
@@ -248,15 +248,15 @@ export interface WorkflowExample {
 
 // ---------------------------------------------------------------------------
 // Default system prompt — minimal-but-complete v1 schema doc, in the
-// same `aipehub.workflow/v1` voice users see in the YAML headers.
+// same `gotong.workflow/v1` voice users see in the YAML headers.
 // ---------------------------------------------------------------------------
 
-const BASE_SYSTEM_PROMPT = `You design AipeHub workflows. The user describes what they want; you produce a YAML file matching the \`${WORKFLOW_SCHEMA_V1}\` schema.
+const BASE_SYSTEM_PROMPT = `You design Gotong workflows. The user describes what they want; you produce a YAML file matching the \`${WORKFLOW_SCHEMA_V1}\` schema.
 
 # Schema
 
 \`\`\`yaml
-schema: aipehub.workflow/v1
+schema: gotong.workflow/v1
 
 workflow:
   id: string                # required, [a-zA-Z0-9_.:-]{1,80}, unique
@@ -298,7 +298,7 @@ workflow:
 
 # Hard rules
 
-  - Always emit the literal first line \`schema: aipehub.workflow/v1\`.
+  - Always emit the literal first line \`schema: gotong.workflow/v1\`.
   - \`workflow.id\` must be a slug ([a-zA-Z0-9_.:-]), no spaces.
   - Every step.id is unique. $-refs must point to earlier steps only.
   - When the host provides \`contextHints\`, USE the capability names listed
@@ -337,7 +337,7 @@ const DEFAULT_CAPABILITIES = ['workflow:assist']
 
 /**
  * LlmAgent subclass that turns a natural-language description into a
- * draft `aipehub.workflow/v1` YAML.
+ * draft `gotong.workflow/v1` YAML.
  *
  * Construction:
  *
@@ -541,7 +541,7 @@ export function verdictForYaml(yaml: string): {
 /**
  * Phase 13 M4 — same as `verdictForYaml` but, when status comes back
  * `'valid'` AND an `inventory` is supplied, runs the deep structural
- * check from `@aipehub/evals` against the parsed workflow and returns the
+ * check from `@gotong/evals` against the parsed workflow and returns the
  * result. Status itself is never downgraded by the deep check — caller
  * inspects `deepCheck.ok` and decides how to render (a typical UI: green
  * iff both `status==='valid'` and `deepCheck.ok`; yellow if valid but
@@ -709,7 +709,7 @@ export function renderExplainMessage(payload: WorkflowAssistantPayload): string 
   const subject = (payload.subjectYaml ?? '').trim()
   const ask = payload.description?.trim()
   const lines: string[] = [
-    ask && ask.length > 0 ? ask : 'Explain what the following AipeHub workflow does.',
+    ask && ask.length > 0 ? ask : 'Explain what the following Gotong workflow does.',
     '',
     'Explain the workflow below. Do NOT rewrite it and do NOT output any code fence — respond with the prose explanation ONLY.',
     detailInstruction(payload.detail ?? 'brief'),

@@ -5,7 +5,7 @@
  * file IO, row validation, and the ONE dispatch path (the sweeper's `fireNow`,
  * which runs the same member-facing gate as `run_my_workflow`: published +
  * surface.me + role + force-set member scope key). Web carries ZERO
- * `@aipehub/host` runtime dependency — it mirrors the surface structurally,
+ * `@gotong/host` runtime dependency — it mirrors the surface structurally,
  * exactly like `SettingOpsSurface`.
  *
  *   GET    /api/admin/workflow-schedules            list rows (intent + mark,
@@ -26,7 +26,7 @@
  */
 
 import type { IncomingMessage, ServerResponse } from 'node:http'
-import type { AdminRecord } from '@aipehub/core'
+import type { AdminRecord } from '@gotong/core'
 
 import { readJsonBody, sendJson } from './http-helpers.js'
 

@@ -1,4 +1,4 @@
-# 家长给孩子开 AI 订阅的家庭学习 hub — 家长 hub 一侧的可载入模板 (aipehub.template/v1)
+# 家长给孩子开 AI 订阅的家庭学习 hub — 家长 hub 一侧的可载入模板 (gotong.template/v1)
 #
 # 这是第二个**跨组织 (cross-org)** 模板 (第一个是 tea-supply-link)。它和 tea-supply-link
 # 的方向**刻意相反**:
@@ -58,7 +58,7 @@
 #     -H 'content-type: application/json' \
 #     -d "$(jq -Rs '{template: .}' examples/family-learning-hub/template/family-tutor.template.yaml)" \
 #     http://127.0.0.1:8745/api/admin/templates/import
-schema: aipehub.template/v1
+schema: gotong.template/v1
 template:
   name: 家长 AI 导师(家庭学习 hub · 家长侧)
   description: |-
@@ -157,10 +157,10 @@ template:
   # runtime 校验 + 注册。trigger 的 `tutor.teach` 是孩子 hub 跨组织调过来的能力 (这条工作流
   # 不点名孩子 peer,运行时由联邦链路解析)。
   #   - `screen` 派 topic.screen        → 运行时确定性参与者 (主题白名单, 返真布尔)
-  #   - `guardian-approval` 派 aipehub.human/v1 → 家长在 /me 收件箱批白名单外例外
+  #   - `guardian-approval` 派 gotong.human/v1 → 家长在 /me 收件箱批白名单外例外
   #   - `teach` 派 teach.lesson          → 本模板的导师 agent (标 child-learning)
   #   - `moderate` 派 content.moderate    → 运行时确定性参与者 (规则引擎, 空规则=关)
-  #   - `mod-approval` 派 aipehub.human/v1 → 自评或规则任一命中时家长审内容
+  #   - `mod-approval` 派 gotong.human/v1 → 自评或规则任一命中时家长审内容
   #
   # 这条工作流**有** human: 步 —— 跟 tea-supply-link 刻意相反:那边的跨组织审批是运行时出站
   # 审批闸 (对工作流透明,工作流里没有 human: 步);这边的白名单 / 内容审批是**家长 hub 工作流

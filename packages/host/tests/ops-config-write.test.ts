@@ -21,7 +21,7 @@ import {
 } from '../src/ops-config-write.js'
 import { runOpsCommand, OpsError, OpsTierError, type OpsCaller, type OpsDeps } from '../src/ops-core.js'
 
-const ENV_PATH = '/space/aipehub.env'
+const ENV_PATH = '/space/gotong.env'
 const PRICING_PATH = '/space/pricing.json'
 
 /** In-memory fs seam: ENOENT (thrown) for absent paths so `readFileOr` falls back. */
@@ -59,13 +59,13 @@ function fakeAudit() {
 
 describe('parseEnvFile / serializeEnvFile', () => {
   it('round-trips KEY=value, ignoring comments and blanks', () => {
-    const map = parseEnvFile('# header\n\nAIPE_MODE=team\nAIPE_WEB_PORT=3001\n')
-    expect(map.get('AIPE_MODE')).toBe('team')
-    expect(map.get('AIPE_WEB_PORT')).toBe('3001')
+    const map = parseEnvFile('# header\n\nGOTONG_MODE=team\nGOTONG_WEB_PORT=3001\n')
+    expect(map.get('GOTONG_MODE')).toBe('team')
+    expect(map.get('GOTONG_WEB_PORT')).toBe('3001')
     const text = serializeEnvFile(map)
     // keys are sorted for a clean diff; values survive
-    expect(parseEnvFile(text).get('AIPE_MODE')).toBe('team')
-    expect(parseEnvFile(text).get('AIPE_WEB_PORT')).toBe('3001')
+    expect(parseEnvFile(text).get('GOTONG_MODE')).toBe('team')
+    expect(parseEnvFile(text).get('GOTONG_WEB_PORT')).toBe('3001')
   })
 })
 
@@ -75,10 +75,10 @@ describe('parseEnvFile / serializeEnvFile', () => {
 
 describe('isSecretKey', () => {
   it('flags secret-suffix keys, not the whitelisted knobs', () => {
-    for (const k of ['ANTHROPIC_API_KEY', 'AIPE_TELEGRAM_BOT_TOKEN', 'AIPE_LARK_APP_SECRET', 'AIPE_MASTER_KEY', 'DB_PASSWORD']) {
+    for (const k of ['ANTHROPIC_API_KEY', 'GOTONG_TELEGRAM_BOT_TOKEN', 'GOTONG_LARK_APP_SECRET', 'GOTONG_MASTER_KEY', 'DB_PASSWORD']) {
       expect(isSecretKey(k)).toBe(true)
     }
-    for (const k of ['AIPE_MODE', 'AIPE_WEB_PORT', 'AIPE_WS_PORT', 'AIPE_OPEN_BROWSER']) {
+    for (const k of ['GOTONG_MODE', 'GOTONG_WEB_PORT', 'GOTONG_WS_PORT', 'GOTONG_OPEN_BROWSER']) {
       expect(isSecretKey(k)).toBe(false)
     }
   })
@@ -93,24 +93,24 @@ describe('applyEnvKnob', () => {
     const fs = fakeFs()
     const audit = fakeAudit()
     const result = await applyEnvKnob(
-      { key: 'AIPE_MODE', value: 'team' },
+      { key: 'GOTONG_MODE', value: 'team' },
       { envFilePath: ENV_PATH, surface: 'cli', audit: audit.sink, ...fs },
     )
-    expect(parseEnvFile(fs.files.get(ENV_PATH)!).get('AIPE_MODE')).toBe('team')
+    expect(parseEnvFile(fs.files.get(ENV_PATH)!).get('GOTONG_MODE')).toBe('team')
     expect(audit.calls).toHaveLength(1)
-    expect(audit.calls[0]).toMatchObject({ kind: 'env', key: 'AIPE_MODE', value: 'team', surface: 'cli', takesEffectOnRestart: true })
-    expect(result.data).toMatchObject({ kind: 'env', key: 'AIPE_MODE', value: 'team' })
+    expect(audit.calls[0]).toMatchObject({ kind: 'env', key: 'GOTONG_MODE', value: 'team', surface: 'cli', takesEffectOnRestart: true })
+    expect(result.data).toMatchObject({ kind: 'env', key: 'GOTONG_MODE', value: 'team' })
   })
 
   it('normalizes a port and rejects a non-integer port — no write on reject', async () => {
     const ok = fakeFs()
-    await applyEnvKnob({ key: 'AIPE_WEB_PORT', value: ' 8080 ' }, { envFilePath: ENV_PATH, surface: 'cli', ...ok })
-    expect(parseEnvFile(ok.files.get(ENV_PATH)!).get('AIPE_WEB_PORT')).toBe('8080')
+    await applyEnvKnob({ key: 'GOTONG_WEB_PORT', value: ' 8080 ' }, { envFilePath: ENV_PATH, surface: 'cli', ...ok })
+    expect(parseEnvFile(ok.files.get(ENV_PATH)!).get('GOTONG_WEB_PORT')).toBe('8080')
 
     const bad = fakeFs()
     const audit = fakeAudit()
     await expect(
-      applyEnvKnob({ key: 'AIPE_WEB_PORT', value: '8080abc' }, { envFilePath: ENV_PATH, surface: 'cli', audit: audit.sink, ...bad }),
+      applyEnvKnob({ key: 'GOTONG_WEB_PORT', value: '8080abc' }, { envFilePath: ENV_PATH, surface: 'cli', audit: audit.sink, ...bad }),
     ).rejects.toMatchObject({ code: 'invalid_value' })
     expect(bad.writes).toBe(0)
     expect(audit.calls).toHaveLength(0)
@@ -119,7 +119,7 @@ describe('applyEnvKnob', () => {
   it('rejects an out-of-range port', async () => {
     const fs = fakeFs()
     await expect(
-      applyEnvKnob({ key: 'AIPE_WS_PORT', value: '99999' }, { envFilePath: ENV_PATH, surface: 'cli', ...fs }),
+      applyEnvKnob({ key: 'GOTONG_WS_PORT', value: '99999' }, { envFilePath: ENV_PATH, surface: 'cli', ...fs }),
     ).rejects.toMatchObject({ code: 'invalid_value' })
     expect(fs.writes).toBe(0)
   })
@@ -127,7 +127,7 @@ describe('applyEnvKnob', () => {
   it('rejects a mode outside the closed set', async () => {
     const fs = fakeFs()
     await expect(
-      applyEnvKnob({ key: 'AIPE_MODE', value: 'enterprise' }, { envFilePath: ENV_PATH, surface: 'cli', ...fs }),
+      applyEnvKnob({ key: 'GOTONG_MODE', value: 'enterprise' }, { envFilePath: ENV_PATH, surface: 'cli', ...fs }),
     ).rejects.toMatchObject({ code: 'invalid_value' })
     expect(fs.writes).toBe(0)
   })
@@ -147,17 +147,17 @@ describe('applyEnvKnob', () => {
   it('refuses an unknown (non-whitelisted) knob', async () => {
     const fs = fakeFs()
     await expect(
-      applyEnvKnob({ key: 'AIPE_FANCY', value: 'x' }, { envFilePath: ENV_PATH, surface: 'cli', ...fs }),
+      applyEnvKnob({ key: 'GOTONG_FANCY', value: 'x' }, { envFilePath: ENV_PATH, surface: 'cli', ...fs }),
     ).rejects.toMatchObject({ code: 'unknown_knob' })
     expect(fs.writes).toBe(0)
   })
 
   it('merges over existing knobs (does not clobber the file)', async () => {
-    const fs = fakeFs({ [ENV_PATH]: 'AIPE_WEB_PORT=3001\n' })
-    await applyEnvKnob({ key: 'AIPE_MODE', value: 'team' }, { envFilePath: ENV_PATH, surface: 'cli', ...fs })
+    const fs = fakeFs({ [ENV_PATH]: 'GOTONG_WEB_PORT=3001\n' })
+    await applyEnvKnob({ key: 'GOTONG_MODE', value: 'team' }, { envFilePath: ENV_PATH, surface: 'cli', ...fs })
     const after = parseEnvFile(fs.files.get(ENV_PATH)!)
-    expect(after.get('AIPE_WEB_PORT')).toBe('3001')
-    expect(after.get('AIPE_MODE')).toBe('team')
+    expect(after.get('GOTONG_WEB_PORT')).toBe('3001')
+    expect(after.get('GOTONG_MODE')).toBe('team')
   })
 })
 
@@ -233,12 +233,12 @@ describe('readEffectiveConfig', () => {
     const fs = fakeFs()
     const view = await readEffectiveConfig({
       spaceDir: '/space',
-      env: { AIPE_MASTER_KEY: 'super-secret-value', ANTHROPIC_API_KEY: '' },
+      env: { GOTONG_MASTER_KEY: 'super-secret-value', ANTHROPIC_API_KEY: '' },
       envFilePath: ENV_PATH,
       pricingPath: PRICING_PATH,
       readFileImpl: fs.readFileImpl,
     })
-    const master = view.secrets.find((s) => s.key === 'AIPE_MASTER_KEY')
+    const master = view.secrets.find((s) => s.key === 'GOTONG_MASTER_KEY')
     const anthropic = view.secrets.find((s) => s.key === 'ANTHROPIC_API_KEY')
     expect(master?.set).toBe(true)
     expect(anthropic?.set).toBe(false)
@@ -247,16 +247,16 @@ describe('readEffectiveConfig', () => {
   })
 
   it('splits knob file value vs live env value', async () => {
-    const fs = fakeFs({ [ENV_PATH]: 'AIPE_MODE=team\n' })
+    const fs = fakeFs({ [ENV_PATH]: 'GOTONG_MODE=team\n' })
     const view = await readEffectiveConfig({
       spaceDir: '/space',
-      env: { AIPE_WEB_PORT: '9000' },
+      env: { GOTONG_WEB_PORT: '9000' },
       envFilePath: ENV_PATH,
       pricingPath: PRICING_PATH,
       readFileImpl: fs.readFileImpl,
     })
-    const mode = view.knobs.find((k) => k.key === 'AIPE_MODE')!
-    const port = view.knobs.find((k) => k.key === 'AIPE_WEB_PORT')!
+    const mode = view.knobs.find((k) => k.key === 'GOTONG_MODE')!
+    const port = view.knobs.find((k) => k.key === 'GOTONG_WEB_PORT')!
     expect(mode.fileValue).toBe('team')
     expect(mode.envValue).toBe(null)
     expect(port.fileValue).toBe(null)
@@ -296,8 +296,8 @@ describe('runOpsCommand config-write gate', () => {
 
   it('refuses config-set when caller may not write config — and NOTHING is written', async () => {
     const fs = fakeFs()
-    await expect(runOpsCommand('config-set', ['AIPE_MODE', 'team'], IM, depsWith(fs))).rejects.toBeInstanceOf(OpsTierError)
-    await expect(runOpsCommand('config-set', ['AIPE_MODE', 'team'], IM, depsWith(fs))).rejects.toMatchObject({
+    await expect(runOpsCommand('config-set', ['GOTONG_MODE', 'team'], IM, depsWith(fs))).rejects.toBeInstanceOf(OpsTierError)
+    await expect(runOpsCommand('config-set', ['GOTONG_MODE', 'team'], IM, depsWith(fs))).rejects.toMatchObject({
       code: 'config_write_not_permitted',
       tier: 'config-write',
     })
@@ -315,10 +315,10 @@ describe('runOpsCommand config-write gate', () => {
   it('runs config-set when the caller may write config', async () => {
     const fs = fakeFs()
     const audit = fakeAudit()
-    const res = await runOpsCommand('config-set', ['AIPE_MODE', 'team'], CLI, depsWith(fs, audit.sink))
+    const res = await runOpsCommand('config-set', ['GOTONG_MODE', 'team'], CLI, depsWith(fs, audit.sink))
     expect(res.command).toBe('config-set')
     expect(res.tier).toBe('config-write')
-    expect(parseEnvFile(fs.files.get(ENV_PATH)!).get('AIPE_MODE')).toBe('team')
+    expect(parseEnvFile(fs.files.get(ENV_PATH)!).get('GOTONG_MODE')).toBe('team')
     expect(audit.calls).toHaveLength(1)
   })
 

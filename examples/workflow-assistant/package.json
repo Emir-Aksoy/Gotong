@@ -1,5 +1,5 @@
 {
-  "name": "@aipehub/example-workflow-assistant",
+  "name": "@gotong/example-workflow-assistant",
   "version": "0.0.0",
   "type": "module",
   "private": true,
@@ -10,13 +10,13 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@aipehub/core": "workspace:*",
-    "@aipehub/evals": "workspace:*",
-    "@aipehub/llm": "workspace:*",
-    "@aipehub/llm-anthropic": "workspace:*",
-    "@aipehub/llm-openai": "workspace:*",
-    "@aipehub/workflow": "workspace:*",
-    "@aipehub/workflow-assistant": "workspace:*",
+    "@gotong/core": "workspace:*",
+    "@gotong/evals": "workspace:*",
+    "@gotong/llm": "workspace:*",
+    "@gotong/llm-anthropic": "workspace:*",
+    "@gotong/llm-openai": "workspace:*",
+    "@gotong/workflow": "workspace:*",
+    "@gotong/workflow-assistant": "workspace:*",
     "@anthropic-ai/sdk": "^0.96.0",
     "openai": "^6.38.0"
   }

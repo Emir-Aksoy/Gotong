@@ -88,7 +88,7 @@ HubConfig.crossHubResolver  — D2 cross-hub explicit dispatch
 DefaultScheduler 同名参数    — 4th 构造参数,可选
 ```
 
-`@aipehub/core` 暴露的新 type:`CrossHubExplicitResolver` +
+`@gotong/core` 暴露的新 type:`CrossHubExplicitResolver` +
 `CrossHubDispatcher`。
 
 ### 新 host 子系统
@@ -146,8 +146,8 @@ docs/zh/
 
 **没做的事**(都是清醒拒绝,不是漏):
 
-1. **knowledge service** — RAG 走 MCP,不在 aipehub 写。
-2. **跨 hub knowledge ACL** — 走 MCP server 自身权限,不在 aipehub。
+1. **knowledge service** — RAG 走 MCP,不在 gotong 写。
+2. **跨 hub knowledge ACL** — 走 MCP server 自身权限,不在 gotong。
 3. **sparkline 历史图** — usage 不持久化历史(sweep 直接 roll),需要
    新时间序列表,不值当。
 4. **reputation admin UI** — 只读 dashboard,cat 文件即可,延后。
@@ -164,10 +164,10 @@ docs/zh/
 
 | 变量 | 默认 | 作用 |
 |---|---|---|
-| `AIPE_PEER_POLL_MS` | 5000 | D1 PeerRegistry tick 间隔 |
-| `AIPE_PEER_INBOUND_TOKEN` | (空) | D1 入方共享 HELLO secret |
-| `AIPE_PEERS_DISABLED` | — | 设 `1` 跳过 PeerRegistry 启动 |
-| `AIPE_HITL_TIMEOUT_MS` | 300000 | D2 HITL 软 timeout(5min),0 = 关 |
+| `GOTONG_PEER_POLL_MS` | 5000 | D1 PeerRegistry tick 间隔 |
+| `GOTONG_PEER_INBOUND_TOKEN` | (空) | D1 入方共享 HELLO secret |
+| `GOTONG_PEERS_DISABLED` | — | 设 `1` 跳过 PeerRegistry 启动 |
+| `GOTONG_HITL_TIMEOUT_MS` | 300000 | D2 HITL 软 timeout(5min),0 = 关 |
 
 每个变量在第一次使用代码段都有解释注释。
 
@@ -219,7 +219,7 @@ docs/zh/
 1. **`packages/identity/src/schema.ts`** — 4 个新表的 migration 注释,
    每条 PK/FK/INDEX 都解释为什么。读完知道整个数据模型。
 2. **`docs/zh/RAG-VIA-MCP.md`** — B3/B4/D3 的决议:为什么不在
-   aipehub 写 knowledge subsystem,以及怎么用 MCP server 替代。
+   gotong 写 knowledge subsystem,以及怎么用 MCP server 替代。
    读完知道 RAG 全栈思路。
 3. **`packages/host/src/peer-registry.ts`** — D1 PeerRegistry,从持久
    化的 peer 表派生活的 HubLink 集。读完知道 federation 启停 + 重连

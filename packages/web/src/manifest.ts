@@ -5,7 +5,7 @@ import type {
   ManagedAgentSpec,
   McpServerSpec,
   ServiceUseSpec,
-} from '@aipehub/core'
+} from '@gotong/core'
 
 /**
  * Agent / team manifests are the file format the public template library
@@ -16,10 +16,10 @@ import type {
  *
  * Two top-level shapes:
  *
- *   schema: aipehub.agent/v1     # one agent
+ *   schema: gotong.agent/v1     # one agent
  *   agent: { id, capabilities, kind: 'llm', provider, model, system, weightDefault? }
  *
- *   schema: aipehub.team/v1      # N agents shipped together
+ *   schema: gotong.team/v1      # N agents shipped together
  *   team:
  *     name: ...
  *     description: ...
@@ -28,15 +28,15 @@ import type {
  *
  * Anything else is rejected loudly. The parser deliberately doesn't try
  * to be clever — better to tell a non-technical user "your file says
- * `schema: aipehub.agent` but expected `aipehub.agent/v1`" than to
+ * `schema: gotong.agent` but expected `gotong.agent/v1`" than to
  * accept a malformed file and have an agent spawn fail at runtime.
  */
 
-export const AGENT_SCHEMA_V1 = 'aipehub.agent/v1'
-export const TEAM_SCHEMA_V1 = 'aipehub.team/v1'
+export const AGENT_SCHEMA_V1 = 'gotong.agent/v1'
+export const TEAM_SCHEMA_V1 = 'gotong.team/v1'
 
 /**
- * `aipehub.bundle/v1` — combine one team + one workflow + (optional)
+ * `gotong.bundle/v1` — combine one team + one workflow + (optional)
  * inline default settings into a single yaml the user imports once.
  *
  * Motivation: shipping the personal-growth experience as a downloadable
@@ -46,14 +46,14 @@ export const TEAM_SCHEMA_V1 = 'aipehub.team/v1'
  *
  * Shape:
  *
- *   schema: aipehub.bundle/v1
+ *   schema: gotong.bundle/v1
  *   bundle:
  *     name: 个人成长
  *     description: …
- *     team:        # required — uses the same shape as aipehub.team/v1's `team:`
+ *     team:        # required — uses the same shape as gotong.team/v1's `team:`
  *       name: …
  *       agents: [ … ]
- *     workflow:    # optional — same shape as aipehub.workflow/v1's `workflow:`
+ *     workflow:    # optional — same shape as gotong.workflow/v1's `workflow:`
  *       id: …
  *       trigger: …
  *       steps: [ … ]
@@ -69,7 +69,7 @@ export const TEAM_SCHEMA_V1 = 'aipehub.team/v1'
  * importer. We don't validate the workflow shape here — that's the
  * workflow runtime's job at load time.
  */
-export const BUNDLE_SCHEMA_V1 = 'aipehub.bundle/v1'
+export const BUNDLE_SCHEMA_V1 = 'gotong.bundle/v1'
 
 export interface ParsedAgent {
   id: string
@@ -197,7 +197,7 @@ export function parseManifest(raw: string): ParsedManifest {
  *
  * The workflow block is re-serialized as yaml so we can hand it to the
  * workflow runner's importer without coupling on its parser. The
- * workflow runner is the source of truth for `aipehub.workflow/v1`
+ * workflow runner is the source of truth for `gotong.workflow/v1`
  * validation; this parser stays deliberately dumb about it.
  */
 export function parseBundle(raw: string): ParsedBundle {
@@ -256,12 +256,12 @@ export function parseBundle(raw: string): ParsedBundle {
 
   // Workflow is optional — a bundle that ships only agents is valid
   // (rare but legal). When present, re-serialize so the workflow
-  // importer sees an aipehub.workflow/v1 yaml verbatim.
+  // importer sees an gotong.workflow/v1 yaml verbatim.
   if (b.workflow !== undefined) {
     if (!b.workflow || typeof b.workflow !== 'object') {
       throw new ManifestError(`bundle.workflow must be an object when present`)
     }
-    out.workflowYaml = `schema: aipehub.workflow/v1\nworkflow:\n` +
+    out.workflowYaml = `schema: gotong.workflow/v1\nworkflow:\n` +
       indentYaml(stringifyYamlSafe(b.workflow), 2)
   }
 

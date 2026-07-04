@@ -3,7 +3,7 @@
  * parked inbox item a person resolves.
  *
  * North-star alignment: a human is a `Participant`, not a tool. The runner (or
- * any agent) dispatches to the `aipehub.human/v1` capability exactly like any
+ * any agent) dispatches to the `gotong.human/v1` capability exactly like any
  * other step; this broker:
  *   1. validates the {@link HumanTaskPayload} (bad → throw, so the step fails
  *      visibly instead of parking a ghost),
@@ -17,7 +17,7 @@
  * `ok` output — and the parent workflow step's output becomes that decision.
  */
 
-import { AgentParticipant, SuspendTaskError, type ParticipantId, type Task } from '@aipehub/core'
+import { AgentParticipant, SuspendTaskError, type ParticipantId, type Task } from '@gotong/core'
 
 import { HUMAN_CAPABILITY, HUMAN_INBOX_PARTICIPANT_ID, NEVER_RESUME_AT } from './constants.js'
 import {
@@ -101,7 +101,7 @@ export class HumanInboxParticipant extends AgentParticipant {
 // --- payload parsing -------------------------------------------------------
 
 /**
- * Validate and normalise a dispatched `aipehub.human/v1` payload. Exported so
+ * Validate and normalise a dispatched `gotong.human/v1` payload. Exported so
  * it can be unit-tested directly. Throws `InboxError('invalid_payload')` on
  * anything the broker can't act on.
  */

@@ -1,5 +1,5 @@
 /**
- * battle-monk-training (战斗修士锻炼) — an AipeHub case: a personal-growth hub for
+ * battle-monk-training (战斗修士锻炼) — an Gotong case: a personal-growth hub for
  * the austere. A preceptor (the router LLM) reads the trainee's SITUATION and the
  * Codex, then routes ONLY the pillars — 肉身 / 心志 / 学识 — that fit today, each
  * writing the trainee's STATE into a persistent Codex (an Obsidian-style vault).
@@ -29,8 +29,8 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { Hub, InMemoryStorage } from '@aipehub/core'
-import { DispatchToolset, LlmAgent } from '@aipehub/llm'
+import { Hub, InMemoryStorage } from '@gotong/core'
+import { DispatchToolset, LlmAgent } from '@gotong/llm'
 
 import {
   setupCodex,
@@ -99,7 +99,7 @@ const SCENARIOS: Scenario[] = [
 ]
 
 async function main(): Promise<void> {
-  console.log('\n=== AipeHub case: battle-monk-training (战斗修士锻炼) ===')
+  console.log('\n=== Gotong case: battle-monk-training (战斗修士锻炼) ===')
   console.log('  督修按修士「今日状态」分派能力 —— 不再不顾状况三柱全压。\n')
 
   for (const s of SCENARIOS) await runScenario(s)
@@ -111,7 +111,7 @@ async function main(): Promise<void> {
 }
 
 async function runScenario(s: Scenario): Promise<void> {
-  const dir = mkdtempSync(join(tmpdir(), 'aipe-battle-monk-'))
+  const dir = mkdtempSync(join(tmpdir(), 'gotong-battle-monk-'))
   const kb = setupCodex(dir)
   for (const p of PILLARS) seed(kb, p, s.seed?.[p] ?? 0)
 

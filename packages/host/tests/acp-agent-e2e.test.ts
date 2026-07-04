@@ -1,5 +1,5 @@
 /**
- * `@aipehub/acp-agent` M6 — the ACP adapter acceptance gate (end-to-end).
+ * `@gotong/acp-agent` M6 — the ACP adapter acceptance gate (end-to-end).
  *
  * THE test the feature exists to pass (AGENT-ADAPTER-CONTRACT §5): the hub
  * OpenClaw-style "manages from startup → holds the session → dispatches" to an
@@ -38,10 +38,10 @@ import { fileURLToPath } from 'node:url'
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { Hub, InMemoryStorage, type Task, type TaskId } from '@aipehub/core'
-import { AcpParticipant, ACP_NEVER_RESUME_AT } from '@aipehub/acp-agent'
-import { openIdentityStore, type IdentityStore } from '@aipehub/identity'
-import { FileInboxStore } from '@aipehub/inbox'
+import { Hub, InMemoryStorage, type Task, type TaskId } from '@gotong/core'
+import { AcpParticipant, ACP_NEVER_RESUME_AT } from '@gotong/acp-agent'
+import { openIdentityStore, type IdentityStore } from '@gotong/identity'
+import { FileInboxStore } from '@gotong/inbox'
 
 // The real-spawned mock ACP agent. `process.execPath <this>` exercises the real
 // stdio / NDJSON path (unlike the unit tests' in-memory PassThrough mock).

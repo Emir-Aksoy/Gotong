@@ -30,19 +30,19 @@
  * peer-id existence — an out-of-range value fails there, visibly, not here.
  */
 
-import { createLogger } from '@aipehub/core'
+import { createLogger } from '@gotong/core'
 import type {
   SetOrgQuotaInput,
   SetQuotaInput,
   UpdatePeerInput,
   UsagePeriod,
   VaultEntry,
-} from '@aipehub/identity'
+} from '@gotong/identity'
 import type {
   StewardCredentialRef,
   StewardPeerPolicy,
   StewardSecurityQuota,
-} from '@aipehub/hub-steward'
+} from '@gotong/hub-steward'
 
 const log = createLogger('steward-sensitive')
 

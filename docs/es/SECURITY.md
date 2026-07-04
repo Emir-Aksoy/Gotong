@@ -11,7 +11,7 @@
 
 Abre un aviso privado en:
 
-> **<https://github.com/Emir-Aksoy/AipeHub/security/advisories/new>**
+> **<https://github.com/Emir-Aksoy/Gotong/security/advisories/new>**
 
 El formulario integrado de GitHub te ofrece:
 
@@ -23,7 +23,7 @@ Este es el canal que leemos primero y respondemos más rápido. Necesitarás una
 
 ### Sin canal de correo electrónico (pre-1.0)
 
-Deliberadamente **no hay correo electrónico de seguridad** durante el período v0.x. `security@aipehub.dev` aparece en revisiones antiguas de este repositorio como una dirección *aspiracional* — el dominio no está registrado y el buzón no está activado, por lo que el correo enviado a él no llega a ningún lugar. Hemos dejado de anunciarlo como alternativa en lugar de dejar un contacto muerto en el que alguien podría confiar con un reporte real.
+Deliberadamente **no hay correo electrónico de seguridad** durante el período v0.x. `security@gotong.dev` aparece en revisiones antiguas de este repositorio como una dirección *aspiracional* — el dominio no está registrado y el buzón no está activado, por lo que el correo enviado a él no llega a ningún lugar. Hemos dejado de anunciarlo como alternativa en lugar de dejar un contacto muerto en el que alguien podría confiar con un reporte real.
 
 El Reporte Privado de Vulnerabilidades de GitHub (anterior) es el **único** canal hoy: gratuito, privado y el que leemos primero. Si vale la pena configurar un buzón real es una decisión de [lista de verificación de lanzamiento](../../.github/RELEASE-CHECKLIST.md#security-contact) diferida hasta el inicio de la versión 1.0; mientras tanto, por favor usa el formulario de aviso.
 
@@ -63,7 +63,7 @@ Recibirás una actualización en cada transición. Si no tienes noticias nuestra
 
 ## Versiones soportadas
 
-AipeHub es pre-1.0 internamente (las etiquetas v2.0 / v2.1 que ves en `CHANGELOG.md` se refieren a la generación de reescritura file-first, no al umbral SemVer 1.0). Parcheamos problemas de seguridad solo en la rama `main` actual. **No hay rama LTS**.
+Gotong es pre-1.0 internamente (las etiquetas v2.0 / v2.1 que ves en `CHANGELOG.md` se refieren a la generación de reescritura file-first, no al umbral SemVer 1.0). Parcheamos problemas de seguridad solo en la rama `main` actual. **No hay rama LTS**.
 
 Si necesitas estabilidad a largo plazo, fija un commit que hayas auditado y presupuesta para parches en el lugar; no podemos hacer backports indefinidamente.
 
@@ -71,7 +71,7 @@ Si necesitas estabilidad a largo plazo, fija un commit que hayas auditado y pres
 
 ## Modelo de amenaza
 
-AipeHub está diseñado para despliegues **pequeños, de confianza y de un solo inquilino** — un laboratorio de investigación, un equipo de proyecto, un pequeño grupo de vista previa pública. Los valores predeterminados asumen que la sala está operada por personas que confían entre sí.
+Gotong está diseñado para despliegues **pequeños, de confianza y de un solo inquilino** — un laboratorio de investigación, un equipo de proyecto, un pequeño grupo de vista previa pública. Los valores predeterminados asumen que la sala está operada por personas que confían entre sí.
 
 En alcance (aceptamos reportes sobre):
 
@@ -103,12 +103,12 @@ Si tu hallazgo está en el límite, envíalo a través del canal de aviso de Git
 Al evaluar un problema, comprueba si alguna de estas ya lo cubre:
 
 - **Almacenamiento de tokens**: los tokens de admin / trabajador se hashean con SHA-256 antes de escribirse en disco. El texto plano se muestra exactamente una vez en la creación. La verificación usa comparación de tiempo constante.
-- **Almacenamiento de cookies**: HttpOnly siempre; `SameSite=Strict` + `Secure` cuando `AIPE_COOKIE_SECURE=1` (requerido detrás de HTTPS).
-- **CSRF**: `AIPE_ALLOWED_HOSTS` aplica las verificaciones `Host:` y `Origin:` en cada método que cambia estado. **Configúralo en cada despliegue de producción.** Sin configurar significa "solo el loopback es seguro".
-- **Limitación de velocidad**: `AIPE_ADMIN_RATE_MAX` / `_SEC` limita los intentos de verificación de token de administración por IP por ventana deslizante. Predeterminados 10 / 60s.
+- **Almacenamiento de cookies**: HttpOnly siempre; `SameSite=Strict` + `Secure` cuando `GOTONG_COOKIE_SECURE=1` (requerido detrás de HTTPS).
+- **CSRF**: `GOTONG_ALLOWED_HOSTS` aplica las verificaciones `Host:` y `Origin:` en cada método que cambia estado. **Configúralo en cada despliegue de producción.** Sin configurar significa "solo el loopback es seguro".
+- **Limitación de velocidad**: `GOTONG_ADMIN_RATE_MAX` / `_SEC` limita los intentos de verificación de token de administración por IP por ventana deslizante. Predeterminados 10 / 60s.
 - **Cabeceras de seguridad**: `X-Frame-Options: DENY`, un CSP estricto, `Referrer-Policy: no-referrer`, `X-Content-Type-Options: nosniff` en cada respuesta.
-- **Barrera de admisión**: `AIPE_GATING=admin-approval` (predeterminado) requiere que cada agente remoto sea aprobado por un humano antes de unirse. `gating=open` es **solo para desarrollo** y se rechaza en producción con una advertencia de inicio.
-- **Cifrado de clave API**: las claves API del espacio de trabajo y por agente viven en `<space>/secrets.enc.json`, AES-256-GCM, clave maestra en `<space>/runtime/secret.key` (0600) o env `AIPE_SECRET_KEY`. El archivo cifrado solo no es suficiente para recuperar las claves.
+- **Barrera de admisión**: `GOTONG_GATING=admin-approval` (predeterminado) requiere que cada agente remoto sea aprobado por un humano antes de unirse. `gating=open` es **solo para desarrollo** y se rechaza en producción con una advertencia de inicio.
+- **Cifrado de clave API**: las claves API del espacio de trabajo y por agente viven en `<space>/secrets.enc.json`, AES-256-GCM, clave maestra en `<space>/runtime/secret.key` (0600) o env `GOTONG_SECRET_KEY`. El archivo cifrado solo no es suficiente para recuperar las claves.
 - **Vinculación de identidad por agente (v0.4)**: `authenticate()` puede devolver `{ ok: true, allowedAgents: [...] }` para que una clave API filtrada no pueda suplantar un id de agente arbitrario — solo a los que está vinculada.
 - **El transcript es de solo adición**: no hay API para eliminar o reescribir entradas del transcript desde el runtime. La manipulación requiere acceso al sistema de archivos (que está fuera de alcance; ver "fuera de alcance" anterior).
 
@@ -136,11 +136,11 @@ Si estás **ejecutando** un hub, no reportando errores en él, la lista de verif
 
 En resumen:
 
-- [ ] `AIPE_COOKIE_SECURE=1` cuando se usa detrás de HTTPS
-- [ ] `AIPE_ALLOWED_HOSTS` configurado con tus nombres de host reales
-- [ ] `AIPE_GATING=admin-approval` (nunca `open` en internet público)
+- [ ] `GOTONG_COOKIE_SECURE=1` cuando se usa detrás de HTTPS
+- [ ] `GOTONG_ALLOWED_HOSTS` configurado con tus nombres de host reales
+- [ ] `GOTONG_GATING=admin-approval` (nunca `open` en internet público)
 - [ ] Caddy / nginx termina TLS; backend enlazado a `127.0.0.1`
-- [ ] `runtime/secret.key` (chmod 600) o env `AIPE_SECRET_KEY` está configurado
+- [ ] `runtime/secret.key` (chmod 600) o env `GOTONG_SECRET_KEY` está configurado
 - [ ] Existen copias de seguridad para el directorio `<space>/`
 - [ ] Al menos 2 cuentas de administrador para que puedas recuperarte de un bloqueo
 - [ ] `/healthz` monitorizado

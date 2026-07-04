@@ -4,7 +4,7 @@
  * Unlike workflow-lifecycle-route.test.ts (which wires a *fake* audit
  * identity), this suite boots a REAL `IdentityStore` so `ctx.grants` carries
  * the actual `WorkflowGrantStore`, plus a stub `WorkflowSurface` so the
- * lifecycle / import / delete routes resolve without `@aipehub/workflow`.
+ * lifecycle / import / delete routes resolve without `@gotong/workflow`.
  *
  * The RBAC contract under test:
  *   - OPERATORS bypass grants entirely. Two kinds of operator:
@@ -27,8 +27,8 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { Hub, Space } from '@aipehub/core'
-import { openIdentityStore, type IdentityStore } from '@aipehub/identity'
+import { Hub, Space } from '@gotong/core'
+import { openIdentityStore, type IdentityStore } from '@gotong/identity'
 
 import {
   serveWeb,
@@ -118,7 +118,7 @@ interface BootResult {
 
 async function boot(opts: { withIdentity?: boolean } = {}): Promise<BootResult> {
   const withIdentity = opts.withIdentity ?? true
-  const tmp = await mkdtemp(join(tmpdir(), 'aipehub-web-wfrbac-'))
+  const tmp = await mkdtemp(join(tmpdir(), 'gotong-web-wfrbac-'))
   const init = await Space.init(tmp, { name: 'wfrbac-test' })
   const hub = new Hub({ space: init.space })
   await hub.start()
@@ -137,15 +137,15 @@ async function boot(opts: { withIdentity?: boolean } = {}): Promise<BootResult> 
     const ib = identity.bootstrap({ ownerEmail: 'owner@local', ownerDisplayName: 'Owner' })
     ownerUserId = ib.ownerUserId!
     identity.setPassword(ownerUserId, 'owner-password-123')
-    ownerCookie = `aipehub_identity=${identity.authenticatePassword({ email: 'owner@local', password: 'owner-password-123' }).token}`
+    ownerCookie = `gotong_identity=${identity.authenticatePassword({ email: 'owner@local', password: 'owner-password-123' }).token}`
 
     const a = identity.createUser({ email: 'admin-a@local', displayName: 'AdminA', role: 'admin', password: 'admin-a-password-123' })
     adminAUserId = a.id
-    adminACookie = `aipehub_identity=${identity.authenticatePassword({ email: 'admin-a@local', password: 'admin-a-password-123' }).token}`
+    adminACookie = `gotong_identity=${identity.authenticatePassword({ email: 'admin-a@local', password: 'admin-a-password-123' }).token}`
 
     const bUser = identity.createUser({ email: 'admin-b@local', displayName: 'AdminB', role: 'admin', password: 'admin-b-password-123' })
     adminBUserId = bUser.id
-    adminBCookie = `aipehub_identity=${identity.authenticatePassword({ email: 'admin-b@local', password: 'admin-b-password-123' }).token}`
+    adminBCookie = `gotong_identity=${identity.authenticatePassword({ email: 'admin-b@local', password: 'admin-b-password-123' }).token}`
   }
 
   const server = await serveWeb(hub, {
@@ -262,7 +262,7 @@ describe('workflow RBAC — import/draft seed the creator as owner', () => {
     const imp = await fetch(`${b.baseUrl}/api/admin/workflows/import`, {
       method: 'POST',
       headers: { cookie: b.adminACookie, 'content-type': 'text/plain' },
-      body: 'schema: aipehub.workflow/v1',
+      body: 'schema: gotong.workflow/v1',
     })
     expect(imp.status).toBe(200)
     // owner gate on the grant list now passes for adminA
@@ -278,7 +278,7 @@ describe('workflow RBAC — import/draft seed the creator as owner', () => {
     await fetch(`${b.baseUrl}/api/admin/workflows/import`, {
       method: 'POST',
       headers: { authorization: `Bearer ${b.v3Token}`, 'content-type': 'text/plain' },
-      body: 'schema: aipehub.workflow/v1',
+      body: 'schema: gotong.workflow/v1',
     })
     // operator can still read the (empty) grant list
     const list = await asV3(b, 'GET', '/api/admin/workflows/wf/grants')
@@ -336,7 +336,7 @@ describe('workflow RBAC — grant CRUD + access control', () => {
     await fetch(`${b.baseUrl}/api/admin/workflows/import`, {
       method: 'POST',
       headers: { cookie: b.adminACookie, 'content-type': 'text/plain' },
-      body: 'schema: aipehub.workflow/v1',
+      body: 'schema: gotong.workflow/v1',
     })
     const grant = await asCookie(b, b.adminACookie, 'POST', '/api/admin/workflows/wf/grants', {
       userId: b.adminBUserId,

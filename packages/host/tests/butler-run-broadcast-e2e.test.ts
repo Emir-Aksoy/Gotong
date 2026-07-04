@@ -21,8 +21,8 @@ import { join } from 'node:path'
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { Hub, InMemoryStorage, type Logger } from '@aipehub/core'
-import { RunStore, type RunState } from '@aipehub/workflow'
+import { Hub, InMemoryStorage, type Logger } from '@gotong/core'
+import { RunStore, type RunState } from '@gotong/workflow'
 
 import { WorkflowController } from '../src/workflow-controller.js'
 import {
@@ -57,7 +57,7 @@ interface Rig {
 }
 
 async function boot(): Promise<Rig> {
-  const tmp = await mkdtemp(join(tmpdir(), 'aipe-runbroadcast-e2e-'))
+  const tmp = await mkdtemp(join(tmpdir(), 'gotong-runbroadcast-e2e-'))
   const hub = new Hub({ storage: new InMemoryStorage() })
   await hub.start()
   const controller = new WorkflowController({ hub, definitionsDir: join(tmp, 'wf'), spaceRoot: tmp })

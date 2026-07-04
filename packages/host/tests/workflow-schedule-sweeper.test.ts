@@ -22,7 +22,7 @@ import { join } from 'node:path'
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import type { Logger } from '@aipehub/core'
+import type { Logger } from '@gotong/core'
 
 import type { ButlerWorkflowSummary } from '../src/personal-butler-workflows.js'
 import {
@@ -96,7 +96,7 @@ const row = (over?: Record<string, unknown>) => ({
 describe('WorkflowScheduleSweeper', () => {
   let dir: string
   beforeEach(async () => {
-    dir = await mkdtemp(join(tmpdir(), 'aipe-wfsched-'))
+    dir = await mkdtemp(join(tmpdir(), 'gotong-wfsched-'))
   })
   afterEach(async () => {
     await rm(dir, { recursive: true, force: true })

@@ -1,5 +1,5 @@
 /**
- * personal-research-hub — a case AipeHub can carry: Karpathy's LLM knowledge-base
+ * personal-research-hub — a case Gotong can carry: Karpathy's LLM knowledge-base
  * loop (raw → compiled wiki → ask-your-wiki) driven by a librarian router that
  * ADAPTS to the wiki's current state.
  *
@@ -25,8 +25,8 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { Hub, InMemoryStorage } from '@aipehub/core'
-import { DispatchToolset, LlmAgent } from '@aipehub/llm'
+import { Hub, InMemoryStorage } from '@gotong/core'
+import { DispatchToolset, LlmAgent } from '@gotong/llm'
 
 import {
   listAnswers,
@@ -95,7 +95,7 @@ const SCENARIOS: ResearchScenario[] = [
 ]
 
 async function main(): Promise<void> {
-  console.log('\n=== AipeHub case: personal-research-hub ===')
+  console.log('\n=== Gotong case: personal-research-hub ===')
   console.log('  图书管理员按「wiki 当前状态」分派 —— 缺什么编译什么、没问就不检索。\n')
 
   for (const s of SCENARIOS) await runResearch(s)
@@ -107,7 +107,7 @@ async function main(): Promise<void> {
 
 /** Run one scenario in its own knowledge base + hub, assert the dispatch fitted. */
 async function runResearch(s: ResearchScenario): Promise<void> {
-  const dir = mkdtempSync(join(tmpdir(), 'aipe-research-hub-'))
+  const dir = mkdtempSync(join(tmpdir(), 'gotong-research-hub-'))
   const kb = setupKnowledgeBase(dir)
   const hub = new Hub({ storage: new InMemoryStorage() })
   await hub.start()

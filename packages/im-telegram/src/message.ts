@@ -3,7 +3,7 @@
  * unit-testable without touching the network.
  */
 
-import type { ImAttachment, ImMessage, ImUser } from '@aipehub/im-adapter'
+import type { ImAttachment, ImMessage, ImUser } from '@gotong/im-adapter'
 
 import type { TelegramMessage, TelegramUser } from './types.js'
 
@@ -21,7 +21,7 @@ import type { TelegramMessage, TelegramUser } from './types.js'
  * Naming: the `telegram-file:` scheme is private to this package —
  * downstream code that wants the bytes must depend on this package
  * (or do its own `getFile` dance). That's intentional: there's no
- * "universal URL" you can hand to anything in the AipeHub graph.
+ * "universal URL" you can hand to anything in the Gotong graph.
  */
 export const TELEGRAM_FILE_URI_PREFIX = 'telegram-file:'
 

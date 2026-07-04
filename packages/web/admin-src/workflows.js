@@ -1,4 +1,4 @@
-/* AipeHub admin — Workflows tab (workflow list + YAML import + run history).
+/* Gotong admin — Workflows tab (workflow list + YAML import + run history).
  *
  * Third ES-module split of the admin console (P3 admin.js split, Phase 2),
  * after services.js and managed-agents.js. Same shape as managed-agents:
@@ -15,11 +15,11 @@
  * shared rendering layer is a separate refactor.
  *
  * Closes over the shared `wf` state object (available / workflows / runs).
- * Shared utilities (t / escapeHtml) come off window.AipeHub, same source as
+ * Shared utilities (t / escapeHtml) come off window.Gotong, same source as
  * the sibling modules.
  */
 
-const { t, escapeHtml } = window.AipeHub
+const { t, escapeHtml } = window.Gotong
 
 export function createWorkflows({ wf }) {
   // Injected once after resolveDom() — see module header.
@@ -592,7 +592,7 @@ export function createWorkflows({ wf }) {
       if (dom.wfGraphBody) {
         // Shared renderer (ARCH-M4) — same module the assist dialog + member
         // SPA use. t / escapeHtml passed in keep it i18n-agnostic.
-        const G = window.AipeHubWorkflowGraph
+        const G = window.GotongWorkflowGraph
         dom.wfGraphBody.innerHTML =
           `<div class="wf-graph-scroll">${G.renderWorkflowGraphSvg(graph, { t, escapeHtml })}</div>` +
           G.graphLegend({ t, escapeHtml })
@@ -613,7 +613,7 @@ export function createWorkflows({ wf }) {
   // graphLegend + renderWorkflowGraphSvg moved to the shared standalone module
   // static/workflow-graph.js (ARCH-M4) so the assist dialog and the member SPA
   // render the same flowchart. Call
-  // window.AipeHubWorkflowGraph.{renderWorkflowGraphSvg, graphLegend}(graph,
+  // window.GotongWorkflowGraph.{renderWorkflowGraphSvg, graphLegend}(graph,
   // { t, escapeHtml }) — see the call site in openWorkflowGraphModal above.
 
   function renderRevisions(current) {
@@ -1130,7 +1130,7 @@ export function createWorkflows({ wf }) {
   // verbatim (StepRecord.error / RunState.error, copied by the workflow runner's
   // describeFailure from the LlmAgent TaskResult). That text ("[auth_error] 401
   // …") is opaque to a non-technical operator. Run it through the SAME
-  // window.AipeHub.describeError classifier the admin + member quick-chat already
+  // window.Gotong.describeError classifier the admin + member quick-chat already
   // use — the code→friendly-text and code→is-key-fix maps live ONLY in
   // app-core.js, so the three surfaces never drift. A key/quota failure reads as
   // plain words + an actionable fix + a one-click「去补 key」button (the global
@@ -1138,7 +1138,7 @@ export function createWorkflows({ wf }) {
   // `!id` guard so a data-id-less button resolves). The raw string is preserved
   // in a collapsed <details> for debugging — nothing is hidden, just demoted.
   function friendlyError(raw) {
-    const d = window.AipeHub.describeError(raw)
+    const d = window.Gotong.describeError(raw)
     const fix = d.fix ? ` <span class="wf-err-fix">${escapeHtml(d.fix)}</span>` : ''
     const keyBtn = d.fixIsKey
       ? ` <button type="button" class="ma-chat-fix-btn" data-act="goto-key">${escapeHtml(t.meChatGoAddKey)}</button>`

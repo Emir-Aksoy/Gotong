@@ -23,7 +23,7 @@
  *      whitespace or quoting", same approach the MCP server's
  *      `redactToken` takes.
  *
- *   3. `aipe-...`    — AipeHub-issued admin / agent tokens. Same
+ *   3. `gotong-...`    — Gotong-issued admin / agent tokens. Same
  *      family of risk as `sk-` but in our own namespace.
  *
  * Anything that DOESN'T match — random opaque IDs, session IDs, IP
@@ -49,8 +49,8 @@ const PATTERNS: ReadonlyArray<RegExp> = [
   // could consolidate, but for now duplication keeps package
   // boundaries clean.
   /Bearer\s+[^\s'"`{}]+/gi,
-  // 3. aipe-... tokens (our own namespace).
-  /aipe-[A-Za-z0-9_-]+/g,
+  // 3. gotong-... tokens (our own namespace).
+  /gotong-[A-Za-z0-9_-]+/g,
 ]
 
 /**

@@ -1,11 +1,11 @@
 /**
- * `@aipehub/mcp-client` — attach a fleet of MCP servers to an AipeHub
+ * `@gotong/mcp-client` — attach a fleet of MCP servers to an Gotong
  * agent so its LLM tool-use loop can drive GitHub / Filesystem /
  * Slack / Postgres / arbitrary stdio-MCP servers natively.
  *
  * See README.md for the full story; the public surface is small:
  *
- *   import { McpToolset, McpClientError } from '@aipehub/mcp-client'
+ *   import { McpToolset, McpClientError } from '@gotong/mcp-client'
  */
 export { McpToolset } from './toolset.js'
 export type {

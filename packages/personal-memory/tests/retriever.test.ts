@@ -8,9 +8,9 @@
  *      to the `MemoryHandle` — the retriever only answers queries.
  */
 
-import type { Task } from '@aipehub/core'
-import type { LlmProvider, LlmRequest, LlmStreamChunk } from '@aipehub/llm'
-import type { MemoryEntry, MemoryQuery } from '@aipehub/services-sdk'
+import type { Task } from '@gotong/core'
+import type { LlmProvider, LlmRequest, LlmStreamChunk } from '@gotong/llm'
+import type { MemoryEntry, MemoryQuery } from '@gotong/services-sdk'
 import { describe, expect, it } from 'vitest'
 
 import { MemoryAugmentedAgent, MemoryToolset, type MemoryRetriever } from '../src/index.js'

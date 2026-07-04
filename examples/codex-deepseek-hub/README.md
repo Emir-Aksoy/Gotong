@@ -1,6 +1,6 @@
 # codex-deepseek-hub — Codex + a DeepSeek TUI, scheduled by one router
 
-A personal **AI 桌面** case AipeHub can carry: one router LLM actively manages two
+A personal **AI 桌面** case Gotong can carry: one router LLM actively manages two
 terminal coding agents — **Codex** and a **DeepSeek-backed TUI** — as hub
 `Participant`s, dispatching the RIGHT coder for each goal. Both operate on the
 **same repo** (shared `cwd`), so they share project-level files: `AGENTS.md` (the
@@ -156,7 +156,7 @@ kept apart on purpose.
 
 The hub's **methodology brain** ships as a LOADABLE file, not a built-in TS
 literal: [`template/codex-deepseek-hub.template.yaml`](template/codex-deepseek-hub.template.yaml)
-(`aipehub.template/v1`). Import it into a running host and you get:
+(`gotong.template/v1`). Import it into a running host and you get:
 
 - **1 个配对导师 agent** (`pairing-mentor`) — a DeepSeek-backed LLM agent that
   consults a methodology KB (via `mcp-obsidian`) before routing, then dispatches
@@ -170,7 +170,7 @@ The template carries **structure + references only**. The actual methodology
 **content** lives OUTSIDE it, under [`methodology-vault/`](methodology-vault/)
 (4 原创笔记 — 配对模型 / 按情况路由 / 落地手册 — 聚焦「推理主理 × 快手实现」,
 **不抄** sibling 的 Karpathy 库). You import those notes into your own Obsidian
-vault; AipeHub never touches the knowledge content (queries go through the
+vault; Gotong never touches the knowledge content (queries go through the
 `mcp-obsidian` subprocess → Obsidian's Local REST API plugin).
 
 > Same template SHAPE as [`personal-coding-hub`](../personal-coding-hub) (1

@@ -1,7 +1,7 @@
 # RFC: SERVICE_CALL streaming (protocol v1.3 draft)
 
 Status: **DRAFT** — design only as of 2026-05. Implementation gated on
-real demand. Frame types are reserved in `@aipehub/protocol` so
+real demand. Frame types are reserved in `@gotong/protocol` so
 v1.2 clients/servers don't accidentally collide with future names.
 
 ---
@@ -242,7 +242,7 @@ implementing, we'd want:
    in this codebase.
 2. A draft of the `streamingMethods` plugin field with a real plugin
    pinned to it.
-3. A reservation in `@aipehub/protocol`'s `ServiceErrorCode` for
+3. A reservation in `@gotong/protocol`'s `ServiceErrorCode` for
    `'stream_aborted'` and `'stream_overrun'` so v1.2 clients can
    surface them.
 

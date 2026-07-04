@@ -4,7 +4,7 @@
  * disk, and audited. It writes only the two things the host actually reads as
  * configuration files, plus a read-only effective view:
  *
- *   1. A managed env file `<space>/aipehub.env` — a WHITELIST of non-secret
+ *   1. A managed env file `<space>/gotong.env` — a WHITELIST of non-secret
  *      deterministic knobs (mode / ports / open-browser). The launcher and a
  *      documented systemd `EnvironmentFile=` source it BEFORE the host starts,
  *      so the host still only ever reads `process.env` — the boot read path is
@@ -86,16 +86,16 @@ function validateOpenBrowser(raw: string): KnobVerdict {
  * The whitelist. Deliberately TINY and grounded: only env vars the host
  * genuinely reads, that are non-secret scalars, and that take effect on restart.
  * NOTE on the absent "IM bridge toggle": the host gates each IM bridge purely on
- * the PRESENCE of its credentials (`AIPE_TELEGRAM_BOT_TOKEN`, etc.) — there is no
+ * the PRESENCE of its credentials (`GOTONG_TELEGRAM_BOT_TOKEN`, etc.) — there is no
  * boolean toggle env it reads, and those creds are secret-name keys this editor
  * hard-refuses. So there is no honest knob to add; inventing one would write an
  * env the host never reads.
  */
 export const ENV_KNOBS: readonly EnvKnobSpec[] = [
-  { key: 'AIPE_MODE', summary: 'Personal vs team mode (auto-detected when unset).', defaultValue: 'personal', validate: validateMode },
-  { key: 'AIPE_WEB_PORT', summary: 'Admin UI / API port.', defaultValue: '3000', validate: validatePort },
-  { key: 'AIPE_WS_PORT', summary: 'Agent WebSocket port.', defaultValue: '4000', validate: validatePort },
-  { key: 'AIPE_OPEN_BROWSER', summary: 'First-run browser auto-open behaviour.', defaultValue: 'auto', validate: validateOpenBrowser },
+  { key: 'GOTONG_MODE', summary: 'Personal vs team mode (auto-detected when unset).', defaultValue: 'personal', validate: validateMode },
+  { key: 'GOTONG_WEB_PORT', summary: 'Admin UI / API port.', defaultValue: '3000', validate: validatePort },
+  { key: 'GOTONG_WS_PORT', summary: 'Agent WebSocket port.', defaultValue: '4000', validate: validatePort },
+  { key: 'GOTONG_OPEN_BROWSER', summary: 'First-run browser auto-open behaviour.', defaultValue: 'auto', validate: validateOpenBrowser },
 ]
 
 function knobSpec(key: string): EnvKnobSpec | undefined {
@@ -115,11 +115,11 @@ export function isSecretKey(key: string): boolean {
 }
 
 // ───────────────────────────────────────────────────────────────────────────
-// Managed env file (`<space>/aipehub.env`) — parse / serialize
+// Managed env file (`<space>/gotong.env`) — parse / serialize
 // ───────────────────────────────────────────────────────────────────────────
 
 /**
- * Parse a managed `aipehub.env` — simple `KEY=value` lines, `#` comments and
+ * Parse a managed `gotong.env` — simple `KEY=value` lines, `#` comments and
  * blanks ignored. We OWN this file (the editor writes it), so the grammar is
  * deliberately minimal; no shell expansion, no quoting games.
  */
@@ -138,7 +138,7 @@ export function parseEnvFile(text: string): Map<string, string> {
 }
 
 const ENV_FILE_HEADER = [
-  '# AipeHub managed environment — written by `setting config-set`.',
+  '# Gotong managed environment — written by `setting config-set`.',
   '# Sourced by the launcher / systemd `EnvironmentFile=` BEFORE the host starts,',
   '# so the host still only reads process.env. Changes take effect on NEXT restart.',
   '# Only NON-SECRET knobs live here. Secrets (API keys, bridge tokens, the master',
@@ -146,7 +146,7 @@ const ENV_FILE_HEADER = [
   '',
 ].join('\n')
 
-/** Serialize a knob map back to `aipehub.env`, keys sorted for a clean diff. */
+/** Serialize a knob map back to `gotong.env`, keys sorted for a clean diff. */
 export function serializeEnvFile(map: Map<string, string> | Record<string, string>): string {
   const entries = map instanceof Map ? [...map.entries()] : Object.entries(map)
   entries.sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0))
@@ -205,7 +205,7 @@ export interface ConfigWriteResult {
 // ───────────────────────────────────────────────────────────────────────────
 
 export interface EnvKnobWriteDeps extends FsWriteSeams {
-  /** Absolute path to the managed env file (`<space>/aipehub.env`). */
+  /** Absolute path to the managed env file (`<space>/gotong.env`). */
   envFilePath: string
   /** Surface label for the audit row (cli/web). */
   surface: string
@@ -213,7 +213,7 @@ export interface EnvKnobWriteDeps extends FsWriteSeams {
 }
 
 /**
- * Set one whitelisted, non-secret env knob in `<space>/aipehub.env`. Order is:
+ * Set one whitelisted, non-secret env knob in `<space>/gotong.env`. Order is:
  * secret-name hard-refuse → whitelist lookup → deterministic validate → read-
  * merge-write the managed file → best-effort audit. Throws `OpsError` (no write,
  * no success audit) on any refusal.
@@ -349,22 +349,22 @@ export async function applyPricingUpsert(
  * known secret knobs and don't dump unrelated env-var names.
  */
 export const SECRET_ENV_VARS: readonly string[] = [
-  'AIPE_MASTER_KEY',
+  'GOTONG_MASTER_KEY',
   'ANTHROPIC_API_KEY',
   'OPENAI_API_KEY',
   'DEEPSEEK_API_KEY',
-  'AIPE_TELEGRAM_BOT_TOKEN',
-  'AIPE_QQ_BOT_SECRET',
-  'AIPE_LARK_APP_SECRET',
-  'AIPE_SLACK_APP_TOKEN',
-  'AIPE_SLACK_BOT_TOKEN',
+  'GOTONG_TELEGRAM_BOT_TOKEN',
+  'GOTONG_QQ_BOT_SECRET',
+  'GOTONG_LARK_APP_SECRET',
+  'GOTONG_SLACK_APP_TOKEN',
+  'GOTONG_SLACK_BOT_TOKEN',
 ]
 
 export interface EffectiveKnobView {
   key: string
   summary: string
   default: string
-  /** Value in the managed `aipehub.env` (null when not set there). */
+  /** Value in the managed `gotong.env` (null when not set there). */
   fileValue: string | null
   /** Value currently live in the process env (null when unset). */
   envValue: string | null
@@ -383,7 +383,7 @@ export interface EffectiveConfigView {
 export interface EffectiveConfigDeps extends FsWriteSeams {
   spaceDir: string
   env: Record<string, string | undefined>
-  /** Defaults to `<space>/aipehub.env`. */
+  /** Defaults to `<space>/gotong.env`. */
   envFilePath?: string
   /** Defaults to `<space>/pricing.json`. */
   pricingPath?: string
@@ -391,7 +391,7 @@ export interface EffectiveConfigDeps extends FsWriteSeams {
 
 /** Build the read-only effective-config view (read tier). */
 export async function readEffectiveConfig(deps: EffectiveConfigDeps): Promise<EffectiveConfigView> {
-  const envFilePath = deps.envFilePath ?? join(deps.spaceDir, 'aipehub.env')
+  const envFilePath = deps.envFilePath ?? join(deps.spaceDir, 'gotong.env')
   const pricingPath = deps.pricingPath ?? join(deps.spaceDir, 'pricing.json')
 
   const fileMap = parseEnvFile(await readFileOr(envFilePath, '', deps))

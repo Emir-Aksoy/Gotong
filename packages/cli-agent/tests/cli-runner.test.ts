@@ -12,7 +12,7 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 
-import { detectFsJail } from '@aipehub/core'
+import { detectFsJail } from '@gotong/core'
 import { afterAll, describe, expect, it } from 'vitest'
 
 import { runCliCommand, type CliChunk } from '../src/cli-runner.js'
@@ -78,7 +78,7 @@ describe('runCliCommand — spawn engine', () => {
     ac.abort()
     // A bogus command would surface ENOENT *if* spawned; asserting no throw +
     // aborted proves we short-circuited before spawn.
-    const r = await runCliCommand({ command: 'aipe-no-such-cmd-xyz', signal: ac.signal })
+    const r = await runCliCommand({ command: 'gotong-no-such-cmd-xyz', signal: ac.signal })
     expect(r.aborted).toBe(true)
     expect(r.exitCode).toBeNull()
   })
@@ -116,20 +116,20 @@ describe('runCliCommand — spawn engine', () => {
   })
 
   it('deletes an env key when the override is undefined (scrub a secret)', async () => {
-    process.env.AIPE_CLI_TEST_DEL = 'present'
+    process.env.GOTONG_CLI_TEST_DEL = 'present'
     const script =
-      "process.stdout.write(process.env.AIPE_CLI_TEST_DEL === undefined ? 'gone' : 'present')"
+      "process.stdout.write(process.env.GOTONG_CLI_TEST_DEL === undefined ? 'gone' : 'present')"
     const r = await runCliCommand({
       command: NODE,
       args: ['-e', script],
-      env: { AIPE_CLI_TEST_DEL: undefined },
+      env: { GOTONG_CLI_TEST_DEL: undefined },
     })
-    delete process.env.AIPE_CLI_TEST_DEL
+    delete process.env.GOTONG_CLI_TEST_DEL
     expect(r.stdout).toBe('gone')
   })
 
   it('throws "command not found" when the executable is missing', async () => {
-    await expect(runCliCommand({ command: 'aipe-no-such-cmd-xyz', args: [] })).rejects.toThrow(
+    await expect(runCliCommand({ command: 'gotong-no-such-cmd-xyz', args: [] })).rejects.toThrow(
       /command not found/,
     )
   })
@@ -140,7 +140,7 @@ describe('runCliCommand — spawn engine', () => {
 // builds argv). HOME-based root/denied (NOT /tmp — that's essential-writable).
 // Self-skips when no OS kernel jail is available.
 const realCap = await detectFsJail({ noCache: true })
-const jailBase = mkdtempSync(join(homedir(), '.aipehub-cli-jail-'))
+const jailBase = mkdtempSync(join(homedir(), '.gotong-cli-jail-'))
 const jailRoot = join(jailBase, 'root')
 mkdirSync(jailRoot)
 afterAll(() => rmSync(jailBase, { recursive: true, force: true }))

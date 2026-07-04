@@ -1,6 +1,6 @@
-"""Wire-protocol shapes for AipeHub.
+"""Wire-protocol shapes for Gotong.
 
-Mirrors `@aipehub/protocol` (TypeScript) exactly — frame names, field names,
+Mirrors `@gotong/protocol` (TypeScript) exactly — frame names, field names,
 and discriminator values are all on the wire and MUST match. See
 docs/PROTOCOL.md at the repo root.
 
@@ -40,7 +40,7 @@ def _default_client_version() -> str:
 def hello(
     *,
     agents: list[dict[str, Any]],
-    client_name: str = "aipehub-python",
+    client_name: str = "gotong-python",
     client_version: str | None = None,
     api_key: str | None = None,
     services: list[dict[str, Any]] | None = None,
@@ -48,7 +48,7 @@ def hello(
     """Build a HELLO frame.
 
     ``services`` (v1.1) declares which Hub Services this connection wants
-    to call. Shape mirrors `@aipehub/protocol`'s ``ServiceUseDecl``: each
+    to call. Shape mirrors `@gotong/protocol`'s ``ServiceUseDecl``: each
     entry is ``{type, impl, owner: {kind, id}, config?}``. Omit (or pass
     None / empty list) for v1.0-compatible behaviour — no service ACL,
     SERVICE_CALL frames will get ``forbidden_service``.

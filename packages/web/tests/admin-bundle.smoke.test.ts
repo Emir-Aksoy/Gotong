@@ -10,7 +10,7 @@
  *
  *   1. the product *executes* under strict mode (a stray implicit global or
  *      octal literal throws only at run time, not at parse/--check time)
- *   2. the IIFE runs to completion — destructures the window.AipeHub helpers,
+ *   2. the IIFE runs to completion — destructures the window.Gotong helpers,
  *      defines every handler, and wires init through the readyState guard
  *   3. the readyState guard itself: app.js injects admin.js from inside its
  *      OWN DOMContentLoaded handler — i.e. AFTER the event already fired. A
@@ -30,8 +30,8 @@ import { runInNewContext } from 'node:vm'
 const HERE = dirname(fileURLToPath(import.meta.url))
 const ADMIN_JS = readFileSync(join(HERE, '..', 'static', 'admin.js'), 'utf8')
 
-// The helpers admin-src/main.js destructures off window.AipeHub.
-const AIPEHUB_HELPERS = [
+// The helpers admin-src/main.js destructures off window.Gotong.
+const GOTONG_HELPERS = [
   '$', 't', 'applyStaticI18n', 'onLangChange', 'escapeHtml', 'formatBytes', 'summarize',
   'isBadResult', 'fetchJson', 'connectStream', 'syncLangFromConfig',
   'fetchLeaderboard', 'renderLeaderboard', 'taskMetricsHtml', 'formatScore',
@@ -43,7 +43,7 @@ const AIPEHUB_HELPERS = [
 interface RunResult {
   domListeners: Record<string, unknown>
   winListeners: Record<string, unknown>
-  /** True if boot() ran: R14b registers a window `aipehub:tabchange` listener. */
+  /** True if boot() ran: R14b registers a window `gotong:tabchange` listener. */
   bootRan: boolean
 }
 
@@ -73,20 +73,20 @@ function makeEl(): Record<string, unknown> {
  *   never touches the DOM at eval time).
  */
 function runBundle(opts: { readyState?: string; tolerantDom?: boolean } = {}): RunResult {
-  const aipeHub: Record<string, unknown> = {}
-  for (const h of AIPEHUB_HELPERS) aipeHub[h] = () => {}
+  const gotongHub: Record<string, unknown> = {}
+  for (const h of GOTONG_HELPERS) gotongHub[h] = () => {}
   // `$` is the selector helper resolveDom() uses to build its element
   // cache (dom.dStrategy = $('d-strategy'), ...) — must return an element.
-  aipeHub.$ = () => makeEl()
+  gotongHub.$ = () => makeEl()
   // Never-resolving so boot() suspends at its first
   // `await fetchJson('/api/whoami')` instead of dereferencing a fake
   // result. We only need to prove boot STARTED (ran setActiveTab), not
   // that the whole console finished wiring against a fake DOM.
-  aipeHub.fetchJson = () => new Promise(() => {})
-  aipeHub.installWorkflowAssist = () => ({ open() {}, close() {}, submit() {}, save() {} })
+  gotongHub.fetchJson = () => new Promise(() => {})
+  gotongHub.installWorkflowAssist = () => ({ open() {}, close() {}, submit() {}, save() {} })
 
   const domListeners: Record<string, unknown> = {}
-  // Window listeners boot registers (R14b: the `aipehub:tabchange`
+  // Window listeners boot registers (R14b: the `gotong:tabchange`
   // subscription). Recording them is how we prove boot ran.
   const winListeners: Record<string, unknown> = {}
   // Shared by `window.location` and the bare `location` global the source
@@ -95,7 +95,7 @@ function runBundle(opts: { readyState?: string; tolerantDom?: boolean } = {}): R
   const body = makeEl()
   const ctx = {
     window: {
-      AipeHub: aipeHub,
+      Gotong: gotongHub,
       addEventListener: (type: string, cb: unknown) => { winListeners[type] = cb },
       location,
     },
@@ -122,9 +122,9 @@ function runBundle(opts: { readyState?: string; tolerantDom?: boolean } = {}): R
     domListeners,
     winListeners,
     // R14b — admin.js no longer runs its own setActiveTab at boot; the
-    // proof that boot ran is the window `aipehub:tabchange` subscription it
+    // proof that boot ran is the window `gotong:tabchange` subscription it
     // registers (before suspending on the first `await fetchJson`).
-    bootRan: typeof winListeners['aipehub:tabchange'] === 'function',
+    bootRan: typeof winListeners['gotong:tabchange'] === 'function',
   }
 }
 
@@ -152,7 +152,7 @@ describe('static/admin.js — esbuild bundle smoke', () => {
     // dead. The readyState guard must boot init synchronously instead.
     let result: RunResult | undefined
     expect(() => { result = runBundle({ readyState: 'complete', tolerantDom: true }) }).not.toThrow()
-    // init ran: boot registered its window `aipehub:tabchange` listener...
+    // init ran: boot registered its window `gotong:tabchange` listener...
     expect(result!.bootRan).toBe(true)
     // ...and it did NOT defer to a DOMContentLoaded that would never fire.
     expect(result!.domListeners.DOMContentLoaded).toBeUndefined()

@@ -23,7 +23,7 @@
  * ordered step list.
  */
 
-import type { MemoryEntry } from '@aipehub/services-sdk'
+import type { MemoryEntry } from '@gotong/services-sdk'
 
 /** Meta key carrying an entry's FORM discriminator (currently only 'procedure'). */
 export const META_FORM = 'form'

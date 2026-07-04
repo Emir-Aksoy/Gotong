@@ -18,8 +18,8 @@
  * standalone live run has no inbox, so an escalation is reported and the run ends.
  *
  * Run:
- *   ACP_LIVE=1 ACP_AGENT=claude-code-acp pnpm --filter @aipehub/example-acp-coding-bridge start:live
- *   ACP_LIVE=1 ACP_AGENT=codex-acp        pnpm --filter @aipehub/example-acp-coding-bridge start:live
+ *   ACP_LIVE=1 ACP_AGENT=claude-code-acp pnpm --filter @gotong/example-acp-coding-bridge start:live
+ *   ACP_LIVE=1 ACP_AGENT=codex-acp        pnpm --filter @gotong/example-acp-coding-bridge start:live
  *
  * Env:
  *   ACP_LIVE=1               required — a guard so this never runs by accident
@@ -31,8 +31,8 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { Hub, InMemoryStorage, type Task, type TaskId } from '@aipehub/core'
-import { AcpParticipant } from '@aipehub/acp-agent'
+import { Hub, InMemoryStorage, type Task, type TaskId } from '@gotong/core'
+import { AcpParticipant } from '@gotong/acp-agent'
 
 import { ACP_PRESETS } from './presets.js'
 
@@ -41,7 +41,7 @@ const parked = new Map<TaskId, { task: Task; state: unknown }>()
 async function main(): Promise<void> {
   if (process.env.ACP_LIVE !== '1') {
     console.error('Refusing to run: set ACP_LIVE=1 to confirm a non-hermetic live run.')
-    console.error('  ACP_LIVE=1 ACP_AGENT=claude-code-acp pnpm --filter @aipehub/example-acp-coding-bridge start:live')
+    console.error('  ACP_LIVE=1 ACP_AGENT=claude-code-acp pnpm --filter @gotong/example-acp-coding-bridge start:live')
     process.exit(2)
   }
 

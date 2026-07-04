@@ -113,7 +113,7 @@ describe('assignSlugs — the public-handle scheme', () => {
   })
 })
 
-const MANIFEST = `schema: aipehub.template/v1
+const MANIFEST = `schema: gotong.template/v1
 template:
   name: 测试模板
   description: |-
@@ -162,7 +162,7 @@ describe('extractTemplate', () => {
   })
 
   it('defaults provenance to empty when absent (no provenance block)', () => {
-    const noProv = `schema: aipehub.template/v1
+    const noProv = `schema: gotong.template/v1
 template:
   name: Bare
 `
@@ -235,7 +235,7 @@ describe('render* — untrusted content stays inside markup', () => {
   it('renderTemplatesJson emits a stable, parseable feed', () => {
     const json = renderTemplatesJson(model)
     const parsed = JSON.parse(json)
-    expect(parsed.schema).toBe('aipehub.site/v1')
+    expect(parsed.schema).toBe('gotong.site/v1')
     expect(parsed.templateCount).toBe(2)
     expect(parsed.leaderboard).toEqual([{ slug: 'evil', name: '<script>alert(1)</script>', citationCount: 1 }])
     // Deterministic: trailing newline, two-space indent.

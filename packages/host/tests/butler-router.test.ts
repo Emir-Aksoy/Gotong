@@ -9,7 +9,7 @@
  * resume re-creates after a "restart", and that shutdown fans out.
  */
 
-import type { Participant, Task, TaskResult } from '@aipehub/core'
+import type { Participant, Task, TaskResult } from '@gotong/core'
 import { describe, expect, it } from 'vitest'
 
 import { BUTLER_ANON_USER, createButlerRouter } from '../src/butler-router.js'

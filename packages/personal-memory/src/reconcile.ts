@@ -25,7 +25,7 @@
  * # No LLM import, fail-soft
  *
  * Like {@link consolidate}, this takes a {@link MemorySummarizer} callback, so
- * it never imports `@aipehub/llm` and is trivially testable with a deterministic
+ * it never imports `@gotong/llm` and is trivially testable with a deterministic
  * fake that returns the ops JSON. A bad/empty/unparseable model response yields
  * ZERO operations (`noModel: true`) — reconciliation never corrupts memory on a
  * model hiccup. Every write happens BEFORE its paired delete (an update writes
@@ -34,7 +34,7 @@
  * can't make us delete a phantom).
  */
 
-import type { MemoryEntry, MemoryHandle, MemoryKind, NewMemoryEntry } from '@aipehub/services-sdk'
+import type { MemoryEntry, MemoryHandle, MemoryKind, NewMemoryEntry } from '@gotong/services-sdk'
 
 import { openedMeta, type MemoryValidityWriter } from './bitemporal.js'
 import { isProfile, type MemorySummarizer } from './consolidate.js'

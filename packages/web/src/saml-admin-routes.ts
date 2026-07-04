@@ -10,7 +10,7 @@
  *   PATCH  /api/admin/saml/providers/:id    targeted update (idpEntityId immutable)
  *   DELETE /api/admin/saml/providers/:id    remove
  *
- * Backed by a host-injected surface (web has no @aipehub/identity dep). Absent
+ * Backed by a host-injected surface (web has no @gotong/identity dep). Absent
  * (no identity store) → every route 503s.
  *
  * Why this carries the cert (unlike the OIDC admin routes, which hide the
@@ -20,8 +20,8 @@
  */
 
 import type { IncomingMessage, ServerResponse } from 'node:http'
-import type { AdminRecord } from '@aipehub/core'
-import { createLogger } from '@aipehub/core'
+import type { AdminRecord } from '@gotong/core'
+import { createLogger } from '@gotong/core'
 
 import { readJsonBody, sendJson } from './http-helpers.js'
 

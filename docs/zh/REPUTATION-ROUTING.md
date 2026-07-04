@@ -8,10 +8,10 @@
 
 **E2 已经 done by composition,不需要新代码。**
 
-- **M5b**(`@aipehub/core` 的 `ReputationStore`)做了
+- **M5b**(`@gotong/core` 的 `ReputationStore`)做了
   feedback ledger 派生 + EWMA 累计 + `DefaultScheduler.dispatchCapability`
   按 score 降序排序。
-- **D1**(`@aipehub/host` 的 `PeerRegistry`)做了 peer 表 → 活的 `HubLink`
+- **D1**(`@gotong/host` 的 `PeerRegistry`)做了 peer 表 → 活的 `HubLink`
   动态拓扑。
 
 D1 的 `installPeerLink` 注册一个本地 wrapper participant,所有跨 hub
@@ -81,12 +81,12 @@ D1 接入只是拓扑变化,reputation 调用面没动。
 
 ```bash
 # 1. 看看 reputation 持久化目录
-ls .aipehub/feedback/reputation/
+ls .gotong/feedback/reputation/
 #   hub_remote1.json
 #   hub_remote2.json
 
 # 2. 看看 ledger
-tail .aipehub/feedback/outbound.jsonl
+tail .gotong/feedback/outbound.jsonl
 
 # 3. 跑一次跨 hub capability dispatch,查 hub log:
 #   会有 "scheduler: dispatchCapability chose ..." 的 ranking 输出

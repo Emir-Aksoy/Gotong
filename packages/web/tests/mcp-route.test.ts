@@ -20,7 +20,7 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { Hub, Space, type HubMcpServerRecord, type McpServerSpec } from '@aipehub/core'
+import { Hub, Space, type HubMcpServerRecord, type McpServerSpec } from '@gotong/core'
 
 import {
   serveWeb,
@@ -48,7 +48,7 @@ interface Boot {
 async function boot(opts: { withRegistry?: boolean; withFederation?: boolean } = {}): Promise<Boot> {
   const withRegistry = opts.withRegistry ?? true
   const withFederation = opts.withFederation ?? true
-  const tmp = await mkdtemp(join(tmpdir(), 'aipehub-web-mcp-'))
+  const tmp = await mkdtemp(join(tmpdir(), 'gotong-web-mcp-'))
   const init = await Space.init(tmp, { name: 'mcp-route-test' })
   const hub = new Hub({ space: init.space })
   await hub.start()

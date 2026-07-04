@@ -1,10 +1,10 @@
-# @aipehub/cli-agent
+# @gotong/cli-agent
 
 Outbound **CLI shell-out adapter** — wrap a self-hosted coding-agent CLI (Claude
 Code, Codex, OpenCode, Aider, Goose, …) as a hub `Participant` so the hub can
 **drive** it.
 
-This is the mirror image of `aipehub connect <agent>`:
+This is the mirror image of `gotong connect <agent>`:
 
 | direction | who calls whom | mechanism |
 |---|---|---|
@@ -44,7 +44,7 @@ spawn plumbing.
 ## Example
 
 ```ts
-import { CliParticipant } from '@aipehub/cli-agent'
+import { CliParticipant } from '@gotong/cli-agent'
 
 // Drive `claude -p "<prompt>"` in a repo, streaming output to the transcript.
 const coder = new CliParticipant({
@@ -68,6 +68,6 @@ terminate acceptance gate) lands in `examples/coding-agent-bridge/` (E2-M3).
 
 ## Why a leaf package, not part of the host
 
-Importing `@aipehub/host` *runs the host* (`main.ts`). Reusable participants
-therefore live in small core-only packages (`@aipehub/inbox`, `@aipehub/a2a`,
+Importing `@gotong/host` *runs the host* (`main.ts`). Reusable participants
+therefore live in small core-only packages (`@gotong/inbox`, `@gotong/a2a`,
 this) so examples and embedders can import just the participant.

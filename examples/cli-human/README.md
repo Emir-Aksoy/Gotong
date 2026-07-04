@@ -1,6 +1,6 @@
 # cli-human
 
-The terminal as a `HumanParticipant` adapter — a reference pattern for any CLI / chat / IM UI built on top of AipeHub.
+The terminal as a `HumanParticipant` adapter — a reference pattern for any CLI / chat / IM UI built on top of Gotong.
 
 ## Run
 
@@ -11,7 +11,7 @@ pnpm demo:cli-human
 For CI / non-TTY shells:
 
 ```bash
-AIPE_AUTO=1 pnpm demo:cli-human   # auto-approves every prompt with "ok"
+GOTONG_AUTO=1 pnpm demo:cli-human   # auto-approves every prompt with "ok"
 ```
 
 ## Scenario
@@ -30,6 +30,6 @@ The Hub doesn't care whether the human is on stdin, in a Slack channel, on a web
 - Capture the response (here: stdin via `readline`).
 - Call `human.complete()` or `human.reject()`.
 
-Copy this file as the skeleton when building a new human-facing UI for AipeHub.
+Copy this file as the skeleton when building a new human-facing UI for Gotong.
 
 Source: [`src/index.ts`](src/index.ts).

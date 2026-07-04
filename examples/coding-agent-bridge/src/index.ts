@@ -21,8 +21,8 @@
 
 import { fileURLToPath } from 'node:url'
 
-import { Hub, InMemoryStorage, type Task, type TaskId } from '@aipehub/core'
-import { CliParticipant, TakeoverController, dangerousCommandGate } from '@aipehub/cli-agent'
+import { Hub, InMemoryStorage, type Task, type TaskId } from '@gotong/core'
+import { CliParticipant, TakeoverController, dangerousCommandGate } from '@gotong/cli-agent'
 
 import { CLI_PRESETS } from './presets.js'
 

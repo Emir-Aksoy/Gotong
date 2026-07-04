@@ -10,7 +10,7 @@
  *   GET /api/admin/identity/usage/summary?groupBy=  JSON aggregate roll-up
  *
  * The store surface is duck-typed (`UsageLedgerSurface`) so web keeps zero
- * runtime dependency on `@aipehub/identity`; the host's IdentityStore
+ * runtime dependency on `@gotong/identity`; the host's IdentityStore
  * satisfies it structurally. Methods are optional — a pre-migration host
  * (no ledger) makes the routes degrade to an empty result rather than 500.
  */
@@ -26,7 +26,7 @@ import {
 } from './export-format.js'
 import { sendJson } from './http-helpers.js'
 
-/** Structural mirror of `@aipehub/identity` LedgerEntry. */
+/** Structural mirror of `@gotong/identity` LedgerEntry. */
 export interface UsageLedgerEntryDTO {
   id: number
   ts: number
@@ -48,7 +48,7 @@ export interface UsageLedgerEntryDTO {
   meta: Record<string, unknown> | null
 }
 
-/** Structural mirror of `@aipehub/identity` LedgerAggregateRow. */
+/** Structural mirror of `@gotong/identity` LedgerAggregateRow. */
 export interface UsageLedgerAggregateRowDTO {
   key: string
   calls: number

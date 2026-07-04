@@ -36,15 +36,15 @@ coverage/
 junit.xml
 packages/*/junit.xml
 data/
-aipe-data/
-**/aipe-data/
+gotong-data/
+**/gotong-data/
 
-# AipeHub v2.0 spaces — per-workspace directories with state files. Each
+# Gotong v2.0 spaces — per-workspace directories with state files. Each
 # example creates its own; they should not be committed.
-.aipehub/
-.aipehub-*/
-**/.aipehub/
-**/.aipehub-*/
+.gotong/
+.gotong-*/
+**/.gotong/
+**/.gotong-*/
 *.sqlite
 *.sqlite-journal
 *.db

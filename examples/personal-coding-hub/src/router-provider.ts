@@ -22,7 +22,7 @@
  * hub wiring is identical.
  */
 
-import type { LlmProvider, LlmRequest, LlmStreamChunk } from '@aipehub/llm'
+import type { LlmProvider, LlmRequest, LlmStreamChunk } from '@gotong/llm'
 
 import { dispatchPrompt, parseExplicitAssignment, planRoute, DEFAULT_CODING_POLICY, type CodingAgent, type RoutingPolicy } from './routing.js'
 

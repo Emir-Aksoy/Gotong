@@ -14,7 +14,7 @@
  * itself (a template carries wiring + a pointer, never content; decision #4).
  */
 
-import { AgentParticipant, type Task } from '@aipehub/core'
+import { AgentParticipant, type Task } from '@gotong/core'
 
 // --- the "manual" the real agents would read from the KB --------------------
 

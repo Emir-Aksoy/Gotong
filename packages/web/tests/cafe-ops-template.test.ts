@@ -5,7 +5,7 @@
  * `template.workflows[]`. So beyond the usual "agents + KB land" checks (mirrors
  * the battle-monk gate), this test runs EACH embedded workflow block through the
  * REAL `parseWorkflow`, proving the opaque re-serialization round-trips: the
- * `human:` HITL sugar desugars to `aipehub.human/v1`, `surface.me` survives, and
+ * `human:` HITL sugar desugars to `gotong.human/v1`, `surface.me` survives, and
  * a broken block would fail loudly instead of importing a dead workflow.
  *
  * It reads the SHIPPED
@@ -20,8 +20,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { Hub, Space } from '@aipehub/core'
-import { parseWorkflow } from '@aipehub/workflow'
+import { Hub, Space } from '@gotong/core'
+import { parseWorkflow } from '@gotong/workflow'
 
 import { serveWeb, type WebServerHandle, type WorkflowSurface } from '../src/server.js'
 import { parseTemplate } from '../src/template-manifest.js'
@@ -41,7 +41,7 @@ beforeEach(async () => {
 })
 
 describe('examples/cafe-ops/template (SM2)', () => {
-  it('parses as a valid aipehub.template/v1 manifest', () => {
+  it('parses as a valid gotong.template/v1 manifest', () => {
     const t = parseTemplate(templateText)
     expect(t.name).toBe('门店运营(奶茶 / 咖啡店)')
     expect(t.version).toBe(1)
@@ -72,7 +72,7 @@ describe('examples/cafe-ops/template (SM2)', () => {
   it('every embedded workflow block round-trips through the real parseWorkflow', () => {
     const t = parseTemplate(templateText)
     // The opaque-blob trick is only sound if each re-serialized block is in fact
-    // a valid aipehub.workflow/v1 — assert it against the SAME parser the host
+    // a valid gotong.workflow/v1 — assert it against the SAME parser the host
     // would run on import, not parseTemplate (which never inspects steps).
     const byId = new Map(t.workflows.map((w) => [w.id, parseWorkflow(w.yaml)]))
 
@@ -85,11 +85,11 @@ describe('examples/cafe-ops/template (SM2)', () => {
     const shift = byId.get('cafe-shift-availability')!
     expect(shift.trigger.capability).toBe('cafe.submit-availability')
     // The `human:` step sugar desugared to the inbox capability.
-    expect(JSON.stringify(shift)).toContain('aipehub.human/v1')
+    expect(JSON.stringify(shift)).toContain('gotong.human/v1')
 
     const overtime = byId.get('cafe-overtime-claim')!
     expect(overtime.trigger.capability).toBe('cafe.claim-overtime')
-    expect(JSON.stringify(overtime)).toContain('aipehub.human/v1')
+    expect(JSON.stringify(overtime)).toContain('gotong.human/v1')
     // Salary data is flagged confidential in governance (declarative, not a gate).
     expect(overtime.governance?.dataSensitivity).toBe('confidential')
   })
@@ -107,7 +107,7 @@ describe('examples/cafe-ops/template (SM2)', () => {
   })
 
   it('imports end-to-end: 2 agents land, 3 workflows import (each re-validated)', async () => {
-    const tmp = await mkdtemp(join(tmpdir(), 'aipehub-cafe-'))
+    const tmp = await mkdtemp(join(tmpdir(), 'gotong-cafe-'))
     const { space } = await Space.init(tmp, { name: 'cafe-test' })
     const hub = new Hub({ space })
     await hub.start()

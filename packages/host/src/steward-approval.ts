@@ -7,7 +7,7 @@
  * When the server-side classifier tiers a steward action `dangerous`
  * (delete_agent) or `cross_hub` (a workflow that leaves this hub), `apply`
  * (hub-steward-service) does NOT execute it. Instead it dispatches a
- * `{ userId, action }` task to THIS broker (capability `aipehub.steward.exec/v1`),
+ * `{ userId, action }` task to THIS broker (capability `gotong.steward.exec/v1`),
  * which parks it in the member's own inbox and suspends. The member sees the
  * approval item in `/me`, approves or rejects, and only then does anything run.
  *
@@ -42,9 +42,9 @@ import {
   type ParticipantId,
   type Task,
   type TaskResult,
-} from '@aipehub/core'
-import { NEVER_RESUME_AT, type InboxItem, type InboxStore } from '@aipehub/inbox'
-import { validateStewardAction, type StewardAction } from '@aipehub/hub-steward'
+} from '@gotong/core'
+import { NEVER_RESUME_AT, type InboxItem, type InboxStore } from '@gotong/inbox'
+import { validateStewardAction, type StewardAction } from '@gotong/hub-steward'
 
 import {
   performStewardAction,
@@ -56,16 +56,16 @@ import type { StewardSensitiveExecutors } from './steward-sensitive.js'
 /**
  * The capability the steward dispatches a gated action to. One capability for
  * both dangerous + cross_hub — the action kind lives in the payload, exactly
- * like the human inbox broker's single `aipehub.human/v1`.
+ * like the human inbox broker's single `gotong.human/v1`.
  */
-export const STEWARD_EXEC_CAPABILITY = 'aipehub.steward.exec/v1'
+export const STEWARD_EXEC_CAPABILITY = 'gotong.steward.exec/v1'
 
 /**
  * The fixed participant id the broker is registered under. Fixed (not generated)
  * so `HostInboxService.resolve` → `hub.resumeTask(row.agentId, …)` lands here
  * without a lookup — `row.agentId` is whatever suspended, i.e. this id.
  */
-export const STEWARD_EXEC_PARTICIPANT_ID = 'aipehub:steward-exec'
+export const STEWARD_EXEC_PARTICIPANT_ID = 'gotong:steward-exec'
 
 /**
  * The payload `apply` dispatches to the broker: the member + the single action

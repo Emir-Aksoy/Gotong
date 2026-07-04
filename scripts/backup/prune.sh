@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Prune AipeHub backup tarballs older than N days.
+# Prune Gotong backup tarballs older than N days.
 #
 # Designed for cron — quiet on success, noisy on failure.
 #
@@ -7,7 +7,7 @@
 #   ./prune.sh <backup-dir> <keep-days>
 #
 # Examples:
-#   ./prune.sh /var/backups/aipehub 14    # keep the last 14 days
+#   ./prune.sh /var/backups/gotong 14    # keep the last 14 days
 #   ./prune.sh /tmp/snapshots      7      # keep the last week
 #
 # Exit codes:
@@ -35,7 +35,7 @@ fi
 
 # Match only files our backup.sh produces. Don't sweep unrelated
 # archives an operator might have parked in the same dir.
-PATTERN="aipehub-*.tar.gz"
+PATTERN="gotong-*.tar.gz"
 
 # `-mtime +N` means "older than N*24h". Use `-print` so cron's mail
 # captures what got deleted; if the dir is clean, nothing prints.

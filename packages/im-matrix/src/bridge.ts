@@ -2,14 +2,14 @@
  * `ImBridge` implementation for Matrix. Sync long-poll mode against
  * the Client-Server API.
  *
- * Why Matrix matters for AipeHub specifically:
+ * Why Matrix matters for Gotong specifically:
  *
- *   - **Federation × federation philosophy alignment**. AipeHub
+ *   - **Federation × federation philosophy alignment**. Gotong
  *     federates between hubs via peer tokens; Matrix federates between
- *     homeservers natively. One AipeHub hub + one Matrix bot = an
+ *     homeservers natively. One Gotong hub + one Matrix bot = an
  *     entry point reachable from any user on any Matrix homeserver
  *     that federates with ours, with no extra config. Two distinct
- *     federation graphs (AipeHub-side and Matrix-side) compose
+ *     federation graphs (Gotong-side and Matrix-side) compose
  *     cleanly because neither needs the other to centralise.
  *   - **No vendor lock-in**. Telegram / Slack / Discord / Lark are
  *     each a single corporate API. Matrix is an open protocol with
@@ -62,7 +62,7 @@ import type {
   ImBridge,
   ImMessage,
   ImUser,
-} from '@aipehub/im-adapter'
+} from '@gotong/im-adapter'
 
 import {
   createMatrixClient,
@@ -307,9 +307,9 @@ export class MatrixBridge implements ImBridge {
 
   private nextTxnId(): string {
     this.txnCounter += 1
-    // `aipe-<ms>-<counter>` — collision-free within a process and
+    // `gotong-<ms>-<counter>` — collision-free within a process and
     // human-readable in homeserver logs.
-    return `aipe-${Date.now()}-${this.txnCounter}`
+    return `gotong-${Date.now()}-${this.txnCounter}`
   }
 
   private recordDelivered(eventId: string): boolean {

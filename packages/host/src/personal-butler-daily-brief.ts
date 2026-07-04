@@ -20,7 +20,7 @@
  * ever set a brief for the member it serves.
  */
 
-import type { LlmAgentToolset, LlmToolCallResult, LlmToolDefinition } from '@aipehub/llm'
+import type { LlmAgentToolset, LlmToolCallResult, LlmToolDefinition } from '@gotong/llm'
 
 import {
   DEFAULT_BRIEF_HOUR,

@@ -11,7 +11,7 @@
  * the prior one — the interviewer (step 1) should know "this is your
  * third time, last time you said X, has Y changed?".
  *
- * AipeHub's workflow runner doesn't pass any cross-run identity to
+ * Gotong's workflow runner doesn't pass any cross-run identity to
  * the agent — every dispatch is a fresh `Task`. So the **caseId**
  * (the per-human identity that ties runs together) lives in the
  * agent's `memory` handle via `meta.caseId`, and the agent recalls
@@ -66,7 +66,7 @@ import type {
   MemoryEntry,
   MemoryHandle,
   NewMemoryEntry,
-} from '@aipehub/services-sdk'
+} from '@gotong/services-sdk'
 
 /**
  * The seven workflow step kinds + the compacted-summary topic. Used
@@ -267,7 +267,7 @@ export interface MaybeCompactResult {
 /**
  * Caller-supplied LLM summarizer. The compactor passes a `system` +
  * `user` prompt and expects the raw text back. This keeps
- * `personal-growth-context.ts` free of any `@aipehub/llm` import —
+ * `personal-growth-context.ts` free of any `@gotong/llm` import —
  * the agent decides which provider + model + temperature to use.
  */
 export type GrowthSummarizer = (input: {

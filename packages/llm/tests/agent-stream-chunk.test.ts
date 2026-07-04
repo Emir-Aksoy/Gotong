@@ -12,7 +12,7 @@
  */
 
 import { describe, expect, it } from 'vitest'
-import { Hub } from '@aipehub/core'
+import { Hub } from '@gotong/core'
 
 import {
   LlmAgent,
@@ -20,7 +20,7 @@ import {
   type LlmStreamChunk,
   type LlmAgentToolset,
 } from '../src/index.js'
-import type { Task } from '@aipehub/core'
+import type { Task } from '@gotong/core'
 
 function makeTask(payload: unknown, capabilities = ['draft']) {
   return {

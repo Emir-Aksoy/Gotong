@@ -6,8 +6,8 @@ import asyncio
 
 import pytest
 
-from aipehub import AgentParticipant, ConnectionRejected, connect
-from aipehub.protocol import PROTOCOL_VERSION
+from gotong import AgentParticipant, ConnectionRejected, connect
+from gotong.protocol import PROTOCOL_VERSION
 
 from .conftest import FakeHub, serve_hub
 

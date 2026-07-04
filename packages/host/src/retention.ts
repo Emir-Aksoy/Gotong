@@ -46,22 +46,22 @@ export interface RetentionTableSpec {
 
 export const RETENTION_TABLES: readonly RetentionTableSpec[] = [
   {
-    env: 'AIPE_LEDGER_KEEP_DAYS',
+    env: 'GOTONG_LEDGER_KEEP_DAYS',
     table: 'usage_ledger',
     prune: (s, before) => s.pruneLedger({ before }),
   },
   {
-    env: 'AIPE_AUDIT_KEEP_DAYS',
+    env: 'GOTONG_AUDIT_KEEP_DAYS',
     table: 'audit_log',
     prune: (s, before) => s.pruneAuditLog({ before }),
   },
   {
-    env: 'AIPE_PEER_SUMMARY_KEEP_DAYS',
+    env: 'GOTONG_PEER_SUMMARY_KEEP_DAYS',
     table: 'peer_summary_snapshots',
     prune: (s, before) => s.prunePeerSummarySnapshots({ before }),
   },
   {
-    env: 'AIPE_ALERT_FIRINGS_KEEP_DAYS',
+    env: 'GOTONG_ALERT_FIRINGS_KEEP_DAYS',
     table: 'peer_summary_alert_firings',
     prune: (s, before) => s.prunePeerSummaryAlertFirings({ before }),
   },

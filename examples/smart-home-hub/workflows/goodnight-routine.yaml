@@ -1,13 +1,13 @@
 # 晚安例程 — 可逆动作直接做, 物理/安防动作要人确认 (HITL)。
 #
-# 这是小米设备经 Home Assistant 接进 AipeHub 后的一条最常见的家居例程:
+# 这是小米设备经 Home Assistant 接进 Gotong 后的一条最常见的家居例程:
 #   1. wind-down  (home.apply-scene) — 关公共区灯 + 卧室空调切睡眠。可逆 → 直接做。
 #   2. confirm-lock (human: approval) — 睡前是否锁门布防? 物理/安防动作, 等人拍板。
 #   3. secure     (home.secure, when 批准才跑) — 锁大门 + 布防。拒绝则这步跳过, 门不锁。
 #
 # 为什么锁门要人确认而关灯不用: 关灯随手可逆; 锁门可能把人锁在外, 布防是安全决策 ——
-# 这正是 AipeHub 的治理立场 (可逆的直接做, 不可逆的物理动作要人确认) 落到一个家里。
-schema: aipehub.workflow/v1
+# 这正是 Gotong 的治理立场 (可逆的直接做, 不可逆的物理动作要人确认) 落到一个家里。
+schema: gotong.workflow/v1
 workflow:
   id: home-goodnight
   name: 晚安例程
@@ -40,7 +40,7 @@ workflow:
         title: 晚安场景
         payload:
           scene: goodnight
-    # human: 糖 → 派到 aipehub.human/v1 → HumanInboxParticipant 挂起任务,
+    # human: 糖 → 派到 gotong.human/v1 → HumanInboxParticipant 挂起任务,
     # 落成住户 /me 收件箱里一条 approval, 批了才跑下一步 (Phase 16)。
     - id: confirm-lock
       description: 睡前是否锁好大门并布防? 物理/安防动作, 等住户确认。

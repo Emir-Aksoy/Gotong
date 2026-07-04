@@ -1,10 +1,10 @@
-# @aipehub/services-sdk
+# @gotong/services-sdk
 
-Plugin SDK for AipeHub Hub Services — the abstraction agents and
+Plugin SDK for Gotong Hub Services — the abstraction agents and
 workflows use for memory, artifacts, datastores, and (later) anything
 else the platform wants to manage as a pluggable resource.
 
-> Same surface for first-party (`@aipehub/service-memory-file`,
+> Same surface for first-party (`@gotong/service-memory-file`,
 > `service-artifact-file`, `service-datastore-sqlite`) and
 > third-party plugins. No "internal interface" — the loader treats
 > both identically.
@@ -27,7 +27,7 @@ behind this package.
 ## Writing a plugin (sketch)
 
 ```ts
-import type { ServicePlugin, MemoryHandle, Owner } from '@aipehub/services-sdk'
+import type { ServicePlugin, MemoryHandle, Owner } from '@gotong/services-sdk'
 
 export default class MyMemoryPlugin implements ServicePlugin<MyConfig, MemoryHandle> {
   readonly type = 'memory'
@@ -51,7 +51,7 @@ Run the standard contract tests against it:
 
 ```ts
 import { describe } from 'vitest'
-import { runPluginContract } from '@aipehub/services-sdk/testing'
+import { runPluginContract } from '@gotong/services-sdk/testing'
 
 describe('contract: my-memory-plugin', () => {
   runPluginContract({

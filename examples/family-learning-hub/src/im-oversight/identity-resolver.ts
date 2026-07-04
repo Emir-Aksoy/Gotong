@@ -9,15 +9,15 @@
  *
  * The throw → discriminated-result conversion is the interesting bit:
  * `claimImBindingCode` throws on the COMMON user-error path (wrong code, expired
- * code), but the `ImBindingResolver` contract (see `@aipehub/im-adapter`)
+ * code), but the `ImBindingResolver` contract (see `@gotong/im-adapter`)
  * explicitly says "discriminated result, not throw — IM users typing wrong codes
  * is the COMMON path." We catch the two known business-logic errors and translate;
  * any other throw bubbles up (it'd indicate infra failure, which the bridge maps
  * to a generic retry message).
  */
 
-import type { ClaimResult, ImBindingResolver } from '@aipehub/im-adapter'
-import { IdentityError, type IdentityStore } from '@aipehub/identity'
+import type { ClaimResult, ImBindingResolver } from '@gotong/im-adapter'
+import { IdentityError, type IdentityStore } from '@gotong/identity'
 
 export function makeIdentityImBindingResolver(store: IdentityStore): ImBindingResolver {
   return {

@@ -1,4 +1,4 @@
-schema: aipehub.agent/v1
+schema: gotong.agent/v1
 agent:
   id: elasticsearch-researcher
   displayName: Elasticsearch Researcher

@@ -15,7 +15,7 @@
  * tax on every memory write.
  */
 
-import { SuspendTaskError, type Task } from '@aipehub/core'
+import { SuspendTaskError, type Task } from '@gotong/core'
 import type {
   LlmAgentToolset,
   LlmProvider,
@@ -23,14 +23,14 @@ import type {
   LlmStreamChunk,
   LlmToolCallResult,
   LlmToolDefinition,
-} from '@aipehub/llm'
+} from '@gotong/llm'
 import type {
   MemoryEntry,
   MemoryHandle,
   MemoryKind,
   MemoryQuery,
   NewMemoryEntry,
-} from '@aipehub/services-sdk'
+} from '@gotong/services-sdk'
 import { describe, expect, it } from 'vitest'
 
 import {

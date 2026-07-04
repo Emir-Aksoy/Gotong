@@ -34,8 +34,8 @@ import type {
   ManagedAgentSpec,
   Space,
   ParticipantId,
-} from '@aipehub/core'
-import { createLogger } from '@aipehub/core'
+} from '@gotong/core'
+import { createLogger } from '@gotong/core'
 import {
   userPrincipal,
   type GrantPerm,
@@ -43,8 +43,8 @@ import {
   type ResourceGrant,
   type ResourceKind,
   type WriteAuditLogInput,
-} from '@aipehub/identity'
-import type { WebServerOptions } from '@aipehub/web'
+} from '@gotong/identity'
+import type { WebServerOptions } from '@gotong/web'
 
 import { assertResourceGrant } from './resource-access.js'
 

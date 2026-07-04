@@ -7,7 +7,7 @@
 
 import { describe, expect, it } from 'vitest'
 
-import type { ServiceCallFrame, ServiceUseDecl } from '@aipehub/protocol'
+import type { ServiceCallFrame, ServiceUseDecl } from '@gotong/protocol'
 
 import { ServiceCallRouter } from '../src/service-call-router.js'
 import type { ServiceCallGateway } from '../src/server.js'

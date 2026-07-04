@@ -23,7 +23,7 @@
  *   - with the console WIRED, every existing branch (`/help`, free-text) is still
  *     byte-for-byte unchanged when the sender is neither triggering nor in mode.
  *
- * When the operator later supplies a real `AIPE_TELEGRAM_BOT_TOKEN` and wires the
+ * When the operator later supplies a real `GOTONG_TELEGRAM_BOT_TOKEN` and wires the
  * real ops-core runner, the only things that change are FakeBridge → TelegramBridge
  * and the canned ops → `runOpsCommand({surface:'im',…})`; this exact console path
  * is what runs. The real-stack physical boundary (a true restore on the CLI) is the
@@ -32,9 +32,9 @@
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { AgentParticipant, Hub, type Logger, type Task } from '@aipehub/core'
-import { openIdentityStore, type IdentityStore } from '@aipehub/identity'
-import type { ImAttachment, ImBridge, ImMessage, ImUser } from '@aipehub/im-adapter'
+import { AgentParticipant, Hub, type Logger, type Task } from '@gotong/core'
+import { openIdentityStore, type IdentityStore } from '@gotong/identity'
+import type { ImAttachment, ImBridge, ImMessage, ImUser } from '@gotong/im-adapter'
 
 import {
   handleImMessage,
@@ -53,7 +53,7 @@ const silentLogger: Logger = {
 
 // ---------------------------------------------------------------------------
 // Hermetic in-memory bridge — the same `ImBridge` contract the six real
-// `@aipehub/im-*` bridges implement, minus the network.
+// `@gotong/im-*` bridges implement, minus the network.
 // ---------------------------------------------------------------------------
 
 class FakeBridge implements ImBridge {
@@ -245,7 +245,7 @@ describe('setting-ops M5 — IM `/setting` command console (hermetic)', () => {
     expect(last(bridge).text).toMatch(/CLI/i)
 
     // 4. in mode, `config-set` (config-write) is REFUSED with an owner/web/CLI hint.
-    await bridge.inject(msgFrom(ALICE, 'config-set AIPE_MODE team'))
+    await bridge.inject(msgFrom(ALICE, 'config-set GOTONG_MODE team'))
     expect(last(bridge).text).toContain('✗')
     expect(last(bridge).text).toMatch(/owner/i)
 
@@ -273,7 +273,7 @@ describe('setting-ops M5 — IM `/setting` command console (hermetic)', () => {
     // Alice is NOT in command mode → /help is not a `/setting` trigger → the
     // console returns false and the normal router answers with the help text.
     await bridge.inject(msgFrom(ALICE, '/help'))
-    expect(last(bridge).text).toContain('AipeHub IM bridge')
+    expect(last(bridge).text).toContain('Gotong IM bridge')
     expect(mode.get(aliceId)).not.toBe(true)
   })
 

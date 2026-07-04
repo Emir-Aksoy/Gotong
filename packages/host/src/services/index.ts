@@ -1,7 +1,7 @@
 /**
  * Public surface of the host's services glue.
  *
- * Internal to `@aipehub/host`. Re-exported through `host/src/index.ts`
+ * Internal to `@gotong/host`. Re-exported through `host/src/index.ts`
  * for tests; the production binary uses `bootstrapServices` directly
  * from `main.ts`.
  */

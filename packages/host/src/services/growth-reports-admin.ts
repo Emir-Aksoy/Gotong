@@ -1,6 +1,6 @@
 /**
  * `GrowthReportsAdmin` — host-side implementation of the
- * `GrowthReportsAdminSurface` defined in `@aipehub/core`.
+ * `GrowthReportsAdminSurface` defined in `@gotong/core`.
  *
  * Walks the synthesist agent's live `artifact` handle to list and
  * serve consolidated 7-section markdown reports written by
@@ -28,8 +28,8 @@
 import type {
   GrowthReportSummary,
   GrowthReportsAdminSurface,
-} from '@aipehub/core'
-import type { ArtifactHandle, ArtifactRef } from '@aipehub/services-sdk'
+} from '@gotong/core'
+import type { ArtifactHandle, ArtifactRef } from '@gotong/services-sdk'
 
 const REPORTS_PREFIX = 'reports/'
 

@@ -29,8 +29,8 @@ import type {
   LlmAgentToolset,
   LlmToolCallResult,
   LlmToolDefinition,
-} from '@aipehub/llm'
-import type { MemoryEntry, MemoryHandle, MemoryKind } from '@aipehub/services-sdk'
+} from '@gotong/llm'
+import type { MemoryEntry, MemoryHandle, MemoryKind } from '@gotong/services-sdk'
 
 import { queryFingerprint, type MemoryQueryHitWriter } from './dreaming.js'
 import {

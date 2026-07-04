@@ -2,9 +2,9 @@
 /**
  * Full fresh-space E2E for a brand-new user.
  *
- *   1. Pull a real DeepSeek key out of ./.aipehub-demo programmatically
+ *   1. Pull a real DeepSeek key out of ./.gotong-demo programmatically
  *      (never logged — flows secret-store → secret-store).
- *   2. mkdir an empty $TMPDIR/aipehub-e2e-* space.
+ *   2. mkdir an empty $TMPDIR/gotong-e2e-* space.
  *   3. Space.init → mint admin token.
  *   4. spawn host child process pointed at the empty space.
  *   5. POST /api/admin/bundles/import with templates/bundles/personal-growth.yaml
@@ -27,8 +27,8 @@ import { resolve, join } from 'node:path'
 import { spawn } from 'node:child_process'
 import { tmpdir } from 'node:os'
 
-const SPACE_DIR = join(tmpdir(), 'aipehub-e2e-' + Date.now())
-const DEMO_SPACE = resolve('.aipehub-demo')
+const SPACE_DIR = join(tmpdir(), 'gotong-e2e-' + Date.now())
+const DEMO_SPACE = resolve('.gotong-demo')
 const WEB_PORT = 3631
 const WS_PORT = 4631
 const BUNDLE_PATH = resolve('templates/bundles/personal-growth.yaml')
@@ -54,7 +54,7 @@ const { Space } = await import('../packages/core/dist/index.js')
 const demo = await Space.openOrInit(DEMO_SPACE, { name: 'demo' })
 const deepseekKey = await demo.space.getAgentApiKey('deepseek-writer')
 if (!deepseekKey || deepseekKey.length < 10) {
-  console.error('FATAL: no DeepSeek key in .aipehub-demo/deepseek-writer — seed it first')
+  console.error('FATAL: no DeepSeek key in .gotong-demo/deepseek-writer — seed it first')
   process.exit(2)
 }
 console.log('lifted DeepSeek key from demo space (length ' + deepseekKey.length + ')')
@@ -74,9 +74,9 @@ const hostProc = spawn(
     cwd: resolve('packages/host'),
     env: {
       ...process.env,
-      AIPE_SPACE: SPACE_DIR,
-      AIPE_WEB_PORT: String(WEB_PORT),
-      AIPE_WS_PORT: String(WS_PORT),
+      GOTONG_SPACE: SPACE_DIR,
+      GOTONG_WEB_PORT: String(WEB_PORT),
+      GOTONG_WS_PORT: String(WS_PORT),
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   },

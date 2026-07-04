@@ -13,7 +13,7 @@
  *     close out, reflecting whether the tool succeeded or was declined.
  */
 
-import type { LlmMessage, LlmProvider, LlmRequest, LlmStreamChunk } from '@aipehub/llm'
+import type { LlmMessage, LlmProvider, LlmRequest, LlmStreamChunk } from '@gotong/llm'
 
 function lastUserMessage(req: LlmRequest): LlmMessage | undefined {
   for (let i = req.messages.length - 1; i >= 0; i--) {

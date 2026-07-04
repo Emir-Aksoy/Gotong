@@ -3,7 +3,7 @@
  * M4) — the WEB surface of the one ops-core engine (CLI + web + IM all consume
  * the same host `ops-core`). Web is a thin requireAdmin → resolveActor → echo;
  * the host `SettingOpsSurface` owns ops-core's deps + the audit binding + the
- * tier chokepoint. Web carries ZERO `@aipehub/host` runtime dependency — it
+ * tier chokepoint. Web carries ZERO `@gotong/host` runtime dependency — it
  * mirrors the surface structurally, exactly like `AdminHealthSurface` / the ACP
  * admin surface.
  *
@@ -30,8 +30,8 @@
  */
 
 import type { IncomingMessage, ServerResponse } from 'node:http'
-import type { AdminRecord } from '@aipehub/core'
-import { createLogger } from '@aipehub/core'
+import type { AdminRecord } from '@gotong/core'
+import { createLogger } from '@gotong/core'
 
 import { readJsonBody, sendJson } from './http-helpers.js'
 

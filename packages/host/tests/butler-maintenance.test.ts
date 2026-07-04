@@ -8,7 +8,7 @@
 
 import { describe, expect, it } from 'vitest'
 
-import type { LlmProvider, LlmRequest, LlmStreamChunk } from '@aipehub/llm'
+import type { LlmProvider, LlmRequest, LlmStreamChunk } from '@gotong/llm'
 
 import { butlerSummarizer } from '../src/personal-butler-maintenance.js'
 

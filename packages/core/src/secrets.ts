@@ -16,7 +16,7 @@
  *     production keys onto a fresh host.
  *
  * Operators with paranoia (or a real KMS) can override the on-disk key
- * with the `AIPE_SECRET_KEY` environment variable (64 hex chars = 32
+ * with the `GOTONG_SECRET_KEY` environment variable (64 hex chars = 32
  * bytes). That path is read every spawn — no caching — so a key
  * rotation is just a host restart with the new env value.
  */
@@ -93,7 +93,7 @@ export function decryptSecret(masterKey: Buffer, enc: EncryptedSecret): string {
 /**
  * Resolve the master key for this host run, in priority order:
  *
- *   1. `AIPE_SECRET_KEY` env var (64 hex chars / 32 bytes) — preferred
+ *   1. `GOTONG_SECRET_KEY` env var (64 hex chars / 32 bytes) — preferred
  *      in deployments where the key is mounted as a secret.
  *   2. `<keyPath>` on disk — preferred in single-machine setups.
  *   3. Generate a random 32-byte key, write it to `<keyPath>` with mode
@@ -102,15 +102,15 @@ export function decryptSecret(masterKey: Buffer, enc: EncryptedSecret): string {
  * The file write is best-effort `chmod 0600`; on filesystems that don't
  * honour POSIX modes (e.g. exFAT, some network mounts) the chmod
  * silently no-ops. Operators in those environments should set
- * `AIPE_SECRET_KEY` and not rely on the file mode.
+ * `GOTONG_SECRET_KEY` and not rely on the file mode.
  */
 export async function loadOrCreateMasterKey(keyPath: string): Promise<Buffer> {
-  const env = process.env.AIPE_SECRET_KEY
+  const env = process.env.GOTONG_SECRET_KEY
   if (env) {
     const buf = Buffer.from(env, 'hex')
     if (buf.length !== KEY_BYTES) {
       throw new Error(
-        `AIPE_SECRET_KEY must be ${KEY_BYTES * 2} hex chars (${KEY_BYTES} bytes); got ${env.length} chars`,
+        `GOTONG_SECRET_KEY must be ${KEY_BYTES * 2} hex chars (${KEY_BYTES} bytes); got ${env.length} chars`,
       )
     }
     return buf

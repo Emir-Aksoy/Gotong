@@ -1,5 +1,5 @@
 {
-  "name": "@aipehub/example-im-steward-bridge",
+  "name": "@gotong/example-im-steward-bridge",
   "version": "0.0.0",
   "type": "module",
   "private": true,
@@ -9,8 +9,8 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@aipehub/identity": "workspace:*",
-    "@aipehub/im-adapter": "workspace:*",
-    "@aipehub/hub-steward": "workspace:*"
+    "@gotong/identity": "workspace:*",
+    "@gotong/im-adapter": "workspace:*",
+    "@gotong/hub-steward": "workspace:*"
   }
 }

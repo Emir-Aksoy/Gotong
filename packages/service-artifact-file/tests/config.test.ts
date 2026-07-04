@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { mimeAllowed, validateArtifactFileConfig } from '../src/config.js'
-import { ServiceConfigError } from '@aipehub/services-sdk'
+import { ServiceConfigError } from '@gotong/services-sdk'
 
 describe('validateArtifactFileConfig', () => {
   it('accepts empty config — defaults', () => {

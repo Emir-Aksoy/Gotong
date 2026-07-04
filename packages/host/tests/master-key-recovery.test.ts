@@ -4,7 +4,7 @@ import { join } from 'node:path'
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { openIdentityStore } from '@aipehub/identity'
+import { openIdentityStore } from '@gotong/identity'
 
 import { recoverMasterKeyRotation } from '../src/master-key-recovery.js'
 import { IDENTITY_DB_FILENAME, MASTER_KEY_FILENAME } from '../src/rotate-master-key.js'
@@ -30,7 +30,7 @@ let stagedFile: string
 let dbPath: string
 
 beforeEach(() => {
-  dir = mkdtempSync(join(tmpdir(), 'aipe-mkrec-'))
+  dir = mkdtempSync(join(tmpdir(), 'gotong-mkrec-'))
   keyFile = join(dir, MASTER_KEY_FILENAME)
   stagedFile = `${keyFile}.next`
   dbPath = join(dir, IDENTITY_DB_FILENAME)

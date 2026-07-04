@@ -31,7 +31,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { readJsonBody, readTextBody, sendJson } from './http-helpers.js'
 
-import type { AdminRecord, Hub } from '@aipehub/core'
+import type { AdminRecord, Hub } from '@gotong/core'
 
 import type {
   WorkflowAssistSurface,
@@ -70,7 +70,7 @@ export interface WorkflowAuditSink {
 
 // P2-M5b — resource-level RBAC (workflow ownership). The grant sink is
 // structurally satisfied by the host IdentityStore; web keeps zero identity
-// runtime dep. Perm literals mirror @aipehub/identity's WorkflowPerm.
+// runtime dep. Perm literals mirror @gotong/identity's WorkflowPerm.
 export type WorkflowPermLiteral = 'owner' | 'editor' | 'viewer'
 
 export interface WorkflowGrantRow {
@@ -230,7 +230,7 @@ export async function handleWorkflowRoute(
   // POST /api/admin/workflows/assist — Phase 13 M3 natural-language draft.
   // The host wires `ctx.workflowAssist` to a `WorkflowAssistantAgent`
   // registered at boot (capability=`workflow:assist`). When absent (no
-  // LLM key resolved, or operator set `AIPE_ASSISTANT_DISABLED=1`),
+  // LLM key resolved, or operator set `GOTONG_ASSISTANT_DISABLED=1`),
   // respond 503 so the admin UI can hide the "AI assistant" button
   // cleanly.
   //
@@ -770,7 +770,7 @@ function seedWorkflowOwner(
 }
 
 /**
- * P2-M2 — route action → audit action string. Web has no `@aipehub/identity`
+ * P2-M2 — route action → audit action string. Web has no `@gotong/identity`
  * runtime dep, so these mirror the `AUDIT_ACTIONS.WORKFLOW_*` literals (same
  * pattern as setup-routes' `'setup_owner_created'`). Only governance-significant
  * transitions appear here; `review` / `draft` (back-to-draft) are authoring

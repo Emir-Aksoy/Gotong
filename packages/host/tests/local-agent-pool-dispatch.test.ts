@@ -24,7 +24,7 @@ import {
   AgentParticipant,
   type AgentRecord,
   type Task,
-} from '@aipehub/core'
+} from '@gotong/core'
 
 import { LocalAgentPool } from '../src/local-agent-pool.js'
 
@@ -43,7 +43,7 @@ describe('LocalAgentPool — wires DispatchToolset from spec.dispatch', () => {
   let hub: Hub
 
   beforeEach(async () => {
-    root = await mkdtemp(join(tmpdir(), 'aipe-lap-dispatch-'))
+    root = await mkdtemp(join(tmpdir(), 'gotong-lap-dispatch-'))
     await rm(root, { recursive: true, force: true })
     const opened = await Space.init(root, { name: 'test' })
     space = opened.space

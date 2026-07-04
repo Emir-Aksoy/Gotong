@@ -11,8 +11,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { randomBytes } from 'node:crypto'
 
-import { Hub, Space, type AgentRecord, type ManagedAgentLifecycle, type ParticipantId } from '@aipehub/core'
-import { AUDIT_ACTIONS, MASTER_KEY_LEN_BYTES, openIdentityStore, userPrincipal, type IdentityStore } from '@aipehub/identity'
+import { Hub, Space, type AgentRecord, type ManagedAgentLifecycle, type ParticipantId } from '@gotong/core'
+import { AUDIT_ACTIONS, MASTER_KEY_LEN_BYTES, openIdentityStore, userPrincipal, type IdentityStore } from '@gotong/identity'
 
 import { HostMeAgentService } from '../src/me-agent-service.js'
 
@@ -51,7 +51,7 @@ const USER = 'user-alice'
 const OTHER = 'user-bob'
 
 async function setup(maxPerMember?: number): Promise<Harness> {
-  const tmp = await mkdtemp(join(tmpdir(), 'aipehub-host-meagent-'))
+  const tmp = await mkdtemp(join(tmpdir(), 'gotong-host-meagent-'))
   const init = await Space.init(tmp, { name: 'meagent-test' })
   const space = init.space
   const hub = new Hub({ space })

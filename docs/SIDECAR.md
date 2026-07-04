@@ -1,7 +1,7 @@
 # Sidecar agents — running a Hub-attached agent in its own process
 
 This is the practical "Day 1" guide for connecting an agent you've
-already written (TypeScript or Python) to an existing AipeHub Hub
+already written (TypeScript or Python) to an existing Gotong Hub
 without touching the Hub's `node_modules` or YAML manifest. The
 contract has been stable since wire protocol **v1.1** (the version
 that added Hub Services over WebSocket).
@@ -42,7 +42,7 @@ is your own code. Drop the snippet below into a fresh file, point at a
 running Hub, and you have a working agent.
 
 ```ts
-import { AgentParticipant, connect, type Task } from '@aipehub/sdk-node'
+import { AgentParticipant, connect, type Task } from '@gotong/sdk-node'
 
 class Greeter extends AgentParticipant {
   constructor() { super({ id: 'greeter', capabilities: ['greet'] }) }
@@ -55,7 +55,7 @@ await connect({ url: 'ws://127.0.0.1:4000', agents: [new Greeter()] })
 console.log('online')
 ```
 
-`pnpm add @aipehub/sdk-node` if you haven't already. Python is the
+`pnpm add @gotong/sdk-node` if you haven't already. Python is the
 mirror image; see [`AGENT.md` § Option B](./AGENT.md#option-b--python).
 
 The Hub does **not** need a yaml entry for your agent. The HELLO
@@ -70,7 +70,7 @@ returned `ServiceClient` back to the agent, and call its handles
 exactly like an in-process LlmAgent would.
 
 ```ts
-import { AgentParticipant, connect, type ServiceClient, type Task } from '@aipehub/sdk-node'
+import { AgentParticipant, connect, type ServiceClient, type Task } from '@gotong/sdk-node'
 
 class CoachAgent extends AgentParticipant {
   services?: ServiceClient   // populated after connect()
@@ -147,14 +147,14 @@ class CoachAgent extends LlmAgent {
 Move it verbatim into a new file `sidecar-coach/src/index.ts`. The
 class doesn't change — `LlmAgent` works in both shapes. The only
 constraint is its dependencies: it must import nothing from
-`@aipehub/host`, since the sidecar process won't have a host.
+`@gotong/host`, since the sidecar process won't have a host.
 
 ### Step 2 — adopt the SDK's `AgentParticipant`
 
 If your agent extended `LlmAgent`, keep doing so — `LlmAgent` is in
-`@aipehub/llm` which is sidecar-safe. If it extended an internal host
+`@gotong/llm` which is sidecar-safe. If it extended an internal host
 class (e.g. `LocalAgentPool`'s spawn shape), drop down to
-`AgentParticipant` from `@aipehub/sdk-node` and reconstruct the
+`AgentParticipant` from `@gotong/sdk-node` and reconstruct the
 behaviour with explicit `provider` and `services` fields.
 
 ### Step 3 — declare services in HELLO
@@ -165,7 +165,7 @@ mode, you declare them on `connect()`:
 
 ```ts
 const session = await connect({
-  url: process.env.AIPEHUB_URL ?? 'ws://127.0.0.1:4000',
+  url: process.env.GOTONG_URL ?? 'ws://127.0.0.1:4000',
   agents: [coach],
   services: [
     { type: 'memory', impl: 'file', owner: { kind: 'agent',       id: 'self' } },
@@ -273,7 +273,7 @@ The errors people actually hit, with what each one means.
 | `session_not_ready` | The SDK's pending-call table got fail-all'd. Either the connection dropped, or `session.close()` was called while a call was in flight. |
 | `bad_args` | The wire `args` field wasn't a JSON array. Don't pass non-serialisable objects (functions, class instances with private fields, etc). |
 | `unknown_agent` | The `from` on your SERVICE_CALL doesn't match any agent declared in your HELLO. This is usually a bug — the SDK fills `from` automatically from the first agent. |
-| `bad_frame` (no `detail`) | The Hub rejected one of your frames at the envelope shape check, but didn't say which field is wrong. **Restart the Hub with `AIPE_PROTOCOL_STRICT=1` set in the env**, retry your sidecar, and the rejection comes back as `bad_frame: invalid_frame: <field> must be …`. See `docs/PROTOCOL.md` § Debug / development env vars. The flag is captured at session construction, so restart the host to pick up a change. |
+| `bad_frame` (no `detail`) | The Hub rejected one of your frames at the envelope shape check, but didn't say which field is wrong. **Restart the Hub with `GOTONG_PROTOCOL_STRICT=1` set in the env**, retry your sidecar, and the rejection comes back as `bad_frame: invalid_frame: <field> must be …`. See `docs/PROTOCOL.md` § Debug / development env vars. The flag is captured at session construction, so restart the host to pick up a change. |
 
 ---
 

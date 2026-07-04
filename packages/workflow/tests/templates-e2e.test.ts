@@ -6,7 +6,7 @@
  * The "mock provider" is a stub hub: it answers each capability dispatch with
  * a canned result keyed on the capability, standing in for the LlmAgents a
  * real host would register. A `human:` step desugars (at parse time) to a
- * dispatch to `aipehub.human/v1`, so the mock simply returns the resolved
+ * dispatch to `gotong.human/v1`, so the mock simply returns the resolved
  * decision — the suspend/resume machinery itself is covered by Phase 16's
  * inbox-e2e; here we prove the TEMPLATE's step graph threads end to end.
  */
@@ -17,14 +17,14 @@ import { fileURLToPath } from 'node:url'
 
 import { describe, expect, it } from 'vitest'
 
-import type { ParticipantId, Task, TaskResult } from '@aipehub/core'
+import type { ParticipantId, Task, TaskResult } from '@gotong/core'
 
 import { WorkflowRunner, parseWorkflow, type HubLike } from '../src/index.js'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const wfDir = join(here, '..', '..', '..', 'templates', 'workflows')
 
-const HUMAN_CAP = 'aipehub.human/v1'
+const HUMAN_CAP = 'gotong.human/v1'
 
 type CapHandler = (payload: Record<string, unknown>) => unknown
 

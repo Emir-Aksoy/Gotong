@@ -11,10 +11,10 @@
  * The monitoring/ files ARE the deliverable under test — this never edits them.
  * Every assertion maps to a real failure mode an operator would otherwise hit
  * only during an incident:
- *   - scrape job `aipehub` must hit the non-admin /metrics route with auth
+ *   - scrape job `gotong` must hit the non-admin /metrics route with auth
  *     (P0-M7-M1) — a regression back to /api/admin/metrics reintroduces the
  *     machine-admin friction this milestone removed;
- *   - alert rules reference `job="aipehub"` and `job="node"` — both must exist
+ *   - alert rules reference `job="gotong"` and `job="node"` — both must exist
  *     as scrape jobs or the alert expr is dead;
  *   - every `severity` an alert stamps (`page`/`ticket`) must have an
  *     Alertmanager route, and every route must target a declared receiver —
@@ -47,14 +47,14 @@ function loadYaml(...parts: string[]): any {
 
 // --- the artefacts under test ------------------------------------------------
 const prom = loadYaml('prometheus', 'prometheus.yml')
-const alerts = loadYaml('prometheus', 'aipehub.alerts.yml')
+const alerts = loadYaml('prometheus', 'gotong.alerts.yml')
 const am = loadYaml('alertmanager', 'alertmanager.yml')
 const compose = loadYaml('docker-compose.yml')
-const alertsRaw = readMon('prometheus', 'aipehub.alerts.yml')
+const alertsRaw = readMon('prometheus', 'gotong.alerts.yml')
 
 // scrape jobs declared in prometheus.yml
 const scrapeJobs: string[] = (prom.scrape_configs ?? []).map((s: any) => s.job_name)
-const aipehubJob = (prom.scrape_configs ?? []).find((s: any) => s.job_name === 'aipehub')
+const gotongJob = (prom.scrape_configs ?? []).find((s: any) => s.job_name === 'gotong')
 
 // `job="..."` literals referenced inside alert expressions
 const jobRefs = new Set(
@@ -96,17 +96,17 @@ function severityHasRoute(sev: string): boolean {
 }
 
 describe('Route B P0-M7-M2 — monitoring stack is internally wired', () => {
-  it('aipehub scrape job hits the non-admin /metrics route WITH bearer auth', () => {
-    expect(aipehubJob).toBeTruthy()
+  it('gotong scrape job hits the non-admin /metrics route WITH bearer auth', () => {
+    expect(gotongJob).toBeTruthy()
     // P0-M7-M1 route — NOT /api/admin/metrics (that needs a machine admin).
-    expect(aipehubJob.metrics_path).toBe('/metrics')
+    expect(gotongJob.metrics_path).toBe('/metrics')
     // Auth must be present — an anonymous metrics scrape would be a leak.
-    expect(typeof aipehubJob.bearer_token_file).toBe('string')
-    expect(aipehubJob.bearer_token_file.length).toBeGreaterThan(0)
+    expect(typeof gotongJob.bearer_token_file).toBe('string')
+    expect(gotongJob.bearer_token_file.length).toBeGreaterThan(0)
   })
 
   it('every job referenced by an alert expr exists as a scrape job', () => {
-    // `up{job="aipehub"}`, `node_..{job="node"}` — a typo here = a dead alert.
+    // `up{job="gotong"}`, `node_..{job="node"}` — a typo here = a dead alert.
     expect(jobRefs.size).toBeGreaterThan(0)
     for (const job of jobRefs) {
       expect(scrapeJobs, `alert references job="${job}" with no scrape job`).toContain(job)
@@ -115,9 +115,9 @@ describe('Route B P0-M7-M2 — monitoring stack is internally wired', () => {
 
   it('Prometheus loads the alert-rules file that exists on disk', () => {
     const ruleFiles: string[] = prom.rule_files ?? []
-    expect(ruleFiles.some((f) => f.endsWith('aipehub.alerts.yml'))).toBe(true)
+    expect(ruleFiles.some((f) => f.endsWith('gotong.alerts.yml'))).toBe(true)
     // The mounted basename must be a real file in the repo.
-    expect(existsSync(join(monDir, 'prometheus', 'aipehub.alerts.yml'))).toBe(true)
+    expect(existsSync(join(monDir, 'prometheus', 'gotong.alerts.yml'))).toBe(true)
   })
 
   it('Prometheus hands alerts to Alertmanager', () => {
@@ -157,9 +157,9 @@ describe('Route B P0-M7-M2 — monitoring stack is internally wired', () => {
     // and gitignored — only its .example is tracked, so skip that path).
     const required = [
       './prometheus/prometheus.yml',
-      './prometheus/aipehub.alerts.yml',
+      './prometheus/gotong.alerts.yml',
       './alertmanager/alertmanager.yml',
-      './grafana/aipehub-overview.json',
+      './grafana/gotong-overview.json',
     ]
     for (const rel of required) {
       expect(hostPaths, `compose never mounts ${rel}`).toContain(rel)

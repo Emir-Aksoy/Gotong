@@ -1,7 +1,7 @@
 /**
- * `aipehub check` tests — the delegating workspace validator.
+ * `gotong check` tests — the delegating workspace validator.
  *
- * Like `start`, `check` never imports `@aipehub/host` at build time (it's not a
+ * Like `start`, `check` never imports `@gotong/host` at build time (it's not a
  * CLI dep); it resolves the host lazily and delegates to the host's NON-booting
  * `./check` subpath export. So the two branches — host present → run the
  * validator, host absent → install hint + non-zero — are driven through INJECTED
@@ -26,7 +26,7 @@ describe('check — host present', () => {
     const err: string[] = []
 
     const code = await check(['--strict'], {
-      resolveHost: () => '/fake/node_modules/@aipehub/host/dist/index.js',
+      resolveHost: () => '/fake/node_modules/@gotong/host/dist/index.js',
       importCheck,
       err: (l) => err.push(l),
     })
@@ -82,17 +82,17 @@ describe('check — host absent', () => {
     // the tiny CLI can check on its own — so it must NOT pretend to.
     expect(importCheck).not.toHaveBeenCalled()
     const text = err.join('\n')
-    expect(text).toContain('@aipehub/host is not installed')
+    expect(text).toContain('@gotong/host is not installed')
     // Points the user at both the install-once and run-directly paths.
-    expect(text).toContain('npm i -g @aipehub/host')
-    expect(text).toContain('npx @aipehub/host')
+    expect(text).toContain('npm i -g @gotong/host')
+    expect(text).toContain('npx @gotong/host')
   })
 })
 
 describe('runCli check wiring', () => {
   it('routes `check` through the dispatcher (not "unknown command")', async () => {
     // Under Vitest `import.meta.resolve` is unavailable, so the real
-    // `resolveModule('@aipehub/host')` returns null → host-absent branch →
+    // `resolveModule('@gotong/host')` returns null → host-absent branch →
     // exit 1 with the install hint. The point of THIS test is wiring: the
     // dispatcher reaches `check` (returns 1), not the default arm (returns 2).
     const errs: string[] = []
@@ -103,7 +103,7 @@ describe('runCli check wiring', () => {
     errSpy.mockRestore()
 
     expect(code).toBe(1)
-    expect(errs.join('\n')).toContain('@aipehub/host is not installed')
+    expect(errs.join('\n')).toContain('@gotong/host is not installed')
   })
 
   it('`help check` documents the command', () => {
@@ -115,7 +115,7 @@ describe('runCli check wiring', () => {
     runCli(['help', 'check'])
     out.mockRestore()
     const text = writes.join('')
-    expect(text).toContain('aipehub check')
+    expect(text).toContain('gotong check')
     expect(text).toContain('--strict')
   })
 })

@@ -26,9 +26,9 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { createLogger, Hub, Space, type Task } from '@aipehub/core'
-import { LlmAgent, MockLlmProvider, drainStream } from '@aipehub/llm'
-import { ownerKey, type ServiceCtx } from '@aipehub/services-sdk'
+import { createLogger, Hub, Space, type Task } from '@gotong/core'
+import { LlmAgent, MockLlmProvider, drainStream } from '@gotong/llm'
+import { ownerKey, type ServiceCtx } from '@gotong/services-sdk'
 
 import { bootstrapServices, type HubServices } from '../src/services/index.js'
 
@@ -69,7 +69,7 @@ describe('end-to-end: industry-coach agent with all three services', () => {
   let services: HubServices
 
   beforeEach(async () => {
-    root = await mkdtemp(join(tmpdir(), 'aipe-e2e-full-'))
+    root = await mkdtemp(join(tmpdir(), 'gotong-e2e-full-'))
     await rm(root, { recursive: true, force: true })
     const o = await Space.init(root, { name: 'e2e' })
     space = o.space
@@ -80,7 +80,7 @@ describe('end-to-end: industry-coach agent with all three services', () => {
     await writeFile(
       join(space.paths.services, 'plugins.json'),
       JSON.stringify({ plugins: [
-        '@aipehub/service-memory-file',
+        '@gotong/service-memory-file',
       ] }, null, 2) + '\n',
       'utf8',
     )

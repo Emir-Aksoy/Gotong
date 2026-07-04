@@ -118,7 +118,7 @@ describe('VaultStore.rotateMasterKey (Route B P0-M4c)', () => {
 describe('IdentityStore.rotateVaultMasterKey — reopen forwarder (Route B P0-M4c)', () => {
   let dir: string
   beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), 'aipe-rot-'))
+    dir = mkdtempSync(join(tmpdir(), 'gotong-rot-'))
   })
   afterEach(() => {
     rmSync(dir, { recursive: true, force: true })

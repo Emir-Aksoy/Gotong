@@ -48,7 +48,7 @@ member 在 /me 首屏看到它 → 填表 → POST /api/me/dispatch
 
 ## 三、架构主线（决定一切的一点）
 
-web 包**不依赖** `@aipehub/workflow` 运行时。工作流定义流到 web 层只有
+web 包**不依赖** `@gotong/workflow` 运行时。工作流定义流到 web 层只有
 **一条数据通道**：`WorkflowSurface.list()` 返回 `WorkflowSummary[]`。新字段
 `surfaceMe` 走的就是 `payloadSchema` 已经在走的那根管子 —— 零新通道、零依赖反转：
 
@@ -81,7 +81,7 @@ export interface MeSurfaceSpec {
 }
 ```
 
-- `WorkflowRole` 是本地字符串字面量联合，**不** import `@aipehub/identity`
+- `WorkflowRole` 是本地字符串字面量联合，**不** import `@gotong/identity`
   —— workflow 包保持零身份依赖。
 - 校验在 `schema.ts` 的 `validateWorkflow` 末尾加 `validateSurfaceSpec`，
   `inputSchema` 直接复用 `validatePayloadSchema`，`userScopeField` 复用既有
@@ -169,12 +169,12 @@ admin.js）：
 
 | 包 | 测试 | 覆盖 |
 |---|---|---|
-| `@aipehub/workflow` | `schema.test.ts` | surface.me 合法解析 / enabled 必填 / 坏 role 拒 / inputSchema 复用校验 / scope 字段正则 / 双命名 / 无 surface 不回归 |
-| `@aipehub/workflow` | `templates.test.ts`（+ Phase 14 describe，11 测试） | 3 个 shipped 模板：enabled + 精确成员字段 + 有效 scope key + scope key 永不在成员字段里 |
-| `@aipehub/host` | `workflow-controller.test.ts` | `toSummary` → `surfaceMe` 透传 |
-| `@aipehub/host` | `me-workflows-e2e.test.ts`（3 测试，**真 WorkflowController seam**） | 真 Hub+Space+Identity+serveWeb，member 登录，catalog 派生 / dispatch 强制 scope（查 `hub.tasks()` payload 断言 `case_id === memberId` 且伪造值不出现）/ 非 member-facing → 403 |
-| `@aipehub/web` | `me-routes.test.ts`（32 测试） | catalog 只含 enabled / role 过滤 / 字段来自 inputSchema / dispatch 安全契约 / fail-closed 无 surface |
-| `@aipehub/web` | `manifest.test.ts`（84 测试） | 首个 builtin-bundle round-trip：`parseBundle` → `parseYaml` → 断言 `surface.me` 存活（snake_case keys） |
+| `@gotong/workflow` | `schema.test.ts` | surface.me 合法解析 / enabled 必填 / 坏 role 拒 / inputSchema 复用校验 / scope 字段正则 / 双命名 / 无 surface 不回归 |
+| `@gotong/workflow` | `templates.test.ts`（+ Phase 14 describe，11 测试） | 3 个 shipped 模板：enabled + 精确成员字段 + 有效 scope key + scope key 永不在成员字段里 |
+| `@gotong/host` | `workflow-controller.test.ts` | `toSummary` → `surfaceMe` 透传 |
+| `@gotong/host` | `me-workflows-e2e.test.ts`（3 测试，**真 WorkflowController seam**） | 真 Hub+Space+Identity+serveWeb，member 登录，catalog 派生 / dispatch 强制 scope（查 `hub.tasks()` payload 断言 `case_id === memberId` 且伪造值不出现）/ 非 member-facing → 403 |
+| `@gotong/web` | `me-routes.test.ts`（32 测试） | catalog 只含 enabled / role 过滤 / 字段来自 inputSchema / dispatch 安全契约 / fail-closed 无 surface |
+| `@gotong/web` | `manifest.test.ts`（84 测试） | 首个 builtin-bundle round-trip：`parseBundle` → `parseYaml` → 断言 `surface.me` 存活（snake_case keys） |
 
 全量 `pnpm -r test` 绿（workflow 7 文件 / host 32 文件 / web 25 文件，其余包全过）。
 

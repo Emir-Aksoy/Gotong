@@ -1,8 +1,8 @@
 /**
- * `@aipehub/cli-agent` — outbound CLI shell-out adapter.
+ * `@gotong/cli-agent` — outbound CLI shell-out adapter.
  *
  * Wraps a self-hosted coding-agent CLI (Claude Code / Codex / OpenCode / Aider …)
- * as a hub `Participant` so the hub can DRIVE it (the mirror of `aipehub connect`,
+ * as a hub `Participant` so the hub can DRIVE it (the mirror of `gotong connect`,
  * where the CLI calls the hub inbound). Built to the AGENT-ADAPTER-CONTRACT
  * five-seam bar (observe / intercept / handoff / resume / terminate).
  *

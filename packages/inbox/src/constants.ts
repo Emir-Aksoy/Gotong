@@ -2,9 +2,9 @@
  * Wire / protocol constants for the member task inbox.
  *
  * These are deliberately plain string literals (not imported across packages)
- * so `@aipehub/workflow`'s `human:` step sugar can dispatch to the same
- * capability without `@aipehub/workflow` depending on `@aipehub/inbox`. They
- * are a stable contract, exactly like the `aipehub.workflow/v1` schema id.
+ * so `@gotong/workflow`'s `human:` step sugar can dispatch to the same
+ * capability without `@gotong/workflow` depending on `@gotong/inbox`. They
+ * are a stable contract, exactly like the `gotong.workflow/v1` schema id.
  */
 
 /**
@@ -12,14 +12,14 @@
  * a human decision. One capability for all kinds — the kind lives in the
  * payload, keeping the scheduler / runner unaware of HITL specifics.
  */
-export const HUMAN_CAPABILITY = 'aipehub.human/v1'
+export const HUMAN_CAPABILITY = 'gotong.human/v1'
 
 /**
  * The fixed participant id the host registers the broker under. Fixed (not
  * generated) so `HostInboxService.resolve` can `hub.resumeTask(BROKER_ID, …)`
  * without a lookup.
  */
-export const HUMAN_INBOX_PARTICIPANT_ID = 'aipehub:human-inbox'
+export const HUMAN_INBOX_PARTICIPANT_ID = 'gotong:human-inbox'
 
 /**
  * The `resumeAt` a human task is parked at: ~8000 years out (2286-11-20 in ms

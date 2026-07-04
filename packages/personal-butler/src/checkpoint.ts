@@ -6,14 +6,14 @@
  * stays a thin leaf. `agent.ts` wires these into park (`SuspendTaskError`) and
  * resume (decision injection).
  *
- * The model mirrors `@aipehub/acp-agent`'s `acp-checkpoint.ts` but the carried
+ * The model mirrors `@gotong/acp-agent`'s `acp-checkpoint.ts` but the carried
  * state is RE-RUNNABLE, not a live in-memory handle: a butler park rides the
  * tool-loop conversation (`messages`) + the round's `toolUses`, so a fresh
  * process can answer the deferred tool call after approval. That makes a butler
  * park durable across a hub restart (unlike an ACP permission park).
  */
 
-import type { LlmMessage, LlmToolUseBlock } from '@aipehub/llm'
+import type { LlmMessage, LlmToolUseBlock } from '@gotong/llm'
 
 /**
  * Sentinel `resumeAt` meaning "never auto-resume" — same value the inbox and

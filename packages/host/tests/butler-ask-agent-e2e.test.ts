@@ -32,12 +32,12 @@ import {
   type ParticipantId,
   type Task,
   type TaskResult,
-} from '@aipehub/core'
-import { MASTER_KEY_LEN_BYTES, openIdentityStore, userPrincipal, type IdentityStore } from '@aipehub/identity'
-import { FileInboxStore } from '@aipehub/inbox'
-import { PersonalButlerAgent } from '@aipehub/personal-butler'
-import type { LlmMessage, LlmProvider, LlmRequest, LlmStreamChunk } from '@aipehub/llm'
-import type { MemoryHandle } from '@aipehub/services-sdk'
+} from '@gotong/core'
+import { MASTER_KEY_LEN_BYTES, openIdentityStore, userPrincipal, type IdentityStore } from '@gotong/identity'
+import { FileInboxStore } from '@gotong/inbox'
+import { PersonalButlerAgent } from '@gotong/personal-butler'
+import type { LlmMessage, LlmProvider, LlmRequest, LlmStreamChunk } from '@gotong/llm'
+import type { MemoryHandle } from '@gotong/services-sdk'
 
 import { buildButlerAskAgentToolset } from '../src/personal-butler-ask-agent.js'
 import { openButlerMemory } from '../src/personal-butler-memory.js'
@@ -111,7 +111,7 @@ interface Rig {
 }
 
 async function boot(): Promise<Rig> {
-  const tmp = await mkdtemp(join(tmpdir(), 'aipe-butler-ask-e2e-'))
+  const tmp = await mkdtemp(join(tmpdir(), 'gotong-butler-ask-e2e-'))
   const { space } = await Space.init(tmp, { name: 'butler-ask-e2e' })
   const identity = openIdentityStore({ dbPath: join(tmp, 'identity.sqlite'), masterKey: randomBytes(MASTER_KEY_LEN_BYTES) })
   const inboxStore = new FileInboxStore(tmp)

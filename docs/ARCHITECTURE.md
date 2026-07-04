@@ -1,4 +1,4 @@
-# AipeHub Architecture (v0.2)
+# Gotong Architecture (v0.2)
 
 This document records the design decisions for the framework. It is the source of truth when the code disagrees with itself.
 
@@ -9,21 +9,21 @@ This document records the design decisions for the framework. It is the source o
 | v0.2 | `LlmAgent` base class + neutral `LlmProvider` interface + Anthropic / OpenAI providers — drop in an LLM-backed agent without coupling the Hub to any vendor SDK |
 | v0.3 | `SqliteStorage` — durable transcript persistence backed by SQLite (`better-sqlite3` optional peer dep). FileStorage stays the no-dependency default. |
 | v0.4 | Per-agent identity at HELLO — `authenticate` can return `{ ok: true, allowedAgents: ['a1', 'a2'] }` to bind an API key to a specific set of agent ids. A leaked key cannot impersonate any other agent. New `forbidden_agent` REJECT code. Back-compat: boolean return still works. |
-| v0.5 | Python SDK (`python-sdk/`, package name `aipehub`) — second language client. `AgentParticipant` + `connect()` mirror the Node SDK; tests pass against a fake Hub server; `examples/remote-python` runs a Node host + Python worker end-to-end over the same wire protocol. |
-| v0.6 | CLI human adapter — `examples/cli-human` shows the terminal driving a `HumanParticipant`: tasks render to stdout, responses come back through readline (`AIPE_AUTO=1` skips the prompt for CI / non-TTY). Reference pattern for any UI / chat / IM adapter built on `human.next()` / `human.complete()` / `human.reject()`. |
+| v0.5 | Python SDK (`python-sdk/`, package name `gotong`) — second language client. `AgentParticipant` + `connect()` mirror the Node SDK; tests pass against a fake Hub server; `examples/remote-python` runs a Node host + Python worker end-to-end over the same wire protocol. |
+| v0.6 | CLI human adapter — `examples/cli-human` shows the terminal driving a `HumanParticipant`: tasks render to stdout, responses come back through readline (`GOTONG_AUTO=1` skips the prompt for CI / non-TTY). Reference pattern for any UI / chat / IM adapter built on `human.next()` / `human.complete()` / `human.reject()`. |
 | v0.7 | **Deadlines** — `Task.deadlineMs` added to the wire type: tasks past their deadline resolve as `failed` with `error: 'deadline_expired'` and never reach a participant. (Originally shipped behind a `PriorityQueueScheduler` wrapper + `Task.priority`; the 2026-06 audit found zero adoption and folded deadline enforcement into `DefaultScheduler`, removing the wrapper, the `schedulerFactory` seam, and `Task.priority`.) |
 
 ## 1. Philosophy
 
 **The Hub is a communication space, not a brain.**
 
-AipeHub does not run LLMs. It does not implement agent loops. It does not own prompts or tool registries. Agents arrive at the Hub with their own intelligence — whether that intelligence is a Claude API call, a shell script, or a sleeping human — and the Hub's only job is to route messages, dispatch tasks, persist the transcript, and emit events.
+Gotong does not run LLMs. It does not implement agent loops. It does not own prompts or tool registries. Agents arrive at the Hub with their own intelligence — whether that intelligence is a Claude API call, a shell script, or a sleeping human — and the Hub's only job is to route messages, dispatch tasks, persist the transcript, and emit events.
 
-This is the opposite stance from frameworks like CrewAI, AutoGen, or OpenBotX, all of which couple agent execution into the framework itself. AipeHub deliberately stays one layer below: it is to multi-participant collaboration what a message broker is to microservices.
+This is the opposite stance from frameworks like CrewAI, AutoGen, or OpenBotX, all of which couple agent execution into the framework itself. Gotong deliberately stays one layer below: it is to multi-participant collaboration what a message broker is to microservices.
 
 **Humans are first-class participants, not a special tool call.**
 
-Most agent frameworks treat humans as a `request_human_input` tool. AipeHub treats humans as a `Participant` with the same wire protocol as agents — they register, subscribe to channels, receive messages, accept tasks, and emit results. The only difference is in the *adapter layer*: a human adapter is backed by a UI; an agent adapter is backed by code. The Hub does not care.
+Most agent frameworks treat humans as a `request_human_input` tool. Gotong treats humans as a `Participant` with the same wire protocol as agents — they register, subscribe to channels, receive messages, accept tasks, and emit results. The only difference is in the *adapter layer*: a human adapter is backed by a UI; an agent adapter is backed by code. The Hub does not care.
 
 ## 2. Participants — the dual-track abstraction
 
@@ -115,8 +115,8 @@ Surface area:
 The frontend is a single vanilla-JS page; no bundler, no framework, no build step beyond `tsc` for the server. Use it as-is, or read it as ~250 lines of reference for building your own UI on top of `hub.onEvent()`.
 
 ```ts
-import { Hub } from '@aipehub/core'
-import { serveWeb } from '@aipehub/web'
+import { Hub } from '@gotong/core'
+import { serveWeb } from '@gotong/web'
 
 const hub = new Hub()
 await hub.start()
@@ -126,16 +126,16 @@ const web = await serveWeb(hub, { port: 3000 })
 
 ## 8. Deployment shapes
 
-AipeHub supports two deployment shapes with the *same* Hub API in both. Local and remote agents register into the same `Registry`; the scheduler does not distinguish them.
+Gotong supports two deployment shapes with the *same* Hub API in both. Local and remote agents register into the same `Registry`; the scheduler does not distinguish them.
 
 ### 8a. Embedded — everything in one process
 
 Library mode. Agents are in-process objects.
 
 ```ts
-import { Hub, FileStorage } from '@aipehub/core'
+import { Hub, FileStorage } from '@gotong/core'
 
-const hub = new Hub({ storage: new FileStorage('./aipe.jsonl') })
+const hub = new Hub({ storage: new FileStorage('./gotong.jsonl') })
 await hub.start()
 hub.register(new MyAgent())
 hub.register(new MyHumanAdapter())
@@ -152,21 +152,21 @@ The Hub process opens a WebSocket transport. Remote agents speak the wire protoc
 
 ```ts
 // host process
-import { Hub } from '@aipehub/core'
-import { serveWebSocket } from '@aipehub/transport-ws'
+import { Hub } from '@gotong/core'
+import { serveWebSocket } from '@gotong/transport-ws'
 
 const hub = new Hub()
 await hub.start()
 const ws = await serveWebSocket(hub, {
   port: 4000,
-  authenticate: (apiKey) => apiKey === process.env.AIPE_API_KEY,
+  authenticate: (apiKey) => apiKey === process.env.GOTONG_API_KEY,
 })
 // hub.dispatch(...) just works — remote agents look identical to local ones
 ```
 
 ```ts
 // worker process — Node SDK
-import { AgentParticipant, connect } from '@aipehub/sdk-node'
+import { AgentParticipant, connect } from '@gotong/sdk-node'
 
 class MyAgent extends AgentParticipant {
   constructor() { super({ id: 'a1', capabilities: ['draft'] }) }
@@ -176,7 +176,7 @@ class MyAgent extends AgentParticipant {
 const session = await connect({
   url: 'ws://hub.example.com:4000',
   agents: [new MyAgent()],
-  apiKey: process.env.AIPE_API_KEY,
+  apiKey: process.env.GOTONG_API_KEY,
 })
 ```
 
@@ -195,7 +195,7 @@ Hub                                         (knows nothing about LLMs)
               └── MockLlmProvider            (in-process, no network)
 ```
 
-**Neutral wire types** (zero vendor coupling — these live in `@aipehub/llm`):
+**Neutral wire types** (zero vendor coupling — these live in `@gotong/llm`):
 
 ```ts
 interface LlmProvider {
@@ -228,7 +228,7 @@ For full control (multi-step reasoning, custom retry, streaming) override `handl
 
 **Provider error semantics.** Providers throw on transport / auth / rate-limit errors; `AgentParticipant.onTask` catches the throw and produces a `failed` `TaskResult` with the error message. A `stopReason: 'error'` on a successful response is a soft failure — the provider got a response body but the model bailed (refusal, content filter, unknown reason); the caller sees the partial text plus the stop reason and decides what to do.
 
-**Why providers are separate packages.** `@anthropic-ai/sdk` and `openai` are both ~1MB+ peer dependencies. Most users only want one vendor; bundling both into a `@aipehub/llm` mega-package would punish everyone for the polyglot case. Splitting also lets each provider track its vendor SDK's version independently.
+**Why providers are separate packages.** `@anthropic-ai/sdk` and `openai` are both ~1MB+ peer dependencies. Most users only want one vendor; bundling both into a `@gotong/llm` mega-package would punish everyone for the polyglot case. Splitting also lets each provider track its vendor SDK's version independently.
 
 **Streaming, tool calls, and JSON mode** are NOT in v0.2 — see §10. The neutral `LlmResponse` is a finished, text-only completion.
 
@@ -238,15 +238,15 @@ Since v0.2 the project has filled in a number of items that used to be on this "
 
 | Feature | Status | Where it lives |
 |---|---|---|
-| Python SDK | ✅ shipped (v0.5) | `python-sdk/`, package name `aipehub` on PyPI |
+| Python SDK | ✅ shipped (v0.5) | `python-sdk/`, package name `gotong` on PyPI |
 | `SqliteStorage` | ✅ shipped (v0.3) | `packages/core/src/storage/sqlite.ts`, peer dep `better-sqlite3` |
 | Per-agent identity at HELLO | ✅ shipped (v0.4) | `authenticate(apiKey) → { ok, allowedAgents? }`; new `forbidden_agent` REJECT code |
 | Deadlines | ✅ shipped (v0.7, folded into `DefaultScheduler` 2026-06) | `Task.deadlineMs`; `error: 'deadline_expired'` |
-| Host-managed LLM agents (no code) | ✅ shipped (v2.1) | `LocalAgentPool` in `@aipehub/host`; YAML/JSON manifest in admin UI |
-| Encrypted API-key storage | ✅ shipped (v2.1) | AES-256-GCM in `<space>/secrets.enc.json`; master key file or `AIPE_SECRET_KEY` env |
+| Host-managed LLM agents (no code) | ✅ shipped (v2.1) | `LocalAgentPool` in `@gotong/host`; YAML/JSON manifest in admin UI |
+| Encrypted API-key storage | ✅ shipped (v2.1) | AES-256-GCM in `<space>/secrets.enc.json`; master key file or `GOTONG_SECRET_KEY` env |
 | Contribution scoring + leaderboard | ✅ shipped (v2.1) | `Task.weight`, `Evaluation.rating`, `hub.leaderboard(...)`, per-publisher opt-out |
-| Template library (built-in + community) | ✅ shipped (v2.1) | `templates/{,community}/{agents,teams}/`; manifest parser in `@aipehub/web` |
-| LLM streaming | ✅ shipped (v3.8 / Phase 8) | `LlmProvider.stream(req)` returns `AsyncIterable<LlmStreamChunk>`. `LlmAgent` consumes chunks per round; `LocalAgentPool` forwards them as `llm_stream_chunk` transcript entries; `@aipehub/web` SSE re-streams them to the admin UI for typewriter-style render. |
+| Template library (built-in + community) | ✅ shipped (v2.1) | `templates/{,community}/{agents,teams}/`; manifest parser in `@gotong/web` |
+| LLM streaming | ✅ shipped (v3.8 / Phase 8) | `LlmProvider.stream(req)` returns `AsyncIterable<LlmStreamChunk>`. `LlmAgent` consumes chunks per round; `LocalAgentPool` forwards them as `llm_stream_chunk` transcript entries; `@gotong/web` SSE re-streams them to the admin UI for typewriter-style render. |
 | **Tool / function calling inside `LlmAgent`** | ❌ not yet | `LlmAgent` passes `task.payload` through, returns text. Multi-turn tool loops are app code today. |
 | **Persistent pending tasks across restarts** | ❌ not yet | Only the transcript is persisted. A pending-tasks table on `SqliteStorage` is sketched but not wired. See §12. |
 | **Reconnect that preserves in-flight tasks** | ❌ not yet | Disconnect fails outstanding tasks as `remote_disconnect`. A `RESUME` frame with prior `sessionId` is reserved on the wire but not implemented. |
@@ -319,11 +319,11 @@ examples/
   remote-python/        Node Hub + Python worker (cross-language) — v0.5
   cli-human/            terminal-as-human adapter; readline-driven approval loop — v0.6
 
-python-sdk/             Python SDK (PyPI name: aipehub) — v0.5
-  src/aipehub/
-    protocol.py         frame constants + outbound builders (mirrors @aipehub/protocol)
+python-sdk/             Python SDK (PyPI name: gotong) — v0.5
+  src/gotong/
+    protocol.py         frame constants + outbound builders (mirrors @gotong/protocol)
     agent.py            AgentParticipant — sync or async handle_task
-    session.py          connect() + Session state machine (mirrors @aipehub/sdk-node)
+    session.py          connect() + Session state machine (mirrors @gotong/sdk-node)
   tests/                pytest-asyncio against a real websockets fake-Hub
 ```
 

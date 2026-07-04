@@ -1,6 +1,6 @@
-# @aipehub/service-memory-file
+# @gotong/service-memory-file
 
-First-party AipeHub plugin: file-backed `memory` service.
+First-party Gotong plugin: file-backed `memory` service.
 Implements [`MemoryHandle`](../services-sdk/src/types/memory.ts) on
 top of append-only JSONL files.
 

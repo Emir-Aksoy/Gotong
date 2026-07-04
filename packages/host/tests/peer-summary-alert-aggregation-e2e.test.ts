@@ -45,13 +45,13 @@ import {
   createInprocHubLinkPair,
   installPeerLink,
   type HubLink,
-} from '@aipehub/core'
+} from '@gotong/core'
 import {
   MASTER_KEY_LEN_BYTES,
   openIdentityStore,
   type IdentityStore,
   type PeerRegistration,
-} from '@aipehub/identity'
+} from '@gotong/identity'
 
 import {
   PeerSummaryHost,
@@ -143,7 +143,7 @@ describe('cross-hub-agg M4 — federation-wide alert aggregation is opt-in + cou
   let pairDenied: ReturnType<typeof createInprocHubLinkPair>
 
   beforeEach(async () => {
-    tmp = await mkdtemp(join(tmpdir(), 'aipe-peer-alert-agg-e2e-'))
+    tmp = await mkdtemp(join(tmpdir(), 'gotong-peer-alert-agg-e2e-'))
     store = openIdentityStore({
       dbPath: join(tmp, 'identity.sqlite'),
       masterKey: randomBytes(MASTER_KEY_LEN_BYTES),

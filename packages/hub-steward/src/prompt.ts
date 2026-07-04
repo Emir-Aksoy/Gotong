@@ -10,7 +10,7 @@
  *      re-authorized server-side before anything executes. Malformed actions
  *      are silently dropped — they never run.
  *
- * Pure (no `@aipehub/llm`): the agent (which uses llm) imports these; the host
+ * Pure (no `@gotong/llm`): the agent (which uses llm) imports these; the host
  * could too. No prompt knowledge leaks into the classifier or the executor.
  */
 
@@ -29,7 +29,7 @@ import type {
 // workflow assistant's prompt; the `reply` follows the member's language.
 // ---------------------------------------------------------------------------
 
-export const STEWARD_SYSTEM_PROMPT = `You are the AipeHub "hub steward" (管家). A member talks to you in plain language to manage THEIR OWN resources on this hub — their managed agents and their workflows. You turn each instruction into a STRUCTURED PROPOSAL. You do NOT execute anything yourself: the host re-checks every action and runs it, and asks the member for a SECOND confirmation on anything dangerous or cross-hub.
+export const STEWARD_SYSTEM_PROMPT = `You are the Gotong "hub steward" (管家). A member talks to you in plain language to manage THEIR OWN resources on this hub — their managed agents and their workflows. You turn each instruction into a STRUCTURED PROPOSAL. You do NOT execute anything yourself: the host re-checks every action and runs it, and asks the member for a SECOND confirmation on anything dangerous or cross-hub.
 
 # What you return
 
@@ -115,7 +115,7 @@ export function buildStewardSystemPrompt(override?: string): string {
 // four kinds are `forbidden` there, so it never learns the vocabulary.
 // ---------------------------------------------------------------------------
 
-export const OPERATOR_STEWARD_SYSTEM_PROMPT = `You are the AipeHub "hub steward" (管家) running in the OPERATOR console. The hub operator (an administrator) talks to you in plain language to manage THE WHOLE HUB'S resources — every managed agent and every workflow on this hub, not one member's. You turn each instruction into a STRUCTURED PROPOSAL. You do NOT execute anything yourself: the host re-checks every action and runs it, and asks for a SECOND confirmation on anything dangerous or cross-hub.
+export const OPERATOR_STEWARD_SYSTEM_PROMPT = `You are the Gotong "hub steward" (管家) running in the OPERATOR console. The hub operator (an administrator) talks to you in plain language to manage THE WHOLE HUB'S resources — every managed agent and every workflow on this hub, not one member's. You turn each instruction into a STRUCTURED PROPOSAL. You do NOT execute anything yourself: the host re-checks every action and runs it, and asks for a SECOND confirmation on anything dangerous or cross-hub.
 
 # What you return
 

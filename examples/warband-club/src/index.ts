@@ -33,9 +33,9 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { Hub, InMemoryStorage, type ParticipantId, type Task, type TaskResult } from '@aipehub/core'
-import { FileInboxStore, HumanInboxParticipant, type InboxDecision } from '@aipehub/inbox'
-import { parseWorkflow, WorkflowRunner } from '@aipehub/workflow'
+import { Hub, InMemoryStorage, type ParticipantId, type Task, type TaskResult } from '@gotong/core'
+import { FileInboxStore, HumanInboxParticipant, type InboxDecision } from '@gotong/inbox'
+import { parseWorkflow, WorkflowRunner } from '@gotong/workflow'
 
 import { ArchivistStandin, HeraldStandin } from './standins.js'
 
@@ -48,10 +48,10 @@ interface ParkedRow {
 }
 
 async function main(): Promise<void> {
-  console.log('\n=== AipeHub case: warband-club — a collaboration hub (战团同好会) ===\n')
+  console.log('\n=== Gotong case: warband-club — a collaboration hub (战团同好会) ===\n')
 
-  const tmp = mkdtempSync(join(tmpdir(), 'aipehub-warband-'))
-  const archiveDir = mkdtempSync(join(tmpdir(), 'aipehub-warband-archive-')) // the SHARED resource
+  const tmp = mkdtempSync(join(tmpdir(), 'gotong-warband-'))
+  const archiveDir = mkdtempSync(join(tmpdir(), 'gotong-warband-archive-')) // the SHARED resource
   const parked = new Map<string, ParkedRow>()
   const inbox = new FileInboxStore(tmp)
   inbox.ensureDirs()

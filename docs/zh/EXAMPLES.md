@@ -53,11 +53,11 @@ pnpm demo                          # = hello-collab（官方第一步，见 QUIC
 | [`multimodal-vision`](../../examples/multimodal-vision) | LlmAgent 经 LlmImageBlock 读一张图并描述——多模态内容块端到端 | 需 key |
 | [`industry-consultation-deepseek`](../../examples/industry-consultation-deepseek) | 真 DeepSeek 驱动的一条行业咨询流水线 | 需 `DEEPSEEK_API_KEY` |
 | [`workflow-assistant`](../../examples/workflow-assistant) | 自然语言 → YAML → parseWorkflow → deepCheck → save 全管线（真 LLM） | 需 key |
-| [`mcp-tools-quickstart`](../../examples/mcp-tools-quickstart) | 纯 `@aipehub/mcp-client`：spawn 文件系统 MCP server、列工具、调一个（无 Hub 无 LLM） | 需本地 MCP server |
+| [`mcp-tools-quickstart`](../../examples/mcp-tools-quickstart) | 纯 `@gotong/mcp-client`：spawn 文件系统 MCP server、列工具、调一个（无 Hub 无 LLM） | 需本地 MCP server |
 | [`mcp-tools-llm-agent`](../../examples/mcp-tools-llm-agent) | 把 MCP 文件系统工具交给 Claude 的 tool-use 循环，看它读文件 | 需 key + MCP server |
 | [`rag-mcp`](../../examples/rag-mcp) | RAG 全走 MCP：一个知识 MCP server（chroma-mcp）灌文档、答问 | 需 MCP server |
-| [`elasticsearch-kb`](../../examples/elasticsearch-kb) | 把 ES 索引当知识库——官方 ES MCP server 查，AipeHub 不碰集群 | 需 ES + MCP server |
-| [`obsidian-kb`](../../examples/obsidian-kb) | 把 Obsidian 库当知识库——mcp-obsidian 读，AipeHub 不碰库 | 需 Obsidian + MCP server |
+| [`elasticsearch-kb`](../../examples/elasticsearch-kb) | 把 ES 索引当知识库——官方 ES MCP server 查，Gotong 不碰集群 | 需 ES + MCP server |
+| [`obsidian-kb`](../../examples/obsidian-kb) | 把 Obsidian 库当知识库——mcp-obsidian 读，Gotong 不碰库 | 需 Obsidian + MCP server |
 | [`remote-agent`](../../examples/remote-agent) | 跨进程：Hub 一个进程、agents 另一个，走线协议连 | 需 socket |
 | [`remote-python`](../../examples/remote-python) | 跨语言：Node Hub + Python worker，走线协议连 | 需 socket + python |
 | [`services-sidecar-demo`](../../examples/services-sidecar-demo) | agent 走 WebSocket 调 Hub Services（memory），SERVICE_CALL（mock provider） | 需 socket |
@@ -87,10 +87,10 @@ pnpm demo                          # = hello-collab（官方第一步，见 QUIC
 | [`a2a-long-running-step`](../../examples/a2a-long-running-step) | 会挂起的 A2A 步：远端 working→completed，整个 run park 到收敛 | 零 |
 | [`codex-deepseek-hub`](../../examples/codex-deepseek-hub) | 一个 router LLM 管 Codex + DeepSeek TUI 编码 agent，同一 repo 共享 AGENTS.md/PROGRESS.md | 零 |
 | [`personal-coding-hub`](../../examples/personal-coding-hub) | 一个 router LLM 管 Claude Code + Codex，按目标派编码任务，同一 repo | 零 |
-| [`im-bridge-host`](../../examples/im-bridge-host) | 把 IM 桥（`@aipehub/im-*`）经 host 路由端到端接进 `Hub.dispatch`，带绑定码流程 | 需 IM 绑定 |
+| [`im-bridge-host`](../../examples/im-bridge-host) | 把 IM 桥（`@gotong/im-*`）经 host 路由端到端接进 `Hub.dispatch`，带绑定码流程 | 需 IM 绑定 |
 | [`im-steward-bridge`](../../examples/im-steward-bridge) | 从 IM 找管家：`/steward <大白话>` → plan、`/apply <n>` → apply，危险动作 park 到审批 | 需 IM 绑定 |
 | [`activepieces-bridge`](../../examples/activepieces-bridge) | 入站自动化 webhook（Activepieces/n8n/Make/Zapier）→ `Hub.dispatch`，共享密钥鉴权 | 需 webhook |
-| [`windmill-bridge`](../../examples/windmill-bridge) | 出站：AipeHub agent 把任务委托给 Windmill 持久工作流引擎并轮询结果 | 需 Windmill |
+| [`windmill-bridge`](../../examples/windmill-bridge) | 出站：Gotong agent 把任务委托给 Windmill 持久工作流引擎并轮询结果 | 需 Windmill |
 
 ## ⑥ 完整形态 hub（照着抄一个真的）
 

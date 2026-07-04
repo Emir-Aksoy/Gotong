@@ -14,7 +14,7 @@
 
 ## 1. Why recognition only
 
-AipeHub's long-term shape is a **governed market of reusable components** —
+Gotong's long-term shape is a **governed market of reusable components** —
 templates, adapters, knowledge-base connectors — built so people trust it enough to
 point it at their home, their family, or their money (see
 [`GOVERNANCE.md`](../GOVERNANCE.md) § "Path to a component committee"). For a market
@@ -186,7 +186,7 @@ So pillar ⑤ adds two light, file-first artifacts — and nothing heavier:
   or GitHub Action (the repo spends no Actions budget on bookkeeping, and a markdown table
   is the lightest honest thing); you are added by a normal PR.
 - **A curated learning showcase — [`LEARN.md`](../LEARN.md).** The best community-made
-  material for learning AipeHub — videos, talks, tutorials, posts — each credited to its
+  material for learning Gotong — videos, talks, tutorials, posts — each credited to its
   author and linked from the README. This is the **reach analog of pillar ④**: flagship
   templates are the best things to *remix*; LEARN entries are the best things to *learn
   from*. Curating someone's video here is a concrete, visible act of recognition — and it

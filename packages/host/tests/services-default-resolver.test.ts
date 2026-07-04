@@ -10,7 +10,7 @@
  * Together, neither file caught the original PR-5/-13 bug: pnpm's
  * isolated module graph means `services-sdk/dist/loader.js`'s naive
  * `import(pkg)` can't see plugin packages declared as host
- * dependencies, because services-sdk's own `node_modules/@aipehub/`
+ * dependencies, because services-sdk's own `node_modules/@gotong/`
  * only contains `core`. Three plugins were declared as host deps but
  * none of them resolved when the host actually booted.
  *
@@ -31,8 +31,8 @@ import { join } from 'node:path'
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { createLogger, Hub, Space } from '@aipehub/core'
-import type { Owner, MemoryHandle, ArtifactHandle, DatastoreHandle } from '@aipehub/services-sdk'
+import { createLogger, Hub, Space } from '@gotong/core'
+import type { Owner, MemoryHandle, ArtifactHandle, DatastoreHandle } from '@gotong/services-sdk'
 
 import { bootstrapServices } from '../src/services/index.js'
 
@@ -43,7 +43,7 @@ describe('host services — default importPackage resolves all first-party plugi
   let space: Space
   let hub: Hub
   beforeEach(async () => {
-    root = await mkdtemp(join(tmpdir(), 'aipe-default-resolver-'))
+    root = await mkdtemp(join(tmpdir(), 'gotong-default-resolver-'))
     await rm(root, { recursive: true, force: true })
     const opened = await Space.init(root, { name: 'test' })
     space = opened.space

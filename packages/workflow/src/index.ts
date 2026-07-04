@@ -1,5 +1,5 @@
 /**
- * Public API for `@aipehub/workflow`.
+ * Public API for `@gotong/workflow`.
  */
 
 export {
@@ -94,7 +94,7 @@ export { SimpleStepExecutor, ParallelStepExecutor } from './step-executors.js'
 export type { StepExecutor, StepExecContext } from './step-executors.js'
 
 // Phase 13 M1 — AI-assisted workflow authoring moved out to its own
-// package, `@aipehub/workflow-assistant`, so this runner stays free of
+// package, `@gotong/workflow-assistant`, so this runner stays free of
 // any LLM runtime dependency. Import from there if you want the agent:
 //
-//   import { WorkflowAssistantAgent } from '@aipehub/workflow-assistant'
+//   import { WorkflowAssistantAgent } from '@gotong/workflow-assistant'

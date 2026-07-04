@@ -1,19 +1,19 @@
-# @aipehub/core
+# @gotong/core
 
-The Hub, message bus, registry, scheduler, transcript, and storage primitives for [AipeHub](https://github.com/Emir-Aksoy/AipeHub) — a TypeScript framework for orchestrating agent clusters and humans as collaborative participants.
+The Hub, message bus, registry, scheduler, transcript, and storage primitives for [Gotong](https://github.com/Emir-Aksoy/Gotong) — a TypeScript framework for orchestrating agent clusters and humans as collaborative participants.
 
 This package is the only one most users need. Everything else (web UI, WebSocket transport, LLM agents, Python SDK) plugs in.
 
 ## Install
 
 ```bash
-pnpm add @aipehub/core
+pnpm add @gotong/core
 ```
 
 ## Use
 
 ```ts
-import { Hub, AgentParticipant, HumanParticipant } from '@aipehub/core'
+import { Hub, AgentParticipant, HumanParticipant } from '@gotong/core'
 
 class MyAgent extends AgentParticipant {
   constructor() { super({ id: 'a1', capabilities: ['draft'] }) }
@@ -39,13 +39,13 @@ const result = await hub.dispatch({
 - `HumanParticipant` — base class for human adapters (UI/CLI/IM).
 - `DefaultScheduler` — three strategies: `explicit`, `capability`, `broadcast`; enforces `Task.deadlineMs` at submit-time (`deadline_expired`).
 - `InMemoryStorage`, `FileStorage`, `SqliteStorage` (optional peer dep `better-sqlite3`).
-- **Admission gating** (v1.1) — `hub.requestAdmission(...)`, `hub.pendingApplications()`, `hub.approveApplication(...)`, `hub.rejectApplication(...)`. Used by `@aipehub/transport-ws` with `gating: 'admin-approval'` to hold a connecting agent in a pending state until an admin approves. Pair with `@aipehub/web` for the admin UI.
+- **Admission gating** (v1.1) — `hub.requestAdmission(...)`, `hub.pendingApplications()`, `hub.approveApplication(...)`, `hub.rejectApplication(...)`. Used by `@gotong/transport-ws` with `gating: 'admin-approval'` to hold a connecting agent in a pending state until an admin approves. Pair with `@gotong/web` for the admin UI.
 - **Evaluation** (v1.1) — `hub.evaluate({ taskId, by, rating?, comment? })` writes an append-only verdict on a finished task into the transcript.
 
 ## See also
 
-- [docs/ARCHITECTURE.md](https://github.com/Emir-Aksoy/AipeHub/blob/main/docs/ARCHITECTURE.md) — the design.
-- [docs/PROTOCOL.md](https://github.com/Emir-Aksoy/AipeHub/blob/main/docs/PROTOCOL.md) — the wire protocol for `@aipehub/transport-ws` and `@aipehub/sdk-node`.
+- [docs/ARCHITECTURE.md](https://github.com/Emir-Aksoy/Gotong/blob/main/docs/ARCHITECTURE.md) — the design.
+- [docs/PROTOCOL.md](https://github.com/Emir-Aksoy/Gotong/blob/main/docs/PROTOCOL.md) — the wire protocol for `@gotong/transport-ws` and `@gotong/sdk-node`.
 
 ## License
 

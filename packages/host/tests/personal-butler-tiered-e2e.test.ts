@@ -34,20 +34,20 @@ import { join } from 'node:path'
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { Hub, InMemoryStorage, type Logger } from '@aipehub/core'
+import { Hub, InMemoryStorage, type Logger } from '@gotong/core'
 import {
   DEFAULT_TIERS,
   tieredReviewer,
   type MemoryReviewer,
-} from '@aipehub/personal-memory'
-import { GovernedActionToolset, PersonalButlerAgent } from '@aipehub/personal-butler'
+} from '@gotong/personal-memory'
+import { GovernedActionToolset, PersonalButlerAgent } from '@gotong/personal-butler'
 import type {
   LlmRequest,
   LlmMessage,
   LlmProvider,
   LlmStreamChunk,
-} from '@aipehub/llm'
-import type { MemoryHandle } from '@aipehub/services-sdk'
+} from '@gotong/llm'
+import type { MemoryHandle } from '@gotong/services-sdk'
 
 import { HostButlerMemoryService } from '../src/butler-memory-service.js'
 import { openButlerMemory } from '../src/personal-butler-memory.js'

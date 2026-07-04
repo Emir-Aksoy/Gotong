@@ -1,4 +1,4 @@
-schema: aipehub.workflow/v1
+schema: gotong.workflow/v1
 workflow:
   id: chain-directive-rollout
   name: 连锁指令下发 (总部 → 门店, 跨组织)

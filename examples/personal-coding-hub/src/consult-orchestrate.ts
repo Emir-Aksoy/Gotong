@@ -14,7 +14,7 @@
  * sees mid-round. That snapshot is the whole reason the round is deterministic.
  */
 
-import { type Hub } from '@aipehub/core'
+import { type Hub } from '@gotong/core'
 
 import {
   evaluateConsensus,

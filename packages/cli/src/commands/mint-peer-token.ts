@@ -1,11 +1,11 @@
 /**
- * `aipehub mint-peer-token` — generate a cryptographically strong bearer
+ * `gotong mint-peer-token` — generate a cryptographically strong bearer
  * token for a federation peer link.
  *
- * Two AipeHub hubs that federate share ONE secret per direction: hub A
+ * Two Gotong hubs that federate share ONE secret per direction: hub A
  * stores it as the outbound token it presents to B, and B stores the
  * SAME string as the inbound token it expects from A (compared with
- * `timingSafeEqual` over in `@aipehub/transport-ws`). This command only
+ * `timingSafeEqual` over in `@gotong/transport-ws`). This command only
  * mints that string — 256 bits from the OS CSPRNG, base64url so it drops
  * cleanly into a JSON / env / Authorization value with no escaping.
  *
@@ -65,7 +65,7 @@ export function renderPairingHint(
 }
 
 /**
- * `aipehub mint-peer-token [--bytes=N] [--peer-id=ID] [--endpoint=URL]`.
+ * `gotong mint-peer-token [--bytes=N] [--peer-id=ID] [--endpoint=URL]`.
  * Exit 0 on a printed token, 2 on bad input.
  */
 export function mintPeerToken(args: readonly string[]): number {
@@ -76,7 +76,7 @@ export function mintPeerToken(args: readonly string[]): number {
     return 0
   }
   const token = generatePeerToken(flags.bytes ?? DEFAULT_BYTES)
-  // Token alone on stdout (pipeable: `aipehub mint-peer-token > t.txt`);
+  // Token alone on stdout (pipeable: `gotong mint-peer-token > t.txt`);
   // the setup hint never pollutes that stream.
   process.stdout.write(token + '\n')
   console.error(renderPairingHint({ peerId: flags.peerId, endpoint: flags.endpoint }))

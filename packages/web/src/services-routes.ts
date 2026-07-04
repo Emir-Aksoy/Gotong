@@ -15,7 +15,7 @@
 
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { readJsonBody, sendJson } from './http-helpers.js'
-import type { AdminRecord, ServicesAdminSurface } from '@aipehub/core'
+import type { AdminRecord, ServicesAdminSurface } from '@gotong/core'
 
 // -- types ----------------------------------------------------------------
 

@@ -13,8 +13,8 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { Hub, Space } from '@aipehub/core'
-import { openIdentityStore, type IdentityStore } from '@aipehub/identity'
+import { Hub, Space } from '@gotong/core'
+import { openIdentityStore, type IdentityStore } from '@gotong/identity'
 
 import { serveWeb, type WebServerHandle } from '../src/server.js'
 import type { InboxItemView, InboxSurface } from '../src/me-routes.js'
@@ -74,7 +74,7 @@ interface Boot {
 
 async function boot(opts: { withInbox?: boolean } = {}): Promise<Boot> {
   const withInbox = opts.withInbox ?? true
-  const tmp = await mkdtemp(join(tmpdir(), 'aipehub-web-inbox-'))
+  const tmp = await mkdtemp(join(tmpdir(), 'gotong-web-inbox-'))
   const space = (await Space.init(tmp, { name: 'inbox-test' })).space
   const hub = new Hub({ space })
   await hub.start()

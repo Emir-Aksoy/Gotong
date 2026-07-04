@@ -6,18 +6,18 @@
 >
 > **初始参考集**在主仓 [`templates/`](../../templates/) 目录下。等项目
 > 稳定后，**公网模板库**会拆到独立仓 ——
-> **`AipeHub/aipehub-templates`**。届时社区 PR 收到那里，
+> **`Gotong/gotong-templates`**。届时社区 PR 收到那里，
 > 主仓只保留一个"CI 冻结子集"供解析器测试用。
 >
 > 拆仓之前：主仓 `templates/` 的 PR 我们仍然收，到时候和你一起整体迁过去。
 
-AipeHub 自带一小批**标准 agent 和团队模板**在
+Gotong 自带一小批**标准 agent 和团队模板**在
 [`templates/`](../../templates/) 下。任何人都可以通过 admin UI 一键导入，
 也可以 PR 新的。
 
 主仓目前有**两套并行的模板集**：
 
-- [`templates/agents/`](../../templates/agents/) + [`templates/teams/`](../../templates/teams/) —— **项目原创**，专为 AipeHub 设计。整体 MIT。
+- [`templates/agents/`](../../templates/agents/) + [`templates/teams/`](../../templates/teams/) —— **项目原创**，专为 Gotong 设计。整体 MIT。
 - [`templates/community/`](../../templates/community/) —— **改造自第三方 prompt 库**（[`awesome-chatgpt-prompts`](https://github.com/f/awesome-chatgpt-prompts)(CC0) 和 [`awesome-chatgpt-prompts-zh`](https://github.com/PlexPt/awesome-chatgpt-prompts-zh)(MIT)）。每个文件头部记录上游来源 + 许可；[`templates/community/LICENSE-NOTICES.md`](../../templates/community/LICENSE-NOTICES.md) 聚合保留完整许可证文本。两类许可证都**允许商用**。我们已经**拒绝**了上游标注 "non-commercial"、"research only"、未声明许可的来源。
 
 本文档讲解：
@@ -39,18 +39,18 @@ AipeHub 自带一小批**标准 agent 和团队模板**在
 每份 manifest 第一行声明版本和形态：
 
 ```yaml
-schema: aipehub.agent/v1    # 单个 agent
+schema: gotong.agent/v1    # 单个 agent
 # 或者
-schema: aipehub.team/v1     # 多个 agent 打包成团队
+schema: gotong.team/v1     # 多个 agent 打包成团队
 ```
 
 未知 schema 在解析时会被拒绝并给出明确错误。等到需要破坏性升级时，
 版本号会升到 `/v2`。
 
-### 单 agent（`aipehub.agent/v1`）
+### 单 agent（`gotong.agent/v1`）
 
 ```yaml
-schema: aipehub.agent/v1
+schema: gotong.agent/v1
 agent:
   id: writer-zh                   # 必填，全工作区唯一
   displayName: 中文写作助手        # 可选，UI 上显示在 id 旁边
@@ -65,10 +65,10 @@ agent:
     - 不要废话。
 ```
 
-### 团队（`aipehub.team/v1`）
+### 团队（`gotong.team/v1`）
 
 ```yaml
-schema: aipehub.team/v1
+schema: gotong.team/v1
 team:
   name: 中文编辑团队              # 可选
   description: 写作 + 审稿        # 可选
@@ -196,7 +196,7 @@ TL;DR：
 - **重命名**模板需要弃用期：原文件顶部加 `# DEPRECATED: see <new-id>`，
   保留 30 天，然后删除。已经导入的人不受影响（持久化记录在他们自己的
   磁盘上）。
-- **破坏 manifest schema** 要升 `aipehub.agent/v2` —— parser 至少
+- **破坏 manifest schema** 要升 `gotong.agent/v2` —— parser 至少
   在下一个 minor 版本内继续接受 `/v1`。
 
 ---
@@ -204,10 +204,10 @@ TL;DR：
 ## 5. 运维小贴士
 
 - LocalAgentPool 每次 spawn 都会 log `[localpool] spawned <id>
-  (provider=<x>)`，启动时 `journalctl -u aipehub | grep localpool`
+  (provider=<x>)`，启动时 `journalctl -u gotong | grep localpool`
   能一眼验证 agents.json 是否完整。
 - `agents.json` 是纯 JSON，没人拦你在 git 里**单独 track** 你自己空间的
-  这一个文件 —— 你团队精挑细选的 agent 集合可以独立于 AipeHub 仓库
+  这一个文件 —— 你团队精挑细选的 agent 集合可以独立于 Gotong 仓库
   在跨机器迁移时保留下来。
 - 测试 / CI 也可以**提前 seed** 一份 `agents.json` 再启动 host —— supervisor
   会像普通启动一样 replay 它。

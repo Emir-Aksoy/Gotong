@@ -4,7 +4,7 @@
  *
  * Layout (under the space root):
  *
- *   .aipehub/
+ *   .gotong/
  *     workflows/
  *       lifecycle/
  *         <sanitisedId>.json   — one LifecycleRecord, rewritten atomically

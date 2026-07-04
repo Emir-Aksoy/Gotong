@@ -3,7 +3,7 @@
  *
  * Layout (under the space root, alongside `runs/` and `definitions/`):
  *
- *   .aipehub/
+ *   .gotong/
  *     workflows/
  *       revisions/
  *         <sanitisedId>/
@@ -19,7 +19,7 @@
  *
  * The store is defined behind the `RevisionStore` interface so a SQLite-backed
  * implementation can slot in later WITHOUT touching callers. The workflow
- * package stays zero-runtime-dependency (only node builtins + `@aipehub/core`).
+ * package stays zero-runtime-dependency (only node builtins + `@gotong/core`).
  *
  * Writes are atomic (`<file>.tmp` then rename), mirroring `RunStore`.
  */

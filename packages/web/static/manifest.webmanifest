@@ -1,7 +1,7 @@
 {
-  "name": "AipeHub",
-  "short_name": "AipeHub",
-  "description": "AipeHub — 人 / 智能体 / 机构 协作工作底座",
+  "name": "Gotong",
+  "short_name": "Gotong",
+  "description": "Gotong — 人 / 智能体 / 机构 协作工作底座",
   "lang": "zh",
   "start_url": "/",
   "scope": "/",

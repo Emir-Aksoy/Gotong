@@ -4,7 +4,7 @@
  * Proves the A2aOutboundManager materialises identity-backed config
  * (a2a_outbound_agents, M11a) onto a real Hub, and re-syncs at runtime when an
  * admin edits a row — without touching the A2A transport itself (covered by the
- * @aipehub/a2a + double-hub tests). We assert HUB STATE (`hub.participant(id)`),
+ * @gotong/a2a + double-hub tests). We assert HUB STATE (`hub.participant(id)`),
  * not dispatch, so the test is deterministic and offline.
  *
  * The credential boundary is the crux: a row whose `tokenEnv` is unset is kept
@@ -14,10 +14,10 @@
 
 import { describe, it, expect, beforeEach } from 'vitest'
 
-import { A2aRemoteParticipant } from '@aipehub/a2a'
-import { Hub, AgentParticipant, type Logger, type Task } from '@aipehub/core'
-import { openIdentityStore, type IdentityStore } from '@aipehub/identity'
-import { type InboxItem, type InboxStore } from '@aipehub/inbox'
+import { A2aRemoteParticipant } from '@gotong/a2a'
+import { Hub, AgentParticipant, type Logger, type Task } from '@gotong/core'
+import { openIdentityStore, type IdentityStore } from '@gotong/identity'
+import { type InboxItem, type InboxStore } from '@gotong/inbox'
 
 import { A2aOutboundManager } from '../src/a2a-outbound.js'
 import { ApprovalGatedParticipant } from '../src/outbound-approval.js'

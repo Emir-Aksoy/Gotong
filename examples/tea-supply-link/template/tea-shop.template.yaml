@@ -1,4 +1,4 @@
-# 奶茶店 ↔ 供货商 (跨组织供货链接) — 奶茶店一侧的可载入模板 (aipehub.template/v1)
+# 奶茶店 ↔ 供货商 (跨组织供货链接) — 奶茶店一侧的可载入模板 (gotong.template/v1)
 #
 # 这是第一个**跨组织 (cross-org)** 模板。前两个组织模板里:
 #   - cafe-ops 的审批是**店内** human: 步 (店长在同一个 hub 里批员工的事);
@@ -34,7 +34,7 @@
 #     -H 'content-type: application/json' \
 #     -d "$(jq -Rs '{template: .}' examples/tea-supply-link/template/tea-shop.template.yaml)" \
 #     http://127.0.0.1:8745/api/admin/templates/import
-schema: aipehub.template/v1
+schema: gotong.template/v1
 template:
   name: 奶茶店(跨组织供货链接)
   description: |-

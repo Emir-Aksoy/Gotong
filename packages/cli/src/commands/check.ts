@@ -1,13 +1,13 @@
 /**
- * `aipehub check [--strict]` — deterministic (non-AI) self-check of a host
+ * `gotong check [--strict]` — deterministic (non-AI) self-check of a host
  * workspace: runtime config 体检 + workflow/agent definition validation.
  *
- * Like `start`, the validator lives in the SEPARATE `@aipehub/host` package
+ * Like `start`, the validator lives in the SEPARATE `@gotong/host` package
  * (it needs `parseWorkflow`, `auditBootSecurity`, the Space layout) — so the
  * tiny CLI does NOT depend on the host. `check` resolves it LAZILY at runtime
  * and delegates to the host's non-booting `./check` subpath export:
  *
- *   - host present → import `@aipehub/host/check` and run its `runCheckCli`.
+ *   - host present → import `@gotong/host/check` and run its `runCheckCli`.
  *                    That subpath is deliberately a NON-booting module (the
  *                    host's `.` entry boots the server), so importing it runs
  *                    the validator, not a hub.
@@ -21,20 +21,20 @@
 
 import { resolveModule } from './start.js'
 
-const HOST_PKG = '@aipehub/host'
+const HOST_PKG = '@gotong/host'
 // A variable, not a string literal, on purpose: tsc only resolves
 // `import("literal")` at build time, so this dynamic import does NOT make
-// `@aipehub/host` a build-time dependency of the CLI (same trick as `start`).
-const CHECK_PKG = '@aipehub/host/check'
+// `@gotong/host` a build-time dependency of the CLI (same trick as `start`).
+const CHECK_PKG = '@gotong/host/check'
 
-/** The slice of `@aipehub/host/check` this command uses. */
+/** The slice of `@gotong/host/check` this command uses. */
 interface CheckModule {
   runCheckCli: (deps?: { argv?: readonly string[] }) => Promise<number>
 }
 
 /** Injectable seams so both branches are testable without the host installed. */
 export interface CheckDeps {
-  /** Probe whether `@aipehub/host` is installed (its entry path, or null). */
+  /** Probe whether `@gotong/host` is installed (its entry path, or null). */
   resolveHost?: () => string | null
   /** Import the host's non-booting `./check` module. */
   importCheck?: () => Promise<CheckModule>
@@ -51,16 +51,16 @@ export async function check(
   const importCheck = deps.importCheck ?? (() => import(CHECK_PKG) as Promise<CheckModule>)
 
   if (!resolveHost()) {
-    err('[aipehub check] @aipehub/host is not installed.')
+    err('[gotong check] @gotong/host is not installed.')
     err('')
     err('  `check` validates a workspace with the host\'s own validators, which')
-    err('  ship in the SEPARATE @aipehub/host package. Install it once:')
+    err('  ship in the SEPARATE @gotong/host package. Install it once:')
     err('')
-    err('      npm i -g @aipehub/host        # then: aipehub check')
+    err('      npm i -g @gotong/host        # then: gotong check')
     err('')
     err('  …or just run the host — it validates the same things on boot:')
     err('')
-    err('      npx @aipehub/host')
+    err('      npx @gotong/host')
     err('')
     return 1
   }

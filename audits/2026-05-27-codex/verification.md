@@ -46,7 +46,7 @@ pnpm test:python
 结果:
 
 - 失败。
-- 失败点: `ModuleNotFoundError: No module named 'aipehub'`。
+- 失败点: `ModuleNotFoundError: No module named 'gotong'`。
 - 原因判断: `python-sdk` 是 src-layout, 但脚本没有设置 `PYTHONPATH=src`, 当前 venv 也没有 editable install。
 
 ### Python SDK direct test with explicit import path

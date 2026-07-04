@@ -33,7 +33,7 @@
  *       the run, which runs the local `archive` step; the run finishes ok.
  *
  * The "external long-running A2A agent" is modelled by an injected `fetchImpl`
- * (the same trick the @aipehub/a2a unit tests use): `message/send` → a `working`
+ * (the same trick the @gotong/a2a unit tests use): `message/send` → a `working`
  * Task; each `tasks/get` advances an internal poll counter and only returns
  * `completed` once it crosses a threshold — modelling remote compute that takes
  * time. The real host reaches a real endpoint over `global fetch`; the
@@ -53,7 +53,7 @@ import {
   type ParticipantId,
   type Task,
   type TaskResult,
-} from '@aipehub/core'
+} from '@gotong/core'
 import {
   A2A_ERROR,
   A2A_METHOD_MESSAGE_SEND,
@@ -64,8 +64,8 @@ import {
   type A2ARequest,
   type A2AResponse,
   type A2ATasksGetRequest,
-} from '@aipehub/a2a'
-import { parseWorkflow, workflowParticipantId, WorkflowRunner } from '@aipehub/workflow'
+} from '@gotong/a2a'
+import { parseWorkflow, workflowParticipantId, WorkflowRunner } from '@gotong/workflow'
 
 const WORKFLOWS_DIR = fileURLToPath(new URL('../workflows', import.meta.url))
 
@@ -178,7 +178,7 @@ interface Parked {
 const NEVER = 9_999_999_999_000
 
 async function main(): Promise<void> {
-  console.log('\n=== AipeHub case: a2a-long-running-step — 长任务外部 A2A agent 当工作流步 (Stream H2) ===\n')
+  console.log('\n=== Gotong case: a2a-long-running-step — 长任务外部 A2A agent 当工作流步 (Stream H2) ===\n')
 
   // Latest park per task id (run + lifecycle child), survives re-parks — exactly
   // how the host's SQLite-backed suspendNotifier captures parked tasks.

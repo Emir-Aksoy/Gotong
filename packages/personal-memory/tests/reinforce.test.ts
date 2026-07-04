@@ -96,7 +96,7 @@ describe('recall reinforcement — ON (opt-in)', () => {
 describe('frozen block is byte-stable under reinforcement', () => {
   it('reinforcing entries (recallCount/lastRecalledTs only) leaves the block identical', () => {
     const entries = [
-      entry('a', 'semantic', '在做 AipeHub 项目', 200, { importance: 5 }),
+      entry('a', 'semantic', '在做 Gotong 项目', 200, { importance: 5 }),
       entry('b', 'semantic', '喜欢喝奶茶', 100, { importance: 3 }),
       entry('c', 'semantic', '住在马来西亚', 150),
     ]

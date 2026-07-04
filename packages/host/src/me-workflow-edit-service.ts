@@ -35,9 +35,9 @@
  * the service is unit-testable with light fakes (no Hub, no LLM, no sqlite).
  */
 
-import { isLiveState, parseWorkflow } from '@aipehub/workflow'
-import type { LifecycleState, WorkflowDefinition } from '@aipehub/workflow'
-import type { WorkflowAssistantOutput } from '@aipehub/workflow-assistant'
+import { isLiveState, parseWorkflow } from '@gotong/workflow'
+import type { LifecycleState, WorkflowDefinition } from '@gotong/workflow'
+import type { WorkflowAssistantOutput } from '@gotong/workflow-assistant'
 
 import {
   enforceEditBoundary,

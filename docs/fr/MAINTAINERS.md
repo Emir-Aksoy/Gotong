@@ -9,7 +9,7 @@ l'échelle des mainteneurs fonctionne, voir
 [`GOVERNANCE.md`](../../GOVERNANCE.md) — en particulier
 [Devenir mainteneur](../../GOVERNANCE.md#devenir-mainteneur).
 
-Il est intentionnellement court. AipeHub est un jeune projet avec, aujourd'hui, un
+Il est intentionnellement court. Gotong est un jeune projet avec, aujourd'hui, un
 seul mainteneur. Ce fichier existe pour que le *deuxième* mainteneur rejoigne par un
 chemin écrit plutôt que par un geste ad-hoc — et pour que la ligne de responsabilité
 ne soit jamais une habitude non écrite.

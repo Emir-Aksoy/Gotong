@@ -29,8 +29,8 @@ import {
   Hub,
   SuspendTaskError,
   type Task,
-} from '@aipehub/core'
-import { a2aGetTask, a2aSendRaw, A2aClientError, isA2ATask } from '@aipehub/a2a'
+} from '@gotong/core'
+import { a2aGetTask, a2aSendRaw, A2aClientError, isA2ATask } from '@gotong/a2a'
 
 import { A2aServer } from '../src/a2a-server.js'
 

@@ -6,7 +6,7 @@
 # Last regenerated: 2026-05-31T03:31:36.440Z
 # ─────────────────────────────────────────────────────────────────────────────
 # 个人成长 bundle (1 团队 + 1 工作流 + UI 引导)
-# Schema: aipehub.bundle/v1
+# Schema: gotong.bundle/v1
 #
 # 怎么用:
 #   1. 在 admin UI 上点"导入团队"按钮(工作流 tab)
@@ -20,7 +20,7 @@
 #        -d "{\"yaml\": $(jq -Rs . < templates/bundles/personal-growth.yaml), \"apiKey\": \"<your-deepseek-key>\"}" \
 #        http://localhost:3000/api/admin/bundles/import
 
-schema: aipehub.bundle/v1
+schema: gotong.bundle/v1
 bundle:
   name: 个人成长(7 教练 + 12 周墙上计划)
   description: |-

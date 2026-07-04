@@ -15,7 +15,7 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { Hub, Space, HumanParticipant } from '@aipehub/core'
+import { Hub, Space, HumanParticipant } from '@gotong/core'
 
 import { renderMetrics } from '../src/metrics.js'
 
@@ -24,7 +24,7 @@ describe('renderMetrics', () => {
   let hub: Hub
 
   beforeEach(async () => {
-    tmp = await mkdtemp(join(tmpdir(), 'aipehub-metrics-'))
+    tmp = await mkdtemp(join(tmpdir(), 'gotong-metrics-'))
     const init = await Space.init(tmp, { name: 'test' })
     hub = new Hub({ space: init.space })
     await hub.start()
@@ -37,11 +37,11 @@ describe('renderMetrics', () => {
 
   it('emits a protocol version info-metric', () => {
     const text = renderMetrics(hub)
-    expect(text).toMatch(/# TYPE aipehub_protocol_version gauge/)
-    expect(text).toMatch(/aipehub_protocol_version\{version="[\d.]+"\} 1/)
+    expect(text).toMatch(/# TYPE gotong_protocol_version gauge/)
+    expect(text).toMatch(/gotong_protocol_version\{version="[\d.]+"\} 1/)
   })
 
-  it('emits process_resident_memory_bytes (the series AipehubProcessRssCreep alerts on)', () => {
+  it('emits process_resident_memory_bytes (the series GotongProcessRssCreep alerts on)', () => {
     const text = renderMetrics(hub)
     expect(text).toContain('# TYPE process_resident_memory_bytes gauge')
     const m = text.match(/^process_resident_memory_bytes (\d+)$/m)
@@ -49,18 +49,18 @@ describe('renderMetrics', () => {
     expect(Number(m![1])).toBeGreaterThan(0)
   })
 
-  it('emits aipehub_participants gauge, even when no participants', () => {
+  it('emits gotong_participants gauge, even when no participants', () => {
     const text = renderMetrics(hub)
-    expect(text).toContain('# TYPE aipehub_participants gauge')
+    expect(text).toContain('# TYPE gotong_participants gauge')
     // The renderer falls back to a single zero sample so the series exists.
-    expect(text).toMatch(/aipehub_participants(\{[^}]*\})? 0/)
+    expect(text).toMatch(/gotong_participants(\{[^}]*\})? 0/)
   })
 
   it('counts live participants by kind', () => {
     hub.register(new HumanParticipant({ id: 'alice', capabilities: ['review'] }))
     hub.register(new HumanParticipant({ id: 'bob',   capabilities: [] }))
     const text = renderMetrics(hub)
-    expect(text).toMatch(/aipehub_participants\{kind="human"\} 2/)
+    expect(text).toMatch(/gotong_participants\{kind="human"\} 2/)
   })
 
   it('counts tasks_total by terminal kind', async () => {
@@ -75,8 +75,8 @@ describe('renderMetrics', () => {
       data: { kind: 'ok', taskId: 't1', by: 'someone', output: {}, ts: Date.now() },
     })
     const text = renderMetrics(hub)
-    expect(text).toMatch(/aipehub_tasks_total\{kind="ok"\} 1/)
-    expect(text).toMatch(/aipehub_tasks_total\{kind="failed"\} 0/)
+    expect(text).toMatch(/gotong_tasks_total\{kind="ok"\} 1/)
+    expect(text).toMatch(/gotong_tasks_total\{kind="failed"\} 0/)
   })
 
   it('counts service_call audit entries and accumulates duration', () => {
@@ -126,10 +126,10 @@ describe('renderMetrics', () => {
       },
     })
     const text = renderMetrics(hub)
-    expect(text).toMatch(/aipehub_service_calls_total\{type="memory",impl="file",outcome="ok"\} 2/)
-    expect(text).toMatch(/aipehub_service_calls_total\{type="memory",impl="file",outcome="forbidden_owner"\} 1/)
-    expect(text).toMatch(/aipehub_service_call_duration_ms_sum\{type="memory",impl="file"\} 42/)
-    expect(text).toMatch(/aipehub_service_call_duration_ms_count\{type="memory",impl="file"\} 3/)
+    expect(text).toMatch(/gotong_service_calls_total\{type="memory",impl="file",outcome="ok"\} 2/)
+    expect(text).toMatch(/gotong_service_calls_total\{type="memory",impl="file",outcome="forbidden_owner"\} 1/)
+    expect(text).toMatch(/gotong_service_call_duration_ms_sum\{type="memory",impl="file"\} 42/)
+    expect(text).toMatch(/gotong_service_call_duration_ms_count\{type="memory",impl="file"\} 3/)
   })
 
   it('reports pending applications gauge', () => {
@@ -137,10 +137,10 @@ describe('renderMetrics', () => {
       agents: [{ id: 'pending-1', capabilities: ['noop'] }],
     })
     const text = renderMetrics(hub)
-    expect(text).toMatch(/aipehub_pending_applications 1/)
+    expect(text).toMatch(/gotong_pending_applications 1/)
     hub.approveApplication(req.applicationId, 'sys')
     const text2 = renderMetrics(hub)
-    expect(text2).toMatch(/aipehub_pending_applications 0/)
+    expect(text2).toMatch(/gotong_pending_applications 0/)
   })
 
   it('escapes quotes and backslashes in label values', () => {
@@ -208,9 +208,9 @@ describe('renderMetrics', () => {
     })
     const text = renderMetrics(hub)
     // The negative is treated as 0, so sum = 0 + 7 = 7 (not -43).
-    expect(text).toMatch(/aipehub_service_call_duration_ms_sum\{type="memory",impl="file"\} 7/)
+    expect(text).toMatch(/gotong_service_call_duration_ms_sum\{type="memory",impl="file"\} 7/)
     // count is still 2 (both calls happened, both audited).
-    expect(text).toMatch(/aipehub_service_call_duration_ms_count\{type="memory",impl="file"\} 2/)
+    expect(text).toMatch(/gotong_service_call_duration_ms_count\{type="memory",impl="file"\} 2/)
   })
 
   // PR #41 — service-call latency histogram for p50/p95/p99 dashboards.
@@ -238,20 +238,20 @@ describe('renderMetrics', () => {
       })
     }
     const text = renderMetrics(hub)
-    expect(text).toContain('# TYPE aipehub_service_call_duration_ms histogram')
+    expect(text).toContain('# TYPE gotong_service_call_duration_ms histogram')
     // Bucket le=5 captures the two 3ms / 4ms calls but not the 200ms one.
-    expect(text).toMatch(/aipehub_service_call_duration_ms_bucket\{type="memory",impl="file",le="5"\} 2/)
-    expect(text).toMatch(/aipehub_service_call_duration_ms_bucket\{type="memory",impl="file",le="100"\} 2/)
+    expect(text).toMatch(/gotong_service_call_duration_ms_bucket\{type="memory",impl="file",le="5"\} 2/)
+    expect(text).toMatch(/gotong_service_call_duration_ms_bucket\{type="memory",impl="file",le="100"\} 2/)
     // le=250 captures all three.
-    expect(text).toMatch(/aipehub_service_call_duration_ms_bucket\{type="memory",impl="file",le="250"\} 3/)
-    expect(text).toMatch(/aipehub_service_call_duration_ms_bucket\{type="memory",impl="file",le="\+Inf"\} 3/)
+    expect(text).toMatch(/gotong_service_call_duration_ms_bucket\{type="memory",impl="file",le="250"\} 3/)
+    expect(text).toMatch(/gotong_service_call_duration_ms_bucket\{type="memory",impl="file",le="\+Inf"\} 3/)
   })
 
   it('histogram emits a zero +Inf bucket when no service calls have run', () => {
     const text = renderMetrics(hub)
-    expect(text).toContain('# TYPE aipehub_service_call_duration_ms histogram')
+    expect(text).toContain('# TYPE gotong_service_call_duration_ms histogram')
     // The placeholder zero series so scrapers see the metric exists.
-    expect(text).toMatch(/aipehub_service_call_duration_ms_bucket\{le="\+Inf"\} 0/)
+    expect(text).toMatch(/gotong_service_call_duration_ms_bucket\{le="\+Inf"\} 0/)
   })
 
   // PR #41 — HTTP response-class counter. Driven via HttpStats; the
@@ -259,7 +259,7 @@ describe('renderMetrics', () => {
   // that scrape metrics out-of-band).
   it('omits HTTP counters when httpStats is not supplied', () => {
     const text = renderMetrics(hub)
-    expect(text).not.toContain('aipehub_http_responses_total')
+    expect(text).not.toContain('gotong_http_responses_total')
   })
 
   it('emits HTTP counters with all canonical classes when httpStats is supplied', async () => {
@@ -271,19 +271,19 @@ describe('renderMetrics', () => {
     stats.record(404)
     stats.record(503)
     const text = renderMetrics(hub, { httpStats: stats })
-    expect(text).toContain('# TYPE aipehub_http_responses_total counter')
-    expect(text).toMatch(/aipehub_http_responses_total\{class="2xx"\} 3/)
-    expect(text).toMatch(/aipehub_http_responses_total\{class="3xx"\} 0/)
-    expect(text).toMatch(/aipehub_http_responses_total\{class="4xx"\} 1/)
-    expect(text).toMatch(/aipehub_http_responses_total\{class="5xx"\} 1/)
+    expect(text).toContain('# TYPE gotong_http_responses_total counter')
+    expect(text).toMatch(/gotong_http_responses_total\{class="2xx"\} 3/)
+    expect(text).toMatch(/gotong_http_responses_total\{class="3xx"\} 0/)
+    expect(text).toMatch(/gotong_http_responses_total\{class="4xx"\} 1/)
+    expect(text).toMatch(/gotong_http_responses_total\{class="5xx"\} 1/)
   })
 
   it('HTTP counters surface a zero row for every canonical class even before traffic', async () => {
     const { HttpStats } = await import('../src/metrics.js')
     const stats = new HttpStats()
     const text = renderMetrics(hub, { httpStats: stats })
-    expect(text).toMatch(/aipehub_http_responses_total\{class="2xx"\} 0/)
-    expect(text).toMatch(/aipehub_http_responses_total\{class="5xx"\} 0/)
+    expect(text).toMatch(/gotong_http_responses_total\{class="2xx"\} 0/)
+    expect(text).toMatch(/gotong_http_responses_total\{class="5xx"\} 0/)
   })
 
   it('HttpStats.record clamps out-of-range / non-finite codes into an "other" bucket', async () => {
@@ -296,8 +296,8 @@ describe('renderMetrics', () => {
     stats.record(-1)           // ignored — negative
     stats.record(200)          // canonical
     const text = renderMetrics(hub, { httpStats: stats })
-    expect(text).toMatch(/aipehub_http_responses_total\{class="2xx"\} 1/)
-    expect(text).toMatch(/aipehub_http_responses_total\{class="other"\} 3/)
+    expect(text).toMatch(/gotong_http_responses_total\{class="2xx"\} 1/)
+    expect(text).toMatch(/gotong_http_responses_total\{class="other"\} 3/)
   })
 
   // --- business metrics rendering (Phase 19 P3-M1) -------------------------
@@ -313,24 +313,24 @@ describe('renderMetrics', () => {
         ],
       },
     })
-    expect(text).toContain('# TYPE aipehub_workflow_runs gauge')
-    expect(text).toMatch(/aipehub_workflow_runs\{status="running"\} 2/)
-    expect(text).toMatch(/aipehub_workflow_runs\{status="done"\} 5/)
+    expect(text).toContain('# TYPE gotong_workflow_runs gauge')
+    expect(text).toMatch(/gotong_workflow_runs\{status="running"\} 2/)
+    expect(text).toMatch(/gotong_workflow_runs\{status="done"\} 5/)
     // The old scan-capped sample gauge is retired (Route B P0-M3-M3) — the
     // run tally is now an exact count, so no such series should exist.
-    expect(text).not.toContain('aipehub_workflow_runs_scan_capped')
-    expect(text).toMatch(/# TYPE aipehub_suspended_tasks gauge/)
-    expect(text).toMatch(/aipehub_suspended_tasks 3/)
-    expect(text).toMatch(/aipehub_llm_calls_total\{model="deepseek-chat"\} 10/)
-    expect(text).toMatch(/aipehub_llm_tokens_total\{model="deepseek-chat"\} 12345/)
-    expect(text).toMatch(/aipehub_llm_cost_micros_total\{model="gpt-4o"\} 100/)
+    expect(text).not.toContain('gotong_workflow_runs_scan_capped')
+    expect(text).toMatch(/# TYPE gotong_suspended_tasks gauge/)
+    expect(text).toMatch(/gotong_suspended_tasks 3/)
+    expect(text).toMatch(/gotong_llm_calls_total\{model="deepseek-chat"\} 10/)
+    expect(text).toMatch(/gotong_llm_tokens_total\{model="deepseek-chat"\} 12345/)
+    expect(text).toMatch(/gotong_llm_cost_micros_total\{model="gpt-4o"\} 100/)
   })
 
   it('omits business series entirely when no snapshot is supplied', () => {
     const text = renderMetrics(hub)
-    expect(text).not.toContain('aipehub_workflow_runs')
-    expect(text).not.toContain('aipehub_suspended_tasks')
-    expect(text).not.toContain('aipehub_llm_calls_total')
+    expect(text).not.toContain('gotong_workflow_runs')
+    expect(text).not.toContain('gotong_suspended_tasks')
+    expect(text).not.toContain('gotong_llm_calls_total')
   })
 
   it('renders an all-zero run tally and a zero llm series when both are empty', () => {
@@ -339,9 +339,9 @@ describe('renderMetrics', () => {
     })
     // All-zero is still a real exact count — the series renders (a dashboard
     // tells "0 because none" from a missing source by the series' presence).
-    expect(text).toMatch(/aipehub_workflow_runs\{status="done"\} 0/)
-    expect(text).not.toContain('aipehub_workflow_runs_scan_capped')
-    expect(text).toMatch(/aipehub_llm_calls_total 0/)
+    expect(text).toMatch(/gotong_workflow_runs\{status="done"\} 0/)
+    expect(text).not.toContain('gotong_workflow_runs_scan_capped')
+    expect(text).toMatch(/gotong_llm_calls_total 0/)
   })
 })
 

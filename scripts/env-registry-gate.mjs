@@ -2,12 +2,12 @@
 /**
  * env-registry-gate — GUARD-M1. A load-bearing gate against silent knob sprawl.
  *
- * 缺口 2 called out "~107 个 AIPE_*" as the ease-of-use regression: every new
+ * 缺口 2 called out "~107 个 GOTONG_*" as the ease-of-use regression: every new
  * env knob is a hidden way the system can behave differently, and nothing forced
- * them to be written down. This gate pins the set. It extracts every `AIPE_*`
+ * them to be written down. This gate pins the set. It extracts every `GOTONG_*`
  * literal referenced in the src tree of every package (source only, tests
  * excluded) and asserts it equals the set registered in
- * `scripts/aipe-env-registry.txt`.
+ * `scripts/gotong-env-registry.txt`.
  *
  *   - Add a knob to code without registering it  → gate goes red (the point).
  *   - Delete a knob but leave it in the registry → gate goes red (stay honest).
@@ -20,7 +20,7 @@
  *
  * The `--list` output IS the registry's source of truth: the registry file is
  * seeded from it, so the gate and the file agree by construction. Only static
- * `AIPE_FOO` literals are seen (there are no dynamically-built knob names in the
+ * `GOTONG_FOO` literals are seen (there are no dynamically-built knob names in the
  * tree — verified); if that ever changes, add the constructed names to the
  * registry with a `# dynamic:` note.
  */
@@ -32,9 +32,9 @@ import { dirname, join, resolve } from 'node:path'
 const HERE = dirname(fileURLToPath(import.meta.url))
 const REPO = resolve(HERE, '..')
 const PACKAGES = join(REPO, 'packages')
-const REGISTRY = join(HERE, 'aipe-env-registry.txt')
+const REGISTRY = join(HERE, 'gotong-env-registry.txt')
 
-const KNOB_RE = /AIPE_[A-Z0-9_]+/g
+const KNOB_RE = /GOTONG_[A-Z0-9_]+/g
 
 /** Recursively collect every `.ts` under each `<pkg>/src` (source only — tests/fixtures excluded). */
 function collectSrcFiles() {
@@ -89,7 +89,7 @@ function main() {
   const registered = registeredKnobs()
   if (registered === null) {
     console.error(`FAIL env-registry-gate: registry missing at ${REGISTRY}`)
-    console.error(`Seed it:  node scripts/env-registry-gate.mjs --list > scripts/aipe-env-registry.txt`)
+    console.error(`Seed it:  node scripts/env-registry-gate.mjs --list > scripts/gotong-env-registry.txt`)
     process.exit(1)
   }
 
@@ -97,7 +97,7 @@ function main() {
   const stale = sorted(registered).filter((k) => !code.has(k)) // registered, not in code
 
   if (unregistered.length === 0 && stale.length === 0) {
-    console.log(`PASS env-registry-gate: ${code.size} AIPE_* knobs, all registered, none stale.`)
+    console.log(`PASS env-registry-gate: ${code.size} GOTONG_* knobs, all registered, none stale.`)
     return
   }
 
@@ -105,14 +105,14 @@ function main() {
   if (unregistered.length) {
     console.error(`\n  ${unregistered.length} knob(s) referenced in code but NOT in the registry:`)
     for (const k of unregistered) console.error(`    + ${k}`)
-    console.error(`  → a new knob must be registered in scripts/aipe-env-registry.txt (that's the guard).`)
+    console.error(`  → a new knob must be registered in scripts/gotong-env-registry.txt (that's the guard).`)
   }
   if (stale.length) {
     console.error(`\n  ${stale.length} knob(s) in the registry but NOT referenced in code (stale):`)
     for (const k of stale) console.error(`    - ${k}`)
     console.error(`  → remove it from the registry, or restore its use.`)
   }
-  console.error(`\n  Re-seed after a deliberate change:  node scripts/env-registry-gate.mjs --list > scripts/aipe-env-registry.txt`)
+  console.error(`\n  Re-seed after a deliberate change:  node scripts/env-registry-gate.mjs --list > scripts/gotong-env-registry.txt`)
   process.exit(1)
 }
 

@@ -28,14 +28,14 @@ import {
   createInprocHubLinkPair,
   installPeerLink,
   type Task,
-} from '@aipehub/core'
+} from '@gotong/core'
 import {
   MASTER_KEY_LEN_BYTES,
   openIdentityStore,
   type IdentityStore,
   type PeerRegistration,
-} from '@aipehub/identity'
-import { WorkflowRunner, parseWorkflow } from '@aipehub/workflow'
+} from '@gotong/identity'
+import { WorkflowRunner, parseWorkflow } from '@gotong/workflow'
 
 import { gateKnowledgeBaseRpc, type RpcResponder } from '../src/peer-kb-gate.js'
 import { MCP_PROXY_METHODS } from '../src/mcp-proxy.js'
@@ -81,7 +81,7 @@ describe('v5 C-M3 — Stream C contracts (KB + node I/O) are isolated across pee
   let pairY: ReturnType<typeof createInprocHubLinkPair>
 
   beforeEach(async () => {
-    tmp = await mkdtemp(join(tmpdir(), 'aipe-stream-c-iso-'))
+    tmp = await mkdtemp(join(tmpdir(), 'gotong-stream-c-iso-'))
     store = openIdentityStore({
       dbPath: join(tmp, 'identity.sqlite'),
       masterKey: randomBytes(MASTER_KEY_LEN_BYTES),
@@ -179,7 +179,7 @@ describe('v5 C-M3 — Stream C contracts (KB + node I/O) are isolated across pee
   it('C-M2 node-I/O axis — a pii node is refused to orgX but the SAME class crosses to orgY', async () => {
     // Workflow → orgX: public node crosses, pii node refused (orgX clamped).
     const wfX = parseWorkflow(`
-schema: aipehub.workflow/v1
+schema: gotong.workflow/v1
 workflow:
   id: to-x
   trigger: { capability: run-x }
@@ -197,7 +197,7 @@ workflow:
 `)
     // Workflow → orgY: the identical pii node sails through (orgY open).
     const wfY = parseWorkflow(`
-schema: aipehub.workflow/v1
+schema: gotong.workflow/v1
 workflow:
   id: to-y
   trigger: { capability: run-y }

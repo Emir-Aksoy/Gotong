@@ -1,7 +1,7 @@
 # =============================================================================
 # Workflow: 中文编辑流水线
 # Companion team: templates/teams/editorial-zh.yaml
-# Schema: aipehub.workflow/v1
+# Schema: gotong.workflow/v1
 #
 # How it works (host 启动加载 + admin 派一个 task 后):
 #   admin 派任务到 capability=run-editorial → 这个 workflow runner 接到
@@ -14,7 +14,7 @@
 # 整个工作流的每一步、每个子任务、最终结果，全部在 transcript 里留痕。
 # =============================================================================
 
-schema: aipehub.workflow/v1
+schema: gotong.workflow/v1
 
 workflow:
   id: editorial-flow

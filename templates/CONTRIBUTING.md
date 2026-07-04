@@ -1,10 +1,10 @@
 # 贡献新模板
 
-> ⚠️ 正式公网模板库即将迁到独立仓 `AipeHub/aipehub-templates`。
+> ⚠️ 正式公网模板库即将迁到独立仓 `Gotong/gotong-templates`。
 > 在迁仓完成前，主仓这个目录仍接受 PR（迁仓时会一起搬过去）。
 > 迁仓完成后此 README 会更新指引到新仓地址。
 
-欢迎给 AipeHub 模板库提交新 agent / team。流程很简单。
+欢迎给 Gotong 模板库提交新 agent / team。流程很简单。
 
 ## 一、决定放在哪里
 
@@ -22,7 +22,7 @@
 参考 [README.md](./README.md) 顶部的 schema 速查。一个最小的合规 agent：
 
 ```yaml
-schema: aipehub.agent/v1
+schema: gotong.agent/v1
 agent:
   id: my-new-agent
   capabilities: [my-skill]

@@ -29,15 +29,15 @@
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
-import { Hub, HumanParticipant, InMemoryStorage } from '@aipehub/core'
-import { type LlmProvider } from '@aipehub/llm'
-import { AnthropicProvider } from '@aipehub/llm-anthropic'
-import { OpenAIProvider } from '@aipehub/llm-openai'
+import { Hub, HumanParticipant, InMemoryStorage } from '@gotong/core'
+import { type LlmProvider } from '@gotong/llm'
+import { AnthropicProvider } from '@gotong/llm-anthropic'
+import { OpenAIProvider } from '@gotong/llm-openai'
 import {
   WorkflowAssistantAgent,
   WORKFLOW_ASSISTANT_CAPABILITY,
   type WorkflowAssistantOutput,
-} from '@aipehub/workflow-assistant'
+} from '@gotong/workflow-assistant'
 
 import { createWorkflowWizard } from '../src/wizard-wiring.js'
 import type { WorkflowWizardService, WizardAssistView } from '../src/workflow-wizard.js'
@@ -49,7 +49,7 @@ function liveProvider(): { provider: LlmProvider; label: string } {
     return {
       label: 'anthropic',
       provider: new AnthropicProvider({
-        defaultModel: process.env.AIPE_LIVE_ANTHROPIC_MODEL ?? 'claude-3-5-haiku-latest',
+        defaultModel: process.env.GOTONG_LIVE_ANTHROPIC_MODEL ?? 'claude-3-5-haiku-latest',
         defaultMaxTokens: 1024,
       }),
     }
@@ -57,7 +57,7 @@ function liveProvider(): { provider: LlmProvider; label: string } {
   return {
     label: 'openai',
     provider: new OpenAIProvider({
-      defaultModel: process.env.AIPE_LIVE_OPENAI_MODEL ?? 'gpt-4o-mini',
+      defaultModel: process.env.GOTONG_LIVE_OPENAI_MODEL ?? 'gpt-4o-mini',
       ...(process.env.OPENAI_BASE_URL ? { baseURL: process.env.OPENAI_BASE_URL } : {}),
     }),
   }

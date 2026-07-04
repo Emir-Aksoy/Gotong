@@ -1,5 +1,5 @@
 /**
- * `aipehub repl` — interactive shell against an in-process Hub.
+ * `gotong repl` — interactive shell against an in-process Hub.
  *
  * Treats stdin/stdout as a "local IM bridge": each line a user types
  * is a free-text dispatch to the default capability; meta commands
@@ -9,8 +9,8 @@
  * Why same source tree as the IM bridges (Phase 12 M2-M7) instead of
  * a separate package: the *contract* is identical — string in, agent
  * reply out, transcript audit on the side. Only the I/O changes
- * (stdin/stdout vs WebSocket frame). Keeping it inside `@aipehub/cli`
- * means `npx @aipehub/cli repl` works the day after install.
+ * (stdin/stdout vs WebSocket frame). Keeping it inside `@gotong/cli`
+ * means `npx @gotong/cli repl` works the day after install.
  *
  * The actual REPL machinery lives in `../repl/` (parse / bootstrap /
  * loop) so the same modules can be re-used by future remote-REPL
@@ -39,7 +39,7 @@ export async function repl(args: readonly string[]): Promise<number> {
   if (parsed.banner) {
     process.stdout.write(
       [
-        `AipeHub REPL — in-memory hub, agents: ${handle.hub
+        `Gotong REPL — in-memory hub, agents: ${handle.hub
           .participants()
           .map((p) => p.id)
           .join(', ')}`,
@@ -89,20 +89,20 @@ function parseArgs(args: readonly string[]): ParsedRepl | null {
     } else if (arg.startsWith('--prompt=')) {
       prompt = arg.slice('--prompt='.length)
       if (prompt.length === 0) {
-        console.error('[aipehub] --prompt must not be empty')
+        console.error('[gotong] --prompt must not be empty')
         return null
       }
     } else if (arg.startsWith('--from=')) {
       const id = arg.slice('--from='.length)
       if (id.length === 0) {
-        console.error('[aipehub] --from must not be empty')
+        console.error('[gotong] --from must not be empty')
         return null
       }
       fromId = id
     } else if (arg === '--help' || arg === '-h') {
       console.log(
         [
-          'aipehub repl [options]',
+          'gotong repl [options]',
           '',
           'Options:',
           '  --prompt=<str>   Override the prompt (default `> `)',
@@ -114,7 +114,7 @@ function parseArgs(args: readonly string[]): ParsedRepl | null {
       )
       return null
     } else {
-      console.error(`[aipehub] unknown option: ${arg}`)
+      console.error(`[gotong] unknown option: ${arg}`)
       return null
     }
   }
@@ -135,7 +135,7 @@ function parseArgs(args: readonly string[]): ParsedRepl | null {
  * subsequent calls hang because readline switched into "expecting
  * answer for prior question" mode and never re-emits a `line` event.
  * Switching to a line-event queue plus an EOF flag works in both
- * TTY and pipe paths (verified with `printf ... | aipehub repl`).
+ * TTY and pipe paths (verified with `printf ... | gotong repl`).
  *
  * Exported so the `setting` console's interactive sub-shell reuses the SAME
  * readline + SIGINT→abort seam (it consumes the `ReplIo` contract, not the

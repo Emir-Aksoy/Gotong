@@ -19,7 +19,7 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { Hub, Space } from '@aipehub/core'
+import { Hub, Space } from '@gotong/core'
 
 import { serveWeb, type WebServerHandle, type WorkflowSurface } from '../src/server.js'
 
@@ -59,7 +59,7 @@ interface BootResult {
 }
 
 async function boot(opts: { result?: unknown; omitMethod?: boolean } = {}): Promise<BootResult> {
-  const tmp = await mkdtemp(join(tmpdir(), 'aipehub-web-wfpx-'))
+  const tmp = await mkdtemp(join(tmpdir(), 'gotong-web-wfpx-'))
   const init = await Space.init(tmp, { name: 'wfpx-test' })
   const hub = new Hub({ space: init.space })
   await hub.start()

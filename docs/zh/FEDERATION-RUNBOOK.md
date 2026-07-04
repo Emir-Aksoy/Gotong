@@ -1,6 +1,6 @@
 # 跨组织联邦 — 两机操作员 runbook
 
-> 把两台**不同机器上**的 AipeHub（org A 与 org B）通过真 WebSocket 连成联邦，让
+> 把两台**不同机器上**的 Gotong（org A 与 org B）通过真 WebSocket 连成联邦，让
 > 一个 hub 的工作流能编排另一个 hub 的能力——而**凭证 / 数据 / 计费各归各家**。这是
 > 北极星 **第 2 层「跨组织协作」** 的上线手册：面向运维人员，从铸 token 到看见跨 hub
 > 工作流跑通，一步一步。
@@ -23,7 +23,7 @@
 
 2. **endpoint = 对方的 ws 地址。** 每一侧 peer 记录里的 `endpointUrl` 指向**对方** hub
    可达的 WebSocket 端点（`wss://partner.example.com:4000` 或反代后的 `wss://…/`）。联邦
-   端口跟远程 agent 共用同一个 `AIPE_WS_PORT`（默认 4000）——HELLO 帧自己分流。
+   端口跟远程 agent 共用同一个 `GOTONG_WS_PORT`（默认 4000）——HELLO 帧自己分流。
 
 3. **框架不替你做信任决策。** 链路只是管子。能放什么能力出站（`outboundCaps`）、要不
    要人工批准（`requireApprovalOutbound`）、能带什么数据类（`allowedDataClasses`）、每窗口
@@ -44,27 +44,27 @@
 
 两台机器各自：
 
-- 跑起生产 host（`aipehub-host`，即 `@aipehub/host` 的 bin；源码仓里用 `pnpm host`），
+- 跑起生产 host（`gotong-host`，即 `@gotong/host` 的 bin；源码仓里用 `pnpm host`），
   **接了 identity store**（联邦记录住在 identity 的 `peers` 表 + vault）。如何本地起一个
   带 identity 的生产 host，见 [`DEPLOY.md`](DEPLOY.md)。
 - 有一个 **owner** 账号（peer CRUD 与出站审批都需要 owner 权限）。
 - 网络互通：org B 的机器能拨到 org A 暴露的 ws 端点，反之亦然（双向，因为联邦对称）。
 - **强烈建议 TLS**：跨公网时用 `wss://`（反向代理 Caddy / nginx 终止 TLS → 转发到本机
-  `AIPE_WS_PORT`）。明文 `ws://` 只在可信内网 / 同机演示用。
+  `GOTONG_WS_PORT`）。明文 `ws://` 只在可信内网 / 同机演示用。
 
-相关环境变量（host 侧，`aipehub-host` 读）：
+相关环境变量（host 侧，`gotong-host` 读）：
 
 | 环境变量 | 默认 | 作用 |
 |---|---|---|
-| `AIPE_HOST` | `127.0.0.1` | HTTP 与 ws 服务器绑定地址。公网暴露要设成 `0.0.0.0` 或具体网卡（建议只让反代连本机，hub 仍绑 `127.0.0.1`）。 |
-| `AIPE_WS_PORT` | `4000` | WebSocket 端口——**远程 agent 与入站 peer HELLO 共用**。这就是对方 `endpointUrl` 要指的端口。 |
-| `AIPE_WEB_PORT` | `3000` | 管理 UI + API（owner 在这上面配 peer、批审批）。**不要**把这个端口当 peer endpoint。 |
-| `AIPE_PEERS_DISABLED` | （未设） | 设 `1` 彻底关掉联邦（既不出站拨号也不接受入站）。 |
-| `AIPE_PEER_POLL_MS` | `5000` | 出站拨号重连 tick（ms）。改了 peer 记录后，最迟下一个 tick 生效。 |
-| `AIPE_TRUST_PROXY` | （未设） | 设 `1` 让入站限流读 `X-Forwarded-For`——**只在 hub 真的坐在反向代理后面时设**。 |
-| `AIPE_PEER_INBOUND_RATE_MAX` | `60` | 每 IP 每窗口最大 HELLO 次数（防 token 爆破）。 |
-| `AIPE_PEER_INBOUND_RATE_WINDOW_MS` | `60000` | 上面那个限流窗口（ms）。 |
-| `AIPE_PEER_LINK_QUOTA_WINDOW_MS` | `60000` | per-link 入站配额计数窗口（ms）；配额额度本身在 peer 记录的 `perLinkQuotaBudget`。 |
+| `GOTONG_HOST` | `127.0.0.1` | HTTP 与 ws 服务器绑定地址。公网暴露要设成 `0.0.0.0` 或具体网卡（建议只让反代连本机，hub 仍绑 `127.0.0.1`）。 |
+| `GOTONG_WS_PORT` | `4000` | WebSocket 端口——**远程 agent 与入站 peer HELLO 共用**。这就是对方 `endpointUrl` 要指的端口。 |
+| `GOTONG_WEB_PORT` | `3000` | 管理 UI + API（owner 在这上面配 peer、批审批）。**不要**把这个端口当 peer endpoint。 |
+| `GOTONG_PEERS_DISABLED` | （未设） | 设 `1` 彻底关掉联邦（既不出站拨号也不接受入站）。 |
+| `GOTONG_PEER_POLL_MS` | `5000` | 出站拨号重连 tick（ms）。改了 peer 记录后，最迟下一个 tick 生效。 |
+| `GOTONG_TRUST_PROXY` | （未设） | 设 `1` 让入站限流读 `X-Forwarded-For`——**只在 hub 真的坐在反向代理后面时设**。 |
+| `GOTONG_PEER_INBOUND_RATE_MAX` | `60` | 每 IP 每窗口最大 HELLO 次数（防 token 爆破）。 |
+| `GOTONG_PEER_INBOUND_RATE_WINDOW_MS` | `60000` | 上面那个限流窗口（ms）。 |
+| `GOTONG_PEER_LINK_QUOTA_WINDOW_MS` | `60000` | per-link 入站配额计数窗口（ms）；配额额度本身在 peer 记录的 `perLinkQuotaBudget`。 |
 
 ---
 
@@ -76,7 +76,7 @@
 ### Step 1 — 铸 token（在 A 机，一次）
 
 ```bash
-aipehub mint-peer-token --peer-id=org-b --endpoint=wss://hub-b.example.com:4000
+gotong mint-peer-token --peer-id=org-b --endpoint=wss://hub-b.example.com:4000
 ```
 
 - 输出：**一行 256-bit base64url token** 打到 **stdout**（可 `> token.txt` / 管道）；一段
@@ -90,10 +90,10 @@ aipehub mint-peer-token --peer-id=org-b --endpoint=wss://hub-b.example.com:4000
 
 ### Step 2 — 暴露 ws 端点（两机）
 
-确保对方能拨到你的 `AIPE_WS_PORT`：
+确保对方能拨到你的 `GOTONG_WS_PORT`：
 
 - 生产建议：反向代理把 `wss://hub-a.example.com/` 终止 TLS → 转发到本机
-  `127.0.0.1:4000`，并设 `AIPE_TRUST_PROXY=1`。
+  `127.0.0.1:4000`，并设 `GOTONG_TRUST_PROXY=1`。
 - 防火墙放行对方源 IP 到该端口。
 - 自检：从对方机器 `curl -i http://<你的ws主机>:4000/`（或 `wscat`）能连上即可——
   HELLO 握手由 hub 自己做，这步只验网络可达。
@@ -151,7 +151,7 @@ POST /api/admin/identity/peers
 | `outboundCaps` | `string[]` \| `null` | **出站**能力白名单。`null` = **不放任何东西出站**（fail-closed）；`[]` 同样锁死；列出的能力既被**通告**给本侧工作流（能路由到 peer）也被**授权**外发——通告=授权。 |
 | `requireApprovalOutbound` | `boolean` | 出站命中时**挂起到 owner 的 `/me` 收件箱**，批准后才真的过 socket。敏感外发务必开。 |
 | `allowedDataClasses` | `string[]` \| `null` | 出站任务允许携带的数据类。`null` = 全允许；`[]` = 锁死。按节点 `dataClasses` 在出站闸判。 |
-| `perLinkQuotaBudget` | `number` \| `null` | 每 `AIPE_PEER_LINK_QUOTA_WINDOW_MS` 窗口的**入站**任务上限。`null` = 不限。越界 fail-closed。 |
+| `perLinkQuotaBudget` | `number` \| `null` | 每 `GOTONG_PEER_LINK_QUOTA_WINDOW_MS` 窗口的**入站**任务上限。`null` = 不限。越界 fail-closed。 |
 | `allowedKnowledgeBases` | `string[]` \| `null` | 对方可调用的共享 KB（MCP server 名）白名单。`null` = 全部共享的可调；`[]` = 锁死。 |
 | `revocationState` | `'active'` \| `'revoked'` | 撤销开关。设 `revoked` → 拆链 + 拒入站 + 线缆层拒，三闸齐落。**不会**被清成 null。 |
 | `shareSummary` | `boolean` | opt-in 把**隐私安全的计数摘要**（资产/活动/健康，永不原始行）经 `peer.summary` RPC 共享给对方控制面。默认关。 |
@@ -176,7 +176,7 @@ POST /api/admin/identity/peers
 就是普通 capability dispatch：
 
 ```yaml
-schema: aipehub.workflow/v1
+schema: gotong.workflow/v1
 workflow:
   id: cross-org-contract-review
   trigger: { capability: legal:start }
@@ -218,12 +218,12 @@ owner 打开 `/me` → 收件箱 → 看到一条 approval 待办「批准把出
 ## 3. 安全清单
 
 - [ ] **token 走安全信道**，写入即加密进 vault，从不回显；轮换就 PATCH 新值。
-- [ ] 跨公网**只用 `wss://`**；坐反代后设 `AIPE_TRUST_PROXY=1`，防火墙按源 IP 收口。
+- [ ] 跨公网**只用 `wss://`**；坐反代后设 `GOTONG_TRUST_PROXY=1`，防火墙按源 IP 收口。
 - [ ] **`outboundCaps` 最小化**——只列真要用的能力；`null`/`[]` = 锁死。
 - [ ] **敏感外发开 `requireApprovalOutbound`**——人在环，owner 收件箱拍板。
 - [ ] **`allowedDataClasses` 收口**敏感数据类，按节点判。
 - [ ] **`perLinkQuotaBudget`** 给入站封顶，防被对方刷爆。
-- [ ] 入站限流 `AIPE_PEER_INBOUND_RATE_MAX` 别设太大（默认 60/分钟够防爆破）。
+- [ ] 入站限流 `GOTONG_PEER_INBOUND_RATE_MAX` 别设太大（默认 60/分钟够防爆破）。
 - [ ] 出问题或终止合作：把 peer 的 `revocationState` 设 `revoked`（三闸齐落），或直接 delete。
 - [ ] `shareSummary` / `shareTranscript` 默认关——只在你愿意让对方控制面看到计数 / 轨迹时才开。
 
@@ -233,13 +233,13 @@ owner 打开 `/me` → 收件箱 → 看到一条 approval 待办「批准把出
 
 | 症状 | 多半原因 / 处理 |
 |---|---|
-| `GET …/peers` 一直 `connected: false`、`backoffAttempts` 涨 | endpoint 不可达：核 `endpointUrl`（对方 ws 主机 + `AIPE_WS_PORT`）、防火墙、TLS 证书。从本机 `curl`/`wscat` 对方端点验网络。 |
+| `GET …/peers` 一直 `connected: false`、`backoffAttempts` 涨 | endpoint 不可达：核 `endpointUrl`（对方 ws 主机 + `GOTONG_WS_PORT`）、防火墙、TLS 证书。从本机 `curl`/`wscat` 对方端点验网络。 |
 | 握手被关、日志 `closed during handshake` / `peer_disconnected` | **token 不符**（两边不是同一个字符串）或 `expectedPeerId` 对不上。注意：拒绝方**不回失败原因**（anti-enumeration），拨号方只看到「链接被关」——去**被拨**那侧的日志看精确原因。重新对齐 token（Step 1/3）。 |
 | 工作流步骤报 `no_participant` / 选不中 peer | org B 没通告该能力：检查 B 侧没把它放进可达能力集、A 侧 `outboundCaps` 没列它（通告=授权，没列就既不通告也不授权）。`peer-manifests/refresh` 后再看。 |
 | 出站报 `outbound_capability_denied:<cap>` | 该能力不在 A 侧 `outboundCaps` 白名单——加进去（Step 4）。 |
-| 入站被拒、对方报配额 | 命中 `perLinkQuotaBudget`：调大额度或加宽 `AIPE_PEER_LINK_QUOTA_WINDOW_MS`。 |
+| 入站被拒、对方报配额 | 命中 `perLinkQuotaBudget`：调大额度或加宽 `GOTONG_PEER_LINK_QUOTA_WINDOW_MS`。 |
 | run 一直挂着不动 | 大概率是出站审批闸在等人批：owner 去 `/me` 收件箱（Step 7）。admin 运行详情的琥珀「等待你批准」徽章 + 深链能直接跳过去。 |
-| 改了 peer 记录没生效 | 出站拨号按 `AIPE_PEER_POLL_MS`（默认 5s）tick；最迟下一拍生效。撤销/契约变更即时穿三个 install 点。 |
+| 改了 peer 记录没生效 | 出站拨号按 `GOTONG_PEER_POLL_MS`（默认 5s）tick；最迟下一拍生效。撤销/契约变更即时穿三个 install 点。 |
 
 ---
 

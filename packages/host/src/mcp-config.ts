@@ -16,8 +16,8 @@
  * `SecretSource` backed by `vault.get(name)` instead of `process.env`.
  */
 
-import type { McpServerSpec } from '@aipehub/core'
-import type { McpServerConfig } from '@aipehub/mcp-client'
+import type { McpServerSpec } from '@gotong/core'
+import type { McpServerConfig } from '@gotong/mcp-client'
 
 /**
  * Resolves a `${VAR}` name to its secret value, or `undefined` if the

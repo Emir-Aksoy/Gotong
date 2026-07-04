@@ -22,7 +22,7 @@
 
 **Включение Discussions — это переключатель в настройках репозитория, а не файл — ни Claude, ни CI не могут его переключить.** Этот шаг должен выполнить владелец репозитория в веб-интерфейсе:
 
-1. Откройте `https://github.com/Emir-Aksoy/AipeHub/settings` (**Settings** репозитория).
+1. Откройте `https://github.com/Emir-Aksoy/Gotong/settings` (**Settings** репозитория).
 2. Прокрутите вниз до раздела **Features**, поставьте галочку **Discussions**.
 3. GitHub **автоматически создаст категории по умолчанию**: Announcements / General / **Ideas** / Polls / **Q&A** / **Show and tell**. Три шаблона форм, поставляемых с этим репозиторием (см. §4), нацелены на три выделенных жирным и прикрепляются автоматически **в момент** включения — без необходимости создавать категории вручную.
 
@@ -63,19 +63,19 @@
 
 ## 5. Черновик приветственного / закреплённого поста (готов к копированию)
 
-После включения Discussions **скопируйте весь блок ниже**, опубликуйте новый Discussion в категории **General** с заголовком `👋 欢迎来到 AipeHub 客厅 / Welcome` и нажмите **Pin**. Оригинальный черновик начинается с китайского (основная аудитория сообщества), затем английский; переставьте по своему усмотрению.
+После включения Discussions **скопируйте весь блок ниже**, опубликуйте новый Discussion в категории **General** с заголовком `👋 欢迎来到 Gotong 客厅 / Welcome` и нажмите **Pin**. Оригинальный черновик начинается с китайского (основная аудитория сообщества), затем английский; переставьте по своему усмотрению.
 
 ```markdown
-## 👋 Welcome to the AipeHub living room
+## 👋 Welcome to the Gotong living room
 
-This is where the AipeHub community hangs out — ask, show, and talk shop. The map:
+This is where the Gotong community hangs out — ask, show, and talk shop. The map:
 
 - **🙋 A question?** Open one in **Q&A**. Say what you're trying to do and what you
   tried; someone will help.
 - **🛠 Built something?** Show it in **Show & Tell**. If it's a template others can
   import-and-run, submit it to the one-click gallery via the
   [submit flow](../../tree/main/templates/community/templates).
-- **💡 An idea?** Pitch it in **Ideas**. AipeHub has a deliberate spine — aiming with
+- **💡 An idea?** Pitch it in **Ideas**. Gotong has a deliberate spine — aiming with
   it lands better: **the hub never runs an LLM · people and agents are the same
   Participant · state is files on disk · federation is peer-to-peer (workflows can
   cross org lines, but credentials/data/billing each stay home)**.
@@ -90,14 +90,14 @@ people, rigorous about ideas — full text in the
 
 ---
 
-## 👋 欢迎来到 AipeHub 客厅
+## 👋 欢迎来到 Gotong 客厅
 
-这里是 AipeHub 的客厅——问问题、晒成果、聊想法的地方。先认认门:
+这里是 Gotong 的客厅——问问题、晒成果、聊想法的地方。先认认门:
 
 - **🙋 有问题?** 去 **Q&A** 开一帖。说清楚你想做什么、试过什么,有人会帮你。
 - **🛠 做了东西?** 去 **Show & Tell** 晒出来。如果是一个**别人能照着导入就跑**的
   模板,顺手按 [提交流程](../../tree/main/templates/community/templates) 提进一键画廊。
-- **💡 有想法?** 去 **Ideas** 提。AipeHub 有一条明确的脊梁,对着它提更容易被采纳:
+- **💡 有想法?** 去 **Ideas** 提。Gotong 有一条明确的脊梁,对着它提更容易被采纳:
   **框架不跑大模型 · 人和 agent 是同一种参与者 · 状态都是磁盘文件 · 联邦点对点
   (工作流能跨边界,但凭证/数据/计费各归各家)**。
 - **🐞 发现 bug?** 那个去 [Issues](../../issues/new/choose),不在这里。

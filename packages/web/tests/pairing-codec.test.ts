@@ -5,7 +5,7 @@ describe('pairing-codec (ease-of-use ④-M1)', () => {
   const sample = {
     peerId: 'hub_a1b2c3d4',
     endpoint: 'wss://partner.example.com:4000',
-    // 256-bit base64url token, the shape `aipehub mint-peer-token` emits.
+    // 256-bit base64url token, the shape `gotong mint-peer-token` emits.
     token: 'qC8kZ3mN7pR2vT5wX9bD1fH4jL6sU0aE-Cg_iK2mO4q',
   }
 

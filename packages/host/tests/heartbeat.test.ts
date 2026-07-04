@@ -17,7 +17,7 @@ import {
   type ParticipantId,
   type Task,
   type TaskResult,
-} from '@aipehub/core'
+} from '@gotong/core'
 
 import {
   HEARTBEAT_BROKER_ID,

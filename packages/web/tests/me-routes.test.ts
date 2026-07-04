@@ -32,8 +32,8 @@ import {
   type Participant,
   type Task,
   type TaskResult,
-} from '@aipehub/core'
-import { AUDIT_ACTIONS, openIdentityStore, type IdentityStore } from '@aipehub/identity'
+} from '@gotong/core'
+import { AUDIT_ACTIONS, openIdentityStore, type IdentityStore } from '@gotong/identity'
 
 import {
   serveWeb,
@@ -277,7 +277,7 @@ async function boot(
   } = {},
 ): Promise<BootResult> {
   const withGrowthReports = opts.withGrowthReports ?? true
-  const tmp = await mkdtemp(join(tmpdir(), 'aipehub-web-me-'))
+  const tmp = await mkdtemp(join(tmpdir(), 'gotong-web-me-'))
   const init = await Space.init(tmp, { name: 'me-test' })
   const space = init.space
   const hub = new Hub({ space })
@@ -297,7 +297,7 @@ async function boot(
   const { admin, token: adminToken } = await space.createAdmin('TestAdmin')
   const adminSid = 'a-me-sid-' + Math.random().toString(36).slice(2)
   await space.addAdminSession(adminSid, admin.id)
-  const adminCookie = `aipehub_admin=${adminSid}`
+  const adminCookie = `gotong_admin=${adminSid}`
 
   const identity = openIdentityStore({ dbPath: join(tmp, 'identity.sqlite') })
   const ib = identity.bootstrap({
@@ -428,7 +428,7 @@ describe('/api/me/* — auth gate', () => {
     const adminSid = 'a-test-2-' + Math.random().toString(36).slice(2)
     await b.space.addAdminSession(adminSid, v3Admin.id)
     const r = await fetch(`${b.baseUrl}/api/me/growth-reports`, {
-      headers: { cookie: `aipehub_admin=${adminSid}` },
+      headers: { cookie: `gotong_admin=${adminSid}` },
     })
     expect(r.status).toBe(401)
   })

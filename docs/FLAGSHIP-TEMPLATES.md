@@ -11,10 +11,10 @@
 
 ## Why these
 
-AipeHub's differentiator isn't "can call AI" — that's everywhere. It's that **you dare point AI at your home, your family, your money**, because the boundaries are real and they are yours:
+Gotong's differentiator isn't "can call AI" — that's everywhere. It's that **you dare point AI at your home, your family, your money**, because the boundaries are real and they are yours:
 
 - **A human gates the critical actions.** Reversible ones (turn off a light) just happen; irreversible ones (lock a door, spend money, send a child's data out) suspend and wait for a human to confirm in the inbox — the workflow **cannot skip** that gate.
-- **The keys and data are on your own disk.** Credentials are encrypted in your `.aipehub/` directory. Federating with another hub shares a **capability**, not your vault.
+- **The keys and data are on your own disk.** Credentials are encrypted in your `.gotong/` directory. Federating with another hub shares a **capability**, not your vault.
 - **No black-box decisions.** Every dispatch and result is a readable, read-only transcript. The framework never runs the model; there are no hidden judgments.
 
 Each template below is these three principles **landed on one concrete thing**.

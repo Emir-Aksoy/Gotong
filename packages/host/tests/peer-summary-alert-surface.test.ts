@@ -10,7 +10,7 @@
  * webhook body.
  */
 
-import { openIdentityStore, type IdentityStore } from '@aipehub/identity'
+import { openIdentityStore, type IdentityStore } from '@gotong/identity'
 import { beforeEach, describe, expect, it } from 'vitest'
 
 import {
@@ -116,7 +116,7 @@ describe('peer summary federation — alert delivery surface (v5 Stream F day-3)
     expect(calls[0].url).toBe('https://hooks.example/x')
     const body = JSON.parse(calls[0].init!.body!)
     expect(body).toMatchObject({
-      type: 'aipehub.peer_summary_alert/v1',
+      type: 'gotong.peer_summary_alert/v1',
       event: 'opened',
       ruleId: 'r1',
       source: 'local',
@@ -281,7 +281,7 @@ describe('peer summary federation — alert delivery surface (v5 Stream F day-3)
     expect(calls).toHaveLength(1)
     const body = JSON.parse(calls[0].init!.body!)
     expect(body).toMatchObject({
-      type: 'aipehub.peer_summary_alert/v1',
+      type: 'gotong.peer_summary_alert/v1',
       event: 'opened',
       firingId: 0,
       source: 'local',

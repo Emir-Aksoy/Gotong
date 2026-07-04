@@ -13,7 +13,7 @@
 
 ## 一、为什么做
 
-AipeHub 有 6 个 IM 桥，但改之前**三个用的不是官方直连**：
+Gotong 有 6 个 IM 桥，但改之前**三个用的不是官方直连**：
 
 | 桥 | 改之前 transport | 性质 |
 |---|---|---|
@@ -26,7 +26,7 @@ AipeHub 有 6 个 IM 桥，但改之前**三个用的不是官方直连**：
 
 目标：**有官方直连的全切官方直连**，做法对齐 OpenClaw / Hermes。
 
-唯一干净的接缝是 **`ImBridge` 契约**（`@aipehub/im-adapter` 的
+唯一干净的接缝是 **`ImBridge` 契约**（`@gotong/im-adapter` 的
 `platform` / `start` / `stop` / `sendMessage` / `onMessage`）。host 路由
 `handleImMessage` + `parseImCommand` **只依赖这个接口**，所以每个桥换 transport
 host 路由 **零改**，爆炸半径锁在各自的包 + 其 hermetic 测试。
@@ -74,7 +74,7 @@ Lark / Slack **没有这个冲突**——两者都能官方 + 免穿透，照官
 ### 3.3 删 OneBot 代码，不留 shim
 
 用户「不需向前兼容、删旧代码优先」+ 明确「qq 改为接官网的那一套」→ im-qq 的 OneBot
-v11 forward-WS 整条删掉，换官方 webhook 实现。不保留 `AIPE_QQ_BRIDGE_ACK_RISK` 风险
+v11 forward-WS 整条删掉，换官方 webhook 实现。不保留 `GOTONG_QQ_BRIDGE_ACK_RISK` 风险
 闸、不保留 NapCat / go-cqhttp adapter 接线。
 
 ### 3.4 QQ 用 Node 内置 `node:crypto`（零新依赖）
@@ -163,10 +163,10 @@ env 齐才构造它的桥，全 push 进同一个 transport-agnostic 的 `bridge
 
 | 平台 | env（桥需要它**全部**才激活） | 方向 |
 |---|---|---|
-| Telegram | `AIPE_TELEGRAM_BOT_TOKEN` | 出站·免穿透 |
-| QQ | `AIPE_QQ_BOT_APPID` + `AIPE_QQ_BOT_SECRET`（可选 `AIPE_QQ_WEBHOOK_PORT` / `_HOST` / `_PATH` 调监听；端口 0 = 不自起监听，由 host 自己的 HTTP 层喂 webhook） | 入站·需公网 |
-| Lark | `AIPE_LARK_APP_ID` + `AIPE_LARK_APP_SECRET` | 出站·免穿透 |
-| Slack | `AIPE_SLACK_APP_TOKEN`（`xapp-`） + `AIPE_SLACK_BOT_TOKEN`（`xoxb-`） | 出站·免穿透 |
+| Telegram | `GOTONG_TELEGRAM_BOT_TOKEN` | 出站·免穿透 |
+| QQ | `GOTONG_QQ_BOT_APPID` + `GOTONG_QQ_BOT_SECRET`（可选 `GOTONG_QQ_WEBHOOK_PORT` / `_HOST` / `_PATH` 调监听；端口 0 = 不自起监听，由 host 自己的 HTTP 层喂 webhook） | 入站·需公网 |
+| Lark | `GOTONG_LARK_APP_ID` + `GOTONG_LARK_APP_SECRET` | 出站·免穿透 |
+| Slack | `GOTONG_SLACK_APP_TOKEN`（`xapp-`） + `GOTONG_SLACK_BOT_TOKEN`（`xoxb-`） | 出站·免穿透 |
 
 > **诚实边界**：`startImBridges` 当前 env-gate 这 **4 个**平台。Discord / Matrix 桥本就
 > 是官方 + 出站、不在本轮改动范围，仍走 `examples/im-bridge-host/` 的示例 router；要把

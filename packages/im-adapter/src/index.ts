@@ -1,7 +1,7 @@
 /**
- * @aipehub/im-adapter — public surface.
+ * @gotong/im-adapter — public surface.
  *
- * Concrete bridges (@aipehub/im-telegram, @aipehub/im-matrix, …)
+ * Concrete bridges (@gotong/im-telegram, @gotong/im-matrix, …)
  * import shapes + the parser from here. Hosts import the
  * `ImBindingResolver` contract to wire identity into bridges.
  */

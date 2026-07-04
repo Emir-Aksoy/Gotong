@@ -1,7 +1,7 @@
-"""Expose a compiled LangGraph graph as an AipeHub Participant.
+"""Expose a compiled LangGraph graph as an Gotong Participant.
 
-LangGraph and AipeHub model the same thing from two ends: LangGraph builds a
-stateful graph of steps *inside* one process; AipeHub routes a Task to
+LangGraph and Gotong model the same thing from two ends: LangGraph builds a
+stateful graph of steps *inside* one process; Gotong routes a Task to
 *whichever* participant serves a capability and writes a transcript. This
 adapter is the seam — it lets a LangGraph graph join a Hub as a first-class
 agent without the Hub knowing it's a graph, and without this SDK taking a
@@ -32,7 +32,7 @@ class _CompiledGraph(Protocol):
     def invoke(self, state: Any, /, *args: Any, **kwargs: Any) -> Any: ...
 
 
-# Map an AipeHub Task to the graph's input state, and the graph's final state
+# Map an Gotong Task to the graph's input state, and the graph's final state
 # back to the Task output. Defaults pass the payload straight through (a
 # LangGraph state IS just a dict) and return the whole final state — callers
 # override when the graph speaks a different shape (e.g. ``{"messages": [...]}``).
@@ -49,7 +49,7 @@ def _default_from_state(state: Any) -> Any:
 
 
 class LangGraphParticipant(AgentParticipant):
-    """An AipeHub agent backed by a compiled LangGraph graph.
+    """An Gotong agent backed by a compiled LangGraph graph.
 
     Prefer the ``langgraph_participant`` factory; this class is exported for
     ``isinstance`` checks and subclassing.
@@ -95,13 +95,13 @@ def langgraph_participant(
     from_state: OutputMapper | None = None,
     config: dict[str, Any] | None = None,
 ) -> LangGraphParticipant:
-    """Wrap a compiled LangGraph graph as an AipeHub ``AgentParticipant``.
+    """Wrap a compiled LangGraph graph as an Gotong ``AgentParticipant``.
 
     Example::
 
         from langgraph.graph import StateGraph
-        from aipehub import connect
-        from aipehub.adapters import langgraph_participant
+        from gotong import connect
+        from gotong.adapters import langgraph_participant
 
         graph = build_graph().compile()
         agent = langgraph_participant(

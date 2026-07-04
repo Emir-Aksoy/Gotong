@@ -25,7 +25,7 @@
  * the public `/.well-known/agent-card.json`.
  */
 
-import type { HubLink, Participant, ParticipantId } from '@aipehub/core'
+import type { HubLink, Participant, ParticipantId } from '@gotong/core'
 import type {
   AddPeerSummaryAlertChannelInput,
   AddPeerSummaryAlertRuleInput,
@@ -36,7 +36,7 @@ import type {
   PeerSummaryAlertRule,
   UpdatePeerSummaryAlertChannelInput,
   UpdatePeerSummaryAlertRuleInput,
-} from '@aipehub/identity'
+} from '@gotong/identity'
 import type { RpcResponder } from './peer-kb-gate.js'
 import {
   PEER_SUMMARY_METRIC_KEYS,
@@ -863,7 +863,7 @@ export function createPeerSummaryFederation(
       // for a receiver to confirm reachability. Delivered even to a DISABLED
       // channel: an operator tests BEFORE flipping it on.
       const payload: AlertWebhookPayload = {
-        type: 'aipehub.peer_summary_alert/v1',
+        type: 'gotong.peer_summary_alert/v1',
         event: 'opened',
         firingId: 0,
         ruleId: 'test',
@@ -872,7 +872,7 @@ export function createPeerSummaryFederation(
         comparator: 'gt',
         threshold: 0,
         value: 1,
-        label: 'AipeHub control-plane test delivery',
+        label: 'Gotong control-plane test delivery',
         openedAt: now(),
         resolvedAt: null,
       }

@@ -1,5 +1,5 @@
 # 行业陪练教练（Pro 版）—— 全程使用 Hub Services + 多阶段咨询
-# AipeHub agent v1 manifest (v2.2 — services + multi-phase coaching)
+# Gotong agent v1 manifest (v2.2 — services + multi-phase coaching)
 #
 # 用法：admin 控制台 → 智能体 → 导入 → 粘贴本文件
 #
@@ -17,7 +17,7 @@
 #
 # Provider 默认 anthropic + claude-opus-4-7。要省钱改 sonnet-4-6；
 # 跑离线 demo 改 mock。
-schema: aipehub.agent/v1
+schema: gotong.agent/v1
 
 agent:
   id: industry-coach-pro

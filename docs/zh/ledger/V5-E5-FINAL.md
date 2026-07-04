@@ -234,7 +234,7 @@ peer-registry.gatedRpcResponder(row):
 | 缺口 | 状态 | 关键资产 |
 |---|---|---|
 | E1 单用户 no-code 糙点 | 完 | 成员 BYO key 点亮自助建 agent + 文案(`bc0c5ae`) |
-| E2 出站 CLI shell-out adapter | 完 | `@aipehub/cli-agent` 五缝 + 动作闸 + §5 验收门([V5-E2-CLI-ADAPTER.md](./V5-E2-CLI-ADAPTER.md)) |
+| E2 出站 CLI shell-out adapter | 完 | `@gotong/cli-agent` 五缝 + 动作闸 + §5 验收门([V5-E2-CLI-ADAPTER.md](./V5-E2-CLI-ADAPTER.md)) |
 | E3 知识库连接器 | 完 | Obsidian / Elasticsearch example + [KB-CONNECTORS.md](../KB-CONNECTORS.md) |
 | E4 agent 资源 RBAC | 完 | admin agent 路由接 grant ladder + UI + 验收门([V5-E4-FINAL.md](./V5-E4-FINAL.md)) |
 | **E5 中央多 hub 控制面** | **完** | 自由图控制面 `peer.summary` + opt-in 闸 + 聚合 UI + 双 hub 验收门(本文档) |

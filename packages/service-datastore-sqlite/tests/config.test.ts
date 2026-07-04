@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { ServiceConfigError } from '@aipehub/services-sdk'
+import { ServiceConfigError } from '@gotong/services-sdk'
 import { DEFAULT_MAX_BYTES, validateDatastoreSqliteConfig } from '../src/config.js'
 
 describe('validateDatastoreSqliteConfig', () => {

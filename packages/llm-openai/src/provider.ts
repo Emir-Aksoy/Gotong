@@ -12,13 +12,13 @@ import type {
   LlmStopReason,
   LlmStreamChunk,
   LlmUsage,
-} from '@aipehub/llm'
+} from '@gotong/llm'
 import {
   DEFAULT_MULTIMODAL_INLINE_BYTE_CAP,
   MultimodalInlineSizeError,
   MultimodalNotSupportedError,
   extractInlineBase64Size,
-} from '@aipehub/llm'
+} from '@gotong/llm'
 
 /**
  * Construction options for {@link OpenAIProvider}.
@@ -30,7 +30,7 @@ import {
  * The same provider class also backs **OpenAI-compatible** vendors —
  * DeepSeek, Qwen via DashScope, Zhipu (智谱), Moonshot (Kimi), local
  * Ollama / vLLM endpoints — by setting {@link baseURL}, {@link name},
- * and (usually) {@link maxTokensField} to `'max_tokens'`. AipeHub's
+ * and (usually) {@link maxTokensField} to `'max_tokens'`. Gotong's
  * host wires this up automatically when `ManagedAgentSpec.provider`
  * is `'openai-compatible'`.
  */
@@ -81,7 +81,7 @@ export interface OpenAIProviderOptions {
   /**
    * Phase 9 — cap on inline base64 payload size per block. Defaults to
    * `DEFAULT_MULTIMODAL_INLINE_BYTE_CAP` (1 MB). Host reads
-   * `AIPE_MULTIMODAL_MAX_INLINE_MB` and forwards here.
+   * `GOTONG_MULTIMODAL_MAX_INLINE_MB` and forwards here.
    */
   maxInlineBytes?: number
 }

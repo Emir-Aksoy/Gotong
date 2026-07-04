@@ -60,7 +60,7 @@ describe('builtin template gallery (G-M1)', () => {
     '%s parses through the real parseTemplate',
     (_id, t) => {
       const parsed = parseTemplate(t.yaml)
-      expect(parsed.schema).toBe('aipehub.template/v1')
+      expect(parsed.schema).toBe('gotong.template/v1')
       expect(typeof parsed.name).toBe('string')
       expect(parsed.name.length).toBeGreaterThan(0)
       expect(typeof parsed.version).toBe('number')

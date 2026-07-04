@@ -1,7 +1,7 @@
 /**
  * better-sqlite3 thin wrapper.
  *
- * Mirrors the strategy in `@aipehub/core/storage/sqlite.ts`:
+ * Mirrors the strategy in `@gotong/core/storage/sqlite.ts`:
  * `createRequire` for synchronous CJS loading so the constructor stays
  * sync (no `await import('better-sqlite3')`). The native bindings are
  * declared as a required peer dep — install fails fast if missing.

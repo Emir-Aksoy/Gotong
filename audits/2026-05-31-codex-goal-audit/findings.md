@@ -2,19 +2,19 @@
 
 ## P1 - v4 owner/admin 登录没有真正授权 legacy admin 操作面
 
-影响: 组织管理目标被打断。v4 identity 已经有 owner/admin/member/viewer、session、invitation、audit，但大部分 operational admin API 仍只接受 legacy `Space` admin token/cookie。结果是: 用户通过 v4 登录成功后，不能只凭 `aipehub_identity` cookie 管理 agents/workflows/services 等核心对象。
+影响: 组织管理目标被打断。v4 identity 已经有 owner/admin/member/viewer、session、invitation、audit，但大部分 operational admin API 仍只接受 legacy `Space` admin token/cookie。结果是: 用户通过 v4 登录成功后，不能只凭 `gotong_identity` cookie 管理 agents/workflows/services 等核心对象。
 
 证据:
 
 - `WebServerOptions.identity` 注释说 v4 session cookie 会被 `requireAdmin` 接受: `packages/web/src/server.ts:275`
 - 但 `findAdminFromRequest` 只检查 Bearer 和 `ADMIN_COOKIE`，并调用 `ctx.space.verifyAdminToken` / `ctx.space.findAdminSession`: `packages/web/src/server.ts:1806`
 - `requireAdmin` 失败时统一返回 `admin auth required`: `packages/web/src/server.ts:1879`
-- 复现命令结果: v4 login 200，随后只带 `aipehub_identity` 调 `/api/admin/agents` 返回 401。
+- 复现命令结果: v4 login 200，随后只带 `gotong_identity` 调 `/api/admin/agents` 返回 401。
 
 复现输出:
 
 ```json
-{"loginStatus":200,"cookiePrefix":"aipehub_identity=","agentsStatus":401,"agentsBody":"{\"error\":\"admin auth required\"}"}
+{"loginStatus":200,"cookiePrefix":"gotong_identity=","agentsStatus":401,"agentsBody":"{\"error\":\"admin auth required\"}"}
 ```
 
 为什么这会影响北极星: 个人模式可以靠首次 admin URL 兜底，但“组织管理多个人 / agent”的身份源应是 v4 identity。邀请来的 admin 或只走 v4 登录的 owner 如果不能管理 agents/workflows，组织层就不是统一闭环。

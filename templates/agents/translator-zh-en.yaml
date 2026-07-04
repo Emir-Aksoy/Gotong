@@ -1,7 +1,7 @@
 # 中英互译助手 — 单 agent 模板
 # 这个模板示例用 OpenAI（需要 OPENAI_API_KEY）；想换 Anthropic
 # 直接把 provider/model 改掉即可。
-schema: aipehub.agent/v1
+schema: gotong.agent/v1
 
 agent:
   id: translator-zh-en

@@ -1,4 +1,4 @@
-schema: aipehub.workflow/v1
+schema: gotong.workflow/v1
 workflow:
   id: tea-shop-restock
   name: 奶茶店补货下单 (跨组织)

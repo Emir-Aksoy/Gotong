@@ -1,4 +1,4 @@
-import type { MemoryEntry } from '@aipehub/services-sdk'
+import type { MemoryEntry } from '@gotong/services-sdk'
 import { describe, expect, it } from 'vitest'
 
 import {

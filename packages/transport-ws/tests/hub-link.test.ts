@@ -14,7 +14,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { WebSocketServer } from 'ws'
 
-import type { HubLink, Message, Task, TaskResult } from '@aipehub/core'
+import type { HubLink, Message, Task, TaskResult } from '@gotong/core'
 
 import { acceptHubLinks, connectHubLink } from '../src/hub-link.js'
 import { bearerAuth } from '../src/peer-auth.js'

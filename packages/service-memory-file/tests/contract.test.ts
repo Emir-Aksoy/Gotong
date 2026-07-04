@@ -1,5 +1,5 @@
 /**
- * Run the shared plugin contract suite from @aipehub/services-sdk
+ * Run the shared plugin contract suite from @gotong/services-sdk
  * against MemoryFilePlugin. This validates lifecycle invariants —
  * persistence across detach/re-attach, soft delete → restore round
  * trip, idempotent same-day soft delete — that every plugin in the
@@ -7,9 +7,9 @@
  */
 
 import { describe, expect } from 'vitest'
-import { runPluginContract } from '@aipehub/services-sdk/testing'
+import { runPluginContract } from '@gotong/services-sdk/testing'
 import { MemoryFilePlugin } from '../src/plugin.js'
-import type { MemoryHandle } from '@aipehub/services-sdk'
+import type { MemoryHandle } from '@gotong/services-sdk'
 
 describe('contract: memory-file', () => {
   runPluginContract({

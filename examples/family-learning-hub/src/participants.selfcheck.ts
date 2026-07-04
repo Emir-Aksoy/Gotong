@@ -7,14 +7,14 @@
  *   ★ an EMPTY moderation rule list NEVER flags (opt-out) — the rule-engine layer is
  *     optional on top of the always-on self-flag.
  *
- * Run:  pnpm --filter @aipehub/example-family-learning-hub selfcheck
+ * Run:  pnpm --filter @gotong/example-family-learning-hub selfcheck
  */
 
 import { mkdtempSync, existsSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import type { Task, TaskResult } from '@aipehub/core'
+import type { Task, TaskResult } from '@gotong/core'
 
 import {
   LessonTutorStandin,
@@ -101,7 +101,7 @@ async function main(): Promise<void> {
 
   // --- records.append — the MASTER copy on the 孩子 hub disk -------------------------
   section('[3] records.append — 学习档案主副本 (真写盘)')
-  const tmp = mkdtempSync(join(tmpdir(), 'aipehub-fl-participants-'))
+  const tmp = mkdtempSync(join(tmpdir(), 'gotong-fl-participants-'))
   try {
     const desk = new RecordsAppendParticipant(tmp)
     const rec1 = okOut(

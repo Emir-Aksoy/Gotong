@@ -80,7 +80,7 @@ import {
 } from './harness.js'
 
 async function main(): Promise<void> {
-  console.log('\n=== AipeHub case: family-learning-hub — 家长给孩子开 AI 订阅 + 管辖权 + AI 安全 (生产硬化 A-M2) ===\n')
+  console.log('\n=== Gotong case: family-learning-hub — 家长给孩子开 AI 订阅 + 管辖权 + AI 安全 (生产硬化 A-M2) ===\n')
   console.log('  跑的是真·家长 `tutor-teach` 工作流 (真 WorkflowRunner + 真求值器 + 真收件箱), 钉死两处 fail-open。\n')
 
   const tmpRoot = makeTmpRoot()

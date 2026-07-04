@@ -2,7 +2,7 @@
  * Cross-organisation RFP demo — two hubs in one process, federated
  * via an inproc HubLink.
  *
- * Run with: pnpm --filter @aipehub/example-cross-org-rfp start
+ * Run with: pnpm --filter @gotong/example-cross-org-rfp start
  *
  * See ../README.md for the architectural pitch. The code below is
  * deliberately ~200 lines so it fits on one screen: the federation
@@ -17,7 +17,7 @@ import {
   installPeerLink,
   type ParticipantId,
   type Task,
-} from '@aipehub/core'
+} from '@gotong/core'
 
 // ---------------------------------------------------------------------------
 // Domain types — the shape of the artifact crossing the org boundary.
@@ -45,7 +45,7 @@ interface QuoteResponse {
 
 // ---------------------------------------------------------------------------
 // Phase 4 — toy "identity" for Org A. In production this would be a
-// real `@aipehub/identity` IdentityStore (sqlite-backed); here we keep
+// real `@gotong/identity` IdentityStore (sqlite-backed); here we keep
 // the example zero-dep by hardcoding a tiny user table. The shape of
 // the `OriginResolver` is identical either way — the resolver function
 // just needs to turn the LOCAL actor id (`task.from`) into the
@@ -182,7 +182,7 @@ async function main(): Promise<void> {
     localWrapperId: 'org-b-bridge',
     // FED-M2 — stamp `origin` on outbound tasks so Org B knows who
     // from Org A is asking. In production `originResolver` would call
-    // into a real IdentityStore (see @aipehub/identity); here it's a
+    // into a real IdentityStore (see @gotong/identity); here it's a
     // hardcoded lookup table for example simplicity.
     selfHubId: 'acme-hub',
     originResolver: resolveOrgAUser,

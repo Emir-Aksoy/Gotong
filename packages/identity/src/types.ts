@@ -1,5 +1,5 @@
 /**
- * Public domain types for @aipehub/identity.
+ * Public domain types for @gotong/identity.
  *
  * Conventions:
  *   - All timestamps are `Date.now()` epoch-ms integers (number).
@@ -33,7 +33,7 @@ export const ROLES: readonly Role[] = [
 // own (the IdP-signed id_token is the proof, validated per-login in M4b); the
 // row exists only to map (issuer, sub) → user and to mint the SAME local
 // session every other auth path uses (decision D-3: self-built session, not
-// pure SP passthrough — AipeHub already owns a complete `Session` model, so
+// pure SP passthrough — Gotong already owns a complete `Session` model, so
 // OIDC merely bootstraps it).
 export type CredentialKind = 'password' | 'admin_token' | 'api_key' | 'oidc' | 'saml'
 
@@ -133,7 +133,7 @@ export interface OidcLogin {
  * Route B P1-M5b — bind a verified SAML identity to a local user. The (IdP
  * entityID, NameID) pair is the SAML analogue of OIDC's (issuer, sub): the
  * stable federated identity. The assertion signature + conditions MUST be
- * validated upstream (@aipehub/saml validateSamlResponse in the host) before
+ * validated upstream (@gotong/saml validateSamlResponse in the host) before
  * this is called — this store method is pure mapping + session-mint.
  */
 export interface LinkSamlInput {
@@ -243,7 +243,7 @@ export interface UpdateSamlProviderInput {
  * When set, a remote that answers `message/send` with a `working` Task (it
  * SUSPENDED: long compute / its own HITL) makes the outbound participant PARK
  * and poll `tasks/get` until it settles, instead of failing. Maps 1:1 to the
- * `@aipehub/a2a` participant's `lifecycle?` option — both fields optional, so
+ * `@gotong/a2a` participant's `lifecycle?` option — both fields optional, so
  * `{}` means "lifecycle on, participant defaults". A NULL column (this whole
  * object absent) = blocking, the legacy behaviour (a returned Task is an error).
  */
@@ -270,7 +270,7 @@ export interface A2aOutboundAgent {
   url: string
   /** Name of the env var holding the bearer token (never the secret itself). */
   tokenEnv: string
-  /** AipeHub↔AipeHub only: our `X-Aipe-Peer-Id`; null = a generic external agent. */
+  /** Gotong↔Gotong only: our `X-Gotong-Peer-Id`; null = a generic external agent. */
   peerId: string | null
   /** `metadata.skill` the remote should dispatch to; null = let the remote default. */
   targetSkill: string | null
@@ -411,7 +411,7 @@ export interface IssuedAdminToken {
  *
  * FED-M4 — `'federated'` covers actions triggered by a task that
  * crossed a peer-hub boundary (i.e. `Task.origin` is set; see
- * `@aipehub/core`'s `TaskOrigin`). The writer is expected to also
+ * `@gotong/core`'s `TaskOrigin`). The writer is expected to also
  * stash `task.origin` in `metadata.origin` so downstream readers can
  * trace back to the original org+user.
  *
@@ -508,7 +508,7 @@ export interface ListAuditLogQuery {
 /**
  * A2 (Phase 5) — recommended action vocabulary. Hosts MAY pass any
  * string to `writeAuditLog.action` (the column is free-form text), but
- * the values below cover every action emitted by aipehub itself. Using
+ * the values below cover every action emitted by gotong itself. Using
  * the typed constants instead of literals catches typos at compile time
  * and keeps downstream analytics (rollup queries, admin UI filters)
  * stable.
@@ -536,7 +536,7 @@ export const AUDIT_ACTIONS = {
   INVITE_REVOKE: 'invite_revoke',
   /**
    * Phase 6 #9: createInvitation was blocked by the org-wide hard cap
-   * on active-pending invites (`AIPE_MAX_PENDING_INVITES`, default
+   * on active-pending invites (`GOTONG_MAX_PENDING_INVITES`, default
    * 1000). Logged so operators can see "the cap is firing in production"
    * before they hit it themselves.
    */
@@ -614,7 +614,7 @@ export const AUDIT_ACTIONS = {
   // metadata carries { name, agentIds, workflowIds, includeSecrets, includePersonnel }.
   TEMPLATE_EXPORT: 'template_export',
   // setting-ops M3 — a deterministic (NON-AI) config write through the unified
-  // `setting` console: a managed env knob (<space>/aipehub.env) or a pricing.json
+  // `setting` console: a managed env knob (<space>/gotong.env) or a pricing.json
   // override, owner-gated and validated before it lands. ONE verb for both write
   // kinds; metadata carries { kind: 'env'|'pricing', surface, key?/model? }. NEVER
   // carries a secret value — secret-name keys are hard-refused before any write
@@ -771,7 +771,7 @@ export interface TotpEnrollment {
 
 /**
  * Unified ownership taxonomy. Used by vault here (A1) and aligned in A3
- * with `@aipehub/services-sdk`'s `OwnerKind` — the string values
+ * with `@gotong/services-sdk`'s `OwnerKind` — the string values
  * ('user' | 'org' | 'peer') are an EXACT subset of the SDK's wider enum
  * (also including 'agent' | 'workflow-run' | 'shared'). This lets a
  * `(kind, id)` tuple round-trip between a vault row and a service
@@ -1738,8 +1738,8 @@ export interface ListDueSuspendedTasksQuery {
 // ===========================================================================
 // Phase 12 M1 — IM bindings (Telegram / Matrix / Lark / Discord / Slack / QQ).
 //
-// IM bridges (separate `@aipehub/im-*` packages) need to map "this
-// Telegram user" to "that AipeHub user" so dispatches carry a proper
+// IM bridges (separate `@gotong/im-*` packages) need to map "this
+// Telegram user" to "that Gotong user" so dispatches carry a proper
 // `Task.origin.userId`. The binding flow is:
 //
 //   1. User logs into admin UI → clicks "Bind IM" → calls
@@ -1748,23 +1748,23 @@ export interface ListDueSuspendedTasksQuery {
 //   2. User opens the IM client and DMs the bot `/bind 123456`. The
 //      bridge calls `claimImBindingCode({ code, platform, platformUserId })`.
 //      Store verifies + deletes the code row + INSERT OR REPLACE into
-//      `im_bindings`. Returns the resolved AipeHub user id.
+//      `im_bindings`. Returns the resolved Gotong user id.
 //   3. Subsequent IM messages from that user: bridge calls
 //      `getUserIdByImBinding(platform, platformUserId)` to populate
 //      `task.origin.userId`.
 //
 // Re-bind semantics:
 //   - Same (platform, platformUserId) re-claiming a fresh code = move
-//     the binding to a (possibly different) AipeHub user. Allowed; no
+//     the binding to a (possibly different) Gotong user. Allowed; no
 //     unbind required. `INSERT OR REPLACE` does the right thing.
-//   - One AipeHub user can have many bindings across platforms (and
+//   - One Gotong user can have many bindings across platforms (and
 //     even multiple bindings on the SAME platform if a user happens to
 //     have multiple IM accounts). The unique index is on (platform,
 //     platformUserId), not on user_id.
 // ===========================================================================
 
 /**
- * One confirmed IM-to-AipeHub binding. PK is `(platform,
+ * One confirmed IM-to-Gotong binding. PK is `(platform,
  * platformUserId)`.
  */
 export interface ImBinding {

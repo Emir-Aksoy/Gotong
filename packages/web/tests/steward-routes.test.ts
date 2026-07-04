@@ -20,8 +20,8 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { Hub, Space } from '@aipehub/core'
-import { openIdentityStore, type IdentityStore } from '@aipehub/identity'
+import { Hub, Space } from '@gotong/core'
+import { openIdentityStore, type IdentityStore } from '@gotong/identity'
 
 import { serveWeb, type WebServerHandle } from '../src/server.js'
 import type {
@@ -103,7 +103,7 @@ interface Boot {
 
 async function boot(opts: { withSteward?: boolean } = {}): Promise<Boot> {
   const withSteward = opts.withSteward ?? true
-  const tmp = await mkdtemp(join(tmpdir(), 'aipehub-web-steward-'))
+  const tmp = await mkdtemp(join(tmpdir(), 'gotong-web-steward-'))
   const space = (await Space.init(tmp, { name: 'steward-test' })).space
   const hub = new Hub({ space })
   await hub.start()

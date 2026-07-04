@@ -20,7 +20,7 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 
-import { createLogger } from '@aipehub/core'
+import { createLogger } from '@gotong/core'
 import { DatastoreSqliteHandle } from '../src/handle.js'
 import type { DatastoreSqliteConfig } from '../src/config.js'
 
@@ -30,7 +30,7 @@ let root: string
 let h: DatastoreSqliteHandle | undefined
 
 beforeEach(async () => {
-  root = await mkdtemp(join(tmpdir(), 'aipe-h2-'))
+  root = await mkdtemp(join(tmpdir(), 'gotong-h2-'))
 })
 afterEach(async () => {
   h?.close()

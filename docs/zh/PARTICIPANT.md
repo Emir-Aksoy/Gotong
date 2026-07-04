@@ -1,7 +1,7 @@
 # 20 行写一个 Participant
 
 > 一句话：**凡是加入 hub 的东西——你的 agent、一个人、一个外部服务——都是同一个
-> `Participant`。** 这就是 AipeHub 的全部扩展面。学会写一个 `Participant`，你就学会了
+> `Participant`。** 这就是 Gotong 的全部扩展面。学会写一个 `Participant`，你就学会了
 > 扩展这个框架的所有方式。
 >
 > 想接的是「已经在跑的 hub、我从另一个进程连上去」——那是物理接线，看
@@ -43,7 +43,7 @@ interface Participant {
 不需要任何基类。一个对象字面量就是一个合法的 `Participant`：
 
 ```ts
-import { Hub, type Participant, type Task, type TaskResult } from '@aipehub/core'
+import { Hub, type Participant, type Task, type TaskResult } from '@gotong/core'
 
 // 一个 Participant 就是「3 个字段 + 一个处理器」。没有基类，没有框架魔法。
 const greeter: Participant = {
@@ -75,7 +75,7 @@ by, ts }`。`AgentParticipant`（[`packages/core/src/participants/agent.ts`](../
 抛错变成 `failed`、替你把 `SuspendTaskError` 当控制流透传。
 
 ```ts
-import { AgentParticipant, Hub, type Task } from '@aipehub/core'
+import { AgentParticipant, Hub, type Task } from '@gotong/core'
 
 class Greeter extends AgentParticipant {
   constructor() {
@@ -135,7 +135,7 @@ SuspendTaskError({...})` 就能挂起、让出 worker、到点被唤醒——不
 契约——`kind: 'human'`。框架自带 `HumanParticipant`：
 
 ```ts
-import { HumanParticipant } from '@aipehub/core'
+import { HumanParticipant } from '@gotong/core'
 const alice = new HumanParticipant({ id: 'alice', capabilities: ['approve'] })
 hub.register(alice)
 // alice.next() 取下一个派给她的 task；alice.complete(taskId, output) 回填结果。

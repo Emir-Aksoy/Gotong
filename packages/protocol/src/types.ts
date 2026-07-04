@@ -1,9 +1,9 @@
 /**
- * Wire-level types — the type contract `@aipehub/protocol` speaks. Lives
- * here (not in `@aipehub/core`) so a lightweight third-party SDK can speak
+ * Wire-level types — the type contract `@gotong/protocol` speaks. Lives
+ * here (not in `@gotong/core`) so a lightweight third-party SDK can speak
  * the protocol without pulling in core's runtime (Hub, Scheduler, Storage).
  *
- * `@aipehub/core` re-exports these so existing `from '@aipehub/core'`
+ * `@gotong/core` re-exports these so existing `from '@gotong/core'`
  * imports keep working — the move is invisible to in-tree consumers.
  */
 

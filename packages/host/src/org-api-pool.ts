@@ -31,7 +31,7 @@ import type {
   IdentityStore,
   UsagePeriod,
   VaultEntry,
-} from '@aipehub/identity'
+} from '@gotong/identity'
 
 /**
  * Resolved org-level LLM API key. The pool returns this — never the raw
@@ -70,7 +70,7 @@ export interface OrgApiPoolOpts {
 /**
  * B2.2 — minimal "who pays for this call" descriptor. Deliberately
  * decoupled from `Task` / `TaskOrigin` so OrgApiPool stays free of
- * @aipehub/core and @aipehub/llm imports. Host wiring code adapts the
+ * @gotong/core and @gotong/llm imports. Host wiring code adapts the
  * concrete shape (e.g. `task.origin`) to this contract at the seam.
  */
 export interface QuotaSubject {
@@ -126,7 +126,7 @@ export interface MakeLlmQuotaGateOpts {
   /**
    * M8 — operator override: allow unpriced models to run even when a cost
    * cap is set (accepting that those calls can't be cost-metered). Set from
-   * `AIPE_ALLOW_UNPRICED_MODELS`. Default false = fail-closed.
+   * `GOTONG_ALLOW_UNPRICED_MODELS`. Default false = fail-closed.
    */
   allowUnpricedModels?: boolean
 }
@@ -221,7 +221,7 @@ export class UnpricedModelDeniedError extends Error {
     public readonly quota: number,
   ) {
     super(
-      `unpriced_model_denied: user=${userId} has a ${metric}/${period} cap=${quota} but the model is unpriced (cost can't be metered); set AIPE_ALLOW_UNPRICED_MODELS=1 to allow, or add the model to pricing.json`,
+      `unpriced_model_denied: user=${userId} has a ${metric}/${period} cap=${quota} but the model is unpriced (cost can't be metered); set GOTONG_ALLOW_UNPRICED_MODELS=1 to allow, or add the model to pricing.json`,
     )
     this.name = 'UnpricedModelDeniedError'
   }

@@ -6,7 +6,7 @@
 // against a hanging fake.
 
 import { describe, it, expect } from 'vitest'
-import type { LlmProvider, LlmRequest, LlmStreamChunk } from '@aipehub/llm'
+import type { LlmProvider, LlmRequest, LlmStreamChunk } from '@gotong/llm'
 import {
   testLlmKey,
   createLlmKeyTestSurface,

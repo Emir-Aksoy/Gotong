@@ -13,10 +13,10 @@
  * code is identical to examples/llm-mock — only the provider differs.
  */
 
-import { Hub, type TranscriptEntry } from '@aipehub/core'
-import { LlmAgent } from '@aipehub/llm'
-import { AnthropicProvider } from '@aipehub/llm-anthropic'
-import { OpenAIProvider } from '@aipehub/llm-openai'
+import { Hub, type TranscriptEntry } from '@gotong/core'
+import { LlmAgent } from '@gotong/llm'
+import { AnthropicProvider } from '@gotong/llm-anthropic'
+import { OpenAIProvider } from '@gotong/llm-openai'
 
 function describe(e: TranscriptEntry): string {
   switch (e.kind) {
@@ -128,7 +128,7 @@ async function main(): Promise<void> {
     }),
   )
 
-  console.log('\n=== AipeHub demo: LlmAgent + real providers ===')
+  console.log('\n=== Gotong demo: LlmAgent + real providers ===')
   console.log(`  writer  -> ${writerProvider.name}`)
   console.log(`  reviewer-> ${reviewerProvider.name}\n`)
 

@@ -66,9 +66,9 @@ describe('buildAgentCard (R3)', () => {
   })
 
   it('uses a sensible default description when none / empty is given', () => {
-    expect(buildAgentCard(base).description).toMatch(/AipeHub federation hub/)
+    expect(buildAgentCard(base).description).toMatch(/Gotong federation hub/)
     expect(buildAgentCard({ ...base, description: '   ' }).description).toMatch(
-      /AipeHub federation hub/,
+      /Gotong federation hub/,
     )
   })
 
@@ -86,7 +86,7 @@ describe('buildAgentCard (R3)', () => {
   })
 
   // C-M1 — skill advertisement is an explicit opt-in (host gates it behind
-  // AIPE_A2A_ADVERTISE_SKILLS). The card never auto-enumerates.
+  // GOTONG_A2A_ADVERTISE_SKILLS). The card never auto-enumerates.
   describe('skills opt-in (Phase 18 C-M1)', () => {
     it('defaults to no skills when none are passed', () => {
       expect(buildAgentCard(base).skills).toEqual([])

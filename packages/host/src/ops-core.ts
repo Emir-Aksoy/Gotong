@@ -2,13 +2,13 @@
  * `ops-core` — the single deterministic (NON-AI) operations engine behind the
  * unified `setting` console. One source of truth; three thin surfaces (CLI,
  * admin web, IM command-mode) consume it. Mirrors the discipline already shipped
- * twice: `@aipehub/host/check` (the workspace validators) and the steward
+ * twice: `@gotong/host/check` (the workspace validators) and the steward
  * surface (one host service, many transports). Nothing here boots a server — it
- * is exported from `@aipehub/host` under the non-booting `./ops` subpath, so the
+ * is exported from `@gotong/host` under the non-booting `./ops` subpath, so the
  * tiny CLI can drive it without becoming the host (same trick as `./check`).
  *
  * Why this exists: the deterministic ops capabilities ALL already exist, but as
- * three unrelated entry points — `aipehub doctor` (pre-flight), `aipehub check`
+ * three unrelated entry points — `gotong doctor` (pre-flight), `gotong check`
  * (definition syntax), and the boot banner (broken-defs notice). There is no one
  * line stitching "cold-start → crash-rescue → re-read definitions → other config
  * management", and no shared web/IM entry. `ops-core` aggregates them under one
@@ -59,14 +59,14 @@ import {
   type ConfigWriteAuditSink,
 } from './ops-config-write.js'
 
-// Re-export the read-tier validators so `@aipehub/host/ops` is a one-stop
+// Re-export the read-tier validators so `@gotong/host/ops` is a one-stop
 // import — a consumer can reach the same deterministic validators the boot path
-// and `aipehub check` use, without also importing `./check`. (Imported locally
+// and `gotong check` use, without also importing `./check`. (Imported locally
 // above so the handlers below can call them directly.)
 export { validateWorkspace, formatCheckReport, definitionsReport }
 export type { WorkspaceCheckReport, CheckFinding, AdminHealthSurface, HealthSnapshot }
 // Re-export the config-write surface so the CLI / web adapters reach the env-knob
-// whitelist, secret-var list and template through the same `@aipehub/host/ops`
+// whitelist, secret-var list and template through the same `@gotong/host/ops`
 // import (M3). The writers themselves are only reachable via `runOpsCommand`'s
 // gated handlers — never exported for a surface to call directly.
 export { ENV_KNOBS, SECRET_ENV_VARS, isSecretKey, generateEnvTemplate } from './ops-config-write.js'
@@ -159,9 +159,9 @@ export type OpsPathProbe =
   | 'blocked'
 
 export interface OpsDeps {
-  /** Workspace root (AIPE_SPACE). */
+  /** Workspace root (GOTONG_SPACE). */
   spaceDir: string
-  /** Env to read AIPE_* from. Defaults to process.env. */
+  /** Env to read GOTONG_* from. Defaults to process.env. */
   env?: Record<string, string | undefined>
   /**
    * Live hub health snapshot — present only when a RUNNING host injected it
@@ -170,12 +170,12 @@ export interface OpsDeps {
    */
   health?: AdminHealthSurface
   /**
-   * Directory scanned by `inventory`. Defaults to env.AIPE_BACKUP_DIR (unset →
+   * Directory scanned by `inventory`. Defaults to env.GOTONG_BACKUP_DIR (unset →
    * no inventory dir, reported honestly rather than guessed).
    */
   backupDir?: string
   // ── config-write (M3) ──
-  /** Managed env file written by `config-set`. Defaults to <space>/aipehub.env. */
+  /** Managed env file written by `config-set`. Defaults to <space>/gotong.env. */
   envFilePath?: string
   /** Pricing override file written by `config-price`. Defaults to <space>/pricing.json. */
   pricingPath?: string
@@ -263,7 +263,7 @@ export function workspaceFixDirs(
   env: Record<string, string | undefined> = {},
 ): string[] {
   const workflowsDir =
-    env.AIPE_WORKFLOWS_DIR ?? join(spaceDir, 'workflows', 'definitions')
+    env.GOTONG_WORKFLOWS_DIR ?? join(spaceDir, 'workflows', 'definitions')
   return [spaceDir, workflowsDir]
 }
 
@@ -329,14 +329,14 @@ export interface BackupInventory {
   dir: string | null
   /** Matching archives, NEWEST FIRST (the filename stamp is lexicographically sortable). */
   items: BackupInventoryItem[]
-  /** Files in the dir that did not match the `aipehub-*.tar.gz` pattern. */
+  /** Files in the dir that did not match the `gotong-*.tar.gz` pattern. */
   ignored: number
 }
 
-// backup.sh names archives `aipehub-<label>-<YYYYMMDDThhmmssZ>.tar.gz`; the
+// backup.sh names archives `gotong-<label>-<YYYYMMDDThhmmssZ>.tar.gz`; the
 // label may itself contain dashes, so anchor the timestamp at the tail and let
 // the label be the greedy remainder.
-const BACKUP_NAME_RE = /^aipehub-(.+)-(\d{8}T\d{6}Z)\.tar\.gz$/
+const BACKUP_NAME_RE = /^gotong-(.+)-(\d{8}T\d{6}Z)\.tar\.gz$/
 
 /**
  * List the recovery candidates in a backup directory — read-only: readdir +
@@ -432,7 +432,7 @@ const COMMANDS: OpsCommandDef[] = [
     id: 'check',
     tier: 'read',
     title: 'Validate workspace',
-    summary: 'Deterministic config + workflow + agent validation (the same checks as `aipehub check` and boot).',
+    summary: 'Deterministic config + workflow + agent validation (the same checks as `gotong check` and boot).',
     run: runCheck,
   },
   {
@@ -468,7 +468,7 @@ const COMMANDS: OpsCommandDef[] = [
     id: 'config-set',
     tier: 'config-write',
     title: 'Set an env knob',
-    summary: 'Set one whitelisted non-secret env knob in <space>/aipehub.env (takes effect on restart).',
+    summary: 'Set one whitelisted non-secret env knob in <space>/gotong.env (takes effect on restart).',
     whereToRun: OWNER_HINT,
     run: runConfigSet,
   },
@@ -661,11 +661,11 @@ async function runList(_args: readonly string[], caller: OpsCaller, _deps: OpsDe
 }
 
 async function runInventory(_args: readonly string[], _caller: OpsCaller, deps: OpsDeps): Promise<OpsResult> {
-  const backupDir = deps.backupDir ?? deps.env?.AIPE_BACKUP_DIR
+  const backupDir = deps.backupDir ?? deps.env?.GOTONG_BACKUP_DIR
   const inv = await readBackupInventory(backupDir, deps)
   const lines: string[] = []
   if (!inv.dir) {
-    lines.push('backup dir: not set (set AIPE_BACKUP_DIR, or pass a backup directory).')
+    lines.push('backup dir: not set (set GOTONG_BACKUP_DIR, or pass a backup directory).')
   } else if (inv.items.length === 0) {
     lines.push(`backup dir: ${inv.dir} — no backups found.`)
   } else {
@@ -693,7 +693,7 @@ async function runFixDirs(_args: readonly string[], _caller: OpsCaller, deps: Op
 // ───────────────────────────────────────────────────────────────────────────
 
 function envFileOf(deps: OpsDeps): string {
-  return deps.envFilePath ?? join(deps.spaceDir, 'aipehub.env')
+  return deps.envFilePath ?? join(deps.spaceDir, 'gotong.env')
 }
 function pricingFileOf(deps: OpsDeps): string {
   return deps.pricingPath ?? join(deps.spaceDir, 'pricing.json')

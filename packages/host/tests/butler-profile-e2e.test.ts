@@ -23,14 +23,14 @@ import { join } from 'node:path'
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { Hub, Space, type Logger } from '@aipehub/core'
-import { PersonalButlerAgent } from '@aipehub/personal-butler'
+import { Hub, Space, type Logger } from '@gotong/core'
+import { PersonalButlerAgent } from '@gotong/personal-butler'
 import type {
   LlmMessage,
   LlmProvider,
   LlmRequest,
   LlmStreamChunk,
-} from '@aipehub/llm'
+} from '@gotong/llm'
 
 import {
   buildButlerProfileToolset,
@@ -115,7 +115,7 @@ describe('butler-profile-e2e — S2-M1 (IM "你记得我什么" = the /me snapsh
   let svc: HostButlerMemoryService
 
   beforeEach(async () => {
-    tmp = await mkdtemp(join(tmpdir(), 'aipe-butler-profile-e2e-'))
+    tmp = await mkdtemp(join(tmpdir(), 'gotong-butler-profile-e2e-'))
     memRoot = join(tmp, 'mem')
     const { space } = await Space.init(tmp, { name: 'butler-profile-e2e' })
     hub = new Hub({ space })
@@ -155,7 +155,7 @@ describe('butler-profile-e2e — S2-M1 (IM "你记得我什么" = the /me snapsh
     const m = openButlerMemory({ rootDir: memRoot, userId: 'alice', logger: silentLogger })
     await m.remember({
       kind: 'semantic',
-      text: '在做 AipeHub 项目',
+      text: '在做 Gotong 项目',
       meta: { tier: 'projects', importance: 5 },
     })
     await m.remember({ kind: 'semantic', text: '喜欢少糖奶茶', meta: { tier: 'persona' } })
@@ -172,7 +172,7 @@ describe('butler-profile-e2e — S2-M1 (IM "你记得我什么" = the /me snapsh
 
     // Structured, tier-grouped, honestly tagged — the /me projection in IM form.
     expect(reply).toContain('【管家记忆】画像 4 条 · 最近 1 条')
-    expect(reply).toContain('- [项目] 在做 AipeHub 项目(重要)')
+    expect(reply).toContain('- [项目] 在做 Gotong 项目(重要)')
     expect(reply).toContain('- [画像] 喜欢少糖奶茶')
     // Untiered fact folds into the default cluster; the closed fact says so.
     expect(reply).toContain('- [其它] 曾住吉隆坡(已失效)')
@@ -192,13 +192,13 @@ describe('butler-profile-e2e — S2-M1 (IM "你记得我什么" = the /me snapsh
 
   it('② no-leak: another member gets the friendly empty answer, none of alice\'s bytes', async () => {
     const m = openButlerMemory({ rootDir: memRoot, userId: 'alice', logger: silentLogger })
-    await m.remember({ kind: 'semantic', text: '在做 AipeHub 项目', meta: { tier: 'projects' } })
+    await m.remember({ kind: 'semantic', text: '在做 Gotong 项目', meta: { tier: 'projects' } })
 
     hub.register(butlerFor('butler:bob', 'bob'))
     const reply = await ask('butler:bob', 'bob', '你记得我什么?')
 
     expect(reply).toContain('还没有存下')
-    expect(reply).not.toContain('AipeHub')
+    expect(reply).not.toContain('Gotong')
   })
 
   it('③ the renderer counts overflow honestly', () => {

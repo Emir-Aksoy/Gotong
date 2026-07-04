@@ -14,17 +14,17 @@
  *      workflow target.
  *   6. They `/unbind` — the binding is removed.
  *
- * The same flow works against the 6 real `@aipehub/im-*` bridges —
+ * The same flow works against the 6 real `@gotong/im-*` bridges —
  * swap `FakeBridge` for `new TelegramBridge({ token })` or similar
  * and the rest of the code is unchanged. That's the whole point of
  * having a shared router.
  *
- * Run:  pnpm --filter @aipehub/example-im-bridge-host start
+ * Run:  pnpm --filter @gotong/example-im-bridge-host start
  */
 
-import { AgentParticipant, Hub, type Task } from '@aipehub/core'
-import { openIdentityStore } from '@aipehub/identity'
-import type { ImMessage, ImUser } from '@aipehub/im-adapter'
+import { AgentParticipant, Hub, type Task } from '@gotong/core'
+import { openIdentityStore } from '@gotong/identity'
+import type { ImMessage, ImUser } from '@gotong/im-adapter'
 
 import { FakeBridge } from './fake-bridge.js'
 import { makeIdentityImBindingResolver } from './identity-resolver.js'
@@ -75,7 +75,7 @@ class WorkflowEchoAgent extends AgentParticipant {
 // ---------------------------------------------------------------------------
 
 async function main(): Promise<void> {
-  console.log('\n=== AipeHub demo: im-bridge-host (Phase 12 M8) ===\n')
+  console.log('\n=== Gotong demo: im-bridge-host (Phase 12 M8) ===\n')
 
   // -- 1. Identity ----------------------------------------------------------
   // In-process SQLite. A real host points `dbPath` at

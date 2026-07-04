@@ -20,7 +20,7 @@
  * `ServiceInitCtx` across a `shutdown`.
  */
 
-import type { Logger } from '@aipehub/core'
+import type { Logger } from '@gotong/core'
 import type { Owner } from './owner.js'
 import type { ServiceSnapshot } from './snapshot.js'
 import type { TrashRef } from './trash.js'
@@ -51,7 +51,7 @@ export interface ServiceInitCtx {
   logger: Logger
   /**
    * Read-only hub surface. Plugins use this to emit events (e.g.
-   * `service_trashed`) without taking a runtime dep on `@aipehub/core`'s
+   * `service_trashed`) without taking a runtime dep on `@gotong/core`'s
    * Hub class.
    */
   hub: HubSurfaceForPlugins
@@ -158,8 +158,8 @@ export interface ServicePlugin<TConfig = unknown, THandle = unknown> {
  * dynamic-imports each `package` in order.
  *
  *   { "plugins": [
- *       "@aipehub/service-memory-file",
- *       { "package": "my-org/aipehub-notion-artifact", "enabled": false }
+ *       "@gotong/service-memory-file",
+ *       { "package": "my-org/gotong-notion-artifact", "enabled": false }
  *     ]
  *   }
  */

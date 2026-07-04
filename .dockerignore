@@ -10,11 +10,11 @@ npm-debug.log*
 **/dist
 **/*.tsbuildinfo
 
-# Workspace state (this is what `AIPE_SPACE` points at — never bake it in)
-.aipehub
-.aipehub-*
-**/.aipehub
-**/.aipehub-*
+# Workspace state (this is what `GOTONG_SPACE` points at — never bake it in)
+.gotong
+.gotong-*
+**/.gotong
+**/.gotong-*
 
 # Editor / OS noise
 .DS_Store

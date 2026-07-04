@@ -1,6 +1,6 @@
 # 排班 — 提报可排时段 + 店长确认 (HITL) — 这是 "管理排班" 那条。
 # 店员提报本周可排时段 → 助手整理成排班建议 → 店长 human: 确认 → 可发布。
-schema: aipehub.workflow/v1
+schema: gotong.workflow/v1
 workflow:
   id: cafe-shift-availability
   name: 排班 — 提报可排时段 + 店长确认

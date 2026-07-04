@@ -1,6 +1,6 @@
 # =============================================================================
 # Workflow: 我的晨报(定时工作流示例)
-# Schema: aipehub.workflow/v1
+# Schema: gotong.workflow/v1
 #
 # 「让 hub 每天替我干活」的最小骨架(LIFE-L2①):一位晨报员 agent 每早替你写
 # 一份中文晨报,跑完由管家播到你的 IM。**调度环零 LLM** —— 唤醒/判定/派发
@@ -29,7 +29,7 @@
 # (fire-and-forget),只是没人接。
 # =============================================================================
 
-schema: aipehub.workflow/v1
+schema: gotong.workflow/v1
 
 workflow:
   id: morning-brief

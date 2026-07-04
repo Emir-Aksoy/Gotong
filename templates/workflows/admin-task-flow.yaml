@@ -1,7 +1,7 @@
 # =============================================================================
 # Workflow: 行政任务编排自动化
 # Companion team: templates/teams/admin-task-orchestration.yaml
-# Schema: aipehub.workflow/v1
+# Schema: gotong.workflow/v1
 #
 # 一份任务通知书丢进来 →
 #   parse-brief  解析关键信息（标题/目标/截止/相关人/约束/歧义）
@@ -19,7 +19,7 @@
 #   templates/workflows/admin-report-restyle-flow.yaml
 # =============================================================================
 
-schema: aipehub.workflow/v1
+schema: gotong.workflow/v1
 
 workflow:
   id: admin-task-flow

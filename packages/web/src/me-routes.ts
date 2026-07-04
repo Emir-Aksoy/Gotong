@@ -46,9 +46,9 @@ import { readJsonBody, sendJson } from './http-helpers.js'
 import { handleMeWizardRoute, type WorkflowWizardSurface } from './wizard-routes.js'
 import { readRawBody } from './uploads-routes.js'
 
-import type { Hub } from '@aipehub/core'
-import type { GrowthReportsAdminSurface } from '@aipehub/core'
-import { createLogger } from '@aipehub/core'
+import type { Hub } from '@gotong/core'
+import type { GrowthReportsAdminSurface } from '@gotong/core'
+import { createLogger } from '@gotong/core'
 
 import {
   resolveV4Auth,
@@ -92,7 +92,7 @@ function parseCaseIdFromReportPath(path: string): string | null {
 const DEFAULT_ME_ROLES: readonly string[] = ['owner', 'admin', 'member']
 
 /**
- * Read-side mirror of `@aipehub/workflow`'s `MeSurfaceSpec`. The web layer
+ * Read-side mirror of `@gotong/workflow`'s `MeSurfaceSpec`. The web layer
  * has no workflow dep, so `surfaceMe` arrives as `unknown` (already
  * validated by the workflow parser at import) and we narrow it here. Only
  * the fields `/me` consumes are typed.
@@ -248,7 +248,7 @@ export interface MeWorkflowSurface {
 // ---------------------------------------------------------------------------
 // Member run history surface (Phase 19 P1-M2)
 //
-// Duck-typed so the web layer takes no runtime dep on `@aipehub/workflow`. The
+// Duck-typed so the web layer takes no runtime dep on `@gotong/workflow`. The
 // host's workflow surface satisfies it structurally: its `listRunsByUser`
 // returns the wider `WorkflowRunSummary`, assignable to the narrow `MeRunView`.
 // `listRunsByUser` is already scoped to the caller server-side (keyed on the
@@ -643,7 +643,7 @@ function memberUploadScope(userId: string): string {
 // ---------------------------------------------------------------------------
 // Member task inbox surface (Phase 16)
 //
-// Duck-typed so the web layer takes no runtime dep on `@aipehub/inbox`; the
+// Duck-typed so the web layer takes no runtime dep on `@gotong/inbox`; the
 // host's `HostInboxService` satisfies it structurally. `listPending` is already
 // scoped to the caller server-side and returns the PUBLIC item shape (no
 // userId / parent / status — internal). `resolve` runs the two-step
@@ -776,7 +776,7 @@ export interface MeWorkflowEditSurface {
 
 /**
  * ARCH-M6 — the architect's depth levels, mirrored locally so the web layer
- * takes NO runtime dep on `@aipehub/workflow-assistant`. Same duck-typing
+ * takes NO runtime dep on `@gotong/workflow-assistant`. Same duck-typing
  * discipline as the rest of this surface (e.g. `WorkflowGraphView` echoed as
  * `unknown`). Kept narrow so the host's `MeWorkflowCreateRequest.detail`
  * (`WorkflowDetailLevel`) is assignable into the surface contract under
@@ -862,7 +862,7 @@ export interface MeWorkflowCreateSurface {
 // ---------------------------------------------------------------------------
 // SW-M6 — the hub steward ("管家"). A member manages THEIR OWN agents +
 // workflows by talking to it in plain language. Duck-typed so the web layer
-// takes NO runtime dep on `@aipehub/hub-steward` (mirroring InboxSurface /
+// takes NO runtime dep on `@gotong/hub-steward` (mirroring InboxSurface /
 // MeWorkflowEditSurface); the host's `HubStewardSurface` satisfies it.
 //
 //   - `plan`  turns one instruction into a classified proposal with ZERO side
@@ -3159,7 +3159,7 @@ async function handleMeTotpEnroll(
     // account = the member's own email (server-side, never client-supplied);
     // issuer is the app name shown in the authenticator. The plaintext secret
     // is returned ONCE here for the QR code — it lives encrypted in the vault.
-    const e = ctx.identity.enrollTotp({ userId, account: email, issuer: 'AipeHub' })
+    const e = ctx.identity.enrollTotp({ userId, account: email, issuer: 'Gotong' })
     sendJson(res, { ok: true, secretBase32: e.secretBase32, otpauthUri: e.otpauthUri })
   } catch (err) {
     // No master key configured → the vault can't encrypt the secret. That's a

@@ -27,8 +27,8 @@ import type {
   ManagedAgentLifecycle,
   ManagedAgentSpec,
   Space,
-} from '@aipehub/core'
-import { createLogger } from '@aipehub/core'
+} from '@gotong/core'
+import { createLogger } from '@gotong/core'
 import {
   AGENT_SCHEMA_V1,
   BUNDLE_SCHEMA_V1,
@@ -89,7 +89,7 @@ export type AgentPermLiteral = 'viewer' | 'editor' | 'owner'
 /**
  * v5 E4-M1 — duck-typed agent-grant sink (the IdentityStore satisfies it via
  * its `hasAgentGrant`/`setAgentGrant`/… facade). Mirrors workflow-routes'
- * WorkflowGrantSink so the web layer keeps zero `@aipehub/identity` runtime dep.
+ * WorkflowGrantSink so the web layer keeps zero `@gotong/identity` runtime dep.
  */
 export interface AgentGrantSink {
   hasAgentGrant(agentId: string, userId: string, min: AgentPermLiteral): boolean
@@ -214,7 +214,7 @@ function validateAgentBody(body: Record<string, unknown>): ParsedAgent {
   // Butler fold-in opt-in marker: spawn a chat agent as a resident
   // PersonalButlerAgent (cross-session memory + governed loop). Pure
   // passthrough — the host owns the upgrade and can also default it on via
-  // AIPE_BUTLER, so most deployments never set this per-agent.
+  // GOTONG_BUTLER, so most deployments never set this per-agent.
   if (typeof body.butler === 'boolean') managed.butler = body.butler
   const out: ParsedAgent = { id: body.id, capabilities, managed }
   if (typeof body.displayName === 'string') out.displayName = body.displayName
@@ -694,7 +694,7 @@ export async function handleAgentsRoute(
   }
 
   // --- template import (v5 B-M4) ---
-  // The inverse of the B-M2/B-M3 export: land an aipehub.template/v1's agents +
+  // The inverse of the B-M2/B-M3 export: land an gotong.template/v1's agents +
   // workflows. Mirrors bundle import (same upsert / skip-existing / lifecycle /
   // importFromText pattern) but with N workflows, KB slots reported (NOT
   // auto-wired — decision #4: the importer connects their OWN knowledge base to
@@ -988,7 +988,7 @@ export async function handleAgentsRoute(
     }
     res.writeHead(200, {
       'content-type': 'application/json; charset=utf-8',
-      'content-disposition': `attachment; filename="${encodeURIComponent(id)}.aipehub-agent.json"`,
+      'content-disposition': `attachment; filename="${encodeURIComponent(id)}.gotong-agent.json"`,
     })
     res.end(JSON.stringify(renderAgentManifest(rec), null, 2))
     return true

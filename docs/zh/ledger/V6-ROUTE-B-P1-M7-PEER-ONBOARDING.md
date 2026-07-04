@@ -14,8 +14,8 @@
 
 联邦认证是**对称**的: 两个 hub 共享**一个** bearer token —— A 把它存成「发往
 B 的出站 token」, B 把**同一个串**存成「来自 A 的入站期望 token」, 在
-`@aipehub/transport-ws` 里 `timingSafeEqual` 比对。M7 给这条「最后一公里」配齐
-工具: `aipehub mint-peer-token` 铸高熵 token, 「联邦」标签页的 onboarding 面板
+`@gotong/transport-ws` 里 `timingSafeEqual` 比对。M7 给这条「最后一公里」配齐
+工具: `gotong mint-peer-token` 铸高熵 token, 「联邦」标签页的 onboarding 面板
 登记对端 + 编辑每条 link 独立的信任契约 (入站 ACL / 出站 capability 白名单 /
 数据类 / 可调用 KB / 配额 / 撤销)。**token 是 secret, 加密存 vault, 永不回显**。
 
@@ -47,7 +47,7 @@ transport 层是**不透明**的, 任何强随机串都行, 选 base64url 只为
 
 ### 输出纪律照 `connect`: token 独占 stdout, 提示走 stderr (M7a)
 
-token 单独一行写 stdout (可 `aipehub mint-peer-token > peer-token.txt` 直接重定
+token 单独一行写 stdout (可 `gotong mint-peer-token > peer-token.txt` 直接重定
 向), 对称配对的 setup 说明 (`--peer-id` / `--endpoint` 槽进「两边各登记一次」的
 提示) 走 stderr。这样 `> file` 拿到的是纯 token, 终端里仍看得到人类可读的下一步。
 
@@ -84,7 +84,7 @@ M7b 顺手把它硬化成 `#peer-federation-panel` by-id, 两模块都 id-target
 
 | M | commit | 包 | 做了什么 |
 |---|---|---|---|
-| **M7a** | `5510f18` | cli | `aipehub mint-peer-token` 子命令。`randomBytes(32)→base64url` (256-bit), 纯无状态 (不碰 workspace/master key/hub)。输出纪律照 `connect`: token 独占 stdout (可 `> file`), 配对提示走 stderr。`--bytes` 16–64 / `--peer-id` / `--endpoint`; 坏参数 fail-closed `exit 2` 零 token。纯 helper (`generatePeerToken`/`renderPairingHint`) 导出供直接断言 + runCli smoke。cli 98→110。 |
+| **M7a** | `5510f18` | cli | `gotong mint-peer-token` 子命令。`randomBytes(32)→base64url` (256-bit), 纯无状态 (不碰 workspace/master key/hub)。输出纪律照 `connect`: token 独占 stdout (可 `> file`), 配对提示走 stderr。`--bytes` 16–64 / `--peer-id` / `--endpoint`; 坏参数 fail-closed `exit 2` 零 token。纯 helper (`generatePeerToken`/`renderPairingHint`) 导出供直接断言 + runCli smoke。cli 98→110。 |
 | **M7b** | `4d25974` | web | admin peer onboarding UI (生命周期基础)。owner-only `#peer-admin-panel` + 自包含 `peer-admin-ui.js`: list / add (peerId+endpoint+token+label+kind) / 启停 / 轮换 token / 删除。**peerToken write-only** (vault 加密, list 不返回, 面板永不回显)。硬化 `peer-manifest-ui.js` 选择器 `section[data-tab=federation]`→`#peer-federation-panel` by-id (联邦 tab 现两 section)。静态重建 (22→23 文件, admin.js 字节不变) + 2 c1-app-shell 哨兵。web 725→727。 |
 | **M7c** | `c204eb1` | web | peer 信任契约策略编辑器 (P4 显式推迟的收口)。每行加「策略」按钮展开行内编辑器, 从 list 响应预填**七个字段** (全在 GET 里): 入站 ACL capabilities + requireOrigin / 出站 capability 白名单 / 出站需审批 / 允许数据类 / 可调用 KB / 每链路入站配额 / 撤销状态。全 PATCH 同一 `/api/admin/identity/peers/:id`。数组字段统一 idiom (留空=null / 逗号列=白名单 / `[]`=单轴锁死 API-only)。配额非负整数客户端先校验。styles `.pa-policy-grid` 自适应网格; +1 c1-app-shell 哨兵。web 727→728。 |
 | **M7d** | (本提交) | docs | M7 收口文档 + CLAUDE.md 目录注解。 |
@@ -96,7 +96,7 @@ M7b 顺手把它硬化成 `#peer-federation-panel` by-id, 两模块都 id-target
 ```
  运维 (双方各一台)            hub A (本地)                    hub B (对端)
    │                            │                                │
-   │ 1. aipehub mint-peer-token │                                │
+   │ 1. gotong mint-peer-token │                                │
    │   → stdout: <256-bit b64url token>                          │
    │     stderr: 「两边各登记一次」提示                          │
    │   (走安全信道把同一 token 交给 B 的运维)                    │
@@ -165,7 +165,7 @@ UI 层是自包含静态 IIFE, 无新 web seam 可单测 —— 靠 c1-app-shell
 
 ## 七、运维须知
 
-- **铸 token**: `aipehub mint-peer-token --peer-id partner-hub --endpoint wss://partner/federation`
+- **铸 token**: `gotong mint-peer-token --peer-id partner-hub --endpoint wss://partner/federation`
   —— token 印到 stdout, 对称配对提示印到 stderr。默认 256-bit; `--bytes 16..64` 可调。
 - **对称登记**: **同一个 token 串**两边各登记一次 —— A 在「联邦」标签页 add peer B,
   B add peer A, peerToken 填同一串。走**安全信道**交换 (别贴聊天/邮件明文)。
@@ -193,8 +193,8 @@ UI 层是自包含静态 IIFE, 无新 web seam 可单测 —— 靠 c1-app-shell
 - **token 强度策略 / 过期** —— 当前 mint 一个高熵串永不过期, 轮换是手动。自动轮换
   / 到期提醒是运维增强, 非安全硬伤。
 - **manifest 经 WS-HELLO 协商** —— 仍是 on-demand RPC (Phase 18 A 既有边界)。
-- **真实外部 (非 AipeHub) 联邦对端的 wire 级互操作测试** —— federation mesh 是
-  AipeHub↔AipeHub 自有通路; 对外生态可达性走 A2A (Phase 18 C), 是另一套信任模型。
+- **真实外部 (非 Gotong) 联邦对端的 wire 级互操作测试** —— federation mesh 是
+  Gotong↔Gotong 自有通路; 对外生态可达性走 A2A (Phase 18 C), 是另一套信任模型。
 
 ---
 

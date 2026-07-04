@@ -8,7 +8,7 @@
  *   ④ quiz options are EQUAL length (length leaks no answer) and the correct POSITION varies;
  *   ⑤ every lesson cites a primary source (never trust parametric knowledge).
  *
- * Run:  pnpm --filter @aipehub/example-family-learning-hub teach:selfcheck
+ * Run:  pnpm --filter @gotong/example-family-learning-hub teach:selfcheck
  */
 
 import { dashCase, equalizeOptionLengths, planTeach, type TeachInsight } from './teach.js'

@@ -108,7 +108,7 @@
   in-memory、重启归零 —— 跟入站 HELLO 限流同姿态，是安全兜底不是计费账本。
 - 把 `allowedDataClasses` + 配额 `inboundGate` 像 acl/outboundCaps 一样穿进**两个**
   install 点；row 整个消失时丢弃配额计数器（`policy_changed` 拆链刻意保留）。
-- `main.ts`：`AIPE_PEER_LINK_QUOTA_WINDOW_MS`（默认 60s）→ `perLinkQuotaWindowMs`。
+- `main.ts`：`GOTONG_PEER_LINK_QUOTA_WINDOW_MS`（默认 60s）→ `perLinkQuotaWindowMs`。
 - web `identity-routes`：契约三件套（revocationState/perLinkQuotaBudget/
   allowedDataClasses）走既有 peer CRUD 路由 —— DTO 投影 + addPeer/updatePeer 面
   + 校验（撤销枚举、预算非负整数或 null 清空、数据类 string[] 或 null 清空）。
@@ -157,7 +157,7 @@
 
 ## 五、运维须知
 
-- **新 env**：`AIPE_PEER_LINK_QUOTA_WINDOW_MS`（默认 60000）—— per-link 入站配额的
+- **新 env**：`GOTONG_PEER_LINK_QUOTA_WINDOW_MS`（默认 60000）—— per-link 入站配额的
   滚动窗口。配额本身是 peer 行的 `perLinkQuotaBudget`（每窗口最多几个入站任务）。
 - **schema 迁移**：v14（`usage_ledger.peer_id`）、v15（`peers` 加三契约列），均加性
   ALTER、可空/有默认，老行平滑取默认，符合「不破坏现有行」。

@@ -21,7 +21,7 @@
  * `recall` tool in place; an MCP tool adds a separate, explicitly-named search.
  */
 
-import type { MemoryEntry, MemoryHandle, MemoryQuery } from '@aipehub/services-sdk'
+import type { MemoryEntry, MemoryHandle, MemoryQuery } from '@gotong/services-sdk'
 
 import { isActive } from './bitemporal.js'
 import { compareByImportanceThenRecency } from './importance.js'

@@ -1,6 +1,6 @@
 /**
  * Tests for the third-party service-type allowlist extension hook
- * (`registerServiceMethods` from `@aipehub/protocol`).
+ * (`registerServiceMethods` from `@gotong/protocol`).
  *
  * Validates:
  *   1. Registration is set-merge (idempotent, never destructive).
@@ -28,7 +28,7 @@ import {
   type ServiceCallFrame,
   type ServiceOwner,
   type ServiceUseDecl,
-} from '@aipehub/protocol'
+} from '@gotong/protocol'
 
 import { ServiceCallRouter } from '../src/service-call-router.js'
 import type { ServiceCallGateway } from '../src/server.js'

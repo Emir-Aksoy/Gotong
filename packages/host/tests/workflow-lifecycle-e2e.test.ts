@@ -28,10 +28,10 @@ import { join } from 'node:path'
 
 import { describe, expect, it } from 'vitest'
 
-import { Hub, InMemoryStorage, SuspendTaskError } from '@aipehub/core'
-import type { ParticipantId, Participant, Task } from '@aipehub/core'
-import { WorkflowRunner, workflowParticipantId } from '@aipehub/workflow'
-import type { RunState } from '@aipehub/workflow'
+import { Hub, InMemoryStorage, SuspendTaskError } from '@gotong/core'
+import type { ParticipantId, Participant, Task } from '@gotong/core'
+import { WorkflowRunner, workflowParticipantId } from '@gotong/workflow'
+import type { RunState } from '@gotong/workflow'
 
 import { WorkflowController } from '../src/workflow-controller.js'
 
@@ -40,7 +40,7 @@ import { WorkflowController } from '../src/workflow-controller.js'
 // marker is the drift probe: a resumed rev1 run must dispatch
 // `{ marker: rev1 }`, never rev2's `{ marker: rev2 }`.
 const yamlFor = (name: string, marker: string): string => `
-schema: aipehub.workflow/v1
+schema: gotong.workflow/v1
 workflow:
   id: lc-e2e
   name: ${name}

@@ -21,8 +21,8 @@ import { existsSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { Space } from '@aipehub/core'
-import { openIdentityStore } from '@aipehub/identity'
+import { Space } from '@gotong/core'
+import { openIdentityStore } from '@gotong/identity'
 
 const tmpDirs: string[] = []
 
@@ -37,12 +37,12 @@ afterEach(() => {
 })
 
 function mkTmp(): string {
-  const d = mkdtempSync(join(tmpdir(), 'aipehub-host-id-'))
+  const d = mkdtempSync(join(tmpdir(), 'gotong-host-id-'))
   tmpDirs.push(d)
   return d
 }
 
-describe('host startup × @aipehub/identity', () => {
+describe('host startup × @gotong/identity', () => {
   it('first-init: bootstrap creates owner user with no credentials', async () => {
     const spaceDir = mkTmp()
     const { adminToken } = await Space.openOrInit(spaceDir, {

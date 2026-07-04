@@ -6,7 +6,7 @@
  * `process.execPath` + `-e`.
  */
 
-import { SuspendTaskError, isSuspendTaskError, type Task, type TaskId } from '@aipehub/core'
+import { SuspendTaskError, isSuspendTaskError, type Task, type TaskId } from '@gotong/core'
 import { describe, expect, it } from 'vitest'
 
 import {

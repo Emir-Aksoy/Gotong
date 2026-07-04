@@ -112,7 +112,7 @@ describe('encodeFrame → decodeFrame — round-trip coverage of every Frame sha
       frame: {
         type: 'HELLO',
         protocolVersion: PROTOCOL_VERSION,
-        client: { name: 'aipehub-test', version: '0.0.0' },
+        client: { name: 'gotong-test', version: '0.0.0' },
         agents: [{ id: 'a', capabilities: ['x'] }],
       } satisfies ClientFrame,
     },
@@ -121,7 +121,7 @@ describe('encodeFrame → decodeFrame — round-trip coverage of every Frame sha
       frame: {
         type: 'HELLO',
         protocolVersion: PROTOCOL_VERSION,
-        client: { name: 'aipehub-test', version: '0.0.0' },
+        client: { name: 'gotong-test', version: '0.0.0' },
         agents: [{ id: 'a', capabilities: [] }],
         services: [
           {

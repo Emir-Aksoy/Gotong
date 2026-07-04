@@ -34,7 +34,7 @@ export interface DiscordClientOptions {
   baseUrl?: string
   /**
    * User-Agent header value. Discord requires this. Defaults to
-   * `aipehub-im-discord/0.1.0 (+https://github.com/aipehub/aipehub)`.
+   * `gotong-im-discord/0.1.0 (+https://github.com/gotong/gotong)`.
    */
   userAgent?: string
   /** Inject a fetch implementation for testing. Defaults to `globalThis.fetch`. */
@@ -114,7 +114,7 @@ export function createDiscordClient(opts: DiscordClientOptions): DiscordClient {
   const fetchImpl = opts.fetchImpl ?? globalThis.fetch
   const defaultTimeoutMs = opts.timeoutMs ?? 60_000
   const userAgent =
-    opts.userAgent ?? 'aipehub-im-discord/0.1.0 (+https://github.com/aipehub/aipehub)'
+    opts.userAgent ?? 'gotong-im-discord/0.1.0 (+https://github.com/gotong/gotong)'
 
   return {
     baseUrl,

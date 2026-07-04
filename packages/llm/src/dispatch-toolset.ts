@@ -33,7 +33,7 @@ import type {
   DispatchStrategy,
   ParticipantId,
   TaskResult,
-} from '@aipehub/core'
+} from '@gotong/core'
 import type {
   LlmAgentToolset,
   LlmToolCallResult,

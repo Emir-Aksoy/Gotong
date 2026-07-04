@@ -52,7 +52,7 @@
 | **家长端 IM 监督桥** | 越界 / flagged 审批推家长 IM、批 / 拒回推(复用管家 async 回推);跨家长隔离 no-leak。无 key | `pnpm demo:family-learning-hub:im` |
 | **真 DeepSeek 导师(opt-in)** | 真 `LlmAgent` 导师接进真工作流,链条自检(无 key 退确定性) | `FL_REAL=1 DEEPSEEK_API_KEY=… pnpm demo:family-learning-hub:real` |
 | **可载入模板 ×2** | 家长侧 `family-tutor.template.yaml`(导师 + 工作流含两 `human:` 审批 + KB 槽位)+ 孩子侧 `child-desk.template.yaml`(两 `surface.me` 工作流 + KB 槽位,0 LLM agent) | `pnpm demo:family-learning-hub:template` |
-| **孩子 `/me` 自助验收门** | 真 `WorkflowController` 上证孩子经 `/me` 自助发起、`learner_id` 强制不可伪造 | `pnpm --filter @aipehub/host test family-child-me-e2e` |
+| **孩子 `/me` 自助验收门** | 真 `WorkflowController` 上证孩子经 `/me` 自助发起、`learner_id` 强制不可伪造 | `pnpm --filter @gotong/host test family-child-me-e2e` |
 
 > **从哪起步**:先跑 6 剧情 demo 看清四道闸,再跑 `:federation` 看真 ws,最后照
 > [`FAMILY-LEARNING-GO-LIVE.md`](../../docs/zh/FAMILY-LEARNING-GO-LIVE.md) 上两机真部署
@@ -168,7 +168,7 @@ admin 的**孩子 member** 经 `/api/me/workflows` 看见课、经 `/api/me/disp
 capability / userScopeField **不泄漏**到 `/me`。
 
 ```bash
-pnpm --filter @aipehub/host test family-child-me-e2e
+pnpm --filter @gotong/host test family-child-me-e2e
 ```
 
 **真机预览(可选,go-live 时人工核对):** 见
@@ -179,8 +179,8 @@ pnpm --filter @aipehub/host test family-child-me-e2e
 
 ## 为什么 host-free(同 cafe-ops / cross-hub-workflow / tea-supply-link 先例)
 
-这些 demo 只依赖 `@aipehub/core` + `@aipehub/workflow` + `@aipehub/inbox`(+ `:federation`
-另加 `@aipehub/transport-ws`),把宿主机的组件**内联成可见的薄镜像**,让机制不被埋在 host 二进制里:
+这些 demo 只依赖 `@gotong/core` + `@gotong/workflow` + `@gotong/inbox`(+ `:federation`
+另加 `@gotong/transport-ws`),把宿主机的组件**内联成可见的薄镜像**,让机制不被埋在 host 二进制里:
 
 - **6 剧情 demo** 跑**真**家长 `tutor-teach` 工作流(真 `parseWorkflow` + `WorkflowRunner` + 真
   predicate + 真 `FileInboxStore` + `HumanInboxParticipant`);两步恢复(`HostInboxService.resolve` 的
@@ -244,7 +244,7 @@ pnpm --filter @aipehub/host test family-child-me-e2e
 |---|---|---|
 | **TEACH-M1 方法论** | 使命锚定(第一课先立「为什么学」)→ 最近发展区(只推进一小步)→ 先知识(讲清**一个**要点,难度是敌人)后技能(回忆 practice,难度是工具)→ 每课**引一手来源** → **选项等长**的小测(长度不泄露答案)→ **有理解证据才**记一条 ADR 式 learning-record(不是流水账)→ 术语表。纯 planner `planTeach` + 结构化 `Lesson` 类型 | `src/teach.ts` |
 | **TEACH-M2 工作区产物** | `MISSION.md`(确立后持久,不重写)、`RESOURCES.md` / `GLOSSARY.md`(累积去重)、`lessons/NNNN-slug.md`(每课写)、`records/NNNN-slug.md`(仅有证据时写 = ADR 式档案)。复制 `learning-records/<learnerId>/` 目录 = 搬走孩子整段学习旅程 | `src/teach-workspace.ts` |
-| **TEACH-M3 模板导师** | 家长模板 `system:` prompt 对齐到完整 9 步 `/teach` 方法论 + 结构化 JSON 输出契约 + 自评 `flagged`。导入 `aipehub start` 即得一个忠实的 `/teach` 导师(`teach.lesson` 由 LlmAgent 服务) | `template/family-tutor.template.yaml` |
+| **TEACH-M3 模板导师** | 家长模板 `system:` prompt 对齐到完整 9 步 `/teach` 方法论 + 结构化 JSON 输出契约 + 自评 `flagged`。导入 `gotong start` 即得一个忠实的 `/teach` 导师(`teach.lesson` 由 LlmAgent 服务) | `template/family-tutor.template.yaml` |
 
 **导师两侧同一套方法论**:hermetic demo 用 `LessonTutorStandin`(经 `planTeach` 出**完整**结构化
 `Lesson`),真实模式用 `FamilyTutorAgent`(真 DeepSeek + mcp-obsidian,模型返 JSON → `coerceLesson`

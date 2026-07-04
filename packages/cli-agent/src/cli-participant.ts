@@ -3,7 +3,7 @@
  *
  * A local hub `Participant` that drives an external CLI (Claude Code, Codex,
  * OpenCode, Aider, …): the dispatched task's prompt goes in, the CLI's stdout
- * comes back as the task output. The mirror of `aipehub connect` (inbound: the
+ * comes back as the task output. The mirror of `gotong connect` (inbound: the
  * CLI calls the hub as an MCP client) — here the hub drives the CLI.
  *
  * All five AGENT-ADAPTER-CONTRACT control seams:
@@ -25,7 +25,7 @@ import {
   type ParticipantId,
   type Task,
   type TaskId,
-} from '@aipehub/core'
+} from '@gotong/core'
 
 import {
   CLI_CHECKPOINT_STATE_V,

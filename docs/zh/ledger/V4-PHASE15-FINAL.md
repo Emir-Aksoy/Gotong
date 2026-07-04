@@ -48,7 +48,7 @@ admin 改工作流 → 存草稿 → 提交审核 → 发布（追加不可变 r
 ## 三、架构主线（3 块 + 1 个不变量）
 
 ```
-A. 两个文件优先 store（@aipehub/workflow，镜像 RunStore）
+A. 两个文件优先 store（@gotong/workflow，镜像 RunStore）
    workflows/revisions/<id>/<rev>.json   ← 不可变修订快照（写一次性）
    workflows/lifecycle/<id>.json         ← 唯一可变记录（状态 + 指针 + 审计）
 
@@ -164,7 +164,7 @@ interface DefinitionResolver {
 | `GET /:id/state` | 完整 `WorkflowLifecycleView` |
 
 web 层全鸭子类型（`WorkflowSurface` + 镜像 `WorkflowLifecycleView` 等），零
-`@aipehub/workflow` 依赖；错误按鸭子 `.code` 字符串映射 HTTP 状态
+`@gotong/workflow` 依赖；错误按鸭子 `.code` 字符串映射 HTTP 状态
 （`illegal_transition` / `capability_immutable` / `stale_head` → 409，
 `unknown_workflow` → 404，坏 rollback 目标 → 400）。
 
@@ -216,14 +216,14 @@ versioning 注册的真 `WorkflowRunner`。
 
 | 包 | 测试 | 覆盖 |
 |---|---|---|
-| `@aipehub/workflow` | `lifecycle.test.ts` | 全合法转移 / 代表性非法转移抛对的 code / archived 终态拒一切 |
-| `@aipehub/workflow` | `revision-store.test.ts` + `lifecycle-store.test.ts` | 写一次性拒覆盖、修订号递增、list 排序、hash 稳定、原子重写 round-trip |
-| `@aipehub/workflow` | `runner.test.ts`（revision binding describe） | 新 run 盖修订号 / **无漂移单测**（挂起 rev1 → current 换 rev2 → 恢复仍跑 rev1）/ 解析不到修订抛错 |
-| `@aipehub/host` | `workflow-versioning.test.ts`（17 测试） | adopt→rev1 / publish-edit append rev2 + repoint / no-op publish 不 append / rollback hash 相等 / capability_immutable / deprecate 保注册、archive 注销 / hydrate 重启 |
-| `@aipehub/host` | `workflow-controller.test.ts`（lifecycle describe） | import→published rev1 / saveDraft 不注册不在 list / publish 提升 / rollback repoint |
-| `@aipehub/host` | `workflow-lifecycle-e2e.test.ts`（**验收门**） | 真栈 7 步无漂移 |
-| `@aipehub/web` | `workflow-lifecycle-route.test.ts`（18 测试） | 每路由调对 surface 方法 + by 戳记 + 错误码→HTTP 映射 |
-| `@aipehub/web` | `me-routes.test.ts`（published-gate describe） | draft/review/dep/arc 不在 catalog 且 dispatch 403；published 200 |
+| `@gotong/workflow` | `lifecycle.test.ts` | 全合法转移 / 代表性非法转移抛对的 code / archived 终态拒一切 |
+| `@gotong/workflow` | `revision-store.test.ts` + `lifecycle-store.test.ts` | 写一次性拒覆盖、修订号递增、list 排序、hash 稳定、原子重写 round-trip |
+| `@gotong/workflow` | `runner.test.ts`（revision binding describe） | 新 run 盖修订号 / **无漂移单测**（挂起 rev1 → current 换 rev2 → 恢复仍跑 rev1）/ 解析不到修订抛错 |
+| `@gotong/host` | `workflow-versioning.test.ts`（17 测试） | adopt→rev1 / publish-edit append rev2 + repoint / no-op publish 不 append / rollback hash 相等 / capability_immutable / deprecate 保注册、archive 注销 / hydrate 重启 |
+| `@gotong/host` | `workflow-controller.test.ts`（lifecycle describe） | import→published rev1 / saveDraft 不注册不在 list / publish 提升 / rollback repoint |
+| `@gotong/host` | `workflow-lifecycle-e2e.test.ts`（**验收门**） | 真栈 7 步无漂移 |
+| `@gotong/web` | `workflow-lifecycle-route.test.ts`（18 测试） | 每路由调对 surface 方法 + by 戳记 + 错误码→HTTP 映射 |
+| `@gotong/web` | `me-routes.test.ts`（published-gate describe） | draft/review/dep/arc 不在 catalog 且 dispatch 403；published 200 |
 
 全量 `pnpm -r test` 绿（host 333 / web 439 / workflow 190 / 全 27 包通过，仅 2 个
 llm 实时 API 测试 skip）。

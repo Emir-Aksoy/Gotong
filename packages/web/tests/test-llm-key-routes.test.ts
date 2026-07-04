@@ -20,7 +20,7 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { Hub, Space } from '@aipehub/core'
+import { Hub, Space } from '@gotong/core'
 
 import {
   serveWeb,
@@ -41,7 +41,7 @@ interface Boot {
 
 async function boot(opts: { wired?: boolean } = {}): Promise<Boot> {
   const wired = opts.wired ?? true
-  const tmp = await mkdtemp(join(tmpdir(), 'aipehub-web-test-llm-key-'))
+  const tmp = await mkdtemp(join(tmpdir(), 'gotong-web-test-llm-key-'))
   const init = await Space.init(tmp, { name: 'test-llm-key-route-test' })
   const hub = new Hub({ space: init.space })
   await hub.start()

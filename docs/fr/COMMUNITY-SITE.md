@@ -9,7 +9,7 @@
 
 ## 1. Pourquoi « zéro calcul »
 
-La posture de conception globale d'AipeHub est **le hub ne fait pas tourner le LLM lui-même / l'état est entièrement sur disque / les identifiants restent sur votre machine / la fédération est pair à pair**. Suivez cette posture jusqu'au bout et **l'infrastructure communautaire n'a pas non plus besoin d'un serveur** :
+La posture de conception globale d'Gotong est **le hub ne fait pas tourner le LLM lui-même / l'état est entièrement sur disque / les identifiants restent sur votre machine / la fédération est pair à pair**. Suivez cette posture jusqu'au bout et **l'infrastructure communautaire n'a pas non plus besoin d'un serveur** :
 
 - **GitHub héberge déjà la substance** — un modèle est un fichier, une soumission est une PR.
 - **La seule chose manquante est une vitrine** — et la vitrine d'un projet file-first est elle-même un ensemble de fichiers statiques.
@@ -17,7 +17,7 @@ La posture de conception globale d'AipeHub est **le hub ne fait pas tourner le L
 Cette vitrine = un générateur + les fichiers statiques qu'il produit. Le générateur est [`packages/web/scripts/build-site.mjs`](../../packages/web/scripts/build-site.mjs), produisant `site/` (racine du dépôt, ignoré par git) :
 
 - `index.html` — un fichier unique autonome (sans framework, sans runtime, CSS intégré) : le héros narratif de confiance + une grille de cartes de la galerie de modèles + le tableau du classement des citations.
-- `templates.json` — un flux `aipehub.site/v1` lisible par machine (la vitrine est aussi de la donnée, file-first).
+- `templates.json` — un flux `gotong.site/v1` lisible par machine (la vitrine est aussi de la donnée, file-first).
 
 Déposez `site/` sur n'importe quel niveau gratuit de GitHub Pages / Cloudflare Pages / Netlify et la vitrine est en ligne à **0 €**. La machine Tencent Cloud 2c2G reste inactive en réserve.
 

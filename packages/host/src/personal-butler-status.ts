@@ -41,16 +41,16 @@
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 
-import type { Logger } from '@aipehub/core'
-import type { MemoryReviewer, ReviewContext, ReviewOutcome } from '@aipehub/personal-memory'
-import { ownerDir } from '@aipehub/service-memory-file'
-import type { Owner } from '@aipehub/services-sdk'
+import type { Logger } from '@gotong/core'
+import type { MemoryReviewer, ReviewContext, ReviewOutcome } from '@gotong/personal-memory'
+import { ownerDir } from '@gotong/service-memory-file'
+import type { Owner } from '@gotong/services-sdk'
 
 /** Filename of the per-user maintenance status, written inside the user's memory dir. */
 export const STATUS_FILE = 'STATUS.md'
 
 /** The stable machine marker that opens the file (`read` keys off it). */
-const MARKER_PREFIX = '<!-- aipehub-status '
+const MARKER_PREFIX = '<!-- gotong-status '
 const MARKER_SUFFIX = ' -->'
 /** Max chars of the status line shown (a status, not a dump). */
 const SUMMARY_CLIP = 500

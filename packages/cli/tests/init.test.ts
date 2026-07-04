@@ -7,7 +7,7 @@ import { randomBytes } from 'node:crypto'
 import { init } from '../src/commands/init.js'
 
 function tmpSpace(): string {
-  return join(tmpdir(), `aipehub-init-test-${randomBytes(6).toString('hex')}`)
+  return join(tmpdir(), `gotong-init-test-${randomBytes(6).toString('hex')}`)
 }
 
 const dirs: string[] = []
@@ -18,7 +18,7 @@ afterEach(() => {
   dirs.length = 0
 })
 
-describe('aipehub init', () => {
+describe('gotong init', () => {
   it('creates workspace with default settings', async () => {
     const dir = tmpSpace()
     dirs.push(dir)
@@ -30,7 +30,7 @@ describe('aipehub init', () => {
     expect(existsSync(join(dir, 'services'))).toBe(true)
 
     const space = JSON.parse(await readFile(join(dir, 'space.json'), 'utf8'))
-    expect(space.name).toBe('AipeHub')
+    expect(space.name).toBe('Gotong')
     expect(space.hubId).toMatch(/^hub_[a-f0-9]{8}$/)
   })
 
@@ -80,7 +80,7 @@ describe('aipehub init', () => {
     expect(existsSync(join(dir, 'space.json'))).toBe(true)
 
     // --pin-team no longer writes orgMode to config.json — it tells
-    // the user to set AIPE_MODE=team when starting the host (Phase 7
+    // the user to set GOTONG_MODE=team when starting the host (Phase 7
     // env override mechanism). Verify config is default.
     const config = JSON.parse(await readFile(join(dir, 'config.json'), 'utf8'))
     expect(config.orgMode).toBeUndefined()

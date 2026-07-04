@@ -194,7 +194,7 @@ describe('ReputationStore — math', () => {
 describe('ReputationStore — persistence', () => {
   let dir: string
   beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), 'aipehub-reputation-test-'))
+    dir = mkdtempSync(join(tmpdir(), 'gotong-reputation-test-'))
   })
   afterEach(() => {
     try {

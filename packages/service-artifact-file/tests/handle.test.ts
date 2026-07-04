@@ -3,7 +3,7 @@ import { mkdtemp, readFile, rm, writeFile, mkdir } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 
-import { createLogger } from '@aipehub/core'
+import { createLogger } from '@gotong/core'
 import { ArtifactFileHandle } from '../src/handle.js'
 import type { ArtifactFileConfig } from '../src/config.js'
 import { ownerDir } from '../src/paths.js'
@@ -18,7 +18,7 @@ const fullConfig: ArtifactFileConfig = {
 
 let rootDir: string
 beforeEach(async () => {
-  rootDir = await mkdtemp(join(tmpdir(), 'aipe-art-handle-'))
+  rootDir = await mkdtemp(join(tmpdir(), 'gotong-art-handle-'))
 })
 afterEach(async () => {
   await rm(rootDir, { recursive: true, force: true })
@@ -301,7 +301,7 @@ describe('owner isolation', () => {
 describe('symlink resilience', () => {
   it('a symlink inside owner dir pointing outside cannot leak via write', async () => {
     // Create a symlink target outside the temp dir.
-    const outside = await mkdtemp(join(tmpdir(), 'aipe-art-outside-'))
+    const outside = await mkdtemp(join(tmpdir(), 'gotong-art-outside-'))
     try {
       const linkOwnerDir = ownerDir(rootDir, owner)
       await mkdir(linkOwnerDir, { recursive: true })

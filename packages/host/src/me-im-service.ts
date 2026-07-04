@@ -1,6 +1,6 @@
 /**
  * HostMeImService — GO-LIVE GL-1c. Backs `/api/me/im/*` so a member can link
- * THEIR OWN IM account (Telegram, …) to AipeHub:
+ * THEIR OWN IM account (Telegram, …) to Gotong:
  *
  *   1. mint a one-time binding code here (POST /api/me/im/binding-code),
  *   2. DM the bot `/bind <code>` — the production IM bridge (im-bridge.ts)
@@ -24,9 +24,9 @@
  *     rotates on re-issue (the store deletes the prior row first).
  */
 
-import { createLogger } from '@aipehub/core'
-import type { ImBinding, ImBindingCode } from '@aipehub/identity'
-import type { WebServerOptions } from '@aipehub/web'
+import { createLogger } from '@gotong/core'
+import type { ImBinding, ImBindingCode } from '@gotong/identity'
+import type { WebServerOptions } from '@gotong/web'
 
 const log = createLogger('me-im')
 

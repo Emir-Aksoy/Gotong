@@ -16,7 +16,7 @@
  *      the 家长 — a LOCAL user of the 家长 hub, NOT the child hub. A local human step
  *      can only assign to a same-hub user, so the child workflows can't hold the
  *      approval; it's enforced by the runtime OUTBOUND approval gate on the 家长 link.
- *      So the child workflows must NOT contain `aipehub.human/v1`.
+ *      So the child workflows must NOT contain `gotong.human/v1`.
  *   3. The cross-org steps tag `dataClasses: [child-learning]` — the data-class tag
  *      survives the template→workflow opaque re-serialization (same vocabulary as the
  *      per-link OUTBOUND data-class contract that confines the child's data to the 家长).
@@ -33,8 +33,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { Hub, Space } from '@aipehub/core'
-import { parseWorkflow } from '@aipehub/workflow'
+import { Hub, Space } from '@gotong/core'
+import { parseWorkflow } from '@gotong/workflow'
 
 import { serveWeb, type WebServerHandle, type WorkflowSurface } from '../src/server.js'
 import { parseTemplate } from '../src/template-manifest.js'
@@ -55,7 +55,7 @@ beforeEach(async () => {
 })
 
 describe('examples/family-learning-hub/template (child-desk, A-M4)', () => {
-  it('parses as a valid aipehub.template/v1 manifest with ZERO agents (child has no subscription)', () => {
+  it('parses as a valid gotong.template/v1 manifest with ZERO agents (child has no subscription)', () => {
     const t = parseTemplate(templateText)
     expect(t.name).toBe('孩子学习桌(家庭学习 hub · 孩子侧)')
     expect(t.version).toBe(1)
@@ -109,7 +109,7 @@ describe('examples/family-learning-hub/template (child-desk, A-M4)', () => {
     // ★ Inversion vs family-tutor: the child workflow has NO human step. The
     // off-whitelist approval is the runtime OUTBOUND gate on the 家长 link, not a
     // local `human:` step (the approver isn't a user of THIS hub).
-    expect(JSON.stringify(wf)).not.toContain('aipehub.human/v1')
+    expect(JSON.stringify(wf)).not.toContain('gotong.human/v1')
     // No step names a peer; every step is a capability dispatch.
     expect(JSON.stringify(wf.steps)).not.toContain('peer')
     for (const s of wf.steps) expect(s.dispatch?.strategy.kind).toBe('capability')
@@ -146,7 +146,7 @@ describe('examples/family-learning-hub/template (child-desk, A-M4)', () => {
     expect(report.dispatch?.dataClasses).toEqual(['child-learning'])
 
     // Still no human step, still names no peer.
-    expect(JSON.stringify(wf)).not.toContain('aipehub.human/v1')
+    expect(JSON.stringify(wf)).not.toContain('gotong.human/v1')
     expect(JSON.stringify(wf.steps)).not.toContain('peer')
   })
 
@@ -158,7 +158,7 @@ describe('examples/family-learning-hub/template (child-desk, A-M4)', () => {
   })
 
   it('imports end-to-end: ZERO agents land, 2 workflows import (re-validated), KB reported inline', async () => {
-    const tmp = await mkdtemp(join(tmpdir(), 'aipehub-child-desk-'))
+    const tmp = await mkdtemp(join(tmpdir(), 'gotong-child-desk-'))
     const { space } = await Space.init(tmp, { name: 'child-desk-test' })
     const hub = new Hub({ space })
     await hub.start()

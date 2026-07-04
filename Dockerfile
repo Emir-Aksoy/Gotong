@@ -72,11 +72,11 @@ RUN pnpm install --frozen-lockfile --prod \
 # Default workspace dir lives under /data — pair with `volume:` in
 # docker-compose or `-v` on `docker run` so transcripts survive container
 # restarts.
-ENV AIPE_SPACE=/data \
-    AIPE_HOST=0.0.0.0 \
-    AIPE_WEB_PORT=3000 \
-    AIPE_WS_PORT=4000 \
-    AIPE_GATING=admin-approval \
+ENV GOTONG_SPACE=/data \
+    GOTONG_HOST=0.0.0.0 \
+    GOTONG_WEB_PORT=3000 \
+    GOTONG_WS_PORT=4000 \
+    GOTONG_GATING=admin-approval \
     NODE_ENV=production
 
 # Run as the unprivileged `node` user shipped with the base image; create
@@ -88,9 +88,9 @@ EXPOSE 3000 4000
 
 # Bare-metal healthcheck — /healthz is unauthenticated and answers 200 ok.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
-  CMD node -e "fetch('http://127.0.0.1:'+(process.env.AIPE_WEB_PORT||3000)+'/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+  CMD node -e "fetch('http://127.0.0.1:'+(process.env.GOTONG_WEB_PORT||3000)+'/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
 
 # Use the published bin shim so the entrypoint is the same one `npx
-# @aipehub/host` would invoke. If you want to override (e.g. exec a
+# @gotong/host` would invoke. If you want to override (e.g. exec a
 # debug shell), pass `--entrypoint /bin/sh` on `docker run`.
-ENTRYPOINT ["node", "packages/host/bin/aipehub-host.js"]
+ENTRYPOINT ["node", "packages/host/bin/gotong-host.js"]

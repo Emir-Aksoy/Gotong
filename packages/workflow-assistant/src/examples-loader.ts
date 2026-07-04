@@ -36,7 +36,7 @@ import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { parseWorkflow } from '@aipehub/workflow'
+import { parseWorkflow } from '@gotong/workflow'
 
 import type { WorkflowExample } from './assistant.js'
 

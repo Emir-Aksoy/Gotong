@@ -1,4 +1,4 @@
-# AipeHub v4 Phase 7-13 开发规划
+# Gotong v4 Phase 7-13 开发规划
 
 > 把 `CLAUDE.md` 第三节"微偏 + 缺失"的全部待补项展开成可执行 milestone。
 > 每个 Phase 拆 M1/M2/M3..., 每个 M 对应一个本地 commit, 单独可测。
@@ -38,7 +38,7 @@
 ### M1 — 清 Phase 6 P2 backlog (#148-#152)
 半小时活, 5 项独立小修:
 - #148: invitations cap 用 `AUDIT_ACTIONS.INVITE_CREATE_BLOCKED` 常量
-- #149: `inboundRateLimit` 加 `AIPE_PEER_INBOUND_RATE_*` 环境变量
+- #149: `inboundRateLimit` 加 `GOTONG_PEER_INBOUND_RATE_*` 环境变量
 - #150: `reputation-ui.js` NaN 防御 (`Number.isFinite(r.score) ? r.score.toFixed(3) : '—'`)
 - #151: `OrgApiPool.makeLlmQuotaGate` 拒绝时写 `API_QUOTA_DENIED` audit
 - #152: reputation sort 加 `(a, b) => (Number.isFinite(b.score) ? b.score : -Infinity) - ...`
@@ -49,7 +49,7 @@
 1-2 天:
 - #153: invitations cap tx 升 IMMEDIATE
 - #154: `peerTokenResolver` 空串 / throw 路径加 warn log
-- #155: 提取 `@aipehub/core` 共享 `PeerReputationSnapshot` 类型, web 导入
+- #155: 提取 `@gotong/core` 共享 `PeerReputationSnapshot` 类型, web 导入
 - #156: `IdentitySurface.countActivePendingInvitations()` 暴露给 UI
 - #157: 并发 401 dedup — `Set<vaultEntryId>` 5s 窗口
 
@@ -65,9 +65,9 @@
 → commit: `docs: personal-hub RFC (Phase 7 M3)`
 
 ### M4 — `personal-hub` bootstrap 实现
-- `@aipehub/identity`: bootstrap 加 `mode: 'personal' | 'team'` (默认 'team' 兼容)
+- `@gotong/identity`: bootstrap 加 `mode: 'personal' | 'team'` (默认 'team' 兼容)
 - `personal` mode 自动创单 user + 单 member + role='owner', skip wizard
-- `@aipehub/host` main.ts: env `AIPE_MODE=personal` 触发
+- `@gotong/host` main.ts: env `GOTONG_MODE=personal` 触发
 - 单测: bootstrap 两种 mode 都走通
 
 → commit: `feat(identity,host): personal-hub bootstrap mode (Phase 7 M4)`
@@ -82,7 +82,7 @@
 → commit: `feat(web): personal-mode SPA shell (Phase 7 M5)`
 
 ### M6 — README + docs 更新
-- README quick-start 加段「30 秒个人模式」: 一条 `docker run -e AIPE_MODE=personal ...` 或 `pnpm host:personal`
+- README quick-start 加段「30 秒个人模式」: 一条 `docker run -e GOTONG_MODE=personal ...` 或 `pnpm host:personal`
 - 新 `docs/zh/PERSONAL-MODE.md`: 5 分钟从空 docker 到第一次对话
 - `docs/OVERVIEW.md` 三层链接图加"个人模式" 入口节点
 
@@ -188,7 +188,7 @@ type LlmContentBlock =
   | LlmAudioBlock             // 新: { type: 'audio'; source: ...; format: 'wav' | 'mp3' }
   | LlmFileRefBlock           // 新: { type: 'file_ref'; artifactId: string; mime: string }
 ```
-- artifact_ref 走 `@aipehub/service-artifact-file` 已有体系
+- artifact_ref 走 `@gotong/service-artifact-file` 已有体系
 
 → commit: `feat(llm): multimodal content blocks (Phase 9 M1)`
 
@@ -324,7 +324,7 @@ throw new SuspendTaskError({ resumeAt: Date.now() + 5*60_000, state: { step: 'wa
 
 ## 七、Phase 12 — 协议外通路
 
-**目标**: 浏览器以外的人都能用上 AipeHub。
+**目标**: 浏览器以外的人都能用上 Gotong。
 
 ### Phase 12.A — IM Bridges (按优先级)
 
@@ -342,7 +342,7 @@ throw new SuspendTaskError({ resumeAt: Date.now() + 5*60_000, state: { step: 'wa
 > **微信小程序**不在 IM bridge 里 — 它是 mini app, 更适合 Phase 12.B 的 PWA 类目, 推后。
 > **WhatsApp Business** 需企业审核, 暂不做。
 
-### M1 — `@aipehub/im-adapter` 基础包
+### M1 — `@gotong/im-adapter` 基础包
 - 抽象接口:
   ```ts
   interface ImBridge {
@@ -353,51 +353,51 @@ throw new SuspendTaskError({ resumeAt: Date.now() + 5*60_000, state: { step: 'wa
   }
   interface ImUser { platform: string; platformUserId: string; displayName?: string }
   ```
-- IM user → AipeHub user binding 表: `im_bindings(platform, platformUserId, userId, createdAt)`
+- IM user → Gotong user binding 表: `im_bindings(platform, platformUserId, userId, createdAt)`
 - 绑定流程: IM 里发 `/bind <code>` → admin UI 出 code → IM bot 回复成功
 
-→ commit: `feat: @aipehub/im-adapter base package (Phase 12 M1)`
+→ commit: `feat: @gotong/im-adapter base package (Phase 12 M1)`
 
-### M2 — `@aipehub/im-telegram`
+### M2 — `@gotong/im-telegram`
 - Telegram bot webhook (or long-polling) → onMessage
 - 命令: `/help`, `/bind`, `/workflow <name>`, `/agents`, free-text → dispatch 给 default agent
 - 单文件 ~300 行
 
-→ commit: `feat: @aipehub/im-telegram (Phase 12 M2)`
+→ commit: `feat: @gotong/im-telegram (Phase 12 M2)`
 
-### M3 — `@aipehub/im-matrix`
+### M3 — `@gotong/im-matrix`
 - matrix-bot-sdk
 - 房间 join + 消息收发
-- 重点: Matrix 本身联邦, 一个 AipeHub hub 接一个 Matrix homeserver, "AipeHub federation × Matrix federation" 二重联邦
+- 重点: Matrix 本身联邦, 一个 Gotong hub 接一个 Matrix homeserver, "Gotong federation × Matrix federation" 二重联邦
 - docs 重点说这个哲学契合
 
-→ commit: `feat: @aipehub/im-matrix (Phase 12 M3)`
+→ commit: `feat: @gotong/im-matrix (Phase 12 M3)`
 
-### M4 — `@aipehub/im-lark` (飞书)
+### M4 — `@gotong/im-lark` (飞书)
 - 飞书 Open Platform Bot 接入
 - 群机器人 + 单聊
-- 国内场景: 企业内一个 AipeHub hub + 飞书群里 @机器人 触发 workflow
+- 国内场景: 企业内一个 Gotong hub + 飞书群里 @机器人 触发 workflow
 
-→ commit: `feat: @aipehub/im-lark (Phase 12 M4)`
+→ commit: `feat: @gotong/im-lark (Phase 12 M4)`
 
-### M5 — `@aipehub/im-discord`
+### M5 — `@gotong/im-discord`
 - discord.js gateway 模式
 - slash commands + free-text mention
 
-→ commit: `feat: @aipehub/im-discord (Phase 12 M5)`
+→ commit: `feat: @gotong/im-discord (Phase 12 M5)`
 
-### M6 — `@aipehub/im-slack`
+### M6 — `@gotong/im-slack`
 - @slack/bolt + Events API
 - slash commands + mention
 
-→ commit: `feat: @aipehub/im-slack (Phase 12 M6)`
+→ commit: `feat: @gotong/im-slack (Phase 12 M6)`
 
-### M7 — `@aipehub/im-qq` (实验性)
+### M7 — `@gotong/im-qq` (实验性)
 - OneBot v11 协议 + go-cqhttp 或 NapCat
 - 标 "实验性 — 第三方协议, 有封号风险"
-- 仅当 host env `AIPE_QQ_BRIDGE_ACK_RISK=true` 时启动
+- 仅当 host env `GOTONG_QQ_BRIDGE_ACK_RISK=true` 时启动
 
-→ commit: `feat: @aipehub/im-qq (Phase 12 M7, experimental)`
+→ commit: `feat: @gotong/im-qq (Phase 12 M7, experimental)`
 
 ### M8 — IM bridges 共用文档 + 一键 docker-compose
 - `docs/zh/IM-BRIDGES.md` 总览, 每个平台 5 分钟接入指南
@@ -428,8 +428,8 @@ throw new SuspendTaskError({ resumeAt: Date.now() + 5*60_000, state: { step: 'wa
 
 ### Phase 12.C — 交互式 CLI REPL
 
-### M12 — `@aipehub/cli` REPL 模式
-- 现 cli 只有脚本子命令, 加 `aipehub repl` 进入对话模式
+### M12 — `@gotong/cli` REPL 模式
+- 现 cli 只有脚本子命令, 加 `gotong repl` 进入对话模式
 - 类似 ChatGPT CLI: 输入 → stream 输出
 - 命令: `:agents`, `:workflow <name>`, `:exit`
 
@@ -464,7 +464,7 @@ throw new SuspendTaskError({ resumeAt: Date.now() + 5*60_000, state: { step: 'wa
 → commit: `feat(web): workflow AI editor (Phase 13 M3)`
 
 ### M4 — 评估器
-- 复用 `@aipehub/evals` 包做生成结果的结构性验证
+- 复用 `@gotong/evals` 包做生成结果的结构性验证
 - 不光 schema 合法, 还要 "agent 引用都存在", "dispatch 链不死循环" 等
 
 → commit: `feat(workflow,evals): generated workflow checker (Phase 13 M4)`

@@ -15,8 +15,8 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { Hub, Space } from '@aipehub/core'
-import { openIdentityStore, type IdentityStore } from '@aipehub/identity'
+import { Hub, Space } from '@gotong/core'
+import { openIdentityStore, type IdentityStore } from '@gotong/identity'
 
 import { serveWeb, type WebServerHandle } from '../src/server.js'
 import type {
@@ -51,7 +51,7 @@ class FakeWorkflowEdit implements MeWorkflowEditSurface {
     workflowId: 'flow',
     state: 'published',
     editable: true,
-    yaml: 'schema: aipehub.workflow/v1\n',
+    yaml: 'schema: gotong.workflow/v1\n',
     boundary: BOUNDARY,
     crossHub: true,
   }
@@ -60,7 +60,7 @@ class FakeWorkflowEdit implements MeWorkflowEditSurface {
     ok: true,
     state: 'published',
     applied: 'published',
-    yaml: 'schema: aipehub.workflow/v1\n',
+    yaml: 'schema: gotong.workflow/v1\n',
     explanation: '把第一步的提示语改了。',
     boundary: BOUNDARY,
   }
@@ -99,7 +99,7 @@ interface Boot {
 
 async function boot(opts: { withEdit?: boolean } = {}): Promise<Boot> {
   const withEdit = opts.withEdit ?? true
-  const tmp = await mkdtemp(join(tmpdir(), 'aipehub-web-wfedit-'))
+  const tmp = await mkdtemp(join(tmpdir(), 'gotong-web-wfedit-'))
   const space = (await Space.init(tmp, { name: 'wfedit-test' })).space
   const hub = new Hub({ space })
   await hub.start()
@@ -238,11 +238,11 @@ describe('/api/me/workflows/:id/edit', () => {
       ok: true,
       state: 'published',
       applied: 'published',
-      yaml: 'schema: aipehub.workflow/v1\n',
+      yaml: 'schema: gotong.workflow/v1\n',
       explanation: '改了提示语。',
       boundary: BOUNDARY,
       diff: [
-        { kind: 'same', text: 'schema: aipehub.workflow/v1' },
+        { kind: 'same', text: 'schema: gotong.workflow/v1' },
         { kind: 'del', text: '      payload: { note: old }' },
         { kind: 'add', text: '      payload: { note: new }' },
       ],
@@ -257,7 +257,7 @@ describe('/api/me/workflows/:id/edit', () => {
     expect(j.ok).toBe(true)
     if (j.ok) {
       expect(j.diff).toEqual([
-        { kind: 'same', text: 'schema: aipehub.workflow/v1' },
+        { kind: 'same', text: 'schema: gotong.workflow/v1' },
         { kind: 'del', text: '      payload: { note: old }' },
         { kind: 'add', text: '      payload: { note: new }' },
       ])
@@ -432,12 +432,12 @@ describe('/api/me/workflows/:id/edit — streaming (D4)', () => {
   }
 
   it('streams chunk lines then a result line; surface got a per-call sink', async () => {
-    b.edit.emitChunks = ['schema: aipehub', '.workflow/v1\n']
+    b.edit.emitChunks = ['schema: gotong', '.workflow/v1\n']
     const { res, lines } = await postStream({ instruction: '改点东西', stream: true })
     expect(res.status).toBe(200)
     expect(res.headers.get('content-type')).toContain('application/x-ndjson')
     expect(lines).toEqual([
-      { kind: 'chunk', text: 'schema: aipehub' },
+      { kind: 'chunk', text: 'schema: gotong' },
       { kind: 'chunk', text: '.workflow/v1\n' },
       expect.objectContaining({ kind: 'result', ok: true, applied: 'published' }),
     ])

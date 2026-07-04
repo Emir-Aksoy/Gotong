@@ -1,14 +1,14 @@
-# Example Prometheus scrape configuration for an AipeHub host.
+# Example Prometheus scrape configuration for an Gotong host.
 #
 # For the FULL one-click stack (Prometheus + Alertmanager + Grafana wired
 # together) use ../docker-compose.yml instead — it mounts a complete
 # prometheus.yml. This file is the standalone scrape block to merge into an
 # EXISTING prometheus.yml's `scrape_configs:`.
 #
-# Two jobs: the AipeHub Hub (bearer-token auth) and node_exporter on the same
-# box (OS-level metrics AipeHub doesn't export).
+# Two jobs: the Gotong Hub (bearer-token auth) and node_exporter on the same
+# box (OS-level metrics Gotong doesn't export).
 #
-# AUTH — the internal /metrics route (Route B P0-M7). Set AIPE_METRICS_TOKEN on
+# AUTH — the internal /metrics route (Route B P0-M7). Set GOTONG_METRICS_TOKEN on
 # the host to a long random secret and (re)start the Hub; GET /metrics then
 # serves the same body as the admin metrics page to any bearer holder. NO
 # machine-admin needed (a scraper should read metrics, not gain admin). Store
@@ -20,14 +20,14 @@
 scrape_configs:
 
   # ----------------------------------------------------------------------
-  # The AipeHub Hub — internal /metrics scrape route.
+  # The Gotong Hub — internal /metrics scrape route.
   # ----------------------------------------------------------------------
-  - job_name: aipehub
+  - job_name: gotong
     metrics_path: /metrics
     scrape_interval: 30s
     scrape_timeout: 10s
-    # The token equals the host's AIPE_METRICS_TOKEN. See the header.
-    bearer_token_file: /etc/prometheus/aipehub.token
+    # The token equals the host's GOTONG_METRICS_TOKEN. See the header.
+    bearer_token_file: /etc/prometheus/gotong.token
     scheme: https
     static_configs:
       - targets:
@@ -35,10 +35,10 @@ scrape_configs:
     # If you front the Hub with Caddy / nginx on standard 443, no
     # tls_config block is needed. For self-signed certs add:
     # tls_config:
-    #   ca_file: /etc/prometheus/aipehub-ca.crt
+    #   ca_file: /etc/prometheus/gotong-ca.crt
     #   insecure_skip_verify: false
     #
-    # Fallback: if you have NOT set AIPE_METRICS_TOKEN and would rather reuse
+    # Fallback: if you have NOT set GOTONG_METRICS_TOKEN and would rather reuse
     # an admin session, point metrics_path at /api/admin/metrics and put a
     # machine-admin token in the bearer_token_file. The dedicated /metrics
     # route above is preferred — it does not widen the admin surface.
@@ -46,19 +46,19 @@ scrape_configs:
   # ----------------------------------------------------------------------
   # OS-level metrics — disk, memory, process RSS
   # ----------------------------------------------------------------------
-  # AipeHub does NOT export these on purpose (the binary stays small +
+  # Gotong does NOT export these on purpose (the binary stays small +
   # focused). Install node_exporter from
   # https://github.com/prometheus/node_exporter on the same host and
-  # scrape it as a separate job. The alert rules in `aipehub.alerts.yml`
-  # under the `aipehub-host` group rely on this job being named "node".
+  # scrape it as a separate job. The alert rules in `gotong.alerts.yml`
+  # under the `gotong-host` group rely on this job being named "node".
   - job_name: node
     static_configs:
       - targets:
           - 127.0.0.1:9100         # node_exporter default port
-    # If you want process-level RSS (for the AipehubProcessRssCreep
+    # If you want process-level RSS (for the GotongProcessRssCreep
     # alert), enable the process collector in node_exporter:
     #   ExecStart=/usr/local/bin/node_exporter \
     #     --collector.processes \
     #     --collector.process.username
-    # and run it as a user that can read /proc for the aipehub-host
+    # and run it as a user that can read /proc for the gotong-host
     # process.

@@ -1,19 +1,19 @@
-# @aipehub/llm-anthropic
+# @gotong/llm-anthropic
 
-Anthropic Claude `LlmProvider` for [AipeHub](https://github.com/Emir-Aksoy/AipeHub). Plug into [`@aipehub/llm`](https://www.npmjs.com/package/@aipehub/llm)'s `LlmAgent`.
+Anthropic Claude `LlmProvider` for [Gotong](https://github.com/Emir-Aksoy/Gotong). Plug into [`@gotong/llm`](https://www.npmjs.com/package/@gotong/llm)'s `LlmAgent`.
 
 ## Install
 
 ```bash
-pnpm add @aipehub/llm-anthropic @anthropic-ai/sdk
+pnpm add @gotong/llm-anthropic @anthropic-ai/sdk
 # @anthropic-ai/sdk is a peer dependency — install the version you want
 ```
 
 ## Use
 
 ```ts
-import { LlmAgent } from '@aipehub/llm'
-import { AnthropicProvider } from '@aipehub/llm-anthropic'
+import { LlmAgent } from '@gotong/llm'
+import { AnthropicProvider } from '@gotong/llm-anthropic'
 
 const provider = new AnthropicProvider({
   // apiKey: '...'         // defaults to process.env.ANTHROPIC_API_KEY

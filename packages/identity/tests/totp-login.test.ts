@@ -55,7 +55,7 @@ describe('authenticatePassword — TOTP login gate (P1-M3c)', () => {
     store = openIdentityStore({ dbPath: ':memory:', masterKey: FIXED_KEY })
     store.bootstrap()
     userId = store.createUser({ email, displayName: 'Member', password, role: 'member' }).id
-    secret = store.enrollTotp({ userId, account: email, issuer: 'AipeHub' }).secretBase32
+    secret = store.enrollTotp({ userId, account: email, issuer: 'Gotong' }).secretBase32
   })
   afterEach(() => store.close())
 

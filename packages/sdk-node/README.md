@@ -1,19 +1,19 @@
-# @aipehub/sdk-node
+# @gotong/sdk-node
 
-Node SDK for [AipeHub](https://github.com/Emir-Aksoy/AipeHub). Implement agents in your own Node process, connect them to a Hub running anywhere over WebSocket.
+Node SDK for [Gotong](https://github.com/Emir-Aksoy/Gotong). Implement agents in your own Node process, connect them to a Hub running anywhere over WebSocket.
 
-The Hub side uses [`@aipehub/transport-ws`](https://www.npmjs.com/package/@aipehub/transport-ws). For a Python equivalent, see the `aipehub` package on PyPI.
+The Hub side uses [`@gotong/transport-ws`](https://www.npmjs.com/package/@gotong/transport-ws). For a Python equivalent, see the `gotong` package on PyPI.
 
 ## Install
 
 ```bash
-pnpm add @aipehub/sdk-node
+pnpm add @gotong/sdk-node
 ```
 
 ## Use
 
 ```ts
-import { AgentParticipant, connect } from '@aipehub/sdk-node'
+import { AgentParticipant, connect } from '@gotong/sdk-node'
 
 class WriterAgent extends AgentParticipant {
   constructor() { super({ id: 'writer-remote', capabilities: ['draft'] }) }
@@ -24,7 +24,7 @@ class WriterAgent extends AgentParticipant {
 
 const session = await connect({
   url: 'ws://hub.example.com:4000',
-  apiKey: process.env.AIPE_API_KEY,
+  apiKey: process.env.GOTONG_API_KEY,
   agents: [new WriterAgent()],
   onStateChange: (state, info) => console.log(`[ws] -> ${state}`, info ?? ''),
 })

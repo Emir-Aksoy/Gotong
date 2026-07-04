@@ -15,7 +15,7 @@ import { describe, expect, it } from 'vitest'
 import {
   WORKFLOW_SCHEMA_V1,
   type WorkflowDefinition,
-} from '@aipehub/workflow'
+} from '@gotong/workflow'
 
 import {
   checkWorkflowStructure,

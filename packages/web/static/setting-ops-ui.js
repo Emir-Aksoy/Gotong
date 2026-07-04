@@ -26,7 +26,7 @@
  * When the host didn't wire the surface the routes 503 and the panel stays hidden
  * (like #hub-health) rather than render a console that can't run anything.
  *
- * i18n: reads the live dict off window.AipeHub.t at call time (app-core.js runs
+ * i18n: reads the live dict off window.Gotong.t at call time (app-core.js runs
  * before this panel is injected). Panel chrome + tier labels + hints are
  * `settingOps*` keys; per-command labels come from the localized `settingOpsCmd`
  * map, falling back to the backend's (English) title/summary for an unknown id.
@@ -34,7 +34,7 @@
 ;(function () {
   'use strict'
 
-  const AH = window.AipeHub
+  const AH = window.Gotong
   function t() {
     return AH.t
   }

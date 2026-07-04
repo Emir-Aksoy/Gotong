@@ -18,8 +18,8 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { Hub, Space } from '@aipehub/core'
-import { openIdentityStore, type IdentityStore } from '@aipehub/identity'
+import { Hub, Space } from '@gotong/core'
+import { openIdentityStore, type IdentityStore } from '@gotong/identity'
 
 import { serveWeb, type WebServerHandle } from '../src/server.js'
 import type { WizardComposeInput, WorkflowWizardSurface } from '../src/wizard-routes.js'
@@ -45,7 +45,7 @@ class FakeWizard implements WorkflowWizardSurface {
   }
   composeResult: ComposeResult = {
     ok: true,
-    yaml: 'schema: aipehub.workflow/v1\n',
+    yaml: 'schema: gotong.workflow/v1\n',
     explanation: '先起草,再发送。',
     gapAnalysis: { ok: true, needs: [] },
     gapText: '✓ 全部满足',
@@ -73,7 +73,7 @@ class FakeCreate implements MeWorkflowCreateSurface {
   fromYamlResult: MeWorkflowCreateResult = {
     ok: true,
     workflowId: 'wiz-flow',
-    yaml: 'schema: aipehub.workflow/v1\n',
+    yaml: 'schema: gotong.workflow/v1\n',
     explanation: '',
   }
   async create(): Promise<MeWorkflowCreateResult> {
@@ -112,7 +112,7 @@ async function boot(
 ): Promise<Boot> {
   const withWizard = opts.withWizard ?? true
   const withCreate = opts.withCreate ?? true
-  const tmp = await mkdtemp(join(tmpdir(), 'aipehub-web-wizard-'))
+  const tmp = await mkdtemp(join(tmpdir(), 'gotong-web-wizard-'))
   const space = (await Space.init(tmp, { name: 'wizard-test' })).space
   const hub = new Hub({ space })
   await hub.start()
@@ -267,7 +267,7 @@ describe('POST /api/admin/workflows/wizard/*', () => {
       ok: false,
       reason: 'exhausted',
       errorsText: '1. 步骤 review 引用了不存在的步骤输出',
-      lastYaml: 'schema: aipehub.workflow/v1\n',
+      lastYaml: 'schema: gotong.workflow/v1\n',
       repairRounds: 2,
     }
     const res = await fetch(`${b.server.url}/api/admin/workflows/wizard/compose`, {
@@ -415,7 +415,7 @@ describe('POST /api/me/workflows/wizard/*', () => {
     const res = await fetch(`${b.server.url}/api/me/workflows/wizard/approve`, {
       method: 'POST',
       headers: memberHeaders(b),
-      body: JSON.stringify({ yaml: 'schema: aipehub.workflow/v1\n', userId: 'spoofed' }),
+      body: JSON.stringify({ yaml: 'schema: gotong.workflow/v1\n', userId: 'spoofed' }),
     })
     expect(res.status).toBe(200)
     expect((await res.json()) as { workflowId?: string }).toMatchObject({
@@ -423,7 +423,7 @@ describe('POST /api/me/workflows/wizard/*', () => {
       workflowId: 'wiz-flow',
     })
     expect(b.create.fromYamlCalls).toEqual([
-      { yaml: 'schema: aipehub.workflow/v1\n', userId: b.memberUserId },
+      { yaml: 'schema: gotong.workflow/v1\n', userId: b.memberUserId },
     ])
   })
 
@@ -452,7 +452,7 @@ describe('POST /api/me/workflows/wizard/*', () => {
       const res = await fetch(`${b.server.url}/api/me/workflows/wizard/approve`, {
         method: 'POST',
         headers: memberHeaders(b),
-        body: JSON.stringify({ yaml: 'schema: aipehub.workflow/v1\n' }),
+        body: JSON.stringify({ yaml: 'schema: gotong.workflow/v1\n' }),
       })
       expect(res.status, reason).toBe(status)
       expect((await res.json()) as { code?: string }).toMatchObject({ code: reason })
@@ -465,7 +465,7 @@ describe('POST /api/me/workflows/wizard/*', () => {
       const res = await fetch(`${b2.server.url}/api/me/workflows/wizard/approve`, {
         method: 'POST',
         headers: memberHeaders(b2),
-        body: JSON.stringify({ yaml: 'schema: aipehub.workflow/v1\n' }),
+        body: JSON.stringify({ yaml: 'schema: gotong.workflow/v1\n' }),
       })
       expect(res.status).toBe(503)
     } finally {
@@ -485,7 +485,7 @@ describe('POST /api/me/workflows/wizard/*', () => {
       const approve = await fetch(`${b2.server.url}/api/me/workflows/wizard/approve`, {
         method: 'POST',
         headers: memberHeaders(b2),
-        body: JSON.stringify({ yaml: 'schema: aipehub.workflow/v1\n' }),
+        body: JSON.stringify({ yaml: 'schema: gotong.workflow/v1\n' }),
       })
       expect(approve.status).toBe(200)
       expect(b2.create.fromYamlCalls).toHaveLength(1)

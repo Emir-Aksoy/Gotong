@@ -17,7 +17,7 @@
 
 import { describe, expect, it } from 'vitest'
 
-import { WORKFLOW_SCHEMA_V1, type Step, type WorkflowDefinition } from '@aipehub/workflow'
+import { WORKFLOW_SCHEMA_V1, type Step, type WorkflowDefinition } from '@gotong/workflow'
 
 import {
   enforceEditBoundary,

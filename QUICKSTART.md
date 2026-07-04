@@ -1,4 +1,4 @@
-# AipeHub — QUICKSTART · 5 分钟上手漏斗
+# Gotong — QUICKSTART · 5 分钟上手漏斗
 
 > **The promise / 承诺**: from a fresh clone to a real multi-participant result on
 > your screen in about a minute — **no API key, no Docker**. Two more short steps
@@ -40,7 +40,7 @@ at compile time ... — revised note: mention IDE autocompletion as a day-to-day
 ```
 
 **What you just saw** — two agents and one person collaborated over the **same**
-message/task rails. In AipeHub a human and an agent are the *same* `Participant`:
+message/task rails. In Gotong a human and an agent are the *same* `Participant`:
 `alice` didn't call a special "ask-a-human" tool — she received a task exactly
 like the agents did. That's the whole point, and it ran **offline, deterministic,
 zero key**. This is your "it works" moment.
@@ -79,13 +79,13 @@ In the wizard: name yourself, then **pick a provider — choose `Mock` to stay
 keyless**, or paste a real key (next step). The master key is created for you
 under `./data/runtime/secret.key`; you land logged-in at `/admin`.
 
-**Won't start?** Run the pre-flight — it inspects the exact `AIPE_*` env the host
+**Won't start?** Run the pre-flight — it inspects the exact `GOTONG_*` env the host
 reads (Node version, ports free to bind, data dir writable, master key) and prints
 ✓ / ⚠ / ✖ per check with a one-line fix:
 
 ```bash
-pnpm exec aipehub doctor          # report only
-pnpm exec aipehub doctor --fix    # also creates a missing data dir (safe, reversible)
+pnpm exec gotong doctor          # report only
+pnpm exec gotong doctor --fix    # also creates a missing data dir (safe, reversible)
 ```
 
 ---

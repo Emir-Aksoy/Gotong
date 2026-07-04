@@ -30,7 +30,7 @@
  * before. Pure, no LLM, trivially testable (北极星: 框架不跑 LLM).
  */
 
-import type { MemoryEntry } from '@aipehub/services-sdk'
+import type { MemoryEntry } from '@gotong/services-sdk'
 
 import { importanceOf, PIN_IMPORTANCE } from './importance.js'
 

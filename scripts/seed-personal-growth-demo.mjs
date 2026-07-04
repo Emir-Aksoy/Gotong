@@ -12,7 +12,7 @@
 //   2. node scripts/seed-personal-growth-demo.mjs
 //   3. restart the host (LocalAgentPool re-spawns from agents.json)
 //
-// Defaults to ./.aipehub-demo/agents.json. Override with $AIPE_SPACE.
+// Defaults to ./.gotong-demo/agents.json. Override with $GOTONG_SPACE.
 //
 // Public users get the same 7 agents via the bundle import path:
 //   POST /api/admin/bundles/import  with templates/bundles/personal-growth.yaml
@@ -29,9 +29,9 @@ import {
   DEFAULT_PROVIDER,
 } from './personal-growth-prompts.mjs';
 
-const SPACE = process.env.AIPE_SPACE
-  ? resolve(process.env.AIPE_SPACE)
-  : resolve('.aipehub-demo');
+const SPACE = process.env.GOTONG_SPACE
+  ? resolve(process.env.GOTONG_SPACE)
+  : resolve('.gotong-demo');
 const PATH = resolve(SPACE, 'agents.json');
 
 const data = JSON.parse(readFileSync(PATH, 'utf8'));

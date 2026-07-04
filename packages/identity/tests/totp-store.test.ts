@@ -37,7 +37,7 @@ describe('IdentityStore — MFA TOTP (P1-M3b)', () => {
   afterEach(() => store.close())
 
   function enroll(): string {
-    const e = store.enrollTotp({ userId, account: email, issuer: 'AipeHub' })
+    const e = store.enrollTotp({ userId, account: email, issuer: 'Gotong' })
     return e.secretBase32
   }
 
@@ -52,12 +52,12 @@ describe('IdentityStore — MFA TOTP (P1-M3b)', () => {
   })
 
   it('enroll moves to pending, stores an encrypted secret, but does NOT yet gate login', () => {
-    const e = store.enrollTotp({ userId, account: email, issuer: 'AipeHub' })
+    const e = store.enrollTotp({ userId, account: email, issuer: 'Gotong' })
     expect(store.totpState(userId)).toBe('pending')
     expect(store.isTotpEnabled(userId)).toBe(false) // pending must not gate login
     expect(e.secretBase32).toMatch(/^[A-Z2-7]+=*$/u)
     expect(e.otpauthUri).toContain('otpauth://totp/')
-    expect(e.otpauthUri).toContain('issuer=AipeHub')
+    expect(e.otpauthUri).toContain('issuer=Gotong')
     expect(totpVaultCount()).toBe(1)
   })
 
@@ -177,7 +177,7 @@ describe('IdentityStore — MFA TOTP without a master key', () => {
     const store = openIdentityStore({ dbPath: ':memory:' }) // no masterKey
     store.bootstrap()
     const u = store.createUser({ email: 'm@t.test', displayName: 'M', role: 'member' })
-    expect(() => store.enrollTotp({ userId: u.id, account: 'm@t.test', issuer: 'AipeHub' })).toThrow(
+    expect(() => store.enrollTotp({ userId: u.id, account: 'm@t.test', issuer: 'Gotong' })).toThrow(
       IdentityError,
     )
     store.close()

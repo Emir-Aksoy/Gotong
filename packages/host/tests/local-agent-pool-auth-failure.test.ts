@@ -11,7 +11,7 @@
  * the spawn pipeline assembles it and hands it to LlmAgent, which
  * calls it on detected 401. Testing the factory + the LlmAgent's call
  * site separately covers the full contract (the LlmAgent-side calling
- * convention is verified in @aipehub/llm's agent-auth-failure.test.ts).
+ * convention is verified in @gotong/llm's agent-auth-failure.test.ts).
  */
 
 import { describe, expect, it, beforeEach, afterEach } from 'vitest'
@@ -20,12 +20,12 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { randomBytes } from 'node:crypto'
 
-import { Hub, Space, type AgentRecord } from '@aipehub/core'
+import { Hub, Space, type AgentRecord } from '@gotong/core'
 import {
   IdentityStore,
   MASTER_KEY_LEN_BYTES,
   openIdentityStore,
-} from '@aipehub/identity'
+} from '@gotong/identity'
 
 import { LocalAgentPool } from '../src/local-agent-pool.js'
 import { OrgApiPool } from '../src/org-api-pool.js'
@@ -42,7 +42,7 @@ interface Fixture {
 }
 
 async function boot(opts: { withIdentity?: boolean } = {}): Promise<Fixture> {
-  const root = await mkdtemp(join(tmpdir(), 'aipe-lap-auth-'))
+  const root = await mkdtemp(join(tmpdir(), 'gotong-lap-auth-'))
   const opened = await Space.init(root, { name: 'test' })
   const space = opened.space
   const hub = new Hub({ space })

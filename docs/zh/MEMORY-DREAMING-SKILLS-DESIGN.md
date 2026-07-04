@@ -9,7 +9,7 @@
 
 ## 〇、一句话 + 定位
 
-- 这是 **AipeHub 框架之上的「管家智能体」** 的记忆增强，**不是框架本身**。纯框架难
+- 这是 **Gotong 框架之上的「管家智能体」** 的记忆增强，**不是框架本身**。纯框架难
   推广，所以我们造了一个贴合框架的智能体当门面；它的「常驻 + 心跳 + 记忆」节律对齐
   OpenClaw / Hermes。对比时比的是「我们这个管家的记忆」对「OpenClaw / Hermes 这类智
   能体的记忆」，不是框架对框架。
@@ -17,7 +17,7 @@
   (Stream D) + `MemoryRetriever` seam + `patchMeta` 写缝 + `composeReviewers` 心跳
   pass 框架，地基正好够用。
 - **零 schema 改**（全住 `MemoryEntry.meta` 自由字段 / 衍生文件）、**core/protocol/
-  identity/workflow-runner 零改**、bulk 落 `@aipehub/personal-memory` 叶包、接线在
+  identity/workflow-runner 零改**、bulk 落 `@gotong/personal-memory` 叶包、接线在
   `examples/personal-butler`、`/me` 只读投影在 host，**example-first**（管家 fold 进
   host main.ts 仍推迟）。
 

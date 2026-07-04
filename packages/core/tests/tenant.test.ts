@@ -28,7 +28,7 @@ function joinEntry(seq: number, id: string): TranscriptEntry {
 
 describe('tenant primitive (Route B P0-M1)', () => {
   describe('tenantRoot', () => {
-    const base = '/srv/aipehub'
+    const base = '/srv/gotong'
 
     it('the default tenant resolves to the bare base root (zero behaviour change)', () => {
       // This is the zero-behaviour-change guarantee: a default-tenant
@@ -147,7 +147,7 @@ describe('tenant isolation round-trip (acceptance — A/B + default byte-identit
   let base: string
 
   beforeEach(async () => {
-    base = await mkdtemp(join(tmpdir(), 'aipehub-tenant-'))
+    base = await mkdtemp(join(tmpdir(), 'gotong-tenant-'))
   })
 
   afterEach(async () => {

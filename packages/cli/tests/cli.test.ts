@@ -24,7 +24,7 @@ describe('runCli', () => {
 
   async function newCwd(): Promise<string> {
     cwdBefore = process.cwd()
-    cwd = await mkdtemp(join(tmpdir(), 'aipehub-cli-'))
+    cwd = await mkdtemp(join(tmpdir(), 'gotong-cli-'))
     process.chdir(cwd)
     return cwd
   }
@@ -56,7 +56,7 @@ describe('runCli', () => {
       dependencies: Record<string, string>
     }
     expect(pkg.name).toBe('demo-agent')
-    expect(pkg.dependencies['@aipehub/sdk-node']).toBeDefined()
+    expect(pkg.dependencies['@gotong/sdk-node']).toBeDefined()
     const src = await readFile(join(cwd!, 'demo-agent', 'src', 'index.ts'), 'utf8')
     expect(src).toContain('class DemoAgentAgent extends AgentParticipant')
     expect(src).toContain('capabilities: ["draft","review"]')

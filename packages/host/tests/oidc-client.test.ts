@@ -14,7 +14,7 @@
 import { describe, it, expect } from 'vitest'
 import { generateKeyPairSync, createSign, type KeyObject } from 'node:crypto'
 
-import { OidcError } from '@aipehub/identity'
+import { OidcError } from '@gotong/identity'
 import { OidcClient, type OidcProviderConfig } from '../src/oidc-client.js'
 
 const ISSUER = 'https://idp.test'

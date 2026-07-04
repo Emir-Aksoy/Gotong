@@ -34,7 +34,7 @@
 import { readFileSync, statSync } from 'node:fs'
 import { extname } from 'node:path'
 
-import { Hub } from '@aipehub/core'
+import { Hub } from '@gotong/core'
 import {
   LlmAgent,
   type LlmImageBlock,
@@ -42,9 +42,9 @@ import {
   type LlmProvider,
   type LlmTextBlock,
   type LlmTaskPayload,
-} from '@aipehub/llm'
-import { AnthropicProvider } from '@aipehub/llm-anthropic'
-import { OpenAIProvider } from '@aipehub/llm-openai'
+} from '@gotong/llm'
+import { AnthropicProvider } from '@gotong/llm-anthropic'
+import { OpenAIProvider } from '@gotong/llm-openai'
 
 interface Cli {
   imagePath: string
@@ -127,7 +127,7 @@ async function main(): Promise<void> {
   const mime = mimeFor(cli.imagePath)
   const data = bytes.toString('base64')
 
-  console.log('\n=== AipeHub demo: multimodal-vision ===')
+  console.log('\n=== Gotong demo: multimodal-vision ===')
   console.log(`  image    : ${cli.imagePath} (${stat.size} bytes, ${mime})`)
   console.log(`  provider : ${cli.provider}`)
   console.log(`  prompt   : ${cli.prompt}\n`)

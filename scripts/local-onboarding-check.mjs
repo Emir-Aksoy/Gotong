@@ -36,13 +36,13 @@
  *             (or `pnpm check:onboarding`)
  *   Real key:  ANTHROPIC_API_KEY=... node scripts/local-onboarding-check.mjs
  *              OPENAI_API_KEY=... OPENAI_BASE_URL=https://api.deepseek.com \
- *                AIPE_LIVE_OPENAI_MODEL=deepseek-chat node scripts/local-onboarding-check.mjs
+ *                GOTONG_LIVE_OPENAI_MODEL=deepseek-chat node scripts/local-onboarding-check.mjs
  *
  * Exit codes:  0 = every check that RAN passed (skipped opt-in checks don't
  *              fail the run) · 1 = a check that ran failed.
  *
  * Build note: imports the compiled host dist. If `packages/host/dist/
- * llm-key-test.js` is missing, run `pnpm --filter @aipehub/host build` first.
+ * llm-key-test.js` is missing, run `pnpm --filter @gotong/host build` first.
  */
 
 import { testLlmKey } from '../packages/host/dist/llm-key-test.js'
@@ -182,8 +182,8 @@ function realKeyInput() {
     return {
       provider: 'anthropic',
       apiKey: process.env.ANTHROPIC_API_KEY,
-      ...(process.env.AIPE_LIVE_ANTHROPIC_MODEL
-        ? { model: process.env.AIPE_LIVE_ANTHROPIC_MODEL }
+      ...(process.env.GOTONG_LIVE_ANTHROPIC_MODEL
+        ? { model: process.env.GOTONG_LIVE_ANTHROPIC_MODEL }
         : {}),
     }
   }
@@ -192,7 +192,7 @@ function realKeyInput() {
       provider: 'openai',
       apiKey: process.env.OPENAI_API_KEY,
       ...(process.env.OPENAI_BASE_URL ? { baseURL: process.env.OPENAI_BASE_URL } : {}),
-      ...(process.env.AIPE_LIVE_OPENAI_MODEL ? { model: process.env.AIPE_LIVE_OPENAI_MODEL } : {}),
+      ...(process.env.GOTONG_LIVE_OPENAI_MODEL ? { model: process.env.GOTONG_LIVE_OPENAI_MODEL } : {}),
     }
   }
   return null
@@ -220,7 +220,7 @@ async function realKeyChecks() {
   // 2b. A garbage key over the SAME real endpoint resolves to invalid_key —
   //     the rescue path fires at the network layer, not just in the fake.
   {
-    const wrong = { ...input, apiKey: 'sk-aipe-deliberately-wrong-key-000000000000' }
+    const wrong = { ...input, apiKey: 'sk-gotong-deliberately-wrong-key-000000000000' }
     const r = await testLlmKey(wrong)
     if (!r.ok && KEY_FIX_CODES.has(r.code)) {
       pass(`错 key 走真线 → ${r.code} → 去补 key`, fmt(r))
@@ -238,7 +238,7 @@ async function realKeyChecks() {
 
 // --- run --------------------------------------------------------------------
 
-console.log('AipeHub 本地新手自检 — testLlmKey 自救路径')
+console.log('Gotong 本地新手自检 — testLlmKey 自救路径')
 await hermeticChecks()
 await realKeyChecks()
 

@@ -1,4 +1,4 @@
-# AipeHub 目标达成度审计
+# Gotong 目标达成度审计
 
 审计日期: 2026-05-31
 审计方: Codex
@@ -9,7 +9,7 @@
 
 结论: **主体架构已经达成，产品闭环还未完全达成**。
 
-AipeHub 的核心抽象、包边界和运行模型基本符合设计目标:
+Gotong 的核心抽象、包边界和运行模型基本符合设计目标:
 
 - Hub 仍然是路由 / transcript / scheduler，不直接拥有智能；人和 agent 统一为 `Participant`。
 - 单机个人模式、v4 identity、roles / invitations / sessions / audit / vault / quota 已形成可用组织层。

@@ -23,10 +23,10 @@
 ;(function () {
   'use strict'
 
-  // i18n — read the live dict off window.AipeHub at call time (app-core.js runs
-  // synchronously before this panel is injected, so AipeHub is always defined).
+  // i18n — read the live dict off window.Gotong at call time (app-core.js runs
+  // synchronously before this panel is injected, so Gotong is always defined).
   // `t()` returns the current-language dict; re-render on language change.
-  const AH = window.AipeHub
+  const AH = window.Gotong
   function t() { return AH.t }
 
   const LIST_API = '/api/admin/peer-manifests'

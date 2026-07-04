@@ -4,7 +4,7 @@
  * Persists the config that makes a local capability dispatch SPAWN and drive an
  * external coding agent over ACP (Agent Client Protocol) — Claude Code / Codex
  * via their ACP bridges, OpenClaw-style (spawn once, hold one session, dispatch
- * many tasks). The host-side mirror of the inbound `aipehub connect`. Replaces
+ * many tasks). The host-side mirror of the inbound `gotong connect`. Replaces
  * hand-written example glue with admin-editable, restart-surviving rows.
  *
  * Modeled on A2aAgentStore / SamlProviderStore: there is NO vault here, and —

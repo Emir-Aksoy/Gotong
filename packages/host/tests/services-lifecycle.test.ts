@@ -20,8 +20,8 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { createLogger, Hub, Space, type AgentRecord, type TranscriptEntry } from '@aipehub/core'
-import { TRASH_DEFAULT_RETENTION_MS, type Owner, type ServicePlugin, type TrashRef } from '@aipehub/services-sdk'
+import { createLogger, Hub, Space, type AgentRecord, type TranscriptEntry } from '@gotong/core'
+import { TRASH_DEFAULT_RETENTION_MS, type Owner, type ServicePlugin, type TrashRef } from '@gotong/services-sdk'
 
 import { LocalAgentPool } from '../src/local-agent-pool.js'
 import {
@@ -106,7 +106,7 @@ describe('HubServices.softDelete publishes service_trashed', () => {
   let services: HubServices
   let captured: TranscriptEntry[]
   beforeEach(async () => {
-    root = await mkdtemp(join(tmpdir(), 'aipe-host-lc-'))
+    root = await mkdtemp(join(tmpdir(), 'gotong-host-lc-'))
     await rm(root, { recursive: true, force: true })
     const o = await Space.init(root, { name: 'test' })
     space = o.space
@@ -173,7 +173,7 @@ describe('HubServices.sweepExpiredTrash', () => {
   let services: HubServices
   let fake: ServicePlugin & { calls: string[]; trash: TrashRef[] }
   beforeEach(async () => {
-    root = await mkdtemp(join(tmpdir(), 'aipe-host-sweep-'))
+    root = await mkdtemp(join(tmpdir(), 'gotong-host-sweep-'))
     await rm(root, { recursive: true, force: true })
     const o = await Space.init(root, { name: 'test' })
     space = o.space
@@ -232,7 +232,7 @@ describe('LifecycleSweeper', () => {
   let services: HubServices
   let fake: ServicePlugin & { calls: string[]; trash: TrashRef[] }
   beforeEach(async () => {
-    root = await mkdtemp(join(tmpdir(), 'aipe-host-sweeper-'))
+    root = await mkdtemp(join(tmpdir(), 'gotong-host-sweeper-'))
     await rm(root, { recursive: true, force: true })
     const o = await Space.init(root, { name: 'test' })
     space = o.space
@@ -286,7 +286,7 @@ describe('LocalAgentPool.onAgentRemoved', () => {
   let hub: Hub
   let services: HubServices
   beforeEach(async () => {
-    root = await mkdtemp(join(tmpdir(), 'aipe-host-onrm-'))
+    root = await mkdtemp(join(tmpdir(), 'gotong-host-onrm-'))
     await rm(root, { recursive: true, force: true })
     const o = await Space.init(root, { name: 'test' })
     space = o.space
@@ -294,7 +294,7 @@ describe('LocalAgentPool.onAgentRemoved', () => {
     await hub.start()
     await writeFile(
       join(space.paths.services, 'plugins.json'),
-      JSON.stringify({ plugins: ['@aipehub/service-memory-file'] }, null, 2) + '\n',
+      JSON.stringify({ plugins: ['@gotong/service-memory-file'] }, null, 2) + '\n',
       'utf8',
     )
     const boot = await bootstrapServices({ space, hub, logger })

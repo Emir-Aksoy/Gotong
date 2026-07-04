@@ -1,4 +1,4 @@
-# Template validation gate — parse every aipehub.template/v1 manifest.
+# Template validation gate — parse every gotong.template/v1 manifest.
 #
 # A community template is just a file. The only merge bar it needs is
 # "license-clear + actually parses" (see GOVERNANCE.md / CONTRIBUTING.md and
@@ -8,7 +8,7 @@
 # contributor runs locally with `pnpm check:templates` — pushing every shipped
 # example AND every community submission through the REAL parseTemplate +
 # parseWorkflow. A malformed manifest, or a workflow block that isn't valid
-# aipehub.workflow/v1, fails the PR by file name instead of blowing up on
+# gotong.workflow/v1, fails the PR by file name instead of blowing up on
 # someone's hub at one-click install.
 #
 # Lean by design — runs ONLY when a template file actually changes:
@@ -48,7 +48,7 @@ concurrency:
 
 jobs:
   validate:
-    name: Validate aipehub.template/v1 manifests
+    name: Validate gotong.template/v1 manifests
     runs-on: ubuntu-latest
     # Parsing a few dozen small YAML files is fast; the time goes to the build
     # of the parser packages. 10min is comfortable headroom.
@@ -66,11 +66,11 @@ jobs:
         uses: ./.github/actions/setup-workspace
 
       - name: Build the parser packages
-        # The gate imports the built dist of @aipehub/web's workspace deps
-        # (@aipehub/core, @aipehub/workflow). `@aipehub/web...` builds web plus
+        # The gate imports the built dist of @gotong/web's workspace deps
+        # (@gotong/core, @gotong/workflow). `@gotong/web...` builds web plus
         # its full dependency closure — leaner than `pnpm -r build` (all 33
         # packages) while still covering parseTemplate + parseWorkflow.
-        run: pnpm --filter "@aipehub/web..." build
+        run: pnpm --filter "@gotong/web..." build
 
       - name: Validate templates
         # Same gate a contributor runs locally — see CONTRIBUTING.md.

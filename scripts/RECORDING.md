@@ -1,4 +1,4 @@
-# Recording the AipeHub demo
+# Recording the Gotong demo
 
 The 30–60 second GIF on the project README is generated from
 [`scripts/demo-60s.sh`](demo-60s.sh) via [asciinema](https://asciinema.org)
@@ -45,7 +45,7 @@ project README:
 
 ```markdown
 <p align="center">
-  <img src="docs/assets/demo.gif" alt="AipeHub 60-second demo" width="780">
+  <img src="docs/assets/demo.gif" alt="Gotong 60-second demo" width="780">
 </p>
 ```
 

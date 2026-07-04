@@ -1,5 +1,5 @@
 /**
- * ACP (Agent Client Protocol) wire types — the subset AipeHub speaks.
+ * ACP (Agent Client Protocol) wire types — the subset Gotong speaks.
  *
  * ACP is JSON-RPC 2.0, but unlike A2A it is BIDIRECTIONAL over one long-lived
  * stdio pipe: the client (hub) sends requests (`initialize` / `session/new` /

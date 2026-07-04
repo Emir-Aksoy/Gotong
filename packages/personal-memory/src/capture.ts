@@ -6,7 +6,7 @@
  *
  * OpenClaw / Hermes capture conversation automatically so the user never has
  * to maintain memory by hand. OpenClaw's safety net is a "save-before-compact"
- * silent round — but AipeHub's `LlmAgent` has **no context auto-compaction
+ * silent round — but Gotong's `LlmAgent` has **no context auto-compaction
  * event** (its truncate is just a log dump). So we capture at the two honest
  * hook points we *do* have: **turn end** (here) and **heartbeat review**
  * (`review.ts`). Turn-end capture is cleaner anyway — it's off the hot path,
@@ -25,8 +25,8 @@
  * (`MemoryAugmentedAgent.captureTurn`) best-effort after a turn completes.
  */
 
-import type { Task } from '@aipehub/core'
-import type { NewMemoryEntry } from '@aipehub/services-sdk'
+import type { Task } from '@gotong/core'
+import type { NewMemoryEntry } from '@gotong/services-sdk'
 
 /** Default soft cap on a single capture entry's text. */
 export const DEFAULT_CAPTURE_MAX_CHARS = 2_000

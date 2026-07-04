@@ -1,20 +1,20 @@
-# AipeHub
+# Gotong
 
 <!-- doc-version: 1.0 -->
 > **Doc version 1.0** · English (authoritative source) · Updated 2026-06-27 · Translations: [中文](docs/zh/README.md) · [日本語](docs/ja/README.md) · [Русский](docs/ru/README.md) · [Français](docs/fr/README.md) · [Español](docs/es/README.md) · [한국어](docs/ko/README.md). If a translation conflicts with this English version, the English version governs.
 
 [English](README.md) · [中文文档](docs/zh/README.md)
 
-**AI + Person + Hub** — a self-hosted substrate where people and AI agents collaborate as equal participants, and organizations federate without handing over their keys, data, or billing.
+**Gotong** — from *gotong-royong*, the Malay–Indonesian tradition of a whole village shouldering work together (Chinese: 共同) — a self-hosted substrate where people and AI agents collaborate as equal participants, and organizations federate without handing over their keys, data, or billing.
 
-AipeHub is not an agent — and not another agent framework. It's the **layer underneath them**: a registry, a message bus, a task router, a governed federation link, and an append-only transcript. LangGraph / CrewAI agents, CLI coding agents (Claude Code, Codex), and humans all plug in as the same `Participant`. The Hub keeps the signals flowing and the boundaries enforced — it never runs the LLM, so every decision stays with the participants.
+Gotong is not an agent — and not another agent framework. It's the **layer underneath them**: a registry, a message bus, a task router, a governed federation link, and an append-only transcript. LangGraph / CrewAI agents, CLI coding agents (Claude Code, Codex), and humans all plug in as the same `Participant`. The Hub keeps the signals flowing and the boundaries enforced — it never runs the LLM, so every decision stays with the participants.
 
 ### AI you can actually trust with the consequential stuff
 
-Most AI tools give you two options: hand everything to a cloud you don't control, or wire it all together yourself. AipeHub is the third option — **AI you can point at your home, your family, or your money, because the boundaries are real and yours:**
+Most AI tools give you two options: hand everything to a cloud you don't control, or wire it all together yourself. Gotong is the third option — **AI you can point at your home, your family, or your money, because the boundaries are real and yours:**
 
 - **A human is in the loop where it matters.** Reversible actions (turn off the lights) just happen; irreversible ones (lock the door, spend money, send a child's data across a link) wait for a person to confirm in an inbox. The workflow can't skip the gate.
-- **Your keys and data stay on your disk.** Credentials live encrypted in your own `.aipehub/` directory. Federating with another hub shares a capability, not your vault.
+- **Your keys and data stay on your disk.** Credentials live encrypted in your own `.gotong/` directory. Federating with another hub shares a capability, not your vault.
 - **Nothing decides in the dark.** Every dispatch and result is an append-only transcript you can read. The framework never runs the model, so there's no hidden judgment call.
 
 → See the [**flagship templates**](docs/zh/FLAGSHIP-TEMPLATES.md) for hubs a non-technical person can import and run today (smart home, café ops, a family learning hub, a personal coding hub), each with the governance gate shown plainly and a one-command demo. Want to share your own? [`templates/community/templates/`](templates/community/templates/).
@@ -29,9 +29,9 @@ Most AI tools give you two options: hand everything to a cloud you don't control
 
 ## Status
 
-**Self-hosted, file-first, and governed for multi-org use.** A workspace is a directory on disk (`.aipehub/`) — drop the directory and the space is gone; copy it and you've handed the room to a teammate; restarts are transparent. On top of that: a per-org credential vault, cross-org federation with per-link trust contracts (capability allowlist · data-class gate · quota · revocation), human-in-the-loop approval inboxes, and a usage / cost ledger. The Hub still never runs an LLM — every decision stays with the participants.
+**Self-hosted, file-first, and governed for multi-org use.** A workspace is a directory on disk (`.gotong/`) — drop the directory and the space is gone; copy it and you've handed the room to a teammate; restarts are transparent. On top of that: a per-org credential vault, cross-org federation with per-link trust contracts (capability allowlist · data-class gate · quota · revocation), human-in-the-loop approval inboxes, and a usage / cost ledger. The Hub still never runs an LLM — every decision stays with the participants.
 
-The npm packages are scoped `@aipehub/*`; the Python SDK is `aipehub` on PyPI. License: [MIT](LICENSE).
+The npm packages are scoped `@gotong/*`; the Python SDK is `gotong` on PyPI. License: [MIT](LICENSE).
 
 ## Pick your door
 
@@ -41,14 +41,14 @@ The npm packages are scoped `@aipehub/*`; the Python SDK is `aipehub` on PyPI. L
 |---|---|---|
 | 🧭 **First time here** | [`docs/OVERVIEW.md`](docs/OVERVIEW.md) | 5-minute map of every concept + a "small-team workflow" walkthrough. |
 | 🧑 **A worker / admin joining a room** | [`docs/HUMAN.md`](docs/HUMAN.md) | Open the URL the operator gave you; pick a nickname; you're in. |
-| 🤖 **Writing an agent to plug in** | [`docs/AGENT.md`](docs/AGENT.md) | `@aipehub/sdk-node` or Python `aipehub`. Subclass `AgentParticipant`. |
+| 🤖 **Writing an agent to plug in** | [`docs/AGENT.md`](docs/AGENT.md) | `@gotong/sdk-node` or Python `gotong`. Subclass `AgentParticipant`. |
 | 🧩 **Bringing in an LLM agent without writing code** | [`docs/TEMPLATES.md`](docs/TEMPLATES.md) + [`templates/`](templates/) | YAML manifest → paste / upload in admin UI → host spawns it for you. Two sets: project-original (`templates/agents/`) and CC0/MIT community-adapted (`templates/community/`). |
 | ⭐ **Just want a hub that does something useful** | [`docs/zh/FLAGSHIP-TEMPLATES.md`](docs/zh/FLAGSHIP-TEMPLATES.md) (zh) | Curated, trust-framed gallery — import one and it works. Smart home, café ops, family learning, personal coding. Each shows what it can/can't touch + a no-key demo. |
 | 🔧 **Running the server** | [`docs/DEPLOY.md`](docs/DEPLOY.md) | `pnpm host` for local, Caddy + systemd for public. |
 | 🚀 **Going live (3 topologies)** | [`docs/zh/GO-LIVE.md`](docs/zh/GO-LIVE.md) + [`deploy/`](deploy/) | Home host + IM, cloud host + IM, or cloud + direct IP. Copy `deploy/.env.home` / `.env.cloud`, follow the runbook. IM bridge is outbound long-poll → a NAT'd home box needs no tunnel. (Runbook is zh; English pending.) |
 | 🪢 **Federating two hubs (team → org)** | [`docs/FEDERATION.md`](docs/FEDERATION.md) | `TeamBridgeAgent` makes a whole sub-Hub appear upstream as one agent — keeps internal members / keys / sub-tasks private. |
-| 🔌 **Driving a Hub from Claude Desktop / Cursor / Cline** | [`docs/MCP.md`](docs/MCP.md) | `@aipehub/mcp-server` is an MCP bridge — 5 tools (list / dispatch / evaluate / leaderboard / tasks). Add 5 lines to your MCP client config. |
-| 🧰 **Giving your agents the MCP tool ecosystem** | [`docs/MCP.md`](docs/MCP.md#6-outbound--using-third-party-mcp-tools-from-your-agent) | `@aipehub/mcp-client` lets your AipeHub agents attach Filesystem / GitHub / Slack / Postgres / any MCP server. `LlmAgent` runs a multi-turn tool-use loop out of the box (v0.3+) — just pass `tools: toolset` and Claude / GPT decide when to call which tool. |
+| 🔌 **Driving a Hub from Claude Desktop / Cursor / Cline** | [`docs/MCP.md`](docs/MCP.md) | `@gotong/mcp-server` is an MCP bridge — 5 tools (list / dispatch / evaluate / leaderboard / tasks). Add 5 lines to your MCP client config. |
+| 🧰 **Giving your agents the MCP tool ecosystem** | [`docs/MCP.md`](docs/MCP.md#6-outbound--using-third-party-mcp-tools-from-your-agent) | `@gotong/mcp-client` lets your Gotong agents attach Filesystem / GitHub / Slack / Postgres / any MCP server. `LlmAgent` runs a multi-turn tool-use loop out of the box (v0.3+) — just pass `tools: toolset` and Claude / GPT decide when to call which tool. |
 | ⚖️ **Worried about license / commercial use** | [`docs/LICENSE-FAQ.md`](docs/LICENSE-FAQ.md) | MIT throughout. Embeddable in closed-source / SaaS. Community templates are CC0 + MIT. |
 | 🧠 **Designing on top of it** | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) + [`docs/PROTOCOL.md`](docs/PROTOCOL.md) | Hub is dumb on purpose; wire protocol is v1.0. |
 | 📊 **Sizing a deployment** | [`docs/PERFORMANCE.md`](docs/PERFORMANCE.md) + [`docs/zh/CLOUD-RESOURCE-FOOTPRINT.md`](docs/zh/CLOUD-RESOURCE-FOOTPRINT.md) | Pre-launch baseline numbers + how to rerun the load test against your own hardware. The zh doc adds a **real production measurement** (Feishu + MiMo, single hub on a 2 vCPU / 2 GiB box) with per-load capacity estimates and upgrade triggers — steady state is ~110–160 MiB RAM and ~0 CPU because inference runs on the LLM provider, not the host. |
@@ -62,7 +62,7 @@ The npm packages are scoped `@aipehub/*`; the Python SDK is `aipehub` on PyPI. L
 | **You do** | Paste / upload a YAML manifest in admin UI | Write `AgentParticipant.handleTask`, call `connect(url, agents)` |
 | **Where it runs** | Inside the Hub process (LocalAgentPool) | Anywhere on the network |
 | **What it can do** | LLM tasks via Anthropic / OpenAI / Mock providers | Anything — LLMs, scrapers, private data, ML models, scripts |
-| **API key lives** | Encrypted in `.aipehub/secrets.enc.json` (per-agent or workspace default) | Wherever your code reads it |
+| **API key lives** | Encrypted in `.gotong/secrets.enc.json` (per-agent or workspace default) | Wherever your code reads it |
 | **On restart** | Auto-respawned by `LocalAgentPool` | Your code reconnects (SDK has built-in auto-retry) |
 | **Best for** | End users • standard roles • one-click templates | Developers • private logic • cross-language workers |
 | **Read** | [`docs/TEMPLATES.md`](docs/TEMPLATES.md) | [`docs/AGENT.md`](docs/AGENT.md) |
@@ -71,7 +71,7 @@ Both paths plug into the same Hub. Mix freely — a room can have host-managed `
 
 What this project is — and what it refuses to become: [`CHARTER.md`](CHARTER.md). Contributing? See [`CONTRIBUTING.md`](CONTRIBUTING.md). Security issues: [`SECURITY.md`](SECURITY.md). Version history: [`CHANGELOG.md`](CHANGELOG.md).
 
-**Learn by watching** → [`LEARN.md`](LEARN.md) curates the best community-made videos, talks, and tutorials, each credited to its author. **Everyone who builds *and spreads* AipeHub** → [`CONTRIBUTORS.md`](CONTRIBUTORS.md) — because reach is real work, and [we recognize it](docs/RECOGNITION-SYSTEM.md#pillar-5).
+**Learn by watching** → [`LEARN.md`](LEARN.md) curates the best community-made videos, talks, and tutorials, each credited to its author. **Everyone who builds *and spreads* Gotong** → [`CONTRIBUTORS.md`](CONTRIBUTORS.md) — because reach is real work, and [we recognize it](docs/RECOGNITION-SYSTEM.md#pillar-5).
 
 ## Quick start
 
@@ -86,15 +86,15 @@ The path that needs **no terminal, no Node, no Docker** on the machine that runs
 it. A maintainer builds a self-contained portable bundle once:
 
 ```bash
-node scripts/build-portable.mjs        # → dist-portable/AipeHub-macos-arm64/
+node scripts/build-portable.mjs        # → dist-portable/Gotong-macos-arm64/
 ```
 
-Then hand the whole `AipeHub-macos-arm64/` folder to anyone. They **double-click
-`AipeHub.command`** → the browser opens the 5-minute setup wizard. The bundle
+Then hand the whole `Gotong-macos-arm64/` folder to anyone. They **double-click
+`Gotong.command`** → the browser opens the 5-minute setup wizard. The bundle
 ships its own pinned Node runtime + the compiled host + a real on-disk
 `node_modules` (including the native SQLite binding), so it runs the **full**
 identity-backed host on a machine with nothing installed. Data lives in
-`~/.aipehub` (outside the folder), so replacing the bundle never loses data.
+`~/.gotong` (outside the folder), so replacing the bundle never loses data.
 
 Built on demand, not a committed/published download yet (that's the post-1.0
 plan) — for now "download & run" means *build the folder once, share the folder*.
@@ -131,10 +131,10 @@ run it opens your browser there for you:
   设置向导在本机回环 (loopback) 上运行。
   The setup wizard runs on loopback only.
 └───────────────────────────────────────────────
-  (已自动打开浏览器 / browser opened — AIPE_OPEN_BROWSER=0 关闭)
+  (已自动打开浏览器 / browser opened — GOTONG_OPEN_BROWSER=0 关闭)
 ```
 
-`AIPE_OPEN_BROWSER` controls the auto-open: unset = `auto` (first local run
+`GOTONG_OPEN_BROWSER` controls the auto-open: unset = `auto` (first local run
 only), `1`/`always` = every start, `0`/`never` = off. It is also forced off
 whenever the host is network-exposed — a headless server never pops a browser,
 and the wizard isn't reachable there anyway (that path uses the admin-token
@@ -150,25 +150,25 @@ file). The banner itself always prints.
 CLI flags (from a built repo):
 
 ```bash
-pnpm exec aipehub-host --help       # full env-var reference
-pnpm exec aipehub-host --version    # current host version
+pnpm exec gotong-host --help       # full env-var reference
+pnpm exec gotong-host --version    # current host version
 ```
 
 After it boots, follow [`docs/OVERVIEW.md`](docs/OVERVIEW.md) for the "what now" walkthrough.
 
 **Won't start?** Run a pre-flight check before booting — it inspects the exact
-`AIPE_*` env the host reads (Node version, ports actually free to bind, data dir
+`GOTONG_*` env the host reads (Node version, ports actually free to bind, data dir
 writable, master key) and prints, per check, ✓ / ⚠ / ✖ with a one-line fix:
 
 ```bash
-pnpm exec aipehub doctor          # report only
-pnpm exec aipehub doctor --fix    # also auto-creates a missing data dir (the one safe, reversible repair)
+pnpm exec gotong doctor          # report only
+pnpm exec gotong doctor --fix    # also auto-creates a missing data dir (the one safe, reversible repair)
 ```
 
 And if a boot *does* fail, the host turns the common, recoverable failures
 (port already in use, no permission to bind a port, missing/invalid master key,
 data dir not writable, disk full) into a one-line human message naming which
-`AIPE_*` var to change — not a stack trace. See the troubleshooting section in
+`GOTONG_*` var to change — not a stack trace. See the troubleshooting section in
 [`docs/zh/GO-LIVE.md`](docs/zh/GO-LIVE.md) §十一.
 
 **Verify the key probe works (no real key needed).** The most common first-run
@@ -184,7 +184,7 @@ ANTHROPIC_API_KEY=… pnpm check:onboarding   # also round-trips a REAL key over
 It's hermetic by default (no network, no spend) and never logs your key.
 Exit 0 = every check that ran passed. The opt-in real-key check mirrors the
 live gate's env contract (`OPENAI_API_KEY` + `OPENAI_BASE_URL=https://api.deepseek.com`
-+ `AIPE_LIVE_OPENAI_MODEL=deepseek-chat` for the DeepSeek path).
++ `GOTONG_LIVE_OPENAI_MODEL=deepseek-chat` for the DeepSeek path).
 
 ### Deploy to a cloud server (VPS)
 
@@ -192,20 +192,20 @@ Got a fresh Ubuntu/Debian box? One command fetches the code (the repo is
 public) and provisions a systemd service:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Emir-Aksoy/AipeHub/main/deploy/cloud-quickstart.sh \
+curl -fsSL https://raw.githubusercontent.com/Emir-Aksoy/Gotong/main/deploy/cloud-quickstart.sh \
   | sudo bash -s -- --clone
 # already have a checkout on the box:  sudo bash deploy/cloud-quickstart.sh
 #   preview first, mutates nothing:    bash deploy/cloud-quickstart.sh --dry-run
 ```
 
-It installs Node + pnpm, builds, creates the `aipehub` service user and data
-dir, drops in `/etc/aipehub.env` (from [`deploy/.env.cloud`](deploy/.env.cloud)),
+It installs Node + pnpm, builds, creates the `gotong` service user and data
+dir, drops in `/etc/gotong.env` (from [`deploy/.env.cloud`](deploy/.env.cloud)),
 and installs a systemd unit that mirrors [`docs/zh/DEPLOY.md`](docs/zh/DEPLOY.md)
 §C.4. It **stops one step short of starting** — the env file ships with the
 domain / master key / host-allowlist blank, and exposing an unconfigured box is
 unsafe. It prints the safe last mile: fill the env, run
 [`scripts/cloud-harden.sh`](scripts/cloud-harden.sh) (perimeter check), put Caddy
-+ a firewall in front, then `systemctl enable --now aipehub`.
++ a firewall in front, then `systemctl enable --now gotong`.
 
 > There is **no browser "one-click deploy" button** while the repo is private
 > (those need a public repo or a provider account pre-linked to your git). This
@@ -214,7 +214,7 @@ unsafe. It prints the safe last mile: fill the env, run
 
 ### 个人模式 (新, v4 Phase 7) — 一个人用 AI 干活, 0 配置
 
-如果你就一个人, 想把 AipeHub 当成"我的 AI 桌面"用 (不是给团队开 hub),
+如果你就一个人, 想把 Gotong 当成"我的 AI 桌面"用 (不是给团队开 hub),
 直接 `docker compose up` 就行 — host 第一次启动检测到只有你一个用户,
 **自动进入个人模式**:
 
@@ -233,8 +233,8 @@ docker compose up
 **所有 admin tab 都还在**(用户管理 / peer / 配额 / audit 全可见),
 但你不会被这些概念占满屏幕。需要时再用。
 
-`AIPE_MODE=team` 可以强制 pin 团队模式(即使只有一个用户);
-`AIPE_MODE=personal` 反过来——多用户时也强制 pin 个人模式(罕见,
+`GOTONG_MODE=team` 可以强制 pin 团队模式(即使只有一个用户);
+`GOTONG_MODE=personal` 反过来——多用户时也强制 pin 个人模式(罕见,
 通常给 dev / 测试场景)。
 
 升级到团队后, 自动出现"邀请用户"流程, 跟着导出 admin URL 给团队成员;
@@ -259,7 +259,7 @@ The first ready-to-run shipped experience. 7 教练 (访谈 + 身体 / 心理 / 
 
 报告里有:画像 + 身体/心理/目标/资源/关系 五份维度分析 + 一句话发展路径 + **12 周墙上计划** (主线 + 副线,每周做什么) + **5 个权衡判断** + "做不到怎么办" 降级方案 + "v2 跑工作流时建议你回答的 5 个种子问题"(下次回来用)。
 
-> 🙏 **关于隐私 / 数据**:你的 4 段自述会发给 DeepSeek (中国大陆服务器) 做推理。Workflow 跑完后,所有产出落在你自己电脑的 `.aipehub-*/services/` 目录,不会上传任何云。每位教练都设计成有边界的陪伴者 — 身体教练触及红旗(持续胸痛 / 不明出血等)会让你找医生;心理教练触及风险信号会给出 24h 危机热线(全国 400-161-9995 / 马来西亚 Befrienders 03-7956 8144)。**这不是医生 / 心理咨询师 / 财务顾问 / 关系治疗师的替代品。**
+> 🙏 **关于隐私 / 数据**:你的 4 段自述会发给 DeepSeek (中国大陆服务器) 做推理。Workflow 跑完后,所有产出落在你自己电脑的 `.gotong-*/services/` 目录,不会上传任何云。每位教练都设计成有边界的陪伴者 — 身体教练触及红旗(持续胸痛 / 不明出血等)会让你找医生;心理教练触及风险信号会给出 24h 危机热线(全国 400-161-9995 / 马来西亚 Befrienders 03-7956 8144)。**这不是医生 / 心理咨询师 / 财务顾问 / 关系治疗师的替代品。**
 
 想换 Anthropic Claude 或 OpenAI?编辑 `templates/teams/personal-growth-team.yaml`,把每个 agent 的 `provider` / `baseURL` / `model` 改掉就行 — system 提示词跟 vendor 无关。
 
@@ -268,9 +268,9 @@ The first ready-to-run shipped experience. 7 教练 (访谈 + 身体 / 心理 / 
 Structured logging is **on by default** — JSON line per event when stdout is piped (for `jq` / Loki / ELK / Datadog), pretty-printed when stdout is a terminal. Three env vars control it:
 
 ```bash
-AIPE_LOG_LEVEL=info       # silent | trace | debug | info (default) | warn | error | fatal
-AIPE_LOG_FORMAT=json      # json | pretty (default: auto by TTY)
-AIPE_LOG_DISABLED=1       # hard-off escape hatch
+GOTONG_LOG_LEVEL=info       # silent | trace | debug | info (default) | warn | error | fatal
+GOTONG_LOG_FORMAT=json      # json | pretty (default: auto by TTY)
+GOTONG_LOG_DISABLED=1       # hard-off escape hatch
 ```
 
 Filter by component with `jq` once you've got JSON output:
@@ -329,10 +329,10 @@ the full catalog and go-live runbook is **[`docs/zh/HANDS-ON-HUBS.md`](docs/zh/H
 ## Embedded — everything in one process
 
 ```ts
-import { Hub, Space } from '@aipehub/core'
+import { Hub, Space } from '@gotong/core'
 
 // v2.0: bind to a directory; admins, workers, transcript all live here
-const { space, adminToken } = await Space.openOrInit('.aipehub', {
+const { space, adminToken } = await Space.openOrInit('.gotong', {
   name: 'my-space',
   adminDisplayName: 'Operator',
 })
@@ -358,8 +358,8 @@ const tmp = Hub.inMemory()
 Host process (the Hub):
 
 ```ts
-import { Hub } from '@aipehub/core'
-import { serveWebSocket } from '@aipehub/transport-ws'
+import { Hub } from '@gotong/core'
+import { serveWebSocket } from '@gotong/transport-ws'
 
 const hub = new Hub()
 await hub.start()
@@ -369,7 +369,7 @@ await serveWebSocket(hub, { port: 4000 })
 Worker process (any agent, anywhere):
 
 ```ts
-import { AgentParticipant, connect } from '@aipehub/sdk-node'
+import { AgentParticipant, connect } from '@gotong/sdk-node'
 
 class MyAgent extends AgentParticipant {
   constructor() { super({ id: 'a1', capabilities: ['draft'] }) }
@@ -386,10 +386,10 @@ The Hub's `dispatch(...)` calls reach the remote agent identically to a local on
 The Hub does not call LLMs. `LlmAgent` does — it's a thin base class that wires a Task into an `LlmProvider` and turns the response into a `TaskResult`. Swapping vendors is a one-line change.
 
 ```ts
-import { Hub } from '@aipehub/core'
-import { LlmAgent } from '@aipehub/llm'
-import { AnthropicProvider } from '@aipehub/llm-anthropic'
-import { OpenAIProvider } from '@aipehub/llm-openai'
+import { Hub } from '@gotong/core'
+import { LlmAgent } from '@gotong/llm'
+import { AnthropicProvider } from '@gotong/llm-anthropic'
+import { OpenAIProvider } from '@gotong/llm-openai'
 
 const hub = new Hub()
 await hub.start()
@@ -421,14 +421,14 @@ Override `buildRequest(task)` to customize prompt assembly (retrieved context, f
 
 ## Open Space — admins, workers, and agents in one room (v2.0)
 
-Anchor the hub to a `.aipehub/` directory; admin identity, worker accounts, and gated agent admissions all live there. Web UI splits into two views (`/` worker, `/admin` admin). Hub restarts are transparent — cookies still work, admins are still admins, transcripts grow rather than restart.
+Anchor the hub to a `.gotong/` directory; admin identity, worker accounts, and gated agent admissions all live there. Web UI splits into two views (`/` worker, `/admin` admin). Hub restarts are transparent — cookies still work, admins are still admins, transcripts grow rather than restart.
 
 ```ts
-import { Hub, Space } from '@aipehub/core'
-import { serveWebSocket } from '@aipehub/transport-ws'
-import { serveWeb } from '@aipehub/web'
+import { Hub, Space } from '@gotong/core'
+import { serveWebSocket } from '@gotong/transport-ws'
+import { serveWeb } from '@gotong/web'
 
-const { space, adminToken } = await Space.openOrInit('.aipehub', {
+const { space, adminToken } = await Space.openOrInit('.gotong', {
   name: 'my-space',
   adminDisplayName: 'Operator',
   config: { gating: 'admin-approval' },
@@ -457,7 +457,7 @@ plugin-from-day-1 so adding a fourth is a separate npm package.
 
 ```yaml
 # templates/agents/industry-coach-with-memory.yaml
-schema: aipehub.agent/v1
+schema: gotong.agent/v1
 agent:
   id: industry-coach
   capabilities: [intake]
@@ -492,16 +492,16 @@ hard-deletes it. Restore is one POST until then. Full design is in
 
 | Package | What it provides |
 |---|---|
-| `@aipehub/services-sdk` | `ServicePlugin` contract, registry, loader. The seam plugin authors implement. |
-| `@aipehub/service-memory-file` | First-party `memory:file` — episodic / semantic / working as JSONL. |
-| `@aipehub/service-artifact-file` | First-party `artifact:file` — per-owner directories of files with MIME + size guards. |
-| `@aipehub/service-datastore-sqlite` | First-party `datastore:sqlite` — KV + raw SQL on one `.sqlite` per declared name. |
+| `@gotong/services-sdk` | `ServicePlugin` contract, registry, loader. The seam plugin authors implement. |
+| `@gotong/service-memory-file` | First-party `memory:file` — episodic / semantic / working as JSONL. |
+| `@gotong/service-artifact-file` | First-party `artifact:file` — per-owner directories of files with MIME + size guards. |
+| `@gotong/service-datastore-sqlite` | First-party `datastore:sqlite` — KV + raw SQL on one `.sqlite` per declared name. |
 
 ### Writing your own plugin
 
 ```ts
 // my-plugin/src/index.ts
-import type { ServicePlugin } from '@aipehub/services-sdk'
+import type { ServicePlugin } from '@gotong/services-sdk'
 
 class MyPlugin implements ServicePlugin {
   readonly type = 'memory'
@@ -530,7 +530,7 @@ doesn't crash the host.
 
 > **Deployment note**: the host resolves plugin packages from its own
 > `node_modules/`, so third-party plugins need to be installed where
-> the host can see them — `pnpm add my-org/aipehub-redis-memory` in
+> the host can see them — `pnpm add my-org/gotong-redis-memory` in
 > the host workspace, or a `package.json` dependency on the deploy
 > image. Putting the package name in `plugins.json` alone is not enough
 > if the package itself isn't on disk.
@@ -539,21 +539,21 @@ doesn't crash the host.
 
 | Package | Purpose |
 |---|---|
-| `@aipehub/core` | Hub, registry, scheduler, transcript, storage, Participant base classes |
-| `@aipehub/web` | Embeddable reference UI (HTTP + SSE + vanilla SPA) |
-| `@aipehub/host` | Production binary — env-driven, no demo state, ships `aipehub-host` |
-| `@aipehub/protocol` | Wire-protocol types + codec (zero runtime) |
-| `@aipehub/transport-ws` | Hub-side WebSocket transport |
-| `@aipehub/sdk-node` | Node SDK for remote agents (also exports `TeamBridgeAgent`) |
-| `@aipehub/llm` | `LlmAgent` base class + `LlmProvider` interface + `MockLlmProvider` |
-| `@aipehub/llm-anthropic` | Anthropic Claude provider (peer dep: `@anthropic-ai/sdk`) |
-| `@aipehub/llm-openai` | OpenAI provider (peer dep: `openai`) |
-| `@aipehub/services-sdk` | Hub Services plugin contract (v2.2) — see the section above |
-| `@aipehub/service-memory-file` | First-party `memory:file` plugin (JSONL on disk) |
-| `@aipehub/service-artifact-file` | First-party `artifact:file` plugin (per-owner dirs, MIME-gated) |
-| `@aipehub/service-datastore-sqlite` | First-party `datastore:sqlite` plugin (KV + SQL) |
-| `@aipehub/mcp-server` | MCP (Model Context Protocol) bridge — let Claude Desktop / Cursor drive a Hub |
-| `aipehub` (PyPI, in `python-sdk/`) | Python SDK — connect Python agents to a Hub over the same wire protocol |
+| `@gotong/core` | Hub, registry, scheduler, transcript, storage, Participant base classes |
+| `@gotong/web` | Embeddable reference UI (HTTP + SSE + vanilla SPA) |
+| `@gotong/host` | Production binary — env-driven, no demo state, ships `gotong-host` |
+| `@gotong/protocol` | Wire-protocol types + codec (zero runtime) |
+| `@gotong/transport-ws` | Hub-side WebSocket transport |
+| `@gotong/sdk-node` | Node SDK for remote agents (also exports `TeamBridgeAgent`) |
+| `@gotong/llm` | `LlmAgent` base class + `LlmProvider` interface + `MockLlmProvider` |
+| `@gotong/llm-anthropic` | Anthropic Claude provider (peer dep: `@anthropic-ai/sdk`) |
+| `@gotong/llm-openai` | OpenAI provider (peer dep: `openai`) |
+| `@gotong/services-sdk` | Hub Services plugin contract (v2.2) — see the section above |
+| `@gotong/service-memory-file` | First-party `memory:file` plugin (JSONL on disk) |
+| `@gotong/service-artifact-file` | First-party `artifact:file` plugin (per-owner dirs, MIME-gated) |
+| `@gotong/service-datastore-sqlite` | First-party `datastore:sqlite` plugin (KV + SQL) |
+| `@gotong/mcp-server` | MCP (Model Context Protocol) bridge — let Claude Desktop / Cursor drive a Hub |
+| `gotong` (PyPI, in `python-sdk/`) | Python SDK — connect Python agents to a Hub over the same wire protocol |
 
 ## License
 

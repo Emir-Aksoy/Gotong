@@ -7,7 +7,7 @@
  * associative link set (E) — are leaf-package primitives that compute the new
  * meta but deliberately DON'T touch the filesystem. Each hands its result to an
  * injected writer (`MemoryValidityWriter` / `MemoryReinforcer` / `MemoryLinkWriter`),
- * so `@aipehub/personal-memory` stays framework-friendly (no I/O) and the host
+ * so `@gotong/personal-memory` stays framework-friendly (no I/O) and the host
  * decides how to persist. This module is that host decision: wire all three to
  * the file backend's in-place `patchMeta` (Z-M1).
  *
@@ -32,8 +32,8 @@ import {
   type MemoryQueryHitWriter,
   type MemoryReinforcer,
   type MemoryValidityWriter,
-} from '@aipehub/personal-memory'
-import type { MemoryHandle } from '@aipehub/services-sdk'
+} from '@gotong/personal-memory'
+import type { MemoryHandle } from '@gotong/services-sdk'
 
 /** The four injected writers, all backed by one handle's `patchMeta`. */
 export interface ButlerMemoryWriters {

@@ -18,7 +18,7 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { Hub, Space } from '@aipehub/core'
+import { Hub, Space } from '@gotong/core'
 
 import { serveWeb, type SamlLoginSurface, type WebServerHandle } from '../src/server.js'
 
@@ -38,7 +38,7 @@ interface Boot {
 
 async function boot(opts: { wired?: boolean } = {}): Promise<Boot> {
   const wired = opts.wired ?? true
-  const tmp = await mkdtemp(join(tmpdir(), 'aipehub-web-saml-'))
+  const tmp = await mkdtemp(join(tmpdir(), 'gotong-web-saml-'))
   const init = await Space.init(tmp, { name: 'saml-route-test' })
   const hub = new Hub({ space: init.space })
   await hub.start()
@@ -197,7 +197,7 @@ describe('/api/auth/saml/* (Route B P1-M5e)', () => {
     expect(r.status).toBe(302)
     expect(r.headers.get('location')).toBe('/')
     const cookie = r.headers.get('set-cookie') ?? ''
-    expect(cookie).toContain('aipehub_identity=ses_stub_token')
+    expect(cookie).toContain('gotong_identity=ses_stub_token')
     expect(cookie).toContain('HttpOnly')
     expect(b.completeCalls).toEqual([{ relayState: 'rs-1', samlResponse: 'B64RESP' }])
   })

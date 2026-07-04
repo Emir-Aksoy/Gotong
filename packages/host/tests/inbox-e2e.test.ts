@@ -22,14 +22,14 @@ import { join } from 'node:path'
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { Hub, InMemoryStorage, type Participant } from '@aipehub/core'
-import { openIdentityStore, type IdentityStore } from '@aipehub/identity'
+import { Hub, InMemoryStorage, type Participant } from '@gotong/core'
+import { openIdentityStore, type IdentityStore } from '@gotong/identity'
 import {
   FileInboxStore,
   HumanInboxParticipant,
   NEVER_RESUME_AT,
-} from '@aipehub/inbox'
-import { workflowParticipantId } from '@aipehub/workflow'
+} from '@gotong/inbox'
+import { workflowParticipantId } from '@gotong/workflow'
 
 import { WorkflowController } from '../src/workflow-controller.js'
 import { HostInboxService } from '../src/inbox-service.js'
@@ -40,7 +40,7 @@ import { HostInboxService } from '../src/inbox-service.js'
 // `approved: $gate.output.approved` field proves the human decision flows
 // downstream as the gate step's output.
 const yamlFor = (name: string, marker: string): string => `
-schema: aipehub.workflow/v1
+schema: gotong.workflow/v1
 workflow:
   id: inbox-e2e
   name: ${name}

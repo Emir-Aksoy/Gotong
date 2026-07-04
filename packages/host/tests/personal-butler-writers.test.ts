@@ -12,7 +12,7 @@ import { join } from 'node:path'
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import type { Logger } from '@aipehub/core'
+import type { Logger } from '@gotong/core'
 import {
   lastRecalledOf,
   linksOf,
@@ -20,8 +20,8 @@ import {
   recallCountOf,
   validFromOf,
   validToOf,
-} from '@aipehub/personal-memory'
-import type { MemoryHandle } from '@aipehub/services-sdk'
+} from '@gotong/personal-memory'
+import type { MemoryHandle } from '@gotong/services-sdk'
 
 import { openButlerMemory } from '../src/personal-butler-memory.js'
 import { butlerMemoryWriters } from '../src/personal-butler-writers.js'

@@ -1,5 +1,5 @@
 {
-  "name": "@aipehub/example-long-running-agent",
+  "name": "@gotong/example-long-running-agent",
   "version": "0.0.0",
   "type": "module",
   "private": true,
@@ -9,6 +9,6 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@aipehub/core": "workspace:*"
+    "@gotong/core": "workspace:*"
   }
 }

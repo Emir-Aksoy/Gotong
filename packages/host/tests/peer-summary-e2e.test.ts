@@ -39,13 +39,13 @@ import {
   createInprocHubLinkPair,
   installPeerLink,
   type HubLink,
-} from '@aipehub/core'
+} from '@gotong/core'
 import {
   MASTER_KEY_LEN_BYTES,
   openIdentityStore,
   type IdentityStore,
   type PeerRegistration,
-} from '@aipehub/identity'
+} from '@gotong/identity'
 
 import {
   PeerSummaryHost,
@@ -127,7 +127,7 @@ describe('v5 E5-M5 — cross-hub control plane summary is per-link opt-in + coun
   let pairDenied: ReturnType<typeof createInprocHubLinkPair>
 
   beforeEach(async () => {
-    tmp = await mkdtemp(join(tmpdir(), 'aipe-peer-summary-e2e-'))
+    tmp = await mkdtemp(join(tmpdir(), 'gotong-peer-summary-e2e-'))
     store = openIdentityStore({
       dbPath: join(tmp, 'identity.sqlite'),
       masterKey: randomBytes(MASTER_KEY_LEN_BYTES),

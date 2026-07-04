@@ -15,12 +15,12 @@
  * is unsupported and would corrupt data anyway.
  */
 
-import type { Logger } from '@aipehub/core'
+import type { Logger } from '@gotong/core'
 import type {
   DatastoreHandle,
   KvHandle,
   SqlHandle,
-} from '@aipehub/services-sdk'
+} from '@gotong/services-sdk'
 
 import { type DatastoreSqliteConfig } from './config.js'
 import { openDb, PreparedKv, type SqliteDb, type SqliteStmt } from './sqlite-driver.js'

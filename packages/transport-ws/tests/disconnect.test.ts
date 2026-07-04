@@ -1,14 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import WebSocket from 'ws'
 
-import { Hub, type TranscriptEntry } from '@aipehub/core'
+import { Hub, type TranscriptEntry } from '@gotong/core'
 import {
   PROTOCOL_VERSION,
   decodeFrame,
   encodeFrame,
   type ClientFrame,
   type Frame,
-} from '@aipehub/protocol'
+} from '@gotong/protocol'
 
 import { serveWebSocket, type WebSocketTransportHandle } from '../src/index.js'
 

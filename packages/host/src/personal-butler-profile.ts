@@ -25,9 +25,9 @@
  * memory (the per-user namespace is the no-leak boundary).
  */
 
-import type { LlmAgentToolset, LlmToolCallResult, LlmToolDefinition } from '@aipehub/llm'
-import { DEFAULT_TIERS } from '@aipehub/personal-memory'
-import type { WebServerOptions } from '@aipehub/web'
+import type { LlmAgentToolset, LlmToolCallResult, LlmToolDefinition } from '@gotong/llm'
+import { DEFAULT_TIERS } from '@gotong/personal-memory'
+import type { WebServerOptions } from '@gotong/web'
 
 // Derive the snapshot contract from the web surface — the SAME projection the
 // /me privacy panel renders (same pattern as HostButlerMemoryService itself).

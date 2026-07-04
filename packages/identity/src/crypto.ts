@@ -25,7 +25,7 @@
  * reboot and operator login. Unacceptable for an unattended single-org
  * host.
  *
- * # Why the master key lives in the workspace .aipehub/ dir
+ * # Why the master key lives in the workspace .gotong/ dir
  *
  *   - Single-machine deployment model. The .key file is exactly as
  *     secret as the .sqlite next to it. An attacker who can read one
@@ -184,8 +184,8 @@ export class KmsStubMasterKeyProvider implements MasterKeyProvider {
       code: 'invalid_input',
       message:
         'master key provider "kms-stub" is a reserved interface with no ' +
-        'implementation; set AIPE_MASTER_KEY_PROVIDER=local-file (default) ' +
-        'or =env and supply AIPE_MASTER_KEY',
+        'implementation; set GOTONG_MASTER_KEY_PROVIDER=local-file (default) ' +
+        'or =env and supply GOTONG_MASTER_KEY',
     })
   }
   describe(): string {
@@ -216,11 +216,11 @@ function decodeMasterKeyMaterial(material: string, encoding: 'hex' | 'base64'): 
 }
 
 export interface ResolveMasterKeyProviderInput {
-  /** AIPE_MASTER_KEY_PROVIDER — undefined/'' → 'local-file'. */
+  /** GOTONG_MASTER_KEY_PROVIDER — undefined/'' → 'local-file'. */
   kind?: string
   /** Key file path for the local-file provider. */
   localFilePath: string
-  /** Injected material for the env provider (e.g. process.env.AIPE_MASTER_KEY). */
+  /** Injected material for the env provider (e.g. process.env.GOTONG_MASTER_KEY). */
   envKeyMaterial?: string
   /** Encoding of `envKeyMaterial`; default 'hex'. */
   envKeyEncoding?: 'hex' | 'base64'
@@ -243,7 +243,7 @@ export function resolveMasterKeyProvider(
         throw new IdentityError({
           code: 'invalid_input',
           message:
-            'AIPE_MASTER_KEY_PROVIDER=env requires AIPE_MASTER_KEY (the ' +
+            'GOTONG_MASTER_KEY_PROVIDER=env requires GOTONG_MASTER_KEY (the ' +
             '32-byte master key as hex)',
         })
       }

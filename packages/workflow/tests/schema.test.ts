@@ -15,7 +15,7 @@ import {
 describe('parseWorkflow', () => {
   it('parses a minimal sequential workflow', () => {
     const yaml = `
-schema: aipehub.workflow/v1
+schema: gotong.workflow/v1
 workflow:
   id: editorial
   name: 编辑流水线
@@ -46,7 +46,7 @@ workflow:
 
   it('parses an equivalent JSON workflow', () => {
     const json = JSON.stringify({
-      schema: 'aipehub.workflow/v1',
+      schema: 'gotong.workflow/v1',
       workflow: {
         id: 'short',
         trigger: { capability: 'go' },
@@ -68,7 +68,7 @@ workflow:
 
   it('parses a parallel step', () => {
     const yaml = `
-schema: aipehub.workflow/v1
+schema: gotong.workflow/v1
 workflow:
   id: fanout
   trigger:
@@ -105,7 +105,7 @@ workflow:
 
   it('parses explicit and broadcast dispatch strategies', () => {
     const yaml = `
-schema: aipehub.workflow/v1
+schema: gotong.workflow/v1
 workflow:
   id: mixed
   trigger:
@@ -134,7 +134,7 @@ workflow:
 
   it('parses step-level onFailure: retry', () => {
     const yaml = `
-schema: aipehub.workflow/v1
+schema: gotong.workflow/v1
 workflow:
   id: retrier
   trigger: { capability: go }
@@ -158,19 +158,19 @@ workflow:
 
   it('rejects wrong schema header', () => {
     const yaml = `
-schema: aipehub.workflow/v0
+schema: gotong.workflow/v0
 workflow:
   id: x
   trigger: { capability: go }
   steps:
     - { id: s, dispatch: { strategy: { kind: capability, capabilities: [a] }, payload: {} } }
 `
-    expect(() => parseWorkflow(yaml)).toThrow(/aipehub.workflow\/v1/)
+    expect(() => parseWorkflow(yaml)).toThrow(/gotong.workflow\/v1/)
   })
 
   it('rejects missing trigger', () => {
     const yaml = `
-schema: aipehub.workflow/v1
+schema: gotong.workflow/v1
 workflow:
   id: x
   steps:
@@ -181,7 +181,7 @@ workflow:
 
   it('rejects missing steps', () => {
     const yaml = `
-schema: aipehub.workflow/v1
+schema: gotong.workflow/v1
 workflow:
   id: x
   trigger: { capability: go }
@@ -191,7 +191,7 @@ workflow:
 
   it('rejects duplicate step ids', () => {
     const yaml = `
-schema: aipehub.workflow/v1
+schema: gotong.workflow/v1
 workflow:
   id: x
   trigger: { capability: go }
@@ -204,7 +204,7 @@ workflow:
 
   it('rejects duplicate branch ids inside a parallel step', () => {
     const yaml = `
-schema: aipehub.workflow/v1
+schema: gotong.workflow/v1
 workflow:
   id: x
   trigger: { capability: go }
@@ -220,7 +220,7 @@ workflow:
 
   it('rejects parallel step without branches', () => {
     const yaml = `
-schema: aipehub.workflow/v1
+schema: gotong.workflow/v1
 workflow:
   id: x
   trigger: { capability: go }
@@ -233,7 +233,7 @@ workflow:
 
   it('rejects bad ids', () => {
     const yaml = `
-schema: aipehub.workflow/v1
+schema: gotong.workflow/v1
 workflow:
   id: "x has spaces"
   trigger: { capability: go }
@@ -245,7 +245,7 @@ workflow:
 
   it('rejects unknown strategy.kind', () => {
     const yaml = `
-schema: aipehub.workflow/v1
+schema: gotong.workflow/v1
 workflow:
   id: x
   trigger: { capability: go }
@@ -260,7 +260,7 @@ workflow:
 
   it('rejects retry policy without positive max', () => {
     const yaml = `
-schema: aipehub.workflow/v1
+schema: gotong.workflow/v1
 workflow:
   id: x
   trigger: { capability: go }
@@ -281,7 +281,7 @@ workflow:
 
   it('parses payload_schema with the four legacy field types', () => {
     const yaml = `
-schema: aipehub.workflow/v1
+schema: gotong.workflow/v1
 workflow:
   id: form-demo
   trigger:
@@ -324,7 +324,7 @@ workflow:
 
   it('parses a file field with accept + maxSizeMb', () => {
     const yaml = `
-schema: aipehub.workflow/v1
+schema: gotong.workflow/v1
 workflow:
   id: upload-demo
   trigger:
@@ -364,7 +364,7 @@ workflow:
 
   it('parses a file field without accept/maxSizeMb (host defaults apply)', () => {
     const yaml = `
-schema: aipehub.workflow/v1
+schema: gotong.workflow/v1
 workflow:
   id: any-file
   trigger:
@@ -385,7 +385,7 @@ workflow:
 
   it('drops defaultValue / placeholder / rows on a file field (canonical shape)', () => {
     const yaml = `
-schema: aipehub.workflow/v1
+schema: gotong.workflow/v1
 workflow:
   id: ignore-noise
   trigger:
@@ -413,7 +413,7 @@ workflow:
 
   it('rejects file.accept as empty array', () => {
     const yaml = `
-schema: aipehub.workflow/v1
+schema: gotong.workflow/v1
 workflow:
   id: bad
   trigger:
@@ -431,7 +431,7 @@ workflow:
 
   it('rejects file.accept entry that is not a non-empty string', () => {
     const yaml = `
-schema: aipehub.workflow/v1
+schema: gotong.workflow/v1
 workflow:
   id: bad
   trigger:
@@ -449,7 +449,7 @@ workflow:
 
   it('rejects file.maxSizeMb > 100', () => {
     const yaml = `
-schema: aipehub.workflow/v1
+schema: gotong.workflow/v1
 workflow:
   id: bad
   trigger:
@@ -467,7 +467,7 @@ workflow:
 
   it('rejects file.maxSizeMb that is non-positive', () => {
     const yaml = `
-schema: aipehub.workflow/v1
+schema: gotong.workflow/v1
 workflow:
   id: bad
   trigger:
@@ -485,7 +485,7 @@ workflow:
 
   it('rejects an unknown payload_schema type', () => {
     const yaml = `
-schema: aipehub.workflow/v1
+schema: gotong.workflow/v1
 workflow:
   id: bad
   trigger:
@@ -509,7 +509,7 @@ workflow:
  */
 describe('surface.me', () => {
   const SKELETON = (surface: string) => `
-schema: aipehub.workflow/v1
+schema: gotong.workflow/v1
 workflow:
   id: member-flow
   name: 成员流程
@@ -647,7 +647,7 @@ ${surface}
  */
 describe('governance', () => {
   const SKELETON = (governance: string) => `
-schema: aipehub.workflow/v1
+schema: gotong.workflow/v1
 workflow:
   id: gov-flow
   trigger:
@@ -759,7 +759,7 @@ ${governance}
 // v5 C-M2 — per-node I/O data classes on a dispatch step.
 describe('parseWorkflow — dispatch.dataClasses (v5 C-M2)', () => {
   const WF = (dispatchExtra: string) => `
-schema: aipehub.workflow/v1
+schema: gotong.workflow/v1
 workflow:
   id: io-auth
   trigger: { capability: run-io }

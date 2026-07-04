@@ -8,7 +8,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import WebSocket from 'ws'
 
-import { Hub } from '@aipehub/core'
+import { Hub } from '@gotong/core'
 import {
   PROTOCOL_VERSION,
   decodeFrame,
@@ -16,7 +16,7 @@ import {
   type ClientFrame,
   type Frame,
   type ServiceOwner,
-} from '@aipehub/protocol'
+} from '@gotong/protocol'
 
 import {
   serveWebSocket,

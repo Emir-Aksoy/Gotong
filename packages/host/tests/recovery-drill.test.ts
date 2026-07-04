@@ -31,7 +31,7 @@ import { fileURLToPath } from 'node:url'
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
-import { Space } from '@aipehub/core'
+import { Space } from '@gotong/core'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const repoRoot = join(here, '..', '..', '..')
@@ -81,7 +81,7 @@ maybe('Route B P0-M7-M3 — recovery drill catches a bad backup', () => {
   let tornDir: string
 
   beforeAll(async () => {
-    workRoot = await mkdtemp(join(tmpdir(), 'aipe-drill-'))
+    workRoot = await mkdtemp(join(tmpdir(), 'gotong-drill-'))
     goodDir = join(workRoot, 'good')
     tornDir = join(workRoot, 'torn')
     await seedSpace(goodDir)

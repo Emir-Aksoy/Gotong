@@ -3,7 +3,7 @@
  *
  * The whole onboarding story dies BEFORE startup for a non-technical user at
  * three walls: 认知 / 获取 / **装运行时**. This script tears down the third
- * one. It produces a double-click folder that runs AipeHub with ZERO system
+ * one. It produces a double-click folder that runs Gotong with ZERO system
  * Node and ZERO Docker — a pinned Node binary, the compiled host, and a real
  * on-disk prod `node_modules` closure (including the prebuilt native
  * `better_sqlite3.node`) packaged side by side.
@@ -21,16 +21,16 @@
  *
  * How the closure is assembled
  * ----------------------------
- * `pnpm --filter @aipehub/host deploy --prod <out>/app` produces a real,
- * dereferenced prod `node_modules` — native addon + every `@aipehub/*`
+ * `pnpm --filter @gotong/host deploy --prod <out>/app` produces a real,
+ * dereferenced prod `node_modules` — native addon + every `@gotong/*`
  * workspace package + the dynamically-imported service plugins + the IM
  * bridges — with no bundler and no hand-curation. Nothing for a newcomer to
  * break. (tsx/vite are devDeps; the host runs `dist/main.js` under plain Node,
  * so the `.bin/tsx` deploy WARN is expected and harmless.)
  *
  * Bundle layout produced:
- *   <out>/AipeHub-<platform>-<arch>/
- *   ├── AipeHub.command        ← copied from deploy/AipeHub.command (tier-0 self-contained branch)
+ *   <out>/Gotong-<platform>-<arch>/
+ *   ├── Gotong.command        ← copied from deploy/Gotong.command (tier-0 self-contained branch)
  *   ├── BUNDLE-INFO.txt        ← platform / node version / build stamp
  *   ├── runtime/bin/node       ← pinned Node binary (this machine's, by default)
  *   └── app/                   ← pnpm deploy --prod output (host package root)
@@ -39,7 +39,7 @@
  *
  * 承重 GATE (runs by default, the entire point of this script): after
  * assembly, boot the deployed host WITH THE BUNDLE'S OWN pinned node against a
- * throwaway space + random ports + AIPE_OPEN_BROWSER=0, then assert
+ * throwaway space + random ports + GOTONG_OPEN_BROWSER=0, then assert
  * `/healthz` → 200 AND the boot log shows the SQLite datastore plugin ready
  * AND identity bootstrapped AND no `bootstrap failed`. That proves the
  * deployed node_modules lets identity + native sqlite + the dynamic plugins
@@ -116,7 +116,7 @@ const DO_VERIFY = !flag('--no-verify')
 // --- platform label ---------------------------------------------------------
 // darwin→macos so the folder name reads like a download a person recognizes.
 const PLATFORM_LABEL = { darwin: 'macos', linux: 'linux', win32: 'win' }[process.platform] || process.platform
-const BUNDLE_NAME = `AipeHub-${PLATFORM_LABEL}-${process.arch}`
+const BUNDLE_NAME = `Gotong-${PLATFORM_LABEL}-${process.arch}`
 const BUNDLE_DIR = join(OUT_BASE, BUNDLE_NAME)
 const APP_DIR = join(BUNDLE_DIR, 'app')
 
@@ -142,7 +142,7 @@ function dirSizeHuman(p) {
 }
 
 // --- assemble ---------------------------------------------------------------
-console.log(`AipeHub portable bundle → ${BUNDLE_NAME}`)
+console.log(`Gotong portable bundle → ${BUNDLE_NAME}`)
 console.log(`  repo:   ${REPO_ROOT}`)
 console.log(`  node:   ${NODE_BIN} (${process.version})`)
 console.log(`  out:    ${BUNDLE_DIR}`)
@@ -160,7 +160,7 @@ mkdirSync(BUNDLE_DIR, { recursive: true })
 
 step('deploy host prod closure (pnpm deploy --prod)')
 // Absolute target removes any relative-path ambiguity in `pnpm --filter`.
-run('pnpm', ['--filter', '@aipehub/host', 'deploy', '--prod', APP_DIR])
+run('pnpm', ['--filter', '@gotong/host', 'deploy', '--prod', APP_DIR])
 
 step('verify deployed artifacts')
 const ENTRY = join(APP_DIR, 'dist', 'main.js')
@@ -186,10 +186,10 @@ copyFileSync(NODE_BIN, BUNDLED_NODE)
 chmodSync(BUNDLED_NODE, 0o755)
 console.log(`  ok  ${BUNDLED_NODE}`)
 
-step('copy launcher (deploy/AipeHub.command)')
-const LAUNCHER_SRC = join(REPO_ROOT, 'deploy', 'AipeHub.command')
+step('copy launcher (deploy/Gotong.command)')
+const LAUNCHER_SRC = join(REPO_ROOT, 'deploy', 'Gotong.command')
 if (!existsSync(LAUNCHER_SRC)) die(`launcher not found: ${LAUNCHER_SRC}`)
-const LAUNCHER_DST = join(BUNDLE_DIR, 'AipeHub.command')
+const LAUNCHER_DST = join(BUNDLE_DIR, 'Gotong.command')
 copyFileSync(LAUNCHER_SRC, LAUNCHER_DST)
 chmodSync(LAUNCHER_DST, 0o755)
 console.log(`  ok  ${LAUNCHER_DST}`)
@@ -202,14 +202,14 @@ const gitSha = (() => {
 writeFileSync(
   join(BUNDLE_DIR, 'BUNDLE-INFO.txt'),
   [
-    `AipeHub portable bundle`,
+    `Gotong portable bundle`,
     `platform:    ${PLATFORM_LABEL}-${process.arch}`,
     `node:        ${process.version}`,
     `git:         ${gitSha}`,
     `built:       ${new Date().toISOString()}`,
     `entry:       app/dist/main.js`,
     ``,
-    `Double-click AipeHub.command. Data lives in ~/.aipehub (outside this folder).`,
+    `Double-click Gotong.command. Data lives in ~/.gotong (outside this folder).`,
     `Zero system Node/Docker required — the runtime ships inside runtime/bin/node.`,
     ``,
   ].join('\n'),
@@ -219,7 +219,7 @@ console.log(`  ok  BUNDLE-INFO.txt (git ${gitSha})`)
 // --- 承重 boot proof --------------------------------------------------------
 async function bootProof() {
   step('承重 boot proof — boot the bundle with its OWN node')
-  const space = mkdtempSync(join(tmpdir(), 'aipe-portable-verify-'))
+  const space = mkdtempSync(join(tmpdir(), 'gotong-portable-verify-'))
   const webPort = 38000 + Math.floor(Math.random() * 1500)
   const wsPort = webPort + 1
   console.log(`  space:  ${space}`)
@@ -229,11 +229,11 @@ async function bootProof() {
     cwd: APP_DIR,
     env: {
       ...process.env,
-      AIPE_SPACE: space,
-      AIPE_WEB_PORT: String(webPort),
-      AIPE_WS_PORT: String(wsPort),
-      AIPE_OPEN_BROWSER: '0',
-      AIPE_LOG_FORMAT: 'json',
+      GOTONG_SPACE: space,
+      GOTONG_WEB_PORT: String(webPort),
+      GOTONG_WS_PORT: String(wsPort),
+      GOTONG_OPEN_BROWSER: '0',
+      GOTONG_LOG_FORMAT: 'json',
     },
   })
   let log = ''
@@ -312,5 +312,5 @@ function makeTar() {
   if (DO_TAR) makeTar()
 
   console.log(`\n✓ portable bundle ready: ${BUNDLE_DIR} (${dirSizeHuman(BUNDLE_DIR)})`)
-  console.log(`  double-click ${BUNDLE_NAME}/AipeHub.command — zero system Node/Docker.`)
+  console.log(`  double-click ${BUNDLE_NAME}/Gotong.command — zero system Node/Docker.`)
 })().catch((e) => die(String(e?.stack || e)))

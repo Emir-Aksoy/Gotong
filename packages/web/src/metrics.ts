@@ -14,19 +14,19 @@
  * import cycle).
  */
 
-import { type Hub } from '@aipehub/core'
-import { PROTOCOL_VERSION } from '@aipehub/protocol'
+import { type Hub } from '@gotong/core'
+import { PROTOCOL_VERSION } from '@gotong/protocol'
 
 /**
  * Per-server response counters. Indexed by status_class (2xx / 3xx /
  * 4xx / 5xx) — a single-dimension axis keeps cardinality low. We
- * deliberately don't track per-route counters here: the AipeHub admin
+ * deliberately don't track per-route counters here: the Gotong admin
  * surface has hundreds of endpoints (admin + worker + SSE + auth + …)
  * and routes that take ids in the path would explode label cardinality.
  *
  * Operators who need per-route visibility can put a reverse proxy
  * (Caddy / nginx) in front and scrape its logs — that's what those
- * layers are for. AipeHub's metrics are about \"is the host healthy\"
+ * layers are for. Gotong's metrics are about \"is the host healthy\"
  * not \"is this specific endpoint slow.\"
  */
 export class HttpStats {
@@ -95,14 +95,14 @@ export interface RenderMetricsOptions {
  * derived from data the hub already keeps in memory or the transcript;
  * no new bookkeeping required):
  *
- *   - `aipehub_protocol_version`       1, labelled with the wire version.
- *   - `aipehub_participants` gauge      total live participants by kind.
- *   - `aipehub_tasks_total` counter     completed tasks by terminal kind.
- *   - `aipehub_pending_applications` gauge  unresolved HELLO admissions.
- *   - `aipehub_service_calls_total` counter  SERVICE_CALL frames by outcome.
- *   - `aipehub_service_call_duration_ms_sum` counter / `_count` —
+ *   - `gotong_protocol_version`       1, labelled with the wire version.
+ *   - `gotong_participants` gauge      total live participants by kind.
+ *   - `gotong_tasks_total` counter     completed tasks by terminal kind.
+ *   - `gotong_pending_applications` gauge  unresolved HELLO admissions.
+ *   - `gotong_service_calls_total` counter  SERVICE_CALL frames by outcome.
+ *   - `gotong_service_call_duration_ms_sum` counter / `_count` —
  *     classic sum/count pair giving you a per-(type,impl) mean over time.
- *   - `aipehub_service_call_duration_ms_bucket` histogram — cumulative
+ *   - `gotong_service_call_duration_ms_bucket` histogram — cumulative
  *     latency buckets (SERVICE_CALL_BUCKETS_MS + `+Inf`) for
  *     `histogram_quantile()` p50 / p95 / p99.
  *
@@ -117,15 +117,15 @@ export function renderMetrics(hub: Hub, opts: RenderMetricsOptions = {}): string
 
   // --- protocol version (info-style metric) ----------------------------------
   w(
-    '# HELP aipehub_protocol_version Wire protocol version (info metric).',
-    '# TYPE aipehub_protocol_version gauge',
-    `aipehub_protocol_version{version="${PROTOCOL_VERSION_LITERAL}"} 1`,
+    '# HELP gotong_protocol_version Wire protocol version (info metric).',
+    '# TYPE gotong_protocol_version gauge',
+    `gotong_protocol_version{version="${PROTOCOL_VERSION_LITERAL}"} 1`,
     '',
   )
 
   // --- process RSS ------------------------------------------------------------
   // The standard prom-client name, hand-rolled: the shipped alert rule
-  // AipehubProcessRssCreep queries this series, and until now /metrics never
+  // GotongProcessRssCreep queries this series, and until now /metrics never
   // exported it (audit — dead alert).
   w(
     '# HELP process_resident_memory_bytes Resident set size of the host process in bytes.',
@@ -141,15 +141,15 @@ export function renderMetrics(hub: Hub, opts: RenderMetricsOptions = {}): string
     byKind[p.kind] = (byKind[p.kind] ?? 0) + 1
   }
   w(
-    '# HELP aipehub_participants Number of live participants, by kind.',
-    '# TYPE aipehub_participants gauge',
+    '# HELP gotong_participants Number of live participants, by kind.',
+    '# TYPE gotong_participants gauge',
   )
   for (const [kind, count] of Object.entries(byKind)) {
-    w(`aipehub_participants{kind="${escapeLabel(kind)}"} ${count}`)
+    w(`gotong_participants{kind="${escapeLabel(kind)}"} ${count}`)
   }
   if (Object.keys(byKind).length === 0) {
     // Emit a zero so the metric exists even before anyone joins.
-    w('aipehub_participants 0')
+    w('gotong_participants 0')
   }
   w('')
 
@@ -205,58 +205,58 @@ export function renderMetrics(hub: Hub, opts: RenderMetricsOptions = {}): string
   pendingApps = hub.pendingApplications().length
 
   w(
-    '# HELP aipehub_tasks_total Tasks that reached a terminal state, by kind.',
-    '# TYPE aipehub_tasks_total counter',
+    '# HELP gotong_tasks_total Tasks that reached a terminal state, by kind.',
+    '# TYPE gotong_tasks_total counter',
   )
   for (const [kind, n] of Object.entries(taskCounts)) {
-    w(`aipehub_tasks_total{kind="${escapeLabel(kind)}"} ${n}`)
+    w(`gotong_tasks_total{kind="${escapeLabel(kind)}"} ${n}`)
   }
   w('')
 
   w(
-    '# HELP aipehub_pending_applications Unresolved admission applications waiting on admin.',
-    '# TYPE aipehub_pending_applications gauge',
-    `aipehub_pending_applications ${pendingApps}`,
+    '# HELP gotong_pending_applications Unresolved admission applications waiting on admin.',
+    '# TYPE gotong_pending_applications gauge',
+    `gotong_pending_applications ${pendingApps}`,
     '',
   )
 
   // --- SERVICE_CALL counters --------------------------------------------------
   w(
-    '# HELP aipehub_service_calls_total SERVICE_CALL frames resolved, by outcome.',
-    '# TYPE aipehub_service_calls_total counter',
+    '# HELP gotong_service_calls_total SERVICE_CALL frames resolved, by outcome.',
+    '# TYPE gotong_service_calls_total counter',
   )
   if (Object.keys(svcCalls).length === 0) {
-    w('aipehub_service_calls_total 0')
+    w('gotong_service_calls_total 0')
   } else {
     for (const [key, n] of Object.entries(svcCalls)) {
       const [type, impl, outcome] = key.split('|') as [string, string, string]
       w(
-        `aipehub_service_calls_total{type="${escapeLabel(type)}",impl="${escapeLabel(impl)}",outcome="${escapeLabel(outcome)}"} ${n}`,
+        `gotong_service_calls_total{type="${escapeLabel(type)}",impl="${escapeLabel(impl)}",outcome="${escapeLabel(outcome)}"} ${n}`,
       )
     }
   }
   w('')
 
   w(
-    '# HELP aipehub_service_call_duration_ms_sum Cumulative latency of all SERVICE_CALL frames.',
-    '# TYPE aipehub_service_call_duration_ms_sum counter',
+    '# HELP gotong_service_call_duration_ms_sum Cumulative latency of all SERVICE_CALL frames.',
+    '# TYPE gotong_service_call_duration_ms_sum counter',
   )
   for (const [key, n] of Object.entries(svcDurSum)) {
     const [type, impl] = key.split('|') as [string, string]
     w(
-      `aipehub_service_call_duration_ms_sum{type="${escapeLabel(type)}",impl="${escapeLabel(impl)}"} ${n}`,
+      `gotong_service_call_duration_ms_sum{type="${escapeLabel(type)}",impl="${escapeLabel(impl)}"} ${n}`,
     )
   }
   w('')
 
   w(
-    '# HELP aipehub_service_call_duration_ms_count Count of SERVICE_CALL frames (mate of the _sum series).',
-    '# TYPE aipehub_service_call_duration_ms_count counter',
+    '# HELP gotong_service_call_duration_ms_count Count of SERVICE_CALL frames (mate of the _sum series).',
+    '# TYPE gotong_service_call_duration_ms_count counter',
   )
   for (const [key, n] of Object.entries(svcDurCnt)) {
     const [type, impl] = key.split('|') as [string, string]
     w(
-      `aipehub_service_call_duration_ms_count{type="${escapeLabel(type)}",impl="${escapeLabel(impl)}"} ${n}`,
+      `gotong_service_call_duration_ms_count{type="${escapeLabel(type)}",impl="${escapeLabel(impl)}"} ${n}`,
     )
   }
   w('')
@@ -270,25 +270,25 @@ export function renderMetrics(hub: Hub, opts: RenderMetricsOptions = {}): string
   // both pre-existing and re-declared metrics, and we already emit
   // them with the same names a histogram would.
   w(
-    '# HELP aipehub_service_call_duration_ms Histogram of SERVICE_CALL frame durations (ms), cumulative buckets.',
-    '# TYPE aipehub_service_call_duration_ms histogram',
+    '# HELP gotong_service_call_duration_ms Histogram of SERVICE_CALL frame durations (ms), cumulative buckets.',
+    '# TYPE gotong_service_call_duration_ms histogram',
   )
   if (Object.keys(svcDurBuckets).length === 0) {
     // Emit a single +Inf zero-count bucket so the metric exists from
     // the very first scrape (some dashboards complain about
     // \"no data\" if the series never appears).
-    w('aipehub_service_call_duration_ms_bucket{le="+Inf"} 0')
+    w('gotong_service_call_duration_ms_bucket{le="+Inf"} 0')
   } else {
     for (const [key, counts] of Object.entries(svcDurBuckets)) {
       const [type, impl] = key.split('|') as [string, string]
       const typeLabel = `type="${escapeLabel(type)}",impl="${escapeLabel(impl)}"`
       for (let i = 0; i < SERVICE_CALL_BUCKETS_MS.length; i++) {
         w(
-          `aipehub_service_call_duration_ms_bucket{${typeLabel},le="${SERVICE_CALL_BUCKETS_MS[i]}"} ${counts[i]}`,
+          `gotong_service_call_duration_ms_bucket{${typeLabel},le="${SERVICE_CALL_BUCKETS_MS[i]}"} ${counts[i]}`,
         )
       }
       w(
-        `aipehub_service_call_duration_ms_bucket{${typeLabel},le="+Inf"} ${counts[SERVICE_CALL_BUCKETS_MS.length]}`,
+        `gotong_service_call_duration_ms_bucket{${typeLabel},le="+Inf"} ${counts[SERVICE_CALL_BUCKETS_MS.length]}`,
       )
     }
   }
@@ -300,8 +300,8 @@ export function renderMetrics(hub: Hub, opts: RenderMetricsOptions = {}): string
   // out-of-band callers that pass just `hub` still get a clean output.
   if (opts.httpStats) {
     w(
-      '# HELP aipehub_http_responses_total HTTP responses sent, bucketed by status class (2xx/3xx/4xx/5xx/other).',
-      '# TYPE aipehub_http_responses_total counter',
+      '# HELP gotong_http_responses_total HTTP responses sent, bucketed by status class (2xx/3xx/4xx/5xx/other).',
+      '# TYPE gotong_http_responses_total counter',
     )
     const classes = opts.httpStats.byStatusClass
     if (classes.size === 0) {
@@ -310,7 +310,7 @@ export function renderMetrics(hub: Hub, opts: RenderMetricsOptions = {}): string
       // NaN; an explicit zero turns the dashboard into a clean line
       // at 0 rps).
       for (const klass of ['2xx', '3xx', '4xx', '5xx']) {
-        w(`aipehub_http_responses_total{class="${klass}"} 0`)
+        w(`gotong_http_responses_total{class="${klass}"} 0`)
       }
     } else {
       // Iterate the seen classes, plus emit zeros for any of the
@@ -321,13 +321,13 @@ export function renderMetrics(hub: Hub, opts: RenderMetricsOptions = {}): string
       const seen = new Set(classes.keys())
       for (const klass of canonical) {
         const n = classes.get(klass) ?? 0
-        w(`aipehub_http_responses_total{class="${klass}"} ${n}`)
+        w(`gotong_http_responses_total{class="${klass}"} ${n}`)
         seen.delete(klass)
       }
       // Any non-canonical class ('other' / '1xx') the server saw.
       for (const klass of seen) {
         w(
-          `aipehub_http_responses_total{class="${escapeLabel(klass)}"} ${classes.get(klass) ?? 0}`,
+          `gotong_http_responses_total{class="${escapeLabel(klass)}"} ${classes.get(klass) ?? 0}`,
         )
       }
     }
@@ -349,24 +349,24 @@ export function renderMetrics(hub: Hub, opts: RenderMetricsOptions = {}): string
  * helper shares its `escapeLabel` for label values.
  *
  * Series:
- *   - aipehub_workflow_runs{status}        gauge   (run records on disk by status)
- *   - aipehub_suspended_tasks              gauge   (currently-parked tasks)
- *   - aipehub_llm_calls_total{model}       counter (ledger is append-only)
- *   - aipehub_llm_tokens_total{model}      counter
- *   - aipehub_llm_cost_micros_total{model} counter (integer micro-USD, 1e6=$1)
+ *   - gotong_workflow_runs{status}        gauge   (run records on disk by status)
+ *   - gotong_suspended_tasks              gauge   (currently-parked tasks)
+ *   - gotong_llm_calls_total{model}       counter (ledger is append-only)
+ *   - gotong_llm_tokens_total{model}      counter
+ *   - gotong_llm_cost_micros_total{model} counter (integer micro-USD, 1e6=$1)
  */
 function renderBusinessMetrics(w: (...ls: string[]) => void, b: BusinessMetrics): void {
   if (b.workflowRuns) {
     w(
-      '# HELP aipehub_workflow_runs Workflow run records on disk, by status.',
-      '# TYPE aipehub_workflow_runs gauge',
+      '# HELP gotong_workflow_runs Workflow run records on disk, by status.',
+      '# TYPE gotong_workflow_runs gauge',
     )
     const entries = Object.entries(b.workflowRuns)
     if (entries.length === 0) {
-      w('aipehub_workflow_runs 0')
+      w('gotong_workflow_runs 0')
     } else {
       for (const [status, n] of entries) {
-        w(`aipehub_workflow_runs{status="${escapeLabel(status)}"} ${n}`)
+        w(`gotong_workflow_runs{status="${escapeLabel(status)}"} ${n}`)
       }
     }
     w('')
@@ -374,38 +374,38 @@ function renderBusinessMetrics(w: (...ls: string[]) => void, b: BusinessMetrics)
 
   if (typeof b.suspendedTasks === 'number') {
     w(
-      '# HELP aipehub_suspended_tasks Tasks currently parked (suspended), awaiting resume.',
-      '# TYPE aipehub_suspended_tasks gauge',
-      `aipehub_suspended_tasks ${b.suspendedTasks}`,
+      '# HELP gotong_suspended_tasks Tasks currently parked (suspended), awaiting resume.',
+      '# TYPE gotong_suspended_tasks gauge',
+      `gotong_suspended_tasks ${b.suspendedTasks}`,
       '',
     )
   }
 
   if (b.llmByModel) {
     w(
-      '# HELP aipehub_llm_calls_total LLM calls recorded in the usage ledger, by model.',
-      '# TYPE aipehub_llm_calls_total counter',
+      '# HELP gotong_llm_calls_total LLM calls recorded in the usage ledger, by model.',
+      '# TYPE gotong_llm_calls_total counter',
     )
     if (b.llmByModel.length === 0) {
-      w('aipehub_llm_calls_total 0')
+      w('gotong_llm_calls_total 0')
     } else {
       for (const r of b.llmByModel) {
-        w(`aipehub_llm_calls_total{model="${escapeLabel(r.model)}"} ${r.calls}`)
+        w(`gotong_llm_calls_total{model="${escapeLabel(r.model)}"} ${r.calls}`)
       }
     }
     w(
-      '# HELP aipehub_llm_tokens_total Total LLM tokens (input+output+cache) recorded in the usage ledger, by model.',
-      '# TYPE aipehub_llm_tokens_total counter',
+      '# HELP gotong_llm_tokens_total Total LLM tokens (input+output+cache) recorded in the usage ledger, by model.',
+      '# TYPE gotong_llm_tokens_total counter',
     )
     for (const r of b.llmByModel) {
-      w(`aipehub_llm_tokens_total{model="${escapeLabel(r.model)}"} ${r.tokens}`)
+      w(`gotong_llm_tokens_total{model="${escapeLabel(r.model)}"} ${r.tokens}`)
     }
     w(
-      '# HELP aipehub_llm_cost_micros_total LLM cost in micro-USD (1e6 = $1) recorded in the usage ledger, by model.',
-      '# TYPE aipehub_llm_cost_micros_total counter',
+      '# HELP gotong_llm_cost_micros_total LLM cost in micro-USD (1e6 = $1) recorded in the usage ledger, by model.',
+      '# TYPE gotong_llm_cost_micros_total counter',
     )
     for (const r of b.llmByModel) {
-      w(`aipehub_llm_cost_micros_total{model="${escapeLabel(r.model)}"} ${r.costMicros}`)
+      w(`gotong_llm_cost_micros_total{model="${escapeLabel(r.model)}"} ${r.costMicros}`)
     }
     w('')
   }

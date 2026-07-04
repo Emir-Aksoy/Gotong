@@ -1,4 +1,4 @@
-# AipeHub Overview · 5-minute map
+# Gotong Overview · 5-minute map
 
 <!-- doc-version: 1.0 -->
 > **Doc version 1.0** · English (authoritative source) · Updated 2026-06-27 · Translations: [中文](zh/OVERVIEW.md) · [日本語](ja/OVERVIEW.md) · [Русский](ru/OVERVIEW.md) · [Français](fr/OVERVIEW.md) · [Español](es/OVERVIEW.md) · [한국어](ko/OVERVIEW.md). If a translation conflicts with this English version, the English version governs.
@@ -6,7 +6,7 @@
 > Looking for the Chinese version? → [`docs/zh/OVERVIEW.md`](./zh/OVERVIEW.md)
 >
 > This is the project's **single-page map**. By the end you'll know what
-> AipeHub is, what sits under what, how participants plug in, where templates
+> Gotong is, what sits under what, how participants plug in, where templates
 > come from, how a few people work together, and how organizations federate
 > without giving up their keys. Each section ends with a → link to the next
 > read when you want to go deeper.
@@ -15,7 +15,7 @@
 
 ## In one sentence
 
-**AipeHub** is a **self-hosted collaboration workspace for TypeScript and
+**Gotong** is a **self-hosted collaboration workspace for TypeScript and
 Python**: people and AI agents share one "room", and a deliberately dumb Hub
 dispatches tasks, collects results, and records the whole run.
 
@@ -28,7 +28,7 @@ for multi-participant collaboration**, where organizations can federate
 ## What it is — and what it sits *under*
 
 Most "agent" projects are an agent, or a framework for writing one agent's loop
-(LangGraph, CrewAI, AutoGen). AipeHub is **neither** — it's the layer they plug
+(LangGraph, CrewAI, AutoGen). Gotong is **neither** — it's the layer they plug
 *into*. A LangGraph graph, a CrewAI crew, a CLI coding agent (Claude Code,
 Codex), an external A2A agent, and a human all join the same room as the same
 `Participant`. The Hub routes their messages, dispatches tasks, records the
@@ -47,7 +47,7 @@ Three things make it more than a message bus:
   two organizations federate, credentials, data, and billing each stay home;
   what crosses the line is constrained by a **per-link trust contract**.
 
-That combination — not any single clever protocol — is what AipeHub is. It's the
+That combination — not any single clever protocol — is what Gotong is. It's the
 first substrate to put human-agent equality, governed cross-org federation, and
 self-hosted sovereignty into one runnable, file-first package.
 
@@ -57,7 +57,7 @@ self-hosted sovereignty into one runnable, file-first package.
 
 ```
         ┌──────────────────────────────────────────────────────────┐
-        │                       One Space (.aipehub/)              │
+        │                       One Space (.gotong/)              │
         │  ─────────────────────────────────────────────────────── │
         │                                                          │
         │   👤 admin       👤 worker      👤 worker                │
@@ -80,9 +80,9 @@ self-hosted sovereignty into one runnable, file-first package.
         └──────────────────────────────────────────────────────────┘
                                   ↑
                           all state is files
-                       (.aipehub/transcript.jsonl
-                        .aipehub/agents.json
-                        .aipehub/secrets.enc.json …)
+                       (.gotong/transcript.jsonl
+                        .gotong/agents.json
+                        .gotong/secrets.enc.json …)
 ```
 
 …and the three columns shown are just examples. The same `Participant` slot also
@@ -91,9 +91,9 @@ and **LangGraph / CrewAI adapters** — all transparent to the scheduler.
 
 ---
 
-## The four edges — how AipeHub connects to the world
+## The four edges — how Gotong connects to the world
 
-AipeHub reaches the rest of the ecosystem over four edges. It **speaks open
+Gotong reaches the rest of the ecosystem over four edges. It **speaks open
 protocols where they exist** — it doesn't reinvent them:
 
 | Edge | Protocol | Direction | What it carries |
@@ -101,9 +101,9 @@ protocols where they exist** — it doesn't reinvent them:
 | Tools & data | **MCP** | both | Agents call external MCP tools; external clients (Claude Desktop, Cursor) drive the Hub. |
 | Agent ↔ agent | **A2A** | both | An inbound `message/send` becomes a dispatch; an outbound call drives a remote A2A agent. |
 | Coding agents | **ACP** | outbound | The Hub spawns and holds a session with Claude Code / Codex and drives it turn by turn. |
-| Hub ↔ hub | **HubLink** | both | AipeHub's own federation link between two hubs — where the per-link trust contracts, cross-org task forwarding, and approval gates live. |
+| Hub ↔ hub | **HubLink** | both | Gotong's own federation link between two hubs — where the per-link trust contracts, cross-org task forwarding, and approval gates live. |
 
-The first three are ecosystem standards AipeHub implements. HubLink is the one
+The first three are ecosystem standards Gotong implements. HubLink is the one
 piece it owns — **not** as a clever wire format (it's WebSocket + bearer token +
 JSON-RPC underneath) but as the **contract for what two governed hubs exchange**:
 a capability manifest, ancestry-preserving task forwarding, and the per-link
@@ -138,7 +138,7 @@ their own upstream licenses (CC0 / MIT), all compatible with MIT and **all
 permit commercial use**.
 
 Full FAQ in [`LICENSE-FAQ.md`](./LICENSE-FAQ.md) — it answers the typical
-questions: "Can I embed AipeHub in my own closed-source product? / Do I have to
+questions: "Can I embed Gotong in my own closed-source product? / Do I have to
 attribute these templates when I use them commercially? / Can I change the
 LICENSE and repackage?"
 
@@ -212,7 +212,7 @@ licenses lives in
 
 ## A few people in one room
 
-AipeHub models a "team" as **one room** = one `.aipehub/` directory. Three role
+Gotong models a "team" as **one room** = one `.gotong/` directory. Three role
 tiers:
 
 | Role | URL | What you can do in this room |
@@ -259,12 +259,12 @@ tiers:
 
 ### One room, many roles (= the section above)
 
-Everyone is in the same `.aipehub/` directory, the same hub process. This is the
+Everyone is in the same `.gotong/` directory, the same hub process. This is the
 default.
 
 ### Many rooms, federated (= true cross-org)
 
-Each org runs its own independent hub (its own `.aipehub/`, its own people and
+Each org runs its own independent hub (its own `.gotong/`, its own people and
 agents, **its own API keys and its own billing**). Two hubs connect over
 **HubLink**, and what one may ask of the other is fixed by a **per-link trust
 contract**:

@@ -1,7 +1,7 @@
 /**
  * SDK-side WebSocket-backed implementation of the Hub Services handle
  * contracts (`MemoryHandle` / `ArtifactHandle` / `DatastoreHandle` from
- * `@aipehub/services-sdk`). Each handle method serialises into a
+ * `@gotong/services-sdk`). Each handle method serialises into a
  * SERVICE_CALL frame and awaits a matching SERVICE_RESULT.
  *
  * # Why this exists
@@ -39,7 +39,7 @@ import type {
   ServiceOwner,
   ServiceResultFrame,
   ServiceUseDecl,
-} from '@aipehub/protocol'
+} from '@gotong/protocol'
 import type {
   ArtifactHandle,
   ArtifactRef,
@@ -51,14 +51,14 @@ import type {
   MemoryQuery,
   NewMemoryEntry,
   SqlHandle,
-} from '@aipehub/services-sdk'
+} from '@gotong/services-sdk'
 
-import { DEFAULT_SERVICE_CALL_TIMEOUT_MS } from '@aipehub/protocol'
+import { DEFAULT_SERVICE_CALL_TIMEOUT_MS } from '@gotong/protocol'
 
 /**
  * Public form of a service declaration callers pass to `connect()`. Same
  * shape as the wire `ServiceUseDecl`, re-exported here for SDK-only
- * imports (users don't need to depend on `@aipehub/protocol` directly).
+ * imports (users don't need to depend on `@gotong/protocol` directly).
  */
 export interface ServiceUseRequest {
   type: 'memory' | 'artifact' | 'datastore' | (string & {})
@@ -99,7 +99,7 @@ export interface CustomServiceHandle {
 
 /**
  * Aggregate facade an agent author reads from. Mirrors the in-process
- * `ServiceCtx` from `@aipehub/services-sdk`:
+ * `ServiceCtx` from `@gotong/services-sdk`:
  *
  *   - Static-owner handles (`memory`, `artifact`, `datastore`) are
  *     populated based on the declarations passed to `connect()`. They're
