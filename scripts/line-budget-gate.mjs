@@ -33,7 +33,7 @@ const REPO = resolve(HERE, '..')
  * on purpose — that visible edit is the guard.
  */
 const BUDGETS = [
-  { file: 'packages/host/src/main.ts', max: 3500 }, // the assembly binary — split target
+  { file: 'packages/host/src/main.ts', max: 3250 }, // the assembly binary — split target (CLI/env → main-cli.ts)
   { file: 'packages/web/src/server.ts', max: 2350 }, // web route assembly (types → server-types.ts)
   { file: 'packages/web/src/me-routes.ts', max: 3500 }, // /me route sprawl
 ]
