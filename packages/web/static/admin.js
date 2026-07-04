@@ -3401,6 +3401,15 @@
           ));
         }
       }
+      for (const s of snap.connectorSlots || []) {
+        if (s.filled) continue;
+        const tag = s.optional ? ` (${t5.healthSlotOptionalTag})` : "";
+        signals.push(hubHealthSignalRow(
+          "yellow",
+          t5.healthSlotUnfilled(s.pack, s.id) + tag + (s.hint ? ` — ${s.hint}` : ""),
+          `<button type="button" class="hh-btn" data-hh="mcp">${escapeHtml5(t5.healthGoMcp)}</button>`
+        ));
+      }
       if (snap.spaceWritable === false) {
         signals.push(hubHealthSignalRow("red", t5.healthSpaceUnwritable(snap.spacePath || ""), ""));
       }

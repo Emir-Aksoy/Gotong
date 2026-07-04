@@ -60,7 +60,7 @@ import {
   type WorkflowGrantSink,
 } from './workflow-routes.js'
 import { handleWizardAdminRoute, type WorkflowWizardSurface } from './wizard-routes.js'
-import { handleAgentsRoute, type AgentGrantSink, type LlmKeyProbe } from './agents-routes.js'
+import { handleAgentsRoute, type AgentGrantSink, type ConnectorSlotSink, type LlmKeyProbe } from './agents-routes.js'
 import { handleAdminStewardRoute } from './admin-steward-routes.js'
 import { handleServicesRoute } from './services-routes.js'
 import { handleUploadsRoute } from './uploads-routes.js'
@@ -304,6 +304,7 @@ export function serveWeb(hub: Hub, opts: WebServerOptions = {}): Promise<WebServ
     workerCreateLimiter,
     lifecycle: opts.lifecycle,
     llmKeyProbe: opts.llmKeyProbe,
+    connectorSlots: opts.connectorSlots,
     adminHealth: opts.adminHealth,
     resourceInventory: opts.resourceInventory,
     resourceAdaptation: opts.resourceAdaptation,
@@ -460,6 +461,8 @@ interface HandlerCtx {
   lifecycle: ManagedAgentLifecycle | undefined
   /** ease-of-use ③-M1 — see WebServerOptions.llmKeyProbe doc above. */
   llmKeyProbe: LlmKeyProbe | undefined
+  /** FDE-M1b — see WebServerOptions.connectorSlots doc (server-types.ts). */
+  connectorSlots: ConnectorSlotSink | undefined
   adminHealth: AdminHealthSurface | undefined
   /** RES-M1 — see WebServerOptions.resourceInventory doc above. */
   resourceInventory: ResourceInventorySurface | undefined
@@ -1348,6 +1351,7 @@ async function handle(
         space: ctx.space,
         lifecycle: ctx.lifecycle,
         llmKeyProbe: ctx.llmKeyProbe,
+        connectorSlots: ctx.connectorSlots,
         reconcileHeartbeats: ctx.reconcileHeartbeats,
         workflows: ctx.workflows,
         requireAdmin: (rq, rs) => requireAdmin(ctx, rq, rs),

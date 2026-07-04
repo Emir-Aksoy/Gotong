@@ -31,6 +31,10 @@ function svc(opts: {
   countRuns?: () => Promise<number>
   // DEPLOY-B3 — live IM bridge rows; same optional-dep contract.
   imStatus?: () => { platform: string; source?: string }[]
+  // FDE-M1b — declared connector slots; same optional-dep contract.
+  listConnectorSlots?: () => Promise<
+    { pack: string; id: string; optional: boolean; hint?: string }[]
+  >
 }) {
   return createAdminHealthService({
     listAgents: async () => opts.agents,
@@ -42,6 +46,7 @@ function svc(opts: {
     ...(opts.countWorkflows ? { countWorkflows: opts.countWorkflows } : {}),
     ...(opts.countRuns ? { countRuns: opts.countRuns } : {}),
     ...(opts.imStatus ? { imStatus: opts.imStatus } : {}),
+    ...(opts.listConnectorSlots ? { listConnectorSlots: opts.listConnectorSlots } : {}),
   })
 }
 
@@ -213,6 +218,78 @@ describe('createAdminHealthService.snapshot', () => {
         },
       }).snapshot()
       expect(s.imBridges).toEqual([])
+      expect(s.managedCount).toBe(1)
+    })
+  })
+
+  // FDE-M1b — declared connector slots with LIVE fulfilment. The file only
+  // stores intent ("pack X wants a server named Y"); `filled` is computed here
+  // against actual MCP wiring (hub registry OR any agent's inline servers), so
+  // the verdict can never go stale. Same optional-dep honesty ladder as above.
+  describe('connectorSlots (FDE-M1b)', () => {
+    const slot = (pack: string, id: string, extra?: { optional?: boolean; hint?: string }) => ({
+      pack,
+      id,
+      optional: extra?.optional ?? false,
+      ...(extra?.hint !== undefined ? { hint: extra.hint } : {}),
+    })
+
+    it('omits the field entirely when the dep is not injected', async () => {
+      const s = await svc({ agents: [] }).snapshot()
+      expect('connectorSlots' in s).toBe(false)
+    })
+
+    it('marks a slot filled when a hub-registry MCP server bears its name', async () => {
+      const s = await svc({
+        agents: [],
+        mcp: [{ spec: { name: 'calendar' } }],
+        listConnectorSlots: async () => [slot('morning-brief-hub', 'calendar', { optional: true })],
+      }).snapshot()
+      expect(s.connectorSlots).toEqual([
+        { pack: 'morning-brief-hub', id: 'calendar', optional: true, filled: true },
+      ])
+    })
+
+    it('marks a slot filled from an agent INLINE mcpServers name too', async () => {
+      const s = await svc({
+        agents: [
+          {
+            id: 'a1',
+            managed: { kind: 'llm', provider: 'openai', mcpServers: [{ name: 'notes' }] },
+          },
+        ],
+        listConnectorSlots: async () => [slot('pack-a', 'notes')],
+      }).snapshot()
+      expect(s.connectorSlots?.[0]).toMatchObject({ id: 'notes', filled: true })
+    })
+
+    it('reports unfilled slots with hint passthrough when nothing matches', async () => {
+      const s = await svc({
+        agents: [],
+        mcp: [{ spec: { name: 'other' } }],
+        listConnectorSlots: async () => [
+          slot('pack-a', 'calendar', { optional: true, hint: '连接器目录「日历」组任选后端' }),
+        ],
+      }).snapshot()
+      expect(s.connectorSlots).toEqual([
+        {
+          pack: 'pack-a',
+          id: 'calendar',
+          optional: true,
+          hint: '连接器目录「日历」组任选后端',
+          filled: false,
+        },
+      ])
+    })
+
+    it('degrades a dep fault to [] without breaking the snapshot', async () => {
+      const s = await svc({
+        agents: [managed('a1', 'openai')],
+        listConnectorSlots: async () => {
+          throw new Error('registry unreadable')
+        },
+      }).snapshot()
+      expect(s.connectorSlots).toEqual([])
       expect(s.managedCount).toBe(1)
     })
   })

@@ -90,6 +90,12 @@ export interface HealthSnapshot {
    * 空 → `[]` (真的没有通道, 前端显示「未配置」提示)。
    */
   imBridges?: HealthImRow[]
+  /**
+   * FDE-M1b — declared connector slots of installed packs, with live
+   * fulfilment. Same optional-dep contract: host 未注入 `listConnectorSlots`
+   * → 字段整个缺席 (前端隐藏该块); 注入了但没人声明过槽位 → `[]`。
+   */
+  connectorSlots?: HealthConnectorSlotRow[]
   /** ISO timestamp the snapshot was taken. */
   checkedAt: string
 }
@@ -101,6 +107,29 @@ export interface HealthImRow {
   source?: string
 }
 
+/**
+ * FDE-M1b — one declared connector slot with its LIVE fulfilment verdict.
+ * `filled` is computed here against the hub's actual MCP wiring (name-identity:
+ * a hub-registry server OR an inline agent server named `id` exists), so the
+ * row can never go stale — the file only stores the intent.
+ */
+export interface HealthConnectorSlotRow {
+  /** The installed template that declared the need. */
+  pack: string
+  /** Slot name = the MCP server name that fulfils it. */
+  id: string
+  /**
+   * true = the solution degrades gracefully unfilled. Display note: unfilled
+   * slots are YELLOW either way (template intent is never host-verified fact,
+   * so it can't escalate the panel to red); optional only tweaks the wording.
+   */
+  optional: boolean
+  /** Installer-facing one-liner (what to hang, where to find backends). */
+  hint?: string
+  /** true = an MCP server with this name exists on the hub today. */
+  filled: boolean
+}
+
 /** Narrow view of an agent record — only the fields the snapshot reads. */
 export interface HealthAgentLike {
   id: string
@@ -108,6 +137,8 @@ export interface HealthAgentLike {
     kind?: string
     provider?: string
     useMcpServers?: readonly string[]
+    /** FDE-M1b — inline MCP wiring; only the names matter for slot fulfilment. */
+    mcpServers?: readonly { name: string }[]
   }
 }
 
@@ -146,6 +177,14 @@ export interface AdminHealthDeps {
    * (host 未接 IM 子系统的诚实「未知」)。同步纯投影 (host 侧读内存数组)。
    */
   imStatus?(): HealthImRow[]
+  /**
+   * FDE-M1b — 已装模板声明的连接器槽位 (host 从 template-connector-slots.json
+   * 读回, 摊平成带 pack 的行)。可选: absent → snapshot 不含 connectorSlots。
+   * fulfilment (filled) 由本服务对着 listAgents/listMcpServers 现算。
+   */
+  listConnectorSlots?(): Promise<
+    readonly { pack: string; id: string; optional: boolean; hint?: string }[]
+  >
 }
 
 /** The duck-typed surface injected into `serveWeb`. */
@@ -241,6 +280,35 @@ export function createAdminHealthService(deps: AdminHealthDeps): AdminHealthSurf
         }
       }
 
+      // FDE-M1b — declared connector slots + live fulfilment. Name-identity:
+      // a slot is filled iff an MCP server named `slot.id` exists TODAY —
+      // in the hub registry, or inline on any agent (managed check is not
+      // limited to LLM agents: any record can carry MCP wiring). Deterministic
+      // set-membership, zero heuristics — 半解析绝不猜 applies to fulfilment
+      // too. Best-effort read: dep 在但抛错 → 当「没声明过」([]), dep 不在 →
+      // 字段整个缺席。
+      let slotRows: HealthConnectorSlotRow[] | undefined
+      if (deps.listConnectorSlots) {
+        let declared: readonly { pack: string; id: string; optional: boolean; hint?: string }[] =
+          []
+        try {
+          declared = await deps.listConnectorSlots()
+        } catch {
+          declared = []
+        }
+        const present = new Set<string>(servers.map((s) => s.spec.name))
+        for (const a of agents) {
+          for (const s of a.managed?.mcpServers ?? []) present.add(s.name)
+        }
+        slotRows = declared.map((d) => ({
+          pack: d.pack,
+          id: d.id,
+          optional: d.optional,
+          ...(d.hint !== undefined ? { hint: d.hint } : {}),
+          filled: present.has(d.id),
+        }))
+      }
+
       return {
         agents: rows,
         agentsMissingKey: rows.filter((r) => r.missingKey).length,
@@ -258,6 +326,7 @@ export function createAdminHealthService(deps: AdminHealthDeps): AdminHealthSurf
           : {}),
         ...(runCount !== undefined ? { runCount } : {}),
         ...(imRows !== undefined ? { imBridges: imRows } : {}),
+        ...(slotRows !== undefined ? { connectorSlots: slotRows } : {}),
         checkedAt: new Date().toISOString(),
       }
     },

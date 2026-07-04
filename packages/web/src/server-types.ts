@@ -33,7 +33,7 @@ import type {
   MeHubStewardSurface,
 } from './me-routes.js'
 import type { WorkflowWizardSurface } from './wizard-routes.js'
-import type { LlmKeyProbe } from './agents-routes.js'
+import type { ConnectorSlotSink, LlmKeyProbe } from './agents-routes.js'
 import type { SetupRoutesCtx } from './setup-routes.js'
 import type { McpRegistrySurface, McpFederationSurface } from './mcp-routes.js'
 import type { PeerSummaryFederationSurface } from './peer-summary-routes.js'
@@ -123,6 +123,13 @@ export interface WebServerOptions {
    * the "agent X still needs a key" advisories are omitted.
    */
   llmKeyProbe?: LlmKeyProbe
+  /**
+   * FDE-M1b — optional durable sink for template-declared connector slots
+   * (`requires.connectors`), recorded at import so the admin 体检 shows slot
+   * status persistently. The host wires its ConnectorSlotStore. Absent →
+   * slots are reported in the install response only.
+   */
+  connectorSlots?: ConnectorSlotSink
   /**
    * ❷-M1 — optional read-only "hub 体检" aggregator for the admin overview
    * panel. The host wires `createAdminHealthService`. Absent → the

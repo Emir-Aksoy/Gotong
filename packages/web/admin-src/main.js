@@ -1385,6 +1385,20 @@ import { createWorkflows } from './workflows.js'
           `<button type="button" class="hh-btn" data-hh="mcp">${escapeHtml(t.healthGoMcp)}</button>`))
       }
     }
+    // FDE-M1b — connector slots declared by installed packs that no MCP server
+    // currently fulfils. Always YELLOW, even for required slots: red rows are
+    // reserved for host-VERIFIED facts (a key that doesn't resolve, an
+    // unwritable dir), while a slot is third-party template intent the hub
+    // never verifies semantically — an imported manifest must not be able to
+    // escalate the panel to red. Filled slots render nothing. Absent field
+    // (host didn't wire the registry) → loop over [] → nothing, honestly.
+    for (const s of snap.connectorSlots || []) {
+      if (s.filled) continue
+      const tag = s.optional ? ` (${t.healthSlotOptionalTag})` : ''
+      signals.push(hubHealthSignalRow('yellow',
+        t.healthSlotUnfilled(s.pack, s.id) + tag + (s.hint ? ` — ${s.hint}` : ''),
+        `<button type="button" class="hh-btn" data-hh="mcp">${escapeHtml(t.healthGoMcp)}</button>`))
+    }
     // RED (rare) — the host can no longer WRITE to its space dir (disk-full /
     // permission-drift early warning). Informational: the fix is host-side.
     if (snap.spaceWritable === false) {

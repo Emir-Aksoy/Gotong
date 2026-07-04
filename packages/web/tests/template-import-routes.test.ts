@@ -403,3 +403,84 @@ describe('POST /api/admin/templates/import — RES-M2 adaptations', () => {
     expect(r.json.postInstallChecklist.adaptations).toEqual([])
   })
 })
+
+// ── FDE-M1b: durable connector-slot recording ────────────────────────────────
+// The registry itself lives host-side (host/src/template-connector-slots.ts,
+// unit-tested there). Here we pin only the web seam: a successful import calls
+// the injected sink with (template.name, declared slots) — [] included, since
+// recording [] is how a reinstall that DROPPED its `requires` clears the stale
+// entry — and a sink fault never fails the install (advisory registry).
+describe('POST /api/admin/templates/import — connector-slot sink (FDE-M1b)', () => {
+  it('records declared slots under the template name after install', async () => {
+    await b.server.close()
+    const recorded: { pack: string; connectors: unknown }[] = []
+    const connectorSlots = {
+      record: async (pack: string, connectors: unknown) => {
+        recorded.push({ pack, connectors })
+      },
+    }
+    const workflows = { importFromText: async () => ({ id: 'x' }) } as unknown as WorkflowSurface
+    b.server = await serveWeb(b.hub, { host: '127.0.0.1', port: 0, workflows, connectorSlots })
+
+    const r = await importReq({
+      template: templateText({
+        name: 'with-slots',
+        agents: [agentBlock()],
+        requires: {
+          connectors: [{ id: 'calendar', kind: 'mcp', optional: true, hint: '挂个日历' }],
+        },
+      }),
+    })
+    expect(r.status).toBe(200)
+    // The sink sees the PARSED slots verbatim (kind included); trimming to the
+    // persisted shape is the store's job, not the route's.
+    expect(recorded).toEqual([
+      {
+        pack: 'with-slots',
+        connectors: [{ id: 'calendar', kind: 'mcp', optional: true, hint: '挂个日历' }],
+      },
+    ])
+  })
+
+  it('records [] for a template without requires (clears a stale entry)', async () => {
+    await b.server.close()
+    const recorded: { pack: string; connectors: unknown }[] = []
+    const connectorSlots = {
+      record: async (pack: string, connectors: unknown) => {
+        recorded.push({ pack, connectors })
+      },
+    }
+    const workflows = { importFromText: async () => ({ id: 'x' }) } as unknown as WorkflowSurface
+    b.server = await serveWeb(b.hub, { host: '127.0.0.1', port: 0, workflows, connectorSlots })
+
+    const r = await importReq({
+      template: templateText({ name: 'no-slots', agents: [agentBlock()] }),
+    })
+    expect(r.status).toBe(200)
+    expect(recorded).toEqual([{ pack: 'no-slots', connectors: [] }])
+  })
+
+  it('a sink fault never fails the import', async () => {
+    await b.server.close()
+    const connectorSlots = {
+      record: async () => {
+        throw new Error('disk hiccup')
+      },
+    }
+    const workflows = { importFromText: async () => ({ id: 'x' }) } as unknown as WorkflowSurface
+    b.server = await serveWeb(b.hub, { host: '127.0.0.1', port: 0, workflows, connectorSlots })
+
+    const r = await importReq({
+      template: templateText({
+        name: 'faulty-sink',
+        agents: [agentBlock()],
+        requires: { connectors: [{ id: 'calendar', kind: 'mcp' }] },
+      }),
+    })
+    expect(r.status).toBe(200)
+    expect(r.json.ok).toBe(true)
+    // Agent still landed despite the sink fault.
+    const ids = (await b.space.agents()).map((a) => a.id)
+    expect(ids).toContain('support-agent')
+  })
+})

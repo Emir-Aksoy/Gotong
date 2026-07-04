@@ -151,6 +151,22 @@ export interface AgentsRoutesCtx {
    * Absent → the checklist carries no `adaptations` (zero regression).
    */
   resourceAdaptation?: AgentsAdaptationSurface
+  /**
+   * FDE-M1b — optional durable sink for a template's declared connector slots
+   * (`requires.connectors`). The install response reports them once; this
+   * records them so the admin 体检 keeps showing "槽位 X 未挂" after the
+   * response scrolls away. The host wires its ConnectorSlotStore. Best-effort:
+   * a record fault never fails an import. Absent → response-only (M1a mode).
+   */
+  connectorSlots?: ConnectorSlotSink
+}
+
+/** FDE-M1b — durable recorder for installed packs' declared connector slots. */
+export interface ConnectorSlotSink {
+  record(
+    pack: string,
+    connectors: readonly { id: string; optional: boolean; hint?: string; capability?: string }[],
+  ): Promise<void>
 }
 
 // -- validation -----------------------------------------------------------
@@ -825,6 +841,20 @@ export async function handleAgentsRoute(
       ...(s.hint !== undefined ? { hint: s.hint } : {}),
       ...(s.capability !== undefined ? { capability: s.capability } : {}),
     }))
+    // FDE-M1b — durably record the declared slots so the 体检 keeps showing
+    // slot status after this response scrolls away. Recording [] on purpose:
+    // it CLEARS a stale entry when a reinstalled template dropped its
+    // `requires`. Advisory registry — a fault never fails the import.
+    if (ctx.connectorSlots) {
+      try {
+        await ctx.connectorSlots.record(template.name, template.connectorSlots)
+      } catch (err) {
+        log.warn('connector-slot recording failed (install unaffected)', {
+          template: template.name,
+          err: err instanceof Error ? err.message : String(err),
+        })
+      }
+    }
     const agentsMissingKey: { id: string; provider: string }[] = []
     if (ctx.llmKeyProbe) {
       for (const { id, provider } of createdProviders) {

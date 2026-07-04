@@ -996,6 +996,9 @@
       healthGoAddKey: '去补 key →',
       healthMcpUnwired: (name) => `MCP 服务「${name}」已配置,但还没有智能体接入`,
       healthGoMcp: '去 MCP 集成 →',
+      // --- FDE-M1b — 已装模板声明的连接器槽位 (未挂 = 黄牌) ---
+      healthSlotUnfilled: (pack, id) => `模板「${pack}」需要一个叫「${id}」的 MCP 服务,还没挂上`,
+      healthSlotOptionalTag: '可选',
       healthSpaceUnwritable: (path) => `数据目录不可写:${path} — 请检查磁盘空间和目录权限`,
       healthRosterTitle: (online, total) => `智能体(${online}/${total} 在线)`,
       healthTest: '测连接',
@@ -2928,6 +2931,9 @@
       healthGoAddKey: 'Add key →',
       healthMcpUnwired: (name) => `MCP server "${name}" is configured but no agent uses it`,
       healthGoMcp: 'Open MCP →',
+      // --- FDE-M1b — connector slots declared by installed templates (unfilled = yellow) ---
+      healthSlotUnfilled: (pack, id) => `Template "${pack}" wants an MCP server named "${id}" — none is wired yet`,
+      healthSlotOptionalTag: 'optional',
       healthSpaceUnwritable: (path) => `Data directory not writable: ${path} — check disk space and permissions`,
       healthRosterTitle: (online, total) => `Agents (${online}/${total} online)`,
       healthTest: 'Test',

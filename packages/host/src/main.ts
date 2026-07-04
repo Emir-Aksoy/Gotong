@@ -189,6 +189,7 @@ function findOwnerUserId(identity: IdentityStore): string | null {
 // registration block lives in main() where identity is in scope.
 
 import { createAdminHealthService } from './admin-health.js'
+import { createConnectorSlotStore } from './template-connector-slots.js'
 import { createResourceInventoryService } from './resource-inventory.js'
 import { createResourceAdaptationService } from './resource-adaptation.js'
 import { createSettingOpsService } from './setting-ops-service.js'
@@ -2599,6 +2600,13 @@ async function main(): Promise<void> {
     }
   }
 
+  // FDE-M1b — durable connector-slot registry: the template import route
+  // records each installed pack's declared `requires.connectors[]` here (via
+  // the web-injected sink below), and the 体检 reads them back. The file only
+  // stores INTENT ("pack X wants a server named Y"); fulfilment is computed
+  // live by admin-health against actual MCP wiring, so it can never go stale.
+  const connectorSlots = createConnectorSlotStore({ spaceDir: space.root })
+
   // ❷-M1 — the read-only "hub 体检" snapshot, lifted to a const so the
   // setting-ops console (below) can reuse the SAME live-health surface for its
   // `status` command. Static signals only; reuses the pool's key-resolution
@@ -2625,6 +2633,17 @@ async function main(): Promise<void> {
     // fetch a snapshot in practice; the `?? []` keeps the boot window honest
     // ("no live bridge yet" is literally true then).
     imStatus: () => imBridges?.status() ?? [],
+    // FDE-M1b — flatten the per-pack registry to the rows the 体检 wants;
+    // fulfilment (filled) is admin-health's job, not the file's.
+    listConnectorSlots: async () =>
+      (await connectorSlots.list()).flatMap((p) =>
+        p.connectors.map((c) => ({
+          pack: p.pack,
+          id: c.id,
+          optional: c.optional,
+          ...(c.hint !== undefined ? { hint: c.hint } : {}),
+        })),
+      ),
   })
 
   // RES-M1 — read-only resource inventory for the "resource adaptation" panel.
@@ -2761,6 +2780,10 @@ async function main(): Promise<void> {
     llmKeyProbe: {
       resolvesKey: (id, provider) => localAgents.hasResolvableLlmKey(id, provider),
     },
+    // FDE-M1b — durable sink for template-declared connector slots (recorded
+    // at import, read back by the 体检 above). Absent → import still works,
+    // slots just aren't remembered.
+    connectorSlots,
     // ease-of-use ❷-M1 — read-only "hub 体检" snapshot for the admin overview
     // panel (lifted to a const above so the setting-ops console reuses it).
     adminHealth,
