@@ -154,6 +154,17 @@ export function normalizeWorkflowSchedule(raw: unknown): WorkflowScheduleDef | n
 // ---------------------------------------------------------------------------
 
 /**
+ * The mark a firing at `nowMs` must persist, independent of the due gate. The
+ * sweep gets its mark from {@link scheduleDue}; the MANUAL fire path (admin
+ * "试跑") deliberately ignores due/enabled, so it computes the mark here — and
+ * writing it means a hand-fired daily row won't auto-fire again the same day.
+ */
+export function fireMark(cadence: ScheduleCadence, nowMs: number): string {
+  if (cadence.kind === 'interval') return String(nowMs)
+  return memberLocalNow(nowMs, cadence.tzOffsetMinutes).date
+}
+
+/**
  * Decide whether `def` should fire at `nowMs`, given the persisted mark of its
  * last firing (undefined = never fired). Pure: same inputs, same verdict.
  */

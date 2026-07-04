@@ -503,6 +503,7 @@ host 启动要绑两个端口 + 开数据目录 + 解密 vault，任一失败时
 | 成员自助出码口 | `packages/host/src/me-im-service.ts` + `/api/me/im/*`（`packages/web/src/me-routes.ts`） |
 | boot 安全自检（暴露即 fail-closed） | `packages/host/src/boot-security.ts` |
 | 首启认领双锚：loopback 或操作员会话（都不信 XFF） | `packages/web/src/setup-routes.ts`（`isLoopbackReq` / `setupTrustAnchor`） |
+| 上线后让 hub 每天干活（定时工作流 + 跑完 IM 播报，零 LLM 调度） | [`WORKFLOW-SCHEDULES.md`](WORKFLOW-SCHEDULES.md) |
 | 通用部署（三形态 + Caddy + systemd + 备份） | [`DEPLOY.md`](DEPLOY.md) |
 | 日常运维（数据目录、备份/恢复/校验） | [`OPERATIONS.md`](../OPERATIONS.md) |
 | 监控 / 指标 | [`MONITORING.md`](../MONITORING.md) |

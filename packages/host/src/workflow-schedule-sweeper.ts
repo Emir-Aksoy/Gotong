@@ -44,8 +44,10 @@ import {
   evaluateRunnable,
   type ButlerDispatchHub,
   type ButlerWorkflowSurface,
+  type RunnableWorkflow,
 } from './personal-butler-workflows.js'
 import {
+  fireMark,
   normalizeWorkflowSchedule,
   scheduleDue,
   type WorkflowScheduleDef,
@@ -93,37 +95,44 @@ export interface WorkflowScheduleSweeperOptions {
   clock?: () => number
 }
 
-/** Read + normalise the intent file. Missing file ⇒ no schedules (silent);
- *  unparseable file ⇒ no schedules (logged by the caller via invalid=-1 marker
- *  is avoided — we return a flag instead, keeping the shape honest). */
-async function readSchedules(
+/** Read the RAW intent rows. Missing file ⇒ `[]` (feature unused); unparseable
+ *  or non-array ⇒ `broken` (callers log, never guess). Exported for the M3
+ *  admin surface, which must round-trip rows it does not understand. */
+export async function readScheduleFileRaw(
   spaceDir: string,
-): Promise<{ rows: WorkflowScheduleDef[]; invalid: number; fileBroken: boolean }> {
+): Promise<{ rows: unknown[]; broken: boolean }> {
   let raw: string
   try {
     raw = await readFile(join(spaceDir, WORKFLOW_SCHEDULES_FILE), 'utf8')
   } catch {
-    return { rows: [], invalid: 0, fileBroken: false } // no file = feature unused
+    return { rows: [], broken: false } // no file = feature unused
   }
-  let parsed: unknown
   try {
-    parsed = JSON.parse(raw)
+    const parsed = JSON.parse(raw)
+    return Array.isArray(parsed) ? { rows: parsed, broken: false } : { rows: [], broken: true }
   } catch {
-    return { rows: [], invalid: 0, fileBroken: true }
+    return { rows: [], broken: true }
   }
-  if (!Array.isArray(parsed)) return { rows: [], invalid: 0, fileBroken: true }
+}
+
+/** Read + normalise the intent file (the sweep's view of it). */
+async function readSchedules(
+  spaceDir: string,
+): Promise<{ rows: WorkflowScheduleDef[]; invalid: number; fileBroken: boolean }> {
+  const { rows: rawRows, broken } = await readScheduleFileRaw(spaceDir)
   const rows: WorkflowScheduleDef[] = []
   let invalid = 0
-  for (const entry of parsed) {
+  for (const entry of rawRows) {
     const def = normalizeWorkflowSchedule(entry)
     if (def) rows.push(def)
     else invalid++
   }
-  return { rows, invalid, fileBroken: false }
+  return { rows, invalid, fileBroken: broken }
 }
 
-/** Read the fact file. Any corruption degrades to {} — see file header. */
-async function readState(spaceDir: string): Promise<Record<string, string>> {
+/** Read the fact file. Any corruption degrades to {} — see file header.
+ *  Exported for the admin surface's list view (marks beside intent). */
+export async function readScheduleState(spaceDir: string): Promise<Record<string, string>> {
   let raw: string
   try {
     raw = await readFile(join(spaceDir, WORKFLOW_SCHEDULES_STATE_FILE), 'utf8')
@@ -142,6 +151,35 @@ async function readState(spaceDir: string): Promise<Record<string, string>> {
     return {}
   }
 }
+
+/** Persist the fact file. A lost mark is worst-case one re-fire — log, move on.
+ *  Exported for the admin surface (removing a schedule drops its mark). */
+export async function writeScheduleState(
+  spaceDir: string,
+  state: Record<string, string>,
+  log: Logger,
+): Promise<void> {
+  try {
+    await writeFile(
+      join(spaceDir, WORKFLOW_SCHEDULES_STATE_FILE),
+      JSON.stringify(state, null, 2),
+      'utf8',
+    )
+  } catch (err) {
+    log.error('workflow-schedules: state write failed', { err })
+  }
+}
+
+/**
+ * Outcome of a MANUAL fire (the admin "试跑" endpoint). It deliberately ignores
+ * the due gate AND `enabled` — testing a parked/early row is the point — but
+ * the member gate is NOT skippable: an unrunnable workflow still refuses, and
+ * the fired mark IS written, so a hand-fired daily row won't auto-fire again
+ * the same member-local day (an interval row restarts its window).
+ */
+export type ScheduleFireResult =
+  | { ok: true; scheduleId: string; workflowId: string; userId: string; mark: string }
+  | { ok: false; reason: 'not_found' | 'invalid' | 'unrunnable' | 'dispatch_failed' }
 
 /**
  * The sweep. Mirrors the run-broadcast sweeper's lifecycle: `start()` arms an
@@ -219,24 +257,13 @@ export class WorkflowScheduleSweeper {
     const outcome: ScheduleSweepOutcome = { fired: [], notDue: 0, invalid, unrunnable: [] }
     if (rows.length === 0) return outcome
 
-    const state = await readState(this.spaceDir)
+    const state = await readScheduleState(this.spaceDir)
     const now = this.clock()
 
-    // Resolve the catalog once per tick, not per row. Fail closed: an outage
-    // means "nothing runnable this tick", never a blind dispatch.
-    let runnableById: Map<string, ReturnType<typeof evaluateRunnable>> | undefined
-    const resolveCatalog = async () => {
-      if (runnableById) return runnableById
-      runnableById = new Map()
-      try {
-        for (const s of await this.workflows.list()) {
-          runnableById.set(s.id, evaluateRunnable(s, this.role))
-        }
-      } catch (err) {
-        this.log.error('workflow-schedules: catalog list failed; firing nothing', { err })
-      }
-      return runnableById
-    }
+    // Resolve the catalog at most once per tick, and only when something is
+    // actually due (the common all-quiet tick never touches it).
+    let runnableById: Map<string, RunnableWorkflow | null> | undefined
+    const catalogOnce = async () => (runnableById ??= await this.resolveCatalog())
 
     let stateDirty = false
     for (const def of rows) {
@@ -245,8 +272,7 @@ export class WorkflowScheduleSweeper {
         outcome.notDue++
         continue
       }
-      const catalog = await resolveCatalog()
-      const wf = catalog.get(def.workflowId) ?? null
+      const wf = (await catalogOnce()).get(def.workflowId) ?? null
       if (!wf) {
         // A due schedule pointing at an unrunnable workflow is a CONFIG error —
         // log loudly every tick (it stays due, so it stays visible) and never
@@ -260,33 +286,7 @@ export class WorkflowScheduleSweeper {
         })
         continue
       }
-      // Copy only DECLARED input fields from the row (the scope key is not in
-      // inputFieldIds, so a hand-written row can't smuggle another member in).
-      const payload: Record<string, unknown> = {}
-      for (const field of wf.inputFieldIds) {
-        if (def.inputs && field in def.inputs) payload[field] = def.inputs[field]
-      }
-      payload[wf.userScopeField] = def.userId
-      try {
-        void this.hub
-          .dispatch({
-            from: def.userId,
-            origin: { orgId: 'local', userId: def.userId },
-            strategy: { kind: 'capability', capabilities: [wf.capability] },
-            payload,
-            title: `${wf.label} — 定时 ${def.id}`,
-          })
-          .catch((err) => {
-            this.log.error('workflow-schedule dispatch failed (async)', {
-              err,
-              scheduleId: def.id,
-            })
-          })
-      } catch (err) {
-        // Synchronous throw = the hub never took it → no mark, next tick retries.
-        this.log.error('workflow-schedule dispatch failed (sync)', { err, scheduleId: def.id })
-        continue
-      }
+      if (!this.dispatchRow(def, wf)) continue // sync throw → no mark, next tick retries
       state[def.id] = verdict.mark
       stateDirty = true
       outcome.fired.push(def.id)
@@ -298,18 +298,78 @@ export class WorkflowScheduleSweeper {
       })
     }
 
-    if (stateDirty) {
-      try {
-        await writeFile(
-          join(this.spaceDir, WORKFLOW_SCHEDULES_STATE_FILE),
-          JSON.stringify(state, null, 2),
-          'utf8',
-        )
-      } catch (err) {
-        // Mark lost ⇒ worst case one re-fire next tick; log it and move on.
-        this.log.error('workflow-schedules: state write failed', { err })
-      }
-    }
+    if (stateDirty) await writeScheduleState(this.spaceDir, state, this.log)
     return outcome
+  }
+
+  /**
+   * MANUAL fire — the admin "试跑" path (semantics on {@link ScheduleFireResult}).
+   * Shares the sweep's dispatch + mark plumbing so there is exactly one way a
+   * schedule reaches the hub. Benign race, documented: a manual fire landing in
+   * the same instant as a sweep tick can double-dispatch or lose one mark write;
+   * worst case is one duplicate run — same posture as a lost state file.
+   */
+  async fireNow(scheduleId: string): Promise<ScheduleFireResult> {
+    const { rows } = await readScheduleFileRaw(this.spaceDir)
+    const raw = rows.find(
+      (r) => !!r && typeof r === 'object' && (r as { id?: unknown }).id === scheduleId,
+    )
+    if (raw === undefined) return { ok: false, reason: 'not_found' }
+    const def = normalizeWorkflowSchedule(raw)
+    if (!def) return { ok: false, reason: 'invalid' }
+    const wf = (await this.resolveCatalog()).get(def.workflowId) ?? null
+    if (!wf) return { ok: false, reason: 'unrunnable' }
+    if (!this.dispatchRow(def, wf)) return { ok: false, reason: 'dispatch_failed' }
+    const mark = fireMark(def.cadence, this.clock())
+    const state = await readScheduleState(this.spaceDir)
+    state[def.id] = mark
+    await writeScheduleState(this.spaceDir, state, this.log)
+    this.log.info('workflow-schedule fired (manual)', { scheduleId: def.id, mark })
+    return { ok: true, scheduleId: def.id, workflowId: def.workflowId, userId: def.userId, mark }
+  }
+
+  /** Runnable view of the whole catalog, keyed by workflow id. Fail closed: an
+   *  outage resolves to an empty map (logged), never a blind dispatch. */
+  private async resolveCatalog(): Promise<Map<string, RunnableWorkflow | null>> {
+    const map = new Map<string, RunnableWorkflow | null>()
+    try {
+      for (const s of await this.workflows.list()) map.set(s.id, evaluateRunnable(s, this.role))
+    } catch (err) {
+      this.log.error('workflow-schedules: catalog list failed; firing nothing', { err })
+    }
+    return map
+  }
+
+  /** Hand one schedule's run to the hub (fire-and-forget — see "fire = attempt"
+   *  in the header). Returns false on a synchronous throw: the hub never took
+   *  it, so the caller must not write the mark. Only DECLARED input fields are
+   *  copied from the row, and the member-scope key is force-set — a hand-written
+   *  row cannot smuggle another member in. */
+  private dispatchRow(def: WorkflowScheduleDef, wf: RunnableWorkflow): boolean {
+    const payload: Record<string, unknown> = {}
+    for (const field of wf.inputFieldIds) {
+      if (def.inputs && field in def.inputs) payload[field] = def.inputs[field]
+    }
+    payload[wf.userScopeField] = def.userId
+    try {
+      void this.hub
+        .dispatch({
+          from: def.userId,
+          origin: { orgId: 'local', userId: def.userId },
+          strategy: { kind: 'capability', capabilities: [wf.capability] },
+          payload,
+          title: `${wf.label} — 定时 ${def.id}`,
+        })
+        .catch((err) => {
+          this.log.error('workflow-schedule dispatch failed (async)', {
+            err,
+            scheduleId: def.id,
+          })
+        })
+      return true
+    } catch (err) {
+      this.log.error('workflow-schedule dispatch failed (sync)', { err, scheduleId: def.id })
+      return false
+    }
   }
 }

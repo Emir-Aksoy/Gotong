@@ -93,6 +93,10 @@ import { handleSamlAdminRoute, type SamlProviderAdminSurface } from './saml-admi
 import { handleA2aAdminRoute, type A2aAgentAdminSurface } from './a2a-admin-routes.js'
 import { handleAcpAdminRoute, type AcpAgentAdminSurface } from './acp-admin-routes.js'
 import { handleSettingRoute, type SettingOpsSurface } from './setting-routes.js'
+import {
+  handleWorkflowScheduleRoute,
+  type WorkflowScheduleAdminSurface,
+} from './workflow-schedule-routes.js'
 
 export type { PeerManifestFederationSurface, PeerManifestRow } from './peer-routes.js'
 export type {
@@ -125,6 +129,11 @@ export type {
   SettingOpsResult,
   SettingTier,
 } from './setting-routes.js'
+export type {
+  WorkflowScheduleAdminSurface,
+  WorkflowScheduleView,
+  WorkflowScheduleFireResult,
+} from './workflow-schedule-routes.js'
 
 export type {
   IdentitySurface,
@@ -615,6 +624,13 @@ export interface WebServerOptions {
    * `runOpsCommand` chokepoint refuses any destructive id reached via `/run`.
    */
   settingOps?: SettingOpsSurface
+  /**
+   * LIFE-L1-M3 — zero-LLM workflow schedules. When wired,
+   * `/api/admin/workflow-schedules` gives the admin CRUD over the on-disk
+   * schedule rows plus a manual 试跑 fire (which dispatches through the same
+   * member gate the sweep uses). Absent → those routes 503.
+   */
+  workflowSchedules?: WorkflowScheduleAdminSurface
   /**
    * Route B P0-M7 — bearer token for the internal `/metrics` scrape route.
    * When set, a Prometheus scraper presenting `Authorization: Bearer <token>`
@@ -1335,6 +1351,7 @@ export function serveWeb(hub: Hub, opts: WebServerOptions = {}): Promise<WebServ
     a2aAgents: opts.a2aAgents,
     acpAgents: opts.acpAgents,
     settingOps: opts.settingOps,
+    workflowSchedules: opts.workflowSchedules,
     httpStats: new HttpStats(),
     metricsToken: opts.metricsToken,
   }
@@ -1530,6 +1547,8 @@ interface HandlerCtx {
   acpAgents: AcpAgentAdminSurface | undefined
   /** setting-ops M4 — see WebServerOptions.settingOps doc above. */
   settingOps: SettingOpsSurface | undefined
+  /** LIFE-L1-M3 — see WebServerOptions.workflowSchedules doc above. */
+  workflowSchedules: WorkflowScheduleAdminSurface | undefined
   /**
    * Counters incremented on every HTTP response. Surfaced via
    * `/api/admin/metrics` so Prometheus can compute 5xx-rate (and a
@@ -2558,6 +2577,20 @@ async function handle(
           const a = resolveResourceActor(rq)
           return { userId: a.userId, isOwner: a.isOperator }
         },
+      },
+      req, res, method, path,
+    )
+    if (handled) return
+  }
+
+  // LIFE-L1-M3 — zero-LLM workflow schedules: CRUD over the on-disk rows +
+  // manual 试跑 fire. The host surface owns validation and the ONE dispatch
+  // path (the sweeper's fireNow → same member gate as run_my_workflow).
+  if (path === '/api/admin/workflow-schedules' || path.startsWith('/api/admin/workflow-schedules/')) {
+    const handled = await handleWorkflowScheduleRoute(
+      {
+        workflowSchedules: ctx.workflowSchedules,
+        requireAdmin: (rq, rs) => requireAdmin(ctx, rq, rs),
       },
       req, res, method, path,
     )

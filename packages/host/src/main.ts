@@ -248,6 +248,7 @@ import {
   buildButlerRunBroadcastToolset,
 } from './personal-butler-run-broadcast.js'
 import { armButlerSweeps } from './personal-butler-sweeps.js'
+import { createWorkflowScheduleAdminSurface } from './workflow-schedule-admin.js'
 import { WorkflowScheduleSweeper } from './workflow-schedule-sweeper.js'
 import { PersonalButlerAgent } from '@aipehub/personal-butler'
 import { HostMeImService } from './me-im-service.js'
@@ -3032,6 +3033,9 @@ async function main(): Promise<void> {
     // config + owner config-write). No destructive routes; ops-core's chokepoint
     // refuses cold-start / restore / rotate-master-key (CLI-only by physics).
     settingOps,
+    // LIFE-L1-M3 — schedule CRUD + manual 试跑; dispatch stays on the sweeper.
+    workflowSchedules: createWorkflowScheduleAdminSurface(
+      { spaceDir: space.root, sweeper: workflowScheduleSweeper, logger: log }),
     reconcileHeartbeats,
     mcpRegistry,
     mcpFederation,
