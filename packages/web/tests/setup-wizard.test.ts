@@ -24,13 +24,16 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { randomBytes } from 'node:crypto'
+import type { IncomingMessage, ServerResponse } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { Readable } from 'node:stream'
 
 import { Hub, Space } from '@aipehub/core'
 import { MASTER_KEY_LEN_BYTES, openIdentityStore, type IdentityStore } from '@aipehub/identity'
 
 import { serveWeb, type WebServerHandle } from '../src/server.js'
+import { handleSetupRoute, type SetupRoutesCtx } from '../src/setup-routes.js'
 
 interface BootResult {
   tmp: string
@@ -608,5 +611,243 @@ describe('GET / (root) during first-run bootstrap', () => {
       expect(isWorkerShell(html)).toBe(true)
       expect(isAppShell(html)).toBe(false)
     } finally { await teardown(b) }
+  })
+
+  // DEPLOY-C followup — the SPA shell carries a server-injected bootstrap
+  // hint meta so a signed-in operator's boot can enter the wizard without a
+  // blocking flag fetch on every normal boot. '1' while the window is open,
+  // empty once the owner has a password.
+  it('bootstrap meta hint: "1" while pending; empty once the owner has a password', async () => {
+    const b = await boot()
+    try {
+      let html = await (await fetch(`${b.baseUrl}/`)).text()
+      expect(html).toContain('name="x-aipehub-bootstrap" content="1"')
+
+      // Finish setup, sign in, refetch the SPA with the session cookie —
+      // the hint must be gone so a signed-in boot on a completed host never
+      // detours through the wizard path.
+      await fetch(`${b.baseUrl}/api/setup/owner-password`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ password: 'fresh-strong-password-12' }),
+      })
+      const login = await fetch(`${b.baseUrl}/api/admin/identity/login`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ email: 'owner@setup.local', password: 'fresh-strong-password-12' }),
+      })
+      expect(login.status).toBe(200)
+      const sessCookie = (login.headers.get('set-cookie') ?? '').split(';')[0] ?? ''
+      expect(sessCookie).not.toBe('')
+      html = await (await fetch(`${b.baseUrl}/`, { headers: { cookie: sessCookie } })).text()
+      expect(isAppShell(html)).toBe(true)
+      expect(html).toContain('name="x-aipehub-bootstrap" content=""')
+    } finally { await teardown(b) }
+  })
+})
+
+// DEPLOY-C followup — trust anchor 2: an authenticated operator session
+// admits the setup writes from a NON-loopback socket. That's the Docker
+// compose path: requests reach the container through the port-forward with
+// the bridge gateway as source IP, so anchor 1 (loopback) can never hold —
+// the operator signs in via the runtime/admin-link.txt URL instead and the
+// wizard runs on that session.
+//
+// These drive handleSetupRoute directly with a forged remoteAddress — the
+// one thing a real HTTP round-trip through 127.0.0.1 cannot simulate (see
+// the NOTE in the owner-password describe above). server.ts's isOperator
+// wiring itself is one line (findAdminFromRequest(..).kind === 'admin');
+// the matrix here covers every anchor combination the gate can see.
+describe('operator-session anchor (non-loopback setup writes)', () => {
+  /** What a Docker bridge port-forward looks like to the container. */
+  const DOCKER_GW = '172.17.0.1'
+
+  interface DirectCtx {
+    tmp: string
+    identity: IdentityStore
+    ownerUserId: string
+  }
+
+  /** Identity-only fixture — no Hub, no web server; we call the handler. */
+  async function directIdentity(): Promise<DirectCtx> {
+    const tmp = await mkdtemp(join(tmpdir(), 'aipehub-setup-direct-'))
+    const init = await Space.init(tmp, { name: 'setup-direct' })
+    const { token: adminToken } = await init.space.createAdmin('DirectAdmin')
+    const identity = openIdentityStore({
+      dbPath: join(tmp, 'identity.sqlite'),
+      masterKey: randomBytes(MASTER_KEY_LEN_BYTES),
+    })
+    const ib = identity.bootstrap({
+      adminToken,
+      ownerEmail: 'owner@direct.local',
+      ownerDisplayName: 'Direct Owner',
+    })
+    return { tmp, identity, ownerUserId: ib.ownerUserId }
+  }
+
+  async function teardownDirect(d: DirectCtx): Promise<void> {
+    d.identity.close()
+    await rm(d.tmp, { recursive: true, force: true })
+  }
+
+  function fakeReq(opts: { remoteAddress: string; body?: unknown }): IncomingMessage {
+    const payload = opts.body === undefined ? [] : [JSON.stringify(opts.body)]
+    const req = Readable.from(payload) as unknown as IncomingMessage & {
+      headers: Record<string, string>
+      socket: { remoteAddress: string }
+    }
+    req.headers = { 'content-type': 'application/json' }
+    req.socket = { remoteAddress: opts.remoteAddress }
+    return req
+  }
+
+  function fakeRes(): { res: ServerResponse; status: () => number; json: () => Record<string, unknown> } {
+    let status = 0
+    let body = ''
+    const res = {
+      writeHead(s: number) { status = s; return this },
+      end(chunk?: unknown) { if (chunk !== undefined) body += String(chunk) },
+    } as unknown as ServerResponse
+    return { res, status: () => status, json: () => JSON.parse(body) as Record<string, unknown> }
+  }
+
+  function ctxOf(d: DirectCtx, extra?: Partial<SetupRoutesCtx>): SetupRoutesCtx {
+    return { identity: d.identity as unknown as SetupRoutesCtx['identity'], ...extra }
+  }
+
+  const ownerHasPassword = (d: DirectCtx): boolean =>
+    d.identity.listCredentials(d.ownerUserId).some((c) => c.kind === 'password')
+
+  it('non-loopback + no isOperator injected → 403 (loopback-only shape unchanged)', async () => {
+    const d = await directIdentity()
+    try {
+      const { res, status } = fakeRes()
+      const handled = await handleSetupRoute(
+        ctxOf(d),
+        fakeReq({ remoteAddress: DOCKER_GW, body: { password: 'strong-enough-password-12' } }),
+        res, 'POST', '/api/setup/owner-password',
+      )
+      expect(handled).toBe(true)
+      expect(status()).toBe(403)
+      expect(ownerHasPassword(d)).toBe(false)
+    } finally { await teardownDirect(d) }
+  })
+
+  it('non-loopback + isOperator=false → 403', async () => {
+    const d = await directIdentity()
+    try {
+      const { res, status } = fakeRes()
+      await handleSetupRoute(
+        ctxOf(d, { isOperator: async () => false }),
+        fakeReq({ remoteAddress: DOCKER_GW, body: { password: 'strong-enough-password-12' } }),
+        res, 'POST', '/api/setup/owner-password',
+      )
+      expect(status()).toBe(403)
+      expect(ownerHasPassword(d)).toBe(false)
+    } finally { await teardownDirect(d) }
+  })
+
+  it('non-loopback + isOperator throws → 403 (fail closed)', async () => {
+    const d = await directIdentity()
+    try {
+      const { res, status } = fakeRes()
+      await handleSetupRoute(
+        ctxOf(d, { isOperator: async () => { throw new Error('resolver exploded') } }),
+        fakeReq({ remoteAddress: DOCKER_GW, body: { password: 'strong-enough-password-12' } }),
+        res, 'POST', '/api/setup/owner-password',
+      )
+      expect(status()).toBe(403)
+      expect(ownerHasPassword(d)).toBe(false)
+    } finally { await teardownDirect(d) }
+  })
+
+  it('non-loopback + isOperator=true → password set, audit anchor=operator-session', async () => {
+    const d = await directIdentity()
+    try {
+      const { res, status, json } = fakeRes()
+      await handleSetupRoute(
+        ctxOf(d, { isOperator: async () => true }),
+        fakeReq({ remoteAddress: DOCKER_GW, body: { password: 'strong-enough-password-12' } }),
+        res, 'POST', '/api/setup/owner-password',
+      )
+      expect(status()).toBe(200)
+      expect(json()).toEqual({ ok: true })
+      expect(ownerHasPassword(d)).toBe(true)
+      const audit = d.identity.listAuditLog!({ action: 'setup_owner_created' })
+      expect(audit.length).toBe(1)
+      expect(audit[0]!.metadata?.anchor).toBe('operator-session')
+    } finally { await teardownDirect(d) }
+  })
+
+  it('loopback still passes with isOperator=false — anchors are OR, not replacement', async () => {
+    const d = await directIdentity()
+    try {
+      const { res, status } = fakeRes()
+      await handleSetupRoute(
+        ctxOf(d, { isOperator: async () => false }),
+        fakeReq({ remoteAddress: '127.0.0.1', body: { password: 'strong-enough-password-12' } }),
+        res, 'POST', '/api/setup/owner-password',
+      )
+      expect(status()).toBe(200)
+      expect(ownerHasPassword(d)).toBe(true)
+      const audit = d.identity.listAuditLog!({ action: 'setup_owner_created' })
+      expect(audit[0]!.metadata?.anchor).toBe('loopback')
+    } finally { await teardownDirect(d) }
+  })
+
+  it('non-loopback operator → owner-llm-key + owner-im write vault rows, anchors audited', async () => {
+    const d = await directIdentity()
+    try {
+      const ctx = ctxOf(d, { isOperator: async () => true })
+
+      const key = fakeRes()
+      await handleSetupRoute(
+        ctx,
+        fakeReq({ remoteAddress: DOCKER_GW, body: { provider: 'anthropic', apiKey: 'sk-ant-docker' } }),
+        key.res, 'POST', '/api/setup/owner-llm-key',
+      )
+      expect(key.status()).toBe(200)
+      const keyRows = d.identity.listVaultEntries!({ kind: 'llm_provider', ownerKind: 'org', activeOnly: true })
+      expect(keyRows.length).toBe(1)
+      const keyAudit = d.identity.listAuditLog!({ action: 'setup_owner_llm_key' })
+      expect(keyAudit[0]!.metadata?.anchor).toBe('operator-session')
+
+      const im = fakeRes()
+      await handleSetupRoute(
+        ctx,
+        fakeReq({ remoteAddress: DOCKER_GW, body: { platform: 'telegram', token: 'tg-docker-token' } }),
+        im.res, 'POST', '/api/setup/owner-im',
+      )
+      expect(im.status()).toBe(200)
+      expect((im.json() as { bridge?: { started: boolean } }).bridge?.started).toBe(false)
+      const imRows = d.identity.listVaultEntries!({ kind: 'im_bridge', ownerKind: 'org', activeOnly: true })
+      expect(imRows.length).toBe(1)
+      const imAudit = d.identity.listAuditLog!({ action: 'setup_owner_im' })
+      expect(imAudit[0]!.metadata?.anchor).toBe('operator-session')
+    } finally { await teardownDirect(d) }
+  })
+
+  it('non-loopback operator → test-llm-key reaches the probe', async () => {
+    const d = await directIdentity()
+    try {
+      const probed: string[] = []
+      const { res, status, json } = fakeRes()
+      await handleSetupRoute(
+        ctxOf(d, {
+          isOperator: async () => true,
+          llmKeyTest: {
+            async testLlmKey(input) {
+              probed.push(input.provider)
+              return { ok: true, model: 'probe-model', latencyMs: 5 }
+            },
+          },
+        }),
+        fakeReq({ remoteAddress: DOCKER_GW, body: { provider: 'anthropic', apiKey: 'sk-ant-x' } }),
+        res, 'POST', '/api/setup/test-llm-key',
+      )
+      expect(status()).toBe(200)
+      expect(probed).toEqual(['anthropic'])
+      expect(json().ok).toBe(true)
+    } finally { await teardownDirect(d) }
   })
 })

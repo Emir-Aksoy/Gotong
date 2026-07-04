@@ -28,6 +28,13 @@
   })
   const ADMIN_OR_OWNER = role === 'owner' || role === 'admin'
   const SIGNED_IN = role === 'owner' || role === 'admin' || role === 'member' || role === 'viewer'
+  // DEPLOY-C followup — server-injected "first-run bootstrap window open"
+  // hint (see app.html). Read synchronously so the signed-in boot below can
+  // decide to enter the wizard WITHOUT a blocking flag fetch before first
+  // paint on every normal boot. Strictly '1' — any other content (including
+  // an unreplaced placeholder in a raw static serve) means "not pending".
+  const BOOTSTRAP_META = document.querySelector('meta[name="x-aipehub-bootstrap"]')
+  const BOOTSTRAP_PENDING = (BOOTSTRAP_META?.getAttribute('content') || '').trim() === '1'
 
   // ---- DOM helpers ------------------------------------------------------
   const $ = (sel) => document.querySelector(sel)
@@ -3656,6 +3663,22 @@
         renderSsoButtons()
       }
       return
+    }
+    // DEPLOY-C followup — an authenticated operator (admin-link.txt /
+    // mint-admin-token session) can land here while first-run bootstrap is
+    // still pending. That's the Docker compose path: requests arrive from
+    // the bridge gateway, never loopback, so the anonymous wizard flow
+    // above is unreachable — the operator signs in with the one-shot admin
+    // URL instead. Surface the SAME wizard; its /api/setup/* writes accept
+    // the operator session as a second trust anchor server-side. Gated on
+    // the server-injected BOOTSTRAP_PENDING meta so the steady-state boot
+    // stays synchronous to first paint (maybeStartSetupWizard re-confirms
+    // against the authoritative flag route — the meta is a hint). Every
+    // wizard exit reloads, by which time bootstrap is done and boot falls
+    // through to the normal shell below.
+    if (ADMIN_OR_OWNER && BOOTSTRAP_PENDING) {
+      const wizardStarted = await maybeStartSetupWizard()
+      if (wizardStarted) return
     }
     // Signed in — reveal tabbar and wire everything.
     show($('#admin-tabbar'))

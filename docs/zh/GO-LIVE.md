@@ -289,7 +289,9 @@ docker compose up -d --build
 
 首启 admin 入口与裸机一致（§八）：banner 会提示一次性 URL 写在
 `<AIPE_SPACE>/runtime/admin-link.txt`（容器内 `/data/runtime/…` = 宿主 `./data/runtime/…`），
-**故意不进 `docker logs`**。IM token / master key 同样经 env 注入；下面的 TTFR 分钟账
+**故意不进 `docker logs`**。打开这个 URL 登录后**直接落进首启向导**（操作员会话是
+向导的第二信任锚，§八）——owner 密码 / LLM key / IM token 三步在浏览器里走完，
+不必 env。要走 env 注入 IM token / master key 也照旧可用；下面的 TTFR 分钟账
 同样适用，只是步 1 的 build 换成镜像构建。
 
 ### T2/T3.1b 部署 TTFR —— 裸 VPS → 首条 IM 回复的分钟账
@@ -368,10 +370,20 @@ openssl rand -hex 32            # 生成一次，64 hex
 
 ## 八、远程 bootstrap（云主机上怎么拿到第一个 admin）
 
-初始的 owner-password / 首启认领是**严格 loopback-only** 的，而且**不信任
-`X-Forwarded-For`** —— 哪怕开了 `AIPE_TRUST_PROXY`，认领也只看真实 socket 地址
-（`packages/web/src/setup-routes.ts:68`）。这是故意的：不让任何反代把外部请求伪装成
-本机来抢 owner。
+初始的 owner-password / 首启认领只认**两个信任锚**，而且**不信任
+`X-Forwarded-For`** —— 哪怕开了 `AIPE_TRUST_PROXY`：
+
+1. **loopback**：只看真实 socket 地址（`packages/web/src/setup-routes.ts` 的
+   `isLoopbackReq`）。这是故意的：不让任何反代把外部请求伪装成本机来抢 owner。
+2. **已验证的操作员会话**：请求带着能过 admin 闸的会话（`admin-link.txt` /
+   `mint-admin-token` 换来的一次性 URL 登录后就有）。token 铸在 `0600` 的
+   `runtime/` 里、与 master key 同一信任边界 —— 证明的是「有主机文件系统权限的
+   操作员」，不是网络位置；比匿名 loopback（本机任意进程都算）**只紧不松**。
+
+锚 2 就是 **Docker compose 的官方向导入口**：端口转发到容器的请求源 IP 是
+bridge 网关、永远不是 loopback（锚 1 必不成立），`cat data/runtime/admin-link.txt`
+打开一次性 URL 登录后，首启窗口没关的话向导直接出现，三步（owner 密码 / LLM key /
+IM token）照走。网关 IP / XFF 声明仍然一概不信。
 
 所以在云主机上（你 SSH 进去、但浏览器在本地、够不着它的 loopback），用**不启动
 listener** 的恢复命令拿 admin URL：
@@ -488,7 +500,7 @@ host 启动要绑两个端口 + 开数据目录 + 解密 vault，任一失败时
 | IM 桥（出站长轮询、`/bind` 路由） | `packages/host/src/im-bridge.ts` |
 | 成员自助出码口 | `packages/host/src/me-im-service.ts` + `/api/me/im/*`（`packages/web/src/me-routes.ts`） |
 | boot 安全自检（暴露即 fail-closed） | `packages/host/src/boot-security.ts` |
-| loopback-only 认领（不信 XFF） | `packages/web/src/setup-routes.ts:62` |
+| 首启认领双锚：loopback 或操作员会话（都不信 XFF） | `packages/web/src/setup-routes.ts`（`isLoopbackReq` / `setupTrustAnchor`） |
 | 通用部署（三形态 + Caddy + systemd + 备份） | [`DEPLOY.md`](DEPLOY.md) |
 | 日常运维（数据目录、备份/恢复/校验） | [`OPERATIONS.md`](../OPERATIONS.md) |
 | 监控 / 指标 | [`MONITORING.md`](../MONITORING.md) |

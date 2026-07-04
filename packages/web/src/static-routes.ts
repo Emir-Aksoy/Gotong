@@ -72,6 +72,16 @@ const ADMIN_COOKIE = 'aipehub_admin'
 export interface AppHtmlCtx {
   identity?: { getSessionByToken(token: string): { role: string } | null } | undefined
   space: { findAdminSession(sid: string): Promise<unknown> }
+  /**
+   * DEPLOY-C followup — "is the first-run bootstrap window still open?"
+   * (server.ts wires setup-routes' isBootstrapPending here, keeping the
+   * single source of truth). Injected into `<meta name="x-aipehub-bootstrap">`
+   * so a signed-in operator's boot can decide SYNCHRONOUSLY to enter the
+   * setup wizard — no blocking flag fetch before first paint on every
+   * normal boot. A render hint exactly like the role meta: the wizard's
+   * /api/setup/* writes re-check everything server-side.
+   */
+  bootstrapPending?: () => boolean
 }
 
 export async function serveStatic(res: ServerResponse, requested: string): Promise<void> {
@@ -224,7 +234,16 @@ export async function serveAppHtml(
   // out of the meta attribute.
   const ALLOWED_ROLES = new Set(['owner', 'admin', 'member', 'viewer'])
   const safeRole = ALLOWED_ROLES.has(role) ? role : ''
-  const out = raw.replace('<!--AIPE_ROLE-->', safeRole)
+  // Bootstrap hint (see AppHtmlCtx.bootstrapPending). '1' or '' only — the
+  // flag is already anonymous-readable via GET /api/setup/needs-bootstrap,
+  // so injecting it leaks nothing new.
+  let pending = false
+  if (ctx.bootstrapPending) {
+    try { pending = ctx.bootstrapPending() === true } catch { /* hint only */ }
+  }
+  const out = raw
+    .replace('<!--AIPE_ROLE-->', safeRole)
+    .replace('<!--AIPE_BOOTSTRAP-->', pending ? '1' : '')
 
   res.writeHead(200, securityHeaders)
   res.end(out)

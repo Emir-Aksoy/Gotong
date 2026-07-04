@@ -1308,6 +1308,7 @@ export function serveWeb(hub: Hub, opts: WebServerOptions = {}): Promise<WebServ
     workflowAssist: opts.workflowAssist,
     llmKeyTest: opts.llmKeyTest,
     imHotStart: opts.imHotStart,
+    bootstrapPending: () => isBootstrapPending(opts.identity),
     services: opts.services,
     growthReports: opts.growthReports,
     inbox: opts.inbox,
@@ -1474,6 +1475,13 @@ interface HandlerCtx {
   llmKeyTest: LlmKeyTestSurface | undefined
   /** DEPLOY-B2 — see WebServerOptions.imHotStart doc above. */
   imHotStart: SetupRoutesCtx['imHotStart'] | undefined
+  /**
+   * DEPLOY-C followup — serveAppHtml's bootstrap-window render hint
+   * (static-routes AppHtmlCtx.bootstrapPending). Closes over the identity
+   * option so setup-routes' isBootstrapPending stays the single source of
+   * truth for "is the first-run window open".
+   */
+  bootstrapPending: () => boolean
   services: ServicesAdminSurface | undefined
   growthReports: GrowthReportsAdminSurface | undefined
   /** Phase 16 — see WebServerOptions.inbox doc above. */
@@ -2153,12 +2161,21 @@ async function handle(
 
   // --- /api/setup/* (A2.3 first-time bootstrap wizard) -------------------
   // First-time bootstrap wizard routes live in setup-routes.ts (P3 batch 3).
-  // Both routes are anonymous / loopback-gated inside the handler — no
-  // requireAdmin, because the whole point is the pre-password window before
-  // any credential exists. See setup-routes.ts for the loopback trust model.
+  // The writes are gated inside the handler on two trust anchors: loopback
+  // socket, or an authenticated operator (`isOperator` below — the same
+  // admin resolver every /api/admin/* route uses). Anchor 2 is what lets
+  // the wizard run through a Docker port-forward, where the source IP is
+  // the bridge gateway and can never be loopback: the operator signs in via
+  // the runtime/admin-link.txt URL first. `rate_limited` maps to false →
+  // the gate fails closed with 403. See setup-routes.ts for the full model.
   if (path.startsWith('/api/setup/')) {
     const handled = await handleSetupRoute(
-      { identity: ctx.identity, llmKeyTest: ctx.llmKeyTest, imHotStart: ctx.imHotStart },
+      {
+        identity: ctx.identity,
+        llmKeyTest: ctx.llmKeyTest,
+        imHotStart: ctx.imHotStart,
+        isOperator: async (r) => (await findAdminFromRequest(ctx, r)).kind === 'admin',
+      },
       req, res, method, path,
     )
     if (handled) return

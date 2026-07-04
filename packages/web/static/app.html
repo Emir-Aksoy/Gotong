@@ -17,6 +17,11 @@
       The role meta is hint-only; every API call is revalidated server-side.
     -->
     <meta name="x-aipehub-role" content="<!--AIPE_ROLE-->" />
+    <!-- DEPLOY-C followup — '1' while the first-run bootstrap window is
+         open (single owner, no password). Lets a signed-in operator's boot
+         enter the setup wizard without a blocking flag fetch on every
+         normal boot. Hint-only, like the role meta above. -->
+    <meta name="x-aipehub-bootstrap" content="<!--AIPE_BOOTSTRAP-->" />
     <title>AipeHub</title>
     <!-- PWA (Phase 12 M9) — installable app shell. The service worker is
          registered from app.js; it never caches /api or the SSE stream. -->

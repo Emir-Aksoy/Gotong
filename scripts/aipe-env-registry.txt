@@ -9,7 +9,8 @@
 # 作用域 = 生产源码 (packages/<pkg>/src 下的 .ts)。测试脚手架里的 AIPE_* 不算旋钮，
 # 不登记。每项一行的「是什么 / 默认」说明是 GUARD-M2 惯例文档的活儿，不在本表。
 #
-# 当前登记数: 103  (CLAUDE.md 缺口 2 记的「~107」是估值，103 是核出来的真实数)
+# 当前登记数: 104  (CLAUDE.md 缺口 2 记的「~107」是估值; 103 是 GUARD-M1 核出的
+#                  真实数, +1 是 AIPE_BOOTSTRAP 注入占位符——非旋钮, 见该行注释)
 # 重新播种 (审慎变更后):  node scripts/env-registry-gate.mjs --list > scripts/aipe-env-registry.txt
 #
 # ── 按名称排序 ──
@@ -37,6 +38,7 @@ AIPE_ASSISTANT_NO_EXAMPLES
 AIPE_ASSISTANT_PROVIDER
 AIPE_AUDIT_KEEP_DAYS
 AIPE_BACKUP_DIR
+AIPE_BOOTSTRAP        # 非旋钮 — app.html 的 <!--AIPE_BOOTSTRAP--> 注入占位符 (同 AIPE_ROLE)
 AIPE_BUTLER
 AIPE_BUTLER_GOVERNED
 AIPE_BUTLER_MAINTENANCE

@@ -12,14 +12,15 @@
  *     PII leakage — the response is just a flag.
  *
  *   POST /api/setup/owner-password
- *     LOOPBACK ONLY. Body: `{password: string}`. Refuses if
+ *     LOOPBACK or OPERATOR SESSION (see Trust model below). Body:
+ *     `{password: string}`. Refuses if
  *     `listUsers().length !== 1` (multi-user host means setup is
  *     already done) or if the owner already has a password
  *     credential. On success: sets the password + writes
  *     `setup_owner_created` audit row + returns `{ok: true}`.
  *
  *   POST /api/setup/owner-llm-key   (ease-of-use ②-M1)
- *     LOOPBACK ONLY. Body: `{provider, apiKey, baseURL?, label?}`.
+ *     LOOPBACK or OPERATOR SESSION. Body: `{provider, apiKey, baseURL?, label?}`.
  *     The OPTIONAL second wizard step — writes an org-scope LLM key
  *     (vault row `kind='llm_provider' ownerKind='org'`) so the very
  *     first managed agent the owner creates has a key to resolve.
@@ -28,11 +29,33 @@
  *     those go through the admin credential UI. Repeatable (overwrites
  *     the prior org row for the same provider tag).
  *
- * Loopback-only matches the mint-admin-token CLI trust model —
- * anyone who can `ssh` to the host can already mint a token, so
- * letting them finish setup from a browser on localhost adds no new
- * surface. Hosts behind a reverse proxy must finish setup via
- * `aipehub-host mint-admin-token` instead.
+ * # Trust model — two anchors, neither trusts a network middleman
+ *
+ * Every write above requires ONE of:
+ *
+ *   1. Loopback — `socket.remoteAddress` IS 127.0.0.1/::1. We never
+ *      honour x-forwarded-for, even with trustProxy on: a reverse proxy
+ *      in front must not be able to disguise an external request as
+ *      local. Matches the mint-admin-token CLI trust model — anyone who
+ *      can `ssh` to the host can already mint a token, so letting them
+ *      finish setup from a localhost browser adds no new surface.
+ *
+ *   2. Authenticated operator session (DEPLOY-C followup) — the request
+ *      carries auth that passes the SAME admin check every /api/admin/*
+ *      route uses (v3 admin cookie/Bearer, or a v4 owner/admin session).
+ *      The v3 token is minted at first boot into runtime/admin-link.txt
+ *      (0600 inside the 0700 runtime dir — the master key's own trust
+ *      boundary), so possession proves "operator with filesystem access",
+ *      not network position. This is what makes the wizard reachable
+ *      through a Docker port-forward, where the source IP is the bridge
+ *      gateway and anchor 1 can never hold: the operator opens the
+ *      admin-link URL, gets a session, and the wizard runs authenticated.
+ *      Gateway IPs / XFF claims still buy nothing.
+ *
+ * Anchor 2 is strictly stronger than anchor 1 (any local process passes
+ * 1; only a minted-token holder passes 2), so accepting it relaxes no
+ * stance — it removes the accidental coupling between "is the operator
+ * present" and "did the TCP connection originate on this netns".
  */
 
 import type { IncomingMessage, ServerResponse } from 'node:http'
@@ -75,15 +98,24 @@ export interface SetupRoutesCtx {
       | { ok: false; reason: string; detail?: string }
     >
   }
+  /**
+   * DEPLOY-C followup — trust anchor 2 (see the header). server.ts injects
+   * its `findAdminFromRequest` here so a request carried by an authenticated
+   * operator (admin-link.txt v3 session / Bearer / v4 owner·admin) passes
+   * the setup gates from a non-loopback socket — the Docker port-forward
+   * case. Absent → byte-identical to the loopback-only behaviour.
+   */
+  isOperator?: (req: IncomingMessage) => Promise<boolean>
 }
 
 // -- helpers --------------------------------------------------------------
 
 /**
- * Loopback check from `socket.remoteAddress` directly — we do NOT honour
- * x-forwarded-for, even when trustProxy is on. A reverse proxy in front
- * means setup MUST go through the CLI; we'd rather refuse than let a
- * misconfigured edge expose the setup writes to the public.
+ * Loopback check (trust anchor 1) from `socket.remoteAddress` directly — we
+ * do NOT honour x-forwarded-for, even when trustProxy is on. We'd rather
+ * refuse than let a misconfigured edge disguise an external request as
+ * local; a visitor who isn't loopback must instead present an operator
+ * session (anchor 2) or fall back to the CLI.
  *
  * Exported so the `/` root-path handler can reuse the SAME loopback trust
  * model when deciding whether to surface the setup wizard at the web root
@@ -92,6 +124,31 @@ export interface SetupRoutesCtx {
 export function isLoopbackReq(req: IncomingMessage): boolean {
   const a = req.socket?.remoteAddress ?? ''
   return a === '127.0.0.1' || a === '::1' || a === '::ffff:127.0.0.1'
+}
+
+/**
+ * Which trust anchor (header § "Trust model") lets this request through the
+ * setup gates — `null` means neither and the caller must 403. The anchor is
+ * also recorded in each write's audit row (`metadata.anchor`) so a later
+ * reader can tell a localhost claim from an operator-session one.
+ *
+ * Fail-closed: an isOperator that throws counts as "not an operator" (the
+ * request can still pass via loopback). A rate-limited admin lookup inside
+ * the injected checker maps to `false` for the same reason.
+ */
+async function setupTrustAnchor(
+  ctx: SetupRoutesCtx,
+  req: IncomingMessage,
+): Promise<'loopback' | 'operator-session' | null> {
+  if (isLoopbackReq(req)) return 'loopback'
+  if (ctx.isOperator) {
+    try {
+      if (await ctx.isOperator(req)) return 'operator-session'
+    } catch {
+      /* fail closed */
+    }
+  }
+  return null
 }
 
 /**
@@ -160,10 +217,11 @@ export async function handleSetupRoute(
       return true
     }
     const sockAddr = req.socket?.remoteAddress ?? ''
-    if (!isLoopbackReq(req)) {
+    const anchor = await setupTrustAnchor(ctx, req)
+    if (!anchor) {
       sendJson(
         res,
-        { error: 'setup-owner-password is loopback-only; use `aipehub-host mint-admin-token` from a remote shell' },
+        { error: 'setup-owner-password needs loopback or an admin session — open the runtime/admin-link.txt URL first, or use `aipehub-host mint-admin-token` from a remote shell' },
         403,
       )
       return true
@@ -198,10 +256,11 @@ export async function handleSetupRoute(
       sendJson(res, { error: `setPassword failed: ${msg}` }, 400)
       return true
     }
-    // Audit row uses actor_source='anonymous' because no session
-    // existed when the call was made — only loopback proximity. The
-    // target_user_id pins the row to the owner that just got their
-    // password set.
+    // Audit row keeps actor_source='anonymous' — the setup surface is
+    // pre-identity (no v4 session vocabulary applies even when an operator
+    // session admitted the call); WHICH anchor admitted it lives in
+    // metadata.anchor. The target_user_id pins the row to the owner that
+    // just got their password set.
     if (typeof ctx.identity.writeAuditLog === 'function') {
       try {
         ctx.identity.writeAuditLog({
@@ -209,6 +268,7 @@ export async function handleSetupRoute(
           actorSource: 'anonymous',
           targetUserId: owner.id,
           ip: sockAddr,
+          metadata: { anchor },
           success: true,
         })
       } catch { /* audit failure is non-fatal */ }
@@ -234,10 +294,11 @@ export async function handleSetupRoute(
       return true
     }
     const sockAddr = req.socket?.remoteAddress ?? ''
-    if (!isLoopbackReq(req)) {
+    const anchor = await setupTrustAnchor(ctx, req)
+    if (!anchor) {
       sendJson(
         res,
-        { error: 'setup-owner-llm-key is loopback-only; configure keys via the admin credential UI on a remote host' },
+        { error: 'setup-owner-llm-key needs loopback or an admin session; configure keys via the admin credential UI on a remote host' },
         403,
       )
       return true
@@ -301,8 +362,9 @@ export async function handleSetupRoute(
       sendJson(res, { error: `vault write failed: ${msg}` }, 400)
       return true
     }
-    // Audit row uses actor_source='anonymous' (loopback proximity, no session),
-    // pinned to the owner. The secret never appears — only the provider tag.
+    // Audit row uses actor_source='anonymous' (setup surface is pre-identity;
+    // the admitting anchor is in metadata), pinned to the owner. The secret
+    // never appears — only the provider tag.
     if (typeof id.writeAuditLog === 'function') {
       try {
         id.writeAuditLog({
@@ -310,7 +372,7 @@ export async function handleSetupRoute(
           actorSource: 'anonymous',
           targetUserId: owner.id,
           ip: sockAddr,
-          metadata: { provider },
+          metadata: { provider, anchor },
           success: true,
         })
       } catch { /* audit failure is non-fatal */ }
@@ -338,10 +400,11 @@ export async function handleSetupRoute(
       return true
     }
     const sockAddr = req.socket?.remoteAddress ?? ''
-    if (!isLoopbackReq(req)) {
+    const anchor = await setupTrustAnchor(ctx, req)
+    if (!anchor) {
       sendJson(
         res,
-        { error: 'setup-owner-im is loopback-only; configure IM via env vars on a remote host' },
+        { error: 'setup-owner-im needs loopback or an admin session; configure IM via env vars on a remote host' },
         403,
       )
       return true
@@ -430,7 +493,8 @@ export async function handleSetupRoute(
     } else {
       bridge = { started: false, reason: 'not_wired' }
     }
-    // Audit: platform only — the token never appears anywhere but the vault.
+    // Audit: platform + anchor only — the token never appears anywhere but
+    // the vault.
     if (typeof id.writeAuditLog === 'function') {
       try {
         id.writeAuditLog({
@@ -438,7 +502,7 @@ export async function handleSetupRoute(
           actorSource: 'anonymous',
           targetUserId: owner.id,
           ip: sockAddr,
-          metadata: { platform, bridgeStarted: bridge.started },
+          metadata: { platform, bridgeStarted: bridge.started, anchor },
           success: true,
         })
       } catch { /* audit failure is non-fatal */ }
@@ -450,17 +514,17 @@ export async function handleSetupRoute(
   // ease-of-use ① — first-run "test connection" probe. The wizard offers a
   // 测试连接 button right next to the key field so the lowest-capability user
   // gets an immediate verdict instead of discovering a dead key much later.
-  // Loopback-only (same trust model as owner-llm-key) — sends ONE minimal
-  // request with the typed key; the host service never logs it.
+  // Same two-anchor gate as owner-llm-key — sends ONE minimal request with
+  // the typed key; the host service never logs it.
   if (path === '/api/setup/test-llm-key' && method === 'POST') {
     if (!ctx.llmKeyTest) {
       sendJson(res, { error: 'llm key test not available on this host' }, 503)
       return true
     }
-    if (!isLoopbackReq(req)) {
+    if ((await setupTrustAnchor(ctx, req)) === null) {
       sendJson(
         res,
-        { error: 'setup test-llm-key is loopback-only; use the admin test-connection on a remote host' },
+        { error: 'setup test-llm-key needs loopback or an admin session; use the admin test-connection on a remote host' },
         403,
       )
       return true
