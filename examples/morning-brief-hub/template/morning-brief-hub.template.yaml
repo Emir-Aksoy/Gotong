@@ -105,6 +105,18 @@ template:
       output:
         brief: $compose.output
 
+  # ── FDE-M1: 连接器槽位 —— 「要读真实数据自己挂 MCP」从散文变成可体检的声明 ────
+  # 槽位 id = 期望存在的 MCP server 名 (挂到晨报员的 mcpServers 或 hub MCP 注册表
+  # 都算「已挂」); 选哪个日历后端是装的人的运行时决定, 模板不点名厂商。
+  # optional: 不挂照样跑 —— 晨报进诚实模式 (不编造日程), 见 agent system prompt。
+  requires:
+    connectors:
+      - id: calendar
+        kind: mcp
+        optional: true
+        capability: calendar.read
+        hint: 连接器目录「日历」组任选后端, server 名用 calendar; 不挂则晨报按诚实模式跑(不编造日程)
+
   # ── 一键: 导入时提示填一次 API key, 自动应用到晨报员 ─────────────────────────
   defaults:
     apiKeyPrompt:

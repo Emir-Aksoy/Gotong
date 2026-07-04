@@ -126,6 +126,12 @@ export interface TemplateCatalogEntry {
   workflows: { id: string }[]
   /** Addressable KB slots (name + description; wiring/preset stay server-side). */
   knowledgeBases: { name: string; description?: string }[]
+  /**
+   * FDE-M1 — abstract connector slots the pack wants filled post-install
+   * (`requires.connectors`). Shown on the gallery card BEFORE install so the
+   * importer knows what the solution expects to be hung — no surprise 散文.
+   */
+  connectorSlots: { id: string; optional: boolean; hint?: string; capability?: string }[]
   /** One-click apiKeyPrompt hint, if the template declares one. */
   apiKeyPrompt?: BundleApiKeyPrompt
 }
@@ -161,6 +167,12 @@ export function buildTemplateCatalog(): TemplateCatalogEntry[] {
         knowledgeBases: p.knowledgeBases.map((k) => ({
           name: k.name,
           ...(k.description !== undefined ? { description: k.description } : {}),
+        })),
+        connectorSlots: p.connectorSlots.map((s) => ({
+          id: s.id,
+          optional: s.optional,
+          ...(s.hint !== undefined ? { hint: s.hint } : {}),
+          ...(s.capability !== undefined ? { capability: s.capability } : {}),
         })),
         ...(p.apiKeyPrompt ? { apiKeyPrompt: p.apiKeyPrompt } : {}),
       })

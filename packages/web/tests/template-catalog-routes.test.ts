@@ -32,6 +32,7 @@ interface CatalogEntry {
   agents: { id: string; displayName?: string; capabilities: string[] }[]
   workflows: { id: string }[]
   knowledgeBases: { name: string; description?: string }[]
+  connectorSlots: { id: string; optional: boolean; hint?: string; capability?: string }[]
   apiKeyPrompt?: { provider: string; baseURL?: string; label?: string }
 }
 
@@ -74,6 +75,8 @@ describe('template gallery catalog routes (G-M2)', () => {
       expect(Array.isArray(t.agents)).toBe(true)
       expect(Array.isArray(t.workflows)).toBe(true)
       expect(Array.isArray(t.knowledgeBases)).toBe(true)
+      // FDE-M1 — connector-slot preview rides on every entry ([] when none).
+      expect(Array.isArray(t.connectorSlots)).toBe(true)
       // The list is the lean preview — raw yaml must NOT ride along.
       expect((t as Record<string, unknown>).yaml).toBeUndefined()
     }
@@ -92,6 +95,13 @@ describe('template gallery catalog routes (G-M2)', () => {
     ])
     expect(cafe.knowledgeBases.map((k) => k.name)).toEqual(['store_ops_manual'])
     expect(cafe.apiKeyPrompt).toMatchObject({ provider: 'openai-compatible', label: 'DeepSeek' })
+
+    // FDE-M1 — morning-brief declares its calendar connector slot; the gallery
+    // card shows the need BEFORE install instead of burying it in README prose.
+    const brief = templates.find((t) => t.id === 'morning-brief-hub')!
+    expect(brief.connectorSlots).toEqual([
+      expect.objectContaining({ id: 'calendar', optional: true, capability: 'calendar.read' }),
+    ])
 
     // child-desk ships ZERO agents (零订阅) but still teaches the hub workflows.
     const child = templates.find((t) => t.id === 'child-desk')!

@@ -814,6 +814,17 @@ export async function handleAgentsRoute(
     const kbSlotsToWire = template.knowledgeBases
       .filter((kb) => !kb.mcpServer)
       .map((kb) => ({ name: kb.name, ...(kb.useMcpServer ? { useMcpServer: kb.useMcpServer } : {}) }))
+    // FDE-M1 — abstract connector slots (`requires.connectors`): like KB slots
+    // these are reported, never auto-wired. Slot id = the MCP server NAME to
+    // hang (hub registry, or inline on an agent); which backend is the
+    // installer's runtime decision. Optional slots degrade gracefully — the
+    // hint tells the importer what the solution does without them.
+    const connectorsToWire = template.connectorSlots.map((s) => ({
+      id: s.id,
+      optional: s.optional,
+      ...(s.hint !== undefined ? { hint: s.hint } : {}),
+      ...(s.capability !== undefined ? { capability: s.capability } : {}),
+    }))
     const agentsMissingKey: { id: string; provider: string }[] = []
     if (ctx.llmKeyProbe) {
       for (const { id, provider } of createdProviders) {
@@ -866,7 +877,7 @@ export async function handleAgentsRoute(
       // ease-of-use ③-M1 — the "what's left to do" checklist (see above).
       // RES-M2 — `adaptations`: read-only proposals to wire agents/slots to
       // local resources; each is applied only via explicit RES-M3 human approval.
-      postInstallChecklist: { kbSlotsToWire, agentsMissingKey, adaptations },
+      postInstallChecklist: { kbSlotsToWire, connectorsToWire, agentsMissingKey, adaptations },
     })
     return true
   }

@@ -53,6 +53,13 @@ import {
  *         presetData:                  # OPTIONAL pointer to a packaged snapshot (B.5)
  *           kind: url                  # url | artifact — a POINTER, never content
  *           ref: https://example.com/kb-support.tar.zst
+ *     requires:                        # FDE-M1 — abstract connector slots (additive,
+ *       connectors:                    # like provenance: old hosts ignore the block)
+ *         - id: calendar               # slot id = the MCP server NAME that fulfils it
+ *           kind: mcp                  # M1: only 'mcp' (a2a/cli arrive with detectors)
+ *           optional: true             # true = solution degrades gracefully without it
+ *           capability: calendar.read  # doc-only tag, no structural meaning in M1
+ *           hint: 连接器目录「日历」组任选其一, server 名用 calendar
  *     defaults:                        # optional UI hints (same as bundle)
  *       apiKeyPrompt: { provider, baseURL?, label? }
  *
@@ -96,6 +103,29 @@ export interface TemplateKnowledgeBase {
   presetData?: TemplatePresetData
 }
 
+/**
+ * FDE-M1 — one abstract connector slot from `template.requires.connectors`.
+ * Where a `knowledgeBases` slot carries CONCRETE wiring (decision #4), a
+ * connector slot declares an abstract NEED: "this solution wants a
+ * calendar-ish MCP server named `calendar`". Same name-identity philosophy as
+ * KB slots — the slot `id` IS the MCP server name expected to exist (hub
+ * registry, or inline on a managed agent); which backend serves it is the
+ * installer's runtime decision. Never credentials, never personnel — the
+ * template says WHAT it needs, the hub's vault/registry holds HOW.
+ */
+export interface TemplateConnectorSlot {
+  /** Slot name = the MCP server name that fulfils it (addressable identity). */
+  id: string
+  /** M1: only 'mcp' is fulfilment-checkable; a2a/cli slots come with theirs. */
+  kind: 'mcp'
+  /** true = the solution degrades gracefully unfilled (hint, not a red). */
+  optional: boolean
+  /** Installer-facing one-liner: what to hang and where to find backends. */
+  hint?: string
+  /** Doc-only capability tag (e.g. `calendar.read`) — no structural meaning in M1. */
+  capability?: string
+}
+
 /** A workflow shipped inside a template — kept as an opaque re-serialized yaml. */
 export interface ParsedTemplateWorkflow {
   /** Workflow id (pulled out for listing + duplicate detection). */
@@ -132,6 +162,8 @@ export interface ParsedTemplate {
   agents: ParsedAgent[]
   workflows: ParsedTemplateWorkflow[]
   knowledgeBases: TemplateKnowledgeBase[]
+  /** FDE-M1 — abstract connector slots (`requires.connectors`); [] when absent. */
+  connectorSlots: TemplateConnectorSlot[]
   apiKeyPrompt?: BundleApiKeyPrompt
   /** Additive citation/attribution metadata (no structural meaning). */
   provenance?: TemplateProvenance
@@ -208,9 +240,11 @@ export function parseTemplate(raw: string): ParsedTemplate {
   const agents = parseTemplateAgents(t.agents)
   const workflows = parseTemplateWorkflows(t.workflows)
   const knowledgeBases = parseTemplateKnowledgeBases(t.knowledgeBases)
+  const connectorSlots = parseTemplateRequires(t.requires)
 
   // A template with nothing in it is almost certainly a mistake — reject it
-  // loudly rather than silently importing an empty architecture.
+  // loudly rather than silently importing an empty architecture. (Connector
+  // slots alone don't count: a pack that only NEEDS things installs nothing.)
   if (agents.length === 0 && workflows.length === 0 && knowledgeBases.length === 0) {
     throw new ManifestError(
       `template must declare at least one of agents / workflows / knowledgeBases`,
@@ -224,6 +258,7 @@ export function parseTemplate(raw: string): ParsedTemplate {
     agents,
     workflows,
     knowledgeBases,
+    connectorSlots,
   }
   if (typeof t.description === 'string') out.description = t.description
   const apiKeyPrompt = parseTemplateDefaults(t.defaults)
@@ -407,6 +442,82 @@ function parseTemplateKnowledgeBases(raw: unknown): TemplateKnowledgeBase[] {
       kb.presetData = parsePresetData(e.presetData, `${path}.presetData`)
     }
     out.push(kb)
+  }
+  return out
+}
+
+/**
+ * FDE-M1 — validate the optional `template.requires` block. Additive like
+ * `provenance`: absent → no slots; present → known fields validated LOUDLY
+ * (a typo'd slot must surface at import, not silently drop a requirement).
+ * An old host's parser reads only the keys it knows, so a template carrying
+ * `requires` still installs there as a plain template — graceful degradation
+ * is structural, not special-cased.
+ */
+function parseTemplateRequires(raw: unknown): TemplateConnectorSlot[] {
+  if (raw === undefined || raw === null) return []
+  if (typeof raw !== 'object' || Array.isArray(raw)) {
+    throw new ManifestError('template.requires must be an object when present')
+  }
+  const r = raw as Record<string, unknown>
+  if (r.connectors === undefined) return []
+  if (!Array.isArray(r.connectors)) {
+    throw new ManifestError('template.requires.connectors must be an array when present')
+  }
+  const out: TemplateConnectorSlot[] = []
+  const seen = new Set<string>()
+  for (let i = 0; i < r.connectors.length; i++) {
+    const entry = r.connectors[i]
+    const path = `template.requires.connectors[${i}]`
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+      throw new ManifestError(`${path} must be an object`)
+    }
+    const e = entry as Record<string, unknown>
+    if (typeof e.id !== 'string' || e.id.length === 0) {
+      throw new ManifestError(`${path}.id is required (non-empty string)`)
+    }
+    // Same charset as a KB slot / MCP server name — the id IS the server name
+    // that fulfils the slot, so it must round-trip into MCP wiring cleanly.
+    if (!KB_NAME_RE.test(e.id)) {
+      throw new ManifestError(
+        `${path}.id must match ${KB_NAME_RE} (letters/digits/_/-, start with a letter) — got '${e.id}'`,
+      )
+    }
+    if (seen.has(e.id)) {
+      throw new ManifestError(
+        `duplicate connector slot id '${e.id}' inside template.requires.connectors`,
+      )
+    }
+    seen.add(e.id)
+    // Only 'mcp' has a fulfilment detector today. Rejecting unknown kinds
+    // loudly beats accepting a slot no check can ever turn green — an
+    // uncheckable requirement would read as "covered" when it isn't.
+    if (e.kind !== 'mcp') {
+      throw new ManifestError(
+        `${path}.kind must be 'mcp' — got '${String(e.kind)}' (a2a/cli slots land together with their fulfilment detectors)`,
+      )
+    }
+    let optional = false
+    if (e.optional !== undefined) {
+      if (typeof e.optional !== 'boolean') {
+        throw new ManifestError(`${path}.optional must be a boolean when present`)
+      }
+      optional = e.optional
+    }
+    const slot: TemplateConnectorSlot = { id: e.id, kind: 'mcp', optional }
+    if (e.hint !== undefined) {
+      if (typeof e.hint !== 'string') {
+        throw new ManifestError(`${path}.hint must be a string when present`)
+      }
+      if (e.hint.trim().length > 0) slot.hint = e.hint.trim()
+    }
+    if (e.capability !== undefined) {
+      if (typeof e.capability !== 'string' || e.capability.trim().length === 0) {
+        throw new ManifestError(`${path}.capability must be a non-empty string when present`)
+      }
+      slot.capability = e.capability.trim()
+    }
+    out.push(slot)
   }
   return out
 }

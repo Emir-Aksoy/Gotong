@@ -53,6 +53,17 @@ describe('examples/morning-brief-hub/template (LIFE-L2①)', () => {
     expect(t.agents[0]!.capabilities).toContain('brief.compose')
     expect(t.workflows).toHaveLength(1)
     expect(t.apiKeyPrompt).toMatchObject({ provider: 'openai-compatible', label: 'DeepSeek' })
+    // FDE-M1 — the calendar connector need is a declared slot, not README prose:
+    // optional (honest mode without it), mcp-kind, name-identity `calendar`.
+    expect(t.connectorSlots).toEqual([
+      {
+        id: 'calendar',
+        kind: 'mcp',
+        optional: true,
+        capability: 'calendar.read',
+        hint: expect.stringContaining('诚实模式'),
+      },
+    ])
   })
 
   it('imports end-to-end: agent lands, ONE workflow yaml reaches the runtime with the member gate open', async () => {

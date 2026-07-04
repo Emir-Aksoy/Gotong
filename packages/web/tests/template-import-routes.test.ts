@@ -286,6 +286,35 @@ describe('POST /api/admin/templates/import — postInstallChecklist (ease-of-use
     ])
     expect(r.json.postInstallChecklist.agentsMissingKey).toEqual([])
   })
+
+  it('reports declared connector slots as connectorsToWire (FDE-M1)', async () => {
+    const r = await importReq({
+      template: templateText({
+        name: 'with-slots',
+        agents: [agentBlock({ id: 'a1', capabilities: ['cap-a'] })],
+        requires: {
+          connectors: [
+            { id: 'calendar', kind: 'mcp', optional: true, hint: '挂个日历', capability: 'calendar.read' },
+            { id: 'crm', kind: 'mcp' },
+          ],
+        },
+      }),
+    })
+    expect(r.status).toBe(200)
+    // Reported, never auto-wired — same posture as kbSlotsToWire.
+    expect(r.json.postInstallChecklist.connectorsToWire).toEqual([
+      { id: 'calendar', optional: true, hint: '挂个日历', capability: 'calendar.read' },
+      { id: 'crm', optional: false },
+    ])
+  })
+
+  it('connectorsToWire is [] for a template without requires (zero regression)', async () => {
+    const r = await importReq({
+      template: templateText({ name: 'no-slots', agents: [agentBlock()] }),
+    })
+    expect(r.status).toBe(200)
+    expect(r.json.postInstallChecklist.connectorsToWire).toEqual([])
+  })
 })
 
 // ── RES-M2: adaptation proposals attached to the checklist ──────────────────

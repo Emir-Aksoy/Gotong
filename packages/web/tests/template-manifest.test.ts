@@ -721,3 +721,73 @@ function tmpl(inner: Record<string, unknown>): string {
 function llmAgent(id: string): Record<string, unknown> {
   return { id, capabilities: ['chat'], kind: 'llm', provider: 'mock', system: 'hi' }
 }
+
+// ── FDE-M1: template.requires — abstract connector slots ────────────────────
+// The additive block that turns "要读真实数据自己挂 MCP" prose into a
+// machine-checkable declaration. Same trust-boundary posture as the rest of
+// the parser: recognized fields validate LOUDLY, absent block costs nothing,
+// and an old host ignores the key entirely (graceful degradation).
+
+const slotTemplate = (requires: unknown): string =>
+  JSON.stringify({
+    schema: TEMPLATE_SCHEMA_V1,
+    template: { name: 'slots', workflows: [{ id: 'wf' }], requires },
+  })
+
+describe('template.requires — FDE-M1 connector slots', () => {
+  it('parses slots; optional defaults false; hint/capability trimmed', () => {
+    const t = parseTemplate(
+      slotTemplate({
+        connectors: [
+          { id: 'calendar', kind: 'mcp', optional: true, capability: ' calendar.read ', hint: ' 挂个日历 ' },
+          { id: 'notes', kind: 'mcp' },
+        ],
+      }),
+    )
+    expect(t.connectorSlots).toEqual([
+      { id: 'calendar', kind: 'mcp', optional: true, capability: 'calendar.read', hint: '挂个日历' },
+      { id: 'notes', kind: 'mcp', optional: false },
+    ])
+  })
+
+  it('absent requires → empty slots (old templates unchanged)', () => {
+    const t = parseTemplate(
+      JSON.stringify({
+        schema: TEMPLATE_SCHEMA_V1,
+        template: { name: 'plain', workflows: [{ id: 'wf' }] },
+      }),
+    )
+    expect(t.connectorSlots).toEqual([])
+  })
+
+  it('rejects a non-mcp kind loudly (no uncheckable green)', () => {
+    expect(() => slotsOf([{ id: 'ext', kind: 'a2a' }])).toThrowError(ManifestError)
+    expect(() => slotsOf([{ id: 'ext', kind: 'a2a' }])).toThrowError(/kind must be 'mcp'/)
+  })
+
+  it('rejects duplicate slot ids', () => {
+    expect(() => slotsOf([{ id: 'x', kind: 'mcp' }, { id: 'x', kind: 'mcp' }])).toThrowError(
+      /duplicate connector slot id 'x'/,
+    )
+  })
+
+  it('rejects a slot id that cannot be an MCP server name', () => {
+    expect(() => slotsOf([{ id: '日历', kind: 'mcp' }])).toThrowError(/must match/)
+    expect(() => slotsOf([{ id: '1st', kind: 'mcp' }])).toThrowError(/must match/)
+  })
+
+  it('rejects malformed requires shapes loudly', () => {
+    expect(() => parseTemplate(slotTemplate('nope'))).toThrowError(/requires must be an object/)
+    expect(() => parseTemplate(slotTemplate({ connectors: 'nope' }))).toThrowError(
+      /connectors must be an array/,
+    )
+    expect(() => slotsOf([{ kind: 'mcp' }])).toThrowError(/id is required/)
+    expect(() => slotsOf([{ id: 'x', kind: 'mcp', optional: 'yes' }])).toThrowError(
+      /optional must be a boolean/,
+    )
+  })
+})
+
+function slotsOf(connectors: unknown[]): unknown {
+  return parseTemplate(slotTemplate({ connectors }))
+}
