@@ -242,16 +242,12 @@ import {
   ButlerMaintenanceSweeper,
   BUTLER_MAINTENANCE_INTERVAL_MS,
 } from './personal-butler-maintenance.js'
+import { BUTLER_PROACTIVE_INTERVAL_MS } from './personal-butler-proactive.js'
 import {
-  ButlerProactiveSweeper,
-  BUTLER_PROACTIVE_INTERVAL_MS,
-  buildButlerBriefComposer,
-} from './personal-butler-proactive.js'
-import {
-  ButlerRunBroadcastSweeper,
   BUTLER_RUN_BROADCAST_INTERVAL_MS,
   buildButlerRunBroadcastToolset,
 } from './personal-butler-run-broadcast.js'
+import { armButlerSweeps } from './personal-butler-sweeps.js'
 import { WorkflowScheduleSweeper } from './workflow-schedule-sweeper.js'
 import { PersonalButlerAgent } from '@aipehub/personal-butler'
 import { HostMeImService } from './me-im-service.js'
@@ -2377,54 +2373,28 @@ async function main(): Promise<void> {
     )
   }
 
-  // S3-M2 — arm the proactive daily-brief sweep. Like the reminder broker it delivers
-  // via the F1 `pushToMember` (read LAZILY through `butlerPushRef`, assigned after the
-  // IM bridges start ~500 lines down — the first tick lands one interval later, well
-  // after that). It resolves the butler's OWN provider fresh per compose (a key added
-  // after boot is picked up; null ⇒ no brief). Off when the butler is off or
-  // AIPE_BUTLER_PROACTIVE opts out; even on, it does nothing until a member opts in via
-  // `set_daily_brief` (DEFAULT-OFF per member). Not-at-boot: first tick one interval in.
-  let butlerProactiveSweeper: ButlerProactiveSweeper | undefined
-  if (butlerProactiveOn) {
-    butlerProactiveSweeper = new ButlerProactiveSweeper({
-      rootDir: butlerMemoryRoot,
-      composeBrief: buildButlerBriefComposer({
-        rootDir: butlerMemoryRoot,
-        buildProvider: () => localAgents.buildButlerProvider(),
-        logger: log,
-      }),
-      push: (userId, msg) =>
-        butlerPushRef
-          ? butlerPushRef(userId, msg)
-          : Promise.resolve({ delivered: false, reason: 'no_bridge' }),
-      logger: log,
+  // S3-M2 + BE-M5 — arm the butler's delivery sweeps (proactive daily brief +
+  // run-result broadcast; both DEFAULT-OFF per member until they opt in). The
+  // push is the F1 `pushToMember`, read LAZILY — bridges start ~500 lines down,
+  // the first tick lands one interval later. Full posture story in the module.
+  const butlerSweeps = armButlerSweeps({
+    memoryRoot: butlerMemoryRoot,
+    push: (userId, msg) =>
+      butlerPushRef
+        ? butlerPushRef(userId, msg)
+        : Promise.resolve({ delivered: false, reason: 'no_bridge' }),
+    logger: log,
+    proactive: {
+      on: butlerProactiveOn,
       intervalMs: butlerProactiveMs,
-    })
-    butlerProactiveSweeper.start()
-  }
-
-  // BE-M5 — arm the run-result broadcast sweep. Same posture as the daily brief:
-  // delivers via the F1 `pushToMember` (read LAZILY through `butlerPushRef`, assigned
-  // after the IM bridges start below — the first tick lands one interval later). It
-  // reads each opted-in member's runs through the SAME `listRunsByUser` projection the
-  // BE-M1 `list_my_runs` eye uses (scoped + secret-scrubbed server-side). Off when the
-  // butler is off, AIPE_BUTLER_RUN_BROADCAST opts out, or the run surface is unwired;
-  // even on, it does nothing until a member opts in via `set_run_broadcast` (DEFAULT-OFF
-  // per member). Zero-LLM — the notice is assembled from the run row, no provider needed.
-  let butlerRunBroadcastSweeper: ButlerRunBroadcastSweeper | undefined
-  if (butlerRunBroadcastOn && butlerObserveRunsRef) {
-    butlerRunBroadcastSweeper = new ButlerRunBroadcastSweeper({
-      rootDir: butlerMemoryRoot,
-      runs: butlerObserveRunsRef,
-      push: (userId, msg) =>
-        butlerPushRef
-          ? butlerPushRef(userId, msg)
-          : Promise.resolve({ delivered: false, reason: 'no_bridge' }),
-      logger: log,
+      buildProvider: () => localAgents.buildButlerProvider(),
+    },
+    runBroadcast: {
+      on: butlerRunBroadcastOn,
       intervalMs: butlerRunBroadcastMs,
-    })
-    butlerRunBroadcastSweeper.start()
-  }
+      runs: butlerObserveRunsRef,
+    },
+  })
 
   // LIFE-L1 乙案 — zero-LLM workflow schedules; default-on, no knob (missing intent file = free no-op).
   const workflowScheduleSweeper = new WorkflowScheduleSweeper(
@@ -3377,12 +3347,7 @@ async function main(): Promise<void> {
     if (butlerMaintenanceSweeper) {
       try { butlerMaintenanceSweeper.stop() } catch (err) { log.error('butler maintenance stop error', { err }) }
     }
-    if (butlerProactiveSweeper) {
-      try { butlerProactiveSweeper.stop() } catch (err) { log.error('butler proactive stop error', { err }) }
-    }
-    if (butlerRunBroadcastSweeper) {
-      try { butlerRunBroadcastSweeper.stop() } catch (err) { log.error('butler run-broadcast stop error', { err }) }
-    }
+    try { butlerSweeps.stop() } catch (err) { log.error('butler sweeps stop error', { err }) }
     try { workflowScheduleSweeper.stop() } catch (err) { log.error('workflow schedule stop error', { err }) }
     if (services) {
       try { await services.shutdownAll() } catch (err) { log.error('services shutdown error', { err }) }
