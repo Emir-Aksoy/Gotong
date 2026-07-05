@@ -132,6 +132,12 @@ export interface TemplateCatalogEntry {
    * importer knows what the solution expects to be hung — no surprise 散文.
    */
   connectorSlots: { id: string; optional: boolean; hint?: string; capability?: string }[]
+  /**
+   * FDE-M2 — golden acceptance cases the pack ships (ids only; triggers and
+   * assertions stay server-side). Shown on the gallery card so the importer
+   * knows the pack can prove itself after install.
+   */
+  acceptanceCases: { id: string; workflowId: string }[]
   /** One-click apiKeyPrompt hint, if the template declares one. */
   apiKeyPrompt?: BundleApiKeyPrompt
 }
@@ -174,6 +180,7 @@ export function buildTemplateCatalog(): TemplateCatalogEntry[] {
           ...(s.hint !== undefined ? { hint: s.hint } : {}),
           ...(s.capability !== undefined ? { capability: s.capability } : {}),
         })),
+        acceptanceCases: p.acceptanceCases.map((c) => ({ id: c.id, workflowId: c.workflowId })),
         ...(p.apiKeyPrompt ? { apiKeyPrompt: p.apiKeyPrompt } : {}),
       })
     } catch (err) {

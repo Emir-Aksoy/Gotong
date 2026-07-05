@@ -159,6 +159,14 @@ export interface AgentsRoutesCtx {
    * a record fault never fails an import. Absent → response-only (M1a mode).
    */
   connectorSlots?: ConnectorSlotSink
+  /**
+   * FDE-M2 — optional durable sink for a template's golden acceptance cases
+   * (`acceptance[]`). Recorded at import so the workflows page can offer
+   * 「跑验收」 later; running them is the acceptance surface's job (see
+   * template-acceptance-routes.ts), never the import's. Best-effort: a
+   * record fault never fails an import. Absent → response-only reporting.
+   */
+  templateAcceptance?: AcceptanceCaseSink
 }
 
 /** FDE-M1b — durable recorder for installed packs' declared connector slots. */
@@ -166,6 +174,20 @@ export interface ConnectorSlotSink {
   record(
     pack: string,
     connectors: readonly { id: string; optional: boolean; hint?: string; capability?: string }[],
+  ): Promise<void>
+}
+
+/** FDE-M2 — durable recorder for installed packs' golden acceptance cases. */
+export interface AcceptanceCaseSink {
+  record(
+    pack: string,
+    cases: readonly {
+      id: string
+      workflowId: string
+      trigger: Record<string, unknown>
+      assert: { sections?: string[]; contains?: string[]; forbid?: string[]; maxBytes?: number }
+      note?: string
+    }[],
   ): Promise<void>
 }
 
@@ -855,6 +877,18 @@ export async function handleAgentsRoute(
         })
       }
     }
+    // FDE-M2 — same posture for golden acceptance cases: record so the admin
+    // workflows page can offer 「跑验收」 later; [] clears a stale entry.
+    if (ctx.templateAcceptance) {
+      try {
+        await ctx.templateAcceptance.record(template.name, template.acceptanceCases)
+      } catch (err) {
+        log.warn('acceptance-case recording failed (install unaffected)', {
+          template: template.name,
+          err: err instanceof Error ? err.message : String(err),
+        })
+      }
+    }
     const agentsMissingKey: { id: string; provider: string }[] = []
     if (ctx.llmKeyProbe) {
       for (const { id, provider } of createdProviders) {
@@ -907,7 +941,19 @@ export async function handleAgentsRoute(
       // ease-of-use ③-M1 — the "what's left to do" checklist (see above).
       // RES-M2 — `adaptations`: read-only proposals to wire agents/slots to
       // local resources; each is applied only via explicit RES-M3 human approval.
-      postInstallChecklist: { kbSlotsToWire, connectorsToWire, agentsMissingKey, adaptations },
+      // FDE-M2 — `acceptanceCases`: golden cases shipped with the pack; run
+      // them from the workflows page (never auto-run at install — a golden
+      // run burns real tokens and must be a deliberate click).
+      postInstallChecklist: {
+        kbSlotsToWire,
+        connectorsToWire,
+        agentsMissingKey,
+        adaptations,
+        acceptanceCases: template.acceptanceCases.map((c) => ({
+          id: c.id,
+          workflowId: c.workflowId,
+        })),
+      },
     })
     return true
   }

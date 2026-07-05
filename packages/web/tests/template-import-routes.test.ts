@@ -484,3 +484,94 @@ describe('POST /api/admin/templates/import — connector-slot sink (FDE-M1b)', (
     expect(ids).toContain('support-agent')
   })
 })
+
+// ── FDE-M2: golden acceptance cases at import ────────────────────────────────
+// Runner + registry live host-side (host/src/template-acceptance.ts). The web
+// seams pinned here: cases land in the checklist (ids only), a successful
+// import records them through the injected surface ([] included — that clears
+// a stale entry on reinstall), and a record fault never fails the install.
+describe('POST /api/admin/templates/import — acceptance cases (FDE-M2)', () => {
+  const acceptanceSurface = () => {
+    const recorded: { pack: string; cases: unknown }[] = []
+    return {
+      recorded,
+      surface: {
+        record: async (pack: string, cases: unknown) => {
+          recorded.push({ pack, cases })
+        },
+        list: async () => [],
+        run: async () => ({ pack: '', ranBy: '', allGreen: true, results: [] }),
+      },
+    }
+  }
+
+  it('reports cases in the checklist and records them under the template name', async () => {
+    await b.server.close()
+    const { recorded, surface } = acceptanceSurface()
+    const workflows = { importFromText: async () => ({ id: 'x' }) } as unknown as WorkflowSurface
+    b.server = await serveWeb(b.hub, {
+      host: '127.0.0.1',
+      port: 0,
+      workflows,
+      templateAcceptance: surface,
+    })
+
+    const r = await importReq({
+      template: templateText({
+        name: 'with-cases',
+        agents: [agentBlock()],
+        workflows: [{ id: 'wf-a', trigger: { capability: 'cap-a' }, steps: [] }],
+        acceptance: [
+          {
+            id: 'smoke',
+            workflowId: 'wf-a',
+            trigger: { focus: 'x' },
+            assert: { contains: ['今日重点'] },
+          },
+        ],
+      }),
+    })
+    expect(r.status).toBe(200)
+    expect(r.json.postInstallChecklist.acceptanceCases).toEqual([
+      { id: 'smoke', workflowId: 'wf-a' },
+    ])
+    expect(recorded).toEqual([
+      {
+        pack: 'with-cases',
+        cases: [
+          {
+            id: 'smoke',
+            workflowId: 'wf-a',
+            trigger: { focus: 'x' },
+            assert: { contains: ['今日重点'] },
+          },
+        ],
+      },
+    ])
+  })
+
+  it('records [] for a case-less template (clears a stale entry) and a fault never fails', async () => {
+    await b.server.close()
+    const { recorded, surface } = acceptanceSurface()
+    surface.record = async (pack: string, cases: unknown) => {
+      recorded.push({ pack, cases })
+      throw new Error('disk hiccup')
+    }
+    const workflows = { importFromText: async () => ({ id: 'x' }) } as unknown as WorkflowSurface
+    b.server = await serveWeb(b.hub, {
+      host: '127.0.0.1',
+      port: 0,
+      workflows,
+      templateAcceptance: surface,
+    })
+
+    const r = await importReq({
+      template: templateText({ name: 'no-cases', agents: [agentBlock()] }),
+    })
+    expect(r.status).toBe(200)
+    expect(r.json.ok).toBe(true)
+    expect(recorded).toEqual([{ pack: 'no-cases', cases: [] }])
+    // checklist still present with an empty list (zero regression shape)
+    expect(r.json.postInstallChecklist.acceptanceCases).toEqual([])
+  })
+})

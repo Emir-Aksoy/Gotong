@@ -61,6 +61,7 @@ import {
 } from './workflow-routes.js'
 import { handleWizardAdminRoute, type WorkflowWizardSurface } from './wizard-routes.js'
 import { handleAgentsRoute, type AgentGrantSink, type ConnectorSlotSink, type LlmKeyProbe } from './agents-routes.js'
+import { handleTemplateAcceptanceRoute, type TemplateAcceptanceSurface } from './template-acceptance-routes.js'
 import { handleAdminStewardRoute } from './admin-steward-routes.js'
 import { handleServicesRoute } from './services-routes.js'
 import { handleUploadsRoute } from './uploads-routes.js'
@@ -305,6 +306,7 @@ export function serveWeb(hub: Hub, opts: WebServerOptions = {}): Promise<WebServ
     lifecycle: opts.lifecycle,
     llmKeyProbe: opts.llmKeyProbe,
     connectorSlots: opts.connectorSlots,
+    templateAcceptance: opts.templateAcceptance,
     adminHealth: opts.adminHealth,
     resourceInventory: opts.resourceInventory,
     resourceAdaptation: opts.resourceAdaptation,
@@ -463,6 +465,8 @@ interface HandlerCtx {
   llmKeyProbe: LlmKeyProbe | undefined
   /** FDE-M1b — see WebServerOptions.connectorSlots doc (server-types.ts). */
   connectorSlots: ConnectorSlotSink | undefined
+  /** FDE-M2 — see WebServerOptions.templateAcceptance doc (server-types.ts). */
+  templateAcceptance: TemplateAcceptanceSurface | undefined
   adminHealth: AdminHealthSurface | undefined
   /** RES-M1 — see WebServerOptions.resourceInventory doc above. */
   resourceInventory: ResourceInventorySurface | undefined
@@ -1352,6 +1356,7 @@ async function handle(
         lifecycle: ctx.lifecycle,
         llmKeyProbe: ctx.llmKeyProbe,
         connectorSlots: ctx.connectorSlots,
+        templateAcceptance: ctx.templateAcceptance,
         reconcileHeartbeats: ctx.reconcileHeartbeats,
         workflows: ctx.workflows,
         requireAdmin: (rq, rs) => requireAdmin(ctx, rq, rs),
@@ -1614,6 +1619,19 @@ async function handle(
         workflows: ctx.workflows,
         personnel: ctx.templatePersonnel,
         audit: ctx.identity,
+        requireAdmin: (rq, rs) => requireAdmin(ctx, rq, rs),
+      },
+      req, res, method, path,
+    )
+    if (handled) return
+  }
+
+  // FDE-M2 — golden-run acceptance (list recorded packs / run through the
+  // member gate). Own module; precise matching inside; absent surface → 503.
+  if (path.startsWith('/api/admin/templates/acceptance')) {
+    const handled = await handleTemplateAcceptanceRoute(
+      {
+        templateAcceptance: ctx.templateAcceptance,
         requireAdmin: (rq, rs) => requireAdmin(ctx, rq, rs),
       },
       req, res, method, path,

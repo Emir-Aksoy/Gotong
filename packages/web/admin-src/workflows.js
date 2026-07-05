@@ -51,6 +51,8 @@ export function createWorkflows({ wf }) {
       // LIFE-L1-M3 — the「定时」card rides every workflow refresh (its rows
       // name workflows and its form lists them, so the two stay in step).
       void refreshSchedules()
+      // FDE-M2 — the「验收」card too (its cases name workflows).
+      void refreshAcceptance()
     } catch (err) {
       console.warn('refreshWorkflows:', err)
     }
@@ -436,6 +438,116 @@ export function createWorkflows({ wf }) {
       await refreshSchedules()
     } catch (err) {
       alert(t.failedAlert(err.message || String(err)))
+    }
+  }
+
+  // --- template acceptance (FDE-M2 —「验收」card) ---------------------------
+  //
+  // Golden cases recorded at template install; 「跑验收」 fires them for real
+  // through the member gate (as the logged-in admin) and the host judges the
+  // output with zero-LLM structure checks. Card hidden when the surface is
+  // unwired (503) OR no installed pack ships cases ([]) — older hosts and
+  // case-less hubs render exactly as before. Verdicts are kept per pack until
+  // the next run (no auto-rerun: a golden run burns real tokens).
+
+  let acceptPacks = []
+  const acceptReports = {} // pack → last run report
+  let acceptRunning = ''
+
+  async function refreshAcceptance() {
+    if (!dom?.wfAcceptCard) return
+    try {
+      const r = await fetch('/api/admin/templates/acceptance')
+      if (!r.ok) {
+        dom.wfAcceptCard.hidden = true
+        return
+      }
+      acceptPacks = (await r.json()).packs || []
+      dom.wfAcceptCard.hidden = acceptPacks.length === 0
+      if (acceptPacks.length > 0) renderAcceptance()
+    } catch (err) {
+      console.warn('refreshAcceptance:', err)
+    }
+  }
+
+  function acceptMsg(text, cls) {
+    if (!dom.wfAcceptMsg) return
+    dom.wfAcceptMsg.textContent = text
+    dom.wfAcceptMsg.classList.remove('ok', 'err')
+    if (cls) dom.wfAcceptMsg.classList.add(cls)
+  }
+
+  function acceptVerdictRows(report) {
+    return report.results.map((v) => {
+      const ok = v.verdict === 'green'
+      const badge = ok
+        ? `<span class="wf-state wf-state-published">${escapeHtml(t.wfAcceptGreen)}</span>`
+        : `<span class="wf-state wf-state-archived">${escapeHtml(t.wfAcceptRed)}</span>`
+      const reason = ok ? '' : ` — ${escapeHtml(t.wfAcceptReason(v.reason))}`
+      const detail = !ok && v.violations?.length
+        ? `<ul class="ma-meta">${v.violations.map((x) => `<li>${escapeHtml(x.message)}</li>`).join('')}</ul>`
+        : !ok && v.message
+          ? `<ul class="ma-meta"><li>${escapeHtml(v.message)}</li></ul>`
+          : ''
+      return `<li class="wf-accept-row">${badge} <code>${escapeHtml(v.caseId)}</code>
+        <span class="hint">${escapeHtml(v.workflowId)} · ${Math.round(v.elapsedMs / 1000)}s</span>${reason}${detail}</li>`
+    }).join('')
+  }
+
+  function renderAcceptance() {
+    if (!dom.wfAcceptList) return
+    if (dom.wfAcceptSummary) {
+      dom.wfAcceptSummary.textContent =
+        acceptPacks.length === 0 ? '' : t.wfAcceptSummary(acceptPacks.length)
+    }
+    dom.wfAcceptList.innerHTML = acceptPacks.map((p) => {
+      const packAttr = escapeHtml(p.pack)
+      const running = acceptRunning === p.pack
+      const report = acceptReports[p.pack]
+      const caseLines = p.cases.map((c) => {
+        const note = c.note ? ` <span class="hint">${escapeHtml(c.note)}</span>` : ''
+        return `<li><code>${escapeHtml(c.id)}</code> → ${escapeHtml(c.workflowId)}${note}</li>`
+      }).join('')
+      const reportBlock = report
+        ? `<ul class="ma-meta wf-accept-report">${acceptVerdictRows(report)}</ul>`
+        : ''
+      return `<article class="ma-card">
+        <header>
+          <strong>${packAttr}</strong>
+          ${report ? (report.allGreen
+            ? `<span class="wf-state wf-state-published">${escapeHtml(t.wfAcceptAllGreen)}</span>`
+            : `<span class="wf-state wf-state-archived">${escapeHtml(t.wfAcceptHasRed(report.results.filter((v) => v.verdict !== 'green').length))}</span>`) : ''}
+          <button type="button" class="ma-btn" data-act="run-acceptance" data-id="${packAttr}"${running ? ' disabled' : ''}>${escapeHtml(running ? t.wfAcceptRunningBtn : t.wfAcceptRunBtn)}</button>
+        </header>
+        <ul class="ma-meta">${caseLines}</ul>
+        ${reportBlock}
+      </article>`
+    }).join('')
+  }
+
+  async function runAcceptance(pack) {
+    if (acceptRunning) return
+    acceptRunning = pack
+    acceptMsg(t.wfAcceptRunning, '')
+    renderAcceptance()
+    try {
+      const r = await fetch(`/api/admin/templates/acceptance/${encodeURIComponent(pack)}/run`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: '{}',
+      })
+      const body = await r.json().catch(() => ({}))
+      if (!r.ok) {
+        acceptMsg(t.failedAlert(body.error || `${r.status}`), 'err')
+        return
+      }
+      acceptReports[pack] = body.report
+      acceptMsg(body.report.allGreen ? t.wfAcceptDoneGreen(pack) : t.wfAcceptDoneRed(pack), body.report.allGreen ? 'ok' : 'err')
+    } catch (err) {
+      acceptMsg(t.failedAlert(err.message || String(err)), 'err')
+    } finally {
+      acceptRunning = ''
+      renderAcceptance()
     }
   }
 
@@ -1344,6 +1456,8 @@ export function createWorkflows({ wf }) {
     fireSchedule,
     toggleSchedule,
     removeSchedule,
+    refreshAcceptance,
+    runAcceptance,
     removeWorkflow,
     lifecycleAction,
     openWorkflowRevisionsModal,

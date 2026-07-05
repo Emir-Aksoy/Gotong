@@ -26,6 +26,14 @@ export interface StructureExpectation {
   requiredSections: string[]
 
   /**
+   * Phrases that MUST appear anywhere in the text (plain substring, no
+   * heading requirement). For outputs that use numbered/short sections
+   * instead of markdown `##` headings — e.g. the morning brief's
+   * 「今日重点 / 提醒 / 今日一学」.
+   */
+  requiredPhrases?: string[]
+
+  /**
    * Phrases anywhere in the text that MUST NOT appear. Useful for
    * guarding against forbidden disclaimers, formality markers, etc.
    */
@@ -39,7 +47,7 @@ export interface StructureExpectation {
 }
 
 export interface StructureViolation {
-  kind: 'missing_section' | 'forbidden_phrase' | 'too_long'
+  kind: 'missing_section' | 'missing_phrase' | 'forbidden_phrase' | 'too_long'
   message: string
 }
 
@@ -60,6 +68,17 @@ export function checkStructure(
         kind: 'missing_section',
         message: `required section "## ...${heading}..." not found`,
       })
+    }
+  }
+
+  if (expect.requiredPhrases) {
+    for (const phrase of expect.requiredPhrases) {
+      if (!text.includes(phrase)) {
+        violations.push({
+          kind: 'missing_phrase',
+          message: `required phrase "${phrase}" not found in text`,
+        })
+      }
     }
   }
 

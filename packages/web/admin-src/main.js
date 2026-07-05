@@ -249,6 +249,11 @@ import { createWorkflows } from './workflows.js'
       wfSchedHour: $('wf-sched-hour'),
       wfSchedMinutes: $('wf-sched-minutes'),
       wfSchedMsg: $('wf-sched-msg'),
+      // Template acceptance (FDE-M2 —「验收」card)
+      wfAcceptCard: $('wf-accept-card'),
+      wfAcceptSummary: $('wf-accept-summary'),
+      wfAcceptList: $('wf-accept-list'),
+      wfAcceptMsg: $('wf-accept-msg'),
       // Workflow start (v2.4) — payload-schema-driven dispatch form
       wfStartModal: $('wf-start-modal'),
       wfStartTitle: $('wf-start-title'),
@@ -3076,6 +3081,8 @@ import { createWorkflows } from './workflows.js'
         workflows.toggleSchedule(id)
       } else if (act === 'remove-schedule') {
         workflows.removeSchedule(id)
+      } else if (act === 'run-acceptance') {
+        workflows.runAcceptance(id)
       } else if (act === 'open-workflow-revisions') {
         workflows.openWorkflowRevisionsModal(id)
       } else if (act === 'rollback-revision') {

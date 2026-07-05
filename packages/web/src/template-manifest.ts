@@ -135,6 +135,36 @@ export interface ParsedTemplateWorkflow {
 }
 
 /**
+ * FDE-M2 — one golden acceptance case shipped with a template. Judged with
+ * zero LLM: the runner fires the workflow through the member gate and applies
+ * `assert` (the `@gotong/evals` structure-checker vocabulary) to the run's
+ * final output text. `trigger` carries the case's INPUT FIELDS only — never a
+ * member identity (the scope key is forced to the person who runs acceptance,
+ * same invariant as every other dispatch path).
+ */
+export interface TemplateAcceptanceCase {
+  /** Case id — unique within the template, shown on the green/red report. */
+  id: string
+  /** The template-shipped workflow this case exercises. */
+  workflowId: string
+  /** Trigger input fields (declared-fields-only at run time). */
+  trigger: Record<string, unknown>
+  /** Zero-LLM assertions on the run's final output text. */
+  assert: {
+    /** Markdown `## ` headings that must appear. */
+    sections?: string[]
+    /** Plain substrings that must appear (for non-`##` section styles). */
+    contains?: string[]
+    /** Substrings that must NOT appear. */
+    forbid?: string[]
+    /** Max output length in bytes. */
+    maxBytes?: number
+  }
+  /** Free-text note shown beside the case on the report. */
+  note?: string
+}
+
+/**
  * Optional, additive provenance for a template (community citation graph).
  * Carries NO structural meaning — the importer ignores it; it exists so credit
  * can flow back upstream and a static leaderboard can rank "how many templates
@@ -164,6 +194,8 @@ export interface ParsedTemplate {
   knowledgeBases: TemplateKnowledgeBase[]
   /** FDE-M1 — abstract connector slots (`requires.connectors`); [] when absent. */
   connectorSlots: TemplateConnectorSlot[]
+  /** FDE-M2 — golden acceptance cases (`acceptance`); [] when absent. */
+  acceptanceCases: TemplateAcceptanceCase[]
   apiKeyPrompt?: BundleApiKeyPrompt
   /** Additive citation/attribution metadata (no structural meaning). */
   provenance?: TemplateProvenance
@@ -241,10 +273,12 @@ export function parseTemplate(raw: string): ParsedTemplate {
   const workflows = parseTemplateWorkflows(t.workflows)
   const knowledgeBases = parseTemplateKnowledgeBases(t.knowledgeBases)
   const connectorSlots = parseTemplateRequires(t.requires)
+  const acceptanceCases = parseTemplateAcceptance(t.acceptance, workflows)
 
   // A template with nothing in it is almost certainly a mistake — reject it
   // loudly rather than silently importing an empty architecture. (Connector
-  // slots alone don't count: a pack that only NEEDS things installs nothing.)
+  // slots / acceptance cases alone don't count: a pack that only NEEDS or
+  // only TESTS things installs nothing.)
   if (agents.length === 0 && workflows.length === 0 && knowledgeBases.length === 0) {
     throw new ManifestError(
       `template must declare at least one of agents / workflows / knowledgeBases`,
@@ -259,6 +293,7 @@ export function parseTemplate(raw: string): ParsedTemplate {
     workflows,
     knowledgeBases,
     connectorSlots,
+    acceptanceCases,
   }
   if (typeof t.description === 'string') out.description = t.description
   const apiKeyPrompt = parseTemplateDefaults(t.defaults)
@@ -518,6 +553,117 @@ function parseTemplateRequires(raw: unknown): TemplateConnectorSlot[] {
       slot.capability = e.capability.trim()
     }
     out.push(slot)
+  }
+  return out
+}
+
+/**
+ * FDE-M2 — validate the optional `template.acceptance` block. Additive like
+ * `requires`: absent → no cases; present → validated LOUDLY. Two rules with
+ * teeth beyond shape checks:
+ *   - `workflowId` must name a workflow SHIPPED IN THIS TEMPLATE — a typo'd
+ *     id would otherwise produce a case that can never run (it would read as
+ *     "red: workflow missing" forever, blaming the hub for the pack's typo);
+ *   - `assert` must contain at least one actual assertion — a case that
+ *     asserts nothing would always report green and reads as "verified"
+ *     when nothing was.
+ */
+function parseTemplateAcceptance(
+  raw: unknown,
+  workflows: readonly ParsedTemplateWorkflow[],
+): TemplateAcceptanceCase[] {
+  if (raw === undefined || raw === null) return []
+  if (!Array.isArray(raw)) {
+    throw new ManifestError('template.acceptance must be an array when present')
+  }
+  const shippedIds = new Set(workflows.map((w) => w.id))
+  const out: TemplateAcceptanceCase[] = []
+  const seen = new Set<string>()
+  for (let i = 0; i < raw.length; i++) {
+    const entry = raw[i]
+    const path = `template.acceptance[${i}]`
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+      throw new ManifestError(`${path} must be an object`)
+    }
+    const e = entry as Record<string, unknown>
+    if (typeof e.id !== 'string' || e.id.length === 0) {
+      throw new ManifestError(`${path}.id is required (non-empty string)`)
+    }
+    if (!KB_NAME_RE.test(e.id)) {
+      throw new ManifestError(
+        `${path}.id must match ${KB_NAME_RE} (letters/digits/_/-, start with a letter) — got '${e.id}'`,
+      )
+    }
+    if (seen.has(e.id)) {
+      throw new ManifestError(`duplicate acceptance case id '${e.id}' inside template.acceptance`)
+    }
+    seen.add(e.id)
+    if (typeof e.workflowId !== 'string' || e.workflowId.length === 0) {
+      throw new ManifestError(`${path}.workflowId is required (non-empty string)`)
+    }
+    if (!shippedIds.has(e.workflowId)) {
+      throw new ManifestError(
+        `${path}.workflowId '${e.workflowId}' does not match any workflow shipped in this template (have: ${[...shippedIds].join(', ') || 'none'})`,
+      )
+    }
+    let trigger: Record<string, unknown> = {}
+    if (e.trigger !== undefined) {
+      if (!e.trigger || typeof e.trigger !== 'object' || Array.isArray(e.trigger)) {
+        throw new ManifestError(`${path}.trigger must be an object when present`)
+      }
+      trigger = e.trigger as Record<string, unknown>
+    }
+    const assert = parseAcceptanceAssert(e.assert, `${path}.assert`)
+    const c: TemplateAcceptanceCase = { id: e.id, workflowId: e.workflowId, trigger, assert }
+    if (e.note !== undefined) {
+      if (typeof e.note !== 'string') {
+        throw new ManifestError(`${path}.note must be a string when present`)
+      }
+      if (e.note.trim().length > 0) c.note = e.note.trim()
+    }
+    out.push(c)
+  }
+  return out
+}
+
+/** Validate one case's `assert` block (must carry ≥1 real assertion). */
+function parseAcceptanceAssert(
+  raw: unknown,
+  path: string,
+): TemplateAcceptanceCase['assert'] {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    throw new ManifestError(`${path} is required (object with at least one assertion)`)
+  }
+  const a = raw as Record<string, unknown>
+  const out: TemplateAcceptanceCase['assert'] = {}
+  for (const key of ['sections', 'contains', 'forbid'] as const) {
+    if (a[key] === undefined) continue
+    const arr = a[key]
+    if (!Array.isArray(arr)) throw new ManifestError(`${path}.${key} must be an array when present`)
+    const cleaned: string[] = []
+    for (const v of arr) {
+      if (typeof v !== 'string' || v.trim().length === 0) {
+        throw new ManifestError(`${path}.${key} entries must be non-empty strings`)
+      }
+      cleaned.push(v.trim())
+    }
+    if (cleaned.length > 0) out[key] = cleaned
+  }
+  if (a.maxBytes !== undefined) {
+    if (typeof a.maxBytes !== 'number' || !Number.isInteger(a.maxBytes) || a.maxBytes < 1) {
+      throw new ManifestError(`${path}.maxBytes must be a positive integer when present`)
+    }
+    out.maxBytes = a.maxBytes
+  }
+  if (
+    (out.sections?.length ?? 0) === 0 &&
+    (out.contains?.length ?? 0) === 0 &&
+    (out.forbid?.length ?? 0) === 0 &&
+    out.maxBytes === undefined
+  ) {
+    throw new ManifestError(
+      `${path} must contain at least one assertion (sections / contains / forbid / maxBytes) — an assertion-free case would always pass`,
+    )
   }
   return out
 }

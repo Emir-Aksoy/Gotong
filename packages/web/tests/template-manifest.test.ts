@@ -791,3 +791,104 @@ describe('template.requires — FDE-M1 connector slots', () => {
 function slotsOf(connectors: unknown[]): unknown {
   return parseTemplate(slotTemplate({ connectors }))
 }
+
+// ── FDE-M2: template.acceptance — golden run cases ──────────────────────────
+// Same additive posture as `requires`. Two rules with teeth: workflowId must
+// name a workflow SHIPPED IN THIS TEMPLATE (a typo'd id would read as a
+// forever-red case blaming the hub), and assert must carry ≥1 real assertion
+// (an assertion-free case would always pass and read as "verified").
+
+const acceptTemplate = (acceptance: unknown): string =>
+  JSON.stringify({
+    schema: TEMPLATE_SCHEMA_V1,
+    template: { name: 'accept', workflows: [{ id: 'wf-a' }, { id: 'wf-b' }], acceptance },
+  })
+
+const caseOf = (over: Record<string, unknown> = {}): Record<string, unknown> => ({
+  id: 'smoke',
+  workflowId: 'wf-a',
+  trigger: { focus: 'x' },
+  assert: { contains: ['今日重点'] },
+  ...over,
+})
+
+describe('template.acceptance — FDE-M2 golden cases', () => {
+  it('parses cases; trigger defaults {}; note trimmed; assert entries trimmed', () => {
+    const t = parseTemplate(
+      acceptTemplate([
+        caseOf({ note: ' 诚实模式即合格线 ' }),
+        { id: 'no-trigger', workflowId: 'wf-b', assert: { sections: [' 核心判断 '], maxBytes: 4000 } },
+      ]),
+    )
+    expect(t.acceptanceCases).toEqual([
+      {
+        id: 'smoke',
+        workflowId: 'wf-a',
+        trigger: { focus: 'x' },
+        assert: { contains: ['今日重点'] },
+        note: '诚实模式即合格线',
+      },
+      {
+        id: 'no-trigger',
+        workflowId: 'wf-b',
+        trigger: {},
+        assert: { sections: ['核心判断'], maxBytes: 4000 },
+      },
+    ])
+  })
+
+  it('absent acceptance → empty cases (old templates unchanged)', () => {
+    const t = parseTemplate(
+      JSON.stringify({
+        schema: TEMPLATE_SCHEMA_V1,
+        template: { name: 'plain', workflows: [{ id: 'wf' }] },
+      }),
+    )
+    expect(t.acceptanceCases).toEqual([])
+  })
+
+  it('rejects a workflowId not shipped in this template', () => {
+    expect(() => parseTemplate(acceptTemplate([caseOf({ workflowId: 'typo' })]))).toThrowError(
+      /does not match any workflow shipped in this template/,
+    )
+  })
+
+  it('rejects an assertion-free case (it would always pass)', () => {
+    expect(() => parseTemplate(acceptTemplate([caseOf({ assert: {} })]))).toThrowError(
+      /at least one assertion/,
+    )
+    expect(() =>
+      parseTemplate(acceptTemplate([caseOf({ assert: { contains: [] } })])),
+    ).toThrowError(/at least one assertion/)
+    expect(() => parseTemplate(acceptTemplate([caseOf({ assert: undefined })]))).toThrowError(
+      /assert is required/,
+    )
+  })
+
+  it('rejects duplicate case ids and malformed shapes loudly', () => {
+    expect(() => parseTemplate(acceptTemplate([caseOf(), caseOf()]))).toThrowError(
+      /duplicate acceptance case id 'smoke'/,
+    )
+    expect(() => parseTemplate(acceptTemplate('nope'))).toThrowError(/must be an array/)
+    expect(() => parseTemplate(acceptTemplate([caseOf({ trigger: 'nope' })]))).toThrowError(
+      /trigger must be an object/,
+    )
+    expect(() =>
+      parseTemplate(acceptTemplate([caseOf({ assert: { contains: [''] } })])),
+    ).toThrowError(/non-empty strings/)
+    expect(() =>
+      parseTemplate(acceptTemplate([caseOf({ assert: { maxBytes: 0 } })])),
+    ).toThrowError(/positive integer/)
+  })
+
+  it('acceptance alone does not satisfy the empty-template rejection', () => {
+    expect(() =>
+      parseTemplate(
+        JSON.stringify({
+          schema: TEMPLATE_SCHEMA_V1,
+          template: { name: 'only-tests', acceptance: [] },
+        }),
+      ),
+    ).toThrowError(/at least one of agents \/ workflows \/ knowledgeBases/)
+  })
+})

@@ -117,6 +117,20 @@ template:
         capability: calendar.read
         hint: 连接器目录「日历」组任选后端, server 名用 calendar; 不挂则晨报按诚实模式跑(不编造日程)
 
+  # ── FDE-M2: 黄金验收用例 —— 「在他们的用例上证明能跑」从人肉眼看变成机器判卷 ──
+  # 装完在 admin「工作流 → 验收」卡点「跑验收」: 真实跑一遍 morning-brief
+  # (以点按钮的人的身份走成员闸), 输出用零 LLM 结构断言判卷。合格线 = 诚实
+  # 模式: 开箱不挂任何连接器也必须绿 —— 三个小节都在、不出现 AI 免责套话。
+  # contains 是子串断言 (晨报用编号小节, 不是 markdown ## 标题)。
+  acceptance:
+    - id: smoke-brief
+      workflowId: morning-brief
+      trigger: { focus: 高效开始这一天 }
+      assert:
+        contains: [今日重点, 提醒, 今日一学]
+        forbid: [作为一个AI, 我无法访问]
+      note: 开箱无连接器状态下也必须绿（诚实模式即合格线）
+
   # ── 一键: 导入时提示填一次 API key, 自动应用到晨报员 ─────────────────────────
   defaults:
     apiKeyPrompt:

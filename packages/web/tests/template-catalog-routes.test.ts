@@ -33,6 +33,7 @@ interface CatalogEntry {
   workflows: { id: string }[]
   knowledgeBases: { name: string; description?: string }[]
   connectorSlots: { id: string; optional: boolean; hint?: string; capability?: string }[]
+  acceptanceCases: { id: string; workflowId: string }[]
   apiKeyPrompt?: { provider: string; baseURL?: string; label?: string }
 }
 
@@ -77,6 +78,8 @@ describe('template gallery catalog routes (G-M2)', () => {
       expect(Array.isArray(t.knowledgeBases)).toBe(true)
       // FDE-M1 — connector-slot preview rides on every entry ([] when none).
       expect(Array.isArray(t.connectorSlots)).toBe(true)
+      // FDE-M2 — acceptance-case preview too (ids only; asserts stay server-side).
+      expect(Array.isArray(t.acceptanceCases)).toBe(true)
       // The list is the lean preview — raw yaml must NOT ride along.
       expect((t as Record<string, unknown>).yaml).toBeUndefined()
     }
@@ -102,6 +105,8 @@ describe('template gallery catalog routes (G-M2)', () => {
     expect(brief.connectorSlots).toEqual([
       expect.objectContaining({ id: 'calendar', optional: true, capability: 'calendar.read' }),
     ])
+    // FDE-M2 — and its golden case, so the card can say "this pack proves itself".
+    expect(brief.acceptanceCases).toEqual([{ id: 'smoke-brief', workflowId: 'morning-brief' }])
 
     // child-desk ships ZERO agents (零订阅) but still teaches the hub workflows.
     const child = templates.find((t) => t.id === 'child-desk')!

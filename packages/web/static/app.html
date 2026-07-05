@@ -825,6 +825,18 @@
           </form>
           <p id="wf-sched-msg" class="form-msg"></p>
         </div>
+        <!-- FDE-M2 — 验收(golden cases)卡。host 没接 templateAcceptance
+             surface(503)或没装过带 acceptance 的模板([])时整卡 hidden;
+             行渲染/跑验收在 admin-src/workflows.js,HTML 只留骨架。 -->
+        <div id="wf-accept-card" class="ma-card" hidden>
+          <h3>
+            <span data-i18n="wfAcceptTitle">验收</span>
+            <span id="wf-accept-summary" class="lb-summary"></span>
+          </h3>
+          <p class="hint" data-i18n="wfAcceptHint">模板自带的黄金用例：真实跑一遍工作流，机器判卷（零大模型），出绿/红清单。run 以你本人身份走成员闸，跟你自己在 /me 点「运行」完全同一道闸。</p>
+          <div id="wf-accept-list"></div>
+          <p id="wf-accept-msg" class="form-msg"></p>
+        </div>
         <p class="hint">
           <span data-i18n="workflowsHint">工作流把多个 agent 按顺序串起来。admin 派一个任务到 workflow 的触发能力，整个流程自动跑完。模板：</span>
           <a href="https://github.com/Gotong/Gotong/tree/main/templates/workflows" target="_blank" rel="noopener">templates/workflows/</a>

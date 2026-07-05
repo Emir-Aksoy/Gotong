@@ -64,6 +64,20 @@ describe('examples/morning-brief-hub/template (LIFE-L2①)', () => {
         hint: expect.stringContaining('诚实模式'),
       },
     ])
+    // FDE-M2 — the pack proves itself: one golden case, honest-mode passing
+    // line (must be green with zero connectors wired), zero-LLM assertions.
+    expect(t.acceptanceCases).toEqual([
+      {
+        id: 'smoke-brief',
+        workflowId: 'morning-brief',
+        trigger: { focus: '高效开始这一天' },
+        assert: {
+          contains: ['今日重点', '提醒', '今日一学'],
+          forbid: ['作为一个AI', '我无法访问'],
+        },
+        note: expect.stringContaining('诚实模式'),
+      },
+    ])
   })
 
   it('imports end-to-end: agent lands, ONE workflow yaml reaches the runtime with the member gate open', async () => {

@@ -190,6 +190,7 @@ function findOwnerUserId(identity: IdentityStore): string | null {
 
 import { createAdminHealthService } from './admin-health.js'
 import { createConnectorSlotStore } from './template-connector-slots.js'
+import { createTemplateAcceptanceService } from './template-acceptance.js'
 import { createResourceInventoryService } from './resource-inventory.js'
 import { createResourceAdaptationService } from './resource-adaptation.js'
 import { createSettingOpsService } from './setting-ops-service.js'
@@ -2607,6 +2608,15 @@ async function main(): Promise<void> {
   // live by admin-health against actual MCP wiring, so it can never go stale.
   const connectorSlots = createConnectorSlotStore({ spaceDir: space.root })
 
+  // FDE-M2 — golden-run acceptance: recorded at template import, run from the
+  // admin workflows page THROUGH the member gate as the calling admin, judged
+  // zero-LLM by @gotong/evals checkStructure over the run's final output.
+  const templateAcceptance = createTemplateAcceptanceService({
+    spaceDir: space.root,
+    workflows: workflowController,
+    hub,
+  })
+
   // ❷-M1 — the read-only "hub 体检" snapshot, lifted to a const so the
   // setting-ops console (below) can reuse the SAME live-health surface for its
   // `status` command. Static signals only; reuses the pool's key-resolution
@@ -2784,6 +2794,8 @@ async function main(): Promise<void> {
     // at import, read back by the 体检 above). Absent → import still works,
     // slots just aren't remembered.
     connectorSlots,
+    // FDE-M2 — golden-run acceptance surface (record at import + list + run).
+    templateAcceptance,
     // ease-of-use ❷-M1 — read-only "hub 体检" snapshot for the admin overview
     // panel (lifted to a const above so the setting-ops console reuses it).
     adminHealth,

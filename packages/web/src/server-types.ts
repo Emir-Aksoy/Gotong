@@ -34,6 +34,7 @@ import type {
 } from './me-routes.js'
 import type { WorkflowWizardSurface } from './wizard-routes.js'
 import type { ConnectorSlotSink, LlmKeyProbe } from './agents-routes.js'
+import type { TemplateAcceptanceSurface } from './template-acceptance-routes.js'
 import type { SetupRoutesCtx } from './setup-routes.js'
 import type { McpRegistrySurface, McpFederationSurface } from './mcp-routes.js'
 import type { PeerSummaryFederationSurface } from './peer-summary-routes.js'
@@ -130,6 +131,13 @@ export interface WebServerOptions {
    * slots are reported in the install response only.
    */
   connectorSlots?: ConnectorSlotSink
+  /**
+   * FDE-M2 — golden-run acceptance surface (record at import + list + run
+   * through the member gate with zero-LLM judging). The host wires
+   * `createTemplateAcceptanceService`. Absent → acceptance routes 503 and
+   * install-time recording is skipped (response-only reporting).
+   */
+  templateAcceptance?: TemplateAcceptanceSurface
   /**
    * ❷-M1 — optional read-only "hub 体检" aggregator for the admin overview
    * panel. The host wires `createAdminHealthService`. Absent → the

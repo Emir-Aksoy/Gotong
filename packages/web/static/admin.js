@@ -1410,6 +1410,7 @@
         dom.wfSection.hidden = false;
         renderWorkflows();
         void refreshSchedules();
+        void refreshAcceptance();
       } catch (err) {
         console.warn("refreshWorkflows:", err);
       }
@@ -1701,6 +1702,90 @@
         await refreshSchedules();
       } catch (err) {
         alert(t4.failedAlert(err.message || String(err)));
+      }
+    }
+    let acceptPacks = [];
+    const acceptReports = {};
+    let acceptRunning = "";
+    async function refreshAcceptance() {
+      if (!dom?.wfAcceptCard) return;
+      try {
+        const r = await fetch("/api/admin/templates/acceptance");
+        if (!r.ok) {
+          dom.wfAcceptCard.hidden = true;
+          return;
+        }
+        acceptPacks = (await r.json()).packs || [];
+        dom.wfAcceptCard.hidden = acceptPacks.length === 0;
+        if (acceptPacks.length > 0) renderAcceptance();
+      } catch (err) {
+        console.warn("refreshAcceptance:", err);
+      }
+    }
+    function acceptMsg(text, cls) {
+      if (!dom.wfAcceptMsg) return;
+      dom.wfAcceptMsg.textContent = text;
+      dom.wfAcceptMsg.classList.remove("ok", "err");
+      if (cls) dom.wfAcceptMsg.classList.add(cls);
+    }
+    function acceptVerdictRows(report) {
+      return report.results.map((v) => {
+        const ok = v.verdict === "green";
+        const badge = ok ? `<span class="wf-state wf-state-published">${escapeHtml4(t4.wfAcceptGreen)}</span>` : `<span class="wf-state wf-state-archived">${escapeHtml4(t4.wfAcceptRed)}</span>`;
+        const reason = ok ? "" : ` — ${escapeHtml4(t4.wfAcceptReason(v.reason))}`;
+        const detail = !ok && v.violations?.length ? `<ul class="ma-meta">${v.violations.map((x) => `<li>${escapeHtml4(x.message)}</li>`).join("")}</ul>` : !ok && v.message ? `<ul class="ma-meta"><li>${escapeHtml4(v.message)}</li></ul>` : "";
+        return `<li class="wf-accept-row">${badge} <code>${escapeHtml4(v.caseId)}</code>
+        <span class="hint">${escapeHtml4(v.workflowId)} · ${Math.round(v.elapsedMs / 1e3)}s</span>${reason}${detail}</li>`;
+      }).join("");
+    }
+    function renderAcceptance() {
+      if (!dom.wfAcceptList) return;
+      if (dom.wfAcceptSummary) {
+        dom.wfAcceptSummary.textContent = acceptPacks.length === 0 ? "" : t4.wfAcceptSummary(acceptPacks.length);
+      }
+      dom.wfAcceptList.innerHTML = acceptPacks.map((p) => {
+        const packAttr = escapeHtml4(p.pack);
+        const running = acceptRunning === p.pack;
+        const report = acceptReports[p.pack];
+        const caseLines = p.cases.map((c) => {
+          const note = c.note ? ` <span class="hint">${escapeHtml4(c.note)}</span>` : "";
+          return `<li><code>${escapeHtml4(c.id)}</code> → ${escapeHtml4(c.workflowId)}${note}</li>`;
+        }).join("");
+        const reportBlock = report ? `<ul class="ma-meta wf-accept-report">${acceptVerdictRows(report)}</ul>` : "";
+        return `<article class="ma-card">
+        <header>
+          <strong>${packAttr}</strong>
+          ${report ? report.allGreen ? `<span class="wf-state wf-state-published">${escapeHtml4(t4.wfAcceptAllGreen)}</span>` : `<span class="wf-state wf-state-archived">${escapeHtml4(t4.wfAcceptHasRed(report.results.filter((v) => v.verdict !== "green").length))}</span>` : ""}
+          <button type="button" class="ma-btn" data-act="run-acceptance" data-id="${packAttr}"${running ? " disabled" : ""}>${escapeHtml4(running ? t4.wfAcceptRunningBtn : t4.wfAcceptRunBtn)}</button>
+        </header>
+        <ul class="ma-meta">${caseLines}</ul>
+        ${reportBlock}
+      </article>`;
+      }).join("");
+    }
+    async function runAcceptance(pack) {
+      if (acceptRunning) return;
+      acceptRunning = pack;
+      acceptMsg(t4.wfAcceptRunning, "");
+      renderAcceptance();
+      try {
+        const r = await fetch(`/api/admin/templates/acceptance/${encodeURIComponent(pack)}/run`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: "{}"
+        });
+        const body = await r.json().catch(() => ({}));
+        if (!r.ok) {
+          acceptMsg(t4.failedAlert(body.error || `${r.status}`), "err");
+          return;
+        }
+        acceptReports[pack] = body.report;
+        acceptMsg(body.report.allGreen ? t4.wfAcceptDoneGreen(pack) : t4.wfAcceptDoneRed(pack), body.report.allGreen ? "ok" : "err");
+      } catch (err) {
+        acceptMsg(t4.failedAlert(err.message || String(err)), "err");
+      } finally {
+        acceptRunning = "";
+        renderAcceptance();
       }
     }
     function lifecycleButtons(id, state) {
@@ -2359,6 +2444,8 @@
       fireSchedule,
       toggleSchedule,
       removeSchedule,
+      refreshAcceptance,
+      runAcceptance,
       removeWorkflow,
       lifecycleAction,
       openWorkflowRevisionsModal,
@@ -2600,6 +2687,11 @@
         wfSchedHour: $("wf-sched-hour"),
         wfSchedMinutes: $("wf-sched-minutes"),
         wfSchedMsg: $("wf-sched-msg"),
+        // Template acceptance (FDE-M2 —「验收」card)
+        wfAcceptCard: $("wf-accept-card"),
+        wfAcceptSummary: $("wf-accept-summary"),
+        wfAcceptList: $("wf-accept-list"),
+        wfAcceptMsg: $("wf-accept-msg"),
         // Workflow start (v2.4) — payload-schema-driven dispatch form
         wfStartModal: $("wf-start-modal"),
         wfStartTitle: $("wf-start-title"),
@@ -4692,6 +4784,8 @@
           workflows.toggleSchedule(id);
         } else if (act === "remove-schedule") {
           workflows.removeSchedule(id);
+        } else if (act === "run-acceptance") {
+          workflows.runAcceptance(id);
         } else if (act === "open-workflow-revisions") {
           workflows.openWorkflowRevisionsModal(id);
         } else if (act === "rollback-revision") {
