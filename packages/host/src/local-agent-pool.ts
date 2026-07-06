@@ -1322,6 +1322,51 @@ export class LocalAgentPool implements ManagedAgentLifecycle {
   }
 
   /**
+   * CARE-M4 — resolve the endpoint (provider + key + baseURL) the onboarding
+   * companion's read-only models-list 活体校验 should probe. Same
+   * {@link resolveApiKey} chain spawn uses, so "the check passed" can never
+   * disagree with whether the agent will actually start. No agentId → prefer
+   * the butler-enabled row (the agent the user is literally talking to), else
+   * the first managed LLM row. Never throws; every miss is a typed status the
+   * caller can phrase honestly (`mock` is its own status — a demo row has no
+   * key to verify, which is an answer, not a failure).
+   */
+  async resolveLlmProbeTarget(agentId?: string): Promise<
+    | { status: 'ok'; agentId: string; provider: string; apiKey: string; baseURL?: string }
+    | { status: 'mock'; agentId: string }
+    | { status: 'no_key'; agentId: string; provider: string }
+    | { status: 'no_agent' }
+  > {
+    let rows: readonly AgentRecord[]
+    try {
+      rows = await this.space.agents()
+    } catch {
+      return { status: 'no_agent' }
+    }
+    const isLlm = (r: AgentRecord) => !!r.managed && (r.managed.kind ?? 'llm') === 'llm'
+    const row = agentId
+      ? rows.find((r) => r.id === agentId && isLlm(r))
+      : rows.find((r) => this.butlerEnabledFor(r)) ?? rows.find(isLlm)
+    if (!row?.managed) return { status: 'no_agent' }
+    const provider = row.managed.provider
+    if (provider === 'mock') return { status: 'mock', agentId: row.id }
+    let resolution: LlmApiKeyResolution | undefined
+    try {
+      resolution = await this.resolveApiKey(row.id, provider)
+    } catch {
+      resolution = undefined
+    }
+    if (!resolution?.apiKey) return { status: 'no_key', agentId: row.id, provider }
+    return {
+      status: 'ok',
+      agentId: row.id,
+      provider,
+      apiKey: resolution.apiKey,
+      ...(row.managed.baseURL ? { baseURL: row.managed.baseURL } : {}),
+    }
+  }
+
+  /**
    * v5 A-M3 — find the member who OWNS `agentId` (the `perm='owner'`
    * resource grant with a user principal), or null. Used to scope the
    * per-user "bring your own key" fallback. Read-only; defensively

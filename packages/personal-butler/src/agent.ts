@@ -73,6 +73,21 @@ export interface PersonalButlerAgentOptions
    * These run inline; only `governed` tools can park the task.
    */
   benign?: LlmAgentToolset | LlmAgentToolset[]
+  /**
+   * CARE-M4 — optional per-turn context probe, run BEFORE each fresh task's
+   * tool-loop. A non-null return is appended to the END of the system prompt
+   * for that turn only (the frozen memory block + persona keep leading, so the
+   * stable prompt-cache prefix is untouched; the probe's text is the variable
+   * tail). `null` ⇒ inject nothing — the zero-injection contract the host's
+   * onboarding companion rides: the probe itself decides, deterministically,
+   * whether this turn needs extra context.
+   *
+   * Failure posture: a probe throw is swallowed (→ no injection). The probe is
+   * an ADVISOR; it must never take normal chat down with it. Not re-run on
+   * resume — a resumed conversation rides its saved messages, and re-probing
+   * mid-approval could inject a card the parked plan never saw.
+   */
+  contextProbe?: (task: Task) => Promise<string | null>
 }
 
 export class PersonalButlerAgent extends MemoryAugmentedAgent {
@@ -82,6 +97,10 @@ export class PersonalButlerAgent extends MemoryAugmentedAgent {
    *  array so multiple self-contained gates coexist; `governedFor` picks the
    *  first that governs a given tool. */
   private readonly governedGates: readonly GovernedActionToolset[]
+  /** CARE-M4 — per-turn context probe (see the option's doc). */
+  private readonly contextProbe: ((task: Task) => Promise<string | null>) | undefined
+  /** The current turn's probe result; null between turns / on resume. */
+  private turnContext: string | null = null
 
   constructor(opts: PersonalButlerAgentOptions) {
     const benignList = opts.benign
@@ -121,6 +140,46 @@ export class PersonalButlerAgent extends MemoryAugmentedAgent {
       frozenShowProcedures: opts.frozenShowProcedures ?? true,
     })
     this.governedGates = governedList
+    this.contextProbe = opts.contextProbe
+  }
+
+  /**
+   * CARE-M4 — run the context probe before the base task path (which calls our
+   * `buildRequest`). Stash-then-super keeps the injection point single: the
+   * probe RESULT travels via `turnContext`, never by mutating options. A throw
+   * degrades to "no injection" — chat must survive a sick probe.
+   */
+  protected override async handleTask(task: Task): Promise<unknown> {
+    this.turnContext = null
+    if (this.contextProbe) {
+      try {
+        this.turnContext = await this.contextProbe(task)
+      } catch {
+        this.turnContext = null
+      }
+    }
+    return super.handleTask(task)
+  }
+
+  /** No fresh probe on resume (see the option's doc); clear any stale stash so
+   *  a previous turn's card can never leak into a resumed conversation. */
+  protected override async handleResume(task: Task, state: unknown): Promise<unknown> {
+    this.turnContext = null
+    return super.handleResume(task, state)
+  }
+
+  /**
+   * Append the probe's card AFTER the base system prompt (frozen memory block
+   * first, then persona, then the per-turn card). Tail position is deliberate:
+   * the leading bytes stay identical across turns, so prompt caching keeps
+   * working; only the variable tail changes when the probe has something.
+   */
+  protected override buildRequest(task: Task): LlmRequest {
+    const req = super.buildRequest(task)
+    if (this.turnContext) {
+      req.system = req.system ? `${req.system}\n\n${this.turnContext}` : this.turnContext
+    }
+    return req
   }
 
   /** The first governed gate that governs `name`, or `undefined` if none does

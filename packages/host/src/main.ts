@@ -245,6 +245,10 @@ import { HostButlerMemoryService } from './butler-memory-service.js'
 // many bound users each get a butler that remembers ONLY them across sessions.
 // Assembly lives in personal-butler-factory.ts; main.ts only wires refs.
 import { buildButlerFactory } from './personal-butler-factory.js'
+import {
+  buildOnboardingKeyCheck,
+  type ButlerOnboardingKeyCheck,
+} from './personal-butler-onboarding.js'
 import { butlerApprovalItemFor, butlerResolvePushback } from './personal-butler-escalation.js'
 import {
   ButlerMaintenanceSweeper,
@@ -1136,6 +1140,9 @@ async function main(): Promise<void> {
     60 * 60 * 1000,
     Math.max(60_000, Number(process.env.GOTONG_BUTLER_RUN_BROADCAST_MS) || BUTLER_RUN_BROADCAST_INTERVAL_MS),
   )
+  // CARE-M4 — 活体校验 closure, bound after the pool starts (below); the
+  // onboarding toolset reads it lazily so an early butler answers honestly.
+  let butlerOnboardingKeyCheckRef: ButlerOnboardingKeyCheck | undefined
   // Per-user butler assembly lives in personal-butler-factory.ts (fourth
   // GUARD line-budget extraction). The getter bag reads the forward-declared
   // refs at butler-build time — the same late-binding the inline closure had.
@@ -1162,6 +1169,15 @@ async function main(): Promise<void> {
       providerBuilder: butlerProviderBuilderRef,
       memoryView: butlerMemoryViewRef,
     }),
+    // CARE-M4 — 开箱陪跑: zero-LLM 现状卡 injection at the free-chat entry +
+    // the read-only key 活体校验. Health rides the SAME lazy adminHealth ref
+    // the patrol uses; lang is the host's resolved default (never re-read env).
+    onboarding: {
+      stateFile: join(space.root, 'butler', 'onboarding-state.json'),
+      health: () => patrolHealthRef,
+      keyCheck: () => butlerOnboardingKeyCheckRef,
+      lang: config.defaultLang,
+    },
   })
 
   const localAgents = new LocalAgentPool({
@@ -1197,6 +1213,11 @@ async function main(): Promise<void> {
   // `buildProvider`), read lazily at butler-build time. Assigned unconditionally;
   // the factory still gates the tool on `butlerMaintenanceOn`.
   butlerProviderBuilderRef = () => localAgents.buildButlerProvider()
+  // CARE-M4 — the 活体校验 rides the pool's spawn-time key-resolution chain
+  // (agentId → provider/key/baseURL) + the read-only models-list GET.
+  butlerOnboardingKeyCheckRef = buildOnboardingKeyCheck({
+    resolveTarget: (agentId) => localAgents.resolveLlmProbeTarget(agentId),
+  })
 
   // BF-M8 — arm the butler memory-maintenance sweep. It borrows the pool's
   // provider-resolution (`buildButlerProvider`, resolved fresh each tick so a

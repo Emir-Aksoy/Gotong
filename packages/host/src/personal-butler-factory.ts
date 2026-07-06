@@ -27,9 +27,11 @@ import type { Hub, Logger } from '@gotong/core'
 import type { LlmProvider } from '@gotong/llm'
 import { PersonalButlerAgent } from '@gotong/personal-butler'
 
+import type { AdminHealthSurface } from './admin-health.js'
 import { createButlerRouter } from './butler-router.js'
 import type { HostButlerMemoryService } from './butler-memory-service.js'
 import { openButlerRecallIndex } from './butler-recall-index.js'
+import type { FailureLang } from './failure-translator.js'
 import type { ButlerFactory } from './local-agent-pool.js'
 import type { StewardAgentDirectory, StewardWorkflowEditor } from './hub-steward-service.js'
 import { buildButlerAskAgentToolset, type ButlerAskRosterSource } from './personal-butler-ask-agent.js'
@@ -49,6 +51,11 @@ import {
   type ButlerAgentSurface,
   type ButlerUsageSurface,
 } from './personal-butler-observe.js'
+import {
+  buildButlerOnboardingProbe,
+  buildButlerOnboardingToolset,
+  type ButlerOnboardingKeyCheck,
+} from './personal-butler-onboarding.js'
 import { buildButlerProfileToolset } from './personal-butler-profile.js'
 import { buildButlerRemindersToolset } from './personal-butler-reminders.js'
 import { buildButlerRunBroadcastToolset } from './personal-butler-run-broadcast.js'
@@ -111,6 +118,20 @@ export interface ButlerFactoryDeps {
   runBroadcastOn: boolean
   /** Read the CURRENT forward-declared refs (called at butler-build time). */
   refs: () => ButlerFactoryRefs
+  /**
+   * CARE-M4 — 开箱陪跑. When present, every per-user butler gets (a) the
+   * zero-LLM context probe that injects the 现状卡 while key gaps exist and
+   * `onboarding-state.json` isn't done, and (b) the benign
+   * `set_onboarding_done` / `check_llm_key` tools. Both surfaces are LAZY
+   * getters — adminHealth and the agent pool are built after the factory in
+   * main.ts, resolved well before a butler's first task.
+   */
+  onboarding?: {
+    stateFile: string
+    health: () => AdminHealthSurface | undefined
+    keyCheck: () => ButlerOnboardingKeyCheck | undefined
+    lang: FailureLang
+  }
 }
 
 export function buildButlerFactory(deps: ButlerFactoryDeps): ButlerFactory {
@@ -263,6 +284,17 @@ export function buildButlerFactory(deps: ButlerFactoryDeps): ButlerFactory {
         const profileToolset = refs.memoryView
           ? buildButlerProfileToolset({ userId, view: refs.memoryView, logger: log })
           : undefined
+        // CARE-M4 — 开箱陪跑: the done/decline marker + the read-only key
+        // 活体校验. Always offered while wired (a key re-check stays useful
+        // after onboarding); the injected CARD is gated per turn by the probe.
+        const onboardingToolset = deps.onboarding
+          ? buildButlerOnboardingToolset({
+              stateFile: deps.onboarding.stateFile,
+              keyCheck: deps.onboarding.keyCheck,
+              lang: deps.onboarding.lang,
+              logger: log,
+            })
+          : undefined
         const benign = [
           ...(tools ? [tools] : []),
           // S1-M2 — the READ half of the row's MCP servers (search notes, list
@@ -278,6 +310,7 @@ export function buildButlerFactory(deps: ButlerFactoryDeps): ButlerFactory {
           ...(dailyBriefToolset ? [dailyBriefToolset] : []),
           ...(runBroadcastToolset ? [runBroadcastToolset] : []),
           ...(profileToolset ? [profileToolset] : []),
+          ...(onboardingToolset ? [onboardingToolset] : []),
         ]
         // Self-contained gates: the steward action set (BF-M7) + the governed
         // create_workflow (BE-M3) + the MCP write half (S1-M2). Tool names are
@@ -309,6 +342,17 @@ export function buildButlerFactory(deps: ButlerFactoryDeps): ButlerFactory {
           captureMeta: { userId },
           ...(benign.length > 0 ? { benign } : {}),
           ...(governed.length > 0 ? { governed } : {}),
+          // CARE-M4 — per-turn zero-LLM injection: 现状卡 while gaps exist and
+          // onboarding isn't done, otherwise一字不注入 (the probe decides).
+          ...(deps.onboarding
+            ? {
+                contextProbe: buildButlerOnboardingProbe({
+                  stateFile: deps.onboarding.stateFile,
+                  health: deps.onboarding.health,
+                  logger: log,
+                }),
+              }
+            : {}),
         })
       },
     })
