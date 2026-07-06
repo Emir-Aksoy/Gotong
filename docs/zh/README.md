@@ -66,6 +66,7 @@
 
 - [`FORWARD-DEPLOY.md`](FORWARD-DEPLOY.md) — **前置部署 playbook**（FDE：给一个团队/一段生活装上智能体网络的五段流水线 + 两边界守则；含方案包 schema 草案）
 - [`GO-LIVE.md`](GO-LIVE.md) — 上线 runbook（T1 家用 / T2 云 / T3 联邦）
+- [`PUBLISH-RUNBOOK.md`](PUBLISH-RUNBOOK.md) — 发布 runbook（npm 36 包 + PyPI；发布前门 / OTP / 回滚=deprecate 纪律）
 - [`DEPLOY.md`](DEPLOY.md) · [`PORTABLE-BUNDLE.md`](PORTABLE-BUNDLE.md) — 部署 / 便携包分发
 - [`PROD-HARDENING-RUNBOOK.md`](PROD-HARDENING-RUNBOOK.md) · [`PRE-LAUNCH-TEST-PLAN.md`](PRE-LAUNCH-TEST-PLAN.md) · [`REAL-WORLD-TESTING.md`](REAL-WORLD-TESTING.md) — 生产加固 / 上线前测试 / 真机测试
 - [`CLOUD-RESOURCE-FOOTPRINT.md`](CLOUD-RESOURCE-FOOTPRINT.md) — 云资源占用

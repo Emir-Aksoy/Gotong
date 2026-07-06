@@ -134,6 +134,10 @@ pnpm host                               # 或 ./gotong-host（单文件二进制
 启动日志里会打印一次性 admin URL（`http://127.0.0.1:3000/admin?token=...`），
 **在这台机器的浏览器里打开**就进 admin 了（loopback，别人开不了）。
 
+> 不想 clone 仓库？`npx gotong start` 直接从 npm 起同一个 host（Node ≥ 20 即可；
+> 环境变量姿势不变，先 `set -a; . ./.env.local; set +a` 再 npx）。升级走
+> `npm i -g gotong@latest` 或重跑 npx；git checkout 形态则用 `gotong update`。
+
 > macOS 上想关掉终端也让它跑：用 `launchd` 写一个 user agent（`~/Library/LaunchAgents/`），
 > `ProgramArguments` 指向 `node .../packages/host/dist/main.js`、`EnvironmentVariables`
 > 喂 `GOTONG_*`。或者最简单：`tmux` / `screen` 里跑着。家用场景不必上 systemd。

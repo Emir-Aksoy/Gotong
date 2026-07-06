@@ -11,6 +11,10 @@
 **Prerequisites / 前置**: Node ≥ 20 and [pnpm](https://pnpm.io) for steps 1 & 3.
 Step 2 also works with just **Docker** (no Node). Nothing else.
 
+> **In a hurry, don't want to clone? / 不想 clone？** One command boots your own
+> hub straight from npm — `npx gotong start` — then pick up at step 2's browser
+> wizard. The ladder below stays the richest path (the zero-key demo needs the repo).
+
 ---
 
 ## 1 · See it work — no key, no Docker (~1 min) · 先看它真的跑起来

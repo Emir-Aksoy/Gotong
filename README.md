@@ -103,18 +103,22 @@ macOS arm64 this round. Full write-up: [`docs/zh/PORTABLE-BUNDLE.md`](docs/zh/PO
 ### Get running in 30 seconds — pick one
 
 ```bash
-# A. Docker (recommended — no Node setup, works on macOS / Windows / Linux)
+# A. npx (fastest — Node ≥ 20, nothing to clone)
+npx gotong start
+# → boots the full hub; first run pulls the closure once (~160MB), later runs are instant
+
+# B. Docker (no Node setup, works on macOS / Windows / Linux)
 docker compose up
 # → http://127.0.0.1:3000  + admin URL printed in the logs
 # → state persists under ./data
 
-# B. From source (cloned repo, full demo set available)
+# C. From source (cloned repo, full demo set available)
 pnpm install
 pnpm build
 pnpm host
 ```
 
-Both boot the same binary. Open the printed admin URL → save the token → you're in.
+All three boot the same binary. Open the printed admin URL → save the token → you're in.
 
 **First-run nicety (new).** After boot the host prints a prominent next-step
 banner pointing at the loopback setup wizard, and on a local (loopback) first
@@ -140,12 +144,13 @@ whenever the host is network-exposed — a headless server never pops a browser,
 and the wizard isn't reachable there anyway (that path uses the admin-token
 file). The banner itself always prints.
 
-> 💡 **Distribution.** No `npm publish` at this stage — Docker (A) and source (B)
-> are the two supported install paths. The earlier "queued for v2.1" npm plan has
-> been **descoped**; the registry choice (npm / JSR / source-only) is an open
-> decision tracked in [RELEASE-CHECKLIST](.github/RELEASE-CHECKLIST.md). Pre-built
-> single-file binaries for macOS / Windows are a planned but non-blocking item —
-> Docker already covers the "click and run" cross-platform case.
+> 💡 **Distribution.** Published on npm as the unscoped meta package
+> [`gotong`](https://www.npmjs.com/package/gotong) (pulls `@gotong/cli` +
+> `@gotong/host` into the install closure) plus the 35 `@gotong/*` workspace
+> packages; the Python SDK ships on PyPI as `gotong`. Docker (B) and source (C)
+> remain fully supported; the publish discipline (gates, OTP, rollback =
+> deprecate never unpublish) lives in
+> [docs/zh/PUBLISH-RUNBOOK.md](docs/zh/PUBLISH-RUNBOOK.md).
 
 CLI flags (from a built repo):
 
