@@ -35,6 +35,7 @@ import { mintPeerToken } from './commands/mint-peer-token.js'
 import { setting } from './commands/setting.js'
 import { backup } from './commands/backup.js'
 import { restore } from './commands/restore.js'
+import { migrate } from './commands/migrate.js'
 import { printHelp } from './commands/help.js'
 
 export async function runCli(argv: readonly string[] = process.argv.slice(2)): Promise<number> {
@@ -91,6 +92,8 @@ export async function runCli(argv: readonly string[] = process.argv.slice(2)): P
         return await backup(rest)
       case 'restore':
         return await restore(rest)
+      case 'migrate':
+        return await migrate(rest)
       default:
         console.error(`unknown command: ${cmd}`)
         printHelp()

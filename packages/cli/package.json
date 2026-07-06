@@ -40,6 +40,7 @@
   "dependencies": {
     "@gotong/core": "workspace:*",
     "@gotong/protocol": "workspace:*",
+    "@gotong/workflow": "workspace:*",
     "tar": "^7.4.3",
     "ws": "^8.20.1"
   },

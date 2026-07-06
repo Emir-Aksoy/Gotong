@@ -20,6 +20,7 @@ Commands:
   setting [subcommand]        Deterministic ops console (status/check/cold-start/restore/…)
   backup <space> <dir>        Archive a workspace to .tar.gz (manifest + sha256, WAL-safe)
   restore <tgz> --space <dir> Verify a backup's manifest, then restore it
+  migrate <scan|apply> <dir>  Find / fix legacy (AipeHub-era) identifiers
   help [command]              Show usage for a specific command
   --version                   Print the CLI version
 
@@ -342,6 +343,40 @@ extract failed / 4 manifest missing, corrupt, or verification failed.
 Examples:
   gotong restore ~/backups/gotong-space-20260706T010203Z.tar.gz --space .gotong
   gotong restore backup.tar.gz --space /opt/gotong/.gotong --force
+`,
+  migrate: `gotong migrate <scan|apply> <space-dir> [--brand]
+
+Doctor for rename residue: workspaces created before the AipeHub → Gotong
+rename can carry legacy identifiers that today's host refuses to load. This
+command finds (scan) and fixes (apply) exactly four known classes — a strict
+whitelist of file×pattern pairs, nothing else is ever touched:
+
+  1. service packages   services/plugins.json: @aipehub/* → @gotong/*
+  2. format ids         workflows/definitions/* and workflows/revisions/*:
+                        aipehub.<name>/vN → gotong.<name>/vN. Revision
+                        snapshots are migrated structurally: contentHash is
+                        re-derived and the lifecycle record's meta copy is
+                        synced (a blind sed would leave stale hashes).
+  3. brand strings      space.json / agents.json display text AipeHub →
+                        Gotong — rewritten only with --brand (always reported).
+  4. env prefixes       AIPE_* → GOTONG_* (+ AIPEHUB_URL → GOTONG_URL).
+                        Env files hold credentials and are NEVER read; scan
+                        just prints the sed one-liner for you to run yourself.
+
+apply is verify-before-write: each file is transformed and validated in
+memory (JSON parse / parseWorkflow); a file that fails validation is left
+untouched. Every rewritten file first gets a *.premigrate copy of the
+original beside it (kept across re-runs — never overwritten with an
+intermediate state). transcript / secrets / identity.sqlite / master keys
+are never in the whitelist.
+
+Exit codes: scan 0 clean / 1 residue found / 2 usage or not a workspace;
+apply 0 done (or nothing to do) / 1 some file failed / 2 usage.
+
+Examples:
+  gotong migrate scan .gotong
+  gotong migrate apply .gotong
+  gotong migrate apply /opt/gotong/.gotong --brand
 `,
 }
 

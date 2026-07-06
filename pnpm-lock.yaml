@@ -715,6 +715,9 @@ importers:
       '@gotong/protocol':
         specifier: workspace:*
         version: link:../protocol
+      '@gotong/workflow':
+        specifier: workspace:*
+        version: link:../workflow
       tar:
         specifier: ^7.4.3
         version: 7.5.19
@@ -880,6 +883,9 @@ importers:
         specifier: ^8.20.1
         version: 8.20.1
     devDependencies:
+      '@gotong/cli':
+        specifier: workspace:*
+        version: link:../cli
       '@gotong/cli-agent':
         specifier: workspace:*
         version: link:../cli-agent

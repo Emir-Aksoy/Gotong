@@ -80,6 +80,13 @@ Three small bash scripts under `scripts/backup/`:
 | `restore.sh` | Extract a backup to a fresh directory; stash any existing target. |
 | `verify.sh` | Sanity-check a workspace (or backup) using `jq` only — no Node needed. |
 
+The same semantics also ship as TS-native CLI commands — `gotong backup` /
+`gotong restore` — for machines without bash (Windows, the portable bundle).
+They add a `gotong-backup-manifest.json` (file list + sha256) inside the
+archive, and `gotong restore` refuses to touch the target unless every hash
+verifies. Servers with cron keep using the `.sh` scripts; both formats
+exclude the same keys/sessions. See `gotong help backup` / `gotong help restore`.
+
 ### One-shot example
 
 ```bash
@@ -138,6 +145,41 @@ delete old `secret.key` copies. Rotate the **v4** KEK online with the
 host `rotate-master-key` subcommand — it re-wraps the vault DEK under a
 new key staged at `identity-master.key.next`, then promotes it, with no
 plaintext re-entry. Back up the new key the same way and retire the old.
+
+### Moving house — one workspace to a new machine
+
+"复制目录 = 搬走房间" as a recipe. No new commands — it is backup → copy →
+restore → check, with the keys riding along **explicitly**:
+
+```bash
+# On the OLD machine — moving-house mode bundles BOTH master keys.
+# The archive can now decrypt everything: treat it like a password.
+gotong backup /var/lib/gotong/.gotong /tmp/move --include-master-key
+
+# Carry it over an encrypted channel, then delete the intermediate copy.
+scp /tmp/move/gotong-*.tar.gz newbox:/tmp/
+rm /tmp/move/gotong-*.tar.gz
+
+# On the NEW machine — verify-then-restore, then the workspace check runs
+# automatically (config 体检 + workflow/agent definitions, no LLM).
+gotong restore /tmp/gotong-*.tar.gz --space /var/lib/gotong/.gotong
+rm /tmp/gotong-*.tar.gz
+gotong doctor        # ports / node / key env for THIS box
+gotong start
+```
+
+If the workspace predates the AipeHub → Gotong rename (old service package
+names, `aipehub.*/v1` format ids, `AIPE_*` env prefixes), run the rename
+doctor before first boot on the new box:
+
+```bash
+gotong migrate scan  /var/lib/gotong/.gotong     # read-only report
+gotong migrate apply /var/lib/gotong/.gotong     # whitelist fix; *.premigrate copies kept
+```
+
+`migrate` never reads env files (they hold credentials) — for those it just
+prints the `sed` one-liner to run yourself. Systemd units, `EnvironmentFile=`
+copies and healthcheck greps are yours to update by hand.
 
 ---
 
