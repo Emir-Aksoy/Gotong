@@ -30,24 +30,26 @@
  * not an intent worth refusing.
  */
 
+import {
+  normalizeScheduleCadence,
+  type ScheduleCadence,
+} from '@gotong/workflow'
+
 import { memberLocalNow } from './personal-butler-proactive.js'
 
-/** Floor for `interval` cadence — mirrors the heartbeat scheduler's 60 s min. */
-export const SCHEDULE_MIN_INTERVAL_MS = 60_000
-
-/** Default member UTC offset (minutes) when a cadence omits it — Malaysia +08:00,
- *  same default the daily brief uses. */
-export const SCHEDULE_DEFAULT_TZ_OFFSET_MIN = 480
+// FDE-M3 — the cadence half moved to @gotong/workflow (the web template parser
+// validates `schedules[]` blocks with the SAME normaliser; web must not import
+// host). Re-exported here so every existing host import keeps working.
+export {
+  SCHEDULE_MIN_INTERVAL_MS,
+  SCHEDULE_DEFAULT_TZ_OFFSET_MIN,
+  normalizeScheduleCadence,
+} from '@gotong/workflow'
+export type { ScheduleCadence } from '@gotong/workflow'
 
 // ---------------------------------------------------------------------------
 // Shapes
 // ---------------------------------------------------------------------------
-
-/** When a schedule fires. `weekday` follows JS convention (0 = Sunday). */
-export type ScheduleCadence =
-  | { kind: 'daily'; hour: number; tzOffsetMinutes: number }
-  | { kind: 'weekly'; weekday: number; hour: number; tzOffsetMinutes: number }
-  | { kind: 'interval'; everyMs: number }
 
 /**
  * One schedule row (a line of the on-disk schedules file). `userId` is the
@@ -93,36 +95,6 @@ function asNonEmptyString(v: unknown): string | undefined {
   return typeof v === 'string' && v.trim().length > 0 ? v : undefined
 }
 
-function asIntInRange(v: unknown, min: number, max: number): number | undefined {
-  return typeof v === 'number' && Number.isInteger(v) && v >= min && v <= max ? v : undefined
-}
-
-function normalizeCadence(raw: unknown): ScheduleCadence | null {
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null
-  const c = raw as Record<string, unknown>
-  const tzOffsetMinutes =
-    typeof c.tzOffsetMinutes === 'number' && Number.isFinite(c.tzOffsetMinutes)
-      ? c.tzOffsetMinutes
-      : SCHEDULE_DEFAULT_TZ_OFFSET_MIN
-  if (c.kind === 'daily') {
-    const hour = asIntInRange(c.hour, 0, 23)
-    if (hour === undefined) return null
-    return { kind: 'daily', hour, tzOffsetMinutes }
-  }
-  if (c.kind === 'weekly') {
-    const weekday = asIntInRange(c.weekday, 0, 6)
-    const hour = asIntInRange(c.hour, 0, 23)
-    if (weekday === undefined || hour === undefined) return null
-    return { kind: 'weekly', weekday, hour, tzOffsetMinutes }
-  }
-  if (c.kind === 'interval') {
-    const raw = c.everyMs
-    if (typeof raw !== 'number' || !Number.isFinite(raw) || raw <= 0) return null
-    return { kind: 'interval', everyMs: Math.max(raw, SCHEDULE_MIN_INTERVAL_MS) }
-  }
-  return null
-}
-
 /**
  * Coerce one parsed file row into a trustworthy {@link WorkflowScheduleDef},
  * or null when it can't be trusted (see fail posture in the file header).
@@ -134,7 +106,7 @@ export function normalizeWorkflowSchedule(raw: unknown): WorkflowScheduleDef | n
   const id = asNonEmptyString(r.id)
   const workflowId = asNonEmptyString(r.workflowId)
   const userId = asNonEmptyString(r.userId)
-  const cadence = normalizeCadence(r.cadence)
+  const cadence = normalizeScheduleCadence(r.cadence)
   if (!id || !workflowId || !userId || !cadence) return null
   const out: WorkflowScheduleDef = {
     id,

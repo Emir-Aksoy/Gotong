@@ -167,6 +167,27 @@ export interface AgentsRoutesCtx {
    * record fault never fails an import. Absent → response-only reporting.
    */
   templateAcceptance?: AcceptanceCaseSink
+  /**
+   * FDE-M3 — optional durable sink for a template's schedule suggestions
+   * (`schedules[]`). Recorded at import so the admin 定时卡 keeps offering
+   * 「补人启用」 after the response scrolls away; enabling one writes a REAL
+   * schedule through the LIFE M3 CRUD, never from here. Same best-effort
+   * posture as the other two sinks. Absent → response-only reporting.
+   */
+  scheduleSuggestions?: ScheduleSuggestionSink
+}
+
+/** FDE-M3 — durable recorder for installed packs' schedule suggestions. */
+export interface ScheduleSuggestionSink {
+  record(
+    pack: string,
+    schedules: readonly {
+      workflowId: string
+      cadence: unknown
+      inputs?: Record<string, unknown>
+      note?: string
+    }[],
+  ): Promise<void>
 }
 
 /** FDE-M1b — durable recorder for installed packs' declared connector slots. */
@@ -889,6 +910,18 @@ export async function handleAgentsRoute(
         })
       }
     }
+    // FDE-M3 — and for schedule suggestions: recorded intent (no personnel),
+    // read back by the 定时卡; [] clears a stale entry on reinstall.
+    if (ctx.scheduleSuggestions) {
+      try {
+        await ctx.scheduleSuggestions.record(template.name, template.scheduleSuggestions)
+      } catch (err) {
+        log.warn('schedule-suggestion recording failed (install unaffected)', {
+          template: template.name,
+          err: err instanceof Error ? err.message : String(err),
+        })
+      }
+    }
     const agentsMissingKey: { id: string; provider: string }[] = []
     if (ctx.llmKeyProbe) {
       for (const { id, provider } of createdProviders) {
@@ -953,6 +986,10 @@ export async function handleAgentsRoute(
           id: c.id,
           workflowId: c.workflowId,
         })),
+        // FDE-M3 — schedule suggestions: cadence intent without personnel.
+        // Enable = write a real schedule (定时卡 / provision --user) — the
+        // member gate applies there; nothing fires from an install.
+        scheduleSuggestions: template.scheduleSuggestions,
       },
     })
     return true

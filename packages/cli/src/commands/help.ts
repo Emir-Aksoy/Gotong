@@ -18,6 +18,7 @@ Commands:
   connect [agent]             Print MCP quick-connect config for a coding agent
   mint-peer-token             Generate a federation peer bearer token
   setting [subcommand]        Deterministic ops console (status/check/cold-start/restore/…)
+  provision <pack.yaml>       Install a template pack + schedules + acceptance in one go
   backup <space> <dir>        Archive a workspace to .tar.gz (manifest + sha256, WAL-safe)
   restore <tgz> --space <dir> Verify a backup's manifest, then restore it
   migrate <scan|apply> <dir>  Find / fix legacy (AipeHub-era) identifiers
@@ -285,6 +286,35 @@ Examples:
   gotong setting                       # interactive sub-shell
   gotong setting restore gotong-prod-20260626T101530Z.tar.gz /opt/gotong --yes
   gotong setting rotate-master-key
+`,
+  provision: `gotong provision <pack.yaml> --url <hub> --token <admin-token> [options]
+
+FDE 开荒一条命令: 对一台已经跑起来的 hub,把「装模板 → 按模板建议建定时 →
+跑黄金验收」三段手工续段压成一次调用,输出绿/黄/红开荒报告。全走 hub 的
+admin HTTP API(Bearer token)——远程 hub 与本机 hub 一视同仁,不碰磁盘。
+
+  - 装模板   POST /api/admin/templates/import(解析拒绝在这一步大声失败)
+  - 建定时   模板的 schedules[] 只带节奏不带人(templates bring structure,
+             never people);给了 --user 才落成真调度行,到点触发仍走该成员
+             自己的闸。不给就黄牌提醒。
+  - 跑验收   pack 自带的黄金用例真实跑一遍(烧真 token),零 LLM 判卷,
+             红行逐条列 violation。
+
+Options:
+  --url <url>          hub 的 admin HTTP 地址,如 http://127.0.0.1:3000 (必填)
+  --token <token>      admin bearer token (必填)
+  --user <memberId>    把模板的定时建议补人启用;run 归属该成员
+  --skip-acceptance    不跑黄金用例(省 token;报告里黄牌记一笔)
+  --help / -h          Show this message
+
+Exit codes: 0 绿或仅黄 / 1 用法或文件错误 / 2 装模板失败 / 3 装上了但
+没到位(工作流落地失败、建调度失败、或验收红)。
+
+Examples:
+  gotong provision templates/bundles/morning-brief-hub.yaml \\
+    --url http://127.0.0.1:3000 --token "$GOTONG_ADMIN_TOKEN"
+  gotong provision pack.yaml --url http://hub:3000 --token t --user u-alice
+  gotong provision pack.yaml --url http://hub:3000 --token t --skip-acceptance
 `,
   backup: `gotong backup <space-dir> <backup-dir> [--include-master-key]
 

@@ -6,10 +6,9 @@
 #     而**定时调度走的就是这同一道成员闸** (见下), 装完补一条调度行即成「每早自动跑」。
 #
 # ── 装完两步, 从「能跑」到「每早自动到 IM」 ────────────────────────────────────
-#   1. 建调度 (admin「工作流 → 定时」卡, 或 curl):
-#        curl -X POST -H "Authorization: Bearer <admin-token>" -H 'content-type: application/json' \
-#          -d '{"workflowId":"morning-brief","userId":"<成员id>","cadence":{"kind":"daily","hour":8},"enabled":true}' \
-#          http://127.0.0.1:8745/api/admin/workflow-schedules
+#   1. 补人启用定时: 本模板自带 schedules 建议 (见下, 每天 8 点 —— 只带节奏不带人),
+#      装完 admin「工作流 → 定时」卡会出现这行建议, 点「补人启用」选成员即可; 或
+#      一条命令开荒: gotong provision <本文件> --url <hub> --token <admin> --user <成员id>
 #      调度环零 LLM (唤醒/判定/派发全程确定性), run 归属该成员 —— 语义 = 该成员每天
 #      8 点自己点了一次「运行」。手动试跑: POST /api/admin/workflow-schedules/<id>/fire。
 #   2. 开播报 (每成员默认关): 成员在 IM 里对管家说「打开运行播报」(set_run_broadcast)。
@@ -130,6 +129,15 @@ template:
         contains: [今日重点, 提醒, 今日一学]
         forbid: [作为一个AI, 我无法访问]
       note: 开箱无连接器状态下也必须绿（诚实模式即合格线）
+
+  # ── FDE-M3: 定时建议 —— 「装完补一条调度」从散文/curl 变成可一键补人的声明 ───
+  # 模板只带节奏不带人 (带 userId 的模板解析直接拒): 装完「定时」卡出现这行建议,
+  # 点「补人启用」选成员 (或 gotong provision --user) 才落成真调度行; 到点触发
+  # 走该成员自己的闸, 建议本身永远不会开跑。
+  schedules:
+    - workflowId: morning-brief
+      cadence: { kind: daily, hour: 8 }
+      note: 装完在「定时」卡补人启用, 每早 8 点自动跑
 
   # ── 一键: 导入时提示填一次 API key, 自动应用到晨报员 ─────────────────────────
   defaults:

@@ -892,3 +892,107 @@ describe('template.acceptance — FDE-M2 golden cases', () => {
     ).toThrowError(/at least one of agents \/ workflows \/ knowledgeBases/)
   })
 })
+
+// ── FDE-M3: template.schedules — cadence suggestions without personnel ──────
+// Third additive block, same posture as requires/acceptance. Three rejections
+// with teeth: workflowId must be shipped in this template, cadence must pass
+// the SAME normaliser the host sweeper trusts at fire time, and a userId is
+// refused outright — templates bring structure, never people.
+
+const schedTemplate = (schedules: unknown): string =>
+  JSON.stringify({
+    schema: TEMPLATE_SCHEMA_V1,
+    template: { name: 'sched', workflows: [{ id: 'wf-a' }, { id: 'wf-b' }], schedules },
+  })
+
+const suggOf = (over: Record<string, unknown> = {}): Record<string, unknown> => ({
+  workflowId: 'wf-a',
+  cadence: { kind: 'daily', hour: 8 },
+  ...over,
+})
+
+describe('template.schedules — FDE-M3 suggestions', () => {
+  it('parses suggestions; cadence normalised (tz default filled); note trimmed; inputs carried', () => {
+    const t = parseTemplate(
+      schedTemplate([
+        suggOf({ note: ' 装完补人启用 ', inputs: { focus: '高效开始这一天' } }),
+        { workflowId: 'wf-b', cadence: { kind: 'weekly', weekday: 1, hour: 9, tzOffsetMinutes: 0 } },
+        { workflowId: 'wf-b', cadence: { kind: 'interval', everyMs: 90_000 } },
+      ]),
+    )
+    expect(t.scheduleSuggestions).toEqual([
+      {
+        workflowId: 'wf-a',
+        cadence: { kind: 'daily', hour: 8, tzOffsetMinutes: 480 },
+        inputs: { focus: '高效开始这一天' },
+        note: '装完补人启用',
+      },
+      { workflowId: 'wf-b', cadence: { kind: 'weekly', weekday: 1, hour: 9, tzOffsetMinutes: 0 } },
+      { workflowId: 'wf-b', cadence: { kind: 'interval', everyMs: 90_000 } },
+    ])
+  })
+
+  it('absent schedules → empty suggestions (old templates unchanged)', () => {
+    const t = parseTemplate(
+      JSON.stringify({
+        schema: TEMPLATE_SCHEMA_V1,
+        template: { name: 'plain', workflows: [{ id: 'wf' }] },
+      }),
+    )
+    expect(t.scheduleSuggestions).toEqual([])
+  })
+
+  it('rejects a userId — templates bring structure, never people', () => {
+    expect(() => parseTemplate(schedTemplate([suggOf({ userId: 'u-alice' })]))).toThrowError(
+      /must not carry a userId/,
+    )
+  })
+
+  it('rejects a workflowId not shipped in this template', () => {
+    expect(() => parseTemplate(schedTemplate([suggOf({ workflowId: 'typo' })]))).toThrowError(
+      /does not match any workflow shipped in this template/,
+    )
+    expect(() => parseTemplate(schedTemplate([suggOf({ workflowId: '' })]))).toThrowError(
+      /workflowId is required/,
+    )
+  })
+
+  it('rejects a cadence the host normaliser would refuse (never guess)', () => {
+    expect(() => parseTemplate(schedTemplate([suggOf({ cadence: { kind: 'daily', hour: 24 } })])))
+      .toThrowError(/not a valid cadence/)
+    expect(() => parseTemplate(schedTemplate([suggOf({ cadence: { kind: 'cron', expr: '* *' } })])))
+      .toThrowError(/not a valid cadence/)
+    expect(() => parseTemplate(schedTemplate([suggOf({ cadence: undefined })]))).toThrowError(
+      /not a valid cadence/,
+    )
+  })
+
+  it('rejects exact duplicates and malformed shapes loudly', () => {
+    expect(() => parseTemplate(schedTemplate([suggOf(), suggOf()]))).toThrowError(
+      /duplicate schedule suggestion for workflow 'wf-a'/,
+    )
+    // Same workflow at a DIFFERENT cadence is legitimate, not a duplicate.
+    expect(() =>
+      parseTemplate(schedTemplate([suggOf(), suggOf({ cadence: { kind: 'daily', hour: 20 } })])),
+    ).not.toThrow()
+    expect(() => parseTemplate(schedTemplate('nope'))).toThrowError(/must be an array/)
+    expect(() => parseTemplate(schedTemplate(['nope']))).toThrowError(/must be an object/)
+    expect(() => parseTemplate(schedTemplate([suggOf({ inputs: 'nope' })]))).toThrowError(
+      /inputs must be an object/,
+    )
+    expect(() => parseTemplate(schedTemplate([suggOf({ note: 42 })]))).toThrowError(
+      /note must be a string/,
+    )
+  })
+
+  it('schedules alone does not satisfy the empty-template rejection', () => {
+    expect(() =>
+      parseTemplate(
+        JSON.stringify({
+          schema: TEMPLATE_SCHEMA_V1,
+          template: { name: 'only-sched', schedules: [] },
+        }),
+      ),
+    ).toThrowError(/at least one of agents \/ workflows \/ knowledgeBases/)
+  })
+})

@@ -273,6 +273,11 @@
           dispatch_failed: '派发失败，看 host 日志。',
         })[reason] || reason,
       confirmRemoveSchedule: (id) => `确定删除定时 "${id}"？已派出的运行不受影响。`,
+      // FDE-M3 — 模板 schedules[] 建议行(意图无人员,补人即启用)
+      wfSchedSuggestFrom: (pack) => `模板「${pack}」建议`,
+      wfSchedSuggestEnableBtn: '补人启用',
+      wfSchedSuggestDone: '已有同频定时',
+      wfSchedSuggestUserPrompt: (wf) => `给「${wf}」补一个成员 id（run 归属该成员，走 TA 自己的闸）：`,
       // --- FDE-M2 —「验收」card (golden cases, 零 LLM 判卷) ---
       wfAcceptTitle: '验收',
       wfAcceptHint: '模板自带的黄金用例：真实跑一遍工作流，机器判卷（零大模型），出绿/红清单。run 以你本人身份走成员闸，跟你自己在 /me 点「运行」完全同一道闸。',
@@ -2229,6 +2234,11 @@
           dispatch_failed: 'Dispatch failed — check host logs.',
         })[reason] || reason,
       confirmRemoveSchedule: (id) => `Delete schedule "${id}"? Runs already dispatched are unaffected.`,
+      // FDE-M3 — template schedules[] suggestion rows (intent, no personnel)
+      wfSchedSuggestFrom: (pack) => `suggested by "${pack}"`,
+      wfSchedSuggestEnableBtn: 'Pick member & enable',
+      wfSchedSuggestDone: 'already scheduled',
+      wfSchedSuggestUserPrompt: (wf) => `Member id to run "${wf}" as (the run belongs to them; their gate applies):`,
       // --- FDE-M2 — "Acceptance" card (golden cases, zero-LLM judging) ---
       wfAcceptTitle: 'Acceptance',
       wfAcceptHint: 'Golden cases shipped with a template: run the workflow for real, judge the output by machine (zero LLM), get a green/red list. Runs execute as YOU through the member gate — the exact gate behind "run" in /me.',

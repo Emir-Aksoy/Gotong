@@ -795,6 +795,9 @@
           </h3>
           <p class="hint" data-i18n="wfSchedHint">到点替成员自动跑一条工作流（调度环零大模型）。run 归属该成员，跟成员自己在 /me 点「运行」完全同一道闸；成员在 IM 对管家说「打开运行播报」即可收到结果。</p>
           <div id="wf-sched-list"></div>
+          <!-- FDE-M3 — 模板 schedules[] 建议行(意图无人员);「补人启用」走上面
+               同一 POST upsert,成员闸照常适用。 -->
+          <div id="wf-sched-suggest"></div>
           <form id="wf-sched-form" class="dispatch-form">
             <label>
               <span data-i18n="wfSchedWorkflow">工作流（已发布 + 成员可跑）</span>

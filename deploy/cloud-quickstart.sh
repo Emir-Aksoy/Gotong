@@ -15,6 +15,8 @@
 #   sudo bash deploy/cloud-quickstart.sh              # from a checkout you put there
 #   sudo bash deploy/cloud-quickstart.sh --clone      # fetch/refresh main into --prefix
 #   sudo bash deploy/cloud-quickstart.sh --start      # provision AND start
+#   sudo bash deploy/cloud-quickstart.sh --pack=examples/morning-brief-hub/template/morning-brief-hub.template.yaml
+#                                                     # + 排好开荒一条命令 (FDE-M3, 见最后一步)
 #   bash deploy/cloud-quickstart.sh --dry-run         # print every step, mutate nothing
 #
 # ── What it deliberately does NOT do ──────────────────────────────────────────
@@ -49,8 +51,9 @@ DO_CLONE=""                    # --clone: fetch the public repo into $PREFIX fir
 CLONE_REF="main"
 DRY_RUN=""
 DO_START=""
+PACK_FILE=""                   # --pack: template pack to 开荒 (gotong provision) after boot
 
-usage() { sed -n '2,48p' "$0" | sed 's/^# \{0,1\}//'; }
+usage() { sed -n '2,38p' "$0" | sed 's/^# \{0,1\}//'; }
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -69,6 +72,8 @@ while [ "$#" -gt 0 ]; do
     --env-file=*) ENV_FILE="${1#--env-file=}"; shift ;;
     --user) SERVICE_USER="${2:-}"; shift 2 ;;
     --user=*) SERVICE_USER="${1#--user=}"; shift ;;
+    --pack) PACK_FILE="${2:-}"; shift 2 ;;
+    --pack=*) PACK_FILE="${1#--pack=}"; shift ;;
     -*) echo "unknown option: $1" >&2; echo "try --help" >&2; exit 1 ;;
     *) echo "unexpected argument: $1" >&2; exit 1 ;;
   esac
@@ -270,6 +275,29 @@ fi
 run systemctl daemon-reload
 run systemctl enable gotong
 
+# ── FDE-M3: --pack → the 开荒 (provision) command for the last mile ──────────
+# The admin token is MINTED on first boot (one-time URL in the journal), so a
+# provisioning script physically cannot run `gotong provision` for you without
+# holding a credential — against this script's no-secrets discipline. Instead
+# --pack resolves the pack path and prints the exact one-liner: paste the
+# token from the journal and the whole 装模板→建调度→跑验收 loop is one command.
+PROVISION_CMD=""
+if [ -n "$PACK_FILE" ]; then
+  PACK_ABS=""
+  for cand in "$PREFIX/$PACK_FILE" "$PACK_FILE" "$SOURCE_DIR/$PACK_FILE"; do
+    if [ -f "$cand" ]; then PACK_ABS="$cand"; break; fi
+  done
+  if [ -z "$PACK_ABS" ] && [ -z "$DRY_RUN" ]; then
+    echo "⚠ --pack: $PACK_FILE not found under $PREFIX / cwd — command below keeps your path as-is." >&2
+    PACK_ABS="$PACK_FILE"
+  fi
+  [ -z "$PACK_ABS" ] && PACK_ABS="$PACK_FILE"
+  # `|| true`: the env file may not exist yet (fresh box, pre-step-5 dry run).
+  WEB_PORT="$(grep -E '^GOTONG_WEB_PORT=' "$ENV_FILE" 2>/dev/null | head -1 | cut -d= -f2 || true)"
+  PROVISION_CMD="node $PREFIX/packages/cli/bin/gotong.js provision $PACK_ABS \\
+         --url http://127.0.0.1:${WEB_PORT:-3000} --token <admin-token> --user <成员id>"
+fi
+
 # ── start (opt-in) or print the safe last mile ────────────────────────────────
 echo
 if [ -n "$DO_START" ]; then
@@ -277,6 +305,12 @@ if [ -n "$DO_START" ]; then
   run systemctl restart gotong
   note "Watch for the one-time admin URL:"
   note "  sudo journalctl -u gotong -f"
+  if [ -n "$PROVISION_CMD" ]; then
+    note ""
+    note "开荒 (--pack): once you have the admin token from the journal, run:"
+    note "  $PROVISION_CMD"
+    note "  (绿/黄/红开荒报告; --user 可省 — 建议行装完在 admin「定时」卡补人)"
+  fi
 else
   cat <<NEXT
 ✓ Provisioned. Before exposing this box, the safe last mile:
@@ -293,7 +327,10 @@ else
   4. Start it + grab the one-time admin URL from the log:
        sudo systemctl enable --now gotong
        sudo journalctl -u gotong -f
-
+${PROVISION_CMD:+
+  5. 开荒 (--pack): 装模板 → 建调度 → 跑验收, one command with the token from step 4:
+       $PROVISION_CMD
+}
   Full runbook (topology, IP-exposure risks, IM member onboarding):
     docs/zh/GO-LIVE.md
 NEXT

@@ -90,7 +90,20 @@ function stubSurface(calls: string[]): WorkflowScheduleAdminSurface {
   }
 }
 
-async function boot(opts: { wired?: boolean } = {}): Promise<Boot> {
+/** FDE-M3 — one recorded pack, as the host suggestion store would list it. */
+const SUGGESTED_PACK = {
+  pack: 'morning-brief-hub',
+  installedAt: '2026-07-06T00:00:00.000Z',
+  schedules: [
+    {
+      workflowId: 'wf-brief',
+      cadence: { kind: 'daily', hour: 8, tzOffsetMinutes: 480 },
+      note: '装完补人启用',
+    },
+  ],
+}
+
+async function boot(opts: { wired?: boolean; suggestions?: boolean } = {}): Promise<Boot> {
   const wired = opts.wired ?? true
   const tmp = await mkdtemp(join(tmpdir(), 'gotong-web-wfsched-'))
   const init = await Space.init(tmp, { name: 'wfsched-route-test' })
@@ -102,6 +115,17 @@ async function boot(opts: { wired?: boolean } = {}): Promise<Boot> {
     host: '127.0.0.1',
     port: 0,
     ...(wired ? { workflowSchedules: stubSurface(surfaceCalls) } : {}),
+    ...(opts.suggestions
+      ? {
+          scheduleSuggestions: {
+            async record() {},
+            async list() {
+              surfaceCalls.push('suggestions:list')
+              return [SUGGESTED_PACK]
+            },
+          },
+        }
+      : {}),
   })
   return { tmp, hub, server, baseUrl: server.url, adminToken, surfaceCalls }
 }
@@ -208,5 +232,34 @@ describe('/api/admin/workflow-schedules/* (LIFE-L1-M3)', () => {
     expect(put.status).toBe(405)
     const bogus = await fetch(`${b.baseUrl}${BASE}/a/b/c`, { headers: auth(b) })
     expect(bogus.status).toBe(404)
+  })
+
+  // FDE-M3 — GET /suggestions: installed packs' schedule suggestions. Advisory
+  // read: absent store answers EMPTY (never 503), and it does not depend on
+  // the schedules surface being wired (separate injection, separate gate).
+  it('GET /suggestions lists recorded packs when the store is wired', async () => {
+    b = await boot({ suggestions: true })
+    const r = await fetch(`${b.baseUrl}${BASE}/suggestions`, { headers: auth(b) })
+    expect(r.status).toBe(200)
+    expect(await r.json()).toEqual({ packs: [SUGGESTED_PACK] })
+    expect(b.surfaceCalls).toContain('suggestions:list')
+  })
+
+  it('GET /suggestions without a store → { packs: [] }, not 503', async () => {
+    b = await boot()
+    const r = await fetch(`${b.baseUrl}${BASE}/suggestions`, { headers: auth(b) })
+    expect(r.status).toBe(200)
+    expect(await r.json()).toEqual({ packs: [] })
+  })
+
+  it('GET /suggestions answers even when the schedules surface is unwired; 401 unauthed; 405 on POST', async () => {
+    b = await boot({ wired: false, suggestions: true })
+    const r = await fetch(`${b.baseUrl}${BASE}/suggestions`, { headers: auth(b) })
+    expect(r.status).toBe(200)
+    expect(((await r.json()) as { packs: unknown[] }).packs).toHaveLength(1)
+    const unauthed = await fetch(`${b.baseUrl}${BASE}/suggestions`)
+    expect(unauthed.status).toBe(401)
+    const post = await fetch(`${b.baseUrl}${BASE}/suggestions`, { method: 'POST', headers: auth(b) })
+    expect(post.status).toBe(405)
   })
 })

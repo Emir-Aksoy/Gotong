@@ -209,6 +209,7 @@ export function createWorkflows({ wf }) {
   // workflows (anything else would sit due-but-unrunnable).
 
   let schedules = []
+  let schedSuggestions = []
   let schedFormReady = false
 
   async function refreshSchedules() {
@@ -221,7 +222,16 @@ export function createWorkflows({ wf }) {
       }
       schedules = (await r.json()).schedules || []
       dom.wfSchedCard.hidden = false
+      // FDE-M3 — installed packs' schedule suggestions (intent, no personnel).
+      // Advisory fetch: any failure just means no suggestion rows.
+      try {
+        const sr = await fetch('/api/admin/workflow-schedules/suggestions')
+        schedSuggestions = sr.ok ? (await sr.json()).packs || [] : []
+      } catch {
+        schedSuggestions = []
+      }
       renderSchedules()
+      renderScheduleSuggestions()
       populateScheduleForm()
     } catch (err) {
       console.warn('refreshSchedules:', err)
@@ -282,6 +292,76 @@ export function createWorkflows({ wf }) {
         </ul>
       </article>`
     }).join('')
+  }
+
+  // FDE-M3 — suggestion rows from installed packs' `schedules[]`: cadence
+  // intent WITHOUT personnel (templates bring structure, never people).
+  // 「补人启用」 prompts for a member id and POSTs a REAL row through the same
+  // upsert as the form — the member gate applies at fire time, so a suggestion
+  // can never do what that member couldn't do themselves. A suggestion whose
+  // workflow+cadence already has a real row shows a badge instead of the
+  // button (both cadences come out of the same normaliser, so JSON compares).
+  function renderScheduleSuggestions() {
+    if (!dom.wfSchedSuggest) return
+    const rows = []
+    for (const p of schedSuggestions) {
+      const list = p.schedules || []
+      for (let i = 0; i < list.length; i++) {
+        const g = list[i]
+        const w = wf.workflows.find((x) => x.id === g.workflowId)
+        const name = escapeHtml(w?.name || g.workflowId)
+        const done = schedules.some(
+          (s) => s.workflowId === g.workflowId && JSON.stringify(s.cadence) === JSON.stringify(g.cadence),
+        )
+        const action = done
+          ? `<span class="wf-state wf-state-published">${escapeHtml(t.wfSchedSuggestDone)}</span>`
+          : `<button type="button" class="ma-btn" data-act="enable-suggestion" data-id="${escapeHtml(p.pack)}" data-idx="${i}">${escapeHtml(t.wfSchedSuggestEnableBtn)}</button>`
+        rows.push(`<article class="ma-card">
+          <header>
+            <strong>${name}</strong>
+            <span class="wf-state wf-state-draft">${escapeHtml(t.wfSchedSuggestFrom(p.pack))}</span>
+            ${action}
+          </header>
+          <ul class="ma-meta">
+            <li>${escapeHtml(schedCadenceText(g.cadence))}</li>
+            ${g.note ? `<li>${escapeHtml(g.note)}</li>` : ''}
+          </ul>
+        </article>`)
+      }
+    }
+    dom.wfSchedSuggest.innerHTML = rows.join('')
+  }
+
+  async function enableSuggestion(pack, idx) {
+    const p = schedSuggestions.find((x) => x.pack === pack)
+    const g = p?.schedules?.[idx]
+    if (!g) return
+    const w = wf.workflows.find((x) => x.id === g.workflowId)
+    const userId = (prompt(t.wfSchedSuggestUserPrompt(w?.name || g.workflowId)) || '').trim()
+    if (!userId) return
+    schedMsg('')
+    try {
+      const r = await fetch('/api/admin/workflow-schedules', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          workflowId: g.workflowId,
+          userId,
+          cadence: g.cadence,
+          ...(g.inputs ? { inputs: g.inputs } : {}),
+          enabled: true,
+        }),
+      })
+      const body = await r.json().catch(() => ({}))
+      if (!r.ok) {
+        schedMsg(t.failedAlert(body.error || `${r.status}`), 'err')
+        return
+      }
+      schedMsg(t.wfSchedCreated(body.schedule?.id || ''), 'ok')
+      await refreshSchedules()
+    } catch (err) {
+      schedMsg(t.failedAlert(err.message || String(err)), 'err')
+    }
   }
 
   function populateScheduleForm() {
@@ -1456,6 +1536,7 @@ export function createWorkflows({ wf }) {
     fireSchedule,
     toggleSchedule,
     removeSchedule,
+    enableSuggestion,
     refreshAcceptance,
     runAcceptance,
     removeWorkflow,

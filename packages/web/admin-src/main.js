@@ -237,6 +237,7 @@ import { createWorkflows } from './workflows.js'
       wfSchedCard: $('wf-sched-card'),
       wfSchedSummary: $('wf-sched-summary'),
       wfSchedList: $('wf-sched-list'),
+      wfSchedSuggest: $('wf-sched-suggest'),
       wfSchedForm: $('wf-sched-form'),
       wfSchedWorkflow: $('wf-sched-workflow'),
       wfSchedUser: $('wf-sched-user'),
@@ -3081,6 +3082,8 @@ import { createWorkflows } from './workflows.js'
         workflows.toggleSchedule(id)
       } else if (act === 'remove-schedule') {
         workflows.removeSchedule(id)
+      } else if (act === 'enable-suggestion') {
+        workflows.enableSuggestion(id, Number(target.dataset.idx))
       } else if (act === 'run-acceptance') {
         workflows.runAcceptance(id)
       } else if (act === 'open-workflow-revisions') {

@@ -98,3 +98,12 @@ export type { StepExecutor, StepExecContext } from './step-executors.js'
 // any LLM runtime dependency. Import from there if you want the agent:
 //
 //   import { WorkflowAssistantAgent } from '@gotong/workflow-assistant'
+
+// FDE-M3 — the cadence half of the LIFE schedule core (shared by the host
+// sweeper and the web template parser; see schedule-cadence.ts header).
+export {
+  SCHEDULE_MIN_INTERVAL_MS,
+  SCHEDULE_DEFAULT_TZ_OFFSET_MIN,
+  normalizeScheduleCadence,
+} from './schedule-cadence.js'
+export type { ScheduleCadence } from './schedule-cadence.js'

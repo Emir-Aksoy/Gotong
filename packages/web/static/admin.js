@@ -826,8 +826,8 @@
     async function quickChat() {
       const agentId = ma._quickChatAgentId;
       if (!agentId || !dom.maQcInput || !dom.maQcStatus) return;
-      const prompt = dom.maQcInput.value.trim();
-      if (!prompt) {
+      const prompt2 = dom.maQcInput.value.trim();
+      if (!prompt2) {
         dom.maQcStatus.textContent = t3.quickChatNeedMsg;
         dom.maQcStatus.classList.remove("ok");
         dom.maQcStatus.classList.add("err");
@@ -851,7 +851,7 @@
           headers: { "content-type": "application/json" },
           body: JSON.stringify({
             strategy: { kind: "explicit", to: agentId },
-            payload: { prompt },
+            payload: { prompt: prompt2 },
             wait: true,
             timeoutMs: 6e4
           })
@@ -1517,6 +1517,7 @@
       }
     }
     let schedules = [];
+    let schedSuggestions = [];
     let schedFormReady = false;
     async function refreshSchedules() {
       if (!dom?.wfSchedCard) return;
@@ -1528,7 +1529,14 @@
         }
         schedules = (await r.json()).schedules || [];
         dom.wfSchedCard.hidden = false;
+        try {
+          const sr = await fetch("/api/admin/workflow-schedules/suggestions");
+          schedSuggestions = sr.ok ? (await sr.json()).packs || [] : [];
+        } catch {
+          schedSuggestions = [];
+        }
         renderSchedules();
+        renderScheduleSuggestions();
         populateScheduleForm();
       } catch (err) {
         console.warn("refreshSchedules:", err);
@@ -1578,6 +1586,65 @@
         </ul>
       </article>`;
       }).join("");
+    }
+    function renderScheduleSuggestions() {
+      if (!dom.wfSchedSuggest) return;
+      const rows = [];
+      for (const p of schedSuggestions) {
+        const list = p.schedules || [];
+        for (let i = 0; i < list.length; i++) {
+          const g = list[i];
+          const w = wf.workflows.find((x) => x.id === g.workflowId);
+          const name = escapeHtml4(w?.name || g.workflowId);
+          const done = schedules.some(
+            (s) => s.workflowId === g.workflowId && JSON.stringify(s.cadence) === JSON.stringify(g.cadence)
+          );
+          const action = done ? `<span class="wf-state wf-state-published">${escapeHtml4(t4.wfSchedSuggestDone)}</span>` : `<button type="button" class="ma-btn" data-act="enable-suggestion" data-id="${escapeHtml4(p.pack)}" data-idx="${i}">${escapeHtml4(t4.wfSchedSuggestEnableBtn)}</button>`;
+          rows.push(`<article class="ma-card">
+          <header>
+            <strong>${name}</strong>
+            <span class="wf-state wf-state-draft">${escapeHtml4(t4.wfSchedSuggestFrom(p.pack))}</span>
+            ${action}
+          </header>
+          <ul class="ma-meta">
+            <li>${escapeHtml4(schedCadenceText(g.cadence))}</li>
+            ${g.note ? `<li>${escapeHtml4(g.note)}</li>` : ""}
+          </ul>
+        </article>`);
+        }
+      }
+      dom.wfSchedSuggest.innerHTML = rows.join("");
+    }
+    async function enableSuggestion(pack, idx) {
+      const p = schedSuggestions.find((x) => x.pack === pack);
+      const g = p?.schedules?.[idx];
+      if (!g) return;
+      const w = wf.workflows.find((x) => x.id === g.workflowId);
+      const userId = (prompt(t4.wfSchedSuggestUserPrompt(w?.name || g.workflowId)) || "").trim();
+      if (!userId) return;
+      schedMsg("");
+      try {
+        const r = await fetch("/api/admin/workflow-schedules", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            workflowId: g.workflowId,
+            userId,
+            cadence: g.cadence,
+            ...g.inputs ? { inputs: g.inputs } : {},
+            enabled: true
+          })
+        });
+        const body = await r.json().catch(() => ({}));
+        if (!r.ok) {
+          schedMsg(t4.failedAlert(body.error || `${r.status}`), "err");
+          return;
+        }
+        schedMsg(t4.wfSchedCreated(body.schedule?.id || ""), "ok");
+        await refreshSchedules();
+      } catch (err) {
+        schedMsg(t4.failedAlert(err.message || String(err)), "err");
+      }
     }
     function populateScheduleForm() {
       if (!dom.wfSchedWorkflow) return;
@@ -2444,6 +2511,7 @@
       fireSchedule,
       toggleSchedule,
       removeSchedule,
+      enableSuggestion,
       refreshAcceptance,
       runAcceptance,
       removeWorkflow,
@@ -2675,6 +2743,7 @@
         wfSchedCard: $("wf-sched-card"),
         wfSchedSummary: $("wf-sched-summary"),
         wfSchedList: $("wf-sched-list"),
+        wfSchedSuggest: $("wf-sched-suggest"),
         wfSchedForm: $("wf-sched-form"),
         wfSchedWorkflow: $("wf-sched-workflow"),
         wfSchedUser: $("wf-sched-user"),
@@ -4784,6 +4853,8 @@
           workflows.toggleSchedule(id);
         } else if (act === "remove-schedule") {
           workflows.removeSchedule(id);
+        } else if (act === "enable-suggestion") {
+          workflows.enableSuggestion(id, Number(target.dataset.idx));
         } else if (act === "run-acceptance") {
           workflows.runAcceptance(id);
         } else if (act === "open-workflow-revisions") {

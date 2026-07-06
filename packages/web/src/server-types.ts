@@ -33,7 +33,7 @@ import type {
   MeHubStewardSurface,
 } from './me-routes.js'
 import type { WorkflowWizardSurface } from './wizard-routes.js'
-import type { ConnectorSlotSink, LlmKeyProbe } from './agents-routes.js'
+import type { ConnectorSlotSink, LlmKeyProbe, ScheduleSuggestionSink } from './agents-routes.js'
 import type { TemplateAcceptanceSurface } from './template-acceptance-routes.js'
 import type { SetupRoutesCtx } from './setup-routes.js'
 import type { McpRegistrySurface, McpFederationSurface } from './mcp-routes.js'
@@ -138,6 +138,27 @@ export interface WebServerOptions {
    * install-time recording is skipped (response-only reporting).
    */
   templateAcceptance?: TemplateAcceptanceSurface
+  /**
+   * FDE-M3 — optional durable sink+source for template schedule suggestions
+   * (`schedules[]`): recorded at import, read back by the admin 定时卡's
+   * suggestion rows. The host wires its ScheduleSuggestionStore (which must
+   * also expose `list()`). Absent → suggestions live in the install response
+   * only and GET /suggestions answers empty.
+   */
+  scheduleSuggestions?: ScheduleSuggestionSink & {
+    list(): Promise<
+      readonly {
+        pack: string
+        installedAt: string
+        schedules: readonly {
+          workflowId: string
+          cadence: unknown
+          inputs?: Record<string, unknown>
+          note?: string
+        }[]
+      }[]
+    >
+  }
   /**
    * ❷-M1 — optional read-only "hub 体检" aggregator for the admin overview
    * panel. The host wires `createAdminHealthService`. Absent → the

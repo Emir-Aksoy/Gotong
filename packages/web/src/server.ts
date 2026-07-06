@@ -307,6 +307,7 @@ export function serveWeb(hub: Hub, opts: WebServerOptions = {}): Promise<WebServ
     llmKeyProbe: opts.llmKeyProbe,
     connectorSlots: opts.connectorSlots,
     templateAcceptance: opts.templateAcceptance,
+    scheduleSuggestions: opts.scheduleSuggestions,
     adminHealth: opts.adminHealth,
     resourceInventory: opts.resourceInventory,
     resourceAdaptation: opts.resourceAdaptation,
@@ -467,6 +468,8 @@ interface HandlerCtx {
   connectorSlots: ConnectorSlotSink | undefined
   /** FDE-M2 — see WebServerOptions.templateAcceptance doc (server-types.ts). */
   templateAcceptance: TemplateAcceptanceSurface | undefined
+  /** FDE-M3 — see WebServerOptions.scheduleSuggestions doc (server-types.ts). */
+  scheduleSuggestions: WebServerOptions['scheduleSuggestions']
   adminHealth: AdminHealthSurface | undefined
   /** RES-M1 — see WebServerOptions.resourceInventory doc above. */
   resourceInventory: ResourceInventorySurface | undefined
@@ -1357,6 +1360,7 @@ async function handle(
         llmKeyProbe: ctx.llmKeyProbe,
         connectorSlots: ctx.connectorSlots,
         templateAcceptance: ctx.templateAcceptance,
+        scheduleSuggestions: ctx.scheduleSuggestions,
         reconcileHeartbeats: ctx.reconcileHeartbeats,
         workflows: ctx.workflows,
         requireAdmin: (rq, rs) => requireAdmin(ctx, rq, rs),
@@ -1594,6 +1598,7 @@ async function handle(
     const handled = await handleWorkflowScheduleRoute(
       {
         workflowSchedules: ctx.workflowSchedules,
+        scheduleSuggestions: ctx.scheduleSuggestions,
         requireAdmin: (rq, rs) => requireAdmin(ctx, rq, rs),
       },
       req, res, method, path,

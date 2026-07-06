@@ -57,8 +57,28 @@ export interface WorkflowScheduleAdminSurface {
   fire(id: string): Promise<WorkflowScheduleFireResult>
 }
 
+/** FDE-M3 — duck of the host schedule-suggestion store: installed packs'
+ *  `schedules[]` intent (cadence, no personnel). Read-only here; enabling one
+ *  goes through the normal POST upsert above. */
+export interface ScheduleSuggestionListSurface {
+  list(): Promise<
+    readonly {
+      pack: string
+      installedAt: string
+      schedules: readonly {
+        workflowId: string
+        cadence: unknown
+        inputs?: Record<string, unknown>
+        note?: string
+      }[]
+    }[]
+  >
+}
+
 export interface WorkflowScheduleRoutesCtx {
   workflowSchedules?: WorkflowScheduleAdminSurface
+  /** Optional (FDE-M3): absent → GET /suggestions answers empty, never 503. */
+  scheduleSuggestions?: ScheduleSuggestionListSurface
   requireAdmin: (req: IncomingMessage, res: ServerResponse) => Promise<AdminRecord | null>
 }
 
@@ -86,6 +106,21 @@ export async function handleWorkflowScheduleRoute(
 
   const admin = await ctx.requireAdmin(req, res)
   if (!admin) return true
+
+  // FDE-M3 — GET /suggestions: installed packs' schedule suggestions (intent
+  // without personnel; 补人 goes through the normal POST upsert). Advisory
+  // read, so no store → empty list rather than 503 — and it sits BEFORE the
+  // schedules-surface gate on purpose: the store is a separate injection.
+  if (path === `${BASE}/suggestions`) {
+    if (method !== 'GET') {
+      sendJson(res, { error: `method ${method} not allowed` }, 405)
+      return true
+    }
+    const packs = ctx.scheduleSuggestions ? await ctx.scheduleSuggestions.list() : []
+    sendJson(res, { packs })
+    return true
+  }
+
   const surface = ctx.workflowSchedules
   if (!surface) {
     sendJson(res, { error: 'workflow schedules not enabled on this host' }, 503)

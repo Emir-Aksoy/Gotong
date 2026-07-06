@@ -1,6 +1,7 @@
 import { parse as parseYaml } from 'yaml'
 
 import type { ManagedAgentSpec, McpServerSpec } from '@gotong/core'
+import { normalizeScheduleCadence, type ScheduleCadence } from '@gotong/workflow'
 
 import { isEncryptedBlob, type EncryptedBlob } from './template-crypto.js'
 import {
@@ -165,6 +166,28 @@ export interface TemplateAcceptanceCase {
 }
 
 /**
+ * FDE-M3 — one schedule SUGGESTION shipped with a template (`schedules[]`,
+ * the third optional `gotong.template/v1` block after `requires` /
+ * `acceptance`; old hosts ignore it wholesale — graceful degradation is
+ * structural, not conventional). A suggestion is intent WITHOUT personnel:
+ * `userId` appearing anywhere top-level is rejected at parse time (the
+ * morning-brief precedent — templates carry structure, never people). It
+ * becomes a REAL schedule only when a human 补人 (admin 定时卡 button or
+ * `gotong provision --user`), which writes through the LIFE M3 CRUD — the
+ * member gate is not bypassable from here.
+ */
+export interface TemplateScheduleSuggestion {
+  /** The template-shipped workflow this suggestion fires. */
+  workflowId: string
+  /** Normalised at parse time — a half-parsed cadence rejects the template. */
+  cadence: ScheduleCadence
+  /** Copyable workflow inputs (the member-scope key is force-set at fire time). */
+  inputs?: Record<string, unknown>
+  /** Installer-facing one-liner shown beside the suggestion. */
+  note?: string
+}
+
+/**
  * Optional, additive provenance for a template (community citation graph).
  * Carries NO structural meaning — the importer ignores it; it exists so credit
  * can flow back upstream and a static leaderboard can rank "how many templates
@@ -196,6 +219,8 @@ export interface ParsedTemplate {
   connectorSlots: TemplateConnectorSlot[]
   /** FDE-M2 — golden acceptance cases (`acceptance`); [] when absent. */
   acceptanceCases: TemplateAcceptanceCase[]
+  /** FDE-M3 — schedule suggestions (`schedules`); [] when absent. */
+  scheduleSuggestions: TemplateScheduleSuggestion[]
   apiKeyPrompt?: BundleApiKeyPrompt
   /** Additive citation/attribution metadata (no structural meaning). */
   provenance?: TemplateProvenance
@@ -274,11 +299,12 @@ export function parseTemplate(raw: string): ParsedTemplate {
   const knowledgeBases = parseTemplateKnowledgeBases(t.knowledgeBases)
   const connectorSlots = parseTemplateRequires(t.requires)
   const acceptanceCases = parseTemplateAcceptance(t.acceptance, workflows)
+  const scheduleSuggestions = parseTemplateSchedules(t.schedules, workflows)
 
   // A template with nothing in it is almost certainly a mistake — reject it
   // loudly rather than silently importing an empty architecture. (Connector
-  // slots / acceptance cases alone don't count: a pack that only NEEDS or
-  // only TESTS things installs nothing.)
+  // slots / acceptance cases / schedule suggestions alone don't count: a pack
+  // that only NEEDS or only TESTS or only SCHEDULES things installs nothing.)
   if (agents.length === 0 && workflows.length === 0 && knowledgeBases.length === 0) {
     throw new ManifestError(
       `template must declare at least one of agents / workflows / knowledgeBases`,
@@ -294,6 +320,7 @@ export function parseTemplate(raw: string): ParsedTemplate {
     knowledgeBases,
     connectorSlots,
     acceptanceCases,
+    scheduleSuggestions,
   }
   if (typeof t.description === 'string') out.description = t.description
   const apiKeyPrompt = parseTemplateDefaults(t.defaults)
@@ -622,6 +649,81 @@ function parseTemplateAcceptance(
       if (e.note.trim().length > 0) c.note = e.note.trim()
     }
     out.push(c)
+  }
+  return out
+}
+
+/**
+ * FDE-M3 — validate the optional `template.schedules` block. Additive like
+ * `requires` / `acceptance`. Three rejections with teeth (装时就报, not at
+ * first fire):
+ *   - `workflowId` must name a workflow SHIPPED IN THIS TEMPLATE (a typo'd id
+ *     would produce a suggestion that can never be enabled);
+ *   - `cadence` must survive the SAME normaliser the host sweeper trusts —
+ *     half-parsed cadence = reject, never guess (LIFE fail posture);
+ *   - `userId` present = reject: templates carry structure, never people
+ *     (装完补人 — the person arrives via the admin 定时卡 / provision --user).
+ * Exact-duplicate rows (same workflow + same normalised cadence) are a pack
+ * bug — rejected the way duplicate connector-slot ids are.
+ */
+function parseTemplateSchedules(
+  raw: unknown,
+  workflows: readonly ParsedTemplateWorkflow[],
+): TemplateScheduleSuggestion[] {
+  if (raw === undefined || raw === null) return []
+  if (!Array.isArray(raw)) {
+    throw new ManifestError('template.schedules must be an array when present')
+  }
+  const shippedIds = new Set(workflows.map((w) => w.id))
+  const out: TemplateScheduleSuggestion[] = []
+  const seen = new Set<string>()
+  for (let i = 0; i < raw.length; i++) {
+    const entry = raw[i]
+    const path = `template.schedules[${i}]`
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+      throw new ManifestError(`${path} must be an object`)
+    }
+    const e = entry as Record<string, unknown>
+    if ('userId' in e) {
+      throw new ManifestError(
+        `${path} must not carry a userId — templates bring structure, never people; 装完在定时卡 (或 gotong provision --user) 补人启用`,
+      )
+    }
+    if (typeof e.workflowId !== 'string' || e.workflowId.length === 0) {
+      throw new ManifestError(`${path}.workflowId is required (non-empty string)`)
+    }
+    if (!shippedIds.has(e.workflowId)) {
+      throw new ManifestError(
+        `${path}.workflowId '${e.workflowId}' does not match any workflow shipped in this template (have: ${[...shippedIds].join(', ') || 'none'})`,
+      )
+    }
+    const cadence = normalizeScheduleCadence(e.cadence)
+    if (!cadence) {
+      throw new ManifestError(
+        `${path}.cadence is not a valid cadence — expected {kind:'daily',hour} / {kind:'weekly',weekday,hour} / {kind:'interval',everyMs}`,
+      )
+    }
+    const key = `${e.workflowId}\u0000${JSON.stringify(cadence)}`
+    if (seen.has(key)) {
+      throw new ManifestError(
+        `duplicate schedule suggestion for workflow '${e.workflowId}' with the same cadence inside template.schedules`,
+      )
+    }
+    seen.add(key)
+    const s: TemplateScheduleSuggestion = { workflowId: e.workflowId, cadence }
+    if (e.inputs !== undefined) {
+      if (!e.inputs || typeof e.inputs !== 'object' || Array.isArray(e.inputs)) {
+        throw new ManifestError(`${path}.inputs must be an object when present`)
+      }
+      s.inputs = e.inputs as Record<string, unknown>
+    }
+    if (e.note !== undefined) {
+      if (typeof e.note !== 'string') {
+        throw new ManifestError(`${path}.note must be a string when present`)
+      }
+      if (e.note.trim().length > 0) s.note = e.note.trim()
+    }
+    out.push(s)
   }
   return out
 }

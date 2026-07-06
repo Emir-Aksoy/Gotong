@@ -192,6 +192,7 @@ function findOwnerUserId(identity: IdentityStore): string | null {
 import { createAdminHealthService, type AdminHealthSurface } from './admin-health.js'
 import { BUTLER_PATROL_INTERVAL_MS } from './personal-butler-patrol.js'
 import { createConnectorSlotStore } from './template-connector-slots.js'
+import { createScheduleSuggestionStore } from './template-schedule-suggestions.js'
 import { createTemplateAcceptanceService } from './template-acceptance.js'
 import { createResourceInventoryService } from './resource-inventory.js'
 import { createResourceAdaptationService } from './resource-adaptation.js'
@@ -2433,12 +2434,13 @@ async function main(): Promise<void> {
     }
   }
 
-  // FDE-M1b — durable connector-slot registry: the template import route
-  // records each installed pack's declared `requires.connectors[]` here (via
-  // the web-injected sink below), and the 体检 reads them back. The file only
-  // stores INTENT ("pack X wants a server named Y"); fulfilment is computed
-  // live by admin-health against actual MCP wiring, so it can never go stale.
+  // FDE-M1b/M3 — durable template-intent registries: the import route records
+  // each installed pack's declared `requires.connectors[]` and `schedules[]`
+  // here (via the web-injected sinks below); 体检 / 定时卡 read them back.
+  // INTENT only, no personnel — fulfilment is computed live and enabling a
+  // suggestion writes a REAL schedule row, so neither file can go stale.
   const connectorSlots = createConnectorSlotStore({ spaceDir: space.root })
+  const scheduleSuggestions = createScheduleSuggestionStore({ spaceDir: space.root })
 
   // FDE-M2 — golden-run acceptance: recorded at template import, run from the
   // admin workflows page THROUGH the member gate as the calling admin, judged
@@ -2581,10 +2583,10 @@ async function main(): Promise<void> {
     llmKeyProbe: {
       resolvesKey: (id, provider) => localAgents.hasResolvableLlmKey(id, provider),
     },
-    // FDE-M1b — durable sink for template-declared connector slots (recorded
-    // at import, read back by the 体检 above). Absent → import still works,
-    // slots just aren't remembered.
+    // FDE-M1b/M3 — durable sinks for template-declared connector slots and
+    // schedule suggestions (recorded at import; absent → response-only).
     connectorSlots,
+    scheduleSuggestions,
     // FDE-M2 — golden-run acceptance surface (record at import + list + run).
     templateAcceptance,
     // ease-of-use ❷-M1 — read-only "hub 体检" snapshot for the admin overview
