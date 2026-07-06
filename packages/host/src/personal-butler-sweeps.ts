@@ -21,7 +21,9 @@
 
 import type { Logger } from '@gotong/core'
 
+import type { AdminHealthSurface } from './admin-health.js'
 import type { ButlerRunSurface } from './personal-butler-observe.js'
+import { ButlerPatrolSweeper } from './personal-butler-patrol.js'
 import {
   ButlerProactiveSweeper,
   buildButlerBriefComposer,
@@ -40,6 +42,12 @@ export interface ButlerSweepsOptions {
   proactive: { on: boolean; intervalMs: number; buildProvider: ButlerBriefProviderBuilder }
   /** BE-M5 run broadcast: gate, cadence, the BE-M1 runs projection (undefined = unwired ⇒ off). */
   runBroadcast: { on: boolean; intervalMs: number; runs: ButlerRunSurface | undefined }
+  /**
+   * CARE-M3 patrol: gate, cadence, state file, LAZY health surface (main.ts
+   * builds adminHealth after arming — the getter resolves by first tick).
+   * Optional so pre-CARE-M3 call sites / tests stay byte-identical.
+   */
+  patrol?: { on: boolean; intervalMs: number; stateFile: string; health: () => AdminHealthSurface | undefined }
 }
 
 export interface ButlerSweepsHandle {
@@ -74,10 +82,23 @@ export function armButlerSweeps(opts: ButlerSweepsOptions): ButlerSweepsHandle {
     })
     runBroadcast.start()
   }
+  let patrol: ButlerPatrolSweeper | undefined
+  if (opts.patrol?.on) {
+    patrol = new ButlerPatrolSweeper({
+      stateFile: opts.patrol.stateFile,
+      memoryRoot: opts.memoryRoot,
+      health: opts.patrol.health,
+      push: opts.push,
+      logger: opts.logger,
+      intervalMs: opts.patrol.intervalMs,
+    })
+    patrol.start()
+  }
   return {
     stop() {
       proactive?.stop()
       runBroadcast?.stop()
+      patrol?.stop()
     },
   }
 }

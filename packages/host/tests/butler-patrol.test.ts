@@ -1,0 +1,275 @@
+/**
+ * CARE-M3 — 主动巡检验收门(计划逐条):
+ *
+ *   1. 注入时钟 E2E:制造黄牌(拔 IM token 配置 ⇒ 体检 imBridges=[])→
+ *      恰一次播报(事实一句 + 「回『为什么』我展开」);
+ *   2. 不修 → 下轮不重播(状态文件边沿 dedup,含跨重启);
+ *   3. 修复 → 恢复播报恰一次;
+ *   4. 全程 mock LLM 计数 = 0 —— 结构性成立:巡检 sweeper 的构造参数里
+ *      根本没有 provider 位(类型层保证);测试里再放一个哨兵计数器,
+ *      全程无人能碰它;
+ *   5. 只有开了运行播报的成员收到(骑 BE-M5 同意面,零新旋钮)。
+ *
+ * 另附纯函数核单测:牌面推导(imBridges 缺席=不知道≠零通道)、diff
+ * 边沿、状态损坏当空、文案模板(溢出帽)。
+ */
+
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, existsSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+
+import type { Logger } from '@gotong/core'
+
+import type { AdminHealthSurface, HealthSnapshot } from '../src/admin-health.js'
+import {
+  ButlerPatrolSweeper,
+  derivePatrolCards,
+  diffPatrolCards,
+  patrolAppearMessage,
+  patrolRecoverMessage,
+} from '../src/personal-butler-patrol.js'
+import { writeButlerRunBroadcastConfig } from '../src/personal-butler-run-broadcast.js'
+
+const silentLogger: Logger = { trace() {}, debug() {}, info() {}, warn() {}, error() {} }
+
+/** 全绿快照打底;用例按需拨坏单项。 */
+function greenSnapshot(over: Partial<HealthSnapshot> = {}): HealthSnapshot {
+  return {
+    agents: [],
+    agentsMissingKey: 0,
+    managedCount: 0,
+    onlineCount: 0,
+    mcpServers: [],
+    mcpUnwired: 0,
+    spaceWritable: true,
+    spacePath: '/space',
+    checkedAt: '2026-07-06T00:00:00.000Z',
+    ...over,
+  }
+}
+
+describe('CARE-M3 纯函数核 — derivePatrolCards', () => {
+  it('全绿 → 零牌;各病灶各出一张,红先黄后', () => {
+    expect(derivePatrolCards(greenSnapshot())).toEqual([])
+
+    const cards = derivePatrolCards(
+      greenSnapshot({
+        spaceWritable: false,
+        agents: [
+          { id: 'writer', provider: 'anthropic', missingKey: true, online: false },
+          { id: 'ok-agent', provider: 'openai', missingKey: false, online: true },
+        ],
+        imBridges: [],
+        mcpServers: [
+          { name: 'calendar', wired: false },
+          { name: 'notes', wired: true },
+        ],
+        connectorSlots: [{ pack: 'morning-brief', id: 'calendar', optional: true, filled: false }],
+      }),
+    )
+    expect(cards.map((c) => c.id)).toEqual([
+      'space:unwritable',
+      'agent-key:writer',
+      'connector:morning-brief/calendar',
+      'im:none',
+      'mcp-unwired:calendar',
+    ])
+    expect(cards[0]!.severity).toBe('red')
+    expect(cards.slice(1).every((c) => c.severity === 'yellow')).toBe(true)
+  })
+
+  it('imBridges 缺席 = 诚实的「不知道」,不发牌;空数组才是零通道', () => {
+    expect(derivePatrolCards(greenSnapshot()).some((c) => c.id === 'im:none')).toBe(false)
+    expect(derivePatrolCards(greenSnapshot({ imBridges: [] })).map((c) => c.id)).toEqual(['im:none'])
+    expect(
+      derivePatrolCards(greenSnapshot({ imBridges: [{ platform: 'telegram' }] })).some((c) => c.id === 'im:none'),
+    ).toBe(false)
+  })
+
+  it('diff:新牌 / 恢复 / 不变', () => {
+    const prev = {
+      'im:none': { severity: 'yellow' as const, label: 'IM 通道全无', since: 1 },
+      'agent-key:w': { severity: 'yellow' as const, label: 'Agent「w」缺 API key', since: 1 },
+    }
+    const current = derivePatrolCards(greenSnapshot({ imBridges: [] }))
+    const { appeared, recovered } = diffPatrolCards(prev, current)
+    expect(appeared).toEqual([]) // im:none 还在,不是新牌
+    expect(recovered.map((c) => c.label)).toEqual(['Agent「w」缺 API key'])
+  })
+
+  it('文案模板:红黄标记 + 溢出帽 + 「为什么」尾巴', () => {
+    const many = Array.from({ length: 7 }, (_, i) => ({
+      id: `agent-key:a${i}`,
+      severity: 'yellow' as const,
+      label: `Agent「a${i}」缺 API key`,
+      fact: `Agent「a${i}」的 key 解析不到。`,
+    }))
+    const msg = patrolAppearMessage(many)
+    expect(msg).toContain('⚠️ 巡检发现新问题:')
+    expect(msg).toContain('🟡 Agent「a0」的 key 解析不到。')
+    expect(msg).toContain('还有 2 项')
+    expect(msg).toContain('回「为什么」我展开细讲。')
+    expect(patrolRecoverMessage([{ severity: 'yellow', label: 'IM 通道全无', since: 1 }])).toBe(
+      '✅ 巡检:「IM 通道全无」已恢复。',
+    )
+  })
+})
+
+describe('CARE-M3 E2E — 注入时钟 + 边沿播报 + 同意面', () => {
+  let dir: string
+  let memoryRoot: string
+  let stateFile: string
+  let pushes: Array<{ userId: string; text: string }>
+  let snapshot: HealthSnapshot
+  let snapshotCalls: number
+  let health: AdminHealthSurface
+  // 哨兵:任何 LLM 调用都会 ++。巡检构造参数里没有 provider 位,结构上
+  // 没人能碰它——测试尾部断 0,即计划的「全程 mock LLM 计数 = 0」。
+  let llmCalls: number
+
+  const makeSweeper = (now: () => number): ButlerPatrolSweeper =>
+    new ButlerPatrolSweeper({
+      stateFile,
+      memoryRoot,
+      health: () => health,
+      push: async (userId, text) => {
+        pushes.push({ userId, text })
+        return { delivered: true }
+      },
+      logger: silentLogger,
+      now,
+    })
+
+  beforeEach(async () => {
+    dir = mkdtempSync(join(tmpdir(), 'gotong-patrol-'))
+    memoryRoot = join(dir, 'butler', 'memory')
+    stateFile = join(dir, 'butler', 'patrol-state.json')
+    pushes = []
+    llmCalls = 0
+    snapshotCalls = 0
+    snapshot = greenSnapshot({ imBridges: [{ platform: 'telegram' }] })
+    health = {
+      snapshot: async () => {
+        snapshotCalls++
+        return snapshot
+      },
+    }
+    // 同意面:alice 开了运行播报(骑同一份),bob 明确关,carol 从未配置。
+    await writeButlerRunBroadcastConfig(memoryRoot, 'alice', { enabled: true, announcedMax: 0 })
+    await writeButlerRunBroadcastConfig(memoryRoot, 'bob', { enabled: false, announcedMax: 0 })
+    mkdirSync(join(memoryRoot, 'user', 'carol'), { recursive: true })
+  })
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('黄牌出现播一次;不修不重播(含跨重启);修复恢复播一次;只有同意的成员收到;零 LLM', async () => {
+    let clock = 1_000
+    const sweeper = makeSweeper(() => clock)
+
+    // ⓪ 全绿起步:一轮巡检,无边沿,无播报。
+    await sweeper.runOnce()
+    expect(pushes).toEqual([])
+
+    // ① 拔 IM token 配置 ⇒ 体检 imBridges 变空 ⇒ 黄牌边沿,恰一次播报。
+    clock = 2_000
+    snapshot = greenSnapshot({ imBridges: [] })
+    await sweeper.runOnce()
+    expect(pushes).toHaveLength(1)
+    expect(pushes[0]!.userId).toBe('alice') // bob 关了、carol 没配置——同意面
+    expect(pushes[0]!.text).toContain('巡检发现新问题')
+    expect(pushes[0]!.text).toContain('IM 通道一个都没挂')
+    expect(pushes[0]!.text).toContain('回「为什么」我展开细讲')
+    expect(existsSync(stateFile)).toBe(true)
+
+    // ② 不修 → 下轮不重播。
+    clock = 3_000
+    await sweeper.runOnce()
+    expect(pushes).toHaveLength(1)
+
+    // ③ 跨重启 dedup:新 sweeper 实例,同一状态文件。
+    const rebooted = makeSweeper(() => 4_000)
+    await rebooted.runOnce()
+    expect(pushes).toHaveLength(1)
+
+    // ④ 修复(IM 桥回来了)→ 恢复播报恰一次,状态里牌清掉。
+    snapshot = greenSnapshot({ imBridges: [{ platform: 'telegram' }] })
+    await rebooted.runOnce()
+    expect(pushes).toHaveLength(2)
+    expect(pushes[1]!.userId).toBe('alice')
+    expect(pushes[1]!.text).toContain('「IM 通道全无」已恢复')
+    expect(JSON.parse(readFileSync(stateFile, 'utf8'))).toEqual({ cards: {} })
+
+    // ⑤ 继续全绿 → 不重复报平安。
+    await rebooted.runOnce()
+    expect(pushes).toHaveLength(2)
+
+    // ⑥ 零 LLM:哨兵计数器全程没人碰(结构性——sweeper 没有 provider 位);
+    //    每轮恰好一次体检快照读(⓪→⑤共 6 次 runOnce)。
+    expect(llmCalls).toBe(0)
+    expect(snapshotCalls).toBe(6)
+  })
+
+  it('多张牌同轮出现合并成一条消息;since 保持首次发现时间', async () => {
+    let clock = 10_000
+    const sweeper = makeSweeper(() => clock)
+    snapshot = greenSnapshot({
+      imBridges: [],
+      agents: [{ id: 'writer', provider: 'anthropic', missingKey: true, online: false }],
+    })
+    await sweeper.runOnce()
+    expect(pushes).toHaveLength(1) // 两张牌一条消息(涓流不是连环炮)
+    expect(pushes[0]!.text).toContain('IM 通道')
+    expect(pushes[0]!.text).toContain('Agent「writer」')
+
+    const state1 = JSON.parse(readFileSync(stateFile, 'utf8')) as { cards: Record<string, { since: number }> }
+    expect(state1.cards['im:none']!.since).toBe(10_000)
+
+    clock = 20_000
+    await sweeper.runOnce() // 牌面没变——since 不动
+    const state2 = JSON.parse(readFileSync(stateFile, 'utf8')) as { cards: Record<string, { since: number }> }
+    expect(state2.cards['im:none']!.since).toBe(10_000)
+  })
+
+  it('状态文件损坏当空:重报一次而不是崩', async () => {
+    mkdirSync(join(dir, 'butler'), { recursive: true })
+    writeFileSync(stateFile, 'not json at all', 'utf8')
+    snapshot = greenSnapshot({ imBridges: [] })
+    const sweeper = makeSweeper(() => 5_000)
+    await sweeper.runOnce()
+    expect(pushes).toHaveLength(1) // 当空 ⇒ 视作新牌,宁重不漏
+  })
+
+  it('体检自己 throw:状态不动、无播报、不崩,下轮恢复正常', async () => {
+    const sweeper = makeSweeper(() => 6_000)
+    snapshot = greenSnapshot({ imBridges: [] })
+    await sweeper.runOnce()
+    expect(pushes).toHaveLength(1)
+
+    health = {
+      snapshot: async () => {
+        throw new Error('health probe exploded')
+      },
+    }
+    await sweeper.runOnce() // 不算牌面变化
+    expect(pushes).toHaveLength(1)
+
+    health = { snapshot: async () => greenSnapshot({ imBridges: [{ platform: 'telegram' }] }) }
+    await sweeper.runOnce()
+    expect(pushes).toHaveLength(2) // 恢复边沿照常
+    expect(pushes[1]!.text).toContain('已恢复')
+  })
+
+  it('没人同意 → 边沿照记账(状态前进),但一条不发', async () => {
+    rmSync(join(memoryRoot, 'user', 'alice'), { recursive: true, force: true })
+    snapshot = greenSnapshot({ imBridges: [] })
+    const sweeper = makeSweeper(() => 7_000)
+    await sweeper.runOnce()
+    expect(pushes).toEqual([])
+    // fire=attempt:状态已经记下这张牌,以后有人开播报也不会翻旧账重播。
+    const state = JSON.parse(readFileSync(stateFile, 'utf8')) as { cards: Record<string, unknown> }
+    expect(Object.keys(state.cards)).toEqual(['im:none'])
+  })
+})

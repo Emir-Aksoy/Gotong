@@ -189,7 +189,8 @@ function findOwnerUserId(identity: IdentityStore): string | null {
 // (store + admin API, no env), so they persist and are admin-editable. The
 // registration block lives in main() where identity is in scope.
 
-import { createAdminHealthService } from './admin-health.js'
+import { createAdminHealthService, type AdminHealthSurface } from './admin-health.js'
+import { BUTLER_PATROL_INTERVAL_MS } from './personal-butler-patrol.js'
 import { createConnectorSlotStore } from './template-connector-slots.js'
 import { createTemplateAcceptanceService } from './template-acceptance.js'
 import { createResourceInventoryService } from './resource-inventory.js'
@@ -2136,7 +2137,16 @@ async function main(): Promise<void> {
       intervalMs: butlerRunBroadcastMs,
       runs: butlerObserveRunsRef,
     },
+    // CARE-M3 — 巡检骑管家总开关,零新旋钮;health 是 lazy getter,adminHealth
+    // 在 ~500 行下面才建,首 tick(10 分钟)时早已就位。
+    patrol: {
+      on: butlerDefaultOn,
+      intervalMs: BUTLER_PATROL_INTERVAL_MS,
+      stateFile: join(space.root, 'butler', 'patrol-state.json'),
+      health: () => patrolHealthRef,
+    },
   })
+  let patrolHealthRef: AdminHealthSurface | undefined
 
   // LIFE-L1 乙案 — zero-LLM workflow schedules; default-on, no knob (missing intent file = free no-op).
   const workflowScheduleSweeper = new WorkflowScheduleSweeper(
@@ -2651,6 +2661,7 @@ async function main(): Promise<void> {
         })),
       ),
   })
+  patrolHealthRef = adminHealth
 
   // RES-M1 — read-only resource inventory for the "resource adaptation" panel.
   // Deterministic + zero-LLM: env/vault EXISTENCE (never key values), a bounded
