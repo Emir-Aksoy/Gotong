@@ -121,6 +121,15 @@ const TABLE: Array<{ what: string; err: unknown; kind: LlmErrorKind }> = [
   },
   { what: 'Node ETIMEDOUT', err: sdkError({ message: 'connect ETIMEDOUT 1.2.3.4:443', code: 'ETIMEDOUT' }), kind: 'timeout' },
   { what: 'undici headers timeout', err: sdkError({ message: 'Headers Timeout Error', code: 'UND_ERR_HEADERS_TIMEOUT' }), kind: 'timeout' },
+  // ---- 字符串输入(hub 边界把 throw 收窄成 err.message,IM 层只拿得到它)----
+  { what: '字符串:401 Incorrect API key', err: '401 Incorrect API key provided: sk-xxx', kind: 'auth' },
+  { what: '字符串:credit balance too low', err: 'Your credit balance is too low to access the Anthropic API.', kind: 'quota' },
+  { what: '字符串:429 Too Many Requests', err: '429 Too Many Requests', kind: 'rate_limited' },
+  { what: '字符串:model not found', err: "model 'llama9:latest' not found, try pulling it first", kind: 'model_not_found' },
+  { what: '字符串:connect ECONNREFUSED', err: 'connect ECONNREFUSED 127.0.0.1:11434', kind: 'network' },
+  { what: '字符串:connect ETIMEDOUT', err: 'connect ETIMEDOUT 104.18.2.5:443', kind: 'timeout' },
+  { what: '字符串:Request timed out.', err: 'Request timed out.', kind: 'timeout' },
+  { what: '字符串:认不出的业务错', err: 'workflow step exploded for reasons', kind: 'unknown' },
   // ---- unknown(诚实兜底)--------------------------------------------------
   { what: '平平无奇的 Error', err: new Error('something exploded in a novel way'), kind: 'unknown' },
   { what: 'null', err: null, kind: 'unknown' },

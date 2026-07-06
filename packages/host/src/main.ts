@@ -149,7 +149,8 @@ import { A2aServer } from './a2a-server.js'
 import { A2aOutboundManager } from './a2a-outbound.js'
 import { AcpOutboundManager } from './acp-outbound.js'
 import { acpApprovalItemFor } from './acp-escalation.js'
-import { startImBridges, type ImBridgesHandle } from './im-bridge.js'
+import { type ImBridgesHandle } from './im-bridge.js'
+import { armImBridgeWiring } from './im-bridge-wiring.js'
 import { OidcClient } from './oidc-client.js'
 import { OidcLoginService } from './oidc-login-service.js'
 import { SamlLoginService } from './saml-login-service.js'
@@ -194,11 +195,6 @@ import { createTemplateAcceptanceService } from './template-acceptance.js'
 import { createResourceInventoryService } from './resource-inventory.js'
 import { createResourceAdaptationService } from './resource-adaptation.js'
 import { createSettingOpsService } from './setting-ops-service.js'
-// setting-ops M5 — the IM `/setting` console drives ops-core directly with an
-// `im` caller (surface='im', allowConfigWrite=false), so config-write AND
-// destructive-offline are both refused by the chokepoint. Built inline below
-// once identity + the live health surface are in scope.
-import { listOpsCommands, runOpsCommand } from './ops-core.js'
 import { LocalAgentPool, type ButlerFactory } from './local-agent-pool.js'
 import { loadPricingTable } from './pricing.js'
 import { McpProxyHost, fetchPeerSharedMcp } from './mcp-proxy.js'
@@ -2718,60 +2714,18 @@ async function main(): Promise<void> {
     ...(identity ? { audit: identity } : {}),
   })
 
-  // setting-ops M5 — start the IM bridges HERE (deferred from ~400 lines up) so
-  // the IM `/setting` console reuses the SAME live `adminHealth` surface as the
-  // web overview, and the IM `status` command never disagrees with it. The
-  // bridges' existing branches (/help, /bind, /unbind, /agents, /workflow,
-  // free-text chat) are byte-for-byte unchanged; this only adds the
-  // owner/operator-gated `/setting` command mode. Still gated per platform
-  // (env var or wizard-written vault row): with nothing configured the handle
-  // is inert — zero bridges, so the `setting` config is never consumed.
+  // setting-ops M5 — IM bridges start HERE (deferred from ~400 lines up) so the
+  // IM `/setting` console reuses the SAME live `adminHealth` as the web overview.
+  // 装配块已整体外迁 im-bridge-wiring.ts(CARE-M2 前置腾挪),语义逐字保留;
+  // CARE-M2 断供接线(canned 回复 + 边沿播报)在该模块内。
   if (identity) {
-    const identityForIm = identity
-    // D3 — the entry gate is the admin bar (owner OR admin), matching
-    // `requireAdmin`. A regular bound member who DMs `/setting` is refused
-    // 「命令模式仅限管理员」. Keyed by the bound Gotong userId, never the raw
-    // IM handle.
-    const imIsOperator = (userId: string): boolean => {
-      const role = identityForIm.getMembership(userId)?.role
-      return role === 'owner' || role === 'admin'
-    }
-    // The "who is in command mode" flag — owned here because `handleImMessage`
-    // is a stateless function. One Map for the host's lifetime.
-    const imSettingMode = new Map<string, boolean>()
-    // The IM caller is ALWAYS surface='im' + allowConfigWrite=false, so
-    // ops-core's chokepoint refuses config-write AND destructive-offline for it
-    // (they are LISTED with "run it on the web/CLI" hints, never executed). Only
-    // read + safe-mutate run here. Reuses the live `adminHealth` so IM `status`
-    // matches the overview panel.
-    const imOpsCaller = { surface: 'im' as const, allowConfigWrite: false }
-    const imOpsDeps = { spaceDir: space.root, env: process.env, health: adminHealth }
-    imBridges = await startImBridges({
+    imBridges = await armImBridgeWiring({
       hub,
       identity,
       log,
-      // DEPLOY-B1 — always hold a handle so the first-boot wizard can hot-start
-      // a bridge right after writing its token to vault (no restart between
-      // "pasted the token" and "bot answers"). With nothing configured the
-      // handle is inert: zero bridges, stop() a no-op.
-      hotStart: true,
-      // F1 — outbound-push foundation. Every inbound message from a bound member
-      // records their freshest chat here; later milestones (approval push-back,
-      // reminders, morning brief) call the returned `pushToMember` to reach them
-      // out of band. A file per member (`<space>/butler/reachable/<userId>.json`),
-      // no identity-schema change.
-      reachableDir: join(space.root, 'butler', 'reachable'),
-      setting: {
-        isOperator: imIsOperator,
-        mode: imSettingMode,
-        ops: {
-          list: () => listOpsCommands(imOpsCaller),
-          run: async (id, args) => {
-            const r = await runOpsCommand(id, args, imOpsCaller, imOpsDeps)
-            return { lines: r.lines }
-          },
-        },
-      },
+      spaceRoot: space.root,
+      health: adminHealth,
+      defaultLang: config.defaultLang,
     })
     // S1-M3 — now that the bridges are live, point the push-back ref at their
     // `pushToMember` (undefined when no reachable dir / no bridge). The inbox

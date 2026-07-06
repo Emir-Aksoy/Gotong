@@ -64,6 +64,9 @@ function names(err: object): string {
 }
 
 export function classifyLlmError(err: unknown): LlmErrorKind {
+  // hub 边界把参与者的 throw 收窄成字符串(TaskResult.error = err.message),
+  // IM / 播报这一层拿到的只有它——分类器不吃字符串,下游就永远只有 unknown。
+  if (typeof err === 'string') return classifyLlmError({ message: err })
   if (!err || typeof err !== 'object') return 'unknown'
   const e = err as ErrShape
   const status = typeof e.status === 'number' ? e.status : 0
@@ -77,7 +80,8 @@ export function classifyLlmError(err: unknown): LlmErrorKind {
   if (
     /timeout/i.test(nm) ||
     ['ETIMEDOUT', 'UND_ERR_CONNECT_TIMEOUT', 'UND_ERR_HEADERS_TIMEOUT', 'UND_ERR_BODY_TIMEOUT'].includes(code) ||
-    /\btimed?.{0,1}out\b/.test(text)
+    // etimedout 一词单列:错误只剩字符串时 code 字段已丢,只能靠词认。
+    /\btimed?.{0,1}out\b|etimedout/.test(text)
   ) {
     return 'timeout'
   }
@@ -120,6 +124,9 @@ export function classifyLlmError(err: unknown): LlmErrorKind {
   if (
     code === 'model_not_found' ||
     /model_not_found/.test(text) ||
+    // 字符串化后没有 status 可依,靠「model … not found / does not exist」
+    // 词形认(Ollama / OpenAI 的原话);裸 "not found" 不算——见下。
+    /model.{0,60}(not found|does not exist|do not have access)/.test(text) ||
     ((status === 404 || /notfounderror/i.test(nm)) && /model/.test(text))
   ) {
     return 'model_not_found'
@@ -128,7 +135,8 @@ export function classifyLlmError(err: unknown): LlmErrorKind {
   if (
     ['ECONNREFUSED', 'ECONNRESET', 'ENOTFOUND', 'EAI_AGAIN', 'EPIPE', 'EHOSTUNREACH', 'ENETUNREACH', 'UND_ERR_SOCKET'].includes(code) ||
     /apiconnectionerror/i.test(nm) ||
-    /fetch failed|socket hang up|premature close|getaddrinfo/.test(text) ||
+    // 网络 code 的词形也列进文本判据——同上,字符串化后只剩词。
+    /fetch failed|socket hang up|premature close|getaddrinfo|econnrefused|econnreset|enotfound|eai_again/.test(text) ||
     (status >= 500 && status <= 599)
   ) {
     return 'network'

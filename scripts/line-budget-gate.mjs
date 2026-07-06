@@ -33,7 +33,7 @@ const REPO = resolve(HERE, '..')
  * on purpose — that visible edit is the guard.
  */
 const BUDGETS = [
-  { file: 'packages/host/src/main.ts', max: 3250 }, // the assembly binary — split target (CLI/env → main-cli.ts)
+  { file: 'packages/host/src/main.ts', max: 3220 }, // the assembly binary — CARE-M2 抽 im-bridge-wiring 后 3201,余量留给 CARE-M3/M4 薄接线
   { file: 'packages/web/src/server.ts', max: 2350 }, // web route assembly (types → server-types.ts)
   { file: 'packages/web/src/me-routes.ts', max: 2850 }, // /me route sprawl (types → me-routes-types.ts)
 ]

@@ -31,7 +31,11 @@
  * `Task.from` for transcript display).
  */
 
+import { readdir } from 'node:fs/promises'
+import { join } from 'node:path'
+
 import type { DispatchStrategy, Hub, TaskResult } from '@gotong/core'
+import { classifyLlmError } from '@gotong/llm'
 import { IdentityError, type IdentityStore } from '@gotong/identity'
 import {
   parseImCommand,
@@ -48,6 +52,9 @@ import { SlackBridge, type WebSocketCtor as SlackWebSocketCtor } from '@gotong/i
 import { WebSocket as NodeWebSocket } from 'ws'
 
 import { ButlerReachableRegistry, type ButlerPushResult } from './butler-reachable.js'
+import { translateLlmFailureKind, type FailureLang, type LlmFailureTranslation } from './failure-translator.js'
+import { LlmOutageTracker, llmOutageAnnouncement, llmRecoveryAnnouncement } from './llm-outage.js'
+import { readButlerRunBroadcastConfig } from './personal-butler-run-broadcast.js'
 
 /**
  * Minimal structural logger — the host's `@gotong/core` `Logger`
@@ -190,6 +197,20 @@ export interface HostImConfig {
     from: ImUser
     chatId?: string
   }) => void
+  /**
+   * CARE-M2 — 断供不失联。present 时:自由文本 dispatch 的 provider 失败
+   * 翻成 canned 大白话回复(零 LLM),断供/恢复的边沿各播报一次(dedup
+   * 由 tracker 的状态文件承担,重启不重播)。absent → 所有分支字节不变。
+   */
+  llmOutage?: HostImLlmOutageConfig
+}
+
+/** CARE-M2 — 断供滤镜的注入面(host 装配;测试给 tmp 文件 + spy)。 */
+export interface HostImLlmOutageConfig {
+  tracker: LlmOutageTracker
+  lang: FailureLang
+  /** 边沿播报出口(接 BE-M5 已同意成员的 push);缺省 → 边沿只发生不发声。 */
+  announce?: (text: string) => Promise<void>
 }
 
 /**
@@ -336,6 +357,11 @@ export async function handleImMessage(
         title: `im:${platform}`,
         origin: { orgId: 'local', userId },
       })
+      // CARE-M2 — provider 病了给 canned 大白话而不是原始异常;答上话了在
+      // 恢复边沿播一声。llmOutage 未接线 → 老路径字节不变。
+      if (config.llmOutage && (await handleLlmOutageOnFreeText(bridge, msg, config, config.llmOutage, result))) {
+        return
+      }
       await reply(bridge, msg, summariseResult(result))
       return
     }
@@ -626,6 +652,13 @@ export interface StartImBridgesOptions {
    * is undefined (pure env-gated IM is byte-for-byte unchanged).
    */
   reachableDir?: string
+  /**
+   * CARE-M2 — 断供不失联接线。file 惯例 `<space>/runtime/llm-outage.json`;
+   * butlerMemoryRoot 用来枚举 BE-M5 播报已同意的成员(骑同一份同意,零新
+   * 旋钮);边沿播报走 reachable push,没配 reachableDir 时退化为只记日志
+   * ——对话内的 canned 回复不依赖这里,永远先答人。
+   */
+  llmOutage?: { file: string; lang: FailureLang; butlerMemoryRoot: string }
 }
 
 /**
@@ -784,6 +817,39 @@ export async function startImBridges(
     await reachable.load()
   }
 
+  // CARE-M2 — 断供/恢复的边沿播报出口:发给 BE-M5 运行播报已开的成员
+  // (同一份同意,零新旋钮)。best-effort:一个成员送不到不挡下一个;
+  // 没有 reachable 注册表就只记日志。
+  const outageOpts = opts.llmOutage
+  const llmOutage: HostImLlmOutageConfig | undefined = outageOpts
+    ? {
+        tracker: new LlmOutageTracker(outageOpts.file),
+        lang: outageOpts.lang,
+        announce: async (text: string) => {
+          if (!reachable) {
+            opts.log.warn('llm outage: announce skipped, no reachable registry')
+            return
+          }
+          let userIds: string[]
+          try {
+            const entries = await readdir(join(outageOpts.butlerMemoryRoot, 'user'), { withFileTypes: true })
+            userIds = entries.filter((e) => e.isDirectory()).map((e) => e.name)
+          } catch {
+            return // 还没有管家成员 → 没有可播对象
+          }
+          for (const userId of userIds) {
+            try {
+              const cfg = await readButlerRunBroadcastConfig(outageOpts.butlerMemoryRoot, userId)
+              if (!cfg?.enabled) continue
+              await reachable.push(userId, text)
+            } catch (err) {
+              opts.log.warn('llm outage: announce delivery failed', { userId, err: String(err) })
+            }
+          }
+        },
+      }
+    : undefined
+
   const resolver = makeIdentityImBindingResolver(opts.identity)
   const config: HostImConfig = {
     hub: opts.hub,
@@ -798,6 +864,7 @@ export async function startImBridges(
     resolveWorkflow: opts.resolveWorkflow,
     log: opts.log,
     ...(opts.setting ? { setting: opts.setting } : {}),
+    ...(llmOutage ? { llmOutage } : {}),
     ...(reachable
       ? {
           onReachable: (info) =>
@@ -946,6 +1013,58 @@ function makeFromId(platform: string, platformUserId: string): string {
 async function reply(bridge: ImBridge, msg: ImMessage, text: string): Promise<void> {
   const to: ImUser = msg.from
   await bridge.sendMessage(to, text, { chatId: msg.chatId })
+}
+
+/**
+ * CARE-M2 — 自由文本 dispatch 结果过一道断供滤镜。
+ *
+ * 返回 true = 已用 canned 回复答复(调用方不再走 summariseResult);
+ * false = 不归我管(成功 / 挂起 / 取消 / 认不出的失败),老路径照旧。
+ *
+ * unknown 故意放行:自由文本的失败不全是 provider 病(工作流步骤炸了、
+ * agent 业务错),认不出的一律走既有 `⚠️ Task failed: 原文`——原文本来
+ * 就在,那已经是诚实兜底,再包一层「我不认识」反而丢了老用户熟悉的形状。
+ *
+ * 播报是 best-effort:announce 抛错只记日志,绝不影响对话内的 canned
+ * 回复(用户在场的那条线永远优先)。
+ */
+async function handleLlmOutageOnFreeText(
+  bridge: ImBridge,
+  msg: ImMessage,
+  config: HostImConfig,
+  outage: HostImLlmOutageConfig,
+  result: TaskResult,
+): Promise<boolean> {
+  if (result.kind === 'ok') {
+    if ((await outage.tracker.onProviderSuccess()) === 'announce_recovery') {
+      try {
+        await outage.announce?.(llmRecoveryAnnouncement(outage.lang))
+      } catch (err) {
+        config.log.warn('llm outage: recovery announce failed', { err: String(err) })
+      }
+    }
+    return false
+  }
+  if (result.kind !== 'failed') return false
+  const kind = classifyLlmError(result.error)
+  if (kind === 'unknown') return false
+  const t = translateLlmFailureKind(kind, outage.lang)
+  await reply(bridge, msg, cannedLlmFailureReply(t, outage.lang))
+  if ((await outage.tracker.onProviderFailure(kind)) === 'announce') {
+    try {
+      await outage.announce?.(llmOutageAnnouncement(kind, outage.lang))
+    } catch (err) {
+      config.log.warn('llm outage: announce failed', { err: String(err) })
+    }
+  }
+  return true
+}
+
+/** canned 回复:翻译文案 + 命令面仍可用。零 LLM——断供期间每条自由文本都答得上话。 */
+function cannedLlmFailureReply(t: LlmFailureTranslation, lang: FailureLang): string {
+  return lang === 'zh'
+    ? `⚠️ ${t.headline}\n${t.fix}\n\n这条消息没能让大模型处理;命令照常可用:/help /agents /workflow <名字>。修好后把话再发一遍就行。`
+    : `⚠️ ${t.headline}\n${t.fix}\n\nThis message couldn't reach the model; commands still work: /help /agents /workflow <name>. Once it's fixed, just send your message again.`
 }
 
 /** F1 — feed the reachable registry (if wired) this member's freshest chat. */
