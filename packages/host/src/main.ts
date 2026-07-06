@@ -243,23 +243,18 @@ import { HostButlerMemoryService } from './butler-memory-service.js'
 // BF-M4 — the resident butler fold-in: the registered `chat` agent is built as a
 // per-user `ButlerRouter` (one memory namespace per member) so the IM channel's
 // many bound users each get a butler that remembers ONLY them across sessions.
-import { createButlerRouter } from './butler-router.js'
-import { openButlerMemory } from './personal-butler-memory.js'
-import { openButlerRecallIndex } from './butler-recall-index.js'
+// Assembly lives in personal-butler-factory.ts; main.ts only wires refs.
+import { buildButlerFactory } from './personal-butler-factory.js'
 import { butlerApprovalItemFor, butlerResolvePushback } from './personal-butler-escalation.js'
 import {
   ButlerMaintenanceSweeper,
   BUTLER_MAINTENANCE_INTERVAL_MS,
 } from './personal-butler-maintenance.js'
 import { BUTLER_PROACTIVE_INTERVAL_MS } from './personal-butler-proactive.js'
-import {
-  BUTLER_RUN_BROADCAST_INTERVAL_MS,
-  buildButlerRunBroadcastToolset,
-} from './personal-butler-run-broadcast.js'
+import { BUTLER_RUN_BROADCAST_INTERVAL_MS } from './personal-butler-run-broadcast.js'
 import { armButlerSweeps } from './personal-butler-sweeps.js'
 import { createWorkflowScheduleAdminSurface } from './workflow-schedule-admin.js'
 import { WorkflowScheduleSweeper } from './workflow-schedule-sweeper.js'
-import { PersonalButlerAgent } from '@gotong/personal-butler'
 import { HostMeImService } from './me-im-service.js'
 import { ApprovalGatedParticipant } from './outbound-approval.js'
 import {
@@ -285,39 +280,19 @@ import {
   type StewardAgentDirectory,
   type StewardWorkflowEditor,
 } from './hub-steward-service.js'
-import { buildButlerGovernedToolset } from './personal-butler-governed.js'
-import {
-  buildButlerWorkflowCreateToolset,
-  type ButlerWorkflowCreateSource,
-} from './personal-butler-workflow-create.js'
-import { buildButlerMcpToolsets } from './personal-butler-mcp.js'
-import {
-  buildButlerWorkflowsToolset,
-  type ButlerWorkflowSurface,
-} from './personal-butler-workflows.js'
-import { buildButlerConsolidateToolset } from './personal-butler-consolidate.js'
-import { buildButlerRemindersToolset } from './personal-butler-reminders.js'
-import { buildButlerDailyBriefToolset } from './personal-butler-daily-brief.js'
-import { buildButlerProfileToolset } from './personal-butler-profile.js'
-import {
-  buildButlerObserveToolset,
-  type ButlerRunSurface,
-  type ButlerAgentSurface,
-  type ButlerUsageSurface,
+import type { ButlerWorkflowCreateSource } from './personal-butler-workflow-create.js'
+import type { ButlerWorkflowSurface } from './personal-butler-workflows.js'
+import type {
+  ButlerRunSurface,
+  ButlerAgentSurface,
+  ButlerUsageSurface,
 } from './personal-butler-observe.js'
-import {
-  buildButlerDiagnoseToolset,
-  type ButlerOwnedAgentSource,
-  type ButlerAdaptationSource,
+import type {
+  ButlerOwnedAgentSource,
+  ButlerAdaptationSource,
 } from './personal-butler-diagnose.js'
-import {
-  buildButlerAskAgentToolset,
-  type ButlerAskRosterSource,
-} from './personal-butler-ask-agent.js'
-import {
-  buildButlerWorkflowWizardToolset,
-  type ButlerWizardSource,
-} from './personal-butler-workflow-wizard.js'
+import type { ButlerAskRosterSource } from './personal-butler-ask-agent.js'
+import type { ButlerWizardSource } from './personal-butler-workflow-wizard.js'
 import { ReminderParticipant } from './reminder-participant.js'
 import type { LlmProvider } from '@gotong/llm'
 import { HostOperatorAgentService } from './operator-agent-service.js'
@@ -1161,203 +1136,33 @@ async function main(): Promise<void> {
     60 * 60 * 1000,
     Math.max(60_000, Number(process.env.GOTONG_BUTLER_RUN_BROADCAST_MS) || BUTLER_RUN_BROADCAST_INTERVAL_MS),
   )
-  const butlerFactory: ButlerFactory = (base, mcp) => {
-    // S1-M2 — split the row's attached MCP (notes / calendar / …) into a benign
-    // READ proxy (runs inline) and a governed WRITE toolset (parks for a /me
-    // approval). Partitioned ONCE per agent (the toolset is per-agent, not
-    // per-user) and captured in the closure below; both halves are stateless
-    // (they just delegate to the connected `callTool`), so every per-user butler
-    // reuses them. Absent MCP → both undefined → no behaviour change.
-    const mcpSplit = mcp
-      ? buildButlerMcpToolsets({
-          tools: mcp.tools,
-          callTool: (name, args) => mcp.toolset.callTool(name, args),
-        })
-      : undefined
-    return createButlerRouter({
-      id: base.id,
-      // The pool only consults this factory for a `chat`-capable row, so
-      // `capabilities` is always set + includes 'chat'; `?? []` only satisfies
-      // the optional `LlmAgentOptions.capabilities` type.
-      capabilities: base.capabilities ?? [],
-      logger: log,
-      createForUser: (userId) => {
-        // Per-user memory namespace + recall index (whole-store inverted index,
-        // active-only) — the no-leak boundary is the `<rootDir>/user/<userId>/`
-        // tree itself. The base toolset the pool built (dispatch / remote MCP; the
-        // row's own MCP arrives via `mcp` and is split above) moves to `benign` so
-        // those tools still run inline; the governed gates below are the only path
-        // that can park the task for a /me approval.
-        const memory = openButlerMemory({ rootDir: butlerMemoryRoot, userId, logger: log })
-        const recallIndex = openButlerRecallIndex({ rootDir: butlerMemoryRoot, userId, logger: log })
-        const { tools, ...rest } = base
-        // BF-M7 — the per-user governed action set, scoped to THIS member (the
-        // executor's RBAC keys off `userId`). Built only when the flag is on AND
-        // the member-agent service exists; the workflow editor is optional (a hub
-        // with no workflowAssist gets the agent tools but no `edit_workflow`).
-        const steward =
-          butlerGovernedOn && butlerGovernedAgentsRef
-            ? buildButlerGovernedToolset({
-                userId,
-                agents: butlerGovernedAgentsRef,
-                ...(butlerGovernedWorkflowEditorRef
-                  ? { workflowEditor: butlerGovernedWorkflowEditorRef }
-                  : {}),
-              })
-            : undefined
-        // BE-M3 — the governed "用大白话建一个工作流" gate. A SEPARATE governed
-        // toolset (create_workflow isn't a StewardAction) composed alongside the
-        // steward gate; disjoint tool name, its own executor → the member service
-        // (cross-hub reject + draft-never-live live there). Same governed master
-        // switch; needs the member create service, else it isn't offered.
-        const workflowCreateGov =
-          butlerGovernedOn && butlerWorkflowCreateRef
-            ? buildButlerWorkflowCreateToolset({
-                userId,
-                create: butlerWorkflowCreateRef,
-                logger: log,
-              })
-            : undefined
-        // S1-M1 — benign "run my workflow" tools (list + run), scoped to THIS
-        // member. Runs one of their OWN published, member-facing workflows via the
-        // same gate as /me (published + surface.me + forced userScopeField). Runs
-        // inline (not governed): it's a member self-service action, and any risky
-        // step INSIDE the workflow gates itself downstream. Composed alongside the
-        // pool's base tools (`tools`) in the benign set.
-        const workflowsToolset = butlerWorkflowsRef
-          ? buildButlerWorkflowsToolset({ userId, workflows: butlerWorkflowsRef, hub, logger: log })
-          : undefined
-        // BE-M1 — benign read-only "eyes" (recent runs / helper roster / own
-        // usage), each scoped to THIS member (agents is hub-wide but sanitized).
-        // Composed into `benign` so they run inline; the WRITE counterparts (fix
-        // an agent, create a workflow) stay governed. A tool whose surface is
-        // absent is dropped from `listTools` — never offered.
-        const observeToolset =
-          butlerObserveRunsRef || butlerObserveAgentsRef || butlerObserveUsageRef
-            ? buildButlerObserveToolset({
-                userId,
-                ...(butlerObserveRunsRef ? { runs: butlerObserveRunsRef } : {}),
-                ...(butlerObserveAgentsRef ? { agents: butlerObserveAgentsRef } : {}),
-                ...(butlerObserveUsageRef ? { usage: butlerObserveUsageRef } : {}),
-                logger: log,
-              })
-            : undefined
-        // BE-M2 — benign "体检我的助手": run the RES-M2 engine over THIS member's
-        // owned agents. Read-only; the enactable fix is the existing governed
-        // `edit_agent` (park → /me approve). Needs both the owned-agent lister and
-        // the adaptation service, else the tool isn't offered.
-        const diagnoseToolset =
-          butlerDiagnoseOwnedRef && butlerDiagnoseAdaptRef
-            ? buildButlerDiagnoseToolset({
-                userId,
-                ownedAgents: butlerDiagnoseOwnedRef,
-                adaptation: butlerDiagnoseAdaptRef,
-                logger: log,
-              })
-            : undefined
-        // BE-M4 — benign "问我自己的助手": one-shot dispatch to an agent THIS member
-        // owns (no-leak via listOwned), awaiting the reply. Inline (a member asking
-        // their own agent), scoped by userId. Needs the owned-agent roster, else off.
-        const askAgentToolset = butlerAskRosterRef
-          ? buildButlerAskAgentToolset({ userId, roster: butlerAskRosterRef, hub, logger: log })
-          : undefined
-        // WIZ-M4c — benign "帮我规划一个工作流": wizard compose, proposal-only
-        // (explanation + gap checklist + validated YAML), persists nothing. Saving
-        // goes through the governed create_workflow above with the proposal's YAML.
-        const planWizardToolset = butlerWizardRef
-          ? buildButlerWorkflowWizardToolset({ userId, wizard: butlerWizardRef, logger: log })
-          : undefined
-        // S2-M2 — benign "整理一下记忆": run BF-M8's per-member maintenance pass
-        // (蒸馏 + STATUS.md) on demand. Gated on the SAME `butlerMaintenanceOn`
-        // flag as the 6h sweep — if distillation is off, the tool isn't offered.
-        // The provider is resolved fresh at call time via the pool ref; a null
-        // model is a friendly refusal, not a crash.
-        const consolidateToolset =
-          butlerMaintenanceOn && butlerProviderBuilderRef
-            ? buildButlerConsolidateToolset({
-                userId,
-                rootDir: butlerMemoryRoot,
-                buildProvider: butlerProviderBuilderRef,
-                logger: log,
-              })
-            : undefined
-        // S3-M1 — benign "set a reminder" tool, scoped to THIS member. Dispatches to
-        // the ReminderParticipant broker (registered below on the same butler-on
-        // gate), which parks a one-shot task with a finite resumeAt; the Phase 11
-        // sweep fires it and pushes the text back to the member's IM. Only needs
-        // `hub` (static broker capability), so no forward-ref — built unconditionally.
-        const remindersToolset = buildButlerRemindersToolset({ userId, hub, logger: log })
-        // S3-M2 — benign "每天早上跟我说声早" tool. Writes THIS member's daily-brief
-        // opt-in file; the ButlerProactiveSweeper (below) polls it and sends. Gated on
-        // the SAME `butlerProactiveOn` flag as the sweep — if the proactive feature is
-        // off the tool isn't offered (writing a config that never fires would be a lie).
-        const dailyBriefToolset = butlerProactiveOn
-          ? buildButlerDailyBriefToolset({ userId, rootDir: butlerMemoryRoot, logger: log })
-          : undefined
-        // BE-M5 — benign "工作流跑完了主动告诉我" opt-in. Writes THIS member's
-        // run-broadcast opt-in file; the ButlerRunBroadcastSweeper (below) polls it and
-        // pushes a notice per finished run. Gated on the SAME `butlerRunBroadcastOn` flag
-        // as the sweep — if the feature is off the tool isn't offered (a config that never
-        // fires would be a lie). Benign: flipping your OWN notices consequences nobody else.
-        const runBroadcastToolset = butlerRunBroadcastOn
-          ? buildButlerRunBroadcastToolset({ userId, rootDir: butlerMemoryRoot, logger: log })
-          : undefined
-        // S2-M1 — benign "你记得我什么": the structured memory snapshot, read
-        // through the SAME HostButlerMemoryService that backs the /me privacy
-        // panel (同源 — never the model improvising from the frozen block).
-        const profileToolset = butlerMemoryViewRef
-          ? buildButlerProfileToolset({ userId, view: butlerMemoryViewRef, logger: log })
-          : undefined
-        const benign = [
-          ...(tools ? [tools] : []),
-          // S1-M2 — the READ half of the row's MCP servers (search notes, list
-          // events, …) runs inline; the WRITE half goes into `governed` below.
-          ...(mcpSplit ? [mcpSplit.readBenign] : []),
-          ...(workflowsToolset ? [workflowsToolset] : []),
-          ...(observeToolset ? [observeToolset] : []),
-          ...(diagnoseToolset ? [diagnoseToolset] : []),
-          ...(askAgentToolset ? [askAgentToolset] : []),
-          ...(planWizardToolset ? [planWizardToolset] : []),
-          ...(consolidateToolset ? [consolidateToolset] : []),
-          remindersToolset,
-          ...(dailyBriefToolset ? [dailyBriefToolset] : []),
-          ...(runBroadcastToolset ? [runBroadcastToolset] : []),
-          ...(profileToolset ? [profileToolset] : []),
-        ]
-        // Self-contained gates: the steward action set (BF-M7) + the governed
-        // create_workflow (BE-M3) + the MCP write half (S1-M2). Tool names are
-        // disjoint (steward verbs vs `create_workflow` vs `<server>__<tool>`), and
-        // the agent gates each call via whichever toolset governs that name.
-        const governed = [
-          ...(steward ? [steward] : []),
-          ...(workflowCreateGov ? [workflowCreateGov] : []),
-          ...(mcpSplit?.writeGoverned ? [mcpSplit.writeGoverned] : []),
-        ]
-
-        return new PersonalButlerAgent({
-          ...rest,
-          memory,
-          memoryRetriever: recallIndex.retriever({ activeOnly: true }),
-          // Keep BOTH kinds in the frozen block even though BF-M8 now runs
-          // consolidation (episodic→semantic) in the background: the curated
-          // `semantic` profile gives durable long-term facts, but a member's
-          // MOST RECENT captures (since the last 6h maintenance tick) only live
-          // in `episodic` — including it means the butler remembers what it
-          // heard minutes ago without waiting on the next sweep. Consolidation
-          // ADDS the distilled profile on top; it doesn't replace fresh recall.
-          frozenMemoryKinds: ['semantic', 'episodic'],
-          // An always-on butler instance serves many independent, history-less IM
-          // messages — re-recall per message so it remembers what it just captured
-          // (without this the block freezes at the first message's contents and the
-          // bot "forgets" mid-conversation). See MemorySession.refresh().
-          frozenRefreshPerTask: true,
-          captureMeta: { userId },
-          ...(benign.length > 0 ? { benign } : {}),
-          ...(governed.length > 0 ? { governed } : {}),
-        })
-      },
-    })
-  }
+  // Per-user butler assembly lives in personal-butler-factory.ts (fourth
+  // GUARD line-budget extraction). The getter bag reads the forward-declared
+  // refs at butler-build time — the same late-binding the inline closure had.
+  const butlerFactory: ButlerFactory = buildButlerFactory({
+    hub,
+    logger: log,
+    memoryRoot: butlerMemoryRoot,
+    governedOn: butlerGovernedOn,
+    maintenanceOn: butlerMaintenanceOn,
+    proactiveOn: butlerProactiveOn,
+    runBroadcastOn: butlerRunBroadcastOn,
+    refs: () => ({
+      governedAgents: butlerGovernedAgentsRef,
+      workflowEditor: butlerGovernedWorkflowEditorRef,
+      workflowCreate: butlerWorkflowCreateRef,
+      workflows: butlerWorkflowsRef,
+      observeRuns: butlerObserveRunsRef,
+      observeAgents: butlerObserveAgentsRef,
+      observeUsage: butlerObserveUsageRef,
+      diagnoseOwned: butlerDiagnoseOwnedRef,
+      diagnoseAdapt: butlerDiagnoseAdaptRef,
+      askRoster: butlerAskRosterRef,
+      wizard: butlerWizardRef,
+      providerBuilder: butlerProviderBuilderRef,
+      memoryView: butlerMemoryViewRef,
+    }),
+  })
 
   const localAgents = new LocalAgentPool({
     butlerFactory,
