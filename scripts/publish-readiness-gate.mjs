@@ -47,6 +47,9 @@ for (const [name, { pkg, dir }] of byName) {
   const needle = name === 'gotong' ? 'bin' : 'dist'
   if (!files.includes(needle))
     errors.push(`${where}: files 不含 ${needle}——发出去的包是空壳`)
+  const scripts = pkg.scripts ?? {}
+  if (scripts.build && !scripts.prepack)
+    errors.push(`${where}: 有 build 却缺 prepack——publish 会打包当时磁盘上的陈旧 dist`)
   for (const [cmd, rel] of Object.entries(pkg.bin ?? {})) {
     if (!existsSync(join(ROOT, 'packages', dir, rel)))
       errors.push(`${where}: bin.${cmd} 指向不存在的 ${rel}`)
