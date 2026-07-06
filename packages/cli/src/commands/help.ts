@@ -22,6 +22,7 @@ Commands:
   backup <space> <dir>        Archive a workspace to .tar.gz (manifest + sha256, WAL-safe)
   restore <tgz> --space <dir> Verify a backup's manifest, then restore it
   migrate <scan|apply> <dir>  Find / fix legacy (AipeHub-era) identifiers
+  update                      Update this install in place (git ff-only / npm / portable)
   help [command]              Show usage for a specific command
   --version                   Print the CLI version
 
@@ -286,6 +287,28 @@ Examples:
   gotong setting                       # interactive sub-shell
   gotong setting restore gotong-prod-20260626T101530Z.tar.gz /opt/gotong --yes
   gotong setting rotate-master-key
+`,
+  update: `gotong update
+
+探测这份 Gotong 是怎么装的,原地更新那种形态;**永不代跑重启**(重启权在
+运维手里,更新完只打印 systemd/前台两句重启命令)。
+
+  git checkout   fetch → merge --ff-only(纪律与 cloud-quickstart 同:工作区
+                 脏 / 本地分叉一律拒,绝不 reset)→ 现有 packages/*/dist 先挪
+                 dist.prev → pnpm install --frozen-lockfile && pnpm build
+                 --workspace-concurrency=1(串行构建,小内存机安全)→ 构建绿
+                 清 .prev / 构建红自动还原 dist.prev(服务继续跑旧产物)→
+                 自动 gotong check(红项警告,不判更新失败)。
+  全局 npm       npm i -g gotong@latest(失败原样转达)。
+  便携包         不做原地更新 —— 指路下载新包;数据目录在包外,原样保留。
+  rsync 部署     这台机器没有 .git 可拉 —— 提示回源 checkout 更新后重新
+                 rsync,或改用 cloud-quickstart --clone 部署。
+
+Exit codes: 0 更新成功/已最新/便携包指路 / 1 用法 / 2 形态无法自更新 /
+3 git 拒绝(脏工作区或非快进) / 4 安装或构建失败(dist.prev 已还原)。
+
+Examples:
+  gotong update
 `,
   provision: `gotong provision <pack.yaml> --url <hub> --token <admin-token> [options]
 

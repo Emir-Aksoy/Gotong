@@ -34,6 +34,7 @@ import { connect } from './commands/connect.js'
 import { mintPeerToken } from './commands/mint-peer-token.js'
 import { setting } from './commands/setting.js'
 import { provision } from './commands/provision.js'
+import { update } from './commands/update.js'
 import { backup } from './commands/backup.js'
 import { restore } from './commands/restore.js'
 import { migrate } from './commands/migrate.js'
@@ -91,6 +92,8 @@ export async function runCli(argv: readonly string[] = process.argv.slice(2)): P
         return await setting(rest)
       case 'provision':
         return await provision(rest)
+      case 'update':
+        return await update(rest)
       case 'backup':
         return await backup(rest)
       case 'restore':
