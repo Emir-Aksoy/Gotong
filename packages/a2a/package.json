@@ -4,7 +4,14 @@
   "type": "module",
   "description": "Gotong A2A (Agent2Agent) interop — blocking message/send wire types + a tiny injectable client, shared by the inbound A2A server (host) and the outbound A2aRemoteParticipant.",
   "license": "MIT",
-  "private": true,
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Emir-Aksoy/Gotong.git",
+    "directory": "packages/a2a"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {

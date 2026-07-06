@@ -4,7 +4,14 @@
   "type": "module",
   "description": "Gotong resident butler — a memory-augmented LlmAgent with a bounded tool-loop and approval-gated governed actions (sensitive → /me inbox). The OpenClaw/Hermes-style butler, but every dangerous action is human-gated (北极星: 框架只提议, 人审阅执行).",
   "license": "MIT",
-  "private": true,
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Emir-Aksoy/Gotong.git",
+    "directory": "packages/personal-butler"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {

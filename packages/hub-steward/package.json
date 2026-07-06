@@ -4,7 +4,14 @@
   "type": "module",
   "description": "Gotong hub steward (管家) — an LlmAgent that turns a member's plain-language instruction into a STRUCTURED PROPOSAL over their own managed agents + workflows. The steward never executes writes itself: the host re-classifies each action (safe / dangerous / cross_hub / forbidden) and runs it behind the existing member services + a Phase 16 approval inbox, so dangerous + cross-hub actions always get a human's second confirmation.",
   "license": "MIT",
-  "private": true,
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Emir-Aksoy/Gotong.git",
+    "directory": "packages/hub-steward"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {

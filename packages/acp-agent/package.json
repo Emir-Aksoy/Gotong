@@ -4,7 +4,14 @@
   "type": "module",
   "description": "Gotong outbound ACP adapter — spawns a coding agent (Claude Code / Codex via their ACP bridges) ONCE and holds a long-lived Agent Client Protocol session (JSON-RPC over NDJSON on stdio), dispatching many tasks to the SAME session with context preserved. The OpenClaw-style complement to the one-shot @gotong/cli-agent. Five seams (observe / intercept / handoff / resume / terminate) with a fail-closed permission gate (AGENT-ADAPTER-CONTRACT).",
   "license": "MIT",
-  "private": true,
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Emir-Aksoy/Gotong.git",
+    "directory": "packages/acp-agent"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {

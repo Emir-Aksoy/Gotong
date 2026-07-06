@@ -65,3 +65,7 @@ codex-next-work.md
 docs/zh/V4-PHASE19-PLAN.md
 docs/zh/V5-ROADMAP.md
 docs/zh/V6-ROUTE-B-PLAN.md
+
+# 凭证类文件永不入库(2026-07-05 事故:npm 恢复码被 git add -A 扫进过本地 commit)
+npm_recovery_codes.txt
+*recovery_codes*

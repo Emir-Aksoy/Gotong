@@ -4,7 +4,14 @@
   "type": "module",
   "description": "Gotong IM bridge for Matrix — implements ImBridge against the Matrix Client-Server API. Sync long-poll; no matrix-bot-sdk dep (uses fetch).",
   "license": "MIT",
-  "private": true,
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Emir-Aksoy/Gotong.git",
+    "directory": "packages/im-matrix"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {

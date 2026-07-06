@@ -4,7 +4,14 @@
   "type": "module",
   "description": "Gotong personal-butler memory — file-first MemorySession + prefix-cache-preserving frozen block + remember/recall/forget MemoryToolset + MemoryAugmentedAgent. The memory engine the resident butler stands on (对标 OpenClaw / Hermes).",
   "license": "MIT",
-  "private": true,
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Emir-Aksoy/Gotong.git",
+    "directory": "packages/personal-memory"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {

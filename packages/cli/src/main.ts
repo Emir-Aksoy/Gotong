@@ -15,10 +15,10 @@
  *
  * The CLI deliberately does NOT depend on `@gotong/sdk-node` or
  * `@gotong/host` at runtime — both pull in transitive deps (LLM
- * SDKs, sqlite, …) that bloat install time. The only runtime dep is
- * `@gotong/protocol` for the wire-protocol version string. `ping`
- * uses a hand-rolled WebSocket client (the `ws` package, declared as
- * a devDep so the published CLI bundles it via `bundleDependencies`).
+ * SDKs, sqlite, …) that bloat install time. Runtime deps stay tiny:
+ * `@gotong/protocol` for the wire-protocol version string, and `ws` —
+ * a real dependency (NOT a devDep; a devDep would be absent from user
+ * installs) — lazily imported so only `ping` ever loads it.
  * `start` keeps that discipline: it resolves `@gotong/host` lazily at
  * runtime (never a build-time dep) and only launches it if present.
  */
@@ -49,7 +49,8 @@ export async function runCli(argv: readonly string[] = process.argv.slice(2)): P
     const { dirname, join } = await import('node:path')
     const here = dirname(fileURLToPath(import.meta.url))
     try {
-      const raw = await readFile(join(here, '..', '..', 'package.json'), 'utf8')
+      // here = dist/ (built) or src/ (vitest) — either way package.json is ONE level up.
+      const raw = await readFile(join(here, '..', 'package.json'), 'utf8')
       const json = JSON.parse(raw) as { version?: string }
       console.log(json.version ?? '?')
     } catch {
@@ -95,15 +96,7 @@ export async function runCli(argv: readonly string[] = process.argv.slice(2)): P
   }
 }
 
-// Top-level for the bin shim. When invoked through Vitest the file is
-// imported for tests, in which case we don't want to call runCli().
-// Guard with the standard "main module" check (Node 20+).
-const isMain = import.meta.url === `file://${process.argv[1]}` || process.argv[1]?.endsWith('gotong.js')
-if (isMain) {
-  runCli().then((code) => {
-    if (typeof code === 'number' && code !== 0) process.exit(code)
-  }).catch((err) => {
-    console.error(err)
-    process.exit(1)
-  })
-}
+// No auto-run side-effect here — the bin shims call `runCli()` explicitly.
+// The old argv[1]-endsWith('gotong.js') heuristic silently no-opped under
+// npm/npx installs, where .bin entries are SYMLINKS and argv[1] is
+// `.bin/gotong` (pnpm's .bin shims pass the real path, which masked it).

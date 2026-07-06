@@ -712,6 +712,9 @@ importers:
       '@gotong/protocol':
         specifier: workspace:*
         version: link:../protocol
+      ws:
+        specifier: ^8.20.1
+        version: 8.20.1
     devDependencies:
       '@types/ws':
         specifier: ^8.5.13
@@ -719,9 +722,6 @@ importers:
       vitest:
         specifier: ^3.2.4
         version: 3.2.4(@types/node@20.19.41)(tsx@4.22.0)(yaml@2.9.0)
-      ws:
-        specifier: ^8.20.1
-        version: 8.20.1
 
   packages/cli-agent:
     dependencies:
@@ -758,6 +758,15 @@ importers:
       vitest:
         specifier: ^3.2.4
         version: 3.2.4(@types/node@20.19.41)(tsx@4.22.0)(yaml@2.9.0)
+
+  packages/gotong:
+    dependencies:
+      '@gotong/cli':
+        specifier: workspace:*
+        version: link:../cli
+      '@gotong/host':
+        specifier: workspace:*
+        version: link:../host
 
   packages/host:
     dependencies:

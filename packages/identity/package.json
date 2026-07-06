@@ -4,7 +4,14 @@
   "type": "module",
   "description": "Gotong v4 identity layer — users, credentials, memberships, sessions. SQLite-backed, zero-dep on other workspace packages (host/web wire it in).",
   "license": "MIT",
-  "private": true,
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Emir-Aksoy/Gotong.git",
+    "directory": "packages/identity"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {

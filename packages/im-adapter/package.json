@@ -4,7 +4,14 @@
   "type": "module",
   "description": "Gotong IM bridge SDK — abstract ImBridge interface + command parser + BindingResolver contract that concrete bridges (@gotong/im-telegram, @gotong/im-matrix, etc.) build on top of.",
   "license": "MIT",
-  "private": true,
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Emir-Aksoy/Gotong.git",
+    "directory": "packages/im-adapter"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {

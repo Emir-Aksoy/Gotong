@@ -4,7 +4,14 @@
   "type": "module",
   "description": "Gotong IM bridge for Lark / Feishu — implements ImBridge over the OFFICIAL long connection (@larksuiteoapi/node-sdk WSClient). Outbound, works behind NAT (no public webhook). Sends still go through the REST client (fetch). Card-button callbacks are not delivered over the long connection.",
   "license": "MIT",
-  "private": true,
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Emir-Aksoy/Gotong.git",
+    "directory": "packages/im-lark"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {

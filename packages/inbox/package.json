@@ -4,7 +4,14 @@
   "type": "module",
   "description": "Gotong member task inbox — file-first InboxStore + HumanInboxParticipant broker that turns a workflow's human-in-the-loop step into a parked Task a person resolves from /me.",
   "license": "MIT",
-  "private": true,
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Emir-Aksoy/Gotong.git",
+    "directory": "packages/inbox"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {

@@ -1,0 +1,26 @@
+{
+  "name": "gotong",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Gotong (gotong-royong) — npx-able meta package: `npx gotong start` boots a full hub. Real CLI lives in @gotong/cli; this package owns the short name and pulls @gotong/host into the install closure.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Emir-Aksoy/Gotong.git",
+    "directory": "packages/gotong"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "bin": {
+    "gotong": "./bin/gotong.js"
+  },
+  "files": [
+    "bin",
+    "README.md"
+  ],
+  "dependencies": {
+    "@gotong/cli": "workspace:*",
+    "@gotong/host": "workspace:*"
+  }
+}
