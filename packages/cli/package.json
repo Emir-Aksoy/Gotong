@@ -40,10 +40,15 @@
   "dependencies": {
     "@gotong/core": "workspace:*",
     "@gotong/protocol": "workspace:*",
+    "tar": "^7.4.3",
     "ws": "^8.20.1"
   },
   "devDependencies": {
-    "vitest": "^3.2.4",
-    "@types/ws": "^8.5.13"
+    "@types/better-sqlite3": "^7.6.0",
+    "@types/ws": "^8.5.13",
+    "vitest": "^3.2.4"
+  },
+  "optionalDependencies": {
+    "better-sqlite3": "^12.10.0"
   }
 }

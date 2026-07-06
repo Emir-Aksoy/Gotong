@@ -18,6 +18,8 @@ Commands:
   connect [agent]             Print MCP quick-connect config for a coding agent
   mint-peer-token             Generate a federation peer bearer token
   setting [subcommand]        Deterministic ops console (status/check/cold-start/restore/…)
+  backup <space> <dir>        Archive a workspace to .tar.gz (manifest + sha256, WAL-safe)
+  restore <tgz> --space <dir> Verify a backup's manifest, then restore it
   help [command]              Show usage for a specific command
   --version                   Print the CLI version
 
@@ -33,6 +35,8 @@ Examples:
   gotong connect claude-code --bin=/abs/packages/mcp-server/bin/gotong-mcp.js
   gotong mint-peer-token --peer-id=partner-hub
   gotong setting status
+  gotong backup .gotong ~/backups
+  gotong restore ~/backups/gotong-space-20260706T010203Z.tar.gz --space .gotong
 `
 
 const PER_COMMAND: Readonly<Record<string, string>> = {
@@ -280,6 +284,64 @@ Examples:
   gotong setting                       # interactive sub-shell
   gotong setting restore gotong-prod-20260626T101530Z.tar.gz /opt/gotong --yes
   gotong setting rotate-master-key
+`,
+  backup: `gotong backup <space-dir> <backup-dir> [--include-master-key]
+
+TS-native workspace backup — works everywhere the CLI runs (Windows and the
+portable bundle included; scripts/backup/backup.sh stays for server cron).
+Online backup is the default: the host can keep running.
+
+Semantics match backup.sh exactly:
+  - ALWAYS excluded: runtime/admin-sessions.json, runtime/worker-sessions.json
+    (restoring them would revive stale cookie sessions).
+  - Excluded by default: runtime/secret.key (v3) and the identity-master.key*
+    family (v4 vault KEK + rotation staging). Keys next to the ciphertext they
+    unlock would defeat the at-rest encryption for the backup copy.
+  - identity.sqlite is WAL-mode; it is copied through an honest ladder:
+    better-sqlite3 backup API → sqlite3 CLI .backup → raw copy + LOUD warning.
+
+On top of the .sh format, the archive carries gotong-backup-manifest.json
+(file list + sha256 of every byte as archived) — \`gotong restore\` verifies
+it before touching the target.
+
+Options:
+  --include-master-key   Moving-house mode: ALSO archive both key families.
+                         The archive can then decrypt everything it contains —
+                         treat the file itself as a credential.
+  --help / -h            Show this message
+
+Exit codes: 0 written / 1 usage / 2 not a workspace / 3 archive failed.
+
+Examples:
+  gotong backup .gotong ~/backups
+  gotong backup /opt/gotong/.gotong /var/backups/gotong --include-master-key
+`,
+  restore: `gotong restore <backup.tar.gz> --space <dir> [--force]
+
+Verify-then-restore for archives produced by \`gotong backup\`. The archive is
+extracted to a temporary directory first and its manifest is checked — every
+file's sha256 and size, plus the file set in both directions. Only a fully
+verified archive is moved into the target; ANY mismatch refuses and leaves the
+target byte-for-byte untouched.
+
+A non-empty target requires --force, and even then the old content is only
+replaced AFTER verification passes. Legacy .sh archives (no manifest inside)
+are refused — restore those with scripts/backup/restore.sh.
+
+After restoring, the workspace check (\`gotong check\`) runs automatically when
+@gotong/host is installed; problems are reported but do not undo the restore.
+
+Options:
+  --space <dir>      Target workspace directory (required; also --space=<dir>)
+  --force            Replace a non-empty target after verification
+  --help / -h        Show this message
+
+Exit codes: 0 restored / 1 usage / 2 target refused / 3 archive missing or
+extract failed / 4 manifest missing, corrupt, or verification failed.
+
+Examples:
+  gotong restore ~/backups/gotong-space-20260706T010203Z.tar.gz --space .gotong
+  gotong restore backup.tar.gz --space /opt/gotong/.gotong --force
 `,
 }
 
