@@ -60,3 +60,9 @@ export {
   ComposedToolNameCollisionError,
   type ComposedToolCollision,
 } from './composed-toolset.js'
+// CARE-M1 — provider 错误分类(纯函数,host 失败翻译表的地基)
+export {
+  classifyLlmError,
+  llmErrorSummary,
+  type LlmErrorKind,
+} from './errors.js'
