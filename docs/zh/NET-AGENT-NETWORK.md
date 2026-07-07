@@ -10,11 +10,11 @@
 >
 > **进展**:A track 全完 —— NET-M1 `list_peers`(`e9f9844`)、NET-M2
 > `ask_peer` governed 出网(`322f90d`,双 hub e2e 四场景)、NET-M3 capstone
-> (`examples/butler-cross-hub` demo + FEDERATION-RUNBOOK「管家出网」节 +
-> 双闸回传显式推迟)。B track(M4 名片 / M5 connect preflight)未动,
-> 动工前先重侦察 A2A agent-card 等标准现状。
+> (`af48654`,`examples/butler-cross-hub` demo + FEDERATION-RUNBOOK「管家
+> 出网」节 + 双闸回传显式推迟)。B track:NET-M4 名片 ✅(A2A v1.0 升卡 +
+> owner 策展文件,本 commit);NET-M5 connect preflight 未动。
 >
-> Last updated: 2026-07-06(NET-M3 收口)
+> Last updated: 2026-07-07(NET-M4 收口)
 
 ---
 
@@ -167,24 +167,43 @@ peer 行内 `requireApprovalOutbound`);节律/上限如需一律常量。B track
 > 出处:[A2A spec](https://a2a-protocol.org/latest/specification/) ·
 > [AgentCard concept](https://agent2agent.info/docs/concepts/agentcard/)。
 
-- **NET-M4 名片 = 一张真 A2A AgentCard**(定稿:概设里的自造
+- **NET-M4 名片 = 一张真 A2A AgentCard ✅(as-built)**(定稿:概设里的自造
   `gotong-hub.json` **放弃**——生态互认优先于自造格式,咱们本来就有 A2A
   入站,名片就该是外部 A2A caller 拿了能直接用的那张卡):
-  - `GET /.well-known/agent-card.json`:`name`/`description` = owner 策展的
-    hub 自我介绍;`url` = 本 hub A2A 端点;`skills[]` = **owner 策展的**可被
-    请求 capability 白名单(id=capability 名);`securitySchemes` = bearer
-    (peer token,拿 token 仍走既有 onboarding);能力旗帜诚实声明。
-  - **file-first,文件即开关,零新 env 旋钮**:名片内容 = `.gotong/` 下
-    owner 策展文件;文件不存在 → 404(主权 hub 缺省沉默,「默认空=只报
-    身份」再收紧为「默认什么都不报」)。策展文件只填人话字段(displayName/
-    description/skills),路由把它翻成规范 AgentCard——owner 永不手写协议
-    结构。
+  - **侦察修正:卡早已存在**——R3(A2A alignment)就落了
+    `host/src/agent-card.ts` + main.ts 闭包 + web 路由
+    (`GET /.well-known/agent-card.json`,请求推导 baseUrl、405/404/
+    cache-control 齐全)+ `GOTONG_A2A_ADVERTISE_SKILLS`(默认关,开=自动
+    枚举全部本地 capability)。外部标准侦察做了、自家仓库没 grep,差点重
+    造——教训记下:**侦察清单里「我们自己有没有」排第一**。M4 因此收敛为
+    两件事:**升 v1.0 卡形 + 加 owner 策展层**,web 路由零改动。
+  - **v1.0 卡形,0.2.x 过渡字段双写**:新增必填 `supportedInterfaces[]`
+    (首项=首选;url=`<base>/a2a`、protocolBinding=JSONRPC、**接口级
+    protocolVersion 诚实写 '0.2'**——方法面真的是 0.2.x 的阻塞
+    message/send + tasks/get 子集,卡形升级不冒领方法面)+
+    `securityRequirements`(v1.0 改名,与旧 `security` 双写);旧顶层
+    `url`/`protocolVersion` 留给 0.2.x 读者;`provider` 删(v1.0 要求
+    url+organization 成对,hub 给不出 organization URL,半个 provider 违
+    规范);v1.0 把 AgentSkill 的 description/tags 变必填 →
+    `buildAgentCard` 统一归一(description 缺省=id,tags 缺省=[])。
+  - **owner 策展文件 = `<space>/agent-card.json`,file-first 零新 env
+    旋钮**:owner 只填人话字段(displayName/description/skills[]
+    {id,name?,description?,tags?},id=可被入站 message/send 请求的
+    capability 名),路由翻成规范卡——owner 永不手写协议结构。每请求
+    `readFileSync` 现读,改完即生效不用重启。**优先级:策展 > env 枚举 >
+    无**;概设「文件不存在→404」修正为:卡本就默认 serve 身份最小卡
+    (身份+怎么认证,这是发现面的正当缺省),缺省沉默指的是 **skills 一个
+    不登**——策展文件管的是「登什么」,不是「有没有卡」。
+  - **损坏=整文件拒,绝不半张卡**:坏 JSON/非对象/skills 非数组/skill 缺
+    string id → warn(每文件 60s 节流,公网端点防扫描刷日志)+ 回落到无
+    策展;重复 skill id → warn 留首个;非字符串 tag 丢弃。
   - **签名 keypair:首版不签,单独拍板**(spec 里签名可选;发现≠信任,
     信任仍走 token onboarding,名片被篡改的后果=读到假介绍,建边时 token
     握手会拆穿)。引入长期 keypair 牵动备份/轮换/vault 姿态,值得单独一轮。
-  - 会红的门:策展文件缺失→404 / 存在→规范字段齐全(对 A2A 类型核)/
-    skills 逐字=策展白名单绝不自动收集 hub 能力 / 损坏文件 warn+404 绝不
-    半张卡。
+  - 会红的门(19 条单测):supportedInterfaces 指向 /a2a 且接口版本 '0.2' /
+    provider 不在卡上 / security 双写 / skills 归一(description←id、
+    tags←[])/ 策展缺省沉默 null 不 warn / 5 种损坏各 warn+null 整文件拒 /
+    重复 id 留首 / 策展 skills 逐字上卡绝不自动扩。
 - **NET-M5 发现 preflight**:`gotong connect <url>` 先取
   `/.well-known/agent-card.json` → 打印人类可读的「对方是谁/开了什么」→
   人确认 → 走既有 token/邀请流。对端没有名片 → 如实说没有,照旧直连

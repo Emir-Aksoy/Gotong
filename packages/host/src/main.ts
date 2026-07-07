@@ -115,7 +115,7 @@ import {
 import { OrgApiPool } from './org-api-pool.js'
 
 import { BAKED_VERSION } from './version.js'
-import { buildAgentCard } from './agent-card.js'
+import { buildAgentCard, readAgentCardCurationSync } from './agent-card.js'
 import { auditBootSecurity, formatBootSecurityReport, isLoopbackHost } from './boot-security.js'
 import {
   firstRunSetupBanner,
@@ -1754,21 +1754,28 @@ async function main(): Promise<void> {
   // so opting in is a deliberate operator act.
   const advertiseSkills = envBool('GOTONG_A2A_ADVERTISE_SKILLS', false)
   const selfHubIdForCard = cardMeta.hubId ?? 'self'
+  // NET-M4 — owner curation file beats env enumeration (a hand-written list is
+  // the more explicit operator act); absent file = legacy behavior unchanged.
+  // Read per request so owner edits go live without a restart.
+  const cardCurationFile = join(space.root, 'agent-card.json')
   const agentCard = {
     json: (baseUrl: string): string => {
-      const skills = advertiseSkills
-        ? buildLocalManifest(
-            hub,
-            selfHubIdForCard,
-            new Set((peerRegistry?.status() ?? []).map((r) => r.peerId)),
-          ).capabilities.map((cap) => ({ id: cap.id, name: cap.id }))
-        : []
+      const curation = readAgentCardCurationSync(cardCurationFile, log)
+      const skills = curation
+        ? curation.skills
+        : advertiseSkills
+          ? buildLocalManifest(
+              hub,
+              selfHubIdForCard,
+              new Set((peerRegistry?.status() ?? []).map((r) => r.peerId)),
+            ).capabilities.map((cap) => ({ id: cap.id, name: cap.id }))
+          : []
       return JSON.stringify(
         buildAgentCard({
-          name: cardMeta.name || cardMeta.hubId || 'Gotong',
+          name: curation?.displayName ?? (cardMeta.name || cardMeta.hubId || 'Gotong'),
           version: BAKED_VERSION,
           url: baseUrl,
-          description: cardMeta.description,
+          description: curation?.description ?? cardMeta.description,
           authSchemes: peerRegistry ? ['bearer'] : [],
           ...(skills.length > 0 ? { skills } : {}),
         }),
