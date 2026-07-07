@@ -16,7 +16,7 @@
 
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
@@ -25,8 +25,11 @@ import type { Logger } from '@gotong/core'
 import type { AdminHealthSurface, HealthSnapshot } from '../src/admin-health.js'
 import {
   ButlerPatrolSweeper,
+  OUTAGE_CARD_ID,
+  OUTAGE_ESCALATION_MS,
   derivePatrolCards,
   diffPatrolCards,
+  outageEscalationCard,
   patrolAppearMessage,
   patrolRecoverMessage,
 } from '../src/personal-butler-patrol.js'
@@ -114,6 +117,41 @@ describe('CARE-M3 纯函数核 — derivePatrolCards', () => {
     expect(patrolRecoverMessage([{ severity: 'yellow', label: 'IM 通道全无', since: 1 }])).toBe(
       '✅ 巡检:「IM 通道全无」已恢复。',
     )
+  })
+
+  it('diff 的 recovered 带 id(CARE-M6 恢复静默按 id 过滤,不靠 label)', () => {
+    const prev = { 'llm:outage': { severity: 'red' as const, label: '管家大脑持续断供', since: 1 } }
+    const { recovered } = diffPatrolCards(prev, [])
+    expect(recovered).toEqual([{ id: 'llm:outage', severity: 'red', label: '管家大脑持续断供', since: 1 }])
+  })
+})
+
+describe('CARE-M6 纯函数核 — outageEscalationCard', () => {
+  const T0 = 1_000_000
+
+  it('无断供 → null', () => {
+    expect(outageEscalationCard(null, T0, OUTAGE_ESCALATION_MS)).toBe(null)
+  })
+
+  it('断供但没到阈值 → null(不抢 CARE-M2 的即时「坏了」)', () => {
+    const outage = { kind: 'network' as const, since: T0 - 10 * 60_000, announced: true } // 断了 10 分钟
+    expect(outageEscalationCard(outage, T0, OUTAGE_ESCALATION_MS)).toBe(null)
+  })
+
+  it('持续超阈值 → 红牌,带分钟数 + 病名(CARE-M1 翻译表)+ 稳定 id', () => {
+    const outage = { kind: 'auth' as const, since: T0 - 31 * 60_000, announced: true }
+    const card = outageEscalationCard(outage, T0, OUTAGE_ESCALATION_MS)
+    expect(card).not.toBe(null)
+    expect(card!.id).toBe(OUTAGE_CARD_ID)
+    expect(card!.severity).toBe('red')
+    expect(card!.fact).toContain('31 分钟')
+    expect(card!.fact).toContain('API key') // auth 病名走翻译表
+    expect(card!.fact).toContain('命令面') // 断供期间命令仍可用
+  })
+
+  it('since 在未来(时钟偏移/损坏)→ downMs 负 → null,不出牌', () => {
+    const outage = { kind: 'timeout' as const, since: T0 + 5 * 60_000, announced: true }
+    expect(outageEscalationCard(outage, T0, OUTAGE_ESCALATION_MS)).toBe(null)
   })
 })
 
@@ -271,5 +309,99 @@ describe('CARE-M3 E2E — 注入时钟 + 边沿播报 + 同意面', () => {
     // fire=attempt:状态已经记下这张牌,以后有人开播报也不会翻旧账重播。
     const state = JSON.parse(readFileSync(stateFile, 'utf8')) as { cards: Record<string, unknown> }
     expect(Object.keys(state.cards)).toEqual(['im:none'])
+  })
+})
+
+describe('CARE-M6 E2E — 长断供升级卡(巡检读断供文件,恢复静默)', () => {
+  let dir: string
+  let memoryRoot: string
+  let stateFile: string
+  let outageFile: string
+  let pushes: Array<{ userId: string; text: string }>
+  let snapshot: HealthSnapshot
+  let health: AdminHealthSurface
+
+  const makeSweeper = (now: () => number): ButlerPatrolSweeper =>
+    new ButlerPatrolSweeper({
+      stateFile,
+      memoryRoot,
+      health: () => health,
+      push: async (userId, text) => {
+        pushes.push({ userId, text })
+        return { delivered: true }
+      },
+      logger: silentLogger,
+      now,
+      outageFile,
+      // 阈值走默认(30 分钟);用注入时钟把「已断供多久」拨过/拨不过它。
+    })
+
+  /** 写断供状态文件(CARE-M2 的形状);删它 = provider 恢复(onProviderSuccess 清盘)。 */
+  const writeOutage = (kind: string, since: number): void => {
+    mkdirSync(dirname(outageFile), { recursive: true })
+    writeFileSync(outageFile, JSON.stringify({ kind, since, announced: true }), 'utf8')
+  }
+
+  beforeEach(async () => {
+    dir = mkdtempSync(join(tmpdir(), 'gotong-patrol-outage-'))
+    memoryRoot = join(dir, 'butler', 'memory')
+    stateFile = join(dir, 'butler', 'patrol-state.json')
+    outageFile = join(dir, 'runtime', 'llm-outage.json')
+    pushes = []
+    // 全绿 health(IM 桥在场)——隔离出断供牌,不与 health 牌混。
+    snapshot = greenSnapshot({ imBridges: [{ platform: 'telegram' }] })
+    health = { snapshot: async () => snapshot }
+    await writeButlerRunBroadcastConfig(memoryRoot, 'alice', { enabled: true, announcedMax: 0 })
+  })
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('阈值内不升级;超阈值升级红牌播一次;不修不重播;文件清掉后恢复静默', async () => {
+    const T0 = 1_000_000
+
+    // ① 刚断供(阈值内)→ 不升级:不抢 CARE-M2 那声即时「坏了」。
+    writeOutage('network', T0)
+    await makeSweeper(() => T0 + 10 * 60_000).runOnce() // 才 10 分钟
+    expect(pushes).toEqual([])
+
+    // ② 持续超阈值 → 升级红牌,恰一次,发给同意的 alice。
+    await makeSweeper(() => T0 + 31 * 60_000).runOnce()
+    expect(pushes).toHaveLength(1)
+    expect(pushes[0]!.userId).toBe('alice')
+    expect(pushes[0]!.text).toContain('巡检发现新问题')
+    expect(pushes[0]!.text).toContain('🔴')
+    expect(pushes[0]!.text).toContain('断供约 31 分钟')
+
+    // ③ 还没好 → 下轮不重播(边沿 dedup)。
+    await makeSweeper(() => T0 + 45 * 60_000).runOnce()
+    expect(pushes).toHaveLength(1)
+
+    // ④ provider 恢复(断供文件被 onProviderSuccess 清)→ 巡检恢复**静默**:
+    //    「✅ 恢复了」交给 CARE-M2/M5,巡检不重复;状态里的升级牌照常清掉。
+    rmSync(outageFile, { force: true })
+    await makeSweeper(() => T0 + 46 * 60_000).runOnce()
+    expect(pushes).toHaveLength(1) // 没有第二条——恢复静默
+    const state = JSON.parse(readFileSync(stateFile, 'utf8')) as { cards: Record<string, unknown> }
+    expect(OUTAGE_CARD_ID in state.cards).toBe(false) // 牌已清,bookkeeping 照常
+  })
+
+  it('升级红牌与 health 黄牌同轮 → 合并一条消息', async () => {
+    const T0 = 2_000_000
+    writeOutage('quota', T0)
+    snapshot = greenSnapshot({ imBridges: [] }) // 顺手拨出一张 im:none 黄牌
+    await makeSweeper(() => T0 + 40 * 60_000).runOnce()
+    expect(pushes).toHaveLength(1) // 一条消息,涓流不连环炮
+    expect(pushes[0]!.text).toContain('断供') // 红牌
+    expect(pushes[0]!.text).toContain('IM 通道') // 黄牌
+  })
+
+  it('断供文件不存在 → 无断供牌(与不接 outageFile 的 CARE-M3 字节一致)', async () => {
+    const T0 = 3_000_000
+    // 不写 outageFile。
+    await makeSweeper(() => T0).runOnce()
+    expect(pushes).toEqual([])
+    const state = JSON.parse(readFileSync(stateFile, 'utf8')) as { cards: Record<string, unknown> }
+    expect(state.cards).toEqual({})
   })
 })

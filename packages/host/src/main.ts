@@ -1872,6 +1872,9 @@ async function main(): Promise<void> {
       intervalMs: BUTLER_PATROL_INTERVAL_MS,
       stateFile: join(space.root, 'butler', 'patrol-state.json'),
       health: () => patrolHealthRef,
+      // CARE-M6 — 同 CARE-M2 那份断供状态文件;巡检读它,持续断供超阈值升级红牌
+      // (恢复静默,交给 CARE-M2/M5 的即时「✅ 恢复了」)。
+      outageFile: join(space.root, 'runtime', 'llm-outage.json'),
     },
   })
   let patrolHealthRef: AdminHealthSurface | undefined

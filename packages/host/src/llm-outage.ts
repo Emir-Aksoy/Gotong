@@ -37,6 +37,21 @@ function isSnapshot(v: unknown): v is LlmOutageSnapshot {
     && typeof s.announced === 'boolean'
 }
 
+/**
+ * 读一次断供状态文件,**无缓存**——不存在 / 损坏 / 形状不对一律当空(null)。
+ * 给旁路只读方(如巡检)按 tick 拉最新用:LlmOutageTracker 自己会把 state
+ * 缓存在内存里(它是断供边沿的权威写方),旁观者不能借它读,否则永远停在
+ * 首次 load 的旧值。tracker 的 load() 也复用这个纯读,保持解析/校验一处。
+ */
+export async function readOutageSnapshotFile(file: string): Promise<LlmOutageSnapshot | null> {
+  try {
+    const parsed: unknown = JSON.parse(await readFile(file, 'utf8'))
+    return isSnapshot(parsed) ? parsed : null
+  } catch {
+    return null // 不存在或损坏当空
+  }
+}
+
 export class LlmOutageTracker {
   private loaded = false
   private state: LlmOutageSnapshot | null = null
@@ -87,12 +102,7 @@ export class LlmOutageTracker {
   private async load(): Promise<void> {
     if (this.loaded) return
     this.loaded = true
-    try {
-      const parsed: unknown = JSON.parse(await readFile(this.file, 'utf8'))
-      this.state = isSnapshot(parsed) ? parsed : null
-    } catch {
-      this.state = null // 不存在或损坏当空
-    }
+    this.state = await readOutageSnapshotFile(this.file)
   }
 
   private async persist(): Promise<void> {

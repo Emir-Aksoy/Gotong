@@ -47,7 +47,14 @@ export interface ButlerSweepsOptions {
    * builds adminHealth after arming — the getter resolves by first tick).
    * Optional so pre-CARE-M3 call sites / tests stay byte-identical.
    */
-  patrol?: { on: boolean; intervalMs: number; stateFile: string; health: () => AdminHealthSurface | undefined }
+  patrol?: {
+    on: boolean
+    intervalMs: number
+    stateFile: string
+    health: () => AdminHealthSurface | undefined
+    /** CARE-M6 — 断供状态文件;给了它,巡检持续断供超阈值会升级一张红牌。 */
+    outageFile?: string
+  }
 }
 
 export interface ButlerSweepsHandle {
@@ -91,6 +98,7 @@ export function armButlerSweeps(opts: ButlerSweepsOptions): ButlerSweepsHandle {
       push: opts.push,
       logger: opts.logger,
       intervalMs: opts.patrol.intervalMs,
+      ...(opts.patrol.outageFile ? { outageFile: opts.patrol.outageFile } : {}),
     })
     patrol.start()
   }

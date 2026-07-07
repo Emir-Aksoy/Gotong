@@ -41,10 +41,19 @@ import { dirname, join } from 'node:path'
 import type { Logger } from '@gotong/core'
 
 import type { AdminHealthSurface, HealthSnapshot } from './admin-health.js'
+import { translateLlmFailureKind } from './failure-translator.js'
+import { readOutageSnapshotFile, type LlmOutageSnapshot } from './llm-outage.js'
 import { readButlerRunBroadcastConfig } from './personal-butler-run-broadcast.js'
 
 /** 默认巡检节奏 — 10 分钟。本轮不加旋钮:要更密/更疏等真实需求出现。 */
 export const BUTLER_PATROL_INTERVAL_MS = 10 * 60 * 1000
+
+/**
+ * CARE-M6 — 断供升级门槛:断供**持续**超过它,巡检才把它当一张红牌升级。
+ * 区别于 CARE-M2 的即时「坏了」(用户在场那条线立刻说);这里是「没人问也
+ * 有人看着」的值班视角——半小时还没好,就不是临时抖动,该运维看了。常量
+ * 非旋钮(同 CARE-M2/M3/M5 零新旋钮惯例)。 */
+export const OUTAGE_ESCALATION_MS = 30 * 60 * 1000
 
 /** 一条播报里最多点名几张牌——首轮巡检可能一次冒一堆,给个涓流帽。 */
 const MAX_CARDS_PER_MESSAGE = 5
@@ -119,6 +128,35 @@ export function derivePatrolCards(s: HealthSnapshot): PatrolCard[] {
   return [...red.sort(byId), ...yellow.sort(byId)]
 }
 
+/** 升级红牌的稳定 id;runOnce 追加它、恢复静默过滤它都认这个常量。 */
+export const OUTAGE_CARD_ID = 'llm:outage'
+
+/**
+ * CARE-M6 — 把断供状态文件(另一模块写的事实)折成一张升级红牌。巡检借此在
+ * 「没人问」的时段也盯着断供,但只在**持续**超阈值时升级——避免与 CARE-M2
+ * 的即时「坏了」撞车。读的是 `{kind, since}`,never 认识任何 provider,
+ * provider-blind 不变式仍成立(病名走 CARE-M1 纯翻译表)。
+ * 返回 null = 无断供 / 还没到阈值,不出牌。since 在未来(时钟偏移/损坏)→
+ * downMs 为负 < 阈值 → 也不出牌。
+ */
+export function outageEscalationCard(
+  outage: LlmOutageSnapshot | null,
+  now: number,
+  thresholdMs: number,
+): PatrolCard | null {
+  if (!outage) return null
+  const downMs = now - outage.since
+  if (downMs < thresholdMs) return null
+  const mins = Math.max(1, Math.round(downMs / 60_000))
+  const t = translateLlmFailureKind(outage.kind, 'zh')
+  return {
+    id: OUTAGE_CARD_ID,
+    severity: 'red',
+    label: '管家大脑持续断供',
+    fact: `管家大脑已经断供约 ${mins} 分钟(${t.headline})——不是临时抖动了,查查 provider 状态 / key / 额度。命令面(/help /agents /workflow)仍照常。`,
+  }
+}
+
 // ---------------------------------------------------------------------------
 // 状态文件 — 上次牌面,损坏当空。
 // ---------------------------------------------------------------------------
@@ -166,16 +204,19 @@ async function loadPatrolState(file: string): Promise<PatrolState> {
   }
 }
 
+/** 恢复牌带上自己的 id——恢复静默过滤(CARE-M6)按 id 认牌,不靠脆弱的 label 比对。 */
+export type RecoveredCard = StoredCard & { id: string }
+
 /** diff 的纯核,导出给单测:上次牌面 vs 本次,谁新来、谁走了。 */
 export function diffPatrolCards(
   prev: Readonly<Record<string, StoredCard>>,
   current: readonly PatrolCard[],
-): { appeared: PatrolCard[]; recovered: StoredCard[] } {
+): { appeared: PatrolCard[]; recovered: RecoveredCard[] } {
   const appeared = current.filter((c) => !(c.id in prev))
   const currentIds = new Set(current.map((c) => c.id))
   const recovered = Object.entries(prev)
     .filter(([id]) => !currentIds.has(id))
-    .map(([, c]) => c)
+    .map(([id, c]) => ({ id, ...c }))
   return { appeared, recovered }
 }
 
@@ -224,6 +265,14 @@ export interface ButlerPatrolSweeperOptions {
   intervalMs?: number
   /** 注入时钟(测试确定性);默认 Date.now。只喂 `since` 戳。 */
   now?: () => number
+  /**
+   * CARE-M6 — 断供状态文件路径(`<space>/runtime/llm-outage.json`,CARE-M2
+   * 写的那份)。给了它,巡检每轮读一次新值,持续断供超阈值就升级一张红牌。
+   * 缺省 → 不读、不出断供牌(纯 health 牌面,与 CARE-M3 字节一致)。
+   */
+  outageFile?: string
+  /** 断供升级门槛;默认 {@link OUTAGE_ESCALATION_MS}(30 分钟)。 */
+  outageEscalationMs?: number
 }
 
 export class ButlerPatrolSweeper {
@@ -234,6 +283,8 @@ export class ButlerPatrolSweeper {
   private readonly log: Logger
   private readonly intervalMs: number
   private readonly now: () => number
+  private readonly outageFile?: string
+  private readonly outageEscalationMs: number
 
   private timer?: ReturnType<typeof setInterval>
   private running = false
@@ -246,6 +297,8 @@ export class ButlerPatrolSweeper {
     this.log = opts.logger
     this.intervalMs = opts.intervalMs ?? BUTLER_PATROL_INTERVAL_MS
     this.now = opts.now ?? Date.now
+    if (opts.outageFile) this.outageFile = opts.outageFile
+    this.outageEscalationMs = opts.outageEscalationMs ?? OUTAGE_ESCALATION_MS
   }
 
   /** 与姊妹 sweep 同姿态:不在启动瞬间跑,首 tick 一个 interval 之后。 */
@@ -283,12 +336,18 @@ export class ButlerPatrolSweeper {
         return
       }
       const current = derivePatrolCards(snapshot)
+      // CARE-M6 — 断供升级:读断供状态文件(每轮拉最新,不借 tracker 的内存缓存),
+      // 持续超阈值就多一张红牌。巡检仍 provider-blind——读的是别人写的事实。
+      const escalation = this.outageFile
+        ? outageEscalationCard(await readOutageSnapshotFile(this.outageFile), this.now(), this.outageEscalationMs)
+        : null
+      const currentAll = escalation ? [...current, escalation] : current
       const prev = await loadPatrolState(this.stateFile)
-      const { appeared, recovered } = diffPatrolCards(prev.cards, current)
+      const { appeared, recovered } = diffPatrolCards(prev.cards, currentAll)
 
       // 无边沿:静默把 severity/label 漂移写回(一张牌一场事,不重播)。
       const nextCards: Record<string, StoredCard> = {}
-      for (const c of current) {
+      for (const c of currentAll) {
         nextCards[c.id] = {
           severity: c.severity,
           label: c.label,
@@ -296,11 +355,17 @@ export class ButlerPatrolSweeper {
         }
       }
       await this.saveState({ cards: nextCards })
-      if (appeared.length === 0 && recovered.length === 0) return
+
+      // CARE-M6 — 断供牌的**恢复**交给 CARE-M2/M5 的即时「✅ 恢复了」:断供文件
+      // 只被 onProviderSuccess 清,而它清时必播恢复,巡检再播一次恒冗余(还晚一个
+      // 节律)。这里静默过滤它的恢复文案;状态照常 diff/落盘,bookkeeping 不变。
+      // (升级牌的**出现**照常播——那正是升级的价值。)
+      const recoveredSpoken = recovered.filter((c) => c.id !== OUTAGE_CARD_ID)
+      if (appeared.length === 0 && recoveredSpoken.length === 0) return
 
       const messages: string[] = []
       if (appeared.length > 0) messages.push(patrolAppearMessage(appeared))
-      if (recovered.length > 0) messages.push(patrolRecoverMessage(recovered))
+      if (recoveredSpoken.length > 0) messages.push(patrolRecoverMessage(recoveredSpoken))
       const reachable = await this.listConsentingUserIds()
       if (reachable.length === 0) {
         this.log.info('butler patrol: edge detected but no member opted into broadcasts', {
