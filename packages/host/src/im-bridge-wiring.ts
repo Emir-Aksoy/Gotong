@@ -71,6 +71,9 @@ export async function armImBridgeWiring(deps: ImBridgeWiringDeps): Promise<ImBri
     // F1 — 出站推送地基:绑定成员的每条入站消息都记下最新可达聊天,
     // 后续提醒 / 审批回推 / 播报走返回的 pushToMember。
     reachableDir: join(deps.spaceRoot, 'butler', 'reachable'),
+    // CARE-M8 — 投递失败入盘、成员可达时重投的每成员 outbox。给了它,
+    // reachable push 的失败不再只是一行日志(短暂失联的成员不漏播报/提醒)。
+    outboxDir: join(deps.spaceRoot, 'butler', 'outbox'),
     // CARE-M2 — 断供不失联:状态文件 + 语言 + BE-M5 同意面的根。
     // CARE-M5 — 有 probeLiveness 时 im-bridge 再 arm 主动恢复探活定时器。
     llmOutage: {

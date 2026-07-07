@@ -51,6 +51,7 @@ import { LarkBridge } from '@gotong/im-lark'
 import { SlackBridge, type WebSocketCtor as SlackWebSocketCtor } from '@gotong/im-slack'
 import { WebSocket as NodeWebSocket } from 'ws'
 
+import { ButlerOutbox } from './butler-outbox.js'
 import { ButlerReachableRegistry, type ButlerPushResult } from './butler-reachable.js'
 import { translateLlmFailureKind, type FailureLang, type LlmFailureTranslation } from './failure-translator.js'
 import {
@@ -658,6 +659,13 @@ export interface StartImBridgesOptions {
    */
   reachableDir?: string
   /**
+   * CARE-M8 — outbox 目录(`<space>/butler/outbox`)。给了它(且 reachableDir
+   * 在)→ `pushToMember` 与断供播报走持久化重投:投递失败入盘,成员下次说话
+   * (record → flush)或 cadence 巡检时补投。缺省 → push 仍是 best-effort
+   * (失败只记日志,与今天字节一致)。
+   */
+  outboxDir?: string
+  /**
    * CARE-M2 — 断供不失联接线。file 惯例 `<space>/runtime/llm-outage.json`;
    * butlerMemoryRoot 用来枚举 BE-M5 播报已同意的成员(骑同一份同意,零新
    * 旋钮);边沿播报走 reachable push,没配 reachableDir 时退化为只记日志
@@ -720,6 +728,13 @@ export interface ImBridgesHandle {
  * 时每次 tick 只是 tracker 的一次内存读('idle' 即返回),近乎零成本。
  */
 const LLM_RECOVERY_PROBE_INTERVAL_MS = 60_000
+
+/**
+ * CARE-M8 — outbox 重投巡检节律。常量非旋钮。成员一说话立刻 flush(record →
+ * flush,常态恢复路径);这个 cadence 只兜「桥恢复了但成员没吭声」——2 分钟够
+ * 及时;空队列时每 tick 只是一次 readdir,近乎零成本。
+ */
+const OUTBOX_FLUSH_INTERVAL_MS = 2 * 60 * 1000
 
 /**
  * Construct and start every configured IM bridge. Each platform is
@@ -840,6 +855,29 @@ export async function startImBridges(
     await reachable.load()
   }
 
+  // CARE-M8 — 持久化投递重投。仅当 reachable 在 AND 宿主给了 outboxDir 时包一层:
+  // 投递失败入盘,成员下次说话(record → flush)或 cadence 巡检时补投。缺省 →
+  // push 仍 best-effort(失败只记日志,与今天字节一致)。
+  let outbox: ButlerOutbox | undefined
+  if (reachable && opts.outboxDir) {
+    const reg = reachable
+    outbox = new ButlerOutbox({
+      dir: opts.outboxDir,
+      push: (userId, text) => reg.push(userId, text),
+      logger: opts.log,
+    })
+  }
+
+  // 面向成员的统一投递原语:有 outbox 走持久重投,否则退回 raw best-effort push。
+  // 一切成员向投递(pushToMember、断供 announce)都走它,重试语义一处、齐整。
+  // reachable 不在 → undefined(纯 env IM 没有出站推送面,字节不变)。
+  const deliverToMember: ((userId: string, text: string) => Promise<ButlerPushResult>) | undefined =
+    reachable
+      ? outbox
+        ? (userId, text) => outbox!.deliver(userId, text)
+        : (userId, text) => reachable!.push(userId, text)
+      : undefined
+
   // CARE-M2 — 断供/恢复的边沿播报出口:发给 BE-M5 运行播报已开的成员
   // (同一份同意,零新旋钮)。best-effort:一个成员送不到不挡下一个;
   // 没有 reachable 注册表就只记日志。
@@ -849,7 +887,7 @@ export async function startImBridges(
         tracker: new LlmOutageTracker(outageOpts.file),
         lang: outageOpts.lang,
         announce: async (text: string) => {
-          if (!reachable) {
+          if (!deliverToMember) {
             opts.log.warn('llm outage: announce skipped, no reachable registry')
             return
           }
@@ -864,7 +902,8 @@ export async function startImBridges(
             try {
               const cfg = await readButlerRunBroadcastConfig(outageOpts.butlerMemoryRoot, userId)
               if (!cfg?.enabled) continue
-              await reachable.push(userId, text)
+              // CARE-M8 — 走 outbox:一个短暂失联的成员不会漏掉这声「坏了/好了」。
+              await deliverToMember(userId, text)
             } catch (err) {
               opts.log.warn('llm outage: announce delivery failed', { userId, err: String(err) })
             }
@@ -890,14 +929,18 @@ export async function startImBridges(
     ...(llmOutage ? { llmOutage } : {}),
     ...(reachable
       ? {
-          onReachable: (info) =>
+          onReachable: (info) => {
             reachable!.record({
               userId: info.userId,
               platform: info.platform,
               platformUserId: info.from.platformUserId,
               displayName: info.from.displayName ?? null,
               ...(info.chatId !== undefined ? { chatId: info.chatId } : {}),
-            }),
+            })
+            // CARE-M8 — 成员刚说话 = 此刻可达:立刻 flush 他的 outbox,把失联
+            // 期间攒下的「坏了/好了」/提醒/审批补投。fire-and-forget,不挡入站。
+            if (outbox) void outbox.flush(info.userId)
+          },
         }
       : {}),
   }
@@ -987,6 +1030,18 @@ export async function startImBridges(
     recoveryTimer.unref?.()
   }
 
+  // CARE-M8 — outbox 重投巡检定时器。仅当有 outbox 时 arm(unref;stop 里
+  // clearInterval)。常态恢复靠 record → flush 即时补投;这个 cadence 只兜「桥
+  // 恢复了但成员没说话」。空队列时每 tick 只是一次 readdir,近乎零成本。
+  let outboxTimer: ReturnType<typeof setInterval> | undefined
+  if (outbox) {
+    const ob = outbox
+    outboxTimer = setInterval(() => {
+      void ob.flushAll().catch((err) => opts.log.warn('outbox flush sweep error', { err: String(err) }))
+    }, OUTBOX_FLUSH_INTERVAL_MS)
+    outboxTimer.unref?.()
+  }
+
   return {
     bridges,
     status: () =>
@@ -994,10 +1049,11 @@ export async function startImBridges(
         const source = credSources.get(b.platform)
         return { platform: b.platform, ...(source ? { source } : {}) }
       }),
-    ...(reachable ? { pushToMember: (userId: string, text: string) => reachable!.push(userId, text) } : {}),
+    ...(deliverToMember ? { pushToMember: deliverToMember } : {}),
     ...(opts.hotStart ? { startPlatform } : {}),
     async stop() {
       if (recoveryTimer) clearInterval(recoveryTimer)
+      if (outboxTimer) clearInterval(outboxTimer)
       for (const b of bridges) {
         try {
           await b.stop()
