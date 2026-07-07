@@ -232,3 +232,17 @@ export {
   type ValidateIdTokenInput,
   type IdTokenClaims,
 } from './oidc.js'
+// C-M2-M1 — outbound OAuth 2.0 pure core (接入现实生活 track). Hub as CLIENT
+// obtaining an access token to call an external API on the user's behalf: no
+// id_token/nonce, provider-native scopes, refresh grant. Pure; network glue +
+// token vault land in later C-M2 milestones. Reuses oidc.ts PKCE/state.
+export {
+  OAuthError,
+  buildOutboundAuthorizationUrl,
+  buildTokenExchangeBody,
+  buildTokenRefreshBody,
+  parseTokenResponse,
+  type OutboundOAuthProvider,
+  type BuildOutboundAuthInput,
+  type OAuthTokenSet,
+} from './oauth-outbound.js'

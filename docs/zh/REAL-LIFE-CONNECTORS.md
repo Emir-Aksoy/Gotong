@@ -57,7 +57,7 @@ filesystem),分类里连 `calendar` / `email` / `tasks` 都不存在。一个普
 | 里程碑 | 交付 | 认证 | 状态 |
 |---|---|---|---|
 | **C-M1** | 现实生活连接器目录:笔记(Notion)/ 任务(Todoist)进内置目录,一键发现 + 装 | 静态 token(stdio) | ✅ done |
-| **C-M2** | 出站 OAuth 连接器接入:日历 / 邮件 / 记账(Google / Microsoft / Notion-OAuth / Todoist-hosted)—— 「用 X 登录」按钮,令牌进 vault + 自动刷新,注入远程 MCP 的 bearer header | OAuth 2.1(出站) | 计划中 |
+| **C-M2** | 出站 OAuth 连接器接入:日历 / 邮件 / 记账(Google / Microsoft / Notion-OAuth / Todoist-hosted)—— 「用 X 登录」按钮,令牌进 vault + 自动刷新,注入远程 MCP 的 bearer header | OAuth 2.1(出站) | M1 ✅ · M2–M5 在途 |
 | **C-M3** | 动作安全加固(按需):agent 真发邮件 / 改日历 / 花钱时的审批闸打磨,复用既有 governed 闸 | — | 观察 |
 
 ## 五、里程碑记录
@@ -85,6 +85,48 @@ filesystem),分类里连 `calendar` / `email` / `tasks` 都不存在。一个普
 **验收**:防腐测试 `builtin-mcp-connectors.test.ts` 扩到 15 例(两条新 spec 各自过真
 `validateMcpServersArray` + 无明文密钥 + id/名唯一 + 分类合法);catalog 路由测试
 (真 HTTP)绿;web 全绿。
+
+### C-M2 —— 出站 OAuth 连接器接入(进行中)
+
+**目标**:普通人「用 Google / Notion 登录」把日历 / 邮件 / 托管笔记接上;令牌进 vault +
+自动刷新,注入远程 MCP 的 bearer header。**opt-in 边界(用户法则)**:未配任何 OAuth
+provider 时,回调路由不挂、v36 表空、MCP 连接器与 C-M1 逐字节一致 —— **能力 ≠ 行为分叉**,
+只有 admin 显式加了 OAuth 连接器配置,「用 X 登录」才存在。
+
+**复用地图**(侦察结论,不重造):PKCE / state ← 复用 `@gotong/identity` `generatePkce`
+/ `randomState`;令牌加密存储 ← 复用 `VaultStore`(DEK 信封);注入 MCP header ← 复用
+`mcp-config.ts` 可插拔 `SecretSource`(注释明写「可换 vault 后端不动调用方」);回调路由
+← 镜像 `oidc-login-service`。**新建仅**:出站授权 URL / 交换 / 刷新(`oidc-client.exchangeCode`
+末尾**强制要 id_token**、`buildAuthorizationUrl` **强塞 openid + nonce**,纯 OAuth2 都不要)
++ refresh grant(入站登录从不刷新)+ v36 配置表。
+
+| 子里程碑 | 交付 | 状态 |
+|---|---|---|
+| **C-M2-M1** | 出站 OAuth2 纯核 `identity/oauth-outbound.ts` | ✅ `ea6b106` |
+| **C-M2-M2** | schema v36 `oauth_connectors` 表(非密元数据)+ 令牌进 vault + CRUD | 计划 |
+| **C-M2-M3** | web「连接」begin + callback(镜像 oidc-login-service),换码存 vault | 计划 |
+| **C-M2-M4** | oauth 背书 `SecretSource`:活令牌喂 `resolveMcpServerConfig` + 过期自动刷新 | 计划 |
+| **C-M2-M5** | OAuth 连接器目录(Google 日历 / Notion 托管)+「用 X 登录」UI + capstone + 文档 | 计划 |
+
+#### C-M2-M1 —— 出站 OAuth2 纯核 `ea6b106`
+
+`packages/identity/src/oauth-outbound.ts`(零网络零状态,同 `oidc.ts` 姿态;为什么单独成
+模块而非给 OIDC 核加开关:两向在**要害处**不同 —— 无 id_token / nonce、原生 scope 不塞
+openid、要 refresh grant):
+
+- `buildOutboundAuthorizationUrl` —— `response_type=code` + S256 PKCE,**provider 原生 scope
+  照用**、无 openid 注入、无 nonce;`extraAuthParams` 供 Google 的 `access_type=offline`
+  (不给它 Google 不返 refresh_token);**安全关键参数覆盖 extras**(有人从 extras 塞
+  `response_type=token` 也被我方 `code` 盖掉)。
+- `buildTokenExchangeBody` / `buildTokenRefreshBody` —— 纯 urlencoded 体;PKCE 用 verifier
+  (非 challenge)证明;`client_secret` 仅机密客户端带;refresh grant 是入站没有的新面。
+- `parseTokenResponse` —— 规范化令牌响应,**必须有 `access_token` 否则当场抛**(不像 OIDC
+  强制 id_token);`refresh_token` 缺失 = 刷新响应正常(调用方留旧的);`expires_in`
+  字符串→数。
+
+无人调用 = 零行为变。验收:`oauth-outbound.test.ts` **19 例**(scope 不含 openid / 无
+nonce / extras 不能越权覆盖 / verifier 非 challenge / 无 access_token 即抛 / 非对象即抛)+
+tsc + identity **635** 全绿 + 四门 PASS(旋钮仍 106)。
 
 ## 六、相关文档
 
