@@ -305,6 +305,7 @@ docs(audit): v4 Phase 5 full audit — 15 modules, no P1/P2 hotfixes (F1)
 | 旗舰模板策展索引 + 引用排行榜 | `docs/zh/FLAGSHIP-TEMPLATES.md` |
 | 零算力社区站生成器 · GitHub Discussions | `docs/zh/COMMUNITY-SITE.md` · `docs/zh/COMMUNITY-DISCUSSIONS.md` |
 | 前置部署 playbook（FDE 五段流水线：发现→构建→对接→部署验收→观察移交 + 两边界守则；M1a/b 连接器槽位 + M2 golden-run 验收 + M3 schedules/provision 已落地） | `docs/zh/FORWARD-DEPLOY.md` |
+| agent 网络 track（NET：A=管家出网 M1 眼睛/M2 ask_peer 治理/M3 双 hub capstone + B=hub 名片/发现概设；两边界=不绕既有闸、发现≠信任） | `docs/zh/NET-AGENT-NETWORK.md` |
 | 上线 runbook（三拓扑 T1/T2/T3） | `docs/zh/GO-LIVE.md` |
 | 发布 runbook（npm 36 包 + PyPI；发布前门 / OTP / 回滚=deprecate 纪律） | `docs/zh/PUBLISH-RUNBOOK.md` |
 | 便携包分发（下载双击即跑，零 Node/Docker） | `docs/zh/PORTABLE-BUNDLE.md` |
