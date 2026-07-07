@@ -13,8 +13,10 @@
 > (`af48654`,`examples/butler-cross-hub` demo + FEDERATION-RUNBOOK「管家
 > 出网」节 + 双闸回传显式推迟)。B track 全完:NET-M4 名片 ✅(A2A v1.0
 > 升卡 + owner 策展文件,`2be8a38`);NET-M5 发现 preflight ✅
-> (`gotong peer-card <url>`,本 commit)。**NET track 收官**;远期项
-> (签名卡 keypair/结算/多跳/目录站)显式不做,见 B track 末尾。
+> (`gotong peer-card <url>`,本 commit)。**NET track 收官**;当初记在
+> 远期的**签名卡**已另起 [STD 标准对齐 track](STD-STANDARDS-ALIGNMENT.md)
+> 落地(STD-M1 生产侧 opt-in ES256 签名 + JWKS);其余远期项(结算/多跳/
+> 目录站)仍显式不做,见 B track 末尾。
 >
 > Last updated: 2026-07-07(NET-M5 收口,track 全完)
 
@@ -199,9 +201,11 @@ peer 行内 `requireApprovalOutbound`);节律/上限如需一律常量。B track
   - **损坏=整文件拒,绝不半张卡**:坏 JSON/非对象/skills 非数组/skill 缺
     string id → warn(每文件 60s 节流,公网端点防扫描刷日志)+ 回落到无
     策展;重复 skill id → warn 留首个;非字符串 tag 丢弃。
-  - **签名 keypair:首版不签,单独拍板**(spec 里签名可选;发现≠信任,
-    信任仍走 token onboarding,名片被篡改的后果=读到假介绍,建边时 token
-    握手会拆穿)。引入长期 keypair 牵动备份/轮换/vault 姿态,值得单独一轮。
+  - **签名 keypair:M4 首版不签,已另起一轮做** → 见
+    [STD-M1](STD-STANDARDS-ALIGNMENT.md)(opt-in `GOTONG_A2A_SIGN_CARD`,
+    ES256 JWS + JWKS 端点;当初判断「值得单独一轮」成立——长期 keypair 的
+    备份/轮换/vault 姿态在 STD track 里单独收)。发现≠信任不变:签名给完
+    整性,身份仍靠 token onboarding(STD-M2 再加 PIN 公钥的身份锚)。
   - 会红的门(19 条单测):supportedInterfaces 指向 /a2a 且接口版本 '0.2' /
     provider 不在卡上 / security 双写 / skills 归一(description←id、
     tags←[])/ 策展缺省沉默 null 不 warn / 5 种损坏各 warn+null 整文件拒 /
@@ -224,10 +228,11 @@ peer 行内 `requireApprovalOutbound`);节律/上限如需一律常量。B track
     不通/超时/HTTP 错/卡无效)/ 2=用法错。
   - 会红的门:17 条单测(URL 归一/防御渲染/注入 fetch 全分支/出码)+
     真 HTTP 冒烟(真 server + 真 bin:有卡/404/坏 JSON/连不上 9 断言)。
-- 远期(显式不做,只记账):Signed Agent Cards(等 keypair 拍板)、跨 hub
-  结算(x402/AP2 类支付协议只观察)、多跳路由/gossip(点对点对当前规模是
-  对的)、名片聚合目录站(等社区真有多 hub 再说,零算力社区站生成器是现成
-  底座)。
+- ~~Signed Agent Cards~~ **已做** → [STD track](STD-STANDARDS-ALIGNMENT.md)
+  (M1 生产侧签名 + JWKS ✅ / M2 消费侧验签 + PIN 公钥)。
+- 远期(仍显式不做,只记账):跨 hub 结算(x402/AP2 类支付协议只观察)、
+  多跳路由/gossip(点对点对当前规模是对的)、名片聚合目录站(等社区真有
+  多 hub 再说,零算力社区站生成器是现成底座)。
 
 ---
 
