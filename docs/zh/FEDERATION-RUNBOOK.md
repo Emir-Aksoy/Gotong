@@ -73,6 +73,16 @@
 下面以 **org A 发起、编排 org B 的一个能力**为主线。联邦对称，所以两边的登记动作镜像
 对称——文中标 “「A 机」/「B 机」” 区分。
 
+### Step 0（可选）— 先看对方名片（NET-M5 发现 preflight）
+
+```bash
+gotong peer-card https://hub-b.example.com
+```
+
+换 token 之前想先知道「对方是谁 / 怎么认证 / 登了什么能力」，用这条只读命令取对方的
+A2A agent card（`/.well-known/agent-card.json`）翻成人话。**发现 ≠ 信任**：看名片永不
+建边；对端没挂名片（404）也不影响——名片是增强不是前置，照 Step 1-3 直连即可。
+
 ### Step 1 — 铸 token（在 A 机，一次）
 
 ```bash

@@ -17,6 +17,7 @@ Commands:
   repl                        Start an interactive shell against an in-memory hub
   connect [agent]             Print MCP quick-connect config for a coding agent
   mint-peer-token             Generate a federation peer bearer token
+  peer-card <url>             Preflight a peer hub: fetch + explain its A2A agent card
   setting [subcommand]        Deterministic ops console (status/check/cold-start/restore/…)
   provision <pack.yaml>       Install a template pack + schedules + acceptance in one go
   backup <space> <dir>        Archive a workspace to .tar.gz (manifest + sha256, WAL-safe)
@@ -248,6 +249,28 @@ Examples:
   gotong mint-peer-token
   gotong mint-peer-token --peer-id=partner-hub --endpoint=wss://partner/federation
   gotong mint-peer-token > peer-token.txt   # token only; hint on stderr
+`,
+  'peer-card': `gotong peer-card <url>
+
+Discovery preflight for federation (NET-M5): BEFORE exchanging tokens
+with a peer hub, fetch its public A2A agent card
+(/.well-known/agent-card.json) and print a human-readable summary —
+who it says it is, how to authenticate, and which capabilities its
+owner curated onto the card.
+
+Read-only and trust-neutral: looking at a card NEVER creates a peer
+link, and a missing card (404) is a normal answer — hubs default to
+silence. Either way the next step is the same existing onboarding:
+mint-peer-token + registering the peer on both sides.
+
+Exit codes:
+  0  clear answer (card printed, or peer confirmed to have no card)
+  1  inconclusive (unreachable / timeout / HTTP error / invalid card)
+  2  usage error
+
+Examples:
+  gotong peer-card https://hub-b.example.com
+  gotong peer-card https://hub-b.example.com/.well-known/agent-card.json
 `,
   setting: `gotong setting [<subcommand> [args]]
 

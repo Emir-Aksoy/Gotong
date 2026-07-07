@@ -11,10 +11,12 @@
 > **进展**:A track 全完 —— NET-M1 `list_peers`(`e9f9844`)、NET-M2
 > `ask_peer` governed 出网(`322f90d`,双 hub e2e 四场景)、NET-M3 capstone
 > (`af48654`,`examples/butler-cross-hub` demo + FEDERATION-RUNBOOK「管家
-> 出网」节 + 双闸回传显式推迟)。B track:NET-M4 名片 ✅(A2A v1.0 升卡 +
-> owner 策展文件,本 commit);NET-M5 connect preflight 未动。
+> 出网」节 + 双闸回传显式推迟)。B track 全完:NET-M4 名片 ✅(A2A v1.0
+> 升卡 + owner 策展文件,`2be8a38`);NET-M5 发现 preflight ✅
+> (`gotong peer-card <url>`,本 commit)。**NET track 收官**;远期项
+> (签名卡 keypair/结算/多跳/目录站)显式不做,见 B track 末尾。
 >
-> Last updated: 2026-07-07(NET-M4 收口)
+> Last updated: 2026-07-07(NET-M5 收口,track 全完)
 
 ---
 
@@ -204,10 +206,24 @@ peer 行内 `requireApprovalOutbound`);节律/上限如需一律常量。B track
     provider 不在卡上 / security 双写 / skills 归一(description←id、
     tags←[])/ 策展缺省沉默 null 不 warn / 5 种损坏各 warn+null 整文件拒 /
     重复 id 留首 / 策展 skills 逐字上卡绝不自动扩。
-- **NET-M5 发现 preflight**:`gotong connect <url>` 先取
-  `/.well-known/agent-card.json` → 打印人类可读的「对方是谁/开了什么」→
-  人确认 → 走既有 token/邀请流。对端没有名片 → 如实说没有,照旧直连
-  (名片是增强不是前置)。名片永不自动建边。
+- **NET-M5 发现 preflight ✅(as-built:命令叫 `gotong peer-card <url>`)**:
+  概设写的 `gotong connect <url>` 落不下——`connect` 早被「主流 coding
+  agent 的 MCP quick-connect 配置打印」占用(positional 是 agent id),
+  两个语义挤一个命令会撞旗标撞帮助文本;peer 登记动作本身也不在 CLI
+  (在管理 UI「联邦」面板 / POST /api/admin/identity/peers)。落点改为
+  与 `mint-peer-token` 同家族的平铺新命令:
+  - `gotong peer-card <url>`:取对端 `/.well-known/agent-card.json` →
+    打印人话(名字/介绍/版本/端点/认证/开放能力)→ 尾部固定指回既有
+    token onboarding(mint-peer-token + 双边登记 + runbook Step 1-3)。
+    接受裸 base 或整条 well-known URL(不重复拼);10s 超时常量非旋钮。
+  - **只读不写**:看名片永不建边、不碰 identity 状态。对端没挂名片
+    (404)是规范内的正常答案——如实说没有,下一步指引照给(名片是增强
+    不是前置)。名片是对端给的不可信输入:字段缺/类型错逐项降级
+    「(未声明)」绝不炸;skills `[]` 如实说「缺省沉默,不代表没有能力」。
+  - 出码脚本可依赖:0=明确答案(有卡或明确没卡)/ 1=没得出结论(网络
+    不通/超时/HTTP 错/卡无效)/ 2=用法错。
+  - 会红的门:17 条单测(URL 归一/防御渲染/注入 fetch 全分支/出码)+
+    真 HTTP 冒烟(真 server + 真 bin:有卡/404/坏 JSON/连不上 9 断言)。
 - 远期(显式不做,只记账):Signed Agent Cards(等 keypair 拍板)、跨 hub
   结算(x402/AP2 类支付协议只观察)、多跳路由/gossip(点对点对当前规模是
   对的)、名片聚合目录站(等社区真有多 hub 再说,零算力社区站生成器是现成
