@@ -7,7 +7,8 @@
  *
  *   1. sanitize red line — endpointUrl / token / ACL detail sneaked into a row
  *      (sloppy upstream) must NEVER reach the rendered text;
- *   2. outbound posture renders its REAL peer-acl semantics — null=未限制 /
+ *   2. outbound posture renders its REAL semantics (peer-acl + G-M1
+ *      advertise=authorize) — null=未策展(routes nothing until curated) /
  *      []=锁死 / list=白名单 — never an invented fourth state;
  *   3. the surface join drops disabled / revoked edges (an edge the operator
  *      turned off must not be offered as reachable);
@@ -45,7 +46,7 @@ describe('NET-M1 — list_peers(管家网络眼睛)', () => {
 
     expect(out).toContain('互联的 hub(3 个)')
     expect(out).toContain('hub-dad(爸爸的 hub) — 在线')
-    expect(out).toContain('出站未限制')                    // null → send-all,不是「不能发」
+    expect(out).toContain('出站未策展')                    // null → 广告为空,派不出;不是「未限制随便发」
     expect(out).toContain('hub-office — 离线')
     expect(out).toContain('可请求能力:research、translate') // 白名单如实列出
     expect(out).toContain('出站已锁死')                     // [] → lockdown

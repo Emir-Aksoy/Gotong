@@ -51,6 +51,7 @@ import {
   type ButlerAgentSurface,
   type ButlerUsageSurface,
 } from './personal-butler-observe.js'
+import { buildButlerAskPeerToolset } from './personal-butler-ask-peer.js'
 import { buildButlerPeersToolset, type ButlerPeerSurface } from './personal-butler-peers.js'
 import {
   buildButlerOnboardingProbe,
@@ -245,6 +246,15 @@ export function buildButlerFactory(deps: ButlerFactoryDeps): ButlerFactory {
         const peersToolset = refs.peerRoster
           ? buildButlerPeersToolset({ peers: refs.peerRoster, logger: log })
           : undefined
+        // NET-M2 — the governed "替我问对端 hub" doorway OUT. Same governed master
+        // switch as every consequential butler verb; targets resolve against the
+        // SAME roster as the eye above (no drift). The dispatch rides the mesh
+        // wrapper untouched, so the owner outbound gate + edge allowlists still
+        // apply downstream — the butler adds a member confirmation, not a bypass.
+        const askPeerGov =
+          deps.governedOn && refs.peerRoster
+            ? buildButlerAskPeerToolset({ userId, peers: refs.peerRoster, hub, logger: log })
+            : undefined
         // WIZ-M4c — benign "帮我规划一个工作流": wizard compose, proposal-only
         // (explanation + gap checklist + validated YAML), persists nothing. Saving
         // goes through the governed create_workflow above with the proposal's YAML.
@@ -329,6 +339,7 @@ export function buildButlerFactory(deps: ButlerFactoryDeps): ButlerFactory {
         const governed = [
           ...(steward ? [steward] : []),
           ...(workflowCreateGov ? [workflowCreateGov] : []),
+          ...(askPeerGov ? [askPeerGov] : []),
           ...(mcpSplit?.writeGoverned ? [mcpSplit.writeGoverned] : []),
         ]
 

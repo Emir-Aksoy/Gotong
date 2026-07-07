@@ -38,8 +38,11 @@ peer 行内 `requireApprovalOutbound`);节律/上限如需一律常量。B track
   WFEDIT 明确锁死成员改跨 hub 边。管家工具面没有任何 peer 向动作。
 - 跨 hub 机制(全部既有,零改动即可骑):
   - `PeerRegistry` 拨号 + `installPeerLink` → `RemoteHubViaLink` wrapper 注册进
-    本地 hub,**id = 对端 peerId**;`hub.dispatch({strategy:{kind:'explicit',
-    to: peerId}})` 即达。
+    本地 hub,**id = 对端 peerId**。**寻址只有 capability 一条路**(M2 e2e
+    证实):wrapper 把 task 连 strategy 原样转发,对端按同一 strategy 重派——
+    explicit 指向我方 wrapper id 的 task 过线后在对端无人认领,必死
+    `no_participant`;而 wrapper 的广告能力 = `row.outboundCaps`(G-M1
+    advertise=authorize),所以**只有策展过的边才路由得出去**。
   - wrapper `onTask` 是**真 round trip**(`await link.dispatch`),回来的就是
     对端的 `TaskResult`。
   - origin 盖章:task 未带 origin 时 wrapper 经 originResolver 盖
@@ -60,11 +63,13 @@ peer 行内 `requireApprovalOutbound`);节律/上限如需一律常量。B track
   `identity.listPeers()` 拼):每行只出 `{peerId, label, connected,
   lastSeenAt, allowedCaps}`。**脱敏红线**:endpointUrl / token / ACL /
   配额细节永不进投影(成员该看拓扑存在性,不该看运维细节)。
-- 出站姿态按 `peer-acl.ts` 的**真实语义**渲染(M1 侦察修正,别按直觉猜):
-  `outboundCaps === null` = **未限制**(legacy send-all,explicit 可直达)/
-  `[]` = **锁死**(什么都不能发)/ 非空列表 = **白名单**(advertise=authorize,
-  G-M1;此时 explicit 派发会被 `strategy_not_allowlisted` 拒——是设计不是 bug,
-  跨界寻址哲学是 capability 不是 id)。
+- 出站姿态按**真实语义**渲染(peer-acl.ts + peer-registry G-M1;M1 侦察改过
+  一次、M2 e2e 又证伪一次,教训:别按直觉猜,读装配处):
+  `outboundCaps === null` = **未策展**(ACL 层放行一切,但 wrapper 广告为空,
+  本地按能力派发选不中这条边——「未限制」是 allowlist 真相不是可路由真相,
+  渲染成「可以直接发」会误导成员)/ `[]` = **锁死**(什么都不能发)/
+  非空列表 = **白名单**(advertise=authorize:同一份列表既是广告又是授权,
+  这是唯一派得出去的姿态)。
 - factory 接线:refs 加 `peerRoster`,surface 缺席 → 工具不出现(既有惯例)。
 - **会红的门**:单测——脱敏(投影里字符串化后不含 endpointUrl/token 字样)/
   connected 与 offline 双态 / allowedCaps null 诚实文案 / surface 缺席不供工具。
@@ -83,10 +88,12 @@ peer 行内 `requireApprovalOutbound`);节律/上限如需一律常量。B track
     收件箱(+ 既有 IM 审批推送),批准后才派发。
   - **no-leak / 反幻觉**:目标 peerId 必须在 roster(NET-M1 同一面)里,否则
     拒绝并列出真实可选项(同 ask_my_agent 对 agentId 的处理)。
-  - 派发(**阶梯按边的出站姿态定**,M1 侦察后修正——白名单边 explicit 会被
-    `strategy_not_allowlisted` 拒,是 mesh 的 capability 寻址设计):
-    - `outboundCaps === null`(新配对边默认)→ `{kind:'explicit', to: peerId}`
-      直达 wrapper;
+  - 派发(**只有策展过的边可问**——初版计划里「null 边 explicit 直达」是
+    虚构,双 hub e2e 抓的现行:explicit 过线后对端路由不了,死
+    `no_participant`;跨界寻址只有 capability 一条路,管家骑工作流跨 hub 步
+    同一套 mesh 语义,零私有寻址):
+    - `outboundCaps === null`(新配对边默认)→ **诚实拒 + 指路策展**
+      (「这条边还没策展可出网的能力,请管理员配 outboundCaps,策展即授权」);
     - 白名单边 → `{kind:'capability', capabilities:[cap]}`,cap 从该边白名单里
       选(唯一→自动,多个→让成员挑);**派前预检**:本地无人服务该 cap 且仅此
       一条边 advertise 它,否则诚实拒绝并指路(「本地也有人做/两条边都认,
@@ -109,11 +116,13 @@ peer 行内 `requireApprovalOutbound`);节律/上限如需一律常量。B track
   - 单测:未知 peerId 拒绝并列真名单 / 空 message 拒 / 五种 kind 文案映射 /
     roster 缺席不供工具。
   - e2e(hermetic,**双真 Hub 进程内互联**——`installPeerLink` 真 wrapper,
-    非 mock):管家 park → 成员 /me approve → 出网 → 对端 echo agent 答 →
-    结果回到成员(走既有 resolve 推回);断言对端收到的 task **origin.orgId =
-    本方 hubId**(不是 'local'、不是空);outboundCaps 不含所需能力时
-    `outbound_capability_denied` 诚实文案;`requireApprovalOutbound` 边上
-    成员批后拿到 `suspended` 文案 + owner `/me` 里真躺着一条 approval。
+    非 mock;边的装法逐字镜像 peer-registry 的 advertise=authorize):
+    ① 策展边全环:管家 park(未批前零字节出网)→ 成员 /me approve →
+    capability 出网 → 对端 agent 答 → 结果回到成员同一轮;断言对端收到的
+    task **origin.orgId = 本方 hubId**(不是 'local'、不是空);② 未策展
+    null 边 classify 就拒(文案含「策展」指路),不 park 零出网;③ 锁死边
+    同拒;④ `requireApprovalOutbound` 边上成员批后拿到「还差 owner 一道」
+    诚实文案 + owner `/me` 里真躺着一条 approval,owner 批完任务才真跨界。
 
 ### NET-M3 — 双 hub capstone:demo + 双闸回传收尾 + 文档
 

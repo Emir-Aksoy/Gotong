@@ -16,11 +16,15 @@
  * such fields, and the renderer only reads the fields it knows.
  *
  * ── The outbound posture is the honest payload ───────────────────────────────
- * Per edge we render `outboundCaps` with its REAL semantics (peer-acl.ts):
- *   - `null`  → 未限制 — legacy send-all; an explicit ask can go straight out.
+ * Per edge we render `outboundCaps` with its REAL semantics (peer-acl.ts +
+ * peer-registry G-M1, advertise = authorize):
+ *   - `null`  → 未策展 — the ACL would allow anything, but the wrapper
+ *               advertises NOTHING, so no locally-initiated ask can route to
+ *               this edge until an admin curates outboundCaps. Rendering it
+ *               as "可以直接发" would be a lie the member acts on.
  *   - `[]`    → 锁死 — a deliberate "send nothing" lockdown.
- *   - `[...]` → 白名单 — capability-addressed only (advertise = authorize,
- *               G-M1); explicit dispatch on such an edge is denied by design.
+ *   - `[...]` → 白名单 — capability-addressed; the same list both routes and
+ *               authorizes. This is the ONLY posture ask_peer can use.
  * That is exactly what a member needs to know before asking the butler to
  * reach the other side.
  */
@@ -38,7 +42,7 @@ export interface ButlerPeerRow {
   connected: boolean
   /** Liveness epoch-ms while connected; null when offline / untracked. */
   lastSeenAt: number | null
-  /** Outbound posture: null = 未限制 / [] = 锁死 / list = 白名单. */
+  /** Outbound posture: null = 未策展 / [] = 锁死 / list = 白名单(即广告). */
   outboundCaps: string[] | null
 }
 
@@ -136,7 +140,7 @@ class ButlerPeersToolset implements LlmAgentToolset {
 
 /** Render the outbound posture with its real semantics — never invent a fourth state. */
 function capsLine(caps: string[] | null): string {
-  if (caps === null) return '出站未限制(可以直接向它发请求)'
+  if (caps === null) return '出站未策展(还派不了请求,要用得先请管理员配置可出站能力)'
   if (caps.length === 0) return '出站已锁死(这条边现在什么都不能发)'
   return `可请求能力:${caps.join('、')}`
 }
