@@ -197,6 +197,92 @@ export interface UpdateOidcProviderInput {
 }
 
 /**
+ * C-M2-M2 — a configured OUTBOUND OAuth 2.0 connector (接入现实生活 track). The
+ * hub is the CLIENT obtaining an access token to call an external API (Google
+ * Calendar, Gmail, Notion-hosted…) on the user's behalf, so a real-life MCP
+ * connector can reach their data. The mirror of {@link OidcProvider} but the
+ * other direction — and it additionally holds a persisted TOKEN SET once the
+ * user has connected.
+ *
+ * The public projection NEVER carries the client_secret or the tokens: only
+ * `hasClientSecret` / `connected` booleans + the non-secret expiry surface
+ * them. Plaintext is reached only via the dedicated accessors on the store.
+ */
+export interface OAuthConnector {
+  /** Admin-supplied stable id — the M4 `${OAUTH:<id>}` reference key. */
+  id: string
+  /** Human label for the UI ("Google Calendar"); null = fall back to id. */
+  displayName: string | null
+  authorizationEndpoint: string
+  tokenEndpoint: string
+  clientId: string
+  redirectUri: string
+  /** Space-separated provider-NATIVE scopes (never `openid`). */
+  scope: string
+  /** Provider-specific extra authorize params (e.g. access_type=offline); null = none. */
+  extraAuthParams: Record<string, string> | null
+  /** Informational: which MCP connector this feeds a bearer to; null = unset. */
+  mcpServerName: string | null
+  /** True iff a confidential client_secret is stored (confidential client). */
+  hasClientSecret: boolean
+  /** True iff a token set is stored (the user completed the connect flow). */
+  connected: boolean
+  /** Access-token absolute expiry, unix ms; null = unknown / not connected. */
+  accessTokenExpiresAt: number | null
+  enabled: boolean
+  createdAt: number
+  updatedAt: number
+}
+
+export interface RegisterOAuthConnectorInput {
+  /** Admin-supplied stable id (the reference key). Must be non-empty + unique. */
+  id: string
+  displayName?: string | null
+  authorizationEndpoint: string
+  tokenEndpoint: string
+  clientId: string
+  redirectUri: string
+  scope: string
+  extraAuthParams?: Record<string, string> | null
+  mcpServerName?: string | null
+  /** Confidential client secret. Omit/empty → a public (PKCE-only) client. */
+  clientSecret?: string | null
+  enabled?: boolean
+}
+
+/** Targeted update — every field optional; `id` is immutable (re-register to change). */
+export interface UpdateOAuthConnectorInput {
+  displayName?: string | null
+  authorizationEndpoint?: string
+  tokenEndpoint?: string
+  clientId?: string
+  redirectUri?: string
+  scope?: string
+  extraAuthParams?: Record<string, string> | null
+  mcpServerName?: string | null
+  /** Provide to rotate the secret; '' clears it (→ public client); undefined = keep. */
+  clientSecret?: string | null
+  enabled?: boolean
+}
+
+/**
+ * The persisted token set for a connector — the plaintext behind `token_vault_id`
+ * plus the non-secret expiry from the row. `setTokenSet` writes it (the caller
+ * having computed the absolute expiry from the response's `expires_in`);
+ * `getTokenSet` reconstructs it. A refresh that omits a new `refreshToken`
+ * leaves the caller to carry the prior one forward (see C-M2-M1
+ * `parseTokenResponse`).
+ */
+export interface StoredOAuthTokenSet {
+  accessToken: string
+  refreshToken: string | null
+  tokenType: string | null
+  scope: string | null
+  /** Absolute expiry, unix ms; null = the provider stated no lifetime. */
+  accessTokenExpiresAt: number | null
+}
+
+/**
  * Route B P1-M5c — a configured SAML 2.0 IdP (the hub acting as a Service
  * Provider). Unlike OidcProvider there is NO secret to hide: `idpCert` is a
  * PUBLIC X.509 signing cert, so the full projection carries it (admins verify
@@ -736,6 +822,15 @@ export type VaultKind =
   // first-boot wizard so IM works without hand-editing env files; env vars
   // still win at boot (metadata carries the platform tag + non-secret ids).
   | 'im_bridge'
+  // C-M2-M2 — outbound OAuth connector credentials (接入现实生活 track),
+  // ownerKind 'org' (the hub owns its connector registration). Two kinds:
+  //   oauth_client_secret — the confidential client_secret (mirror of
+  //                         oidc_client_secret but for an OUTBOUND provider).
+  //   oauth_token         — the obtained token SET (access + refresh + type +
+  //                         scope) as a JSON blob, encrypted at rest like any
+  //                         secret. Rewritten on each refresh (C-M2-M4).
+  | 'oauth_client_secret'
+  | 'oauth_token'
 
 export const VAULT_KINDS: readonly VaultKind[] = [
   'llm_provider',
@@ -745,6 +840,8 @@ export const VAULT_KINDS: readonly VaultKind[] = [
   'totp',
   'oidc_client_secret',
   'im_bridge',
+  'oauth_client_secret',
+  'oauth_token',
 ] as const
 
 /**

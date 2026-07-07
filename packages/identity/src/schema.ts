@@ -1156,6 +1156,67 @@ const MIGRATIONS: Migration[] = [
       ALTER TABLE peers ADD COLUMN pinned_kid TEXT;
     `,
   },
+  {
+    // C-M2-M2 — outbound OAuth 2.0 connector registrations (接入现实生活 track).
+    // A row lets the hub obtain (and keep refreshed) an access token to call an
+    // external API ON THE USER'S BEHALF, injected as the bearer of a remote MCP
+    // connector (Google Calendar / Gmail / Notion-hosted…). The mirror of
+    // oidc_providers but OUTBOUND: native scopes (never `openid`), a refresh
+    // grant, and a persisted TOKEN SET on top of the client config.
+    //
+    // opt-in edge (用户法则): an EMPTY table is byte-for-byte identical to
+    // today — no connector configured ⇒ no "connect with X", no callback route
+    // effect, no MCP behavior change. The capability is dormant until an admin
+    // explicitly registers a provider. This migration only CREATES the table;
+    // it seeds nothing.
+    //
+    // Two vault pointers, same discipline as oidc_providers' single one:
+    //   secret_vault_id — the confidential client_secret (kind
+    //                     'oauth_client_secret', ownerKind 'org'). NULL for a
+    //                     public (PKCE-only) client, so a hub without a master
+    //                     key can still register one.
+    //   token_vault_id  — the obtained token SET as a JSON blob (kind
+    //                     'oauth_token'): { accessToken, refreshToken,
+    //                     tokenType, scope }. NULL until the user completes the
+    //                     "connect" flow (C-M2-M3). The tokens are the live
+    //                     credential, so they are encrypted at rest exactly like
+    //                     any other secret — a master-key rotation re-wraps them
+    //                     for free.
+    // access_token_expires_at is NON-secret metadata kept in the row (unix ms)
+    // so the M4 SecretSource can decide "is this token stale?" WITHOUT
+    // decrypting the vault blob on every MCP spawn.
+    //   id                     PK = admin-supplied stable connector id (the M4
+    //                          SecretSource resolves a `${OAUTH:<id>}` ref by
+    //                          THIS id, so it is the load-bearing reference key,
+    //                          not synthetic).
+    //   mcp_server_name        informational: which MCP connector this feeds a
+    //                          bearer to (for the admin UI + M5 catalog tie-in);
+    //                          nullable, NOT the lookup key.
+    //   extra_auth_params      JSON object of provider-specific authorize params
+    //                          (e.g. Google's access_type=offline); NULL = none.
+    //   enabled                0 disables without deleting the config + tokens.
+    version: 36,
+    name: 'oauth-connectors',
+    sql: `
+      CREATE TABLE IF NOT EXISTS oauth_connectors (
+        id                      TEXT PRIMARY KEY,
+        display_name            TEXT,
+        authorization_endpoint  TEXT NOT NULL,
+        token_endpoint          TEXT NOT NULL,
+        client_id               TEXT NOT NULL,
+        redirect_uri            TEXT NOT NULL,
+        scope                   TEXT NOT NULL,
+        extra_auth_params       TEXT,
+        mcp_server_name         TEXT,
+        secret_vault_id         TEXT,
+        token_vault_id          TEXT,
+        access_token_expires_at INTEGER,
+        enabled                 INTEGER NOT NULL DEFAULT 1,
+        created_at              INTEGER NOT NULL,
+        updated_at              INTEGER NOT NULL
+      );
+    `,
+  },
 ]
 
 /**

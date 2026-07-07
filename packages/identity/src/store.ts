@@ -62,6 +62,7 @@ import { PeerStore } from './peer-store.js'
 import { QuotaStore } from './quota-store.js'
 import { TotpStore, type EnrollTotpInput, type VerifyTotpInput } from './totp-store.js'
 import { OidcProviderStore } from './oidc-provider-store.js'
+import { OAuthConnectorStore } from './oauth-connector-store.js'
 import { SamlProviderStore } from './saml-provider-store.js'
 import { A2aAgentStore } from './a2a-agent-store.js'
 import { AcpAgentStore } from './acp-agent-store.js'
@@ -106,6 +107,10 @@ import {
   type AcpOutboundAgent,
   type AddAcpOutboundAgentInput,
   type UpdateAcpOutboundAgentInput,
+  type OAuthConnector,
+  type RegisterOAuthConnectorInput,
+  type UpdateOAuthConnectorInput,
+  type StoredOAuthTokenSet,
   type UpdateOidcProviderInput,
   type OwnerKind,
   type ResetUsageInput,
@@ -531,6 +536,10 @@ export class IdentityStore {
   // pointer: ACP bridges ride the underlying agent's own login (hub injects no
   // key), so every column is non-secret config (command/args/cwd).
   private readonly acpAgents: AcpAgentStore
+  // C-M2-M2 — outbound OAuth connector registry. Composes the vault for the
+  // confidential client_secret AND the obtained token set (both ownerKind
+  // 'org'). Empty table = byte-for-byte unchanged (opt-in).
+  private readonly oauthConnectors: OAuthConnectorStore
   // Phase 7 M4 — org_meta kv (org_mode lives here).
   private readonly stmtOrgMetaGet: SqliteStmt
   private readonly stmtOrgMetaUpsert: SqliteStmt
@@ -595,6 +604,10 @@ export class IdentityStore {
     this.a2aAgents = new A2aAgentStore(db)
     // ACP-OUT-M1 — outbound ACP agent registry. No vault (rides agent's login).
     this.acpAgents = new AcpAgentStore(db)
+    // C-M2-M2 — outbound OAuth connector registry. Same composition as
+    // OidcProviderStore: `this` supplies the vault facade for the client_secret
+    // AND the token set (both ownerKind 'org').
+    this.oauthConnectors = new OAuthConnectorStore(db, this)
 
     this.stmtUserById = db.prepare('SELECT * FROM users WHERE id = ?')
     this.stmtUserByEmail = db.prepare('SELECT * FROM users WHERE email = ?')
@@ -2331,6 +2344,59 @@ export class IdentityStore {
   /** Delete the registration and revoke its client secret. */
   removeOidcProvider(id: string): boolean {
     return this.oidcProviders.remove(id)
+  }
+
+  // =====================================================================
+  // C-M2-M2 — outbound OAuth 2.0 connector registry (接入现实生活 track).
+  // Delegates to OAuthConnectorStore. The hub is the CLIENT: config +
+  // client_secret (vault) + an obtained token SET (vault) that the M4
+  // SecretSource injects as a remote MCP connector's bearer. Public
+  // projections never carry the secret or the tokens — only
+  // readOAuthClientSecret / getOAuthTokenSet touch plaintext. Empty registry =
+  // byte-for-byte unchanged (opt-in 用户法则).
+  // =====================================================================
+
+  /** Register a connector. Duplicate id → `oauth_connector_exists`. */
+  registerOAuthConnector(input: RegisterOAuthConnectorInput): OAuthConnector {
+    return this.oauthConnectors.register(input)
+  }
+
+  getOAuthConnector(id: string): OAuthConnector | null {
+    return this.oauthConnectors.get(id)
+  }
+
+  listOAuthConnectors(): OAuthConnector[] {
+    return this.oauthConnectors.list()
+  }
+
+  /** Read the client secret for the token exchange/refresh ('' = public/PKCE-only). */
+  readOAuthClientSecret(id: string): string {
+    return this.oauthConnectors.readClientSecret(id)
+  }
+
+  /** Targeted config update (id immutable; `clientSecret: ''` clears it). Tokens untouched. */
+  updateOAuthConnector(id: string, patch: UpdateOAuthConnectorInput): OAuthConnector {
+    return this.oauthConnectors.update(id, patch)
+  }
+
+  /** Persist a token set after the connect flow / a refresh (tokens → vault). */
+  setOAuthTokenSet(id: string, tokenSet: StoredOAuthTokenSet): OAuthConnector {
+    return this.oauthConnectors.setTokenSet(id, tokenSet)
+  }
+
+  /** Read the stored token set (null = not connected). Only plaintext accessor for tokens. */
+  getOAuthTokenSet(id: string): StoredOAuthTokenSet | null {
+    return this.oauthConnectors.getTokenSet(id)
+  }
+
+  /** Disconnect: revoke the token set, keep the config. Idempotent. */
+  clearOAuthTokenSet(id: string): boolean {
+    return this.oauthConnectors.clearTokenSet(id)
+  }
+
+  /** Delete the registration and revoke its client secret + token set. */
+  removeOAuthConnector(id: string): boolean {
+    return this.oauthConnectors.remove(id)
   }
 
   // =====================================================================

@@ -62,6 +62,15 @@ export type IdentityErrorCode =
   //   `acp_agent_not_found`  get/update/remove targeted an id with no row.
   | 'acp_agent_exists'
   | 'acp_agent_not_found'
+  // C-M2-M2 — outbound OAuth 2.0 connector registry (接入现实生活 track).
+  //   `oauth_connector_exists`     registerOAuthConnector reused an id (PK).
+  //   `oauth_connector_not_found`  get/update/remove/token-op targeted an id
+  //                                with no row (never silently returns '').
+  //   `malformed_token_blob`       getTokenSet found an unreadable / access-
+  //                                token-less vault blob — refuse a partial credential.
+  | 'oauth_connector_exists'
+  | 'oauth_connector_not_found'
+  | 'malformed_token_blob'
   // v5 Stream F — control-plane alert rules (peer.summary thresholds).
   //   `alert_rule_exists`     addPeerSummaryAlertRule reused an explicit id (PK).
   //   `alert_rule_not_found`  get/update/remove targeted an id with no row.
