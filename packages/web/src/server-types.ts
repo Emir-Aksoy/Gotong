@@ -41,6 +41,7 @@ import type { PeerSummaryFederationSurface } from './peer-summary-routes.js'
 import type { TemplatePersonnelSource } from './template-routes.js'
 import type { PeerManifestFederationSurface } from './peer-routes.js'
 import type { OidcLoginSurface } from './oidc-routes.js'
+import type { OAuthConnectSurface } from './oauth-connect-routes.js'
 import type { OidcProviderAdminSurface } from './oidc-admin-routes.js'
 import type { SamlLoginSurface } from './saml-routes.js'
 import type { SamlProviderAdminSurface } from './saml-admin-routes.js'
@@ -464,6 +465,13 @@ export interface WebServerOptions {
    * OidcLoginService + the provider config store.
    */
   oidcLogin?: OidcLoginSurface
+  /**
+   * C-M2-M3 — host-injected outbound OAuth connect surface (接入现实生活 track).
+   * When wired, POST /api/admin/oauth/start (admin-gated) returns a provider
+   * authorize URL and GET /api/oauth/callback (public, state-protected) persists
+   * the token set. Absent → start 503s, callback bounces to ?oauth_error=not_enabled.
+   */
+  oauthConnect?: OAuthConnectSurface
   /**
    * Route B P1-M5e — host-injected SAML 2.0 SP login surface. When wired, the
    * public `/api/auth/saml/{providers,metadata,start,acs}` routes let a browser

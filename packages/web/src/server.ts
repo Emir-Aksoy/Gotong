@@ -89,6 +89,7 @@ import {
 } from './peer-routes.js'
 import { handleOidcRoute, type OidcLoginSurface } from './oidc-routes.js'
 import { handleOidcAdminRoute, type OidcProviderAdminSurface } from './oidc-admin-routes.js'
+import { handleOAuthConnectCallbackRoute, handleOAuthConnectAdminRoute, type OAuthConnectSurface } from './oauth-connect-routes.js'
 import { handleSamlRoute, type SamlLoginSurface } from './saml-routes.js'
 import { handleSamlAdminRoute, type SamlProviderAdminSurface } from './saml-admin-routes.js'
 import { handleA2aAdminRoute, type A2aAgentAdminSurface } from './a2a-admin-routes.js'
@@ -119,6 +120,7 @@ export type {
 } from './peer-summary-routes.js'
 export type { OidcLoginSurface } from './oidc-routes.js'
 export type { OidcProviderAdminSurface, OidcProviderView } from './oidc-admin-routes.js'
+export type { OAuthConnectSurface } from './oauth-connect-routes.js'
 export type { SamlLoginSurface } from './saml-routes.js'
 export type { SamlProviderAdminSurface, SamlProviderView } from './saml-admin-routes.js'
 export type { A2aAgentAdminSurface, A2aAgentView } from './a2a-admin-routes.js'
@@ -344,6 +346,7 @@ export function serveWeb(hub: Hub, opts: WebServerOptions = {}): Promise<WebServ
     peerManifests: opts.peerManifests,
     peerSummaries: opts.peerSummaries,
     oidcLogin: opts.oidcLogin,
+    oauthConnect: opts.oauthConnect,
     samlLogin: opts.samlLogin,
     oidcAdmin: opts.oidcAdmin,
     samlAdmin: opts.samlAdmin,
@@ -540,6 +543,8 @@ interface HandlerCtx {
   peerSummaries: PeerSummaryFederationSurface | undefined
   /** Route B P1-M4e — see WebServerOptions.oidcLogin doc above. */
   oidcLogin: OidcLoginSurface | undefined
+  /** C-M2-M3 — outbound OAuth connect (begin admin-gated, callback public). */
+  oauthConnect: OAuthConnectSurface | undefined
   /** Route B P1-M5e — see WebServerOptions.samlLogin doc above. */
   samlLogin: SamlLoginSurface | undefined
   /** Route B P1-M4f — see WebServerOptions.oidcAdmin doc above. */
@@ -813,6 +818,12 @@ async function handle(
   // session yet), so the CSRF Origin check must not run. The callback mints the
   // identity cookie on success; the host surface owns all OIDC auth + policy.
   if (await handleOidcRoute({ oidcLogin: ctx.oidcLogin, cookieSecure: ctx.cookieSecure }, req, res, method, path)) {
+    return
+  }
+
+  // C-M2-M3 — public outbound OAuth connect callback (state-protected; the
+  // begin half is admin-gated below). Pre-CSRF like the OIDC callback.
+  if (await handleOAuthConnectCallbackRoute({ oauthConnect: ctx.oauthConnect }, req, res, method, path)) {
     return
   }
 
@@ -1491,6 +1502,16 @@ async function handle(
       req, res, method, path,
     )
     if (handled) return
+  }
+
+  // C-M2-M3 — outbound OAuth connect BEGIN (admin-gated owner action).
+  if (
+    await handleOAuthConnectAdminRoute(
+      { oauthConnect: ctx.oauthConnect, requireAdmin: (rq, rs) => requireAdmin(ctx, rq, rs) },
+      req, res, method, path,
+    )
+  ) {
+    return
   }
 
   // #2-M3.4b — cross-hub federation discovery (browse peers' shared servers).

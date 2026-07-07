@@ -226,3 +226,23 @@ export class OAuthConnectService {
     }
   }
 }
+
+/**
+ * Build the narrow `{ begin, complete }` surface the web layer injects (duck
+ * matches web's `OAuthConnectSurface`). Extracted as a factory so main.ts adds
+ * ~one line instead of an inline closure block — the same move STD-M1 made for
+ * the agent-card surface, keeping the assembly binary within its line budget.
+ */
+export function createOAuthConnectSurface(
+  identity: OAuthConnectIdentity,
+  opts: OAuthConnectServiceOptions = {},
+): {
+  begin(connectorId: string): Promise<{ authorizationUrl: string }>
+  complete(input: { state: string; code: string }): Promise<{ connectorId: string }>
+} {
+  const svc = new OAuthConnectService(identity, opts)
+  return {
+    begin: (connectorId) => svc.begin(connectorId),
+    complete: (input) => svc.complete(input),
+  }
+}

@@ -154,6 +154,7 @@ import { type ImBridgesHandle } from './im-bridge.js'
 import { armImBridgeWiring } from './im-bridge-wiring.js'
 import { OidcClient } from './oidc-client.js'
 import { OidcLoginService } from './oidc-login-service.js'
+import { createOAuthConnectSurface } from './oauth-connect-service.js'
 import { SamlLoginService } from './saml-login-service.js'
 import { buildSpMetadata, SamlError } from '@gotong/saml'
 import {
@@ -2214,6 +2215,8 @@ async function main(): Promise<void> {
       remove: (id) => idForOidc.removeOidcProvider(id),
     }
   }
+  // C-M2-M3 — outbound OAuth connect surface. Same identity gate as OIDC.
+  const oauthConnect = identity ? createOAuthConnectSurface(identity) : undefined
 
   // Route B P1-M5e — browser SSO via configured SAML 2.0 IdPs. Wired only when
   // identity is present (the provider registry + (idpEntityId,NameID)→user links
@@ -2631,6 +2634,8 @@ async function main(): Promise<void> {
     ...(a2aServer ? { a2aServer } : {}),
     // Route B P1-M4e — public OIDC login (undefined → /api/auth/oidc/* degrades).
     ...(oidcLogin ? { oidcLogin } : {}),
+    // C-M2-M3 — outbound OAuth connect (undefined → /api/*/oauth/* degrades).
+    ...(oauthConnect ? { oauthConnect } : {}),
     // Route B P1-M5e — public SAML login (undefined → /api/auth/saml/* degrades).
     ...(samlLogin ? { samlLogin } : {}),
     // Route B P1-M4f — admin OIDC provider registry CRUD (undefined → 503).
