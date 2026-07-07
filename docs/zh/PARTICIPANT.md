@@ -155,6 +155,10 @@ agent 是同一个 Participant」——不是口号，是同一个 `register` / 
 - **桥接现成的外部 agent**（Claude Code / Codex / 别人的 A2A / MCP）→
   [`QUICK-CONNECT.md`](QUICK-CONNECT.md) · [`MCP.md`](MCP.md)，出站适配器见
   [`ledger/V5-E2-CLI-ADAPTER.md`](ledger/V5-E2-CLI-ADAPTER.md)。
+- **让你的参与者被别的 hub 用到**：策展这条边的 `outboundCaps`（通告=授权）后，
+  对面的工作流步——或对面成员对管家的一句大白话（管家出网）——就能按能力
+  路由到它 → [`NET-AGENT-NETWORK.md`](NET-AGENT-NETWORK.md) ·
+  [`examples/butler-cross-hub`](../../examples/butler-cross-hub)。
 - **照着抄一个完整的**：[`examples/hello-collab`](../../examples/hello-collab/src/index.ts)
   （agent×2 + 人，全流程最短），更多在 [`examples/`](../../examples/) 目录（45 个端到端 demo）。
 - **概念总览** → [`OVERVIEW.md`](OVERVIEW.md)；**为什么这么设计** → [`ARCHITECTURE.md`](ARCHITECTURE.md)。

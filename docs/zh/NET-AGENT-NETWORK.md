@@ -8,7 +8,13 @@
 >
 > 用户拍板(2026-07-06):「先 A(管家出网)再 B(名片/发现)」。
 >
-> Last updated: 2026-07-06(NET-M0 计划)
+> **进展**:A track 全完 —— NET-M1 `list_peers`(`e9f9844`)、NET-M2
+> `ask_peer` governed 出网(`322f90d`,双 hub e2e 四场景)、NET-M3 capstone
+> (`examples/butler-cross-hub` demo + FEDERATION-RUNBOOK「管家出网」节 +
+> 双闸回传显式推迟)。B track(M4 名片 / M5 connect preflight)未动,
+> 动工前先重侦察 A2A agent-card 等标准现状。
+>
+> Last updated: 2026-07-06(NET-M3 收口)
 
 ---
 
@@ -53,7 +59,7 @@ peer 行内 `requireApprovalOutbound`);节律/上限如需一律常量。B track
 - 成员侧回传:S1-M3 `butlerPushRef`(inbox resolve 推回)+ CARE-M8 outbox
   (短暂失联不丢),管家 governed 动作「批完把结果推回 IM」这条缝已经可靠。
 
-### NET-M1 — 管家的「网络眼睛」:`list_peers`(benign 只读)
+### NET-M1 — 管家的「网络眼睛」:`list_peers`(benign 只读)✅ `e9f9844`
 
 对齐 BE-M1 三只读的姿态:读投影、绝不动作、脱敏。
 
@@ -74,7 +80,7 @@ peer 行内 `requireApprovalOutbound`);节律/上限如需一律常量。B track
 - **会红的门**:单测——脱敏(投影里字符串化后不含 endpointUrl/token 字样)/
   connected 与 offline 双态 / allowedCaps null 诚实文案 / surface 缺席不供工具。
 
-### NET-M2 — `ask_peer`(governed,成员确认后出网,主里程碑)
+### NET-M2 — `ask_peer`(governed,成员确认后出网,主里程碑)✅ `322f90d`
 
 「问一下爸爸的 hub 今晚有没有空」——管家转述、成员确认、出网、答案带回。
 
@@ -124,18 +130,26 @@ peer 行内 `requireApprovalOutbound`);节律/上限如需一律常量。B track
     同拒;④ `requireApprovalOutbound` 边上成员批后拿到「还差 owner 一道」
     诚实文案 + owner `/me` 里真躺着一条 approval,owner 批完任务才真跨界。
 
-### NET-M3 — 双 hub capstone:demo + 双闸回传收尾 + 文档
+### NET-M3 — 双 hub capstone:demo + 双闸回传收尾 + 文档 ✅
 
-- `examples/butler-cross-hub/`:一进程起两台真 hub(A 有管家 + 成员,B 有一个
-  echo/助理 agent),脚本走完「问 → 确认 → 出网 → 带回」,README 对照
-  FEDERATION-RUNBOOK 讲两台真机怎么复刻。对齐 EXAMPLES.md 分级索引(标前置)。
-- 双闸(owner 也要批)场景的最终答案回传:评估三条路——① inbox resolve 推回
-  按 task.from 追加通知原提问成员;② 骑 BE-M5 run-broadcast 面;③ 显式推迟
-  (文档写清行为)。按「复用既有缝优先、新缝最小」定夺,做不小就 ③。
-- 文档:FEDERATION-RUNBOOK 加「管家出网」一节;PARTICIPANT/OVERVIEW 各一指针;
-  本文档滚动记账。
-- **会红的门**:examples 冒烟(demo 脚本 exit 0 + 输出含对端答案)+ 双闸回传
-  按选定方案的回归测试(或推迟决定钉进文档,门=文档一致性)。
+- `examples/butler-cross-hub/` ✅:一进程两台真 Hub + 真 `installPeerLink`
+  (装法逐字镜像 peer-registry 的 advertise=authorize),真 PersonalButlerAgent
+  (确定性 mock provider,零 API key)。四幕:问→park(零字节出网)/ 批准→
+  capability 跨界→wrapper 盖真 origin→答案回同轮 / 拒绝→fail-closed 对端
+  永不被联系 / 未策展边 classify 当场拒+指路。demo 自带 7 条自断言 + exit 0
+  即冒烟门;host-free(cross-hub-workflow 先例),内联 ~50 行教学镜像并指路
+  host 真件。`pnpm demo:butler-cross-hub`;进 EXAMPLES.md ④ 级(零前置)。
+- 双闸最终答案回传:**定夺 = ③ 显式推迟**。① 按 task.from 推回需在
+  inbox-service/im-bridge 之间开新缝且要辨别任务类别;② BE-M5 面只覆盖工作流
+  run,不覆盖裸 dispatch——都不小,按「复用既有缝优先、新缝最小」推迟。行为
+  已钉进 FEDERATION-RUNBOOK「管家出网」节:owner 批准后任务照常送达执行
+  (transcript 有记录),结果不自动回推原提问成员;日常用法是管家常问的边
+  不开 `requireApprovalOutbound`(成员闸已挡一道),高敏边由 owner 转达。
+- 文档 ✅:FEDERATION-RUNBOOK「变体 — 管家出网」节(前提/两闸顺序/回传推迟
+  /排障入口)+ §5 验收表加行;PARTICIPANT「接着读哪」+ OVERVIEW HubLink 行
+  各一指针;本文档滚动记账。
+- **会红的门**:demo 自断言 + exit 0(对端恰被联系一次/origin 真章/答案回
+  同轮/拒绝与未策展边零出网);双闸回传的推迟决定钉进 runbook(门=文档一致)。
 
 ---
 

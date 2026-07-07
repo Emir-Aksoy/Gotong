@@ -67,6 +67,7 @@ pnpm demo                          # = hello-collab（官方第一步，见 QUIC
 | 例子 | 一句话 | 前置 |
 |---|---|---|
 | [`cross-hub-workflow`](../../examples/cross-hub-workflow) | 两个 hub 一个进程：工作流派一步到 peer hub 的能力，出站审批闸后跨过组织边界 | 零（inproc） |
+| [`butler-cross-hub`](../../examples/butler-cross-hub) | 管家出网：成员一句大白话 → `/me` 确认 → capability 跨界（真 wrapper 盖 origin）→ 对端答案回同一轮 | 零（inproc） |
 | [`cross-org-rfp`](../../examples/cross-org-rfp) | 最小真·跨组织流：买方发 RFP，卖方起草 + HITL 批 + 回报价 | 零（inproc） |
 | [`cross-hub-mcp`](../../examples/cross-hub-mcp) | hub A 共享 MCP server，hub B 经联邦链调它的工具——子进程 + 凭证留在 A | 零 + 本地 MCP |
 | [`cross-hub-federation`](../../examples/cross-hub-federation) | 真 WebSocket 跨组织联邦：双向 bearer token，approve 跨界、reject fail-closed、错 token 握手拒 | 需 socket |
@@ -116,7 +117,7 @@ pnpm demo                          # = hello-collab（官方第一步，见 QUIC
 
 - **人在环 / HITL** → `hello-collab` · `cli-human` · `cafe-ops` · `personal-butler` · `cross-org-rfp`
 - **工作流** → `workflow-architect` · `workflow-assistant` · `cross-hub-workflow` · `tea-supply-link` · `tea-chain-hq`
-- **记忆 / 管家** → `personal-butler` · `butler-vector-recall`（更多能力细节见 [`ledger/MEMORY-ADVANCED-FINAL.md`](ledger/MEMORY-ADVANCED-FINAL.md)）
+- **记忆 / 管家** → `personal-butler` · `butler-vector-recall` · `butler-cross-hub`（更多能力细节见 [`ledger/MEMORY-ADVANCED-FINAL.md`](ledger/MEMORY-ADVANCED-FINAL.md)）
 - **MCP / 知识库** → `mcp-tools-quickstart` · `mcp-tools-llm-agent` · `rag-mcp` · `elasticsearch-kb` · `obsidian-kb` · `cross-hub-mcp`
 - **跨 hub / 联邦** → 见 ④；真网络看 `cross-hub-federation`
 - **桥接外部 agent** → 见 ⑤；契约看 [`AGENT-ADAPTER-CONTRACT.md`](AGENT-ADAPTER-CONTRACT.md)

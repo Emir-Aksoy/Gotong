@@ -213,6 +213,34 @@ owner 打开 `/me` → 收件箱 → 看到一条 approval 待办「批准把出
   配阈值。「控制面」UI 有 sparkline + 告警徽章。
 - **用量归属**：跨 hub 调用在 `usage_ledger` 带 `peer_id`，admin「用量」可按「联邦对端」维度汇总。
 
+### 变体 — 管家出网（成员对话驱动，NET-M2/M3）
+
+上面 Step 6–7 的驱动方是工作流；同一条边也能由**成员对管家的一句大白话**驱动：
+
+```
+成员(IM)> 帮我问一下爸爸的 hub 今晚有没有空。
+管家    > （ask_peer 停进成员自己的 /me —— 未批前零字节出网）
+成员批准 ✅
+管家    > 对端「hub-dad(爸爸的 hub)」回复:有空,回来吃饭。
+```
+
+- **前提**：Step 4 里这条边已策展 `outboundCaps`（**只有策展过的边可问**——
+  未策展边管家会当场诚实拒绝并指路；这不是限制而是事实：跨 hub 寻址只有
+  capability 一条路，未策展的边路由不出去）+ 对端有服务该能力的参与者 +
+  本侧管家 governed 面开着（`GOTONG_BUTLER_GOVERNED` 默认开）。
+- **两道闸各守其主**：成员闸（「我真的要发这句话吗」，停成员自己的 `/me`）
+  永远在前；这条边若还开了 `requireApprovalOutbound`，owner 闸照常在后、
+  不可绕——成员批完 owner 闸又停时，管家如实说「还差 hub 管理员一道」。
+- **双闸场景的最终答案回传——显式推迟（NET-M3 决定）**：owner 批准后任务
+  照常送达对端并执行完（transcript 有记录、owner 的批准响应里有结果），但
+  该结果**当前不会自动回推给原提问成员**。一步到位需要给「owner 批准的
+  结果按 task.from 回推成员 IM」开一条新缝，按「复用既有缝优先、新缝最小」
+  纪律首版不开；日常用法是给管家常问的边**不开** `requireApprovalOutbound`
+  （成员闸已经挡了一道），需要 owner 双闸的高敏边则由 owner 转达结果。
+- 成员先问管家「咱们连着谁」（`list_peers`，NET-M1）就能看到每条边的
+  出站姿态：未策展 / 锁死 / 可请求能力列表。
+- 单机看肌理：`pnpm demo:butler-cross-hub`（[`examples/butler-cross-hub`](../../examples/butler-cross-hub)）。
+
 ---
 
 ## 3. 安全清单
@@ -254,6 +282,7 @@ owner 打开 `/me` → 收件箱 → 看到一条 approval 待办「批准把出
 | transcript chain 过真 ws + opt-in 闸 | `packages/host/tests/cross-hub-transcript-chain-ws-e2e.test.ts` |
 | 断链 + 重拨韧性（挂起不丢、重拨后批准跑完） | `packages/host/tests/cross-hub-redial-resilience-e2e.test.ts` |
 | 多组织隔离（夹紧一条不外溢） | `packages/host/tests/peer-isolation-ws-e2e.test.ts` |
+| 管家出网（问 → 成员确认 → 跨界 → 答案回同轮 + 双闸顺序） | `pnpm demo:butler-cross-hub`（`examples/butler-cross-hub/`）+ `packages/host/tests/butler-ask-peer-e2e.test.ts`（双真 Hub 四场景） |
 
 ---
 

@@ -1,0 +1,17 @@
+{
+  "name": "@gotong/example-butler-cross-hub",
+  "version": "0.0.0",
+  "type": "module",
+  "private": true,
+  "description": "NET-M3 capstone — the resident butler asks a PEER HUB on the member's behalf (「问一下爸爸的 hub 今晚有没有空」). Two real hubs in one process over a real installPeerLink: the ask parks in the member's own /me first (nothing crosses before approval), then rides capability dispatch through the real wrapper (outbound allowlist + origin stamp), and the peer's answer returns in the same conversational turn. Deterministic, no API key.",
+  "scripts": {
+    "start": "tsx src/demo.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@gotong/core": "workspace:*",
+    "@gotong/llm": "workspace:*",
+    "@gotong/personal-butler": "workspace:*",
+    "@gotong/services-sdk": "workspace:*"
+  }
+}
