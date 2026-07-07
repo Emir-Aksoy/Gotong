@@ -522,6 +522,92 @@ describe('peer policy fields (Phase 18 B-M2)', () => {
   })
 })
 
+describe('peer pinned signing key (STD-M2b)', () => {
+  let b: BootResult
+  beforeEach(async () => { b = await boot() })
+  afterEach(async () => { await teardown(b) })
+
+  const KID = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLM1234' // 43-char base64url
+
+  it('POST persists pinnedKid + round-trips via getPeer AND the list DTO', async () => {
+    const r = await fetch(`${b.baseUrl}/api/admin/identity/peers`, {
+      method: 'POST',
+      headers: { cookie: b.ownerCookie, 'content-type': 'application/json' },
+      body: JSON.stringify({
+        peerId: 'hub_pin', endpointUrl: 'wss://pin.example', peerToken: 'tok-pin-12345',
+        pinnedKid: KID,
+      }),
+    })
+    expect(r.status).toBe(200)
+    const j = (await r.json()) as { peer: { id: string; pinnedKid: string | null } }
+    expect(j.peer.pinnedKid).toBe(KID)
+    // Persisted, not just echoed.
+    expect(b.identity.getPeer(j.peer.id)!.pinnedKid).toBe(KID)
+    // Exposed in the list DTO so the admin panel can display the anchor.
+    const lr = await fetch(`${b.baseUrl}/api/admin/identity/peers`, { headers: { cookie: b.ownerCookie } })
+    const lj = (await lr.json()) as { peers: Array<{ peerId: string; pinnedKid: string | null }> }
+    expect(lj.peers.find((p) => p.peerId === 'hub_pin')!.pinnedKid).toBe(KID)
+  })
+
+  it('POST without pinnedKid → null (no anchor by default; identity rests on the token)', async () => {
+    const r = await fetch(`${b.baseUrl}/api/admin/identity/peers`, {
+      method: 'POST',
+      headers: { cookie: b.ownerCookie, 'content-type': 'application/json' },
+      body: JSON.stringify({ peerId: 'hub_nopin', endpointUrl: 'wss://np.example', peerToken: 'tok-nopin-1234' }),
+    })
+    expect(r.status).toBe(200)
+    const j = (await r.json()) as { peer: { pinnedKid: string | null } }
+    expect(j.peer.pinnedKid).toBeNull()
+  })
+
+  it('POST a malformed pinnedKid (not the 43-char thumbprint shape) → 400', async () => {
+    const r = await fetch(`${b.baseUrl}/api/admin/identity/peers`, {
+      method: 'POST',
+      headers: { cookie: b.ownerCookie, 'content-type': 'application/json' },
+      body: JSON.stringify({
+        peerId: 'hub_badpin', endpointUrl: 'wss://bp.example', peerToken: 'tok-badpin-123',
+        pinnedKid: 'too-short',
+      }),
+    })
+    // A paste typo must be rejected up front — a bad pin would else become a
+    // permanent phantom mismatch.
+    expect(r.status).toBe(400)
+  })
+
+  it('PATCH sets then clears the pin (explicit null clears the anchor)', async () => {
+    const id = b.identity.addPeer({
+      peerId: 'hub_pinpatch', endpointUrl: 'wss://pp.example', peerToken: 'tok-pinpatch-1',
+    }).id
+    const set = await fetch(`${b.baseUrl}/api/admin/identity/peers/${id}`, {
+      method: 'PATCH', headers: { cookie: b.ownerCookie, 'content-type': 'application/json' },
+      body: JSON.stringify({ pinnedKid: KID }),
+    })
+    expect(set.status).toBe(200)
+    expect(b.identity.getPeer(id)!.pinnedKid).toBe(KID)
+    const clear = await fetch(`${b.baseUrl}/api/admin/identity/peers/${id}`, {
+      method: 'PATCH', headers: { cookie: b.ownerCookie, 'content-type': 'application/json' },
+      body: JSON.stringify({ pinnedKid: null }),
+    })
+    expect(clear.status).toBe(200)
+    expect(b.identity.getPeer(id)!.pinnedKid).toBeNull()
+  })
+
+  it('PATCH pinnedKid-only stays on the plain invalidate path — advisory ≠ re-gate', async () => {
+    const id = b.identity.addPeer({
+      peerId: 'hub_pinonly', endpointUrl: 'wss://po.example', peerToken: 'tok-pinonly-12',
+    }).id
+    const inv = b.invalidateCount.n
+    const rp = b.refreshPolicyCount.n
+    const r = await fetch(`${b.baseUrl}/api/admin/identity/peers/${id}`, {
+      method: 'PATCH', headers: { cookie: b.ownerCookie, 'content-type': 'application/json' },
+      body: JSON.stringify({ pinnedKid: KID }),
+    })
+    expect(r.status).toBe(200)
+    expect(b.invalidateCount.n).toBe(inv + 1) // plain reconcile
+    expect(b.refreshPolicyCount.n).toBe(rp) // the pin never re-dials a connected peer
+  })
+})
+
 // Phase 19 P4-M4 — the per-link trust-contract trio (revocationState /
 // perLinkQuotaBudget / allowedDataClasses) over the same CRUD routes. The host
 // ENFORCEMENT is pinned in host/tests/peer-isolation-e2e.test.ts +

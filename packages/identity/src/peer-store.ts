@@ -58,6 +58,9 @@ interface PeerRow {
   // v5 Stream G day-5 — per-link opt-in to expose this link's task transcript
   // slices via the `peer.transcript` RPC (schema v27, fail-closed default 0).
   share_transcript: number
+  // STD-M2b — owner-pinned signing-key thumbprint (schema v35). NULL = no
+  // trust anchor; identity rests on the token handshake (pre-STD default).
+  pinned_kid: string | null
 }
 
 export class PeerStore {
@@ -143,6 +146,8 @@ export class PeerStore {
           input.shareSummary ? 1 : 0,
           // v5 Stream G day-5 — transcript sharing; omitted → 0 = fail-closed.
           input.shareTranscript ? 1 : 0,
+          // STD-M2b — pinned signing-key thumbprint; omitted → NULL = no anchor.
+          input.pinnedKid ?? null,
         )
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err)
@@ -276,6 +281,10 @@ export class PeerStore {
             ? 1
             : 0
           : existing.share_transcript
+      // STD-M2b — trust anchor. undefined preserves; explicit null CLEARS the
+      // pin (back to token-only trust), same contract as `label`.
+      const pinnedKid =
+        input.pinnedKid !== undefined ? input.pinnedKid : existing.pinned_kid
       this.stmtPeerUpdate.run(
         endpointUrl,
         label,
@@ -291,6 +300,7 @@ export class PeerStore {
         allowedKnowledgeBasesJson,
         shareSummary,
         shareTranscript,
+        pinnedKid,
         Date.now(),
         id,
       )
@@ -339,8 +349,9 @@ export class PeerStore {
          created_at, updated_at,
          kind, acl_json, outbound_caps_json, require_approval_outbound,
          revocation_state, per_link_quota_budget, allowed_data_classes_json,
-         allowed_knowledge_bases_json, share_summary, share_transcript
-       ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         allowed_knowledge_bases_json, share_summary, share_transcript,
+         pinned_kid
+       ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ))
   }
   private get stmtPeerById(): SqliteStmt {
@@ -372,6 +383,7 @@ export class PeerStore {
              revocation_state = ?, per_link_quota_budget = ?,
              allowed_data_classes_json = ?, allowed_knowledge_bases_json = ?,
              share_summary = ?, share_transcript = ?,
+             pinned_kid = ?,
              updated_at = ?
        WHERE id = ?`,
     ))
@@ -431,6 +443,8 @@ function rowToPeerRegistration(r: PeerRow): PeerRegistration {
     shareSummary: r.share_summary !== 0,
     // v5 Stream G day-5 — per-link transcript-sharing opt-in (default 0 = off).
     shareTranscript: r.share_transcript !== 0,
+    // STD-M2b — owner-pinned signing-key thumbprint projection (NULL = no anchor).
+    pinnedKid: r.pinned_kid ?? null,
   }
   // Omit on healthy rows so the record shape is unchanged for the common case
   // (mirrors `SuspendedTask.corrupt`).

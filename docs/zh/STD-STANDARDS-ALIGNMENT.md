@@ -156,15 +156,37 @@ owner 手上有锚定 kid(带外记的),就能随时 `peer-card <url> --expect-k
   单测(一致/不符 exit 3/`=` 形式/未签名/JWKS 不可达/缺值 usage)+ 真 bin×真
   签名 host e2e 冒烟加 3 断言(一致 exit 0、不符 exit 3、打印「不符」)。
 
-#### STD-M2b-2 identity 落 PIN + web admin 面板显示(下一步)
+#### STD-M2b-2 identity 落 PIN + web admin 捕获/显示 ✅(as-built)
 
-- **peer 记录存锚定 kid**:identity `peers` 表加一个可空列(additive 迁移),
-  `mint-peer-token` / 双边登记时 owner **显式**填入锚定 kid;server 侧对「已
-  登记且带 kid」的 peer 用 `verifyCardKidMatches` 复验,`peer-card` + admin
-  联邦面板显示 匹配 / 不符。
-- **不符只 advisory 警告,绝不硬挡联邦**:身份的最终裁决仍是 token 握手;PIN
-  是给 owner 的**显式提醒**(钥变了 = 该核实),不是自动闸。没 PIN 的 peer 零
-  影响。
+把锚定 kid 从「owner 脑子里带外记的」落成 hub 状态的一部分:owner 在联邦
+面板 **显式** 填,存进 peer 记录,列表 + 面板显示。
+
+- **identity**:`peers` 表加可空 `pinned_kid` 列(schema **v35** additive 迁
+  移;公钥指纹 **不是密钥**,故进列不进 vault,续「凭证进 vault 不进列」纪
+  律)。PeerRow / `AddPeerInput` / `UpdatePeerInput` / `PeerRegistration` 全
+  线穿 `pinnedKid`——**undefined 保留、显式 null 清除**(同 `label` 契约)。
+  NULL = 无锚,identity 靠 token 握手,与今天逐字节一致。
+- **web**:`POST/PATCH /api/admin/identity/peers` 捕获 `pinnedKid`——校验
+  **RFC 7638 43 字符 base64url shape**(防粘贴错:一个 typo'd pin 会永久假
+  性不符),`null` 清除;list DTO 暴露(面板可显示)。admin 联邦面板策略编辑
+  器加「锚定签名公钥」输入(预填现值 / 显示 / 编辑 / 保存,空=清除)。**pin
+  是 advisory**:pin-only 编辑走 `invalidate` **不重拨**(它从不碰 mesh 门
+  控),这条被单测钉死。
+- **会红的门**:identity `peers.test` 4 例(默认 null / round-trip / 保留-替
+  换-清除 / 与策略字段独立)+ web 5 例(POST 持久化 + list 暴露 / 默认 null /
+  坏 shape→400 / PATCH set→clear / **pin-only 不 `refreshPolicy`**)。identity
+  616 / web 1276 / host 1882 全绿,四门 PASS(旋钮仍 106,无新增)。
+
+#### STD-M2b-3 面板内实时「匹配/不符」徽章(显式推迟,待定 card URL 来源)
+
+面板内实时徽章需**服务端**取对端 HTTP 名片 + JWKS,用 `verifyCardKidMatches`
+对存下的 pin 复验。但 peer 存的 `endpointUrl` 是 **wss mesh 地址**,名片却在
+另一端口/协议的 well-known —— 无法从 wss 稳妥推导 card URL。补它要么给 web 开
+**新的出站 fetch 面**(含 SSRF 面)+ 决定 card URL 从哪来(admin 粘贴 / 另存
+一列),是真架构岔口,不擅自拍。**验证能力其实已交付**:M2b-1 的 `gotong
+peer-card <url> --expect-kid <kid>` 就是这颗徽章的 CLI 形态——面板现已显示
+pin,owner 复制去 CLI 即可复验。是否要面板内一键徽章、card URL 怎么来,待用户
+拍板再上。
 
 ### 远期(观察不做,只记账)
 

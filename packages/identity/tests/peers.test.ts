@@ -748,4 +748,51 @@ describe('IdentityStore — peers (D1)', () => {
       expect(off.shareTranscript).toBe(true) // transcript opt-in survives
     })
   })
+
+  describe('pinnedKid trust anchor (STD-M2b)', () => {
+    // 43-char base64url shape (RFC 7638). The store itself stores any string —
+    // shape validation is the web layer's job — but we use realistic values.
+    const KID = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLM1234'
+    const KID2 = 'ROTATED' + 'x'.repeat(36)
+
+    it('addPeer without the field → null (no anchor; identity rests on the token)', () => {
+      const p = store.addPeer({
+        peerId: 'hub_pkdef', endpointUrl: 'wss://pk.example', peerToken: 'tok-pk-1',
+      })
+      expect(p.pinnedKid).toBeNull()
+    })
+
+    it('addPeer round-trips an explicit pin', () => {
+      const p = store.addPeer({
+        peerId: 'hub_pkon', endpointUrl: 'wss://pkon.example', peerToken: 'tok-pkon-1',
+        pinnedKid: KID,
+      })
+      for (const r of [p, store.getPeerByPeerId('hub_pkon')!]) {
+        expect(r.pinnedKid).toBe(KID)
+      }
+    })
+
+    it('updatePeer preserves on undefined, replaces on a new value, CLEARS on null', () => {
+      const p = store.addPeer({
+        peerId: 'hub_pkupd', endpointUrl: 'wss://pku.example', peerToken: 'tok-pku-1',
+        pinnedKid: KID,
+      })
+      const preserved = store.updatePeer(p.id, { label: 'renamed' })
+      expect(preserved.pinnedKid).toBe(KID) // undefined preserves
+      const rotated = store.updatePeer(p.id, { pinnedKid: KID2 })
+      expect(rotated.pinnedKid).toBe(KID2) // a new value replaces
+      const cleared = store.updatePeer(p.id, { pinnedKid: null })
+      expect(cleared.pinnedKid).toBeNull() // explicit null clears the anchor
+    })
+
+    it('the pin is independent of policy fields (a policy edit leaves it untouched)', () => {
+      const p = store.addPeer({
+        peerId: 'hub_pkiso', endpointUrl: 'wss://pki.example', peerToken: 'tok-pki-1',
+        pinnedKid: KID,
+      })
+      const u = store.updatePeer(p.id, { requireApprovalOutbound: true })
+      expect(u.requireApprovalOutbound).toBe(true)
+      expect(u.pinnedKid).toBe(KID) // untouched by an unrelated policy change
+    })
+  })
 })

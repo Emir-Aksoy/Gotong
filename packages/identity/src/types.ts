@@ -1494,6 +1494,17 @@ export interface PeerRegistration {
    */
   shareTranscript: boolean
   /**
+   * STD-M2b — the owner's out-of-band trust anchor: the RFC 7638 thumbprint
+   * of the public key this peer's signed A2A card is EXPECTED to carry. Set
+   * EXPLICITLY by the owner at registration (never auto / never TOFU); null =
+   * no anchor, so this link's identity rests on the token handshake alone (the
+   * pre-STD default, unchanged). When present, peer-card + the admin federation
+   * panel verify the peer's live card against it and flag a mismatch — advisory
+   * ONLY, it NEVER hard-blocks federation (发现≠信任: the token stays the trust
+   * root; a rotated key is a "go re-verify" nudge, not an auto-kill).
+   */
+  pinnedKid: string | null
+  /**
    * Audit L13 — corruption trail. Present (and non-empty) ONLY when one or
    * more stored policy JSON columns were unparseable or the wrong shape and
    * had to be normalised on read (e.g. `outbound_caps_json` held `"chat"`
@@ -1540,6 +1551,9 @@ export interface AddPeerInput {
   shareSummary?: boolean
   // ---- v5 Stream G day-5 — transcript sharing (omitted → 0 = fail-closed). ----
   shareTranscript?: boolean
+  // ---- STD-M2b — owner-pinned signing-key thumbprint (omitted → NULL = no
+  //      anchor; identity rests on the token handshake, the pre-STD default). ----
+  pinnedKid?: string | null
 }
 
 export interface UpdatePeerInput {
@@ -1573,6 +1587,9 @@ export interface UpdatePeerInput {
   shareSummary?: boolean
   // ---- v5 Stream G day-5 — transcript sharing. undefined = preserve; sets. ----
   shareTranscript?: boolean
+  // ---- STD-M2b — pinned signing-key thumbprint. undefined = preserve;
+  //      explicit null CLEARS the anchor (back to token-only trust). ----
+  pinnedKid?: string | null
 }
 
 export interface ListPeersQuery {

@@ -188,6 +188,10 @@ export interface IdentityPeerDTO {
   // the slice of one cross-hub task's trace (always present from a v27 store;
   // default false = fail-closed). Reveals more than the summary's counts.
   shareTranscript: boolean
+  // STD-M2b — owner-pinned signing-key thumbprint, the out-of-band trust anchor
+  // for this peer's signed A2A card (always present from a v35 store; null = no
+  // anchor). Advisory only: a mismatch on the live card flags but never blocks.
+  pinnedKid: string | null
 }
 
 export interface IdentityOrgQuotaDTO {
@@ -299,6 +303,7 @@ export interface IdentitySurface {
     allowedKnowledgeBases?: string[] | null
     shareSummary?: boolean
     shareTranscript?: boolean
+    pinnedKid?: string | null
   }): IdentityPeerDTO
   listPeers?(): IdentityPeerDTO[]
   updatePeer?(
@@ -318,6 +323,7 @@ export interface IdentitySurface {
       allowedKnowledgeBases?: string[] | null
       shareSummary?: boolean
       shareTranscript?: boolean
+      pinnedKid?: string | null
     },
   ): IdentityPeerDTO
   removePeer?(id: string): boolean
@@ -2112,6 +2118,8 @@ interface PeerPolicyFields {
   shareSummary?: boolean
   // v5 Stream G day-5 — opt-in to answer peer.transcript (fail-closed default).
   shareTranscript?: boolean
+  // STD-M2b — owner-pinned signing-key thumbprint (null = clear the anchor).
+  pinnedKid?: string | null
 }
 
 /**
@@ -2161,6 +2169,7 @@ function parsePeerPolicyFields(b: {
   allowedKnowledgeBases?: unknown
   shareSummary?: unknown
   shareTranscript?: unknown
+  pinnedKid?: unknown
 }): { ok: true; value: PeerPolicyFields } | { ok: false; error: string } {
   const value: PeerPolicyFields = {}
   if (b.kind !== undefined) {
@@ -2234,6 +2243,22 @@ function parsePeerPolicyFields(b: {
       return { ok: false, error: 'shareTranscript must be a boolean' }
     }
     value.shareTranscript = b.shareTranscript
+  }
+  // STD-M2b — owner-pinned signing-key thumbprint (the out-of-band trust anchor
+  // for this peer's signed A2A card). null CLEARS the anchor; a string MUST be
+  // the RFC 7638 shape (43-char base64url SHA-256) so a paste typo can't quietly
+  // become a pin that then always mismatches. Owner sets it explicitly — this is
+  // never auto-derived (发现≠信任).
+  if (b.pinnedKid !== undefined) {
+    if (b.pinnedKid === null) value.pinnedKid = null
+    else if (typeof b.pinnedKid === 'string' && /^[A-Za-z0-9_-]{43}$/.test(b.pinnedKid)) {
+      value.pinnedKid = b.pinnedKid
+    } else {
+      return {
+        ok: false,
+        error: 'pinnedKid must be a 43-char base64url RFC 7638 thumbprint, or null to clear',
+      }
+    }
   }
   return { ok: true, value }
 }
@@ -2381,8 +2406,11 @@ async function handlePatchPeer(
   Object.assign(input, policy.value)
   // A policy or endpoint change must re-gate / re-dial a CONNECTED peer;
   // invalidate() alone won't (tick keeps the existing link). Label / enabled
-  // / token-only edits are fine with a plain reconcile.
-  const needsRelink = Object.keys(policy.value).length > 0 || input.endpointUrl !== undefined
+  // / token-only edits are fine with a plain reconcile. STD-M2b `pinnedKid` is
+  // an advisory trust anchor that never touches mesh gating, so a pin-only edit
+  // must NOT force a re-dial — exclude it from the relink trigger.
+  const gatingChanged = Object.keys(policy.value).some((k) => k !== 'pinnedKid')
+  const needsRelink = gatingChanged || input.endpointUrl !== undefined
   try {
     const updated = ctx.identity.updatePeer!(id, input)
     if (needsRelink && ctx.peerRegistry?.refreshPolicy) ctx.peerRegistry.refreshPolicy(id)

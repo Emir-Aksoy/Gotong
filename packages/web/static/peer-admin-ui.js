@@ -478,6 +478,11 @@
       '    <label class="pa-pol-check"><input class="pa-pol-sharetranscript" type="checkbox"' +
       (p.shareTranscript ? ' checked' : '') + ' /> ' + escHtml(d.padmPolShareTranscript) +
       ' <small>' + escHtml(d.padmPolShareTranscriptHint) + '</small></label>' +
+      // STD-M2b — owner-pinned signing-key thumbprint (the out-of-band trust
+      // anchor for this peer's signed A2A card). Blank = no anchor; a set value
+      // is what `gotong peer-card <url> --expect-kid <kid>` re-verifies against.
+      '    <label>' + escHtml(d.padmPolPinnedKid) + ' <small>' + escHtml(d.padmPolPinnedKidHint) + '</small>' +
+      '      <input class="pa-pol-pinnedkid" type="text" value="' + escHtml(p.pinnedKid || '') + '" /></label>' +
       '  </div>' +
       '  <button type="button" class="pa-pol-save">' + escHtml(d.padmPolSave) + '</button>' +
       '</div>'
@@ -498,6 +503,9 @@
     const aclCaps = textToArr($('.pa-pol-aclcaps', detail).value)
     const acl = { requireOrigin: $('.pa-pol-requireorigin', detail).checked }
     if (aclCaps) acl.capabilities = aclCaps
+    // STD-M2b — empty pin field CLEARS the anchor (null); a value is sent as-is
+    // and the server validates the RFC 7638 shape (rejects a paste typo).
+    const pinnedRaw = $('.pa-pol-pinnedkid', detail).value.trim()
     const body = {
       acl: acl,
       outboundCaps: textToArr($('.pa-pol-outcaps', detail).value),
@@ -508,6 +516,7 @@
       revocationState: $('.pa-pol-revstate', detail).value,
       shareSummary: $('.pa-pol-sharesummary', detail).checked,
       shareTranscript: $('.pa-pol-sharetranscript', detail).checked,
+      pinnedKid: pinnedRaw === '' ? null : pinnedRaw,
     }
     setStatus(root, t().padmSavingPolicy, 'loading')
     try {

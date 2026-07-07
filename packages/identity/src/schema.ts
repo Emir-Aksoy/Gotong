@@ -1140,6 +1140,22 @@ const MIGRATIONS: Migration[] = [
       ALTER TABLE acp_outbound_agents ADD COLUMN outbound_quota_budget INTEGER;
     `,
   },
+  {
+    // STD-M2b — the owner's out-of-band trust anchor for a peer's signed A2A
+    // card: the RFC 7638 thumbprint (base64url SHA-256 of the canonical EC JWK)
+    // the peer's card is EXPECTED to be signed with. Additive, nullable, and
+    // NOT a secret (a public-key fingerprint), so it continues the store's
+    // "credentials live in vault, not columns" discipline. NULL = no anchor —
+    // the link's identity rests on the token handshake alone, exactly as every
+    // pre-STD peer does, so this migration is byte-invisible to existing rows.
+    // The owner sets it EXPLICITLY (never TOFU); a mismatch on the peer's live
+    // card is an advisory nudge, never an auto-disconnect (发现≠信任).
+    version: 35,
+    name: 'peer-pinned-kid',
+    sql: `
+      ALTER TABLE peers ADD COLUMN pinned_kid TEXT;
+    `,
+  },
 ]
 
 /**
