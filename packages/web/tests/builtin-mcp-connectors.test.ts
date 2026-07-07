@@ -30,6 +30,8 @@ const EXPECTED_IDS = [
   'mcp-registry-search',
   'chroma-rag',
   'obsidian-notes',
+  'notion-notes',
+  'todoist-tasks',
   'elasticsearch',
   'filesystem',
 ]

@@ -68,11 +68,18 @@
 | `mcp-registry-search` | MCP 注册站搜索(fetch) | `discovery` | 联网取数,去官方注册站实时搜几万个 server | — |
 | `chroma-rag` | Chroma 向量知识库 | `rag` | 本地向量 RAG:灌文档 + 相似度检索 | — |
 | `obsidian-notes` | Obsidian 笔记库 | `notes` | 连本地 Obsidian(需 Local REST API 插件):全文搜 + 读笔记 | `OBSIDIAN_API_KEY` |
+| `notion-notes` | Notion 笔记 / 文档 | `notes` | 连你的 Notion:搜索 / 读写页面与数据库(Notion 官方 server) | `NOTION_TOKEN` |
+| `todoist-tasks` | Todoist 任务 | `tasks` | 连你的 Todoist:查看 / 新建 / 完成任务(Doist 官方 server) | `TODOIST_API_KEY` |
 | `elasticsearch` | Elasticsearch 搜索索引 | `search` | 查 ES 索引:列索引 / 看 mapping / query DSL | `ES_URL` `ES_API_KEY` |
 | `filesystem` | 本地文件系统 | `files` | 读写指定沙箱目录的文件(官方参考实现) | — |
 
+> **「接入现实生活」track(C)**:`notion-notes` / `todoist-tasks` 是把目录伸向日常
+> 生活工具的第一批(C-M1),都是**厂商官方 server + 静态 token**(非 OAuth)。生态里
+> **日历 / 邮件 / 记账**等已整体迁到「托管远程 + OAuth」,那层由 **C-M2** 补出站 OAuth
+> 后接入 —— 见 [REAL-LIFE-CONNECTORS.md](REAL-LIFE-CONNECTORS.md)。
+
 分类单一真相源 = `MCP_CONNECTOR_CATEGORIES`(`discovery` / `rag` / `notes` /
-`search` / `files` / `web`)。防腐测试钉死:目录顺序固定、id / 展示名 / `spec.name`
+`tasks` / `search` / `files` / `web`)。防腐测试钉死:目录顺序固定、id / 展示名 / `spec.name`
 三者各自唯一、`category` 必在允许集、整组过 `validateMcpServersArray`、且
 **每个 `needsEnv` 凭证在 `spec.env` 里只能是 `${NAME}` 占位、绝不写明文**
 (连「写一半的占位」`${ES_API_KEY` 都会被逮)。

@@ -26,6 +26,7 @@ export const MCP_CONNECTOR_CATEGORIES = [
   'discovery',
   'rag',
   'notes',
+  'tasks',
   'search',
   'files',
   'web',
@@ -127,6 +128,53 @@ export const BUILTIN_MCP_CONNECTORS: BuiltinMcpConnector[] = [
       args: ['mcp-obsidian'],
       env: {
         OBSIDIAN_API_KEY: '${OBSIDIAN_API_KEY}',
+        PATH: '${PATH}',
+      },
+    },
+  },
+
+  // —— notes:Notion 工作区(Notion 官方 server,静态内部集成 token)——
+  {
+    id: 'notion-notes',
+    name: 'Notion 笔记 / 文档',
+    category: 'notes',
+    whatFor:
+      '连接你的 Notion 工作区:搜索、读写页面与数据库。工具以 notion__ 前缀挂载。' +
+      '前置 —— 在 Notion 建一个 internal integration 拿集成密钥(ntn_…),' +
+      '并把要给 AI 用的页面 / 数据库「共享」给该集成:没共享的内容它看不到。',
+    homepage: 'https://developers.notion.com/docs/get-started-with-mcp',
+    needsEnv: ['NOTION_TOKEN'],
+    sourceRef: 'https://github.com/makenotion/notion-mcp-server(Notion 官方)',
+    // 静态内部集成 token(非 OAuth)。env 一设子进程只继承列出的 key,故显式带 PATH。
+    spec: {
+      name: 'notion',
+      command: 'npx',
+      args: ['-y', '@notionhq/notion-mcp-server'],
+      env: {
+        NOTION_TOKEN: '${NOTION_TOKEN}',
+        PATH: '${PATH}',
+      },
+    },
+  },
+
+  // —— tasks:Todoist 任务(Doist 官方 server,静态个人 API token)——
+  {
+    id: 'todoist-tasks',
+    name: 'Todoist 任务',
+    category: 'tasks',
+    whatFor:
+      '连接你的 Todoist:查看 / 新建 / 完成任务、管理项目与截止日期。工具以 todoist__ 前缀挂载。' +
+      '前置 —— 在 Todoist 账号 Settings → Integrations → Developer 复制个人 API token。',
+    homepage: 'https://github.com/Doist/todoist-mcp',
+    needsEnv: ['TODOIST_API_KEY'],
+    sourceRef: 'https://github.com/Doist/todoist-mcp(Doist 官方)',
+    // 本地 stdio 走静态个人 API token;托管 ai.todoist.net/mcp 才走 OAuth(留 C-M2)。
+    spec: {
+      name: 'todoist',
+      command: 'npx',
+      args: ['-y', '@doist/todoist-mcp'],
+      env: {
+        TODOIST_API_KEY: '${TODOIST_API_KEY}',
         PATH: '${PATH}',
       },
     },
