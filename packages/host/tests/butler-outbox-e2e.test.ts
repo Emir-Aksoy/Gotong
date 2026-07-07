@@ -132,6 +132,9 @@ describe('CARE-M8 — outbox 补投(startImBridges 真 onReachable 缝)', () => 
     const redelivered = fake.outbound.find((o) => o.text.includes('大脑坏了'))
     expect(redelivered).toBeDefined()
     expect(redelivered!.chatId).toBe('private:2001') // 补到她自己那条最近的聊天
+    // flush 是 fire-and-forget(onReachable 不能 await)——补投文本先于删文件出现,
+    // 全量并发跑时收尾会慢半拍,给它有界等待再断言。
+    for (let i = 0; i < 100 && existsSync(outboxFile); i++) await delay(2)
     expect(existsSync(outboxFile)).toBe(false) // 队列排空,不留空壳
   })
 
