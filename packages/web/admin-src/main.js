@@ -1374,6 +1374,18 @@ import { createWorkflows } from './workflows.js'
     const agents = snap.agents || []
     const mcp = snap.mcpServers || []
     const signals = []
+    // CARE-M7 — RED, TOP signal: the LLM brain is currently OUT. Before this the
+    // outage was only visible over IM (CARE-M2 canned reply + CARE-M6 patrol
+    // escalation); a web operator saw nothing. `llmOutage` is tri-state: absent
+    // (host didn't wire it) / null (wired, healthy) / a fact row (down). Only the
+    // row is truthy → renders. Minutes fold here (presentation layer, with the
+    // active language) from `since` vs the snapshot's `checkedAt` — host ships
+    // only the raw fact. Placed first: nothing else matters if it can't think.
+    if (snap.llmOutage) {
+      const downMs = Date.parse(snap.checkedAt || '') - (snap.llmOutage.since || 0)
+      const mins = downMs > 0 ? Math.round(downMs / 60000) : 0
+      signals.push(hubHealthSignalRow('red', t.healthLlmOutage(snap.llmOutage.kind, mins), ''))
+    }
     // RED — managed agents whose key does not resolve (the headline signal).
     for (const a of agents) {
       if (a.missingKey) {

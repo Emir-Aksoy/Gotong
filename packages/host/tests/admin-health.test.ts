@@ -35,6 +35,8 @@ function svc(opts: {
   listConnectorSlots?: () => Promise<
     { pack: string; id: string; optional: boolean; hint?: string }[]
   >
+  // CARE-M7 — 断供读取;same optional-dep contract (absent → snapshot 无 llmOutage).
+  readLlmOutage?: () => Promise<{ kind: string; since: number } | null>
 }) {
   return createAdminHealthService({
     listAgents: async () => opts.agents,
@@ -47,6 +49,7 @@ function svc(opts: {
     ...(opts.countRuns ? { countRuns: opts.countRuns } : {}),
     ...(opts.imStatus ? { imStatus: opts.imStatus } : {}),
     ...(opts.listConnectorSlots ? { listConnectorSlots: opts.listConnectorSlots } : {}),
+    ...(opts.readLlmOutage ? { readLlmOutage: opts.readLlmOutage } : {}),
   })
 }
 
@@ -290,6 +293,40 @@ describe('createAdminHealthService.snapshot', () => {
         },
       }).snapshot()
       expect(s.connectorSlots).toEqual([])
+      expect(s.managedCount).toBe(1)
+    })
+  })
+
+  describe('llmOutage (CARE-M7)', () => {
+    it('omits the field entirely when the dep is not injected (honest unknown)', async () => {
+      const s = await svc({ agents: [managed('a1', 'openai')] }).snapshot()
+      expect('llmOutage' in s).toBe(false)
+    })
+
+    it('null when wired but there is no outage (checked, healthy)', async () => {
+      const s = await svc({
+        agents: [managed('a1', 'openai')],
+        readLlmOutage: async () => null,
+      }).snapshot()
+      expect(s.llmOutage).toBe(null)
+    })
+
+    it('passes through the outage fact (kind + since) when down', async () => {
+      const s = await svc({
+        agents: [managed('a1', 'anthropic')],
+        readLlmOutage: async () => ({ kind: 'auth', since: 1_700_000_000_000 }),
+      }).snapshot()
+      expect(s.llmOutage).toEqual({ kind: 'auth', since: 1_700_000_000_000 })
+    })
+
+    it('degrades a dep fault to null — a read fault must never show a false red', async () => {
+      const s = await svc({
+        agents: [managed('a1', 'anthropic')],
+        readLlmOutage: async () => {
+          throw new Error('disk hiccup')
+        },
+      }).snapshot()
+      expect(s.llmOutage).toBe(null) // fail-open:体检读盘出错 ≠ 断供
       expect(s.managedCount).toBe(1)
     })
   })

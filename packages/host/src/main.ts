@@ -190,6 +190,7 @@ function findOwnerUserId(identity: IdentityStore): string | null {
 // registration block lives in main() where identity is in scope.
 
 import { createAdminHealthService, type AdminHealthSurface } from './admin-health.js'
+import { readOutageSnapshotFile } from './llm-outage.js'
 import { BUTLER_PATROL_INTERVAL_MS } from './personal-butler-patrol.js'
 import { createConnectorSlotStore } from './template-connector-slots.js'
 import { createScheduleSuggestionStore } from './template-schedule-suggestions.js'
@@ -2392,6 +2393,9 @@ async function main(): Promise<void> {
           ...(c.hint !== undefined ? { hint: c.hint } : {}),
         })),
       ),
+    // CARE-M7 — 断供当下事实上体检面板(同 CARE-M2/M6 那份 runtime/llm-outage.json;
+    // 无阈值,面板要即时真相)。readOutageSnapshotFile 无缓存新读 + 损坏当空,不抛。
+    readLlmOutage: () => readOutageSnapshotFile(join(space.root, 'runtime', 'llm-outage.json')),
   })
   patrolHealthRef = adminHealth
 

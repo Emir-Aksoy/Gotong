@@ -1026,6 +1026,13 @@
       healthSlotUnfilled: (pack, id) => `模板「${pack}」需要一个叫「${id}」的 MCP 服务,还没挂上`,
       healthSlotOptionalTag: '可选',
       healthSpaceUnwritable: (path) => `数据目录不可写:${path} — 请检查磁盘空间和目录权限`,
+      // --- CARE-M7 — 断供当下事实上体检面板(最严重红条)---
+      healthLlmOutage: (kind, mins) => {
+        const names = { auth: '密钥认证失败', quota: '额度用尽', rate_limited: '被限流', network: '连不上供应商', timeout: '响应超时', model_not_found: '模型不存在' }
+        const why = names[kind] || String(kind)
+        const tail = mins > 0 ? `已断供约 ${mins} 分钟` : '刚刚断供'
+        return `管家大脑当前不可用(${why})— ${tail}。命令面仍可用;查供应商状态 / key / 额度。`
+      },
       healthRosterTitle: (online, total) => `智能体(${online}/${total} 在线)`,
       healthTest: '测连接',
       healthOffline: '未上线',
@@ -2987,6 +2994,13 @@
       healthSlotUnfilled: (pack, id) => `Template "${pack}" wants an MCP server named "${id}" — none is wired yet`,
       healthSlotOptionalTag: 'optional',
       healthSpaceUnwritable: (path) => `Data directory not writable: ${path} — check disk space and permissions`,
+      // --- CARE-M7 — LLM outage as the top red signal on the health panel ---
+      healthLlmOutage: (kind, mins) => {
+        const names = { auth: 'key authentication failed', quota: 'quota exhausted', rate_limited: 'rate limited', network: "can't reach provider", timeout: 'response timeout', model_not_found: 'model not found' }
+        const why = names[kind] || String(kind)
+        const tail = mins > 0 ? `down for ~${mins} min` : 'just went down'
+        return `The butler's brain is currently unavailable (${why}) — ${tail}. Commands still work; check provider status / key / quota.`
+      },
       healthRosterTitle: (online, total) => `Agents (${online}/${total} online)`,
       healthTest: 'Test',
       healthOffline: 'Offline',

@@ -96,6 +96,16 @@ export interface HealthSnapshot {
    * → 字段整个缺席 (前端隐藏该块); 注入了但没人声明过槽位 → `[]`。
    */
   connectorSlots?: HealthConnectorSlotRow[]
+  /**
+   * CARE-M7 — LLM 断供的**当下事实**,喂 web 体检面板一条红信号(此前断供只在
+   * IM 可见:CARE-M2 播报 + CARE-M6 巡检升级,web 运维看面板看不到「大脑挂了」)。
+   * 三态同 imBridges 的「可选=诚实未知」约定:host 未注入 `readLlmOutage` →
+   * 字段整个缺席(前端不显示);注入了但当前无断供 → `null`(体检过、正常);
+   * 断供中 → 行(前端红条「断供约 N 分钟」)。与 CARE-M6 巡检读同一份
+   * `runtime/llm-outage.json`,但**无阈值**:面板要当下真相,即时显示(巡检的
+   * 30 分钟阈值只为不刷 IM,不是面板的事)。
+   */
+  llmOutage?: HealthLlmOutageRow | null
   /** ISO timestamp the snapshot was taken. */
   checkedAt: string
 }
@@ -105,6 +115,16 @@ export interface HealthImRow {
   platform: string
   /** 'env' | 'vault' — where the credential came from (换 token 该去哪). */
   source?: string
+}
+
+/**
+ * CARE-M7 — 断供当下事实的只读行。`kind` 是结构化病名码(auth/quota/network/
+ * timeout/rate_limited/model_not_found),前端 i18n 映射成本地化文案;`since`
+ * 是断供起点(epoch ms),前端对着 `checkedAt` 算「已断供多久」。故意不在这
+ * 算分钟数:host 只出事实,呈现层(带语言)自己折。 */
+export interface HealthLlmOutageRow {
+  kind: string
+  since: number
 }
 
 /**
@@ -185,6 +205,13 @@ export interface AdminHealthDeps {
   listConnectorSlots?(): Promise<
     readonly { pack: string; id: string; optional: boolean; hint?: string }[]
   >
+  /**
+   * CARE-M7 — 读断供状态文件(host 注入 `readOutageSnapshotFile(runtime/
+   * llm-outage.json)`)。可选:absent → snapshot 不含 llmOutage(host 未接断供
+   * 子系统的诚实「未知」);返回 null = 当前无断供。读盘的解析/损坏降级在
+   * readOutageSnapshotFile 内(损坏当空),故这里的实现体不会抛。
+   */
+  readLlmOutage?(): Promise<{ kind: string; since: number } | null>
 }
 
 /** The duck-typed surface injected into `serveWeb`. */
@@ -287,6 +314,18 @@ export function createAdminHealthService(deps: AdminHealthDeps): AdminHealthSurf
       // set-membership, zero heuristics — 半解析绝不猜 applies to fulfilment
       // too. Best-effort read: dep 在但抛错 → 当「没声明过」([]), dep 不在 →
       // 字段整个缺席。
+      // CARE-M7 — 断供当下事实。同 best-effort 契约:dep 在但抛错 → 当「没断供」
+      // (null,advisory 绝不因体检读盘失败误报红);dep 不在 → 字段整个缺席。
+      // 三态:undefined(未接)/ null(接了·正常)/ 行(断供中)。
+      let llmOutage: HealthLlmOutageRow | null | undefined
+      if (deps.readLlmOutage) {
+        try {
+          llmOutage = await deps.readLlmOutage()
+        } catch {
+          llmOutage = null
+        }
+      }
+
       let slotRows: HealthConnectorSlotRow[] | undefined
       if (deps.listConnectorSlots) {
         let declared: readonly { pack: string; id: string; optional: boolean; hint?: string }[] =
@@ -327,6 +366,7 @@ export function createAdminHealthService(deps: AdminHealthDeps): AdminHealthSurf
         ...(runCount !== undefined ? { runCount } : {}),
         ...(imRows !== undefined ? { imBridges: imRows } : {}),
         ...(slotRows !== undefined ? { connectorSlots: slotRows } : {}),
+        ...(llmOutage !== undefined ? { llmOutage } : {}),
         checkedAt: new Date().toISOString(),
       }
     },

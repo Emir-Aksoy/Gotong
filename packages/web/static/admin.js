@@ -3544,6 +3544,11 @@
       const agents = snap.agents || [];
       const mcp2 = snap.mcpServers || [];
       const signals = [];
+      if (snap.llmOutage) {
+        const downMs = Date.parse(snap.checkedAt || "") - (snap.llmOutage.since || 0);
+        const mins = downMs > 0 ? Math.round(downMs / 6e4) : 0;
+        signals.push(hubHealthSignalRow("red", t5.healthLlmOutage(snap.llmOutage.kind, mins), ""));
+      }
       for (const a of agents) {
         if (a.missingKey) {
           signals.push(hubHealthSignalRow(
