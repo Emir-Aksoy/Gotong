@@ -60,9 +60,11 @@ peer 行内 `requireApprovalOutbound`);节律/上限如需一律常量。B track
   `identity.listPeers()` 拼):每行只出 `{peerId, label, connected,
   lastSeenAt, allowedCaps}`。**脱敏红线**:endpointUrl / token / ACL /
   配额细节永不进投影(成员该看拓扑存在性,不该看运维细节)。
-- `allowedCaps` = 该边的 outboundCaps(advertise = authorize,G-M1 语义)——
-  这正是「我能请对端做什么」的诚实答案;null(legacy 未策展)如实显示
-  「未策展(这条边还不能出网派发)」。
+- 出站姿态按 `peer-acl.ts` 的**真实语义**渲染(M1 侦察修正,别按直觉猜):
+  `outboundCaps === null` = **未限制**(legacy send-all,explicit 可直达)/
+  `[]` = **锁死**(什么都不能发)/ 非空列表 = **白名单**(advertise=authorize,
+  G-M1;此时 explicit 派发会被 `strategy_not_allowlisted` 拒——是设计不是 bug,
+  跨界寻址哲学是 capability 不是 id)。
 - factory 接线:refs 加 `peerRoster`,surface 缺席 → 工具不出现(既有惯例)。
 - **会红的门**:单测——脱敏(投影里字符串化后不含 endpointUrl/token 字样)/
   connected 与 offline 双态 / allowedCaps null 诚实文案 / surface 缺席不供工具。
@@ -81,9 +83,17 @@ peer 行内 `requireApprovalOutbound`);节律/上限如需一律常量。B track
     收件箱(+ 既有 IM 审批推送),批准后才派发。
   - **no-leak / 反幻觉**:目标 peerId 必须在 roster(NET-M1 同一面)里,否则
     拒绝并列出真实可选项(同 ask_my_agent 对 agentId 的处理)。
-  - 派发:`from: userId`、**不带 origin**(让 wrapper 盖真章)、
-    `strategy: {kind:'explicit', to: peerId}`、payload = message 大白话。
-    AWAIT 结果,`TaskResult` 五种 kind 逐一映射诚实文案:
+  - 派发(**阶梯按边的出站姿态定**,M1 侦察后修正——白名单边 explicit 会被
+    `strategy_not_allowlisted` 拒,是 mesh 的 capability 寻址设计):
+    - `outboundCaps === null`(新配对边默认)→ `{kind:'explicit', to: peerId}`
+      直达 wrapper;
+    - 白名单边 → `{kind:'capability', capabilities:[cap]}`,cap 从该边白名单里
+      选(唯一→自动,多个→让成员挑);**派前预检**:本地无人服务该 cap 且仅此
+      一条边 advertise 它,否则诚实拒绝并指路(「本地也有人做/两条边都认,
+      让管理员给这条边策展一个专属能力名」)——预检只读,真正的闸仍在 wrapper;
+    - `[]` 锁死边 → 直接诚实拒绝。
+    统一:`from: userId`、**不带 origin**(让 wrapper 盖真章)、payload =
+    message 大白话。AWAIT 结果,`TaskResult` 五种 kind 逐一映射诚实文案:
     - `ok` → 「对端回复:…」(replyText 两形状:string / {text})
     - `no_participant` → 「对端不在线/这条边没接通」
     - `failed: outbound_capability_denied:*` → 「这条边没开这个能力,找管理员策展」

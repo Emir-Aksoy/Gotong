@@ -290,6 +290,7 @@ import type {
   ButlerAdaptationSource,
 } from './personal-butler-diagnose.js'
 import type { ButlerAskRosterSource } from './personal-butler-ask-agent.js'
+import { buildButlerPeerSurface, type ButlerPeerSurface } from './personal-butler-peers.js'
 import type { ButlerWizardSource } from './personal-butler-workflow-wizard.js'
 import { ReminderParticipant } from './reminder-participant.js'
 import type { LlmProvider } from '@gotong/llm'
@@ -987,6 +988,9 @@ async function main(): Promise<void> {
   // an agent THIS member owns (no-leak via listOwned), awaiting the reply. Ref
   // assigned once the member-agent lister exists. Absent ⇒ the tool isn't offered.
   let butlerAskRosterRef: ButlerAskRosterSource | undefined
+  // NET-M1 — the butler's benign network eye: sanitized mesh roster (no
+  // endpoint/token/ACL detail). Ref assigned once the peer registry exists.
+  let butlerPeerRosterRef: ButlerPeerSurface | undefined
   // WIZ-M4c — the butler's benign "帮我规划一个工作流" planner: the six-phase
   // wizard's compose (组装→缺口→校验闭环), proposal-only, persists nothing. The
   // save half hands off to the governed create_workflow with the wizard's YAML.
@@ -1068,6 +1072,7 @@ async function main(): Promise<void> {
       diagnoseOwned: butlerDiagnoseOwnedRef,
       diagnoseAdapt: butlerDiagnoseAdaptRef,
       askRoster: butlerAskRosterRef,
+      peerRoster: butlerPeerRosterRef,
       wizard: butlerWizardRef,
       providerBuilder: butlerProviderBuilderRef,
       memoryView: butlerMemoryViewRef,
@@ -1586,6 +1591,13 @@ async function main(): Promise<void> {
     // target isn't local + whose task.origin points at a connected peer
     // will be forwarded over the live HubLink.
     peerRegistryRef = peerRegistry
+    // NET-M1 — the butler's sanitized mesh roster rides the same registry
+    // (live connected state) + identity rows (outbound posture).
+    const rosterRegistry = peerRegistry
+    butlerPeerRosterRef = buildButlerPeerSurface({
+      status: () => rosterRegistry.status(),
+      rows: () => identity.listPeers(),
+    })
     // Bind the federation discovery surface to this registry. Each call
     // asks every connected peer what it shares; an offline peer or a
     // listShared that throws (e.g. an older peer without the method)

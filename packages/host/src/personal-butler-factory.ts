@@ -51,6 +51,7 @@ import {
   type ButlerAgentSurface,
   type ButlerUsageSurface,
 } from './personal-butler-observe.js'
+import { buildButlerPeersToolset, type ButlerPeerSurface } from './personal-butler-peers.js'
 import {
   buildButlerOnboardingProbe,
   buildButlerOnboardingToolset,
@@ -95,6 +96,8 @@ export interface ButlerFactoryRefs {
   diagnoseAdapt: ButlerAdaptationSource | undefined
   /** BE-M4 — owned-agent roster for `ask_my_agent`. */
   askRoster: ButlerAskRosterSource | undefined
+  /** NET-M1 — sanitized mesh roster for the `list_peers` network eye. */
+  peerRoster: ButlerPeerSurface | undefined
   /** WIZ-M4c — six-phase wizard compose service. */
   wizard: ButlerWizardSource | undefined
   /** S2-M2 — fresh-per-call distillation provider (assigned after pool start). */
@@ -236,6 +239,12 @@ export function buildButlerFactory(deps: ButlerFactoryDeps): ButlerFactory {
         const askAgentToolset = refs.askRoster
           ? buildButlerAskAgentToolset({ userId, roster: refs.askRoster, hub, logger: log })
           : undefined
+        // NET-M1 — benign "看看互联了哪些 hub": org-level mesh roster, sanitized
+        // (no endpoint/token/ACL detail). Read-only; the outbound ACTION arrives
+        // in NET-M2 as a governed gate resolving targets against this same surface.
+        const peersToolset = refs.peerRoster
+          ? buildButlerPeersToolset({ peers: refs.peerRoster, logger: log })
+          : undefined
         // WIZ-M4c — benign "帮我规划一个工作流": wizard compose, proposal-only
         // (explanation + gap checklist + validated YAML), persists nothing. Saving
         // goes through the governed create_workflow above with the proposal's YAML.
@@ -304,6 +313,7 @@ export function buildButlerFactory(deps: ButlerFactoryDeps): ButlerFactory {
           ...(observeToolset ? [observeToolset] : []),
           ...(diagnoseToolset ? [diagnoseToolset] : []),
           ...(askAgentToolset ? [askAgentToolset] : []),
+          ...(peersToolset ? [peersToolset] : []),
           ...(planWizardToolset ? [planWizardToolset] : []),
           ...(consolidateToolset ? [consolidateToolset] : []),
           remindersToolset,
