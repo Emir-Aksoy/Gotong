@@ -544,6 +544,12 @@ export interface WebServerOptions {
 export interface AgentCardSurface {
   /** Render the Agent Card as a JSON string for the given public base URL. */
   json(baseUrl: string): string
+  /**
+   * STD-M1 — the JWKS (signing public keys) as a JSON string, served at
+   * `/.well-known/jwks.json` so a verifier can resolve the card's signature
+   * `jku`/`kid`. Returns null (route 404s) when card signing is off.
+   */
+  jwks?(): string | null
 }
 
 /**

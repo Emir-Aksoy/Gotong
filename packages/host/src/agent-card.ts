@@ -40,6 +40,8 @@
 
 import { readFileSync } from 'node:fs'
 
+import { attachSignature, buildJwks, type AgentCardSigner } from './agent-card-signing.js'
+
 /** OpenAPI-style security scheme — the subset A2A uses for HTTP bearer. */
 export interface AgentCardSecurityScheme {
   type: 'http'
@@ -88,6 +90,18 @@ export interface AgentCardSkillWire {
   tags: string[]
 }
 
+/**
+ * A2A `AgentCardSignature` (v1.0 §8.4) — one detached-payload JWS over the
+ * card. `protected` is a base64url JWS protected header, `signature` the
+ * base64url signature; `header` (unprotected) is unused by us. See
+ * `agent-card-signing.ts` for how these are produced / verified.
+ */
+export interface AgentCardSignature {
+  protected: string
+  signature: string
+  header?: Record<string, unknown>
+}
+
 /** The A2A Agent Card document (v1.0 shape + 0.2.x transition fields). */
 export interface AgentCard {
   name: string
@@ -112,6 +126,12 @@ export interface AgentCard {
   security?: Array<Record<string, string[]>>
   /** v1.0 name for the same requirement list (double-written). */
   securityRequirements?: Array<Record<string, string[]>>
+  /**
+   * STD-M1 — JWS signatures over this card (§8.4). Present only when the
+   * operator opted into signing (`GOTONG_A2A_SIGN_CARD`); excluded from the
+   * canonical payload it signs. See `agent-card-signing.ts`.
+   */
+  signatures?: AgentCardSignature[]
 }
 
 export interface BuildAgentCardOpts {
@@ -303,5 +323,63 @@ export function readAgentCardCurationSync(
     ...(typeof obj.displayName === 'string' && obj.displayName.trim() ? { displayName: obj.displayName } : {}),
     ...(typeof obj.description === 'string' && obj.description.trim() ? { description: obj.description } : {}),
     skills,
+  }
+}
+
+// ─── Card surface factory (host↔web duck) ────────────────────────────────────
+
+/**
+ * Everything the `/.well-known/agent-card.json` (+ `/.well-known/jwks.json`)
+ * renderers need, injected by the host so this module stays free of the
+ * manifest / hub / registry types. Extracted from main.ts so the assembly
+ * layer stays within its line budget (factory precedent).
+ */
+export interface AgentCardSurfaceDeps {
+  /** Owner curation file path (`<space>/agent-card.json`). Read per request. */
+  curationFile: string
+  /** Fallback display name when curation gives none. */
+  nameFallback: string
+  /** This hub's software version. */
+  version: string
+  /** Optional description fallback when curation gives none. */
+  description?: string
+  /** Whether inbound peer auth is on → advertise the bearer scheme. */
+  hasPeerRegistry: boolean
+  /** `GOTONG_A2A_ADVERTISE_SKILLS` — enumerate local caps when no curation. */
+  advertiseSkills: boolean
+  /** Enumerate local capabilities as skills (host wraps its manifest). */
+  enumerateSkills: () => AgentCardSkill[]
+  /** STD-M1 — present only when `GOTONG_A2A_SIGN_CARD` is on. */
+  signer: AgentCardSigner | null
+  log: { warn: (msg: string, meta?: Record<string, unknown>) => void }
+}
+
+/**
+ * Build the `{ json, jwks }` surface the web layer serves. `json` is
+ * request-derived (the card's `url` and any signature `jku` reflect how the
+ * client reached us); `jwks` is null unless signing is on.
+ */
+export function createAgentCardSurface(deps: AgentCardSurfaceDeps): {
+  json: (baseUrl: string) => string
+  jwks: () => string | null
+} {
+  return {
+    json: (baseUrl: string): string => {
+      const curation = readAgentCardCurationSync(deps.curationFile, deps.log)
+      const skills = curation ? curation.skills : deps.advertiseSkills ? deps.enumerateSkills() : []
+      let card = buildAgentCard({
+        name: curation?.displayName ?? deps.nameFallback,
+        version: deps.version,
+        url: baseUrl,
+        description: curation?.description ?? deps.description,
+        authSchemes: deps.hasPeerRegistry ? ['bearer'] : [],
+        ...(skills.length > 0 ? { skills } : {}),
+      })
+      if (deps.signer) {
+        card = attachSignature(card, deps.signer, { jku: `${baseUrl}/.well-known/jwks.json` })
+      }
+      return JSON.stringify(card, null, 2)
+    },
+    jwks: (): string | null => (deps.signer ? buildJwks(deps.signer) : null),
   }
 }

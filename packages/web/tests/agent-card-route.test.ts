@@ -51,6 +51,17 @@ const fakeCard: AgentCardSurface = {
   json: (baseUrl) => JSON.stringify({ name: 'card-test', url: baseUrl, skills: [] }),
 }
 
+// STD-M1 — a surface with signing on (jwks() returns a JWKS) vs a surface with
+// signing off (jwks() returns null → route 404s).
+const fakeSignedCard: AgentCardSurface = {
+  json: (baseUrl) => JSON.stringify({ name: 'card-test', url: baseUrl, skills: [] }),
+  jwks: () => JSON.stringify({ keys: [{ kty: 'EC', crv: 'P-256', x: 'x', y: 'y', kid: 'k', use: 'sig', alg: 'ES256' }] }),
+}
+const fakeUnsignedCard: AgentCardSurface = {
+  json: (baseUrl) => JSON.stringify({ name: 'card-test', url: baseUrl, skills: [] }),
+  jwks: () => null,
+}
+
 describe('GET /.well-known/agent-card.json (R3)', () => {
   let b: Boot
   afterEach(async () => { if (b) await teardown(b) })
@@ -84,6 +95,45 @@ describe('GET /.well-known/agent-card.json (R3)', () => {
     const res = await fetch(`${b.baseUrl}/.well-known/agent-card.json`, {
       method: 'POST',
     })
+    expect(res.status).toBe(405)
+  })
+})
+
+describe('GET /.well-known/jwks.json (STD-M1)', () => {
+  let b: Boot
+  afterEach(async () => { if (b) await teardown(b) })
+
+  it('404 when no agentCard surface is wired', async () => {
+    b = await boot()
+    const res = await fetch(`${b.baseUrl}/.well-known/jwks.json`)
+    expect(res.status).toBe(404)
+  })
+
+  it('404 when the card has no jwks method (legacy surface, signing off)', async () => {
+    b = await boot(fakeCard)
+    const res = await fetch(`${b.baseUrl}/.well-known/jwks.json`)
+    expect(res.status).toBe(404)
+  })
+
+  it('404 when jwks() returns null (signing off)', async () => {
+    b = await boot(fakeUnsignedCard)
+    const res = await fetch(`${b.baseUrl}/.well-known/jwks.json`)
+    expect(res.status).toBe(404)
+  })
+
+  it('200 + JWKS when signing is on', async () => {
+    b = await boot(fakeSignedCard)
+    const res = await fetch(`${b.baseUrl}/.well-known/jwks.json`)
+    expect(res.status).toBe(200)
+    expect(res.headers.get('content-type')).toMatch(/application\/json/)
+    const body = await res.json()
+    expect(Array.isArray(body.keys)).toBe(true)
+    expect(body.keys[0]).toMatchObject({ kty: 'EC', use: 'sig', alg: 'ES256' })
+  })
+
+  it('405 on non-GET', async () => {
+    b = await boot(fakeSignedCard)
+    const res = await fetch(`${b.baseUrl}/.well-known/jwks.json`, { method: 'POST' })
     expect(res.status).toBe(405)
   })
 })

@@ -115,7 +115,8 @@ import {
 import { OrgApiPool } from './org-api-pool.js'
 
 import { BAKED_VERSION } from './version.js'
-import { buildAgentCard, readAgentCardCurationSync } from './agent-card.js'
+import { createAgentCardSurface } from './agent-card.js'
+import { FileAgentCardSigner } from './agent-card-signing.js'
 import { auditBootSecurity, formatBootSecurityReport, isLoopbackHost } from './boot-security.js'
 import {
   firstRunSetupBanner,
@@ -1748,42 +1749,34 @@ async function main(): Promise<void> {
   // public at /.well-known/agent-card.json. Bearer is advertised whenever
   // inbound peer auth is active (peer registry on).
   const cardMeta = await space.meta()
-  // C-M1 — skill advertisement is OFF by default. When on, the card enumerates
-  // this hub's local capabilities (peer wrappers excluded) as A2A skills, each
-  // skill id == the capability an inbound message/send targets. Public endpoint,
-  // so opting in is a deliberate operator act.
+  // C-M1 — skill advertisement is OFF by default (see AgentCardSurfaceDeps).
   const advertiseSkills = envBool('GOTONG_A2A_ADVERTISE_SKILLS', false)
   const selfHubIdForCard = cardMeta.hubId ?? 'self'
-  // NET-M4 — owner curation file beats env enumeration (a hand-written list is
-  // the more explicit operator act); absent file = legacy behavior unchanged.
-  // Read per request so owner edits go live without a restart.
-  const cardCurationFile = join(space.root, 'agent-card.json')
-  const agentCard = {
-    json: (baseUrl: string): string => {
-      const curation = readAgentCardCurationSync(cardCurationFile, log)
-      const skills = curation
-        ? curation.skills
-        : advertiseSkills
-          ? buildLocalManifest(
-              hub,
-              selfHubIdForCard,
-              new Set((peerRegistry?.status() ?? []).map((r) => r.peerId)),
-            ).capabilities.map((cap) => ({ id: cap.id, name: cap.id }))
-          : []
-      return JSON.stringify(
-        buildAgentCard({
-          name: curation?.displayName ?? (cardMeta.name || cardMeta.hubId || 'Gotong'),
-          version: BAKED_VERSION,
-          url: baseUrl,
-          description: curation?.description ?? cardMeta.description,
-          authSchemes: peerRegistry ? ['bearer'] : [],
-          ...(skills.length > 0 ? { skills } : {}),
-        }),
-        null,
-        2,
-      )
-    },
-  }
+  // STD-M1 — card signing is OFF by default (unset = byte-identical card). When
+  // on, the hub loads/creates a P-256 signing key in the workspace and the card
+  // is served with a JWS `signatures[]` + a JWKS at /.well-known/jwks.json.
+  const cardSigner = envBool('GOTONG_A2A_SIGN_CARD', false)
+    ? new FileAgentCardSigner(join(space.root, 'agent-card-signing.key'))
+    : null
+  if (cardSigner) log.info('agent-card: signing on', { alg: 'ES256', kid: cardSigner.kid() })
+  const agentCard = createAgentCardSurface({
+    // NET-M4 — owner curation file beats env enumeration; read per request so
+    // edits go live without a restart. Absent file = legacy behavior unchanged.
+    curationFile: join(space.root, 'agent-card.json'),
+    nameFallback: cardMeta.name || cardMeta.hubId || 'Gotong',
+    version: BAKED_VERSION,
+    description: cardMeta.description,
+    hasPeerRegistry: !!peerRegistry,
+    advertiseSkills,
+    enumerateSkills: () =>
+      buildLocalManifest(
+        hub,
+        selfHubIdForCard,
+        new Set((peerRegistry?.status() ?? []).map((r) => r.peerId)),
+      ).capabilities.map((cap) => ({ id: cap.id, name: cap.id })),
+    signer: cardSigner,
+    log,
+  })
 
   // #2-M2 — hub MCP server registry surface: persist to the Space +
   // propagate live into running opted-in agents via LocalAgentPool.

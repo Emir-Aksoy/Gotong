@@ -769,6 +769,29 @@ async function handle(
     return
   }
 
+  // --- JWKS (STD-M1) — public signing keys for the card's JWS signatures ----
+  // Same public convention as the card; 404 when the host didn't wire a card
+  // OR when card signing is off (jwks() returns null).
+  if (path === '/.well-known/jwks.json') {
+    if (method !== 'GET') {
+      res.writeHead(405, { 'content-type': 'application/json', allow: 'GET' })
+      res.end(JSON.stringify({ error: 'method not allowed' }))
+      return
+    }
+    const jwks = ctx.agentCard?.jwks?.() ?? null
+    if (!jwks) {
+      res.writeHead(404, { 'content-type': 'application/json' })
+      res.end(JSON.stringify({ error: 'jwks not enabled' }))
+      return
+    }
+    res.writeHead(200, {
+      'content-type': 'application/json; charset=utf-8',
+      'cache-control': 'public, max-age=300',
+    })
+    res.end(jwks)
+    return
+  }
+
   // --- Inbound A2A (Phase 18 C-M3) --------------------------------------
   // BEFORE the CSRF gate and OUTSIDE requireAdmin: A2A is its own bearer-auth
   // domain (X-Gotong-Peer-Id + peer token), not a browser session, so the CSRF
