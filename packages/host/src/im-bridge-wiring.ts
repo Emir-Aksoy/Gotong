@@ -41,6 +41,12 @@ export interface ImBridgeWiringDeps {
   health: AdminHealthSurface
   /** host 已解析的 GOTONG_DEFAULT_LANG——断供文案随它,不二次读 env。 */
   defaultLang: FailureLang
+  /**
+   * CARE-M5 — 只读活体探针(可选)。给了它,断供期间就按节律主动探 provider
+   * 恢复并立刻播报,不必等下一条用户消息。宿主复用 onboarding key check 的解析
+   * 链(lazy 读 ref),缺省 → 恢复仍只走反应式。
+   */
+  probeLiveness?: () => Promise<boolean>
 }
 
 /** 装配并启动 IM 桥(语义=当年 main.ts 内联块 + CARE-M2 断供接线)。 */
@@ -66,10 +72,12 @@ export async function armImBridgeWiring(deps: ImBridgeWiringDeps): Promise<ImBri
     // 后续提醒 / 审批回推 / 播报走返回的 pushToMember。
     reachableDir: join(deps.spaceRoot, 'butler', 'reachable'),
     // CARE-M2 — 断供不失联:状态文件 + 语言 + BE-M5 同意面的根。
+    // CARE-M5 — 有 probeLiveness 时 im-bridge 再 arm 主动恢复探活定时器。
     llmOutage: {
       file: join(deps.spaceRoot, 'runtime', 'llm-outage.json'),
       lang: deps.defaultLang,
       butlerMemoryRoot: join(deps.spaceRoot, 'butler', 'memory'),
+      ...(deps.probeLiveness ? { probeLiveness: deps.probeLiveness } : {}),
     },
     setting: {
       isOperator: imIsOperator,

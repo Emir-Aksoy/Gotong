@@ -53,7 +53,12 @@ import { WebSocket as NodeWebSocket } from 'ws'
 
 import { ButlerReachableRegistry, type ButlerPushResult } from './butler-reachable.js'
 import { translateLlmFailureKind, type FailureLang, type LlmFailureTranslation } from './failure-translator.js'
-import { LlmOutageTracker, llmOutageAnnouncement, llmRecoveryAnnouncement } from './llm-outage.js'
+import {
+  LlmOutageTracker,
+  checkOutageRecovery,
+  llmOutageAnnouncement,
+  llmRecoveryAnnouncement,
+} from './llm-outage.js'
 import { readButlerRunBroadcastConfig } from './personal-butler-run-broadcast.js'
 
 /**
@@ -657,8 +662,19 @@ export interface StartImBridgesOptions {
    * butlerMemoryRoot 用来枚举 BE-M5 播报已同意的成员(骑同一份同意,零新
    * 旋钮);边沿播报走 reachable push,没配 reachableDir 时退化为只记日志
    * ——对话内的 canned 回复不依赖这里,永远先答人。
+   *
+   * CARE-M5 — 可选 probeLiveness:给了它(且 reachableDir 在)就 arm 一个
+   * 主动恢复探活定时器,断供期间按节律做只读活体探针,通了立刻播恢复,
+   * 不必等下一条用户消息。缺省 → 恢复仍只走反应式(下一条消息成功才播)。
    */
-  llmOutage?: { file: string; lang: FailureLang; butlerMemoryRoot: string }
+  llmOutage?: {
+    file: string
+    lang: FailureLang
+    butlerMemoryRoot: string
+    probeLiveness?: () => Promise<boolean>
+    /** 探活节律毫秒。缺省 = LLM_RECOVERY_PROBE_INTERVAL_MS;主要给测试缩短。 */
+    probeIntervalMs?: number
+  }
 }
 
 /**
@@ -697,6 +713,13 @@ export interface ImBridgesHandle {
   startPlatform?: (platform: ImVaultPlatform) => Promise<ImHotStartResult>
   stop(): Promise<void>
 }
+
+/**
+ * CARE-M5 — 主动恢复探活的节律。常量而非 env 旋钮(同 CARE-M2/M3 的零新
+ * 旋钮惯例):断供期间每 60s 探一次只读活体,足够及时又不刷 provider;健康
+ * 时每次 tick 只是 tracker 的一次内存读('idle' 即返回),近乎零成本。
+ */
+const LLM_RECOVERY_PROBE_INTERVAL_MS = 60_000
 
 /**
  * Construct and start every configured IM bridge. Each platform is
@@ -942,6 +965,28 @@ export async function startImBridges(
       : { ok: false, reason: 'start_failed', detail: 'bridge start threw; see host log' }
   }
 
+  // CARE-M5 — 主动恢复探活定时器。宿主给了 probeLiveness(且 reachable 在,
+  // 否则本就无处播)才 arm:断供期间按节律探只读活体,通了 checkOutageRecovery
+  // 经同一个 tracker 边沿判定后立刻播恢复,不必等下一条用户消息。unref → 绝不
+  // 拖住进程退出;stop() 里 clearInterval。tracker 与反应式路径同一实例,谁先
+  // 清谁播,不重复。
+  let recoveryTimer: ReturnType<typeof setInterval> | undefined
+  if (llmOutage && outageOpts?.probeLiveness && reachable) {
+    const probeLiveness = outageOpts.probeLiveness
+    const outageForSweep = llmOutage
+    const intervalMs = outageOpts.probeIntervalMs ?? LLM_RECOVERY_PROBE_INTERVAL_MS
+    recoveryTimer = setInterval(() => {
+      void checkOutageRecovery({
+        tracker: outageForSweep.tracker,
+        probeLiveness,
+        announce: outageForSweep.announce ?? (async () => {}),
+        lang: outageForSweep.lang,
+        log: opts.log,
+      }).catch((err) => opts.log.warn('llm recovery sweep error', { err: String(err) }))
+    }, intervalMs)
+    recoveryTimer.unref?.()
+  }
+
   return {
     bridges,
     status: () =>
@@ -952,6 +997,7 @@ export async function startImBridges(
     ...(reachable ? { pushToMember: (userId: string, text: string) => reachable!.push(userId, text) } : {}),
     ...(opts.hotStart ? { startPlatform } : {}),
     async stop() {
+      if (recoveryTimer) clearInterval(recoveryTimer)
       for (const b of bridges) {
         try {
           await b.stop()

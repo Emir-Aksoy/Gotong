@@ -119,3 +119,74 @@ export function llmRecoveryAnnouncement(lang: FailureLang): string {
     ? '✅ 管家大脑恢复了,可以正常聊天了。'
     : "✅ The butler's brain is back — chat works normally again."
 }
+
+/**
+ * CARE-M5 — 探针能**证伪「恢复」**的断供 kind。只读活体探针(models-list
+ * GET)本质是「够得着 + 认得过 provider」的一次握手,只有当断供本身就是
+ * 「够不着 / 认不过」时,握手成功才等于恢复:
+ *   - network  探针答上话 = 网络回来了
+ *   - timeout  探针即时返回 = provider 又响应了
+ *   - auth     探针用同一把 key,200 = key 又有效了
+ * 蓄意**不含**:
+ *   - quota / rate_limited —— 只读 models-list 免费,握手成功证明不了
+ *     「生成配额已恢复」,探通了就播「恢复」是误报;
+ *   - model_not_found —— 列表 200 证明不了那个具体模型又在了。
+ * 这三类继续走反应式(下一条真派发成功才由 onProviderSuccess 清并播),
+ * 主动探针在它们身上一律 no-op。(unknown 本就从不被记为断供——反应式
+ * 路径把它落到通用 Task-failed 兜底,故此处不必列。)
+ */
+const PROBE_CONFIRMABLE_KINDS: ReadonlySet<LlmErrorKind> = new Set<LlmErrorKind>([
+  'network',
+  'timeout',
+  'auth',
+])
+
+/** 一次主动恢复探活的结果(测试断言 + 日志用)。 */
+export type OutageRecoveryOutcome =
+  | 'idle' // 当前无断供 → 根本没探(健康时零 provider 调用)
+  | 'skipped_kind' // 断供 kind 探针证伪不了(quota/rate_limited/model_not_found)→ 交给反应式
+  | 'still_down' // 探了,没通 → 静默
+  | 'recovered' // 探通了 → 已(经 tracker 边沿判定)播恢复
+
+export interface OutageRecoveryDeps {
+  tracker: LlmOutageTracker
+  /** 只读活体探针(models-list GET,零 token);true = 大脑够得着且认得过。 */
+  probeLiveness: () => Promise<boolean>
+  /** 恢复播报出口(与 CARE-M2 边沿播报同一个 announce)。 */
+  announce: (text: string) => Promise<void>
+  lang: FailureLang
+  log: { warn: (msg: string, ctx?: Record<string, unknown>) => void }
+}
+
+/**
+ * CARE-M5 — 断供期间的一次主动恢复探活,补上 CARE-M2「恢复只在下一条用户
+ * 消息成功时才播」的缺口:provider 半夜恢复、无人发消息时,由这里按节律探
+ * 通后立刻播「✅ 恢复了」。
+ *
+ * 健康(无断供)→ 'idle',**根本不探**,零成本。恢复边沿仍由 tracker 单实例
+ * 判定——与反应式路径共用同一个 tracker,谁先清谁播,绝不重复播报(另一条
+ * 路径随后拿到 'quiet')。设计上不抛:所有 await 点都在 try 里或本就不 reject。
+ */
+export async function checkOutageRecovery(deps: OutageRecoveryDeps): Promise<OutageRecoveryOutcome> {
+  const snap = await deps.tracker.snapshot()
+  if (!snap) return 'idle'
+  if (!PROBE_CONFIRMABLE_KINDS.has(snap.kind)) return 'skipped_kind'
+  let live = false
+  try {
+    live = await deps.probeLiveness()
+  } catch (err) {
+    deps.log.warn('llm recovery probe threw', { err: String(err) })
+    return 'still_down'
+  }
+  if (!live) return 'still_down'
+  // tracker 单实例判边沿:onProviderSuccess 清文件并返回是否该播。反应式
+  // 路径若同一时刻也清了,这里拿到 'quiet',不重播。
+  if ((await deps.tracker.onProviderSuccess()) === 'announce_recovery') {
+    try {
+      await deps.announce(llmRecoveryAnnouncement(deps.lang))
+    } catch (err) {
+      deps.log.warn('llm recovery announce failed', { err: String(err) })
+    }
+  }
+  return 'recovered'
+}

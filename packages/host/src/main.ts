@@ -2466,6 +2466,19 @@ async function main(): Promise<void> {
       spaceRoot: space.root,
       health: adminHealth,
       defaultLang: config.defaultLang,
+      // CARE-M5 — 主动恢复探活的探针,复用 onboarding key check 的只读活体
+      // (models-list GET,零 token)解析链;lazy 读 ref(此刻已赋值,但 lazy
+      // 也兜住未就绪 = 视作没通,无害)。status==='ok' 才算大脑真的回来了
+      // (mock/no_key/no_agent/fail 都不是真 provider 恢复)。
+      probeLiveness: async () => {
+        const keyCheck = butlerOnboardingKeyCheckRef
+        if (!keyCheck) return false
+        try {
+          return (await keyCheck()).status === 'ok'
+        } catch {
+          return false
+        }
+      },
     })
     // S1-M3 — now that the bridges are live, point the push-back ref at their
     // `pushToMember` (undefined when no reachable dir / no bridge). The inbox
