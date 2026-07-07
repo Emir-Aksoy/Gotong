@@ -18,13 +18,20 @@
  *   靠 onboarding 时带外锚定公钥(STD-M2b)。**签名裁决是 advisory**:它不改
  *   出码——出码只反映 preflight 有没有完成(取到卡即算完成),不当信任判决。
  *
+ * STD-M2b `--expect-kid <kid>`:owner 带外记下的锚定公钥,拿来复验「对方现在
+ *   的签名钥还是不是我锚定的那把」。**这是显式断言**——不符就当失败(出码 3),
+ *   好让脚本 `peer-card <url> --expect-kid <k> && 重连` 卡在钥变了的时候。pin
+ *   绑的是**验签密钥的真实指纹**(verifyCardKidMatches),不认 header 里可伪造
+ *   的 kid 标签。
+ *
  * 出码(脚本可依赖):
- *   0 = preflight 得到明确答案(有名片,或明确没有名片)
+ *   0 = preflight 得到明确答案(有名片,或明确没有名片;带 --expect-kid 时=一致)
  *   1 = 没得出结论(网络不通 / 超时 / 对端回错误码 / 名片无效)
  *   2 = 用法错误
+ *   3 = --expect-kid 断言失败(锚定公钥不符 / 对方没签名或验不出,无法确认)
  */
 
-import { readCardSignatureHeader, verifyAgentCardSignature, type SignedCard } from '@gotong/a2a'
+import { readCardSignatureHeader, verifyAgentCardSignature, verifyCardKidMatches, type SignedCard } from '@gotong/a2a'
 
 import { printHelp } from './help.js'
 
@@ -144,47 +151,81 @@ function resolveJwksUrl(header: Record<string, unknown>, cardUrl: string): { url
  * JWKS and report ✓/✗, or say it's unsigned. Fetches the JWKS (remote input,
  * so every failure degrades to "can't verify" — never throws). The honest
  * caveat is always attached to a ✓: integrity is not identity (发现≠信任).
+ *
+ * STD-M2b: when `expectKid` is given, additionally check the card's signing
+ * key against the owner's out-of-band anchor and append a `锚定` line. That
+ * check is a hard assertion — `expectFailed` flips true on anything but an
+ * exact match (mismatch, unsigned, or unverifiable-so-can't-confirm), so the
+ * caller can exit non-zero. The pin binds to the RECOMPUTED key thumbprint
+ * (verifyCardKidMatches), never the forgeable header `kid` label.
  */
 export async function verifyCardSignature(
   card: Record<string, unknown>,
   cardUrl: string,
   fetchImpl: typeof fetch,
-): Promise<string> {
+  expectKid?: string,
+): Promise<{ text: string; expectFailed: boolean }> {
+  const expShort = expectKid ? `${expectKid.slice(0, 8)}…` : ''
+  // 期望却没等到确认 = 断言失败。unsigned / 拿不到 JWKS 都算「无法确认锚定」。
+  const cannotConfirm = (line: string): { text: string; expectFailed: boolean } =>
+    expectKid
+      ? { text: `${line}\n  锚定      ⚠ 你锚定了公钥(${expShort})但这张卡无法确认 —— 别急着信。`, expectFailed: true }
+      : { text: line, expectFailed: false }
+
   const signed = card as unknown as SignedCard
   const header = readCardSignatureHeader(signed)
-  if (!header) return '  签名      (未签名 —— A2A 签名是可选的,不影响直连)'
+  if (!header) return cannotConfirm('  签名      (未签名 —— A2A 签名是可选的,不影响直连)')
 
   const kid = str(header.kid)
   const kidShort = kid ? `${kid.slice(0, 8)}…` : '(无 kid)'
   const { url: jwksUrl, crossOrigin } = resolveJwksUrl(header, cardUrl)
   if (!jwksUrl) {
-    return `  签名      ⚠ 带签名(kid=${kidShort})但 jku 不是 http(s) URL —— 无法验证`
+    return cannotConfirm(`  签名      ⚠ 带签名(kid=${kidShort})但 jku 不是 http(s) URL —— 无法验证`)
   }
 
   let jwksText: string
   try {
     const res = await fetchImpl(jwksUrl, { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) })
     if (!res.ok) {
-      return `  签名      ⚠ 带签名(kid=${kidShort})但 JWKS 拿不到(HTTP ${res.status} @ ${jwksUrl})—— 无法验证`
+      return cannotConfirm(`  签名      ⚠ 带签名(kid=${kidShort})但 JWKS 拿不到(HTTP ${res.status} @ ${jwksUrl})—— 无法验证`)
     }
     jwksText = await res.text()
   } catch {
-    return `  签名      ⚠ 带签名(kid=${kidShort})但连不上 JWKS(${jwksUrl})—— 无法验证`
+    return cannotConfirm(`  签名      ⚠ 带签名(kid=${kidShort})但连不上 JWKS(${jwksUrl})—— 无法验证`)
   }
 
   const result = verifyAgentCardSignature(signed, jwksText)
   const originNote = crossOrigin ? `\n            ⓘ JWKS 在另一个源:${jwksUrl}(留意)` : ''
+  const lines: string[] = []
   if (result.ok) {
-    return [
+    lines.push(
       `  签名      ✓ 完整性已验证(ES256, kid=${kidShort})`,
       '            ⓘ 只证明名片没被篡改、与自报公钥一致 —— 不代表签发者就是对方本人。',
       `            身份仍靠 onboarding 时带外锚定这把公钥(建边前确认)。${originNote}`,
-    ].join('\n')
+    )
+  } else {
+    lines.push(
+      `  签名      ✗ 验证失败:${result.reason ?? '未知原因'}(kid=${kidShort})`,
+      `            ⚠ 带签名却对不上公钥 —— 可能被篡改或对端换了钥,建边前务必核实。${originNote}`,
+    )
   }
-  return [
-    `  签名      ✗ 验证失败:${result.reason ?? '未知原因'}(kid=${kidShort})`,
-    `            ⚠ 带签名却对不上公钥 —— 可能被篡改或对端换了钥,建边前务必核实。${originNote}`,
-  ].join('\n')
+
+  // STD-M2b 锚定复验:pin 绑真实指纹(verifyCardKidMatches 内部重算),不认 header 标签。
+  let expectFailed = false
+  if (expectKid) {
+    const pin = verifyCardKidMatches(signed, jwksText, expectKid)
+    if (pin.status === 'match') {
+      lines.push(`  锚定      ✓ 与你锚定的公钥一致(${expShort})`)
+    } else {
+      expectFailed = true
+      const actual = pin.actualKid ? `${pin.actualKid.slice(0, 8)}…` : '(验不出)'
+      lines.push(
+        `  锚定      ⚠ 与锚定公钥不符:现在是 ${actual},你锚定的是 ${expShort}`,
+        '            对端可能轮换了签名钥,也可能是冒充 —— 核实清楚再信,别急着建边。',
+      )
+    }
+  }
+  return { text: lines.join('\n'), expectFailed }
 }
 
 /** 尾部固定指引:发现之后的「下一步」永远是既有 token onboarding。 */
@@ -204,10 +245,32 @@ export async function peerCard(args: readonly string[], deps: PeerCardDeps = {})
   const fetchImpl = deps.fetchImpl ?? fetch
 
   let target: string | undefined
-  for (const a of args) {
+  let expectKid: string | undefined
+  const EXPECT_PREFIX = '--expect-kid='
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i]!
     if (a === '--help' || a === '-h') {
       printHelp('peer-card')
       return 0
+    }
+    if (a === '--expect-kid') {
+      const v = args[i + 1]
+      if (v === undefined || v.startsWith('-')) {
+        err('[peer-card] --expect-kid 需要一个 kid 值(带外记下的锚定公钥指纹)')
+        return 2
+      }
+      expectKid = v
+      i++
+      continue
+    }
+    if (a.startsWith(EXPECT_PREFIX)) {
+      const v = a.slice(EXPECT_PREFIX.length)
+      if (!v) {
+        err('[peer-card] --expect-kid 需要一个 kid 值(带外记下的锚定公钥指纹)')
+        return 2
+      }
+      expectKid = v
+      continue
     }
     if (a.startsWith('-')) {
       err(`[peer-card] 不认识的旗标: ${a}`)
@@ -264,7 +327,9 @@ export async function peerCard(args: readonly string[], deps: PeerCardDeps = {})
 
   const card = parsed as Record<string, unknown>
   out(renderPeerCard(card, cardUrl))
-  out(await verifyCardSignature(card, cardUrl, fetchImpl))
+  const sig = await verifyCardSignature(card, cardUrl, fetchImpl, expectKid)
+  out(sig.text)
   out(renderNextSteps())
-  return 0
+  // --expect-kid 断言失败 = 出码 3(锚定不符),否则 preflight 完成即 0。
+  return sig.expectFailed ? 3 : 0
 }

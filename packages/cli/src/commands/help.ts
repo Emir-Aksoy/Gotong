@@ -250,7 +250,7 @@ Examples:
   gotong mint-peer-token --peer-id=partner-hub --endpoint=wss://partner/federation
   gotong mint-peer-token > peer-token.txt   # token only; hint on stderr
 `,
-  'peer-card': `gotong peer-card <url>
+  'peer-card': `gotong peer-card <url> [--expect-kid <kid>]
 
 Discovery preflight for federation (NET-M5): BEFORE exchanging tokens
 with a peer hub, fetch its public A2A agent card
@@ -263,14 +263,24 @@ link, and a missing card (404) is a normal answer — hubs default to
 silence. Either way the next step is the same existing onboarding:
 mint-peer-token + registering the peer on both sides.
 
+If the card is signed (A2A §8.4), its first signature is verified
+against the card's JWKS and reported ✓/✗ — advisory only (integrity,
+not identity). --expect-kid <kid> additionally asserts the signing key
+matches YOUR out-of-band anchor (the recomputed key thumbprint, not the
+forgeable header label); a mismatch (or unverifiable card) exits 3 so a
+script can gate reconnection on the key not having rotated.
+
 Exit codes:
-  0  clear answer (card printed, or peer confirmed to have no card)
+  0  clear answer (card printed, or peer confirmed to have no card;
+     with --expect-kid, the pinned key also matched)
   1  inconclusive (unreachable / timeout / HTTP error / invalid card)
   2  usage error
+  3  --expect-kid assertion failed (key mismatch / can't confirm)
 
 Examples:
   gotong peer-card https://hub-b.example.com
   gotong peer-card https://hub-b.example.com/.well-known/agent-card.json
+  gotong peer-card https://hub-b.example.com --expect-kid t9Xq...43chars
 `,
   setting: `gotong setting [<subcommand> [args]]
 

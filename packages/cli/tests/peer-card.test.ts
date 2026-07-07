@@ -276,4 +276,69 @@ describe('peerCard signature verification (STD-M2a)', () => {
     expect(r.seen).toContain(JWKS_URL) // derived the conventional location
     expect(r.stdout).toContain('✓ 完整性已验证')
   })
+
+  // --- STD-M2b: --expect-kid 锚定复验(match → 0,不符/无法确认 → 3)---
+
+  it('--expect-kid matching the signing key → ✓ 一致, exit 0', async () => {
+    const signer = makeSigner()
+    const card = attachSignature({ name: 'Hub B', skills: [] }, signer, { jku: JWKS_URL })
+    const r = await runRouted(['https://hub-b.example.com', '--expect-kid', signer.kid()], {
+      [CARD_URL]: () => Response.json(card),
+      [JWKS_URL]: () => new Response(buildJwks(signer)),
+    })
+    expect(r.code).toBe(0)
+    expect(r.stdout).toContain('与你锚定的公钥一致')
+  })
+
+  it('--expect-kid NOT matching (key rotated / impostor) → ⚠ 不符, exit 3', async () => {
+    const signer = makeSigner()
+    const card = attachSignature({ name: 'Hub B', skills: [] }, signer, { jku: JWKS_URL })
+    const r = await runRouted(['https://hub-b.example.com', '--expect-kid', 'D'.repeat(43)], {
+      [CARD_URL]: () => Response.json(card),
+      [JWKS_URL]: () => new Response(buildJwks(signer)),
+    })
+    expect(r.code).toBe(3) // assertion failure — distinct from preflight-incomplete (1)
+    expect(r.stdout).toContain('✓ 完整性已验证') // 签名本身是真的(验得过)…
+    expect(r.stdout).toContain('与锚定公钥不符') // …但不是我锚定的那把
+  })
+
+  it('--expect-kid=<kid> (equals form) also parses; matching key → exit 0', async () => {
+    const signer = makeSigner()
+    const card = attachSignature({ name: 'Hub B', skills: [] }, signer, { jku: JWKS_URL })
+    const r = await runRouted([`--expect-kid=${signer.kid()}`, 'https://hub-b.example.com'], {
+      [CARD_URL]: () => Response.json(card),
+      [JWKS_URL]: () => new Response(buildJwks(signer)),
+    })
+    expect(r.code).toBe(0)
+    expect(r.stdout).toContain('与你锚定的公钥一致')
+  })
+
+  it('--expect-kid on an UNSIGNED card → can\'t confirm, exit 3 (never a silent pass)', async () => {
+    const r = await runRouted(['https://hub-b.example.com', '--expect-kid', 'A'.repeat(43)], {
+      [CARD_URL]: () => Response.json({ name: 'Hub B', skills: [] }),
+    })
+    expect(r.code).toBe(3)
+    expect(r.stdout).toContain('无法确认')
+  })
+
+  it('--expect-kid but JWKS unreachable → can\'t confirm the pin, exit 3', async () => {
+    const signer = makeSigner()
+    const card = attachSignature({ name: 'Hub B', skills: [] }, signer, { jku: JWKS_URL })
+    const r = await runRouted(['https://hub-b.example.com', '--expect-kid', signer.kid()], {
+      [CARD_URL]: () => Response.json(card), // JWKS_URL unrouted → 404
+    })
+    expect(r.code).toBe(3)
+    expect(r.stdout).toContain('无法确认')
+  })
+
+  it('--expect-kid with no value → usage error, exit 2', async () => {
+    const errLines: string[] = []
+    const code = await peerCard(['https://hub-b.example.com', '--expect-kid'], {
+      fetchImpl: (() => { throw new Error('fetch must not be called on usage errors') }) as unknown as typeof fetch,
+      out: () => {},
+      err: (l) => errLines.push(l),
+    })
+    expect(code).toBe(2)
+    expect(errLines.join('\n')).toContain('--expect-kid 需要一个 kid 值')
+  })
 })

@@ -181,6 +181,15 @@ export function buildJwks(signer: AgentCardSigner): string {
 export interface VerifyResult {
   ok: boolean
   reason?: string
+  /**
+   * On success only: the RFC 7638 thumbprint of the key that ACTUALLY verified,
+   * recomputed from the JWKS key — the trustworthy id to compare a pinned kid
+   * against. NOT the header's `kid` label, which a lying JWKS could set to any
+   * string; pinning must bind to the real key, so `verifyCardKidMatches` uses
+   * this, never the label. (For an honest card these are equal by construction:
+   * our producer sets kid = thumbprint.)
+   */
+  keyThumbprint?: string
 }
 
 /**
@@ -243,5 +252,31 @@ export function verifyAgentCardSignature(card: SignedCard, jwksJson: string): Ve
     return { ok: false, reason: 'signature is not valid base64url' }
   }
   const ok = cryptoVerify('sha256', signingInput, { key: publicKey, dsaEncoding: 'ieee-p1363' }, signature)
-  return ok ? { ok: true } : { ok: false, reason: 'signature does not verify' }
+  if (!ok) return { ok: false, reason: 'signature does not verify' }
+  // Bind the result to the REAL key, not the header's kid label: recompute the
+  // thumbprint of the key that verified so a pin check can't be fooled by a
+  // JWKS that labels an attacker key with the victim's kid.
+  return { ok: true, keyThumbprint: ecThumbprint(jwk) }
+}
+
+/**
+ * Does a card verify AND is the verifying key the one pinned? Returns:
+ *   - 'match'    — signature verifies and the key's thumbprint === pinnedKid
+ *   - 'mismatch' — verifies but under a DIFFERENT key than pinned (rotated /
+ *                  impostor), or the signature doesn't verify at all
+ *   - 'unsigned' — the card carries no signature to check
+ * The pin binds to the recomputed thumbprint (see `VerifyResult.keyThumbprint`),
+ * never the header label. `pinnedKid` is the operator's out-of-band anchor.
+ */
+export function verifyCardKidMatches(
+  card: SignedCard,
+  jwksJson: string,
+  pinnedKid: string,
+): { status: 'match' | 'mismatch' | 'unsigned'; actualKid?: string; reason?: string } {
+  if (!card.signatures?.[0]) return { status: 'unsigned' }
+  const result = verifyAgentCardSignature(card, jwksJson)
+  if (!result.ok) return { status: 'mismatch', reason: result.reason }
+  return result.keyThumbprint === pinnedKid
+    ? { status: 'match', actualKid: result.keyThumbprint }
+    : { status: 'mismatch', actualKid: result.keyThumbprint, reason: 'signed by a different key than pinned' }
 }

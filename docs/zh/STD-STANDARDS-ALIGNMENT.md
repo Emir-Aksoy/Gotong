@@ -128,14 +128,43 @@ opt-in `GOTONG_A2A_SIGN_CARD`(默认关;第 106 个旋钮,已登记)。
   `readCardSignatureHeader` 解 jku/kid)+ cli 5 单测(✓/未签名/✗/JWKS 不可
   达/jku 回落,URL 路由 fetch 注入)+ 真 bin×真签名 host e2e 冒烟 5 断言。
 
-### STD-M2b 信任锚定:onboarding PIN 公钥(下一步)
+### STD-M2b 信任锚定:owner 显式 PIN 公钥
 
-- **peer onboarding 可选 PIN 公钥 / kid**:`mint-peer-token` + 双边登记
-  时,把首次见到的 kid 记进 peer 记录;之后名片若换了 kid / 签名对不上
-  PIN → warn / 拒。**这才是「这真的是 hub X」的身份锚**。
-- **信任姿态(已定默认)**:走 **owner 显式确认才 PIN、永不自动信任**(贴合
-  发现≠信任),而非 TOFU 首见即锁。没 PIN 的 peer 照旧靠 token 握手(今天
-  的兜底不退化)。PIN 永远是显式动作。
+**信任姿态(已定默认)**:走 **owner 显式确认才 PIN、永不自动信任**(贴合
+发现≠信任),而非 TOFU 首见即锁。没 PIN 的 peer 照旧靠 token 握手(今天的
+兜底不退化)。PIN 永远是显式动作。分两步落地:
+
+#### STD-M2b-1 a2a 硬化 + cli `--expect-kid` 独立复验 ✅(as-built,无 schema)
+
+先把「拿名片对锚定公钥」的能力做成**不依赖 identity 状态的独立断言**——
+owner 手上有锚定 kid(带外记的),就能随时 `peer-card <url> --expect-kid <k>`
+复验对端签名钥有没有换。
+
+- **a2a 侧硬化(pin 绑真实指纹,不认可伪造的 header 标签)**:
+  `verifyAgentCardSignature` 成功时多返回 `keyThumbprint`(**重算**的验签
+  密钥 RFC 7638 指纹);新 `verifyCardKidMatches(card, jwks, pinnedKid)` 返回
+  `match | mismatch | unsigned`,比的是 `keyThumbprint === pinnedKid`,**绝不**
+  信 protected 头里那个可被撒谎 JWKS 伪造的 `kid` 标签。载重测:**撒谎 JWKS
+  防御**——攻击者用受害者 kid 当标签签卡、JWKS 里把自己的钥也标成那个 kid,
+  签名能验过,但重算指纹是攻击者的,`verifyCardKidMatches` 如实报 mismatch。
+- **cli `gotong peer-card <url> --expect-kid <kid>`**:验签之外多打一行 `锚定`
+  —— 一致 `✓ 与你锚定的公钥一致`;不符 / 没签名 / 拿不到 JWKS(无法确认)一律
+  `⚠`。**这是显式断言,改出码**:不符 = 出码 **3**(区别于 preflight 未完成的
+  1),好让脚本 `peer-card <url> --expect-kid <k> && 重连` 卡在钥变了的时候。不
+  带 `--expect-kid` 时行为与 M2a 逐字节一致(advisory、出码不变)。
+- **会红的门**:a2a `verifyCardKidMatches` 4 单测(含撒谎 JWKS 防御)+ cli 6
+  单测(一致/不符 exit 3/`=` 形式/未签名/JWKS 不可达/缺值 usage)+ 真 bin×真
+  签名 host e2e 冒烟加 3 断言(一致 exit 0、不符 exit 3、打印「不符」)。
+
+#### STD-M2b-2 identity 落 PIN + web admin 面板显示(下一步)
+
+- **peer 记录存锚定 kid**:identity `peers` 表加一个可空列(additive 迁移),
+  `mint-peer-token` / 双边登记时 owner **显式**填入锚定 kid;server 侧对「已
+  登记且带 kid」的 peer 用 `verifyCardKidMatches` 复验,`peer-card` + admin
+  联邦面板显示 匹配 / 不符。
+- **不符只 advisory 警告,绝不硬挡联邦**:身份的最终裁决仍是 token 握手;PIN
+  是给 owner 的**显式提醒**(钥变了 = 该核实),不是自动闸。没 PIN 的 peer 零
+  影响。
 
 ### 远期(观察不做,只记账)
 

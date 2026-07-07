@@ -23,6 +23,7 @@ import {
   readCardSignatureHeader,
   signAgentCard,
   verifyAgentCardSignature,
+  verifyCardKidMatches,
   type AgentCardSigner,
 } from '../src/card-signature.js'
 
@@ -69,7 +70,7 @@ describe('sign + verify round-trip', () => {
   it('our verifier accepts a freshly signed card', () => {
     const signer = makeSigner()
     const card = attachSignature(sampleCard(), signer, { jku: 'https://hub.example.com/.well-known/jwks.json' })
-    expect(verifyAgentCardSignature(card, buildJwks(signer))).toEqual({ ok: true })
+    expect(verifyAgentCardSignature(card, buildJwks(signer))).toMatchObject({ ok: true })
   })
 
   it('an INDEPENDENT node:crypto verifier reaches the same bytes (spec interop)', () => {
@@ -143,5 +144,52 @@ describe('readCardSignatureHeader (consumer finds the JWKS)', () => {
   it('returns null for an unsigned card or an undecodable protected header', () => {
     expect(readCardSignatureHeader({})).toBeNull()
     expect(readCardSignatureHeader({ signatures: [{ protected: '!!!not-base64-json', signature: 'x' }] })).toBeNull()
+  })
+})
+
+describe('verifyCardKidMatches (STD-M2b pin binding)', () => {
+  it('success returns the RECOMPUTED key thumbprint (not just the header label)', () => {
+    const signer = makeSigner()
+    const card = attachSignature(sampleCard(), signer)
+    const v = verifyAgentCardSignature(card, buildJwks(signer))
+    expect(v.ok).toBe(true)
+    expect(v.keyThumbprint).toBe(signer.kid())
+  })
+
+  it('match when pinned kid === verifying key; mismatch for a different pin', () => {
+    const signer = makeSigner()
+    const card = attachSignature(sampleCard(), signer)
+    const jwks = buildJwks(signer)
+    expect(verifyCardKidMatches(card, jwks, signer.kid())).toMatchObject({ status: 'match' })
+    expect(verifyCardKidMatches(card, jwks, 'some-other-kid').status).toBe('mismatch')
+  })
+
+  it('unsigned card → unsigned; tampered card → mismatch (not a false match)', () => {
+    const signer = makeSigner()
+    expect(verifyCardKidMatches({}, buildJwks(signer), signer.kid())).toEqual({ status: 'unsigned' })
+    const card = attachSignature(sampleCard(), signer)
+    expect(verifyCardKidMatches({ ...card, name: 'tampered' }, buildJwks(signer), signer.kid()).status).toBe('mismatch')
+  })
+
+  it('binds the pin to the REAL key, not the header kid label (lying-JWKS defense)', () => {
+    // Attacker signs the card WITH a forged victim kid in the protected header,
+    // then serves a JWKS whose (attacker) key is LABELED with that victim kid.
+    const attacker = makeSigner()
+    const victimKid = 'A'.repeat(43) // plausible-looking, but NOT the attacker's thumbprint
+    const base = sampleCard()
+    const header = { alg: 'ES256', typ: 'JOSE', kid: victimKid }
+    const protectedB64 = Buffer.from(JSON.stringify(header), 'utf8').toString('base64url')
+    const payloadB64 = Buffer.from(jcsCanonicalize(base), 'utf8').toString('base64url')
+    const signature = attacker.sign(Buffer.from(`${protectedB64}.${payloadB64}`, 'ascii')).toString('base64url')
+    const card = { ...base, signatures: [{ protected: protectedB64, signature }] }
+    const jwks = JSON.stringify({ keys: [{ ...attacker.publicJwk(), kid: victimKid, use: 'sig', alg: 'ES256' }] })
+
+    // The signature verifies (a real sig by the served key)...
+    const v = verifyAgentCardSignature(card, jwks)
+    expect(v.ok).toBe(true)
+    // ...but the recomputed thumbprint is the ATTACKER's, not the forged label.
+    expect(v.keyThumbprint).not.toBe(victimKid)
+    // ...so pinning the victim kid correctly reports a mismatch, not a match.
+    expect(verifyCardKidMatches(card, jwks, victimKid).status).toBe('mismatch')
   })
 })

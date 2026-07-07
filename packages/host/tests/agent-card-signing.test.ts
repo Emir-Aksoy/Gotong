@@ -98,7 +98,7 @@ describe('signAgentCard + verify round-trip', () => {
   it('our verifier accepts a freshly signed card', () => {
     const signer = new FileAgentCardSigner(freshKeyPath())
     const card = { ...sampleCard(), signatures: [signAgentCard(sampleCard(), signer, { jku: 'https://hub.example.com/.well-known/jwks.json' })] }
-    expect(verifyAgentCardSignature(card, buildJwks(signer))).toEqual({ ok: true })
+    expect(verifyAgentCardSignature(card, buildJwks(signer))).toMatchObject({ ok: true })
   })
 
   it('an INDEPENDENT node:crypto verifier reaches the same bytes (spec interop)', () => {
@@ -188,7 +188,7 @@ describe('createAgentCardSurface', () => {
     expect(jwks).not.toBeNull()
 
     // The whole point: parse what we serve, verify it against what we serve.
-    expect(verifyAgentCardSignature(card, jwks!)).toEqual({ ok: true })
+    expect(verifyAgentCardSignature(card, jwks!)).toMatchObject({ ok: true })
 
     // jku reflects how the client reached us (request-derived base URL).
     const header = JSON.parse(Buffer.from(card.signatures![0]!.protected, 'base64url').toString('utf8'))
