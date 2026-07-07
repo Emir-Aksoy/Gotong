@@ -177,16 +177,22 @@ owner 手上有锚定 kid(带外记的),就能随时 `peer-card <url> --expect-k
   坏 shape→400 / PATCH set→clear / **pin-only 不 `refreshPolicy`**)。identity
   616 / web 1276 / host 1882 全绿,四门 PASS(旋钮仍 106,无新增)。
 
-#### STD-M2b-3 面板内实时「匹配/不符」徽章(显式推迟,待定 card URL 来源)
+#### STD-M2b-3 面板内实时「匹配/不符」徽章(显式不做,2026-07-07 用户拍板收 M2)
 
 面板内实时徽章需**服务端**取对端 HTTP 名片 + JWKS,用 `verifyCardKidMatches`
 对存下的 pin 复验。但 peer 存的 `endpointUrl` 是 **wss mesh 地址**,名片却在
 另一端口/协议的 well-known —— 无法从 wss 稳妥推导 card URL。补它要么给 web 开
 **新的出站 fetch 面**(含 SSRF 面)+ 决定 card URL 从哪来(admin 粘贴 / 另存
-一列),是真架构岔口,不擅自拍。**验证能力其实已交付**:M2b-1 的 `gotong
-peer-card <url> --expect-kid <kid>` 就是这颗徽章的 CLI 形态——面板现已显示
-pin,owner 复制去 CLI 即可复验。是否要面板内一键徽章、card URL 怎么来,待用户
-拍板再上。
+一列),是真架构岔口。按守则 4.4 把三选项(收 M2 / 加 `card_url` 列常显徽章 /
+按需验证)摆给用户,**用户拍板「就此收 STD-M2」**:验证能力已由下面这条 CLI
+交付,面板已显示 pin,面板徽章是纯便利,不值这层新出站面。
+
+> **验证怎么做**:面板复制 peer 的锚定 kid → `gotong peer-card <对端 https 地址>
+> --expect-kid <kid>`。一致 exit 0、不符 exit 3(见 M2b-1)。这就是徽章的 CLI
+> 形态,能力不缺,只是不在面板里一键。
+
+将来真需要面板一键徽章(例如联邦规模大到 CLI 逐个跑嫌烦),再按上面的岔口选型
+重启——不预造。
 
 ### 远期(观察不做,只记账)
 
