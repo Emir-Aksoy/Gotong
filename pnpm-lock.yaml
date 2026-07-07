@@ -724,6 +724,9 @@ importers:
 
   packages/cli:
     dependencies:
+      '@gotong/a2a':
+        specifier: workspace:*
+        version: link:../a2a
       '@gotong/core':
         specifier: workspace:*
         version: link:../core

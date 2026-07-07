@@ -12,11 +12,19 @@
  *   - 名片是**对端给的不可信输入**:字段缺/类型错不炸,能读多少读多少,
  *     读不出的标「(未声明)」;但整体不是 JSON 对象就如实报无效。
  *
+ * STD-M2a 验签:名片若带 A2A §8.4 签名,就按 `jku`(或回落到本源
+ *   `/.well-known/jwks.json`)取 JWKS 验一遍,打 ✓/✗。**边界照旧**——✓ 只
+ *   证明名片没被篡改、与自报公钥一致,**不代表签发者就是对方本人**;身份仍
+ *   靠 onboarding 时带外锚定公钥(STD-M2b)。**签名裁决是 advisory**:它不改
+ *   出码——出码只反映 preflight 有没有完成(取到卡即算完成),不当信任判决。
+ *
  * 出码(脚本可依赖):
  *   0 = preflight 得到明确答案(有名片,或明确没有名片)
  *   1 = 没得出结论(网络不通 / 超时 / 对端回错误码 / 名片无效)
  *   2 = 用法错误
  */
+
+import { readCardSignatureHeader, verifyAgentCardSignature, type SignedCard } from '@gotong/a2a'
 
 import { printHelp } from './help.js'
 
@@ -108,6 +116,77 @@ export function renderPeerCard(card: Record<string, unknown>, cardUrl: string): 
   return lines.join('\n')
 }
 
+/**
+ * Where the card's public key lives. Prefer the signature's `jku`; if absent,
+ * fall back to the conventional `<card-origin>/.well-known/jwks.json`. Returns
+ * `crossOrigin` so the caller can note when the key is served elsewhere (an
+ * honesty signal, not a rejection — integrity verification works either way).
+ */
+function resolveJwksUrl(header: Record<string, unknown>, cardUrl: string): { url: string | null; crossOrigin: boolean } {
+  const jku = str(header.jku)
+  if (jku) {
+    if (!/^https?:\/\//i.test(jku)) return { url: null, crossOrigin: false }
+    let cardOrigin: string | null = null
+    try { cardOrigin = new URL(cardUrl).origin } catch { /* cardUrl was validated http(s) upstream */ }
+    let jkuOrigin: string | null = null
+    try { jkuOrigin = new URL(jku).origin } catch { return { url: null, crossOrigin: false } }
+    return { url: jku, crossOrigin: !!cardOrigin && jkuOrigin !== cardOrigin }
+  }
+  try {
+    return { url: `${new URL(cardUrl).origin}/.well-known/jwks.json`, crossOrigin: false }
+  } catch {
+    return { url: null, crossOrigin: false }
+  }
+}
+
+/**
+ * Render the `签名` line(s): verify the card's first signature against its
+ * JWKS and report ✓/✗, or say it's unsigned. Fetches the JWKS (remote input,
+ * so every failure degrades to "can't verify" — never throws). The honest
+ * caveat is always attached to a ✓: integrity is not identity (发现≠信任).
+ */
+export async function verifyCardSignature(
+  card: Record<string, unknown>,
+  cardUrl: string,
+  fetchImpl: typeof fetch,
+): Promise<string> {
+  const signed = card as unknown as SignedCard
+  const header = readCardSignatureHeader(signed)
+  if (!header) return '  签名      (未签名 —— A2A 签名是可选的,不影响直连)'
+
+  const kid = str(header.kid)
+  const kidShort = kid ? `${kid.slice(0, 8)}…` : '(无 kid)'
+  const { url: jwksUrl, crossOrigin } = resolveJwksUrl(header, cardUrl)
+  if (!jwksUrl) {
+    return `  签名      ⚠ 带签名(kid=${kidShort})但 jku 不是 http(s) URL —— 无法验证`
+  }
+
+  let jwksText: string
+  try {
+    const res = await fetchImpl(jwksUrl, { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) })
+    if (!res.ok) {
+      return `  签名      ⚠ 带签名(kid=${kidShort})但 JWKS 拿不到(HTTP ${res.status} @ ${jwksUrl})—— 无法验证`
+    }
+    jwksText = await res.text()
+  } catch {
+    return `  签名      ⚠ 带签名(kid=${kidShort})但连不上 JWKS(${jwksUrl})—— 无法验证`
+  }
+
+  const result = verifyAgentCardSignature(signed, jwksText)
+  const originNote = crossOrigin ? `\n            ⓘ JWKS 在另一个源:${jwksUrl}(留意)` : ''
+  if (result.ok) {
+    return [
+      `  签名      ✓ 完整性已验证(ES256, kid=${kidShort})`,
+      '            ⓘ 只证明名片没被篡改、与自报公钥一致 —— 不代表签发者就是对方本人。',
+      `            身份仍靠 onboarding 时带外锚定这把公钥(建边前确认)。${originNote}`,
+    ].join('\n')
+  }
+  return [
+    `  签名      ✗ 验证失败:${result.reason ?? '未知原因'}(kid=${kidShort})`,
+    `            ⚠ 带签名却对不上公钥 —— 可能被篡改或对端换了钥,建边前务必核实。${originNote}`,
+  ].join('\n')
+}
+
 /** 尾部固定指引:发现之后的「下一步」永远是既有 token onboarding。 */
 export function renderNextSteps(): string {
   return [
@@ -183,7 +262,9 @@ export async function peerCard(args: readonly string[], deps: PeerCardDeps = {})
     return 1
   }
 
-  out(renderPeerCard(parsed as Record<string, unknown>, cardUrl))
+  const card = parsed as Record<string, unknown>
+  out(renderPeerCard(card, cardUrl))
+  out(await verifyCardSignature(card, cardUrl, fetchImpl))
   out(renderNextSteps())
   return 0
 }

@@ -105,19 +105,37 @@ opt-in `GOTONG_A2A_SIGN_CARD`(默认关;第 106 个旋钮,已登记)。
     `FileAgentCardSigner` + 真 `createAgentCardSurface`(逐字复刻
     `main.ts` 接线),curl 两端点 + 独立验签 + 改名验签失败,9 断言全过。
 
-### STD-M2 消费侧:验签 + 信任锚定(下一步)
+### STD-M2a 消费侧验签:`gotong peer-card` 打 ✓/✗ ✅(as-built)
 
-发现≠信任在这里长牙:
+发现≠信任在这里长第一颗牙——建边前先能验一验对方名片的完整性。
 
-- **`gotong peer-card <url>` 验签**:取到带 `signatures[]` 的卡时,按
-  `jku` 拉 JWKS,调 `verifyAgentCardSignature` 打印 ✓/✗——但**明说**「✓
-  只代表这张卡没被篡改,**不代表**签发者就是对端本人」。
+- **前置抽取**(使能这一步的架构动作):纯 JWS/JCS/verify 核从 host 的
+  `agent-card-signing.ts` 移到 **`@gotong/a2a`** 新 `card-signature.ts`
+  (`jcsCanonicalize` / `signAgentCard` / `attachSignature` / `buildJwks` /
+  `verifyAgentCardSignature` / `readCardSignatureHeader` / `es256Sign` /
+  `ecThumbprint`);host 只留 file-backed `FileAgentCardSigner` 并回引 +
+  re-export(既有 import 面零改)。这样 **cli 复用验证器而不依赖 host 装配
+  层**——cli 加 `@gotong/a2a`(kernel)依赖是合法方向,kernel-deps 门绿。
+- **`gotong peer-card <url>` 验签**:取到带 `signatures[]` 的卡时,读
+  protected 头的 `jku`(缺则回落 `<对端源>/.well-known/jwks.json`)拉 JWKS,
+  调 `verifyAgentCardSignature` 打印 **✓ 完整性已验证** / **✗ 验证失败** /
+  **⚠ 无法验证**(拿不到 JWKS/jku 非 http)/ **未签名**。✓ 永远带一句
+  **「只证明没被篡改、与自报公钥一致,不代表签发者就是对方本人」**。
+- **签名裁决是 advisory,不改出码**:出码仍只反映 preflight 有没有完成(取
+  到卡即算),✗ 是「发现」不是「preflight 失败」——契约稳定,不把信任判决
+  塞进出码;真要严格可留 `--require-valid-signature` 旗标日后加。
+- **会红的门**:a2a 12 单测(含独立 node:crypto round-trip、篡改即失败、
+  `readCardSignatureHeader` 解 jku/kid)+ cli 5 单测(✓/未签名/✗/JWKS 不可
+  达/jku 回落,URL 路由 fetch 注入)+ 真 bin×真签名 host e2e 冒烟 5 断言。
+
+### STD-M2b 信任锚定:onboarding PIN 公钥(下一步)
+
 - **peer onboarding 可选 PIN 公钥 / kid**:`mint-peer-token` + 双边登记
-  时,把首次见到的 kid 记进 peer 记录(TOFU 或 owner 手动确认);之后名
-  片若换了 kid / 签名对不上 PIN → warn / 拒。**这才是「这真的是 hub
-  X」的身份锚**。
-- **边界**:PIN 是**显式动作**,永不自动;没 PIN 的 peer 照旧靠 token 握
-  手(今天的兜底不退化)。
+  时,把首次见到的 kid 记进 peer 记录;之后名片若换了 kid / 签名对不上
+  PIN → warn / 拒。**这才是「这真的是 hub X」的身份锚**。
+- **信任姿态(已定默认)**:走 **owner 显式确认才 PIN、永不自动信任**(贴合
+  发现≠信任),而非 TOFU 首见即锁。没 PIN 的 peer 照旧靠 token 握手(今天
+  的兜底不退化)。PIN 永远是显式动作。
 
 ### 远期(观察不做,只记账)
 

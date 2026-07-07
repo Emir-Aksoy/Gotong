@@ -4,9 +4,16 @@
  * command loop with an injected fetch: card present / absent (404 is a
  * NORMAL answer, exit 0) / invalid / unreachable. The card is remote,
  * untrusted input — the renderer must degrade, never throw.
+ *
+ * STD-M2a adds signature verification: a signed card is verified against its
+ * JWKS and reported ✓/✗ — advisory only, never changing the exit code.
  */
 
+import { createPublicKey, generateKeyPairSync } from 'node:crypto'
+
 import { describe, expect, it } from 'vitest'
+
+import { attachSignature, buildJwks, ecThumbprint, es256Sign, type AgentCardSigner } from '@gotong/a2a'
 
 import {
   peerCard,
@@ -186,5 +193,87 @@ describe('peerCard command', () => {
     expect(text).toContain('mint-peer-token')
     expect(text).toContain('/api/admin/identity/peers')
     expect(text).toContain('FEDERATION-RUNBOOK')
+  })
+})
+
+describe('peerCard signature verification (STD-M2a)', () => {
+  const JWKS_URL = 'https://hub-b.example.com/.well-known/jwks.json'
+
+  function makeSigner(): AgentCardSigner {
+    const { privateKey } = generateKeyPairSync('ec', { namedCurve: 'prime256v1' })
+    const jwk = createPublicKey(privateKey).export({ format: 'jwk' }) as Record<string, unknown>
+    const thumb = ecThumbprint(jwk)
+    return { kid: () => thumb, publicJwk: () => jwk, sign: (i: Buffer) => es256Sign(privateKey, i) }
+  }
+
+  /** Drive peerCard with a URL-routed fetch (card + JWKS live at different URLs). */
+  async function runRouted(
+    args: string[],
+    routes: Record<string, () => Response | Promise<Response>>,
+  ): Promise<{ code: number; stdout: string; seen: string[] }> {
+    const outLines: string[] = []
+    const seen: string[] = []
+    const fetchImpl = (async (url: RequestInfo | URL) => {
+      const key = String(url)
+      seen.push(key)
+      return routes[key] ? routes[key]!() : new Response('nope', { status: 404 })
+    }) as typeof fetch
+    const code = await peerCard(args, { fetchImpl, out: (l) => outLines.push(l), err: () => {} })
+    return { code, stdout: outLines.join('\n'), seen }
+  }
+
+  it('signed card + reachable JWKS via jku → ✓ verified, with the integrity≠identity caveat, exit 0', async () => {
+    const signer = makeSigner()
+    const card = attachSignature({ name: 'Hub B', description: 'd', version: '1', skills: [] }, signer, { jku: JWKS_URL })
+    const r = await runRouted(['https://hub-b.example.com'], {
+      [CARD_URL]: () => Response.json(card),
+      [JWKS_URL]: () => new Response(buildJwks(signer), { headers: { 'content-type': 'application/json' } }),
+    })
+    expect(r.code).toBe(0)
+    expect(r.stdout).toContain('✓ 完整性已验证')
+    expect(r.stdout).toContain('不代表签发者就是对方本人') // 发现 ≠ 信任
+  })
+
+  it('unsigned card → says 未签名 (advisory), exit 0', async () => {
+    const r = await runRouted(['https://hub-b.example.com'], {
+      [CARD_URL]: () => Response.json({ name: 'Hub B', skills: [] }),
+    })
+    expect(r.code).toBe(0)
+    expect(r.stdout).toContain('未签名')
+  })
+
+  it('tampered card (body altered after signing) → ✗ 验证失败, but still exit 0 (advisory)', async () => {
+    const signer = makeSigner()
+    const card = attachSignature({ name: 'Hub B', description: 'd', version: '1', skills: [] }, signer, { jku: JWKS_URL })
+    const tampered = { ...card, name: 'Impostor' } // signature no longer covers this body
+    const r = await runRouted(['https://hub-b.example.com'], {
+      [CARD_URL]: () => Response.json(tampered),
+      [JWKS_URL]: () => new Response(buildJwks(signer)),
+    })
+    expect(r.code).toBe(0) // a bad signature is a finding, not a preflight failure
+    expect(r.stdout).toContain('✗ 验证失败')
+    expect(r.stdout).toContain('务必核实')
+  })
+
+  it('signed card but JWKS unreachable → ⚠ 无法验证, exit 0', async () => {
+    const signer = makeSigner()
+    const card = attachSignature({ name: 'Hub B', skills: [] }, signer, { jku: JWKS_URL })
+    const r = await runRouted(['https://hub-b.example.com'], {
+      [CARD_URL]: () => Response.json(card), // JWKS_URL unrouted → 404
+    })
+    expect(r.code).toBe(0)
+    expect(r.stdout).toContain('无法验证')
+  })
+
+  it('no jku → derives <origin>/.well-known/jwks.json and verifies there', async () => {
+    const signer = makeSigner()
+    const card = attachSignature({ name: 'Hub B', skills: [] }, signer) // no jku
+    const r = await runRouted(['https://hub-b.example.com'], {
+      [CARD_URL]: () => Response.json(card),
+      [JWKS_URL]: () => new Response(buildJwks(signer)),
+    })
+    expect(r.code).toBe(0)
+    expect(r.seen).toContain(JWKS_URL) // derived the conventional location
+    expect(r.stdout).toContain('✓ 完整性已验证')
   })
 })

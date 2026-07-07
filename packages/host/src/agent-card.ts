@@ -40,7 +40,7 @@
 
 import { readFileSync } from 'node:fs'
 
-import { attachSignature, buildJwks, type AgentCardSigner } from './agent-card-signing.js'
+import { attachSignature, buildJwks, type AgentCardSigner, type AgentCardSignatureValue } from './agent-card-signing.js'
 
 /** OpenAPI-style security scheme — the subset A2A uses for HTTP bearer. */
 export interface AgentCardSecurityScheme {
@@ -92,15 +92,11 @@ export interface AgentCardSkillWire {
 
 /**
  * A2A `AgentCardSignature` (v1.0 §8.4) — one detached-payload JWS over the
- * card. `protected` is a base64url JWS protected header, `signature` the
- * base64url signature; `header` (unprotected) is unused by us. See
- * `agent-card-signing.ts` for how these are produced / verified.
+ * card. Aliased to the shared `@gotong/a2a` wire type (re-exported via
+ * `agent-card-signing.ts`) so the host card and the CLI `peer-card` verifier
+ * speak the exact same signature shape. See `agent-card-signing.ts`.
  */
-export interface AgentCardSignature {
-  protected: string
-  signature: string
-  header?: Record<string, unknown>
-}
+export type AgentCardSignature = AgentCardSignatureValue
 
 /** The A2A Agent Card document (v1.0 shape + 0.2.x transition fields). */
 export interface AgentCard {

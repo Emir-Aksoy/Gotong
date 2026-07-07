@@ -38,6 +38,7 @@
     "prepack": "tsc -p tsconfig.json"
   },
   "dependencies": {
+    "@gotong/a2a": "workspace:*",
     "@gotong/core": "workspace:*",
     "@gotong/protocol": "workspace:*",
     "@gotong/workflow": "workspace:*",
