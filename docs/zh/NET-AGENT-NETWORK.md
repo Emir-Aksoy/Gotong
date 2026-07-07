@@ -153,22 +153,46 @@ peer 行内 `requireApprovalOutbound`);节律/上限如需一律常量。B track
 
 ---
 
-## 三、B track:hub 名片/发现(NET-M4 →,概设,实施前再侦察)
+## 三、B track:hub 名片/发现(NET-M4/M5,2026-07-06 侦察后定稿)
 
-> ⚠️ 本节是**概设不是承诺**:agent 发现类惯例(A2A agent-card、well-known
-> 路径、签名格式)演进很快,动工前必须重新侦察一轮当时的标准现状,再定稿
-> 细分里程碑。
+> 概设阶段的「实施前再侦察」已做(2026-07-06,A track 收口当天):
+> **A2A v1.0(2026 年初定稿)**把 agent card 钉在
+> `/.well-known/agent-card.json`(早期 `agent.json` 已被替代),必填字段
+> name/description/url/version/capabilities/securitySchemes/
+> defaultInputModes/defaultOutputModes/skills[]{id,name,description,tags};
+> v1.0 重头是 **Signed Agent Cards**(JWS + canonicalization,可选)与
+> authenticated extended card(`capabilities.extendedAgentCard` +
+> 认证后取详卡)。本方 `/a2a` 入站(message/send + tasks/get,bearer
+> peer-token,`metadata.skill`→capability)早已在——缺的只是发现面。
+> 出处:[A2A spec](https://a2a-protocol.org/latest/specification/) ·
+> [AgentCard concept](https://agent2agent.info/docs/concepts/agentcard/)。
 
-- **NET-M4 名片**:`GET /.well-known/gotong-hub.json`——hub id、显示名、
-  **owner 策展的**可被请求 capability 白名单(默认空=只报身份不报能力)、
-  联邦/A2A 端点、格式版本。对读 A2A agent-card 生态,能对齐就对齐(生态互认
-  优先于自造格式)。签名/身份证明机制随侦察定(现有 peer auth 是 bearer
-  token,无长期 keypair——是否引入签名密钥是这一步最大的设计决定,单独拍板)。
-- **NET-M5 发现 preflight**:`gotong connect <url>` 先取名片 → 打印人类可读
-  的「对方是谁/开了什么」→ 人确认 → 走既有 token/邀请流。名片永不自动建边。
-- 远期(显式不做,只记账):跨 hub 结算(x402/AP2 类支付协议只观察)、
-  多跳路由/gossip(点对点对当前规模是对的)、名片聚合目录站(等社区真有
-  多 hub 再说,零算力社区站生成器是现成底座)。
+- **NET-M4 名片 = 一张真 A2A AgentCard**(定稿:概设里的自造
+  `gotong-hub.json` **放弃**——生态互认优先于自造格式,咱们本来就有 A2A
+  入站,名片就该是外部 A2A caller 拿了能直接用的那张卡):
+  - `GET /.well-known/agent-card.json`:`name`/`description` = owner 策展的
+    hub 自我介绍;`url` = 本 hub A2A 端点;`skills[]` = **owner 策展的**可被
+    请求 capability 白名单(id=capability 名);`securitySchemes` = bearer
+    (peer token,拿 token 仍走既有 onboarding);能力旗帜诚实声明。
+  - **file-first,文件即开关,零新 env 旋钮**:名片内容 = `.gotong/` 下
+    owner 策展文件;文件不存在 → 404(主权 hub 缺省沉默,「默认空=只报
+    身份」再收紧为「默认什么都不报」)。策展文件只填人话字段(displayName/
+    description/skills),路由把它翻成规范 AgentCard——owner 永不手写协议
+    结构。
+  - **签名 keypair:首版不签,单独拍板**(spec 里签名可选;发现≠信任,
+    信任仍走 token onboarding,名片被篡改的后果=读到假介绍,建边时 token
+    握手会拆穿)。引入长期 keypair 牵动备份/轮换/vault 姿态,值得单独一轮。
+  - 会红的门:策展文件缺失→404 / 存在→规范字段齐全(对 A2A 类型核)/
+    skills 逐字=策展白名单绝不自动收集 hub 能力 / 损坏文件 warn+404 绝不
+    半张卡。
+- **NET-M5 发现 preflight**:`gotong connect <url>` 先取
+  `/.well-known/agent-card.json` → 打印人类可读的「对方是谁/开了什么」→
+  人确认 → 走既有 token/邀请流。对端没有名片 → 如实说没有,照旧直连
+  (名片是增强不是前置)。名片永不自动建边。
+- 远期(显式不做,只记账):Signed Agent Cards(等 keypair 拍板)、跨 hub
+  结算(x402/AP2 类支付协议只观察)、多跳路由/gossip(点对点对当前规模是
+  对的)、名片聚合目录站(等社区真有多 hub 再说,零算力社区站生成器是现成
+  底座)。
 
 ---
 
