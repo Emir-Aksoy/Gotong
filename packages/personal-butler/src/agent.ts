@@ -41,6 +41,7 @@ import {
 import {
   BUTLER_NEVER_RESUME_AT,
   butlerGateState,
+  type PersistedVerdict,
   readButlerDecision,
   readButlerGateState,
 } from './checkpoint.js'
@@ -261,12 +262,25 @@ export class PersonalButlerAgent extends MemoryAugmentedAgent {
           ...req.messages,
           { role: 'assistant', content: assistantBlocks },
         ]
+        // Snapshot EVERY governed tool's verdict so resume can honour them
+        // individually. Without this, resume would re-run every deferred
+        // governed call on a single approval — laundering a `refuse` sibling
+        // (server-denied) or a SECOND `approve` the human never saw.
+        const persistedVerdicts: Record<string, PersistedVerdict> = {}
+        for (const [id, verdict] of verdicts) {
+          persistedVerdicts[id] =
+            verdict.decision === 'allow'
+              ? { decision: 'allow' }
+              : { decision: verdict.decision, reason: verdict.reason }
+        }
         throw new SuspendTaskError({
           resumeAt: BUTLER_NEVER_RESUME_AT,
           state: butlerGateState({
             messages,
             pending: {
               toolUses,
+              approvedId: park.id,
+              verdicts: persistedVerdicts,
               approval: {
                 toolName: park.name,
                 // A park implies a governed 'approve' verdict, so a gate governs
@@ -311,11 +325,17 @@ export class PersonalButlerAgent extends MemoryAugmentedAgent {
    * `LlmAgent.handleResume` (reached via `super.resumeBody`) handles non-butler
    * state; here we own the case where the carried state is a `ButlerGateState`.
    *
-   * On approval we run the deferred tool call (the very same `callOne` the loop
-   * would have run inline); on denial the governed tool gets a fail-closed
-   * `isError` result — the model is told it was declined and adapts. Either way
-   * we append the round's `tool_result`s and continue the loop, so the
-   * conversation stays coherent.
+   * The human decides ONE action (`pending.approvedId`). Resume answers every
+   * deferred block from its snapshotted verdict, so the decision's scope stays
+   * exactly what the human saw:
+   *   - benign sibling (no gate) → run (it was only deferred by the park)
+   *   - governed `allow` → run (auto-cleared)
+   *   - the approved id → run iff approved, else fail-closed
+   *   - governed `refuse` → NEVER runs (approval of a sibling can't launder it)
+   *   - a SECOND `approve` the human never saw → fail-closed; the model must
+   *     request it again so it gets its own review
+   * Every `tool_use` still gets exactly one matching `tool_result` so the
+   * provider stays happy and the loop continues coherently.
    */
   protected override async resumeBody(task: Task, state: unknown): Promise<unknown> {
     const gate = readButlerGateState(state)
@@ -333,12 +353,22 @@ export class PersonalButlerAgent extends MemoryAugmentedAgent {
       approved: false,
       note: 'no decision recorded — failing closed',
     }
+    const { approvedId, verdicts = {} } = gate.pending
 
     const toolResultBlocks: LlmToolResultBlock[] = []
     for (const tu of gate.pending.toolUses) {
       // A pure-memory butler never reaches a governed park, but guard anyway:
       // no gate governs → the tool runs inline as benign.
-      if (this.governedFor(tu.name)) {
+      if (!this.governedFor(tu.name)) {
+        toolResultBlocks.push(await this.callOne(tu))
+        continue
+      }
+      const verdict = verdicts[tu.id]
+      if (verdict?.decision === 'allow') {
+        toolResultBlocks.push(await this.callOne(tu)) // governed but auto-cleared
+        continue
+      }
+      if (verdict?.decision === 'approve' && tu.id === approvedId) {
         if (decision.approved) {
           toolResultBlocks.push(await this.callOne(tu)) // cleared by a human → execute
         } else {
@@ -351,11 +381,18 @@ export class PersonalButlerAgent extends MemoryAugmentedAgent {
             isError: true,
           })
         }
-      } else {
-        // A benign sibling in the same round runs now (it was deferred so we
-        // wouldn't act before the human decided).
-        toolResultBlocks.push(await this.callOne(tu))
+        continue
       }
+      // Everything else fails closed and NEVER runs: a `refuse` (server-denied,
+      // which approving a sibling must not launder), a second `approve` the
+      // human never saw, or a missing verdict (defensive).
+      const why =
+        verdict?.decision === 'refuse'
+          ? `Refused (not run): ${verdict.reason ?? 'server policy'}.`
+          : verdict?.decision === 'approve'
+            ? `Not executed — this action needs its own approval; ask again so it can be reviewed.`
+            : `Not executed — no approval on record (fail-closed).`
+      toolResultBlocks.push({ type: 'tool_result', toolUseId: tu.id, content: why, isError: true })
     }
 
     const messages: LlmMessage[] = [

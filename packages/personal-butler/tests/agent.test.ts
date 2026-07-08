@@ -522,3 +522,105 @@ describe('PersonalButlerAgent — bounded', () => {
     expect(log.length).toBe(3) // ran exactly maxToolRounds benign calls, then stopped
   })
 })
+
+describe('PersonalButlerAgent — approval scope is exactly what the human saw', () => {
+  // A round can mix governed actions with DIFFERENT verdicts. The park shows the
+  // human ONE action; resume must not launder the rest. Regression for the P0
+  // where resume re-ran every deferred governed call on a single approval —
+  // executing a server-REFUSED sibling and a SECOND unseen `approve`.
+  function twoActionGate(execLog: string[], classify: GovernedClassifier): GovernedActionToolset {
+    return new GovernedActionToolset({
+      tools: [
+        { name: 'delete_agent', description: 'delete a managed agent', inputSchema: { type: 'object', properties: { handle: { type: 'string' } } } },
+        { name: 'send_email', description: 'send an email', inputSchema: { type: 'object', properties: { to: { type: 'string' } } } },
+      ],
+      classify,
+      execute: async (name: string, args: Record<string, unknown>) => {
+        execLog.push(`${name}:${String(args.handle ?? args.to)}`)
+        return { text: `${name} done` }
+      },
+    })
+  }
+
+  it('a REFUSED sibling never runs when a DIFFERENT action is approved', async () => {
+    const exec: string[] = []
+    // delete_agent → refuse (hard no); send_email → approve (parks).
+    const classify: GovernedClassifier = async (name) =>
+      name === 'delete_agent'
+        ? { decision: 'refuse', reason: 'destructive — deletes an agent' }
+        : { decision: 'approve', reason: '会替你发一封邮件' }
+    const provider = new ScriptProvider([
+      toolTurn(
+        { id: 't1', name: 'delete_agent', input: { handle: 'mailer' } },
+        { id: 't2', name: 'send_email', input: { to: 'bob' } },
+      ),
+      textTurn('sent the email'),
+    ])
+    const agent = new PersonalButlerAgent({
+      id: 'butler',
+      provider,
+      memory: emptyMemory(),
+      system: 'base',
+      captureTurns: false,
+      governed: twoActionGate(exec, classify),
+    })
+    const t = task('a', 'delete mailer and email bob')
+
+    let state: unknown
+    try {
+      await agent.onTask(t)
+      throw new Error('expected a park')
+    } catch (e) {
+      if (!(e instanceof SuspendTaskError)) throw e
+      state = e.state
+    }
+    const gate = readButlerGateState(state)
+    expect(gate!.pending!.approval.toolName).toBe('send_email') // parked on the APPROVE one
+    expect(gate!.pending!.approvedId).toBe('t2')
+    expect(gate!.pending!.verdicts.t1!.decision).toBe('refuse') // the refuse is on record
+
+    const res = await agent.onResume(t, { ...(state as object), answer: { approved: true } })
+    expect(okText(res)).toBe('sent the email')
+    // ONLY the approved action ran; the server-refused delete NEVER did.
+    expect(exec).toEqual(['send_email:bob'])
+  })
+
+  it('a SECOND approve the human never saw does not run on the first approval', async () => {
+    const exec: string[] = []
+    // Both need approval; the park shows only the FIRST.
+    const classify: GovernedClassifier = async () => ({ decision: 'approve', reason: '需要批准' })
+    const provider = new ScriptProvider([
+      toolTurn(
+        { id: 't1', name: 'send_email', input: { to: 'bob' } },
+        { id: 't2', name: 'delete_agent', input: { handle: 'mailer' } },
+      ),
+      textTurn('done'),
+    ])
+    const agent = new PersonalButlerAgent({
+      id: 'butler',
+      provider,
+      memory: emptyMemory(),
+      system: 'base',
+      captureTurns: false,
+      governed: twoActionGate(exec, classify),
+    })
+    const t = task('a', 'email bob and delete mailer')
+
+    let state: unknown
+    try {
+      await agent.onTask(t)
+      throw new Error('expected a park')
+    } catch (e) {
+      if (!(e instanceof SuspendTaskError)) throw e
+      state = e.state
+    }
+    const gate = readButlerGateState(state)
+    expect(gate!.pending!.approval.toolName).toBe('send_email') // human sees only the first
+    expect(gate!.pending!.approvedId).toBe('t1')
+
+    const res = await agent.onResume(t, { ...(state as object), answer: { approved: true } })
+    expect(okText(res)).toBe('done')
+    // Approving the email must NOT also delete the agent — that action was never shown.
+    expect(exec).toEqual(['send_email:bob'])
+  })
+})

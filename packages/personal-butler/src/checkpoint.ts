@@ -42,6 +42,20 @@ export interface ButlerApprovalContext {
 }
 
 /**
+ * The serialized form of a {@link GovernedVerdict}, snapshotted PER TOOL at park
+ * time and carried across the park. Resume MUST honour these instead of blindly
+ * re-running every deferred governed call: a round can mix a `refuse` (which must
+ * NEVER run) with the one `approve` the human is being shown, and approving the
+ * latter must not launder the former. Inlined here (not imported) so this leaf
+ * stays dependency-free.
+ */
+export interface PersistedVerdict {
+  decision: 'allow' | 'approve' | 'refuse'
+  /** Present for `approve` / `refuse` (the classifier's reason); absent for `allow`. */
+  reason?: string
+}
+
+/**
  * Persisted across a park — rides `SuspendTaskError.state`. The host writes an
  * approval inbox item from `pending.approval` and, on resume, hands this back
  * merged with the reviewer's decision (`{ ...state, answer }`).
@@ -67,6 +81,19 @@ export interface ButlerGateState {
      * siblings get executed — so a mixed round stays coherent.
      */
     toolUses: LlmToolUseBlock[]
+    /**
+     * The tool-use id the human is actually being asked to approve (the one
+     * that triggered the park). ONLY this id runs on approval — a second
+     * `approve` sibling in the same round is NOT covered by this decision and
+     * fails closed (the model must request it again so it gets its own review).
+     */
+    approvedId: string
+    /**
+     * Per-tool verdicts snapshotted at park time, keyed by tool-use id. Only
+     * governed tools appear (benign siblings carry no verdict → run inline).
+     * Resume reads these so a `refuse` NEVER runs, whatever the human answered.
+     */
+    verdicts: Record<string, PersistedVerdict>
     approval: ButlerApprovalContext
   }
   /** Opaque user state preserved from a wrapped non-governed suspend. */
@@ -76,7 +103,12 @@ export interface ButlerGateState {
 /** Build the park state carried by `SuspendTaskError`. */
 export function butlerGateState(args: {
   messages: LlmMessage[]
-  pending?: { toolUses: LlmToolUseBlock[]; approval: ButlerApprovalContext }
+  pending?: {
+    toolUses: LlmToolUseBlock[]
+    approvedId: string
+    verdicts: Record<string, PersistedVerdict>
+    approval: ButlerApprovalContext
+  }
   user?: unknown
 }): ButlerGateState {
   const state: ButlerGateState = { v: BUTLER_GATE_STATE_V, messages: args.messages }
