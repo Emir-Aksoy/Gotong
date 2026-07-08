@@ -156,6 +156,7 @@ import { OidcClient } from './oidc-client.js'
 import { OidcLoginService } from './oidc-login-service.js'
 import { createOAuthConnectSurface } from './oauth-connect-service.js'
 import { makeOAuthSecretSource } from './oauth-secret-source.js'
+import { OAuthTokenRefresher } from './oauth-token-refresh.js'
 import { SamlLoginService } from './saml-login-service.js'
 import { buildSpMetadata, SamlError } from '@gotong/saml'
 import {
@@ -2219,6 +2220,10 @@ async function main(): Promise<void> {
   }
   // C-M2-M3 — outbound OAuth connect surface. Same identity gate as OIDC.
   const oauthConnect = identity ? createOAuthConnectSurface(identity) : undefined
+  // C-M2-M4b — keep connected oauth tokens fresh so a respawned toolset never
+  // injects an expired bearer; inert w/o connectors, stopped in shutdown drain.
+  const oauthRefresher = identity ? new OAuthTokenRefresher(identity, { logger: log }) : undefined
+  oauthRefresher?.start()
 
   // Route B P1-M5e — browser SSO via configured SAML 2.0 IdPs. Wired only when
   // identity is present (the provider registry + (idpEntityId,NameID)→user links
@@ -2864,6 +2869,7 @@ async function main(): Promise<void> {
     }
     try { butlerSweeps.stop() } catch (err) { log.error('butler sweeps stop error', { err }) }
     try { workflowScheduleSweeper.stop() } catch (err) { log.error('workflow schedule stop error', { err }) }
+    if (oauthRefresher) { try { oauthRefresher.stop() } catch (err) { log.error('oauth refresh stop error', { err }) } }
     if (services) {
       try { await services.shutdownAll() } catch (err) { log.error('services shutdown error', { err }) }
     }

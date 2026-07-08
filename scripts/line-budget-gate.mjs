@@ -33,7 +33,7 @@ const REPO = resolve(HERE, '..')
  * on purpose — that visible edit is the guard.
  */
 const BUDGETS = [
-  { file: 'packages/host/src/main.ts', max: 2980 }, // the assembly binary — SLIM 抽 heartbeat-engine 后 2941,棘轮 3040→2980,~39 行余量解锁后续 host 薄接线
+  { file: 'packages/host/src/main.ts', max: 2986 }, // the assembly binary — SLIM 抽 heartbeat-engine 后 2941,棘轮 3040→2980;C-M2-M4b 出站 OAuth 令牌刷新计时器接线(construct+start+shutdown stop)显式抬 2980→2986
   { file: 'packages/web/src/server.ts', max: 2370 }, // web route assembly (types → server-types.ts); 2350→2370 C-M2-M3b 出站 OAuth connect 路由对(公开 callback + admin begin 派发),抽 blessed OIDC/SAML 派发风险更高故显式抬棘轮
   { file: 'packages/web/src/me-routes.ts', max: 2850 }, // /me route sprawl (types → me-routes-types.ts)
 ]
