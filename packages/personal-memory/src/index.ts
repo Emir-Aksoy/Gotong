@@ -41,6 +41,8 @@ export {
   type Embedder,
   type EmbeddingRetrieverOptions,
 } from './embedding-retriever.js'
+export { localBigramEmbedder } from './local-embedder.js'
+export { fusedRetriever, type FusionRetrieverOptions } from './fusion-retriever.js'
 export {
   InvertedIndex,
   buildInvertedIndex,

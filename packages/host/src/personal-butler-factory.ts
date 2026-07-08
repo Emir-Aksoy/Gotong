@@ -178,7 +178,19 @@ export function buildButlerFactory(deps: ButlerFactoryDeps): ButlerFactory {
         // those tools still run inline; the governed gates below are the only path
         // that can park the task for a /me approval.
         const memory = openButlerMemory({ rootDir: memoryRoot, userId, logger: log })
-        const recallIndex = openButlerRecallIndex({ rootDir: memoryRoot, userId, logger: log })
+        // MU-M2 — recall fuses the keyword arm with a focus-aware local embedder
+        // (dependency-free, no network / key / data movement), so the on-demand
+        // `recall` tool surfaces the on-topic fact FIRST instead of the newest
+        // passing mention — what a weak model needs. `fusion: {}` = local default
+        // embedder; a real embedding provider (MU-M4) would be injected as
+        // `fusion: { embed }`. The byte-stable frozen block is untouched (fusion
+        // only rides the recall path).
+        const recallIndex = openButlerRecallIndex({
+          rootDir: memoryRoot,
+          userId,
+          logger: log,
+          fusion: {},
+        })
         // TN-M1 — the member's task notebook: cross-turn mission ledger, file
         // next to the user's jsonl (same `ownerDir` safety as STATUS.md). The
         // 4 list-editing tools are benign (same class as `set_reminder` —

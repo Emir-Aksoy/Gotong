@@ -40,7 +40,9 @@ import type { Logger } from '@gotong/core'
 import {
   InvertedIndex,
   buildInvertedIndex,
+  fusedRetriever,
   invertedIndexRetriever,
+  type Embedder,
   type InvertedIndexSnapshot,
   type MemoryRetriever,
   type RetrieverOptions,
@@ -49,6 +51,22 @@ import { kindFile, ownerDir } from '@gotong/service-memory-file'
 import type { MemoryEntry, MemoryKind, Owner } from '@gotong/services-sdk'
 
 import { BUTLER_MEMORY_KINDS } from './personal-butler-memory.js'
+
+/**
+ * Enable multi-signal fusion recall (MU-M2). The PRESENCE of this config turns
+ * fusion ON for this index's retriever; OMIT it and the retriever is the
+ * keyword-only `invertedIndexRetriever` — byte-for-byte today's behavior (so a
+ * direct caller / the existing tests are unaffected).
+ *
+ * `embed` is the SEMANTIC arm's text→vector function. Default (when the object is
+ * present but `embed` is omitted) is the dependency-free local term-frequency
+ * embedder — a focus-aware lexical signal that reranks the keyword arm's ties, no
+ * network / key / data movement. Inject a real embedding provider here (MU-M4)
+ * and the SAME retriever gains true synonym bridging.
+ */
+export interface ButlerRecallFusion {
+  embed?: Embedder
+}
 
 /** A persisted index = the leaf snapshot plus the watermark it was built at. */
 export interface PersistedRecallIndex {
@@ -91,6 +109,8 @@ export class FileBackedInvertedIndex {
   constructor(
     private readonly io: RecallIndexIo,
     private readonly logger?: Logger,
+    /** Present ⇒ recall uses MU-M2 fusion; absent ⇒ keyword-only (byte-unchanged). */
+    private readonly fusion?: ButlerRecallFusion,
   ) {}
 
   /** How many entries the index currently holds (post-`ensureFresh`). */
@@ -129,10 +149,16 @@ export class FileBackedInvertedIndex {
    * stale even though the index rebuilds underneath it.
    */
   retriever(opts?: RetrieverOptions): MemoryRetriever {
+    const fusion = this.fusion
     return {
       retrieve: async (query) => {
         await this.ensureFresh()
-        return invertedIndexRetriever(this.index, opts).retrieve(query)
+        // Fusion when configured (MU-M2), else the keyword-only ranking. Both read
+        // the freshly-rebuilt `this.index`, so the caller's retriever never goes stale.
+        const backend = fusion
+          ? fusedRetriever(this.index, { ...opts, embed: fusion.embed })
+          : invertedIndexRetriever(this.index, opts)
+        return backend.retrieve(query)
       },
     }
   }
@@ -184,6 +210,8 @@ export interface OpenButlerRecallIndexOptions {
   /** Which kinds to index. Defaults to {@link BUTLER_MEMORY_KINDS} (episodic + semantic). */
   kinds?: readonly MemoryKind[]
   logger?: Logger
+  /** Provide to enable MU-M2 fusion recall (omit = keyword-only, byte-unchanged). */
+  fusion?: ButlerRecallFusion
 }
 
 /** Filename of the persisted index cache, written inside the user's memory dir. */
@@ -244,7 +272,7 @@ export function openButlerRecallIndex(
     },
   }
 
-  return new FileBackedInvertedIndex(io, opts.logger)
+  return new FileBackedInvertedIndex(io, opts.logger, opts.fusion)
 }
 
 // ---------------------------------------------------------------------------
