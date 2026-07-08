@@ -44,6 +44,7 @@ pnpm demo                          # = hello-collab（官方第一步，见 QUIC
 | [`web-demo`](../../examples/web-demo) | Hub + 参考 web UI：写手 agent 和人（alice）在浏览器里协作 | 零（无 env） |
 | [`open-space`](../../examples/open-space) | admin-approval 入场闸 + admin/worker web UI + 需批准才能加入的远程写手 | 零 |
 | [`butler-vector-recall`](../../examples/butler-vector-recall) | 管家语义召回：本地 embed + cosine / chroma-mcp 接缝——框架从不算向量，注入式 | 零 |
+| [`reallife-oauth`](../../examples/reallife-oauth) | 用 Google 登录接日历：授权 URL → 换码进 vault（明文不落盘）→ `${OAUTH_ACCESS_TOKEN}` 注入 MCP 头 → 到期自动刷，同一条缝永远新鲜 | 零（假令牌端点） |
 
 ## ③ 接真东西（需 key / 本地 MCP server / 跨进程）
 

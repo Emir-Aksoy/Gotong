@@ -543,6 +543,12 @@ importers:
         specifier: ^4.7.0
         version: 4.22.0
 
+  examples/reallife-oauth:
+    dependencies:
+      '@gotong/identity':
+        specifier: workspace:*
+        version: link:../../packages/identity
+
   examples/remote-agent:
     dependencies:
       '@gotong/core':

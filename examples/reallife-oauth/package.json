@@ -1,0 +1,14 @@
+{
+  "name": "@gotong/example-reallife-oauth",
+  "version": "0.0.0",
+  "type": "module",
+  "private": true,
+  "description": "C-M2 capstone (接入现实生活 track) — 「用 Google 登录」把日历接给你的 AI,令牌自动保鲜. The whole outbound-OAuth chain in one deterministic run, no network, no API key: register a Google Calendar connector → begin (real PKCE + native scope, no openid, access_type=offline) → callback exchanges the code and the token lands VAULT-ENCRYPTED (raw DB asserted secret-free) → the M4a injection seam resolves ${OAUTH_ACCESS_TOKEN} to that connector's LIVE bearer for its MCP server → the clock jumps past expiry, the refresh grant swaps in a new token, and the SAME seam now yields the fresh one — connect once, stays fresh, reborn = fresh. Real @gotong/identity M1 core + M2 vault store underneath; only the token endpoint is faked.",
+  "scripts": {
+    "start": "tsx src/demo.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@gotong/identity": "workspace:*"
+  }
+}

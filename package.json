@@ -57,6 +57,7 @@
     "demo:cross-hub-workflow": "pnpm --filter @gotong/example-cross-hub-workflow start",
     "demo:cross-hub-federation": "pnpm --filter @gotong/example-cross-hub-federation start",
     "demo:butler-cross-hub": "pnpm --filter @gotong/example-butler-cross-hub start",
+    "demo:reallife-oauth": "pnpm --filter @gotong/example-reallife-oauth start",
     "demo:a2a-workflow-step": "pnpm --filter @gotong/example-a2a-workflow-step start",
     "demo:a2a-long-running-step": "pnpm --filter @gotong/example-a2a-long-running-step start",
     "demo:tea-supply-link": "pnpm --filter @gotong/example-tea-supply-link start",
