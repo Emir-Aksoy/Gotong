@@ -10,6 +10,12 @@ export type ButlerErrorCode =
   | 'no_governed_tools'
   /** Two governed tool specs share a name — `callTool` would mis-route. */
   | 'duplicate_governed_tool'
+  /** Task notebook (TN-M1): the referenced task doesn't exist or is closed. */
+  | 'task_note_not_found'
+  /** Task notebook (TN-M1): bad input (empty / too long / bad step index). */
+  | 'task_note_invalid'
+  /** Task notebook (TN-M1): an explicit cap refused the op (no silent caps). */
+  | 'task_note_limit'
 
 export class ButlerError extends Error {
   readonly code: ButlerErrorCode

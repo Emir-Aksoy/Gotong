@@ -39,3 +39,18 @@ export {
   PersonalButlerAgent,
   type PersonalButlerAgentOptions,
 } from './agent.js'
+
+export {
+  openTaskNotebook,
+  createTaskNotebookToolset,
+  composeContextProbes,
+  TASK_NOTEBOOK_LIMITS,
+  type TaskNotebook,
+  type TaskNote,
+  type TaskNoteStep,
+  type OpenTaskNotebookOptions,
+  type OpenTaskNoteInput,
+  type UpdateTaskNoteInput,
+  type ButlerContextProbe,
+  type TaskNotebookLogger,
+} from './task-notebook.js'

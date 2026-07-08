@@ -23,9 +23,17 @@
  * degradation as before the extraction).
  */
 
+import { join } from 'node:path'
+
 import type { Hub, Logger } from '@gotong/core'
 import type { LlmProvider } from '@gotong/llm'
-import { PersonalButlerAgent } from '@gotong/personal-butler'
+import {
+  PersonalButlerAgent,
+  composeContextProbes,
+  createTaskNotebookToolset,
+  openTaskNotebook,
+} from '@gotong/personal-butler'
+import { ownerDir } from '@gotong/service-memory-file'
 
 import type { AdminHealthSurface } from './admin-health.js'
 import { createButlerRouter } from './butler-router.js'
@@ -171,6 +179,17 @@ export function buildButlerFactory(deps: ButlerFactoryDeps): ButlerFactory {
         // that can park the task for a /me approval.
         const memory = openButlerMemory({ rootDir: memoryRoot, userId, logger: log })
         const recallIndex = openButlerRecallIndex({ rootDir: memoryRoot, userId, logger: log })
+        // TN-M1 — the member's task notebook: cross-turn mission ledger, file
+        // next to the user's jsonl (same `ownerDir` safety as STATUS.md). The
+        // 4 list-editing tools are benign (same class as `set_reminder` —
+        // editing your own list touches nobody else); its per-turn digest joins
+        // the CARE-M4 probe below so each turn the model reads "where we are"
+        // instead of holding the plan in its own context.
+        const taskNotebook = openTaskNotebook({
+          file: join(ownerDir(memoryRoot, { kind: 'user', id: userId }), 'tasks.json'),
+          logger: log,
+        })
+        const taskNotebookToolset = createTaskNotebookToolset(taskNotebook)
         const { tools, ...rest } = base
         // BF-M7 — the per-user governed action set, scoped to THIS member (the
         // executor's RBAC keys off `userId`). Built only when the flag is on AND
@@ -327,6 +346,7 @@ export function buildButlerFactory(deps: ButlerFactoryDeps): ButlerFactory {
           ...(planWizardToolset ? [planWizardToolset] : []),
           ...(consolidateToolset ? [consolidateToolset] : []),
           remindersToolset,
+          taskNotebookToolset,
           ...(dailyBriefToolset ? [dailyBriefToolset] : []),
           ...(runBroadcastToolset ? [runBroadcastToolset] : []),
           ...(profileToolset ? [profileToolset] : []),
@@ -363,17 +383,20 @@ export function buildButlerFactory(deps: ButlerFactoryDeps): ButlerFactory {
           captureMeta: { userId },
           ...(benign.length > 0 ? { benign } : {}),
           ...(governed.length > 0 ? { governed } : {}),
-          // CARE-M4 — per-turn zero-LLM injection: 现状卡 while gaps exist and
-          // onboarding isn't done, otherwise一字不注入 (the probe decides).
-          ...(deps.onboarding
-            ? {
-                contextProbe: buildButlerOnboardingProbe({
+          // CARE-M4 probe slot, composed (TN-M1): the onboarding 现状卡 (when
+          // wired) leads, then the task-notebook recitation digest. Both parts
+          // decide per turn; no onboarding gaps + no open tasks → null → the
+          // prompt stays byte-identical to today.
+          contextProbe: composeContextProbes(
+            deps.onboarding
+              ? buildButlerOnboardingProbe({
                   stateFile: deps.onboarding.stateFile,
                   health: deps.onboarding.health,
                   logger: log,
-                }),
-              }
-            : {}),
+                })
+              : undefined,
+            () => taskNotebook.digest(),
+          ),
         })
       },
     })
