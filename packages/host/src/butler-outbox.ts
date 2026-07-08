@@ -9,7 +9,9 @@
  * 这层把 push 包成一个 file-first 的每成员队列:push 失败就把这行追加到
  * `<dir>/<userId>.json`;等成员下次跟我们说话(record → flush)或 cadence 巡检
  * (桥恢复了但成员没吭声)时重投。投达的行删掉;FIFO,一次 flush **停在第一个
- * 失败**上以保住顺序(跨重试仍有序)。
+ * 失败**上以保住顺序(跨重试仍有序)。flush 每投达一条就**立刻落盘**缩短队列——
+ * 投递与落盘无法原子,逐条 checkpoint 把进程中途崩溃的重投窗口从「整批」收到
+ * 「1 条」(at-least-once 下最小重复面)。
  *
  * 有界(一个永远失联的成员不能把文件撑爆):每成员队列上限 MAX_QUEUE(超了丢最
  * 旧、大声记),flush 时超过 MAX_AGE_MS 的行丢弃(一条一天前的「坏了」比沉默更糟
@@ -99,7 +101,8 @@ export class ButlerOutbox {
 
   /**
    * 重投某成员的队列。FIFO,停在第一个失败(顺序跨重试保住);投前先丢弃超
-   * TTL 的行。空队列 = no-op(常态,零成本)。
+   * TTL 的行;**每投达一条即落盘**(崩溃窗口 = 1 条,见类头)。空队列 =
+   * no-op(常态,零成本)。
    */
   async flush(userId: string): Promise<void> {
     await this.withLock(userId, async () => {
@@ -118,8 +121,16 @@ export class ButlerOutbox {
         if (!r.delivered) break // 还是不可达 —— 剩下的留到下次 flush
         remaining.shift()
         delivered++
+        // 每投达一条就立刻把缩短后的队列落盘:投递(IM 发送)与落盘无法原子,
+        // 若只在整个循环后写一次,进程在投递中途崩溃 → 盘上仍是整批 → 重启后
+        // 已投达的那几条全部重投(audit P2 崩溃窗口重复)。逐条落盘把崩溃窗口
+        // 从「整批」收到「1 条」——at-least-once 下能达到的最小重复面。
+        await this.write(userId, remaining)
       }
-      if (delivered > 0 || expired > 0) await this.write(userId, remaining)
+      // 一条没投达、但 TTL 丢了行 —— 循环里没写过盘,这里补一次把裁剪落定
+      // (否则过期行每次 flush 重丢、日噪,崩溃后过期判断还得重来)。投达 ≥1 时
+      // 循环内最后一次 write 已含 TTL 裁剪,无需再写。
+      if (delivered === 0 && expired > 0) await this.write(userId, remaining)
       if (delivered > 0) {
         this.log.info('butler outbox: flushed', { userId, delivered, remaining: remaining.length })
       }

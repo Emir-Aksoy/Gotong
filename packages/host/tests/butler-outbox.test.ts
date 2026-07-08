@@ -142,6 +142,40 @@ describe('ButlerOutbox (CARE-M8)', () => {
     expect(raw.map((it: { text: string }) => it.text)).toEqual(['b', 'c'])
   })
 
+  it('flush: persists after EACH delivery so a mid-flush crash re-sends at most one item (audit P2)', async () => {
+    // Five queued lines. The bridge delivers the first two, then push THROWS on
+    // the third (a transport fault / process crash mid-flush). The old code
+    // persisted the shrunken queue only AFTER the whole loop, so a throw skipped
+    // the write entirely → disk still held all five → 'a'/'b' would re-send on the
+    // next flush (duplicate). Per-delivery checkpointing must leave disk at [c,d,e].
+    const delivered: string[] = []
+    let flushCall = 0
+    let reachable = false
+    const push = async (_userId: string, text: string): Promise<ButlerPushResult> => {
+      // Enqueue phase: everything fails so all five land on disk.
+      if (!reachable) return { delivered: false, reason: 'no_bridge' }
+      // Flush phase: deliver a, b; crash on the third (c).
+      flushCall++
+      if (flushCall === 3) throw new Error('boom mid-flush')
+      delivered.push(text)
+      return { delivered: true }
+    }
+    const outbox = new ButlerOutbox({ dir, push, logger: new LoggerHolder().log })
+
+    for (const t of ['a', 'b', 'c', 'd', 'e']) await outbox.deliver(USER, t)
+    expect(await outbox.pending(USER)).toBe(5)
+
+    reachable = true
+    await expect(outbox.flush(USER)).rejects.toThrow('boom mid-flush')
+
+    // Only a and b were delivered; the crash never re-sends them because the queue
+    // was shrunk to [c, d, e] on disk before the throw.
+    expect(delivered).toEqual(['a', 'b'])
+    expect(await outbox.pending(USER)).toBe(3) // old code: 5
+    const raw = JSON.parse(await readFile(join(dir, `${USER}.json`), 'utf8'))
+    expect(raw.map((it: { text: string }) => it.text)).toEqual(['c', 'd', 'e'])
+  })
+
   it('cap: queue full drops the OLDEST and warns loudly', async () => {
     const cap = new LoggerHolder()
     const push = new PushController()
