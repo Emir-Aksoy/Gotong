@@ -4,12 +4,18 @@
  * Implements {@link MemoryHandle} backed by jsonl files. One handle
  * per (plugin, owner); the Hub guarantees this.
  *
- * Concurrency: all writes from one handle are serialized through a
- * single promise chain. `fs.appendFile` on POSIX is atomic up to
- * PIPE_BUF (typically 4096 bytes), but a `MemoryEntry` can exceed
- * that — the serialization is what makes "two concurrent remembers
- * from the same agent" safe. Reads are unsynchronised; readers
- * tolerate a tail of half-written bytes (parsing skips bad lines).
+ * Concurrency: all writes to one OWNER are serialized through a single
+ * PROCESS-WIDE promise chain keyed by the owner dir — NOT a per-handle chain.
+ * The same owner is often written through more than one handle at once (the
+ * resident butler's live captures, the 6h maintenance sweep's distillation, the
+ * on-demand consolidate tool), and a full-file `forget`/`patchMeta` rewrite from
+ * one handle would otherwise clobber a concurrent `appendFile` from another —
+ * silent memory loss (audit P1). Sharing the chain by owner makes every writer
+ * to a given member serialize. `fs.appendFile` on POSIX is atomic up to PIPE_BUF
+ * (~4096 bytes) but a `MemoryEntry` can exceed that, so the chain also makes
+ * "two concurrent remembers" safe. Reads are unsynchronised; with tmp+rename
+ * rewrites they never observe a half-written file (parsing still skips bad lines
+ * from a legacy tail).
  */
 
 import {
@@ -22,6 +28,7 @@ import {
   stat,
   writeFile,
 } from 'node:fs/promises'
+import { resolve } from 'node:path'
 import type { Logger } from '@gotong/core'
 import type {
   MemoryEntry,
@@ -41,6 +48,27 @@ const RECALL_MAX_K = 200
 const LIST_DEFAULT_LIMIT = 100
 const LIST_MAX_LIMIT = 500
 
+/**
+ * Process-wide write chains keyed by resolved owner dir. EVERY `MemoryFileHandle`
+ * to the same owner serializes through the SAME chain (see the file header). A
+ * settled promise is tiny, so the map growing by distinct-owner count is fine.
+ */
+const ownerWriteChains = new Map<string, Promise<unknown>>()
+
+/** A per-process-unique tmp sibling so a rewrite's tmp never collides. */
+let tmpSeq = 0
+function uniqueTmp(path: string): string {
+  tmpSeq = (tmpSeq + 1) % 1_000_000_000
+  return `${path}.tmp.${process.pid}.${tmpSeq}`
+}
+
+/** Atomically replace `path`'s contents (tmp+rename): a crash never leaves half a file. */
+async function writeFileAtomic(path: string, data: string): Promise<void> {
+  const tmp = uniqueTmp(path)
+  await writeFile(tmp, data, 'utf8')
+  await rename(tmp, path)
+}
+
 export interface MemoryFileHandleOpts {
   rootDir: string
   owner: Owner
@@ -56,8 +84,8 @@ export class MemoryFileHandle implements MemoryHandle {
   private readonly config: MemoryFileConfig
   private readonly logger: Logger
   private readonly now: () => number
-  /** Serialize per-handle writes. Reads don't queue. */
-  private writeChain: Promise<unknown> = Promise.resolve()
+  /** Stable key into {@link ownerWriteChains} — resolved so spellings agree. */
+  private readonly chainKey: string
 
   constructor(opts: MemoryFileHandleOpts) {
     this.rootDir = opts.rootDir
@@ -65,6 +93,7 @@ export class MemoryFileHandle implements MemoryHandle {
     this.config = opts.config
     this.logger = opts.logger.child({ owner: ownerLabel(opts.owner) })
     this.now = opts.now ?? Date.now
+    this.chainKey = resolve(ownerDir(this.rootDir, this.owner))
   }
 
   async recall(query: MemoryQuery): Promise<MemoryEntry[]> {
@@ -145,7 +174,7 @@ export class MemoryFileHandle implements MemoryHandle {
           remaining.push(line)
         }
         if (removed) {
-          await writeFile(path, remaining.join('\n') + (remaining.length > 0 ? '\n' : ''), 'utf8')
+          await writeFileAtomic(path, remaining.join('\n') + (remaining.length > 0 ? '\n' : ''))
           return
         }
       }
@@ -185,7 +214,7 @@ export class MemoryFileHandle implements MemoryHandle {
           lines.push(line)
         }
         if (patched) {
-          await writeFile(path, lines.join('\n') + '\n', 'utf8')
+          await writeFileAtomic(path, lines.join('\n') + '\n')
           return true
         }
       }
@@ -206,10 +235,15 @@ export class MemoryFileHandle implements MemoryHandle {
 
   // --- internals ----------------------------------------------------
 
-  /** Wait for the current write to finish, run `fn`, chain the next. */
+  /**
+   * Wait for any in-flight write to THIS OWNER (from any handle) to finish, run
+   * `fn`, then chain the next. Shared across handles so concurrent subsystems
+   * never clobber each other's file rewrites.
+   */
   private serializeWrite<T>(fn: () => Promise<T>): Promise<T> {
-    const next = this.writeChain.then(fn, fn)
-    this.writeChain = next.then(noop, noop)
+    const prev = ownerWriteChains.get(this.chainKey) ?? Promise.resolve()
+    const next = prev.then(fn, fn)
+    ownerWriteChains.set(this.chainKey, next.then(noop, noop))
     return next
   }
 
@@ -249,9 +283,7 @@ export class MemoryFileHandle implements MemoryHandle {
     const lines = raw.split('\n').filter((l) => l.length > 0)
     const keep = Math.max(1, Math.floor(lines.length / 2))
     const kept = lines.slice(-keep)
-    const tmp = path + '.tmp'
-    await writeFile(tmp, kept.join('\n') + '\n', 'utf8')
-    await rename(tmp, path)
+    await writeFileAtomic(path, kept.join('\n') + '\n')
     this.logger.info('truncated oversized memory file', {
       kind, sizeBefore: size, kept: keep, dropped: lines.length - keep,
     })

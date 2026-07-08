@@ -169,6 +169,36 @@ describe('concurrent writes are serialised (no jsonl corruption)', () => {
   })
 })
 
+describe('cross-handle writes to one owner serialize (audit P1 — no lost update)', () => {
+  it('a full-file forget on one handle never clobbers concurrent appends from another', async () => {
+    // TWO handles, SAME owner — mirrors the resident butler (live captures) and
+    // the 6h maintenance sweep (distillation forget) each holding their own handle.
+    const a = newHandle()
+    const b = newHandle()
+
+    const seeded = []
+    for (let i = 0; i < 20; i++) {
+      seeded.push(await a.remember({ kind: 'episodic', text: `seed-${i}` }))
+    }
+    const victimId = seeded[10]!.id
+
+    // A rewrites the whole file (forget) while B appends 20 entries. Before the
+    // shared-owner chain, A's rewrite — computed from a snapshot taken before
+    // B's appends — would silently drop whichever appends landed mid-rewrite.
+    await Promise.all([
+      a.forget(victimId),
+      ...Array.from({ length: 20 }, (_, i) => b.remember({ kind: 'episodic', text: `live-${i}` })),
+    ])
+
+    const all = await a.list({ kind: 'episodic', limit: 500 })
+    expect(all).toHaveLength(39) // 20 seeded − 1 forgotten + 20 live appends
+    expect(all.some((e) => e.id === victimId)).toBe(false) // the forgotten one is gone
+    for (let i = 0; i < 20; i++) {
+      expect(all.some((e) => e.text === `live-${i}`)).toBe(true) // every append survived
+    }
+  })
+})
+
 describe('owner isolation', () => {
   it('two owners do not see each other', async () => {
     const h1 = new MemoryFileHandle({
