@@ -84,7 +84,7 @@
     "check:onboarding": "node scripts/local-onboarding-check.mjs",
     "check:first-result": "node scripts/first-result-smoke.mjs",
     "check:templates": "pnpm -C packages/web exec vitest run tests/all-templates-parse.test.ts",
-    "check:memory-recall": "pnpm -C packages/personal-memory exec vitest run tests/memory-recall-bench.test.ts",
+    "check:memory-recall": "pnpm -C packages/personal-memory exec vitest run tests/memory-recall-bench.test.ts tests/memory-consolidation.test.ts",
     "check:kernel-deps": "node scripts/kernel-deps-gate.mjs",
     "check:env-registry": "node scripts/env-registry-gate.mjs",
     "check:line-budget": "node scripts/line-budget-gate.mjs",

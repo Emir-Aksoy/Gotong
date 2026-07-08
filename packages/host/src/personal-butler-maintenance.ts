@@ -15,13 +15,22 @@
  *
  * # What one tick does, per member
  *
- * For every `<rootDir>/user/<userId>/` namespace on disk it fires ONE
- * maintenance reviewer:
+ * For every `<rootDir>/user/<userId>/` namespace on disk it fires the maintenance
+ * reviewer:
  *
  *   statusProjectingReviewer({                      // ④写状态 → STATUS.md (/me sees it)
  *     statusFile,
- *     inner: tieredReviewer({ summarize, budgetBytes? }),  // 蒸馏 episodic→cluster→profile
+ *     inner: composeReviewers(
+ *       tieredReviewer({ summarize, budgetBytes? }),  // 蒸馏 episodic→cluster→profile
+ *       atomicFactsReviewer({ summarize }),           // MU-M3 抽取自包含原子事实
+ *     ),
  *   })
+ *
+ * MU-M3 note: the 6h pass now makes TWO model calls (distillation + atomic fact
+ * extraction), both on the butler's own model, both 6h-BACKGROUND — the per-turn
+ * hot path is still zero-LLM. The extraction writes self-contained facts so a
+ * later category query 「饮料」 can hit 「用户最爱的饮料是珍珠奶茶」, closing the
+ * true-synonym gap the retriever alone can't (MU-M1's `semantic` category).
  *
  * Deliberately LEAN vs. the MR4 example composition: the butler's default memory
  * config omits `working` scratch and doesn't auto-author procedures yet, so
@@ -57,6 +66,8 @@ import { join } from 'node:path'
 import type { Logger } from '@gotong/core'
 import { drainStream, type LlmProvider } from '@gotong/llm'
 import {
+  atomicFactsReviewer,
+  composeReviewers,
   tieredReviewer,
   type MemoryReviewer,
   type MemorySummarizer,
@@ -125,11 +136,20 @@ export function buildButlerMaintenanceReviewer(
 ): MemoryReviewer {
   return statusProjectingReviewer({
     statusFile: opts.statusFile,
-    inner: tieredReviewer({
-      summarize: opts.summarize,
-      ...(opts.tierConfig ? { config: opts.tierConfig } : {}),
-      ...(opts.budgetBytes !== undefined ? { budgetBytes: opts.budgetBytes } : {}),
-    }),
+    // MU-M3 — the 6h pass now does TWO things on the butler's own model: cluster
+    // distillation (tiered) AND atomic fact extraction. The extraction writes
+    // self-contained facts (「用户最爱的饮料是珍珠奶茶」) so a later category query
+    // 「饮料」 hits them — closing the true-synonym gap the retriever alone can't.
+    // Both are 6h background calls; the per-turn hot path stays zero-LLM. Runs
+    // AFTER tiered so its dedup sees the fresh cluster profiles too.
+    inner: composeReviewers(
+      tieredReviewer({
+        summarize: opts.summarize,
+        ...(opts.tierConfig ? { config: opts.tierConfig } : {}),
+        ...(opts.budgetBytes !== undefined ? { budgetBytes: opts.budgetBytes } : {}),
+      }),
+      atomicFactsReviewer({ summarize: opts.summarize }),
+    ),
   })
 }
 

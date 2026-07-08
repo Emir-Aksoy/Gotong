@@ -6,9 +6,10 @@
 > 差距不在骨架,在**检索质量**(多信号/知识图谱)和**可测性**(零 benchmark)。
 > 本 track 补这两块,延续 MR1–4 记忆里程碑。
 >
-> Last updated: 2026-07-08 · M0–M2 完(M1 立尺 benchmark 承重门;M2 融合召回把
-> MRR 从 0.548 抬到 0.738、已成管家默认 recall,零新旋钮);M3 实体抽取 / M4 外部
-> provider / M5 git 快照 / capstone 待做。
+> Last updated: 2026-07-08 · M0–M3 完(M1 立尺 benchmark 承重门;M2 融合召回把
+> MRR 从 0.548 抬到 0.738、已成管家默认 recall,零新旋钮;M3 原子事实抽取把 semantic
+> 类 recall 从 0 抬到 100%、已并进 6h 蒸馏,零新旋钮);M4 外部 provider / M5 git
+> 快照 / capstone 待做。
 
 ---
 
@@ -52,9 +53,10 @@ dreaming、程序技能。但两处短板在退:
 
 ## 三、四条不可破边界(与宪章一致)
 
-1. **框架仍不跑 LLM**。整条链唯一的 LLM 调用仍是 **6h 蒸馏**(M3 是升级它,不新增
-   热路径 LLM);M2 融合里的 embedding 走**注入/本地确定性**、keyword 与实体是纯
-   函数。捕获(每轮)永远零模型。
+1. **框架仍不跑 LLM**。所有 LLM 调用仍只在 **6h 后台维护**里发生;M3 后那一趟维护
+   做**两次**模型调用(既有 tieredReviewer 分簇蒸馏 + 新增 atomicFactsReviewer 原子事实
+   抽取,`composeReviewers` best-effort 串联),但**都是 6h 背景、每轮热路径仍零 LLM**。
+   M2 融合里的 embedding 走**注入/本地确定性**、keyword 是纯函数。捕获(每轮)永远零模型。
 
 2. **字节不变 binds 冻结块 + 有门槛项**(M2 拍板细化)。「不启用=逐字节一致」的硬
    保证锁两处:①**冻结块**永远字节稳定(prompt-cache 前缀契约,融合只骑 recall 路径
@@ -84,7 +86,10 @@ dreaming、程序技能。但两处短板在退:
 Embed     Embedder=(texts)=>number[][],注入式 —— M2 默认 localBigramEmbedder(纯 TF,
           零依赖零网络);M4 把它换成真 embedding provider,同一 fusedRetriever 即获
           真语义桥接。
-蒸馏缝    tieredReviewer(6h 维护里那次唯一 LLM 调用)—— M3 升级/并列成原子事实抽取。
+蒸馏缝    tieredReviewer(6h 维护里的分簇蒸馏)—— M3 **并列**一个 atomicFactsReviewer
+          原子事实抽取(单遍法,Mem0 式),经 composeReviewers 串进同一趟维护。
+          ✅ M3:抽取「用户最爱的饮料是珍珠奶茶」这类**含类别词+具体词**的自足事实,
+          semantic 类 recall 0→100%(不改检索器,改的是库里有什么给检索器找)。
 量尺      packages/personal-memory 召回 benchmark(纯 harness,零 key)—— M1 挂
           check:memory-recall(vitest 门,镜像 check:templates)。注意不进
           packages/evals:evals 是「结构合规」检查器(自述 Not a benchmark suite
@@ -100,7 +105,7 @@ Embed     Embedder=(texts)=>number[][],注入式 —— M2 默认 localBigramEmb
 | **MU-M0** | —— | 本计划文档 + 侦察(三缝确认) | 计划 |
 | **MU-M1** | ② benchmark | `packages/personal-memory` 召回 benchmark(纯 harness + 14 例双语 fixture)+ `pnpm check:memory-recall`,钉住 keyword 基线 recall@5=78.6% / MRR=0.548(棘轮地板只升不降) | **完** |
 | **MU-M2** | ① 多信号融合 | `fusedRetriever`(keyword ⊕ 本地 TF cosine,relative-score 融合)+ 本地确定性 embedder + factory 接线成默认;MRR 0.548→0.738(cross-session 0.333→1.0),recall 不变、semantic 仍 0(本地天花板) | **完** |
-| **MU-M3** | ④ 实体抽取 | 6h 蒸馏升级原子事实抽取(单遍法,agent=用户同权)+ 去重 reconcile;M1 分数再抬 | 计划 |
+| **MU-M3** | ④ 实体抽取 | 6h 蒸馏并列 `atomicFactsReviewer`(单遍法,含类别词+具体词的自足事实)+ relevanceScore 去重(跨 pass + pass 内);semantic 类 recall@5 0→100% | **完** |
 | **MU-M4** | ⑤ 外部 provider | opt-in Mem0-as-backend 走 retriever 缝 + MCP + 连接器目录;凭证 vault + 离盒告知(Zep 按需再加) | 计划 |
 | **MU-M5** | ③ git 背书 | 6h 维护里记忆树周期 git 快照(**轻量**,用户拍板 A=a);审计历史零热路径成本 | 计划 |
 | **MU-capstone** | —— | `examples/memory-upgrade`:同组事实纯 keyword vs 融合+抽取,recall@k 明显变好;self-assert exit 0 + 文档收尾 | 计划 |
@@ -215,6 +220,55 @@ embedder 的单测证明 **M4 缝**能桥接(饮料↔奶茶映同轴 → 金标
 干净;host 1919 全绿(factory + recall-index 改动零 ripple)/typecheck/build 干净;四门
 PASS(`check:guards`:**旋钮仍 106**、line-budget main.ts 2990/2990 不动——融合落在非预算
 文件)+ `check:memory-recall` 锁 fused 地板 {recall@5≥0.785, MRR≥0.737}。内核零改动。
+
+### MU-M3 —— 原子事实抽取(把检索器够不到的同义词,蒸馏成够得到的事实)
+
+**缺口**:M1 的 `semantic` 类 **recall 恒 0**,M2 也抬不动——keyword 与本地字符
+embedder(哪怕融合)**都桥不了真同义词**:query 「饮料」和答案 「珍珠奶茶」**零共享字**,
+没有任何词法/字符信号能把它俩连起来。这不是检索器不够聪明,是**库里根本没有一条同时
+带「饮料」和「珍珠奶茶」的记忆**。
+
+**做法(Mem0 式单遍抽取,改的是「库里有什么」不是「检索器多聪明」)**:6h 维护里
+**并列**一个 `atomicFactsReviewer`,从最近 episodic 抽出**自足事实**——每条**同时带类别词
+和具体值**:「用户最爱的饮料是珍珠奶茶」而不是「珍珠奶茶」。这样类别 query 「饮料」直接
+命中这条桥接事实,答案(珍珠奶茶)就在事实文本里被顺带召回。这正是 Mem0 的洞见:抽成
+**能独立召回**的原子事实。
+
+**关键设计**:
+- **6h 背景、每轮零 LLM**。抽取是个 `MemoryReviewer`,复用注入的 `MemorySummarizer` 缝
+  (叶子永不 import LLM,跟 `consolidate`/`tieredReviewer` 同姿态)。M3 后那趟维护做**两次**
+  模型调用(分簇蒸馏 + 事实抽取,`composeReviewers` best-effort 串联),**但都是背景**——
+  热路径捕获仍纯抽取零模型(边界 1 细化:2 次调用都在 6h 里)。
+- **自足形状是 benchmark 检查的属性**。prompt 强制「类别词+具体值」——坏例子「珍珠奶茶」
+  (缺类别,单独召回不知在讲什么)被规则明令排除。这个形状就是后续类别 query 的重叠面。
+- **去重不花第二次模型调用**。新事实用 `relevanceScore`(词法覆盖度≥0.8)对**已存 semantic**
+  查重(稳定事实不每 6h 重写一遍)+ 对**本 pass 已接受的**查重(模型吐重复行也只落一条);
+  写入打 `meta.atomicFact` 出处标记(OpenClaw「召回知道记忆从哪来」)。
+- **agent 说的与用户说的同权**(Mem0 单遍法:transcript 是源,谁说的都抽)。
+- **安静**:episodic 不够 trigger(默认 4)、或模型抽不出东西 → 返回 idle 不打扰 heartbeat;
+  parseFacts 纯函数剥项目符号/编号、丢空行与超 200 字的段落、封顶每 pass 12 条防跑飞。
+
+**接线**:leaf `atomicFactsReviewer`;host `personal-butler-maintenance.ts` 的
+`buildButlerMaintenanceReviewer` 内层从 `tieredReviewer({...})` 改成
+`composeReviewers(tieredReviewer({...}), atomicFactsReviewer({ summarize }))`——同一趟 6h
+维护、同一个注入 summarizer。**零新旋钮、零 host 装配层行数**(改的是既有 reviewer 组合)。
+
+**测得抬升(蒸馏承重门,确定性无 LLM)**:
+
+```
+semantic 类 recall@5:  0%  →  100%   (饮料→珍珠奶茶 / 宠物→大黄 / electric vehicle→Tesla)
+```
+
+`tests/memory-consolidation.test.ts` 端到端量这个抬升:同一批 synonym query **蒸馏前
+recall 0**(只有 raw episodic + 类别词诱饵,query 够不到具体答案),跑一次
+`atomicFactsReviewer`(固定 summarizer,零 LLM)写入 3 条桥接事实后,**同批 query recall 1**。
+这是纯检索 bench 的诚实补充——**M3 不改检索器**(bench 的 keyword/fused 地板一字不动),
+改的是**库里有什么给检索器找**。
+
+**验收**:personal-memory 400 单测全绿(+7:6 atomic-facts + 1 蒸馏门)/typecheck/build
+干净;host 1919 全绿(6h 维护 composeReviewers 改动,11 个 maintenance/consolidate e2e 测试
+全过)/typecheck 干净;四门 PASS(`check:guards`:**旋钮仍 106**、line-budget 三热文件不动)+
+`check:memory-recall` 现同时跑 bench 地板 + 蒸馏抬升门。内核(core/workflow/protocol)零改动。
 
 ## 七、相关文档
 

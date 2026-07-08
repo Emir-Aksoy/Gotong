@@ -183,6 +183,18 @@ export {
 } from './clean-outputs.js'
 export { relevanceScore, extractTerms } from './relevance.js'
 export {
+  atomicFactsReviewer,
+  parseFacts,
+  isAtomicFact,
+  META_ATOMIC_FACT,
+  DEFAULT_ATOMIC_FACTS_SYSTEM,
+  DEFAULT_ATOMIC_FACTS_TRIGGER_ENTRIES,
+  DEFAULT_FACT_DEDUP_THRESHOLD,
+  DEFAULT_MAX_FACTS_PER_PASS,
+  ATOMIC_FACTS_RECALL_WINDOW,
+  type AtomicFactsReviewerOptions,
+} from './atomic-facts.js'
+export {
   linkRelated,
   linksOf,
   mergeLinks,
