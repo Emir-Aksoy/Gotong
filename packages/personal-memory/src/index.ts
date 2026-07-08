@@ -48,6 +48,15 @@ export {
   type InvertedIndexSnapshot,
 } from './inverted-index.js'
 export {
+  scoreRetriever,
+  formatBenchResult,
+  type RecallCase,
+  type RecallCategory,
+  type RetrieverFactory,
+  type CaseScore,
+  type BenchResult,
+} from './benchmark.js'
+export {
   MemoryAugmentedAgent,
   type MemoryAugmentedAgentOptions,
 } from './agent.js'

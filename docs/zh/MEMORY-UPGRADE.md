@@ -6,8 +6,9 @@
 > 差距不在骨架,在**检索质量**(多信号/知识图谱)和**可测性**(零 benchmark)。
 > 本 track 补这两块,延续 MR1–4 记忆里程碑。
 >
-> Last updated: 2026-07-08 · 计划中(M0 本文档;M1 benchmark / M2 融合召回 /
-> M3 实体抽取 / M4 外部 provider / M5 git 快照 / capstone 待做)。
+> Last updated: 2026-07-08 · M0–M1 完(M1 召回 benchmark 承重门已挂,keyword
+> 基线 recall@5=78.6% / MRR=0.548 已钉);M2 融合召回 / M3 实体抽取 / M4 外部
+> provider / M5 git 快照 / capstone 待做。
 
 ---
 
@@ -75,8 +76,10 @@ dreaming、程序技能。但两处短板在退:
 Embed     embeddingRetriever({ embed: Embedder })  —— Embedder=(texts)=>number[][],
           注入式;M2 默认本地确定性 embed,可换 provider。
 蒸馏缝    tieredReviewer(6h 维护里那次唯一 LLM 调用)—— M3 升级/并列成原子事实抽取。
-量尺      packages/evals + scripts/*.mjs 承重门(镜像 check:first-result)—— M1 挂
-          check:memory-recall,确定性 mock provider,零 key。
+量尺      packages/personal-memory 召回 benchmark(纯 harness,零 key)—— M1 挂
+          check:memory-recall(vitest 门,镜像 check:templates)。注意不进
+          packages/evals:evals 是「结构合规」检查器(自述 Not a benchmark suite
+          for accuracy),尺子该跟检索器同包,retriever 在这里,benchmark 就在这里。
 落盘缝    <rootDir>/user/<userId>/ jsonl 树 —— M5 在 6h 维护里做周期 git 快照(轻量,
           非每写即 commit),per-user 隔离、缺 git 优雅降级。
 ```
@@ -86,7 +89,7 @@ Embed     embeddingRetriever({ embed: Embedder })  —— Embedder=(texts)=>numb
 | 里程碑 | 对应建议 | 交付 | 状态 |
 |---|---|---|---|
 | **MU-M0** | —— | 本计划文档 + 侦察(三缝确认) | 计划 |
-| **MU-M1** | ② benchmark | `packages/evals` 记忆召回小集 + `pnpm check:memory-recall`,钉住今天 keyword 基线分 | 计划 |
+| **MU-M1** | ② benchmark | `packages/personal-memory` 召回 benchmark(纯 harness + 14 例双语 fixture)+ `pnpm check:memory-recall`,钉住 keyword 基线 recall@5=78.6% / MRR=0.548(棘轮地板只升不降) | **完** |
 | **MU-M2** | ① 多信号融合 | `fusedRetriever`(keyword ⊕ semantic ⊕ 词法实体,RRF 融合)+ factory 接线;M1 分数抬升 | 计划 |
 | **MU-M3** | ④ 实体抽取 | 6h 蒸馏升级原子事实抽取(单遍法,agent=用户同权)+ 去重 reconcile;M1 分数再抬 | 计划 |
 | **MU-M4** | ⑤ 外部 provider | opt-in Mem0-as-backend 走 retriever 缝 + MCP + 连接器目录;凭证 vault + 离盒告知(Zep 按需再加) | 计划 |
@@ -98,7 +101,62 @@ Embed     embeddingRetriever({ embed: Embedder })  —— Embedder=(texts)=>numb
 
 ## 六、里程碑记录
 
-(逐里程碑收口时填。)
+### MU-M1 —— 召回 benchmark 承重门(先量后改的尺子)
+
+**为什么先做**:排序纪律「先量后改」。M2/M3/M4 都声称「召回变好」,但没有尺子 =
+无法证伪。M1 先把尺子立起来,后面每步拿同一把尺量抬升。
+
+**落哪**:**不进 `packages/evals`** —— 侦察时读了它,自述 "Not a benchmark suite
+for accuracy, we measure structural compliance",它只查工作流/prompt 的结构合规。
+尺子该跟被测对象同包:检索器(`invertedIndexRetriever` 等)在 `packages/personal-memory`,
+benchmark 就在这里,能直接复用真实检索器、零跨包耦合。
+
+**交付**:
+- **`src/benchmark.ts`** —— 纯 harness,零 LLM 零 key:`scoreRetriever(make, cases, k)`
+  对每例「用 corpus 建检索器 → 跑 query → 对金标算 recall@k + 倒数排名」,聚合出
+  `recall@k / MRR / 命中率 / 逐类`。关键设计:入参是**检索器工厂**(corpus→retriever),
+  M2 拿同一批 case 跑融合检索器,抬升当场可证。`formatBenchResult` 出逐类中文记分卡。
+- **`tests/fixtures/recall-cases.ts`** —— 14 例双语 LongMemEval/LoCoMo 风格 fixture,
+  时间戳全常量(无 `Date.now`,分数逐字节稳定),五类各压一种失败模式:
+  `direct`(词法直命中,钉 recall@5=MRR=1 防融合改动误伤易题)、`cross-session`
+  (金标**又老又聚焦**——反复提 query 词,新干扰只顺带提一次;keyword 覆盖度是粗二值
+  → 平票落到 recency → 聚焦金标被埋到第 4 名,recall@5 仍 1 = **纯排名空间**留给 M2 的
+  TF cosine 臂)、`temporal`(旧事实被 supersede,`activeOnly` 必须剔除,金标=当前事实)、
+  `multi-hop`(两条金标)、**`semantic`**(query 与金标**零共享词**:「饮料」vs「珍珠奶茶」、
+  "electric vehicle" vs "Tesla Model 3",且放**够多含 query 词的诱饵**把 top-k 占满 → 金标
+  被挤出 → keyword 与字符 embedder 都 recall 0,只有 M3/M4 能救)。
+- **`tests/memory-recall-bench.test.ts`** —— 承重门,跑**生产默认检索器**
+  (`invertedIndexRetriever` + `activeOnly`,与管家 factory 接线一致),锁地板。
+
+**测得的 keyword 基线(k=5)**:
+
+```
+recall@5=78.6%  MRR=0.548  命中率=78.6%
+  · direct         recall@5=100%   MRR=1.000  (3 例)
+  · cross-session  recall@5=100%   MRR=0.333  (4 例) ← 聚焦金标被 recency 埋到第 4,纯排名空间
+  · temporal       recall@5=100%   MRR=1.000  (2 例) ← activeOnly 剔除旧事实生效
+  · multi-hop      recall@5=100%   MRR=0.667  (2 例)
+  · semantic       recall@5=0.0%   MRR=0.000  (3 例) ← 真同义词,keyword 天生做不到
+```
+
+**这把尺子诚实在哪**:`semantic` 类 **recall 恒 0 是设计出来的**,不是 bug —— 字符
+重叠信号(连 M2 本地 embedder 都算)**无法桥接真同义词**。这正是后续里程碑各自要吃
+的空间:**M2**(多信号融合)吃 `cross-session` 的 **MRR**(term-frequency cosine 这个不同
+偏置的信号把聚焦金标从第 4 名提到第 1;recall@5 不变——本地信号扩不了召回,只重排);
+**M3**(蒸馏出「饮料=珍珠奶茶」这类含类别词+具体词的桥接事实)让 `semantic` 类 query 命中
+蒸馏出的原子事实;**M4**(真 embedding provider)不靠蒸馏直接跨语义。测试**显式断言
+`semantic.recallAtK === 0`**,把缺口钉成实测事实而非脚注。
+
+**棘轮方向**(镜像 line-budget-gate,反号):line-budget 锁天花板只降;准确率锁**地板
+只升**。地板常量 `{recallAtK:0.785, mrr:0.547, hitRate:0.785}`,M2/M3/M4 每步必须跑同
+fixture 并**抬高**这些常量来证明抬升;退化即红。**绝不为过门下调地板**。MRR 地板故意压
+得低(cross-session keyword MRR 只有 0.333),正是留给 M2 的排名空间。
+
+**验收**:personal-memory typecheck 干净 / 380 单测全绿(+4)/ build 干净;四门 PASS
+(`check:guards`:kernel-deps 6 不变式、env-registry **106 旋钮不变**、line-budget
+main.ts 2990/2990 不动)+ 新 `pnpm check:memory-recall` 绿。零新 env 旋钮、内核零改动
+(benchmark 是 personal-memory 叶子内纯函数,只 import services-sdk 类型 + `./retriever`
+类型)。
 
 ## 七、相关文档
 
