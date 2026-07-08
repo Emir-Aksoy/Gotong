@@ -20,9 +20,10 @@
  * `recall` tool, not poured into every prompt.
  */
 
-import type { MemoryHandle, MemoryKind } from '@gotong/services-sdk'
+import type { MemoryEntry, MemoryHandle, MemoryKind } from '@gotong/services-sdk'
 
 import { renderClusteredFrozenBlock, renderFrozenBlock } from './frozen-block.js'
+import { compareByImportanceThenRecency } from './importance.js'
 import type { TierConfig } from './tiers.js'
 
 export interface MemorySessionOptions {
@@ -32,8 +33,14 @@ export interface MemorySessionOptions {
   label?: string
   /** Kinds that seed the frozen block. Default `['semantic']`. */
   frozenKinds?: readonly MemoryKind[]
-  /** Max entries pulled for the block. Default 100. */
+  /** Max entries KEPT in the block, chosen by (importance, recency). Default 100. */
   frozenK?: number
+  /**
+   * How many candidate entries to pull from disk BEFORE selecting the top
+   * `frozenK` by (importance, recency). Larger than `frozenK` so a high-importance
+   * pin isn't evicted just for being old — see {@link DEFAULT_FROZEN_CANDIDATE_K}.
+   */
+  frozenCandidateK?: number
   /** Soft char cap for the rendered block body. Default 4000. */
   frozenMaxChars?: number
   /**
@@ -75,24 +82,32 @@ export interface MemorySessionOptions {
 
 const DEFAULT_FROZEN_KINDS: readonly MemoryKind[] = ['semantic']
 /**
- * Max entries pulled into the always-on block. This is a DELIBERATE CEILING, not
- * a growth bound: `semantic` memory can hold more than this, and when it does the
- * renderer keeps the top `frozenK` by (importance, recency) and notes the rest as
- * "(N lower-priority … omitted)". The omitted tail is NOT lost — it stays on disk
- * and the model reaches it on demand via the `recall` tool. Two other mechanisms
- * do the actual scaling: the `budgetReviewer` (decision F/D eviction) bounds how
- * much accrues on disk in the first place, and the pluggable embedding retriever
- * (decision C-M3) scales `recall` past the default O(n) lexical scan. So the
- * frozen block stays a small, byte-stable prompt prefix no matter how large the
- * store grows. See docs/zh/ledger/MEMORY-ADVANCED-FINAL.md §八.
+ * Max entries KEPT in the always-on block. A DELIBERATE CEILING, not a growth
+ * bound: `semantic` can hold more, and the block keeps the top `frozenK` by
+ * (importance, recency), noting the rest as "(N lower-priority … omitted)". The
+ * omitted tail is NOT lost — it stays on disk, reachable via the `recall` tool.
+ * See docs/zh/ledger/MEMORY-ADVANCED-FINAL.md §八.
  */
 const DEFAULT_FROZEN_K = 100
+/**
+ * Candidate window pulled from disk before the top-`frozenK` selection. It must
+ * be LARGER than `frozenK`: the store returns newest-first, so if we only pulled
+ * `frozenK` we'd pre-truncate by recency and a high-importance pin older than the
+ * newest `frozenK` entries would never reach the importance sort — silently
+ * evicted from the block despite being pinned (audit P2). Pulling a generous
+ * window first, THEN sorting by (importance, recency), keeps pins in. With the
+ * `budgetReviewer` byte cap bounding the store, this covers the whole store for
+ * a normal member; a pin beyond the newest `frozenCandidateK` is still on disk
+ * and recall-able, just not auto-frozen.
+ */
+const DEFAULT_FROZEN_CANDIDATE_K = 500
 
 export class MemorySession {
   private readonly memory: MemoryHandle
   private readonly label: string | undefined
   private readonly frozenKinds: readonly MemoryKind[]
   private readonly frozenK: number
+  private readonly frozenCandidateK: number
   private readonly frozenMaxChars: number | undefined
   private readonly tierConfig: TierConfig | undefined
   private readonly activeOnly: boolean
@@ -116,6 +131,10 @@ export class MemorySession {
     this.frozenKinds =
       opts.frozenKinds && opts.frozenKinds.length > 0 ? opts.frozenKinds : DEFAULT_FROZEN_KINDS
     this.frozenK = opts.frozenK ?? DEFAULT_FROZEN_K
+    this.frozenCandidateK = Math.max(
+      this.frozenK,
+      opts.frozenCandidateK ?? DEFAULT_FROZEN_CANDIDATE_K,
+    )
     this.frozenMaxChars = opts.frozenMaxChars
     this.tierConfig = opts.tierConfig
     this.activeOnly = opts.activeOnly ?? false
@@ -158,10 +177,18 @@ export class MemorySession {
     if (this.frozen !== null) return this.frozen
     if (this.pending) return this.pending
     this.pending = (async () => {
-      const entries = await this.memory.recall({
-        kinds: [...this.frozenKinds],
-        k: this.frozenK,
-      })
+      // Pull a GENEROUS candidate window per kind, then keep the top `frozenK`
+      // by (importance, recency). `recall({k})` alone would recency-truncate
+      // first and drop old pins before the importance sort ever sees them
+      // (audit P2). `list` gives the raw newest-N without recall's text/since
+      // filters — exactly the candidate set the block wants.
+      const candidates: MemoryEntry[] = []
+      for (const kind of this.frozenKinds) {
+        candidates.push(...(await this.memory.list({ kind, limit: this.frozenCandidateK })))
+      }
+      const entries = candidates
+        .sort(compareByImportanceThenRecency)
+        .slice(0, this.frozenK)
       const renderOpts = {
         ...(this.label !== undefined ? { label: this.label } : {}),
         ...(this.frozenMaxChars !== undefined ? { maxChars: this.frozenMaxChars } : {}),

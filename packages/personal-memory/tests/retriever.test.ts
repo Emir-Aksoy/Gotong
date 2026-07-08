@@ -126,8 +126,8 @@ describe('MemoryAugmentedAgent — memoryRetriever threads to the recall tool', 
     expect(retrieved).toHaveLength(1)
     expect(retrieved[0]!.text).toBe('oolong')
     // The frozen block used the HANDLE (curated semantic profile), proven by the
-    // handle's own recall having run at session warm-up.
-    expect(mem.recallCount).toBeGreaterThanOrEqual(1)
+    // handle's own `list` having run at session warm-up — NOT the retriever.
+    expect(mem.listCount).toBeGreaterThanOrEqual(1)
     // The injected vector hit fed back to the model (second request carries the tool result).
     expect(JSON.stringify(provider.requests[1]!.messages)).toContain('VECTOR: ordered oolong')
   })

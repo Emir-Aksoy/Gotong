@@ -15,14 +15,18 @@ import type {
 export interface FakeMemory extends MemoryHandle {
   /** Live view of stored entries. */
   readonly entries: readonly MemoryEntry[]
-  /** How many times `recall` has run — proves frozen-block memoization. */
+  /** How many times `recall` has run. */
   readonly recallCount: number
+  /** How many times `list` has run — the frozen block fetches via `list`, so
+   *  this proves frozen-block memoization (fetch exactly once per session). */
+  readonly listCount: number
 }
 
 export function makeFakeMemory(seed: readonly MemoryEntry[] = []): FakeMemory {
   const entries: MemoryEntry[] = [...seed]
   let seq = 0
   let recallCount = 0
+  let listCount = 0
 
   return {
     get entries() {
@@ -30,6 +34,9 @@ export function makeFakeMemory(seed: readonly MemoryEntry[] = []): FakeMemory {
     },
     get recallCount() {
       return recallCount
+    },
+    get listCount() {
+      return listCount
     },
     async recall(q: MemoryQuery): Promise<MemoryEntry[]> {
       recallCount++
@@ -57,6 +64,7 @@ export function makeFakeMemory(seed: readonly MemoryEntry[] = []): FakeMemory {
       return e
     },
     async list(opts: { kind?: MemoryKind; limit?: number } = {}): Promise<MemoryEntry[]> {
+      listCount++
       const kind = opts.kind
       return entries
         .filter((e) => !kind || e.kind === kind)

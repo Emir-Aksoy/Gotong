@@ -78,8 +78,8 @@ describe('MemoryAugmentedAgent', () => {
 
     expect(provider.requests.length).toBe(2)
     expect(provider.requests[1]!.system).toBe(provider.requests[0]!.system)
-    // Recall ran once for the whole session.
-    expect(mem.recallCount).toBe(1)
+    // The frozen block fetched once for the whole session.
+    expect(mem.listCount).toBe(1)
   })
 
   it('composes memory tools with a caller toolset (no name collision)', async () => {

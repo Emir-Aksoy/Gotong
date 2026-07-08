@@ -33,14 +33,29 @@ describe('MemorySession', () => {
     await s.ensureFrozenBlock()
     await s.ensureFrozenBlock()
     await s.ensureFrozenBlock()
-    expect(mem.recallCount).toBe(1)
+    expect(mem.listCount).toBe(1) // one fetch per frozen kind, once
   })
 
-  it('does not double-recall under concurrent first calls', async () => {
+  it('does not double-fetch under concurrent first calls', async () => {
     const mem = makeFakeMemory([entry('a', 'semantic', 'x', 100)])
     const s = new MemorySession({ memory: mem })
     await Promise.all([s.ensureFrozenBlock(), s.ensureFrozenBlock(), s.ensureFrozenBlock()])
-    expect(mem.recallCount).toBe(1)
+    expect(mem.listCount).toBe(1)
+  })
+
+  it('keeps a high-importance pin in the block even when buried under newer facts (audit P2)', async () => {
+    // One old pin + many newer, lower-importance facts. With frozenK=3 the pin
+    // is far outside the newest-3 window; a recency-only pull would evict it.
+    const seed = [
+      entry('pin', 'semantic', '主人最爱的饮料是珍珠奶茶', 100, { importance: 5 }),
+      ...Array.from({ length: 20 }, (_, i) =>
+        entry(`n${i}`, 'semantic', `顺带一提的事 ${i}`, 200 + i, { importance: 2 }),
+      ),
+    ]
+    const mem = makeFakeMemory(seed)
+    const s = new MemorySession({ memory: mem, frozenK: 3 })
+    const block = await s.ensureFrozenBlock()
+    expect(block).toContain('珍珠奶茶') // the pin survived recency burial
   })
 
   // ── Fix B: D/E/G frozen-block options must reach the renderer ──────────────
@@ -125,21 +140,21 @@ describe('MemorySession', () => {
   // The default caches forever (the test above). An always-on butler instance
   // calls refresh() between messages so what it just captured surfaces next turn.
 
-  it('refresh() makes the next ensureFrozenBlock re-recall and pick up new memory', async () => {
+  it('refresh() makes the next ensureFrozenBlock re-fetch and pick up new memory', async () => {
     const mem = makeFakeMemory([entry('a', 'semantic', 'first fact', 100)])
     const s = new MemorySession({ memory: mem })
     const before = await s.ensureFrozenBlock()
     expect(before).toContain('first fact')
-    expect(mem.recallCount).toBe(1)
+    expect(mem.listCount).toBe(1)
 
     await mem.remember({ kind: 'semantic', text: 'second fact' })
     // Without refresh the cache holds (proving refresh is what changes it).
     expect((await s.ensureFrozenBlock())).toBe(before)
-    expect(mem.recallCount).toBe(1)
+    expect(mem.listCount).toBe(1)
 
     s.refresh()
     const after = await s.ensureFrozenBlock()
-    expect(mem.recallCount).toBe(2) // re-recalled
+    expect(mem.listCount).toBe(2) // re-fetched
     expect(after).toContain('second fact')
     expect(after).toContain('first fact')
   })
