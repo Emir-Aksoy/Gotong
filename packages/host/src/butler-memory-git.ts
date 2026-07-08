@@ -149,10 +149,18 @@ export async function snapshotMemoryTree(opts: SnapshotMemoryTreeOptions): Promi
   }
 }
 
-/** Does `dir` have its own `.git` (i.e. is it already a repo root)? */
+/**
+ * Does `dir` have its own `.git` (i.e. is it already a repo root)? `.git` is a
+ * DIRECTORY in a normal repo, but a FILE — a "gitlink" holding `gitdir: <path>` —
+ * in a linked worktree or a submodule. BOTH mean "already a repo, don't re-init";
+ * treating the file form as "not a repo" would run `git init` over an existing
+ * repo (audit P3). `stat` (not `lstat`) follows a symlinked `.git` to its target,
+ * so a symlinked repo is detected too.
+ */
 async function hasOwnGitDir(dir: string): Promise<boolean> {
   try {
-    return (await stat(join(dir, '.git'))).isDirectory()
+    const s = await stat(join(dir, '.git'))
+    return s.isDirectory() || s.isFile()
   } catch {
     return false
   }

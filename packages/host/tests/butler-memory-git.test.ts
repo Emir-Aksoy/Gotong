@@ -98,6 +98,18 @@ describe('snapshotMemoryTree — best-effort git snapshot (injected runner)', ()
     await expect(readFile(join(dir, '.gitignore'), 'utf8')).rejects.toThrow()
   })
 
+  it('already a repo via a .git FILE (gitlink: linked worktree / submodule) → skips init (audit P3)', async () => {
+    // A linked worktree / submodule stores `.git` as a FILE (`gitdir: <path>`),
+    // not a directory. Detecting only the directory form would re-`git init` over
+    // an existing repo; the file form must count as "already a repo".
+    await writeFile(join(dir, '.git'), 'gitdir: /somewhere/.git/worktrees/mem\n', 'utf8')
+    const { git, subs } = scriptedRunner({ status: { code: 0, stdout: ' M x\n', stderr: '' } })
+    const { logger } = capturingLogger()
+    const out = await snapshotMemoryTree({ dir, logger, git })
+    expect(out).toBe('committed')
+    expect(subs).toEqual(['add', 'status', 'commit']) // no 'init' — the gitlink was recognized
+  })
+
   it('nothing changed (clean status) → "nothing", never commits', async () => {
     await mkdir(join(dir, '.git'))
     const { git, subs } = scriptedRunner({}) // status defaults to clean ''
