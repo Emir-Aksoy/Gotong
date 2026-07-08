@@ -213,6 +213,7 @@
       <button class="tabbar-btn" type="button" data-tab="activity"  data-roles="owner,admin" data-i18n="tabActivity">活动</button>
       <button class="tabbar-btn" type="button" data-tab="services"  data-roles="owner,admin" data-i18n="tabServices">服务</button>
       <button class="tabbar-btn" type="button" data-tab="mcp"       data-roles="owner,admin" data-i18n="tabMcp">MCP</button>
+      <button class="tabbar-btn" type="button" data-tab="reallife"  data-roles="owner,admin" data-i18n="tabReallife">连接现实生活</button>
       <button class="tabbar-btn" type="button" data-tab="users"     data-roles="owner" data-i18n="tabUsers">用户</button>
       <button class="tabbar-btn" type="button" data-tab="quotas"    data-roles="owner" data-i18n="tabQuotas">配额</button>
       <button class="tabbar-btn" type="button" data-tab="usage"     data-roles="owner" data-i18n="tabUsage">用量</button>
@@ -1604,6 +1605,41 @@
           <button type="submit" data-i18n="mcpInstallBtn">安装</button>
           <p id="mcp-form-msg" class="form-msg"></p>
         </form>
+      </section>
+
+      <!-- C-M2-M5c — 连接现实生活: the "用 X 登录" front door. Browse built-in
+           outbound OAuth presets (Google 日历 / Gmail), fill your own OAuth
+           app's three fields, connect (redirect to provider consent). The
+           confidential client_secret is write-only; the list never returns it.
+           接入 ≠ 授权行动: connecting only lets an agent CALL the provider —
+           high-risk actions still pass the butler's governed approval gate. -->
+      <section id="reallife" class="managed-agents" data-tab="reallife" data-roles="owner,admin" hidden>
+        <h2><span data-i18n="reallifePanel">连接现实生活</span></h2>
+        <p class="hint" data-i18n="reallifeIntro">用 OAuth「登录」把日历、邮件等现实工具接给你的 AI。凭证进 vault、永不明文;令牌自动刷新。接上只是「能读写」——真发信 / 改日程仍要过审批闸。</p>
+        <p id="reallife-banner" class="form-msg" role="status" aria-live="polite" hidden></p>
+
+        <!-- built-in preset directory (browse + connect). Hidden until the
+             catalog loads; also hidden when no identity store is wired. -->
+        <section id="reallife-directory" class="mcp-directory" hidden>
+          <h2 style="margin-top:1rem"><span data-i18n="reallifeDirTitle">用 X 登录</span></h2>
+          <p class="hint" data-i18n="reallifeDirIntro">挑一个服务,填你自己在其开发者后台注册的 OAuth 应用三件套(客户端 ID / 密钥 / 回调 URL),点「连接」跳转授权。</p>
+          <div id="reallife-cards" class="mcp-cards"></div>
+        </section>
+
+        <div id="reallife-disabled" class="empty-state" hidden data-i18n="reallifeDisabled">此主机未启用身份存储,无法连接 OAuth 服务</div>
+        <div id="reallife-empty" class="empty-state" hidden data-i18n="reallifeEmpty">尚未连接任何服务</div>
+        <table id="reallife-table" class="services-table" hidden>
+          <thead>
+            <tr>
+              <th data-i18n="reallifeColConnector">连接器</th>
+              <th data-i18n="reallifeColProvider">MCP server</th>
+              <th data-i18n="reallifeColScope">范围</th>
+              <th data-i18n="reallifeColStatus">状态</th>
+              <th data-i18n="servicesActions">操作</th>
+            </tr>
+          </thead>
+          <tbody id="reallife-tbody"></tbody>
+        </table>
       </section>
 
       <!-- v4 identity / user management. Content rendered entirely by

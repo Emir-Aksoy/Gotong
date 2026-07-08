@@ -12,6 +12,7 @@
  */
 import { createServices } from './services.js'
 import { createMcp } from './mcp.js'
+import { createOAuthConnect } from './oauth-connect.js'
 import { createManagedAgents } from './managed-agents.js'
 import { createWorkflows } from './workflows.js'
 
@@ -105,6 +106,9 @@ import { createWorkflows } from './workflows.js'
   // — list / install / uninstall against /api/admin/mcp-servers, no shared
   // state beyond window.Gotong helpers. Lazy-loaded on first tab focus.
   const mcp = createMcp()
+  // C-M2-M5c — 连接现实生活 tab (outbound OAuth connectors). Same self-contained
+  // shape as mcp: browse presets + connect/disconnect against /api/admin/oauth/*.
+  const oauthConnect = createOAuthConnect()
   // Managed Agents tab lives in admin-src/managed-agents.js (P3 Phase 2,
   // second ES-module split). It drives the shared `dom` cache, so we hand
   // it the resolved `dom` via setDom() right after resolveDom(); the
@@ -2779,6 +2783,8 @@ import { createWorkflows } from './workflows.js'
       // MCP tab (#2-M4): lazy-refresh the registry list on every focus so
       // installs/uninstalls from another window get picked up.
       if (e.detail?.name === 'mcp') mcp.refreshMcp().catch((err) => console.warn('mcp refresh failed:', err))
+      // C-M2-M5c — 连接现实生活 tab: lazy-refresh connectors + preset directory.
+      if (e.detail?.name === 'reallife') oauthConnect.refreshOAuth().catch((err) => console.warn('reallife refresh failed:', err))
       // ⑦-M1 — re-probe the "start here" card whenever the user lands on
       // overview (it self-hides once the hub gains an agent/workflow or the
       // card is dismissed; the guard inside makes this a no-op after that).
@@ -3280,6 +3286,20 @@ import { createWorkflows } from './workflows.js'
     mcp.syncMcpTransportFields()
     if (document.body.dataset.activeTab === 'mcp') {
       mcp.refreshMcp().catch((err) => console.warn('mcp initial load failed:', err))
+    }
+
+    // C-M2-M5c — 连接现实生活. After an OAuth connect round-trip the callback
+    // bounces to /?oauth_connected=<id> (or ?oauth_error=<code>); land the user
+    // back on this tab and surface the outcome. app.js owns tabbar clicks, so a
+    // .click() drives its setActiveTab → gotong:tabchange → refreshOAuth.
+    const oauthQuery = new URLSearchParams(window.location.search)
+    if (oauthQuery.has('oauth_connected') || oauthQuery.has('oauth_error')) {
+      const reallifeBtn = document.querySelector('.tabbar-btn[data-tab="reallife"]')
+      if (reallifeBtn) reallifeBtn.click()
+      oauthConnect.checkConnectBanner()
+    }
+    if (document.body.dataset.activeTab === 'reallife') {
+      oauthConnect.refreshOAuth().catch((err) => console.warn('reallife initial load failed:', err))
     }
 
     const sweepBtn = document.getElementById('services-sweep-btn')

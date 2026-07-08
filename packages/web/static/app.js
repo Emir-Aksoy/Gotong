@@ -667,7 +667,7 @@
   // they were silently unreachable; restored alongside the new oidc (SSO) tab.
   const ADMIN_TABS = new Set([
     'overview', 'agents', 'workflows', 'tasks', 'activity', 'services',
-    'mcp', 'users', 'quotas', 'usage', 'reputation', 'federation', 'oidc',
+    'mcp', 'reallife', 'users', 'quotas', 'usage', 'reputation', 'federation', 'oidc',
     'saml',
   ])
 

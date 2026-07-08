@@ -2224,6 +2224,27 @@ body.admin[data-active-tab="settings"] main.admin-grid {
 .mcp-card-home { font-size: 0.76rem; }
 .mcp-card-install, .mcp-card-installed { margin-left: auto; }
 .mcp-card-installed { font-size: 0.76rem; color: #3a7d4f; font-weight: 600; }
+
+/* C-M2-M5c — 连接现实生活 tab. Reuses .mcp-card / .mcp-cards / .services-table;
+   these add the connected-status colors + the inline per-card connect form. */
+.reallife-ok { color: #3a7d4f; font-weight: 600; }
+.reallife-off { color: #888; }
+.reallife-expiry { color: #888; font-weight: 400; font-size: 0.74rem; }
+.reallife-scope code { font-size: 0.72rem; word-break: break-all; }
+.reallife-actions { display: flex; flex-wrap: wrap; gap: 0.35rem; }
+.reallife-connect-form {
+  display: none;
+  flex-direction: column;
+  gap: 0.4rem;
+  margin-top: 0.6rem;
+  padding-top: 0.6rem;
+  border-top: 1px solid #e2e2e2;
+}
+.reallife-connect-form:not([hidden]) { display: flex; }
+.reallife-connect-form label { display: flex; flex-direction: column; gap: 0.2rem; font-size: 0.76rem; }
+.reallife-connect-form input { width: 100%; box-sizing: border-box; }
+.reallife-card-msg { margin: 0; font-size: 0.76rem; }
+#reallife-banner:not([hidden]) { display: block; margin-bottom: 0.8rem; }
 .tg-result-summary { margin-bottom: 0.3rem; }
 .tg-checklist { color: #555; }
 .tg-checklist > summary { cursor: pointer; font-weight: 600; color: #b5651d; }

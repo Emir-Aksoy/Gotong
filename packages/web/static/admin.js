@@ -520,8 +520,259 @@
     return { refreshMcp, submitMcpForm, syncMcpTransportFields, loadInstalledMcpServerNames, state: mcp };
   }
 
-  // admin-src/managed-agents.js
+  // admin-src/oauth-connect.js
   var { t: t3, escapeHtml: escapeHtml3, fetchJson: fetchJson3 } = window.Gotong;
+  function createOAuthConnect() {
+    const oauth = {
+      connectors: [],
+      // OAuthConnectorView[] — never carries the secret/token
+      catalog: null,
+      // built-in presets, cached after first fetch
+      disabled: false
+      // host didn't wire the connector store (GET → 503)
+    };
+    async function refreshOAuth() {
+      const tableEl = document.getElementById("reallife-table");
+      const tbodyEl = document.getElementById("reallife-tbody");
+      const emptyEl = document.getElementById("reallife-empty");
+      const disabledEl = document.getElementById("reallife-disabled");
+      if (!tableEl || !tbodyEl) return;
+      let connectors;
+      try {
+        const r = await fetch("/api/admin/oauth/connectors");
+        if (r.status === 503) {
+          oauth.disabled = true;
+          if (disabledEl) disabledEl.hidden = false;
+          tableEl.hidden = true;
+          if (emptyEl) emptyEl.hidden = true;
+          const dirEl = document.getElementById("reallife-directory");
+          if (dirEl) dirEl.hidden = true;
+          return;
+        }
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        const j = await r.json();
+        connectors = j.connectors || [];
+      } catch (err) {
+        console.warn("reallife: connector list fetch failed", err);
+        return;
+      }
+      oauth.disabled = false;
+      if (disabledEl) disabledEl.hidden = true;
+      oauth.connectors = connectors;
+      if (connectors.length === 0) {
+        tableEl.hidden = true;
+        if (emptyEl) emptyEl.hidden = false;
+      } else {
+        if (emptyEl) emptyEl.hidden = true;
+        tableEl.hidden = false;
+      }
+      renderConnectorTable();
+      refreshCatalog().catch((err) => console.warn("reallife: catalog refresh failed", err));
+    }
+    function renderConnectorTable() {
+      const tbodyEl = document.getElementById("reallife-tbody");
+      if (!tbodyEl) return;
+      tbodyEl.innerHTML = "";
+      for (const c of oauth.connectors) {
+        const tr = document.createElement("tr");
+        const status = c.connected ? `<span class="reallife-ok">${escapeHtml3(t3.reallifeConnected)}${expiryHint(c)}</span>` : `<span class="reallife-off">${escapeHtml3(t3.reallifeNotConnected)}</span>`;
+        const connectLabel = c.connected ? t3.reallifeReconnect : t3.reallifeConnect;
+        tr.innerHTML = `
+        <td><strong>${escapeHtml3(c.displayName || c.id)}</strong><br /><code>${escapeHtml3(c.id)}</code></td>
+        <td><code>${escapeHtml3(c.mcpServerName || "")}</code></td>
+        <td class="reallife-scope"><code>${escapeHtml3(c.scope || "")}</code></td>
+        <td>${status}</td>
+        <td class="reallife-actions">
+          <button type="button" class="mcp-card-install" data-action="connect">${escapeHtml3(connectLabel)}</button>
+          <button type="button" data-action="disconnect"${c.connected ? "" : " disabled"}>${escapeHtml3(t3.reallifeDisconnect)}</button>
+          <button type="button" class="danger-btn" data-action="remove">${escapeHtml3(t3.reallifeRemove)}</button>
+        </td>
+      `;
+        tr.querySelector('[data-action="connect"]').addEventListener("click", () => startConnect(c.id));
+        tr.querySelector('[data-action="disconnect"]').addEventListener("click", () => disconnect(c.id));
+        tr.querySelector('[data-action="remove"]').addEventListener("click", () => removeConnector(c));
+        tbodyEl.appendChild(tr);
+      }
+    }
+    function expiryHint(c) {
+      if (typeof c.accessTokenExpiresAt !== "number") return "";
+      const mins = Math.round((c.accessTokenExpiresAt - Date.now()) / 6e4);
+      if (!Number.isFinite(mins)) return "";
+      return ` <span class="reallife-expiry">${escapeHtml3(t3.reallifeExpiryMins(mins))}</span>`;
+    }
+    async function refreshCatalog() {
+      const sectionEl = document.getElementById("reallife-directory");
+      if (!sectionEl) return;
+      if (oauth.disabled) {
+        sectionEl.hidden = true;
+        return;
+      }
+      if (!oauth.catalog) {
+        try {
+          const j = await fetchJson3("/api/admin/oauth/catalog");
+          oauth.catalog = j.connectors || [];
+        } catch (err) {
+          console.warn("reallife: catalog fetch failed", err);
+          sectionEl.hidden = true;
+          return;
+        }
+      }
+      sectionEl.hidden = false;
+      renderCatalogCards();
+    }
+    function renderCatalogCards() {
+      const cardsEl = document.getElementById("reallife-cards");
+      if (!cardsEl) return;
+      const installed = new Set(oauth.connectors.map((c) => c.id));
+      cardsEl.innerHTML = "";
+      for (const preset of oauth.catalog || []) {
+        const isInstalled = installed.has(preset.id);
+        const catLabel = t3.reallifeCat && t3.reallifeCat[preset.category] || preset.category;
+        const home = preset.homepage ? `<a class="mcp-card-home" href="${escapeHtml3(preset.homepage)}" target="_blank" rel="noopener noreferrer">${escapeHtml3(t3.mcpDirHomepage)}</a>` : "";
+        const card = document.createElement("div");
+        card.className = "mcp-card";
+        const foot = isInstalled ? `<span class="mcp-card-installed">${escapeHtml3(t3.reallifeAdded)}</span>` : `<button type="button" class="mcp-card-install" data-action="reveal">${escapeHtml3(t3.reallifeConnect)}</button>`;
+        card.innerHTML = `
+        <div class="mcp-card-head">
+          <strong class="mcp-card-name">${escapeHtml3(preset.name)}</strong>
+          <span class="mcp-cat-badge">${escapeHtml3(catLabel)}</span>
+        </div>
+        <p class="mcp-card-what">${escapeHtml3(preset.whatFor)}</p>
+        <div class="mcp-card-foot">${home}${foot}</div>
+        <form class="reallife-connect-form" hidden>
+          <label><span>${escapeHtml3(t3.reallifeClientId)}</span>
+            <input type="text" autocomplete="off" data-field="clientId" required /></label>
+          <label><span>${escapeHtml3(t3.reallifeClientSecret)}</span>
+            <input type="password" autocomplete="off" data-field="clientSecret" required /></label>
+          <label><span>${escapeHtml3(t3.reallifeRedirect)}</span>
+            <input type="url" autocomplete="off" data-field="redirectUri" required /></label>
+          <p class="reallife-card-msg form-msg" aria-live="polite"></p>
+          <button type="submit" class="mcp-card-install">${escapeHtml3(t3.reallifeConnectBtn(preset.name))}</button>
+        </form>
+      `;
+        if (!isInstalled) {
+          const form = card.querySelector(".reallife-connect-form");
+          const redirectInput = form.querySelector('[data-field="redirectUri"]');
+          redirectInput.value = `${window.location.origin}/api/oauth/callback`;
+          card.querySelector('[data-action="reveal"]').addEventListener("click", (e) => {
+            e.target.hidden = true;
+            form.hidden = false;
+            form.querySelector('[data-field="clientId"]').focus();
+          });
+          form.addEventListener("submit", (e) => connectPreset(e, preset, form));
+        }
+        cardsEl.appendChild(card);
+      }
+    }
+    async function connectPreset(e, preset, form) {
+      e.preventDefault();
+      const msgEl = form.querySelector(".reallife-card-msg");
+      if (msgEl) {
+        msgEl.textContent = "";
+        msgEl.classList.remove("ok", "err");
+      }
+      const val = (f) => form.querySelector(`[data-field="${f}"]`).value.trim();
+      const clientId = val("clientId");
+      const clientSecret = val("clientSecret");
+      const redirectUri = val("redirectUri");
+      if (!clientId || !clientSecret || !redirectUri) return;
+      try {
+        await fetchJson3("/api/admin/oauth/connectors", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            id: preset.id,
+            displayName: preset.name,
+            authorizationEndpoint: preset.authorizationEndpoint,
+            tokenEndpoint: preset.tokenEndpoint,
+            clientId,
+            clientSecret,
+            redirectUri,
+            scope: preset.scope,
+            extraAuthParams: preset.extraAuthParams || null,
+            mcpServerName: preset.mcpServer.name
+          })
+        });
+        await fetchJson3("/api/admin/mcp-servers", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ spec: preset.mcpServer, description: preset.whatFor })
+        });
+      } catch (err) {
+        if (msgEl) {
+          msgEl.textContent = err?.message || String(err);
+          msgEl.classList.add("err");
+        }
+        return;
+      }
+      await startConnect(preset.id, msgEl);
+    }
+    async function startConnect(connectorId, msgEl) {
+      try {
+        const j = await fetchJson3("/api/admin/oauth/start", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ connectorId })
+        });
+        if (j.authorizationUrl) {
+          window.location.assign(j.authorizationUrl);
+          return;
+        }
+        throw new Error("no authorization url");
+      } catch (err) {
+        if (msgEl) {
+          msgEl.textContent = err?.message || String(err);
+          msgEl.classList.add("err");
+        } else alert(t3.failedAlert(err?.message || String(err)));
+      }
+    }
+    async function disconnect(connectorId) {
+      try {
+        await fetchJson3(`/api/admin/oauth/connectors/${encodeURIComponent(connectorId)}/disconnect`, { method: "POST" });
+        await refreshOAuth();
+      } catch (err) {
+        alert(t3.failedAlert(err?.message || String(err)));
+      }
+    }
+    async function removeConnector(c) {
+      if (!confirm(t3.reallifeConfirmRemove(c.displayName || c.id))) return;
+      try {
+        await fetchJson3(`/api/admin/oauth/connectors/${encodeURIComponent(c.id)}`, { method: "DELETE" });
+        if (c.mcpServerName) {
+          await fetch(`/api/admin/mcp-servers/${encodeURIComponent(c.mcpServerName)}`, { method: "DELETE" }).catch(() => {
+          });
+        }
+        await refreshOAuth();
+      } catch (err) {
+        alert(t3.failedAlert(err?.message || String(err)));
+      }
+    }
+    function checkConnectBanner() {
+      const bannerEl = document.getElementById("reallife-banner");
+      if (!bannerEl) return;
+      const params = new URLSearchParams(window.location.search);
+      const ok = params.get("oauth_connected");
+      const err = params.get("oauth_error");
+      if (!ok && !err) return;
+      bannerEl.hidden = false;
+      bannerEl.classList.remove("ok", "err");
+      if (ok) {
+        bannerEl.textContent = t3.reallifeConnectedBanner(ok);
+        bannerEl.classList.add("ok");
+      } else {
+        bannerEl.textContent = t3.reallifeErrorBanner(err);
+        bannerEl.classList.add("err");
+      }
+      params.delete("oauth_connected");
+      params.delete("oauth_error");
+      const qs = params.toString();
+      window.history.replaceState({}, "", `${window.location.pathname}${qs ? "?" + qs : ""}${window.location.hash}`);
+    }
+    return { refreshOAuth, checkConnectBanner, state: oauth };
+  }
+
+  // admin-src/managed-agents.js
+  var { t: t4, escapeHtml: escapeHtml4, fetchJson: fetchJson4 } = window.Gotong;
   function createManagedAgents({ ma, openBundleImportModal }) {
     let dom = null;
     function setDom(d) {
@@ -531,10 +782,10 @@
       if (!dom?.maList) return;
       try {
         const [agentsResp, provResp, secretsResp, healthResp] = await Promise.all([
-          fetchJson3("/api/admin/agents"),
-          fetchJson3("/api/admin/agents/providers"),
-          fetchJson3("/api/admin/secrets"),
-          fetchJson3("/api/admin/health").catch(() => null)
+          fetchJson4("/api/admin/agents"),
+          fetchJson4("/api/admin/agents/providers"),
+          fetchJson4("/api/admin/secrets"),
+          fetchJson4("/api/admin/health").catch(() => null)
         ]);
         ma.agents = agentsResp.agents || [];
         ma.providers = provResp.providers || [];
@@ -558,16 +809,16 @@
       const list = ma.agents;
       const managedCount = list.filter((a) => !!a.managed).length;
       const onlineManaged = list.filter((a) => !!a.managed && a.online).length;
-      dom.maSummary.textContent = list.length === 0 ? t3.maEmpty : t3.maSummary(managedCount, onlineManaged, list.length - managedCount);
+      dom.maSummary.textContent = list.length === 0 ? t4.maEmpty : t4.maSummary(managedCount, onlineManaged, list.length - managedCount);
       if (list.length === 0) {
         dom.maList.innerHTML = `<div class="empty-state" style="padding: 1.2rem; line-height: 1.7;">
-        <p style="margin: 0 0 0.6rem; font-weight: 600;">${escapeHtml3(t3.maEmpty)}</p>
-        <p style="margin: 0 0 0.8rem; color: #555;">${escapeHtml3(t3.admOnboardPgPrompt)}</p>
+        <p style="margin: 0 0 0.6rem; font-weight: 600;">${escapeHtml4(t4.maEmpty)}</p>
+        <p style="margin: 0 0 0.8rem; color: #555;">${escapeHtml4(t4.admOnboardPgPrompt)}</p>
         <p style="margin: 0;">
-          <button type="button" id="onboarding-pg-btn" class="ma-btn">${escapeHtml3(t3.admOnboardPgBtn)}</button>
+          <button type="button" id="onboarding-pg-btn" class="ma-btn">${escapeHtml4(t4.admOnboardPgBtn)}</button>
         </p>
         <small class="hint" style="display: block; margin-top: 0.6rem; color: #777;">
-          ${t3.admOnboardDeepseekHint('<a href="https://platform.deepseek.com" target="_blank" rel="noopener">platform.deepseek.com</a>')}
+          ${t4.admOnboardDeepseekHint('<a href="https://platform.deepseek.com" target="_blank" rel="noopener">platform.deepseek.com</a>')}
         </small>
       </div>`;
         const btn = document.getElementById("onboarding-pg-btn");
@@ -583,9 +834,9 @@
       const html = list.map((a) => {
         const managed = a.managed;
         const onlineCls = a.online ? "agent-online" : "agent-offline";
-        const onlineLabel = a.online ? t3.online : t3.offline;
-        const caps = (a.allowedCapabilities || []).map((c) => `<span class="cap">${escapeHtml3(c)}</span>`).join("");
-        const kindBadge = managed ? `<span class="agent-kind-badge agent-kind-local">${escapeHtml3(t3.localAgentBadge)}</span>` : `<span class="agent-kind-badge agent-kind-cloud">${escapeHtml3(t3.cloudAgentBadge)}</span>`;
+        const onlineLabel = a.online ? t4.online : t4.offline;
+        const caps = (a.allowedCapabilities || []).map((c) => `<span class="cap">${escapeHtml4(c)}</span>`).join("");
+        const kindBadge = managed ? `<span class="agent-kind-badge agent-kind-local">${escapeHtml4(t4.localAgentBadge)}</span>` : `<span class="agent-kind-badge agent-kind-cloud">${escapeHtml4(t4.cloudAgentBadge)}</span>`;
         let providerText = managed?.provider || "";
         if (managed?.provider === "openai-compatible") {
           let host = managed.providerLabel;
@@ -597,20 +848,20 @@
           }
           providerText = host ? `openai-compat · ${host}` : "openai-compat";
         }
-        const meta = managed ? `${kindBadge}<span class="ma-provider">${escapeHtml3(providerText)}${managed.model ? " · " + escapeHtml3(managed.model) : ""}</span>` : `${kindBadge}<span class="ma-external">${escapeHtml3(t3.externalAgent)}</span>`;
+        const meta = managed ? `${kindBadge}<span class="ma-provider">${escapeHtml4(providerText)}${managed.model ? " · " + escapeHtml4(managed.model) : ""}</span>` : `${kindBadge}<span class="ma-external">${escapeHtml4(t4.externalAgent)}</span>`;
         const actions = managed ? `
-        <button class="ma-action" data-act="edit-agent" data-id="${escapeHtml3(a.id)}">${escapeHtml3(t3.edit)}</button>
-        <button class="ma-action" data-act="manage-agent-access" data-id="${escapeHtml3(a.id)}">${escapeHtml3(t3.agentAccessManage)}</button>
-        <button class="ma-action" data-act="export-agent" data-id="${escapeHtml3(a.id)}">${escapeHtml3(t3.export_)}</button>
-        <button class="ma-action ma-danger" data-act="remove-agent" data-id="${escapeHtml3(a.id)}">${escapeHtml3(t3.remove)}</button>
+        <button class="ma-action" data-act="edit-agent" data-id="${escapeHtml4(a.id)}">${escapeHtml4(t4.edit)}</button>
+        <button class="ma-action" data-act="manage-agent-access" data-id="${escapeHtml4(a.id)}">${escapeHtml4(t4.agentAccessManage)}</button>
+        <button class="ma-action" data-act="export-agent" data-id="${escapeHtml4(a.id)}">${escapeHtml4(t4.export_)}</button>
+        <button class="ma-action ma-danger" data-act="remove-agent" data-id="${escapeHtml4(a.id)}">${escapeHtml4(t4.remove)}</button>
       ` : "";
-        const keyWarn = managed && ma.health?.[a.id]?.missingKey ? `<button type="button" class="ma-keywarn" data-act="fix-agent-key" data-id="${escapeHtml3(a.id)}" title="${escapeHtml3(t3.agentKeyWarnHint)}">${escapeHtml3(t3.agentKeyWarnBadge)}</button>` : "";
+        const keyWarn = managed && ma.health?.[a.id]?.missingKey ? `<button type="button" class="ma-keywarn" data-act="fix-agent-key" data-id="${escapeHtml4(a.id)}" title="${escapeHtml4(t4.agentKeyWarnHint)}">${escapeHtml4(t4.agentKeyWarnBadge)}</button>` : "";
         return `
         <div class="ma-row ${onlineCls}">
           <div class="ma-head">
-            <strong class="ma-id">${escapeHtml3(a.displayName || a.id)}</strong>
-            ${a.displayName ? `<code class="ma-realid">${escapeHtml3(a.id)}</code>` : ""}
-            <span class="ma-status">${escapeHtml3(onlineLabel)}</span>
+            <strong class="ma-id">${escapeHtml4(a.displayName || a.id)}</strong>
+            ${a.displayName ? `<code class="ma-realid">${escapeHtml4(a.id)}</code>` : ""}
+            <span class="ma-status">${escapeHtml4(onlineLabel)}</span>
             ${keyWarn}
           </div>
           <div class="ma-meta">${meta}</div>
@@ -627,8 +878,8 @@
       const avail = new Set(ma.providers);
       dom.maProvider.innerHTML = all.map((p) => {
         const disabled = !avail.has(p);
-        const suffix = disabled ? ` — ${t3.providerDisabled}` : "";
-        const display = p === "openai-compatible" ? `openai-compatible · ${t3.openaiCompatHint}` : p;
+        const suffix = disabled ? ` — ${t4.providerDisabled}` : "";
+        const display = p === "openai-compatible" ? `openai-compatible · ${t4.openaiCompatHint}` : p;
         return `<option value="${p}"${disabled ? " disabled" : ""}>${display}${suffix}</option>`;
       }).join("");
       const first = all.find((p) => avail.has(p));
@@ -645,7 +896,7 @@
       if (dom.maApiKeyHint && !ma._clearKeyOnSubmit) {
         if (ma.formMode === "edit") {
         } else {
-          dom.maApiKeyHint.textContent = isCompat ? t3.agentApiKeyHintCompat : t3.agentApiKeyHint;
+          dom.maApiKeyHint.textContent = isCompat ? t4.agentApiKeyHintCompat : t4.agentApiKeyHint;
         }
       }
     }
@@ -710,7 +961,7 @@
       for (const p of online) for (const s of p.servers) if (s?.name) discovered.add(`${p.peer}:${s.name}`);
       const orphans = [...sel].filter((ref) => ref.includes(":") && !discovered.has(ref));
       if (online.length > 0 || orphans.length > 0) {
-        addHeading(t3.mcpAgentFedHeading, "ma-mcp-group");
+        addHeading(t4.mcpAgentFedHeading, "ma-mcp-group");
         for (const p of online) {
           addHeading(p.label || p.peer, "ma-mcp-peer");
           for (const s of p.servers) {
@@ -720,7 +971,7 @@
           }
         }
         for (const ref of orphans) {
-          addCheckbox(ref, `${ref} ${t3.mcpAgentOffline}`, true, "ma-mcp-cb-peer ma-mcp-offline");
+          addCheckbox(ref, `${ref} ${t4.mcpAgentOffline}`, true, "ma-mcp-cb-peer ma-mcp-offline");
         }
       }
       if (emptyEl) emptyEl.hidden = container.children.length > 0;
@@ -728,7 +979,7 @@
     function openAgentForm(mode, agent) {
       ma.formMode = mode;
       ma.editingId = mode === "edit" ? agent?.id ?? null : null;
-      dom.maFormTitle.textContent = mode === "edit" ? t3.editAgent : t3.newAgent;
+      dom.maFormTitle.textContent = mode === "edit" ? t4.editAgent : t4.newAgent;
       dom.maFormEditWarning.hidden = mode !== "edit";
       dom.maFormMsg.textContent = "";
       dom.maFormMsg.classList.remove("ok", "err");
@@ -754,14 +1005,14 @@
         const hasOverride = !!ma.secrets.agents[agent.id];
         dom.maApiKey.value = "";
         dom.maApiKey.placeholder = hasOverride ? "••••••••" : "";
-        dom.maApiKeyHint.textContent = hasOverride ? t3.agentApiKeyHintEdit : t3.agentApiKeyHint;
+        dom.maApiKeyHint.textContent = hasOverride ? t4.agentApiKeyHintEdit : t4.agentApiKeyHint;
         dom.maApiKeyClear.hidden = !hasOverride;
         syncProviderDependentFields();
       } else {
         dom.maForm.reset();
         dom.maId.disabled = false;
         dom.maApiKey.placeholder = "";
-        dom.maApiKeyHint.textContent = t3.agentApiKeyHint;
+        dom.maApiKeyHint.textContent = t4.agentApiKeyHint;
         dom.maApiKeyClear.hidden = true;
         syncProviderSelect();
       }
@@ -805,7 +1056,7 @@
     }
     function openAgentChat(agentId) {
       if (!dom.maFormModal) return;
-      if (dom.maFormTitle) dom.maFormTitle.textContent = t3.healthTestTitle(agentId);
+      if (dom.maFormTitle) dom.maFormTitle.textContent = t4.healthTestTitle(agentId);
       if (dom.maFormEditWarning) dom.maFormEditWarning.hidden = true;
       if (dom.maFormMsg) {
         dom.maFormMsg.textContent = "";
@@ -819,7 +1070,7 @@
       const btn = document.createElement("button");
       btn.type = "button";
       btn.className = "ma-chat-fix-btn";
-      btn.textContent = t3.meChatGoAddKey;
+      btn.textContent = t4.meChatGoAddKey;
       btn.addEventListener("click", openKeysModal);
       dom.maQcStatus.append(" ", btn);
     }
@@ -828,7 +1079,7 @@
       if (!agentId || !dom.maQcInput || !dom.maQcStatus) return;
       const prompt2 = dom.maQcInput.value.trim();
       if (!prompt2) {
-        dom.maQcStatus.textContent = t3.quickChatNeedMsg;
+        dom.maQcStatus.textContent = t4.quickChatNeedMsg;
         dom.maQcStatus.classList.remove("ok");
         dom.maQcStatus.classList.add("err");
         return;
@@ -837,16 +1088,16 @@
       const prevLabel = btn ? btn.textContent : "";
       if (btn) {
         btn.disabled = true;
-        btn.textContent = t3.quickChatSending;
+        btn.textContent = t4.quickChatSending;
       }
-      dom.maQcStatus.textContent = t3.quickChatSending;
+      dom.maQcStatus.textContent = t4.quickChatSending;
       dom.maQcStatus.classList.remove("ok", "err");
       if (dom.maQcReply) {
         dom.maQcReply.hidden = true;
         dom.maQcReply.textContent = "";
       }
       try {
-        const r = await fetchJson3("/api/admin/dispatch", {
+        const r = await fetchJson4("/api/admin/dispatch", {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({
@@ -859,21 +1110,21 @@
         renderQuickChatReply(r?.result);
       } catch (err) {
         const d = window.Gotong.describeError(err && err.message ? err.message : String(err));
-        dom.maQcStatus.textContent = t3.quickChatFailed(d.fix ? `${d.text} ${d.fix}` : d.text);
+        dom.maQcStatus.textContent = t4.quickChatFailed(d.fix ? `${d.text} ${d.fix}` : d.text);
         dom.maQcStatus.classList.remove("ok");
         dom.maQcStatus.classList.add("err");
         appendKeyFixButton(d);
       } finally {
         if (btn) {
           btn.disabled = false;
-          btn.textContent = prevLabel || t3.quickChatSend;
+          btn.textContent = prevLabel || t4.quickChatSend;
         }
       }
     }
     function renderQuickChatReply(result) {
       if (!dom.maQcStatus) return;
       if (!result) {
-        dom.maQcStatus.textContent = t3.quickChatNoResult;
+        dom.maQcStatus.textContent = t4.quickChatNoResult;
         dom.maQcStatus.classList.remove("ok");
         dom.maQcStatus.classList.add("err");
         return;
@@ -886,7 +1137,7 @@
           dom.maQcReply.textContent = text;
           dom.maQcReply.hidden = false;
         }
-        dom.maQcStatus.textContent = t3.quickChatOk;
+        dom.maQcStatus.textContent = t4.quickChatOk;
         dom.maQcStatus.classList.remove("err");
         dom.maQcStatus.classList.add("ok");
         return;
@@ -898,7 +1149,7 @@
         dom.maQcReply.hidden = true;
         dom.maQcReply.textContent = "";
       }
-      dom.maQcStatus.textContent = t3.quickChatAgentFailed(friendly);
+      dom.maQcStatus.textContent = t4.quickChatAgentFailed(friendly);
       dom.maQcStatus.classList.remove("ok");
       dom.maQcStatus.classList.add("err");
       appendKeyFixButton(d);
@@ -940,16 +1191,16 @@
       try {
         const url = ma.formMode === "edit" ? `/api/admin/agents/${encodeURIComponent(ma.editingId)}` : "/api/admin/agents";
         const method = ma.formMode === "edit" ? "PUT" : "POST";
-        const r = await fetchJson3(url, {
+        const r = await fetchJson4(url, {
           method,
           headers: { "content-type": "application/json" },
           body: JSON.stringify(body)
         });
         if (r?.warning) {
-          dom.maFormMsg.textContent = t3.savedWithWarning(r.error || r.warning);
+          dom.maFormMsg.textContent = t4.savedWithWarning(r.error || r.warning);
           dom.maFormMsg.classList.add("err");
         } else if (ma.formMode === "edit") {
-          dom.maFormMsg.textContent = t3.saveOk;
+          dom.maFormMsg.textContent = t4.saveOk;
           dom.maFormMsg.classList.add("ok");
           setTimeout(closeAgentForm, 400);
         } else {
@@ -957,7 +1208,7 @@
         }
         await refreshManagedAgents();
       } catch (err) {
-        dom.maFormMsg.textContent = t3.failedAlert(err.message || String(err));
+        dom.maFormMsg.textContent = t4.failedAlert(err.message || String(err));
         dom.maFormMsg.classList.add("err");
       }
     }
@@ -970,7 +1221,7 @@
       const apiKey = dom.maApiKey.value;
       const baseURL = provider === "openai-compatible" ? dom.maBaseUrl?.value.trim() || void 0 : void 0;
       if (!apiKey.trim()) {
-        dom.maTestMsg.textContent = t3.testConnNeedKey;
+        dom.maTestMsg.textContent = t4.testConnNeedKey;
         dom.maTestMsg.classList.add("err");
         return;
       }
@@ -978,11 +1229,11 @@
       const prevLabel = btn ? btn.textContent : "";
       if (btn) {
         btn.disabled = true;
-        btn.textContent = t3.testConnTesting;
+        btn.textContent = t4.testConnTesting;
       }
-      dom.maTestMsg.textContent = t3.testConnTesting;
+      dom.maTestMsg.textContent = t4.testConnTesting;
       try {
-        const verdict = await fetchJson3("/api/admin/test-llm-key", {
+        const verdict = await fetchJson4("/api/admin/test-llm-key", {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ provider, apiKey, model, baseURL })
@@ -991,12 +1242,12 @@
         dom.maTestMsg.textContent = d.text;
         dom.maTestMsg.classList.add(d.level === "ok" ? "ok" : "err");
       } catch (err) {
-        dom.maTestMsg.textContent = t3.failedAlert(err.message || String(err));
+        dom.maTestMsg.textContent = t4.failedAlert(err.message || String(err));
         dom.maTestMsg.classList.add("err");
       } finally {
         if (btn) {
           btn.disabled = false;
-          btn.textContent = prevLabel || t3.testConnBtn;
+          btn.textContent = prevLabel || t4.testConnBtn;
         }
       }
     }
@@ -1024,11 +1275,11 @@
         const ts = ma.secrets.providers[p];
         let statusHtml;
         if (wsConfigured) {
-          statusHtml = `<span class="key-status ok">${escapeHtml3(t3.apiKeySet)}</span><span class="key-ts">${escapeHtml3(t3.apiKeyUpdated(ts))}</span>`;
+          statusHtml = `<span class="key-status ok">${escapeHtml4(t4.apiKeySet)}</span><span class="key-ts">${escapeHtml4(t4.apiKeyUpdated(ts))}</span>`;
         } else if (envConfigured) {
-          statusHtml = `<span class="key-status env">${escapeHtml3(t3.apiKeyEnv)}</span>`;
+          statusHtml = `<span class="key-status env">${escapeHtml4(t4.apiKeyEnv)}</span>`;
         } else {
-          statusHtml = `<span class="key-status missing">${escapeHtml3(t3.apiKeyMissing)}</span>`;
+          statusHtml = `<span class="key-status missing">${escapeHtml4(t4.apiKeyMissing)}</span>`;
         }
         return `
         <div class="key-row" data-provider="${p}">
@@ -1037,9 +1288,9 @@
             ${statusHtml}
           </div>
           <div class="key-controls">
-            <input type="password" class="key-input" placeholder="${escapeHtml3(t3.keyEnterHere)}" autocomplete="off" />
-            <button type="button" class="ma-btn" data-act="set-provider-key" data-provider="${p}">${escapeHtml3(wsConfigured ? t3.updateKey : t3.setKey)}</button>
-            ${wsConfigured ? `<button type="button" class="ma-btn ma-btn-secondary ma-danger" data-act="remove-provider-key" data-provider="${p}">${escapeHtml3(t3.clearKey)}</button>` : ""}
+            <input type="password" class="key-input" placeholder="${escapeHtml4(t4.keyEnterHere)}" autocomplete="off" />
+            <button type="button" class="ma-btn" data-act="set-provider-key" data-provider="${p}">${escapeHtml4(wsConfigured ? t4.updateKey : t4.setKey)}</button>
+            ${wsConfigured ? `<button type="button" class="ma-btn ma-btn-secondary ma-danger" data-act="remove-provider-key" data-provider="${p}">${escapeHtml4(t4.clearKey)}</button>` : ""}
           </div>
         </div>
       `;
@@ -1049,38 +1300,38 @@
     async function setProviderKey(provider, input) {
       const key = input.value.trim();
       if (!key) {
-        dom.maKeysMsg.textContent = t3.failedAlert(t3.keyEnterHere);
+        dom.maKeysMsg.textContent = t4.failedAlert(t4.keyEnterHere);
         dom.maKeysMsg.classList.add("err");
         return;
       }
       try {
-        const r = await fetchJson3(`/api/admin/secrets/${encodeURIComponent(provider)}`, {
+        const r = await fetchJson4(`/api/admin/secrets/${encodeURIComponent(provider)}`, {
           method: "PUT",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ apiKey: key })
         });
         input.value = "";
-        dom.maKeysMsg.textContent = r?.note ? t3.keyWarnRestart : t3.keySetOk;
+        dom.maKeysMsg.textContent = r?.note ? t4.keyWarnRestart : t4.keySetOk;
         dom.maKeysMsg.classList.remove("err");
         dom.maKeysMsg.classList.add("ok");
         await refreshManagedAgents();
         renderKeysList();
       } catch (err) {
-        dom.maKeysMsg.textContent = t3.failedAlert(err.message || String(err));
+        dom.maKeysMsg.textContent = t4.failedAlert(err.message || String(err));
         dom.maKeysMsg.classList.add("err");
       }
     }
     async function removeProviderKey(provider) {
-      if (!confirm(t3.failedAlert?.length ? `${provider}: ${t3.clearKey}?` : `${provider}: remove?`)) return;
+      if (!confirm(t4.failedAlert?.length ? `${provider}: ${t4.clearKey}?` : `${provider}: remove?`)) return;
       try {
-        await fetchJson3(`/api/admin/secrets/${encodeURIComponent(provider)}`, { method: "DELETE" });
-        dom.maKeysMsg.textContent = t3.keyRemoved;
+        await fetchJson4(`/api/admin/secrets/${encodeURIComponent(provider)}`, { method: "DELETE" });
+        dom.maKeysMsg.textContent = t4.keyRemoved;
         dom.maKeysMsg.classList.remove("err");
         dom.maKeysMsg.classList.add("ok");
         await refreshManagedAgents();
         renderKeysList();
       } catch (err) {
-        dom.maKeysMsg.textContent = t3.failedAlert(err.message || String(err));
+        dom.maKeysMsg.textContent = t4.failedAlert(err.message || String(err));
         dom.maKeysMsg.classList.add("err");
       }
     }
@@ -1096,7 +1347,7 @@
         text = await file.text();
       }
       if (!text || !text.trim()) {
-        dom.maImportMsg.textContent = t3.importEmpty;
+        dom.maImportMsg.textContent = t4.importEmpty;
         dom.maImportMsg.classList.add("err");
         return;
       }
@@ -1108,21 +1359,21 @@
         });
         const body = await r.json().catch(() => ({}));
         if (!r.ok) {
-          dom.maImportMsg.textContent = t3.failedAlert(body.error || `${r.status}`);
+          dom.maImportMsg.textContent = t4.failedAlert(body.error || `${r.status}`);
           dom.maImportMsg.classList.add("err");
           return;
         }
         const createdCount = (body.created || []).length;
         const skippedCount = (body.skipped || []).length;
         const spawnErrCount = (body.spawnErrors || []).length;
-        dom.maImportMsg.textContent = t3.importDone(createdCount, skippedCount, spawnErrCount);
+        dom.maImportMsg.textContent = t4.importDone(createdCount, skippedCount, spawnErrCount);
         dom.maImportMsg.classList.add(spawnErrCount > 0 ? "err" : "ok");
         await refreshManagedAgents();
         if (createdCount > 0 && spawnErrCount === 0) {
           setTimeout(closeImportModal, 700);
         }
       } catch (err) {
-        dom.maImportMsg.textContent = t3.failedAlert(err.message || String(err));
+        dom.maImportMsg.textContent = t4.failedAlert(err.message || String(err));
         dom.maImportMsg.classList.add("err");
       }
     }
@@ -1169,7 +1420,7 @@
       dom.maGhImportMsg.classList.remove("ok", "err");
       const parts = parseGithubUrl(dom.maGhUrl.value);
       if (!parts) {
-        dom.maGhImportMsg.textContent = t3.ghImportBadUrl;
+        dom.maGhImportMsg.textContent = t4.ghImportBadUrl;
         dom.maGhImportMsg.classList.add("err");
         return;
       }
@@ -1181,7 +1432,7 @@
         text = await r.text();
         if (!text.trim()) throw new Error("empty response");
       } catch (err) {
-        dom.maGhImportMsg.textContent = t3.ghFetchFailed(err.message || String(err));
+        dom.maGhImportMsg.textContent = t4.ghFetchFailed(err.message || String(err));
         dom.maGhImportMsg.classList.add("err");
         return;
       }
@@ -1193,21 +1444,21 @@
         });
         const body = await r.json().catch(() => ({}));
         if (!r.ok) {
-          dom.maGhImportMsg.textContent = t3.failedAlert(body.error || `${r.status}`);
+          dom.maGhImportMsg.textContent = t4.failedAlert(body.error || `${r.status}`);
           dom.maGhImportMsg.classList.add("err");
           return;
         }
         const createdCount = (body.created || []).length;
         const skippedCount = (body.skipped || []).length;
         const spawnErrCount = (body.spawnErrors || []).length;
-        dom.maGhImportMsg.textContent = t3.importDone(createdCount, skippedCount, spawnErrCount);
+        dom.maGhImportMsg.textContent = t4.importDone(createdCount, skippedCount, spawnErrCount);
         dom.maGhImportMsg.classList.add(spawnErrCount > 0 ? "err" : "ok");
         await refreshManagedAgents();
         if (createdCount > 0 && spawnErrCount === 0) {
           setTimeout(closeGithubImportModal, 700);
         }
       } catch (err) {
-        dom.maGhImportMsg.textContent = t3.failedAlert(err.message || String(err));
+        dom.maGhImportMsg.textContent = t4.failedAlert(err.message || String(err));
         dom.maGhImportMsg.classList.add("err");
       }
     }
@@ -1215,12 +1466,12 @@
       window.location.href = `/api/admin/agents/${encodeURIComponent(id)}/export`;
     }
     async function removeAgent(id) {
-      if (!confirm(t3.confirmRemoveAgent(id))) return;
+      if (!confirm(t4.confirmRemoveAgent(id))) return;
       try {
-        await fetchJson3(`/api/admin/agents/${encodeURIComponent(id)}`, { method: "DELETE" });
+        await fetchJson4(`/api/admin/agents/${encodeURIComponent(id)}`, { method: "DELETE" });
         await refreshManagedAgents();
       } catch (err) {
-        alert(t3.failedAlert(err.message || String(err)));
+        alert(t4.failedAlert(err.message || String(err)));
       }
     }
     let grantsAgentId = null;
@@ -1229,7 +1480,7 @@
       if (dom.maGrantsEmpty) dom.maGrantsEmpty.hidden = true;
       if (dom.maGrantsAdd) dom.maGrantsAdd.hidden = true;
       if (dom.maGrantsMsg) {
-        dom.maGrantsMsg.textContent = t3[key] || "";
+        dom.maGrantsMsg.textContent = t4[key] || "";
         dom.maGrantsMsg.classList.remove("ok");
         dom.maGrantsMsg.classList.add("err");
       }
@@ -1243,7 +1494,7 @@
       }
       if (dom.maGrantsAdd) dom.maGrantsAdd.hidden = false;
       if (dom.maGrantsEmpty) dom.maGrantsEmpty.hidden = true;
-      if (dom.maGrantsList) dom.maGrantsList.innerHTML = `<p class="hint">${escapeHtml3(t3.loading)}</p>`;
+      if (dom.maGrantsList) dom.maGrantsList.innerHTML = `<p class="hint">${escapeHtml4(t4.loading)}</p>`;
       if (dom.maAccessModal) dom.maAccessModal.hidden = false;
       void fetchAgentGrants(id);
     }
@@ -1265,7 +1516,7 @@
       } catch (err) {
         if (dom.maGrantsList) dom.maGrantsList.innerHTML = "";
         if (dom.maGrantsMsg) {
-          dom.maGrantsMsg.textContent = t3.failedAlert(err.message || String(err));
+          dom.maGrantsMsg.textContent = t4.failedAlert(err.message || String(err));
           dom.maGrantsMsg.classList.add("err");
         }
       }
@@ -1279,14 +1530,14 @@
       }
       if (dom.maGrantsEmpty) dom.maGrantsEmpty.hidden = true;
       dom.maGrantsList.innerHTML = rows.map((g) => {
-        const user = escapeHtml3(g.userId);
-        const perm = escapeHtml3(g.perm);
+        const user = escapeHtml4(g.userId);
+        const perm = escapeHtml4(g.perm);
         return `<div class="wf-grant-row">
           <span class="wf-grant-user-id">${user}</span>
           <span class="wf-grant-perm-tag wf-grant-perm-${perm}">${perm}</span>
           <button type="button" class="ma-btn ma-btn-secondary ma-danger wf-grant-remove"
                   data-act="remove-agent-grant" data-user="${user}"
-                  >${escapeHtml3(t3.workflowGrantsRemove)}</button>
+                  >${escapeHtml4(t4.workflowGrantsRemove)}</button>
         </div>`;
       }).join("");
     }
@@ -1300,7 +1551,7 @@
       }
       if (!userId) {
         if (dom.maGrantsMsg) {
-          dom.maGrantsMsg.textContent = t3.workflowGrantsNeedUser;
+          dom.maGrantsMsg.textContent = t4.workflowGrantsNeedUser;
           dom.maGrantsMsg.classList.add("err");
         }
         return;
@@ -1314,7 +1565,7 @@
         if (!r.ok) {
           const body2 = await r.json().catch(() => ({}));
           if (dom.maGrantsMsg) {
-            dom.maGrantsMsg.textContent = t3.failedAlert(body2.error || `${r.status}`);
+            dom.maGrantsMsg.textContent = t4.failedAlert(body2.error || `${r.status}`);
             dom.maGrantsMsg.classList.add("err");
           }
           return;
@@ -1324,7 +1575,7 @@
         renderAgentGrants(body.grants || []);
       } catch (err) {
         if (dom.maGrantsMsg) {
-          dom.maGrantsMsg.textContent = t3.failedAlert(err.message || String(err));
+          dom.maGrantsMsg.textContent = t4.failedAlert(err.message || String(err));
           dom.maGrantsMsg.classList.add("err");
         }
       }
@@ -1339,7 +1590,7 @@
         if (!r.ok) {
           const body = await r.json().catch(() => ({}));
           if (dom.maGrantsMsg) {
-            dom.maGrantsMsg.textContent = t3.failedAlert(body.error || `${r.status}`);
+            dom.maGrantsMsg.textContent = t4.failedAlert(body.error || `${r.status}`);
             dom.maGrantsMsg.classList.add("err");
           }
           return;
@@ -1347,7 +1598,7 @@
         await fetchAgentGrants(grantsAgentId);
       } catch (err) {
         if (dom.maGrantsMsg) {
-          dom.maGrantsMsg.textContent = t3.failedAlert(err.message || String(err));
+          dom.maGrantsMsg.textContent = t4.failedAlert(err.message || String(err));
           dom.maGrantsMsg.classList.add("err");
         }
       }
@@ -1385,7 +1636,7 @@
   }
 
   // admin-src/workflows.js
-  var { t: t4, escapeHtml: escapeHtml4 } = window.Gotong;
+  var { t: t5, escapeHtml: escapeHtml5 } = window.Gotong;
   function createWorkflows({ wf }) {
     let dom = null;
     function setDom(d) {
@@ -1418,45 +1669,45 @@
     function renderWorkflows() {
       if (!dom.wfList) return;
       if (dom.wfSummary) {
-        dom.wfSummary.textContent = wf.workflows.length === 0 ? "" : t4.workflowsSummary(wf.workflows.length);
+        dom.wfSummary.textContent = wf.workflows.length === 0 ? "" : t5.workflowsSummary(wf.workflows.length);
       }
       if (wf.workflows.length === 0) {
-        dom.wfList.innerHTML = `<p class="empty">${escapeHtml4(t4.workflowsEmpty)}</p>`;
+        dom.wfList.innerHTML = `<p class="empty">${escapeHtml5(t5.workflowsEmpty)}</p>`;
         return;
       }
       dom.wfList.innerHTML = wf.workflows.map((w) => {
-        const name = w.name ? escapeHtml4(w.name) : escapeHtml4(w.id);
-        const desc = w.description ? `<p class="hint">${escapeHtml4(w.description)}</p>` : "";
-        const file = w.file ? `<small class="hint">${escapeHtml4(w.file)}</small>` : "";
+        const name = w.name ? escapeHtml5(w.name) : escapeHtml5(w.id);
+        const desc = w.description ? `<p class="hint">${escapeHtml5(w.description)}</p>` : "";
+        const file = w.file ? `<small class="hint">${escapeHtml5(w.file)}</small>` : "";
         const state = w.state || "published";
         const isLive = state === "published" || state === "deprecated";
-        const stateBadge = `<span class="wf-state wf-state-${escapeHtml4(state)}">${escapeHtml4(t4.workflowStateLabel(state))}</span>`;
-        const revTag = w.currentRevision ? `<span class="wf-rev-tag">${escapeHtml4(t4.workflowRevTag(w.currentRevision))}</span>` : "";
-        const startBtn = isLive ? `<button type="button" class="ma-btn" data-act="start-workflow" data-id="${escapeHtml4(w.id)}">${escapeHtml4(t4.admStart)}</button>` : "";
+        const stateBadge = `<span class="wf-state wf-state-${escapeHtml5(state)}">${escapeHtml5(t5.workflowStateLabel(state))}</span>`;
+        const revTag = w.currentRevision ? `<span class="wf-rev-tag">${escapeHtml5(t5.workflowRevTag(w.currentRevision))}</span>` : "";
+        const startBtn = isLive ? `<button type="button" class="ma-btn" data-act="start-workflow" data-id="${escapeHtml5(w.id)}">${escapeHtml5(t5.admStart)}</button>` : "";
         return `<article class="ma-card">
         <header>
           <strong>${name}</strong>
-          <code>${escapeHtml4(w.participantId)}</code>
+          <code>${escapeHtml5(w.participantId)}</code>
           ${stateBadge}${revTag}
           ${startBtn}
           <button type="button" class="ma-btn ma-btn-secondary"
                   data-act="open-workflow-runs"
-                  data-id="${escapeHtml4(w.id)}">${escapeHtml4(t4.workflowRunsBtn)}</button>
+                  data-id="${escapeHtml5(w.id)}">${escapeHtml5(t5.workflowRunsBtn)}</button>
           <button type="button" class="ma-btn ma-btn-secondary"
                   data-act="open-workflow-graph"
-                  data-id="${escapeHtml4(w.id)}">${escapeHtml4(t4.workflowGraphBtn)}</button>
+                  data-id="${escapeHtml5(w.id)}">${escapeHtml5(t5.workflowGraphBtn)}</button>
           <button type="button" class="ma-btn ma-btn-secondary"
                   data-act="explain-workflow"
-                  data-id="${escapeHtml4(w.id)}">${escapeHtml4(t4.workflowExplainBtn)}</button>
+                  data-id="${escapeHtml5(w.id)}">${escapeHtml5(t5.workflowExplainBtn)}</button>
           ${lifecycleButtons(w.id, state)}
           <button type="button" class="ma-btn ma-btn-secondary"
                   data-act="remove-workflow"
-                  data-id="${escapeHtml4(w.id)}">${escapeHtml4(t4.workflowRemoveBtn)}</button>
+                  data-id="${escapeHtml5(w.id)}">${escapeHtml5(t5.workflowRemoveBtn)}</button>
         </header>
         ${desc}
         <ul class="ma-meta">
-          <li><span class="ma-label">${escapeHtml4(t4.workflowTriggerLabel)}:</span> <code>${escapeHtml4(w.triggerCapability)}</code></li>
-          <li>${escapeHtml4(t4.workflowStepsLabel(w.stepCount))}</li>
+          <li><span class="ma-label">${escapeHtml5(t5.workflowTriggerLabel)}:</span> <code>${escapeHtml5(w.triggerCapability)}</code></li>
+          <li>${escapeHtml5(t5.workflowStepsLabel(w.stepCount))}</li>
         </ul>
         ${crossHubPanel(w.crossHubSteps)}
         ${governancePanel(w.governance)}
@@ -1468,52 +1719,52 @@
       if (!Array.isArray(steps) || steps.length === 0) return "";
       const rows = steps.map((s) => {
         const dest = s.peerLabel || s.peer;
-        const label = s.kind === "a2a" ? t4.workflowCrossHubA2a(String(dest)) : t4.workflowCrossHubPeer(String(dest));
-        return `<li><code>${escapeHtml4(String(s.stepId))}</code> → <code>${escapeHtml4(String(s.capability))}</code> <span class="wf-xhub-peer">${escapeHtml4(label)}</span></li>`;
+        const label = s.kind === "a2a" ? t5.workflowCrossHubA2a(String(dest)) : t5.workflowCrossHubPeer(String(dest));
+        return `<li><code>${escapeHtml5(String(s.stepId))}</code> → <code>${escapeHtml5(String(s.capability))}</code> <span class="wf-xhub-peer">${escapeHtml5(label)}</span></li>`;
       });
-      return `<details class="wf-xhub"><summary>${escapeHtml4(t4.workflowCrossHubSummary(steps.length))}</summary><ul class="ma-meta">${rows.join("")}</ul></details>`;
+      return `<details class="wf-xhub"><summary>${escapeHtml5(t5.workflowCrossHubSummary(steps.length))}</summary><ul class="ma-meta">${rows.join("")}</ul></details>`;
     }
     function govChips(arr) {
-      return arr.map((x) => `<span class="wf-gov-chip">${escapeHtml4(String(x))}</span>`).join(" ");
+      return arr.map((x) => `<span class="wf-gov-chip">${escapeHtml5(String(x))}</span>`).join(" ");
     }
     function governancePanel(g) {
       if (!g || typeof g !== "object") return "";
       const rows = [];
       if (g.dataSensitivity) {
         rows.push(
-          `<li><span class="ma-label">${escapeHtml4(t4.workflowGovSensitivity)}:</span> <span class="wf-gov-sens wf-gov-sens-${escapeHtml4(g.dataSensitivity)}">${escapeHtml4(t4.workflowGovSensitivityLabel(g.dataSensitivity))}</span></li>`
+          `<li><span class="ma-label">${escapeHtml5(t5.workflowGovSensitivity)}:</span> <span class="wf-gov-sens wf-gov-sens-${escapeHtml5(g.dataSensitivity)}">${escapeHtml5(t5.workflowGovSensitivityLabel(g.dataSensitivity))}</span></li>`
         );
       }
       if (Array.isArray(g.requiredCredentials) && g.requiredCredentials.length) {
-        rows.push(`<li><span class="ma-label">${escapeHtml4(t4.workflowGovCredentials)}:</span> ${govChips(g.requiredCredentials)}</li>`);
+        rows.push(`<li><span class="ma-label">${escapeHtml5(t5.workflowGovCredentials)}:</span> ${govChips(g.requiredCredentials)}</li>`);
       }
       if (typeof g.expectedCostUsd === "number") {
-        rows.push(`<li><span class="ma-label">${escapeHtml4(t4.workflowGovCost)}:</span> <code>$${escapeHtml4(String(g.expectedCostUsd))}</code></li>`);
+        rows.push(`<li><span class="ma-label">${escapeHtml5(t5.workflowGovCost)}:</span> <code>$${escapeHtml5(String(g.expectedCostUsd))}</code></li>`);
       }
       if (Array.isArray(g.requiredHumanRoles) && g.requiredHumanRoles.length) {
-        rows.push(`<li><span class="ma-label">${escapeHtml4(t4.workflowGovHumanRoles)}:</span> ${govChips(g.requiredHumanRoles)}</li>`);
+        rows.push(`<li><span class="ma-label">${escapeHtml5(t5.workflowGovHumanRoles)}:</span> ${govChips(g.requiredHumanRoles)}</li>`);
       }
       if (Array.isArray(g.externalSystems) && g.externalSystems.length) {
-        rows.push(`<li><span class="ma-label">${escapeHtml4(t4.workflowGovExternal)}:</span> ${govChips(g.externalSystems)}</li>`);
+        rows.push(`<li><span class="ma-label">${escapeHtml5(t5.workflowGovExternal)}:</span> ${govChips(g.externalSystems)}</li>`);
       }
-      if (g.notes) rows.push(`<li class="wf-gov-notes">${escapeHtml4(g.notes)}</li>`);
+      if (g.notes) rows.push(`<li class="wf-gov-notes">${escapeHtml5(g.notes)}</li>`);
       if (!rows.length) return "";
-      return `<details class="wf-gov"><summary>${escapeHtml4(t4.workflowGovSummary)}</summary><ul class="ma-meta">${rows.join("")}</ul></details>`;
+      return `<details class="wf-gov"><summary>${escapeHtml5(t5.workflowGovSummary)}</summary><ul class="ma-meta">${rows.join("")}</ul></details>`;
     }
     async function removeWorkflow(id) {
-      if (!confirm(t4.confirmRemoveWorkflow(id))) return;
+      if (!confirm(t5.confirmRemoveWorkflow(id))) return;
       try {
         const r = await fetch(`/api/admin/workflows/${encodeURIComponent(id)}`, {
           method: "DELETE"
         });
         if (!r.ok) {
           const body = await r.json().catch(() => ({}));
-          alert(t4.failedAlert(body.error || `${r.status}`));
+          alert(t5.failedAlert(body.error || `${r.status}`));
           return;
         }
         await refreshWorkflows();
       } catch (err) {
-        alert(t4.failedAlert(err.message || String(err)));
+        alert(t5.failedAlert(err.message || String(err)));
       }
     }
     let schedules = [];
@@ -1543,45 +1794,45 @@
       }
     }
     function schedCadenceText(c) {
-      if (!c || typeof c !== "object") return t4.wfSchedInvalid;
+      if (!c || typeof c !== "object") return t5.wfSchedInvalid;
       if (c.kind === "daily") {
-        return t4.wfSchedCadenceDaily(c.hour) + t4.wfSchedTz(c.tzOffsetMinutes ?? 480);
+        return t5.wfSchedCadenceDaily(c.hour) + t5.wfSchedTz(c.tzOffsetMinutes ?? 480);
       }
       if (c.kind === "weekly") {
-        const wd = t4.wfSchedWeekdays[c.weekday] ?? String(c.weekday);
-        return t4.wfSchedCadenceWeekly(wd, c.hour) + t4.wfSchedTz(c.tzOffsetMinutes ?? 480);
+        const wd = t5.wfSchedWeekdays[c.weekday] ?? String(c.weekday);
+        return t5.wfSchedCadenceWeekly(wd, c.hour) + t5.wfSchedTz(c.tzOffsetMinutes ?? 480);
       }
-      if (c.kind === "interval") return t4.wfSchedCadenceInterval(Math.round(c.everyMs / 6e4));
-      return t4.wfSchedInvalid;
+      if (c.kind === "interval") return t5.wfSchedCadenceInterval(Math.round(c.everyMs / 6e4));
+      return t5.wfSchedInvalid;
     }
     function renderSchedules() {
       if (!dom.wfSchedList) return;
       if (dom.wfSchedSummary) {
-        dom.wfSchedSummary.textContent = schedules.length === 0 ? "" : t4.wfSchedSummary(schedules.length);
+        dom.wfSchedSummary.textContent = schedules.length === 0 ? "" : t5.wfSchedSummary(schedules.length);
       }
       if (schedules.length === 0) {
-        dom.wfSchedList.innerHTML = `<p class="empty">${escapeHtml4(t4.wfSchedEmpty)}</p>`;
+        dom.wfSchedList.innerHTML = `<p class="empty">${escapeHtml5(t5.wfSchedEmpty)}</p>`;
         return;
       }
       dom.wfSchedList.innerHTML = schedules.map((s) => {
         const w = wf.workflows.find((x) => x.id === s.workflowId);
-        const name = escapeHtml4(w?.name || s.workflowId);
-        const idAttr = escapeHtml4(s.id);
-        const stateBadge = !s.valid ? `<span class="wf-state wf-state-archived">${escapeHtml4(t4.wfSchedInvalid)}</span>` : s.enabled ? `<span class="wf-state wf-state-published">${escapeHtml4(t4.wfSchedEnabled)}</span>` : `<span class="wf-state wf-state-draft">${escapeHtml4(t4.wfSchedDisabled)}</span>`;
-        const fired = s.lastFiredMark ? t4.wfSchedLastFired(s.lastFiredMark) : t4.wfSchedNeverFired;
-        const toggleBtn = s.valid ? `<button type="button" class="ma-btn ma-btn-secondary" data-act="toggle-schedule" data-id="${idAttr}">${escapeHtml4(s.enabled ? t4.wfSchedPauseBtn : t4.wfSchedResumeBtn)}</button>` : "";
+        const name = escapeHtml5(w?.name || s.workflowId);
+        const idAttr = escapeHtml5(s.id);
+        const stateBadge = !s.valid ? `<span class="wf-state wf-state-archived">${escapeHtml5(t5.wfSchedInvalid)}</span>` : s.enabled ? `<span class="wf-state wf-state-published">${escapeHtml5(t5.wfSchedEnabled)}</span>` : `<span class="wf-state wf-state-draft">${escapeHtml5(t5.wfSchedDisabled)}</span>`;
+        const fired = s.lastFiredMark ? t5.wfSchedLastFired(s.lastFiredMark) : t5.wfSchedNeverFired;
+        const toggleBtn = s.valid ? `<button type="button" class="ma-btn ma-btn-secondary" data-act="toggle-schedule" data-id="${idAttr}">${escapeHtml5(s.enabled ? t5.wfSchedPauseBtn : t5.wfSchedResumeBtn)}</button>` : "";
         return `<article class="ma-card">
         <header>
           <strong>${name}</strong>
-          <code>${escapeHtml4(s.userId)}</code>
+          <code>${escapeHtml5(s.userId)}</code>
           ${stateBadge}
-          <button type="button" class="ma-btn" data-act="fire-schedule" data-id="${idAttr}">${escapeHtml4(t4.wfSchedFireBtn)}</button>
+          <button type="button" class="ma-btn" data-act="fire-schedule" data-id="${idAttr}">${escapeHtml5(t5.wfSchedFireBtn)}</button>
           ${toggleBtn}
-          <button type="button" class="ma-btn ma-btn-secondary" data-act="remove-schedule" data-id="${idAttr}">${escapeHtml4(t4.wfSchedRemoveBtn)}</button>
+          <button type="button" class="ma-btn ma-btn-secondary" data-act="remove-schedule" data-id="${idAttr}">${escapeHtml5(t5.wfSchedRemoveBtn)}</button>
         </header>
         <ul class="ma-meta">
-          <li>${escapeHtml4(schedCadenceText(s.cadence))}</li>
-          <li>${escapeHtml4(fired)}</li>
+          <li>${escapeHtml5(schedCadenceText(s.cadence))}</li>
+          <li>${escapeHtml5(fired)}</li>
           <li><code>${idAttr}</code></li>
         </ul>
       </article>`;
@@ -1595,20 +1846,20 @@
         for (let i = 0; i < list.length; i++) {
           const g = list[i];
           const w = wf.workflows.find((x) => x.id === g.workflowId);
-          const name = escapeHtml4(w?.name || g.workflowId);
+          const name = escapeHtml5(w?.name || g.workflowId);
           const done = schedules.some(
             (s) => s.workflowId === g.workflowId && JSON.stringify(s.cadence) === JSON.stringify(g.cadence)
           );
-          const action = done ? `<span class="wf-state wf-state-published">${escapeHtml4(t4.wfSchedSuggestDone)}</span>` : `<button type="button" class="ma-btn" data-act="enable-suggestion" data-id="${escapeHtml4(p.pack)}" data-idx="${i}">${escapeHtml4(t4.wfSchedSuggestEnableBtn)}</button>`;
+          const action = done ? `<span class="wf-state wf-state-published">${escapeHtml5(t5.wfSchedSuggestDone)}</span>` : `<button type="button" class="ma-btn" data-act="enable-suggestion" data-id="${escapeHtml5(p.pack)}" data-idx="${i}">${escapeHtml5(t5.wfSchedSuggestEnableBtn)}</button>`;
           rows.push(`<article class="ma-card">
           <header>
             <strong>${name}</strong>
-            <span class="wf-state wf-state-draft">${escapeHtml4(t4.wfSchedSuggestFrom(p.pack))}</span>
+            <span class="wf-state wf-state-draft">${escapeHtml5(t5.wfSchedSuggestFrom(p.pack))}</span>
             ${action}
           </header>
           <ul class="ma-meta">
-            <li>${escapeHtml4(schedCadenceText(g.cadence))}</li>
-            ${g.note ? `<li>${escapeHtml4(g.note)}</li>` : ""}
+            <li>${escapeHtml5(schedCadenceText(g.cadence))}</li>
+            ${g.note ? `<li>${escapeHtml5(g.note)}</li>` : ""}
           </ul>
         </article>`);
         }
@@ -1620,7 +1871,7 @@
       const g = p?.schedules?.[idx];
       if (!g) return;
       const w = wf.workflows.find((x) => x.id === g.workflowId);
-      const userId = (prompt(t4.wfSchedSuggestUserPrompt(w?.name || g.workflowId)) || "").trim();
+      const userId = (prompt(t5.wfSchedSuggestUserPrompt(w?.name || g.workflowId)) || "").trim();
       if (!userId) return;
       schedMsg("");
       try {
@@ -1637,13 +1888,13 @@
         });
         const body = await r.json().catch(() => ({}));
         if (!r.ok) {
-          schedMsg(t4.failedAlert(body.error || `${r.status}`), "err");
+          schedMsg(t5.failedAlert(body.error || `${r.status}`), "err");
           return;
         }
-        schedMsg(t4.wfSchedCreated(body.schedule?.id || ""), "ok");
+        schedMsg(t5.wfSchedCreated(body.schedule?.id || ""), "ok");
         await refreshSchedules();
       } catch (err) {
-        schedMsg(t4.failedAlert(err.message || String(err)), "err");
+        schedMsg(t5.failedAlert(err.message || String(err)), "err");
       }
     }
     function populateScheduleForm() {
@@ -1651,10 +1902,10 @@
       if (!schedFormReady) {
         schedFormReady = true;
         if (dom.wfSchedKind) {
-          dom.wfSchedKind.innerHTML = `<option value="daily">${escapeHtml4(t4.wfSchedKindDaily)}</option><option value="weekly">${escapeHtml4(t4.wfSchedKindWeekly)}</option><option value="interval">${escapeHtml4(t4.wfSchedKindInterval)}</option>`;
+          dom.wfSchedKind.innerHTML = `<option value="daily">${escapeHtml5(t5.wfSchedKindDaily)}</option><option value="weekly">${escapeHtml5(t5.wfSchedKindWeekly)}</option><option value="interval">${escapeHtml5(t5.wfSchedKindInterval)}</option>`;
         }
         if (dom.wfSchedWeekday) {
-          dom.wfSchedWeekday.innerHTML = t4.wfSchedWeekdays.map((d, i) => `<option value="${i}"${i === 1 ? " selected" : ""}>${escapeHtml4(d)}</option>`).join("");
+          dom.wfSchedWeekday.innerHTML = t5.wfSchedWeekdays.map((d, i) => `<option value="${i}"${i === 1 ? " selected" : ""}>${escapeHtml5(d)}</option>`).join("");
         }
         void fillScheduleUserOptions();
       }
@@ -1662,7 +1913,7 @@
       const rows = wf.workflows.filter(
         (w) => (w.state || "published") === "published" && w.surfaceMe && w.surfaceMe.enabled === true
       );
-      dom.wfSchedWorkflow.innerHTML = rows.length === 0 ? `<option value="">${escapeHtml4(t4.wfSchedNoWorkflow)}</option>` : rows.map((w) => `<option value="${escapeHtml4(w.id)}">${escapeHtml4(w.name || w.id)}</option>`).join("");
+      dom.wfSchedWorkflow.innerHTML = rows.length === 0 ? `<option value="">${escapeHtml5(t5.wfSchedNoWorkflow)}</option>` : rows.map((w) => `<option value="${escapeHtml5(w.id)}">${escapeHtml5(w.name || w.id)}</option>`).join("");
       if (prev && rows.some((w) => w.id === prev)) dom.wfSchedWorkflow.value = prev;
     }
     async function fillScheduleUserOptions() {
@@ -1671,7 +1922,7 @@
         const r = await fetch("/api/admin/identity/users");
         if (!r.ok) return;
         const users = (await r.json()).users || [];
-        dom.wfSchedUserOptions.innerHTML = users.map((u) => `<option value="${escapeHtml4(u.id)}">${escapeHtml4(u.displayName || u.email || u.id)}</option>`).join("");
+        dom.wfSchedUserOptions.innerHTML = users.map((u) => `<option value="${escapeHtml5(u.id)}">${escapeHtml5(u.displayName || u.email || u.id)}</option>`).join("");
       } catch {
       }
     }
@@ -1702,14 +1953,14 @@
         });
         const body = await r.json().catch(() => ({}));
         if (!r.ok) {
-          schedMsg(t4.failedAlert(body.error || `${r.status}`), "err");
+          schedMsg(t5.failedAlert(body.error || `${r.status}`), "err");
           return;
         }
-        schedMsg(t4.wfSchedCreated(body.schedule?.id || ""), "ok");
+        schedMsg(t5.wfSchedCreated(body.schedule?.id || ""), "ok");
         if (dom.wfSchedUser) dom.wfSchedUser.value = "";
         await refreshSchedules();
       } catch (err) {
-        schedMsg(t4.failedAlert(err.message || String(err)), "err");
+        schedMsg(t5.failedAlert(err.message || String(err)), "err");
       }
     }
     async function fireSchedule(id) {
@@ -1720,13 +1971,13 @@
         });
         const body = await r.json().catch(() => ({}));
         if (!r.ok) {
-          schedMsg(t4.wfSchedFireFail(body.error || `${r.status}`), "err");
+          schedMsg(t5.wfSchedFireFail(body.error || `${r.status}`), "err");
           return;
         }
-        schedMsg(t4.wfSchedFired(body.workflowId, body.userId), "ok");
+        schedMsg(t5.wfSchedFired(body.workflowId, body.userId), "ok");
         await refreshSchedules();
       } catch (err) {
-        schedMsg(t4.failedAlert(err.message || String(err)), "err");
+        schedMsg(t5.failedAlert(err.message || String(err)), "err");
       }
     }
     async function toggleSchedule(id) {
@@ -1747,28 +1998,28 @@
         });
         if (!r.ok) {
           const body = await r.json().catch(() => ({}));
-          alert(t4.failedAlert(body.error || `${r.status}`));
+          alert(t5.failedAlert(body.error || `${r.status}`));
           return;
         }
         await refreshSchedules();
       } catch (err) {
-        alert(t4.failedAlert(err.message || String(err)));
+        alert(t5.failedAlert(err.message || String(err)));
       }
     }
     async function removeSchedule(id) {
-      if (!confirm(t4.confirmRemoveSchedule(id))) return;
+      if (!confirm(t5.confirmRemoveSchedule(id))) return;
       try {
         const r = await fetch(`/api/admin/workflow-schedules/${encodeURIComponent(id)}`, {
           method: "DELETE"
         });
         if (!r.ok) {
           const body = await r.json().catch(() => ({}));
-          alert(t4.failedAlert(body.error || `${r.status}`));
+          alert(t5.failedAlert(body.error || `${r.status}`));
           return;
         }
         await refreshSchedules();
       } catch (err) {
-        alert(t4.failedAlert(err.message || String(err)));
+        alert(t5.failedAlert(err.message || String(err)));
       }
     }
     let acceptPacks = [];
@@ -1798,32 +2049,32 @@
     function acceptVerdictRows(report) {
       return report.results.map((v) => {
         const ok = v.verdict === "green";
-        const badge = ok ? `<span class="wf-state wf-state-published">${escapeHtml4(t4.wfAcceptGreen)}</span>` : `<span class="wf-state wf-state-archived">${escapeHtml4(t4.wfAcceptRed)}</span>`;
-        const reason = ok ? "" : ` — ${escapeHtml4(t4.wfAcceptReason(v.reason))}`;
-        const detail = !ok && v.violations?.length ? `<ul class="ma-meta">${v.violations.map((x) => `<li>${escapeHtml4(x.message)}</li>`).join("")}</ul>` : !ok && v.message ? `<ul class="ma-meta"><li>${escapeHtml4(v.message)}</li></ul>` : "";
-        return `<li class="wf-accept-row">${badge} <code>${escapeHtml4(v.caseId)}</code>
-        <span class="hint">${escapeHtml4(v.workflowId)} · ${Math.round(v.elapsedMs / 1e3)}s</span>${reason}${detail}</li>`;
+        const badge = ok ? `<span class="wf-state wf-state-published">${escapeHtml5(t5.wfAcceptGreen)}</span>` : `<span class="wf-state wf-state-archived">${escapeHtml5(t5.wfAcceptRed)}</span>`;
+        const reason = ok ? "" : ` — ${escapeHtml5(t5.wfAcceptReason(v.reason))}`;
+        const detail = !ok && v.violations?.length ? `<ul class="ma-meta">${v.violations.map((x) => `<li>${escapeHtml5(x.message)}</li>`).join("")}</ul>` : !ok && v.message ? `<ul class="ma-meta"><li>${escapeHtml5(v.message)}</li></ul>` : "";
+        return `<li class="wf-accept-row">${badge} <code>${escapeHtml5(v.caseId)}</code>
+        <span class="hint">${escapeHtml5(v.workflowId)} · ${Math.round(v.elapsedMs / 1e3)}s</span>${reason}${detail}</li>`;
       }).join("");
     }
     function renderAcceptance() {
       if (!dom.wfAcceptList) return;
       if (dom.wfAcceptSummary) {
-        dom.wfAcceptSummary.textContent = acceptPacks.length === 0 ? "" : t4.wfAcceptSummary(acceptPacks.length);
+        dom.wfAcceptSummary.textContent = acceptPacks.length === 0 ? "" : t5.wfAcceptSummary(acceptPacks.length);
       }
       dom.wfAcceptList.innerHTML = acceptPacks.map((p) => {
-        const packAttr = escapeHtml4(p.pack);
+        const packAttr = escapeHtml5(p.pack);
         const running = acceptRunning === p.pack;
         const report = acceptReports[p.pack];
         const caseLines = p.cases.map((c) => {
-          const note = c.note ? ` <span class="hint">${escapeHtml4(c.note)}</span>` : "";
-          return `<li><code>${escapeHtml4(c.id)}</code> → ${escapeHtml4(c.workflowId)}${note}</li>`;
+          const note = c.note ? ` <span class="hint">${escapeHtml5(c.note)}</span>` : "";
+          return `<li><code>${escapeHtml5(c.id)}</code> → ${escapeHtml5(c.workflowId)}${note}</li>`;
         }).join("");
         const reportBlock = report ? `<ul class="ma-meta wf-accept-report">${acceptVerdictRows(report)}</ul>` : "";
         return `<article class="ma-card">
         <header>
           <strong>${packAttr}</strong>
-          ${report ? report.allGreen ? `<span class="wf-state wf-state-published">${escapeHtml4(t4.wfAcceptAllGreen)}</span>` : `<span class="wf-state wf-state-archived">${escapeHtml4(t4.wfAcceptHasRed(report.results.filter((v) => v.verdict !== "green").length))}</span>` : ""}
-          <button type="button" class="ma-btn" data-act="run-acceptance" data-id="${packAttr}"${running ? " disabled" : ""}>${escapeHtml4(running ? t4.wfAcceptRunningBtn : t4.wfAcceptRunBtn)}</button>
+          ${report ? report.allGreen ? `<span class="wf-state wf-state-published">${escapeHtml5(t5.wfAcceptAllGreen)}</span>` : `<span class="wf-state wf-state-archived">${escapeHtml5(t5.wfAcceptHasRed(report.results.filter((v) => v.verdict !== "green").length))}</span>` : ""}
+          <button type="button" class="ma-btn" data-act="run-acceptance" data-id="${packAttr}"${running ? " disabled" : ""}>${escapeHtml5(running ? t5.wfAcceptRunningBtn : t5.wfAcceptRunBtn)}</button>
         </header>
         <ul class="ma-meta">${caseLines}</ul>
         ${reportBlock}
@@ -1833,7 +2084,7 @@
     async function runAcceptance(pack) {
       if (acceptRunning) return;
       acceptRunning = pack;
-      acceptMsg(t4.wfAcceptRunning, "");
+      acceptMsg(t5.wfAcceptRunning, "");
       renderAcceptance();
       try {
         const r = await fetch(`/api/admin/templates/acceptance/${encodeURIComponent(pack)}/run`, {
@@ -1843,44 +2094,44 @@
         });
         const body = await r.json().catch(() => ({}));
         if (!r.ok) {
-          acceptMsg(t4.failedAlert(body.error || `${r.status}`), "err");
+          acceptMsg(t5.failedAlert(body.error || `${r.status}`), "err");
           return;
         }
         acceptReports[pack] = body.report;
-        acceptMsg(body.report.allGreen ? t4.wfAcceptDoneGreen(pack) : t4.wfAcceptDoneRed(pack), body.report.allGreen ? "ok" : "err");
+        acceptMsg(body.report.allGreen ? t5.wfAcceptDoneGreen(pack) : t5.wfAcceptDoneRed(pack), body.report.allGreen ? "ok" : "err");
       } catch (err) {
-        acceptMsg(t4.failedAlert(err.message || String(err)), "err");
+        acceptMsg(t5.failedAlert(err.message || String(err)), "err");
       } finally {
         acceptRunning = "";
         renderAcceptance();
       }
     }
     function lifecycleButtons(id, state) {
-      const idAttr = escapeHtml4(id);
+      const idAttr = escapeHtml5(id);
       const btn = (act, label) => `<button type="button" class="ma-btn ma-btn-secondary"
-               data-act="${act}" data-id="${idAttr}">${escapeHtml4(label)}</button>`;
-      const revisions = btn("open-workflow-revisions", t4.workflowRevisionsBtn);
+               data-act="${act}" data-id="${idAttr}">${escapeHtml5(label)}</button>`;
+      const revisions = btn("open-workflow-revisions", t5.workflowRevisionsBtn);
       if (state === "draft") {
-        return btn("submit-review-workflow", t4.workflowSubmitReviewBtn) + btn("publish-workflow", t4.workflowPublishBtn) + revisions;
+        return btn("submit-review-workflow", t5.workflowSubmitReviewBtn) + btn("publish-workflow", t5.workflowPublishBtn) + revisions;
       }
       if (state === "review") {
-        return btn("publish-workflow", t4.workflowPublishBtn) + btn("back-to-draft-workflow", t4.workflowBackToDraftBtn) + revisions;
+        return btn("publish-workflow", t5.workflowPublishBtn) + btn("back-to-draft-workflow", t5.workflowBackToDraftBtn) + revisions;
       }
       if (state === "archived") {
         return revisions;
       }
       if (state === "deprecated") {
-        return btn("republish-workflow", t4.workflowRepublishBtn) + btn("archive-workflow", t4.workflowArchiveBtn) + revisions;
+        return btn("republish-workflow", t5.workflowRepublishBtn) + btn("archive-workflow", t5.workflowArchiveBtn) + revisions;
       }
-      return btn("deprecate-workflow", t4.workflowDeprecateBtn) + revisions;
+      return btn("deprecate-workflow", t5.workflowDeprecateBtn) + revisions;
     }
     async function lifecycleAction(id, action) {
       const ask = {
-        review: t4.confirmSubmitReview,
-        draft: t4.confirmBackToDraft,
-        deprecate: t4.confirmDeprecateWorkflow,
-        publish: t4.confirmPublishWorkflow,
-        archive: t4.confirmArchiveWorkflow
+        review: t5.confirmSubmitReview,
+        draft: t5.confirmBackToDraft,
+        deprecate: t5.confirmDeprecateWorkflow,
+        publish: t5.confirmPublishWorkflow,
+        archive: t5.confirmArchiveWorkflow
       }[action];
       if (ask && !confirm(ask(id))) return;
       try {
@@ -1889,12 +2140,12 @@
         });
         if (!r.ok) {
           const body = await r.json().catch(() => ({}));
-          alert(t4.failedAlert(body.error || `${r.status}`));
+          alert(t5.failedAlert(body.error || `${r.status}`));
           return;
         }
         await refreshWorkflows();
       } catch (err) {
-        alert(t4.failedAlert(err.message || String(err)));
+        alert(t5.failedAlert(err.message || String(err)));
       }
     }
     let revWorkflowId = null;
@@ -1908,7 +2159,7 @@
         dom.wfRevMsg.classList.remove("ok", "err");
       }
       if (dom.wfRevEmpty) dom.wfRevEmpty.hidden = true;
-      if (dom.wfRevList) dom.wfRevList.innerHTML = `<p class="hint">${escapeHtml4(t4.loading)}</p>`;
+      if (dom.wfRevList) dom.wfRevList.innerHTML = `<p class="hint">${escapeHtml5(t5.loading)}</p>`;
       if (dom.wfRevModal) dom.wfRevModal.hidden = false;
       void loadWorkflowAudit(id);
       void loadWorkflowGrants(id);
@@ -1918,7 +2169,7 @@
           const body2 = await r.json().catch(() => ({}));
           if (dom.wfRevList) dom.wfRevList.innerHTML = "";
           if (dom.wfRevMsg) {
-            dom.wfRevMsg.textContent = t4.failedAlert(body2.error || `${r.status}`);
+            dom.wfRevMsg.textContent = t5.failedAlert(body2.error || `${r.status}`);
             dom.wfRevMsg.classList.add("err");
           }
           return;
@@ -1930,7 +2181,7 @@
       } catch (err) {
         if (dom.wfRevList) dom.wfRevList.innerHTML = "";
         if (dom.wfRevMsg) {
-          dom.wfRevMsg.textContent = t4.failedAlert(err.message || String(err));
+          dom.wfRevMsg.textContent = t5.failedAlert(err.message || String(err));
           dom.wfRevMsg.classList.add("err");
         }
       }
@@ -1944,7 +2195,7 @@
         dom.wfGraphMsg.textContent = "";
         dom.wfGraphMsg.classList.remove("ok", "err");
       }
-      if (dom.wfGraphBody) dom.wfGraphBody.innerHTML = `<p class="hint">${escapeHtml4(t4.loading)}</p>`;
+      if (dom.wfGraphBody) dom.wfGraphBody.innerHTML = `<p class="hint">${escapeHtml5(t5.loading)}</p>`;
       if (dom.wfGraphModal) dom.wfGraphModal.hidden = false;
       try {
         const r = await fetch(`/api/admin/workflows/${encodeURIComponent(id)}/graph`);
@@ -1952,24 +2203,24 @@
           const body = await r.json().catch(() => ({}));
           if (dom.wfGraphBody) dom.wfGraphBody.innerHTML = "";
           if (dom.wfGraphMsg) {
-            dom.wfGraphMsg.textContent = t4.workflowGraphError(body.error || `${r.status}`);
+            dom.wfGraphMsg.textContent = t5.workflowGraphError(body.error || `${r.status}`);
             dom.wfGraphMsg.classList.add("err");
           }
           return;
         }
         const graph = (await r.json()).graph;
         if (!graph || !Array.isArray(graph.nodes) || graph.nodes.length === 0) {
-          if (dom.wfGraphBody) dom.wfGraphBody.innerHTML = `<p class="hint">${escapeHtml4(t4.workflowGraphEmpty)}</p>`;
+          if (dom.wfGraphBody) dom.wfGraphBody.innerHTML = `<p class="hint">${escapeHtml5(t5.workflowGraphEmpty)}</p>`;
           return;
         }
         if (dom.wfGraphBody) {
           const G = window.GotongWorkflowGraph;
-          dom.wfGraphBody.innerHTML = `<div class="wf-graph-scroll">${G.renderWorkflowGraphSvg(graph, { t: t4, escapeHtml: escapeHtml4 })}</div>` + G.graphLegend({ t: t4, escapeHtml: escapeHtml4 });
+          dom.wfGraphBody.innerHTML = `<div class="wf-graph-scroll">${G.renderWorkflowGraphSvg(graph, { t: t5, escapeHtml: escapeHtml5 })}</div>` + G.graphLegend({ t: t5, escapeHtml: escapeHtml5 });
         }
       } catch (err) {
         if (dom.wfGraphBody) dom.wfGraphBody.innerHTML = "";
         if (dom.wfGraphMsg) {
-          dom.wfGraphMsg.textContent = t4.workflowGraphError(err.message || String(err));
+          dom.wfGraphMsg.textContent = t5.workflowGraphError(err.message || String(err));
           dom.wfGraphMsg.classList.add("err");
         }
       }
@@ -1990,23 +2241,23 @@
         const isCurrent = rev.revision === current;
         const when = rev.createdAt ? new Date(rev.createdAt).toLocaleString() : "";
         const rolledFrom = rev.rolledBackFrom ? ` ← rev ${rev.rolledBackFrom}` : "";
-        const hash = rev.contentHash ? `<code>${escapeHtml4(String(rev.contentHash).slice(0, 10))}</code>` : "";
-        const right = isCurrent ? `<span class="wf-state wf-state-published">${escapeHtml4(t4.workflowRevCurrent)}</span>` : `<button type="button" class="ma-btn ma-btn-secondary"
-                   data-act="rollback-revision" data-id="${escapeHtml4(revWorkflowId)}"
-                   data-rev="${rev.revision}">${escapeHtml4(t4.workflowRevRollbackBtn)}</button>`;
+        const hash = rev.contentHash ? `<code>${escapeHtml5(String(rev.contentHash).slice(0, 10))}</code>` : "";
+        const right = isCurrent ? `<span class="wf-state wf-state-published">${escapeHtml5(t5.workflowRevCurrent)}</span>` : `<button type="button" class="ma-btn ma-btn-secondary"
+                   data-act="rollback-revision" data-id="${escapeHtml5(revWorkflowId)}"
+                   data-rev="${rev.revision}">${escapeHtml5(t5.workflowRevRollbackBtn)}</button>`;
         return `<div class="wf-rev-row${isCurrent ? " wf-rev-current" : ""}">
-        <span class="wf-rev-tag">${escapeHtml4(t4.workflowRevTag(rev.revision))}</span>
+        <span class="wf-rev-tag">${escapeHtml5(t5.workflowRevTag(rev.revision))}</span>
         <span>
-          <span class="wf-rev-origin">${escapeHtml4(t4.workflowRevOrigin(rev.origin || ""))}${escapeHtml4(rolledFrom)}</span>
+          <span class="wf-rev-origin">${escapeHtml5(t5.workflowRevOrigin(rev.origin || ""))}${escapeHtml5(rolledFrom)}</span>
           ${hash}
-          <small class="hint">${escapeHtml4(when)}</small>
+          <small class="hint">${escapeHtml5(when)}</small>
         </span>
         ${right}
       </div>`;
       }).join("");
     }
     async function rollbackTo(id, rev) {
-      if (!confirm(t4.confirmRollback(id, rev))) return;
+      if (!confirm(t5.confirmRollback(id, rev))) return;
       try {
         const r = await fetch(`/api/admin/workflows/${encodeURIComponent(id)}/rollback`, {
           method: "POST",
@@ -2016,7 +2267,7 @@
         if (!r.ok) {
           const body = await r.json().catch(() => ({}));
           if (dom.wfRevMsg) {
-            dom.wfRevMsg.textContent = t4.failedAlert(body.error || `${r.status}`);
+            dom.wfRevMsg.textContent = t5.failedAlert(body.error || `${r.status}`);
             dom.wfRevMsg.classList.add("err");
           }
           return;
@@ -2025,7 +2276,7 @@
         await openWorkflowRevisionsModal(id);
       } catch (err) {
         if (dom.wfRevMsg) {
-          dom.wfRevMsg.textContent = t4.failedAlert(err.message || String(err));
+          dom.wfRevMsg.textContent = t5.failedAlert(err.message || String(err));
           dom.wfRevMsg.classList.add("err");
         }
       }
@@ -2047,7 +2298,7 @@
       }
       if (dom.wfAuditEmpty) dom.wfAuditEmpty.hidden = true;
       if (dom.wfAuditExport) dom.wfAuditExport.hidden = true;
-      if (dom.wfAuditList) dom.wfAuditList.innerHTML = `<p class="hint">${escapeHtml4(t4.loading)}</p>`;
+      if (dom.wfAuditList) dom.wfAuditList.innerHTML = `<p class="hint">${escapeHtml5(t5.loading)}</p>`;
       await fetchWorkflowAudit(id, "");
     }
     async function refreshWorkflowAudit() {
@@ -2056,7 +2307,7 @@
         dom.wfAuditMsg.textContent = "";
         dom.wfAuditMsg.classList.remove("ok", "err");
       }
-      if (dom.wfAuditList) dom.wfAuditList.innerHTML = `<p class="hint">${escapeHtml4(t4.loading)}</p>`;
+      if (dom.wfAuditList) dom.wfAuditList.innerHTML = `<p class="hint">${escapeHtml5(t5.loading)}</p>`;
       await fetchWorkflowAudit(auditWorkflowId, dom.wfAuditAction ? dom.wfAuditAction.value : "");
     }
     async function fetchWorkflowAudit(id, action) {
@@ -2069,7 +2320,7 @@
           if (dom.wfAuditList) dom.wfAuditList.innerHTML = "";
           if (dom.wfAuditExport) dom.wfAuditExport.hidden = true;
           if (dom.wfAuditMsg) {
-            dom.wfAuditMsg.textContent = r.status === 403 ? t4.workflowAuditOwnerOnly : t4.workflowAuditUnavailable;
+            dom.wfAuditMsg.textContent = r.status === 403 ? t5.workflowAuditOwnerOnly : t5.workflowAuditUnavailable;
             dom.wfAuditMsg.classList.add("err");
           }
           return;
@@ -2082,7 +2333,7 @@
       } catch (err) {
         if (dom.wfAuditList) dom.wfAuditList.innerHTML = "";
         if (dom.wfAuditMsg) {
-          dom.wfAuditMsg.textContent = t4.failedAlert(err.message || String(err));
+          dom.wfAuditMsg.textContent = t5.failedAlert(err.message || String(err));
           dom.wfAuditMsg.classList.add("err");
         }
       }
@@ -2097,15 +2348,15 @@
       if (dom.wfAuditEmpty) dom.wfAuditEmpty.hidden = true;
       dom.wfAuditList.innerHTML = rows.map((e) => {
         const when = e.ts ? new Date(e.ts).toLocaleString() : "";
-        const actor = e.actorUserId ? escapeHtml4(e.actorUserId) : "—";
+        const actor = e.actorUserId ? escapeHtml5(e.actorUserId) : "—";
         const meta = e.metadata || {};
-        const rev = meta.revision != null ? `rev ${escapeHtml4(String(meta.revision))}` : "";
-        const actionShort = escapeHtml4(String(e.action || "").replace(/^workflow_/, ""));
+        const rev = meta.revision != null ? `rev ${escapeHtml5(String(meta.revision))}` : "";
+        const actionShort = escapeHtml5(String(e.action || "").replace(/^workflow_/, ""));
         return `<div class="wf-audit-row">
           <span class="wf-audit-action-tag">${actionShort}</span>
           <span class="wf-audit-actor">${actor}</span>
           <span class="wf-audit-rev">${rev}</span>
-          <small class="hint">${escapeHtml4(when)}</small>
+          <small class="hint">${escapeHtml5(when)}</small>
         </div>`;
       }).join("");
     }
@@ -2115,7 +2366,7 @@
       if (dom.wfGrantsEmpty) dom.wfGrantsEmpty.hidden = true;
       if (dom.wfGrantsAdd) dom.wfGrantsAdd.hidden = true;
       if (dom.wfGrantsMsg) {
-        dom.wfGrantsMsg.textContent = t4[key] || "";
+        dom.wfGrantsMsg.textContent = t5[key] || "";
         dom.wfGrantsMsg.classList.remove("ok");
         dom.wfGrantsMsg.classList.add("err");
       }
@@ -2128,7 +2379,7 @@
       }
       if (dom.wfGrantsAdd) dom.wfGrantsAdd.hidden = false;
       if (dom.wfGrantsEmpty) dom.wfGrantsEmpty.hidden = true;
-      if (dom.wfGrantsList) dom.wfGrantsList.innerHTML = `<p class="hint">${escapeHtml4(t4.loading)}</p>`;
+      if (dom.wfGrantsList) dom.wfGrantsList.innerHTML = `<p class="hint">${escapeHtml5(t5.loading)}</p>`;
       await fetchWorkflowGrants(id);
     }
     async function refreshWorkflowGrants() {
@@ -2147,7 +2398,7 @@
       } catch (err) {
         if (dom.wfGrantsList) dom.wfGrantsList.innerHTML = "";
         if (dom.wfGrantsMsg) {
-          dom.wfGrantsMsg.textContent = t4.failedAlert(err.message || String(err));
+          dom.wfGrantsMsg.textContent = t5.failedAlert(err.message || String(err));
           dom.wfGrantsMsg.classList.add("err");
         }
       }
@@ -2161,14 +2412,14 @@
       }
       if (dom.wfGrantsEmpty) dom.wfGrantsEmpty.hidden = true;
       dom.wfGrantsList.innerHTML = rows.map((g) => {
-        const user = escapeHtml4(g.userId);
-        const perm = escapeHtml4(g.perm);
+        const user = escapeHtml5(g.userId);
+        const perm = escapeHtml5(g.perm);
         return `<div class="wf-grant-row">
           <span class="wf-grant-user-id">${user}</span>
           <span class="wf-grant-perm-tag wf-grant-perm-${perm}">${perm}</span>
           <button type="button" class="ma-btn ma-btn-secondary ma-danger wf-grant-remove"
                   data-act="remove-workflow-grant" data-user="${user}"
-                  >${escapeHtml4(t4.workflowGrantsRemove)}</button>
+                  >${escapeHtml5(t5.workflowGrantsRemove)}</button>
         </div>`;
       }).join("");
     }
@@ -2182,7 +2433,7 @@
       }
       if (!userId) {
         if (dom.wfGrantsMsg) {
-          dom.wfGrantsMsg.textContent = t4.workflowGrantsNeedUser;
+          dom.wfGrantsMsg.textContent = t5.workflowGrantsNeedUser;
           dom.wfGrantsMsg.classList.add("err");
         }
         return;
@@ -2196,7 +2447,7 @@
         if (!r.ok) {
           const body2 = await r.json().catch(() => ({}));
           if (dom.wfGrantsMsg) {
-            dom.wfGrantsMsg.textContent = t4.failedAlert(body2.error || `${r.status}`);
+            dom.wfGrantsMsg.textContent = t5.failedAlert(body2.error || `${r.status}`);
             dom.wfGrantsMsg.classList.add("err");
           }
           return;
@@ -2206,7 +2457,7 @@
         renderWorkflowGrants(body.grants || []);
       } catch (err) {
         if (dom.wfGrantsMsg) {
-          dom.wfGrantsMsg.textContent = t4.failedAlert(err.message || String(err));
+          dom.wfGrantsMsg.textContent = t5.failedAlert(err.message || String(err));
           dom.wfGrantsMsg.classList.add("err");
         }
       }
@@ -2221,7 +2472,7 @@
         if (!r.ok) {
           const body = await r.json().catch(() => ({}));
           if (dom.wfGrantsMsg) {
-            dom.wfGrantsMsg.textContent = t4.failedAlert(body.error || `${r.status}`);
+            dom.wfGrantsMsg.textContent = t5.failedAlert(body.error || `${r.status}`);
             dom.wfGrantsMsg.classList.add("err");
           }
           return;
@@ -2229,7 +2480,7 @@
         await fetchWorkflowGrants(grantsWorkflowId);
       } catch (err) {
         if (dom.wfGrantsMsg) {
-          dom.wfGrantsMsg.textContent = t4.failedAlert(err.message || String(err));
+          dom.wfGrantsMsg.textContent = t5.failedAlert(err.message || String(err));
           dom.wfGrantsMsg.classList.add("err");
         }
       }
@@ -2253,7 +2504,7 @@
         text = await file.text();
       }
       if (!text || !text.trim()) {
-        dom.wfImportMsg.textContent = t4.importEmpty;
+        dom.wfImportMsg.textContent = t5.importEmpty;
         dom.wfImportMsg.classList.add("err");
         return;
       }
@@ -2265,17 +2516,17 @@
         });
         const body = await r.json().catch(() => ({}));
         if (!r.ok) {
-          dom.wfImportMsg.textContent = t4.failedAlert(body.error || `${r.status}`);
+          dom.wfImportMsg.textContent = t5.failedAlert(body.error || `${r.status}`);
           dom.wfImportMsg.classList.add("err");
           return;
         }
         const id = body.workflow?.id || "?";
-        dom.wfImportMsg.textContent = t4.workflowImportDone(id);
+        dom.wfImportMsg.textContent = t5.workflowImportDone(id);
         dom.wfImportMsg.classList.add("ok");
         await refreshWorkflows();
         setTimeout(closeWorkflowImportModal, 700);
       } catch (err) {
-        dom.wfImportMsg.textContent = t4.failedAlert(err.message || String(err));
+        dom.wfImportMsg.textContent = t5.failedAlert(err.message || String(err));
         dom.wfImportMsg.classList.add("err");
       }
     }
@@ -2303,9 +2554,9 @@
       stopRunPoll();
       if (dom.wfRunsTarget) dom.wfRunsTarget.textContent = workflowId;
       if (dom.wfRunsMsg) dom.wfRunsMsg.textContent = "";
-      if (dom.wfRunsList) dom.wfRunsList.innerHTML = `<p class="hint">${escapeHtml4(t4.loading)}</p>`;
+      if (dom.wfRunsList) dom.wfRunsList.innerHTML = `<p class="hint">${escapeHtml5(t5.loading)}</p>`;
       if (dom.wfRunsEmpty) dom.wfRunsEmpty.hidden = true;
-      if (dom.wfRunDetail) dom.wfRunDetail.innerHTML = `<p class="hint">${escapeHtml4(t4.workflowRunsPickHint)}</p>`;
+      if (dom.wfRunDetail) dom.wfRunDetail.innerHTML = `<p class="hint">${escapeHtml5(t5.workflowRunsPickHint)}</p>`;
       if (dom.wfRunsModal) dom.wfRunsModal.hidden = false;
       try {
         const url = `/api/admin/workflows/runs?workflowId=${encodeURIComponent(workflowId)}&limit=100`;
@@ -2313,7 +2564,7 @@
         if (!r.ok) {
           const body2 = await r.json().catch(() => ({}));
           dom.wfRunsList.innerHTML = "";
-          dom.wfRunsMsg.textContent = t4.failedAlert(body2.error || `${r.status}`);
+          dom.wfRunsMsg.textContent = t5.failedAlert(body2.error || `${r.status}`);
           dom.wfRunsMsg.classList.add("err");
           return;
         }
@@ -2322,7 +2573,7 @@
         renderWorkflowRunsList();
       } catch (err) {
         dom.wfRunsList.innerHTML = "";
-        dom.wfRunsMsg.textContent = t4.failedAlert(err.message || String(err));
+        dom.wfRunsMsg.textContent = t5.failedAlert(err.message || String(err));
         dom.wfRunsMsg.classList.add("err");
       }
     }
@@ -2343,11 +2594,11 @@
         const selected = row.runId === wf.runs.selectedRunId ? " wf-run-row-active" : "";
         return `<button type="button" class="wf-run-row${selected}"
                       data-act="open-workflow-run"
-                      data-run-id="${escapeHtml4(row.runId)}">
-        <span class="wf-run-status wf-run-${escapeHtml4(row.status)}">${escapeHtml4(row.status)}</span>
-        <span class="wf-run-time">${escapeHtml4(new Date(row.startedAt).toLocaleString())}</span>
-        <span class="wf-run-meta">${escapeHtml4(t4.workflowRunStepCount(row.stepCount))} · ${escapeHtml4(dur)}</span>
-        <code class="wf-run-id">${escapeHtml4(row.runId)}</code>
+                      data-run-id="${escapeHtml5(row.runId)}">
+        <span class="wf-run-status wf-run-${escapeHtml5(row.status)}">${escapeHtml5(row.status)}</span>
+        <span class="wf-run-time">${escapeHtml5(new Date(row.startedAt).toLocaleString())}</span>
+        <span class="wf-run-meta">${escapeHtml5(t5.workflowRunStepCount(row.stepCount))} · ${escapeHtml5(dur)}</span>
+        <code class="wf-run-id">${escapeHtml5(row.runId)}</code>
       </button>`;
       }).join("");
     }
@@ -2357,7 +2608,7 @@
       const gen = wf.runs.pollGen;
       renderWorkflowRunsList();
       if (!dom.wfRunDetail) return;
-      dom.wfRunDetail.innerHTML = `<p class="hint">${escapeHtml4(t4.loading)}</p>`;
+      dom.wfRunDetail.innerHTML = `<p class="hint">${escapeHtml5(t5.loading)}</p>`;
       await fetchAndRenderRun(runId, gen);
     }
     async function fetchAndRenderRun(runId, gen) {
@@ -2366,7 +2617,7 @@
         if (gen !== wf.runs.pollGen || wf.runs.selectedRunId !== runId) return;
         if (!r.ok) {
           const body2 = await r.json().catch(() => ({}));
-          dom.wfRunDetail.innerHTML = `<p class="form-msg err">${escapeHtml4(body2.error || `${r.status}`)}</p>`;
+          dom.wfRunDetail.innerHTML = `<p class="form-msg err">${escapeHtml5(body2.error || `${r.status}`)}</p>`;
           return;
         }
         const body = await r.json();
@@ -2375,7 +2626,7 @@
         scheduleRunPoll(body.run, runId, gen);
       } catch (err) {
         if (gen !== wf.runs.pollGen || wf.runs.selectedRunId !== runId) return;
-        dom.wfRunDetail.innerHTML = `<p class="form-msg err">${escapeHtml4(err.message || String(err))}</p>`;
+        dom.wfRunDetail.innerHTML = `<p class="form-msg err">${escapeHtml5(err.message || String(err))}</p>`;
       }
     }
     function scheduleRunPoll(run, runId, gen) {
@@ -2390,48 +2641,48 @@
     }
     function friendlyError(raw) {
       const d = window.Gotong.describeError(raw);
-      const fix = d.fix ? ` <span class="wf-err-fix">${escapeHtml4(d.fix)}</span>` : "";
-      const keyBtn = d.fixIsKey ? ` <button type="button" class="ma-chat-fix-btn" data-act="goto-key">${escapeHtml4(t4.meChatGoAddKey)}</button>` : "";
-      const rawBlock = raw ? `<details class="wf-err-raw"><summary>${escapeHtml4(t4.workflowRunErrorRaw)}</summary><pre class="wf-pre">${escapeHtml4(String(raw))}</pre></details>` : "";
-      return `<div class="form-msg err wf-step-err">${escapeHtml4(d.text)}${fix}${keyBtn}${rawBlock}</div>`;
+      const fix = d.fix ? ` <span class="wf-err-fix">${escapeHtml5(d.fix)}</span>` : "";
+      const keyBtn = d.fixIsKey ? ` <button type="button" class="ma-chat-fix-btn" data-act="goto-key">${escapeHtml5(t5.meChatGoAddKey)}</button>` : "";
+      const rawBlock = raw ? `<details class="wf-err-raw"><summary>${escapeHtml5(t5.workflowRunErrorRaw)}</summary><pre class="wf-pre">${escapeHtml5(String(raw))}</pre></details>` : "";
+      return `<div class="form-msg err wf-step-err">${escapeHtml5(d.text)}${fix}${keyBtn}${rawBlock}</div>`;
     }
     function renderWorkflowRunDetail(run) {
       if (!dom.wfRunDetail) return;
-      const dur = run.endedAt ? `${run.endedAt - run.startedAt}ms` : t4.workflowRunStillRunning;
-      const liveTag = runIsActive(run) ? `<span class="wf-run-live">${escapeHtml4(t4.workflowRunLive)}</span>` : "";
-      const finalBlock = run.status === "failed" ? friendlyError(run.error || "") : run.finalOutput !== void 0 ? `<details open><summary>${escapeHtml4(t4.workflowRunFinal)}</summary><pre class="wf-pre">${escapeHtml4(JSON.stringify(run.finalOutput, null, 2))}</pre></details>` : "";
+      const dur = run.endedAt ? `${run.endedAt - run.startedAt}ms` : t5.workflowRunStillRunning;
+      const liveTag = runIsActive(run) ? `<span class="wf-run-live">${escapeHtml5(t5.workflowRunLive)}</span>` : "";
+      const finalBlock = run.status === "failed" ? friendlyError(run.error || "") : run.finalOutput !== void 0 ? `<details open><summary>${escapeHtml5(t5.workflowRunFinal)}</summary><pre class="wf-pre">${escapeHtml5(JSON.stringify(run.finalOutput, null, 2))}</pre></details>` : "";
       const steps = (run.steps || []).map((s) => {
         const sDur = s.endedAt ? `${s.endedAt - s.startedAt}ms` : "—";
-        const subtasks = (s.subTaskIds || []).length ? `<small class="hint">${escapeHtml4(t4.workflowRunSubTasks)}: ${s.subTaskIds.map(escapeHtml4).join(", ")}</small>` : "";
-        const out = s.output !== void 0 ? `<details><summary>${escapeHtml4(t4.workflowRunOutput)}</summary><pre class="wf-pre">${escapeHtml4(JSON.stringify(s.output, null, 2))}</pre></details>` : "";
+        const subtasks = (s.subTaskIds || []).length ? `<small class="hint">${escapeHtml5(t5.workflowRunSubTasks)}: ${s.subTaskIds.map(escapeHtml5).join(", ")}</small>` : "";
+        const out = s.output !== void 0 ? `<details><summary>${escapeHtml5(t5.workflowRunOutput)}</summary><pre class="wf-pre">${escapeHtml5(JSON.stringify(s.output, null, 2))}</pre></details>` : "";
         const err = s.error ? friendlyError(s.error) : "";
         const awaiting = !!s.crossHub && s.status === "suspended";
         const dest = s.crossHub ? String(s.crossHub.peerLabel || s.crossHub.peer) : "";
-        const xhub = s.crossHub && !awaiting ? `<span class="wf-xhub-peer">${escapeHtml4(
-          t4.workflowRunCrossHub(dest, s.crossHub.kind)
+        const xhub = s.crossHub && !awaiting ? `<span class="wf-xhub-peer">${escapeHtml5(
+          t5.workflowRunCrossHub(dest, s.crossHub.kind)
         )}</span>` : "";
-        const awaitBlock = awaiting ? `<p class="wf-xhub-await">${escapeHtml4(t4.workflowRunAwaitingApproval(dest))} <a href="#home" class="wf-xhub-inbox-link">${escapeHtml4(t4.workflowRunGoToInbox)}</a></p>` : "";
+        const awaitBlock = awaiting ? `<p class="wf-xhub-await">${escapeHtml5(t5.workflowRunAwaitingApproval(dest))} <a href="#home" class="wf-xhub-inbox-link">${escapeHtml5(t5.workflowRunGoToInbox)}</a></p>` : "";
         const peerTx = s.crossHub && s.crossHub.kind !== "a2a" && !awaiting ? `<div class="wf-peer-tx-box">
             <button type="button" class="wf-peer-tx-btn" data-act="view-peer-transcript"
-                    data-run-id="${escapeHtml4(run.runId)}" data-step-id="${escapeHtml4(s.stepId)}">${escapeHtml4(t4.workflowRunPeerTranscriptBtn)}</button>
+                    data-run-id="${escapeHtml5(run.runId)}" data-step-id="${escapeHtml5(s.stepId)}">${escapeHtml5(t5.workflowRunPeerTranscriptBtn)}</button>
             <div class="wf-peer-tx-out"></div>
           </div>` : "";
         const branchBlock = s.branchCrossHub && Object.keys(s.branchCrossHub).length ? `<div class="wf-xhub-branches">${Object.entries(s.branchCrossHub).map(([branchId, ref]) => {
           const bDest = String(ref.peerLabel || ref.peer);
-          const badge = `<span class="wf-xhub-peer">${escapeHtml4(t4.workflowRunBranchCrossHub(branchId, bDest, ref.kind))}</span>`;
+          const badge = `<span class="wf-xhub-peer">${escapeHtml5(t5.workflowRunBranchCrossHub(branchId, bDest, ref.kind))}</span>`;
           const bTx = ref.kind !== "a2a" ? `<div class="wf-peer-tx-box">
                   <button type="button" class="wf-peer-tx-btn" data-act="view-peer-transcript"
-                          data-run-id="${escapeHtml4(run.runId)}" data-step-id="${escapeHtml4(s.stepId)}"
-                          data-branch-id="${escapeHtml4(branchId)}">${escapeHtml4(t4.workflowRunPeerTranscriptBtn)}</button>
+                          data-run-id="${escapeHtml5(run.runId)}" data-step-id="${escapeHtml5(s.stepId)}"
+                          data-branch-id="${escapeHtml5(branchId)}">${escapeHtml5(t5.workflowRunPeerTranscriptBtn)}</button>
                   <div class="wf-peer-tx-out"></div>
                 </div>` : "";
           return `<div class="wf-xhub-branch">${badge}${bTx}</div>`;
         }).join("")}</div>` : "";
         return `<article class="wf-step">
         <header>
-          <span class="wf-run-status wf-run-${escapeHtml4(s.status)}">${escapeHtml4(s.status)}</span>
-          <strong>${escapeHtml4(s.stepId)}</strong>
-          <span class="wf-step-meta">${escapeHtml4(sDur)} · ${escapeHtml4(t4.workflowRunAttempts(s.attempts || 1))}</span>
+          <span class="wf-run-status wf-run-${escapeHtml5(s.status)}">${escapeHtml5(s.status)}</span>
+          <strong>${escapeHtml5(s.stepId)}</strong>
+          <span class="wf-step-meta">${escapeHtml5(sDur)} · ${escapeHtml5(t5.workflowRunAttempts(s.attempts || 1))}</span>
           ${xhub}
         </header>
         ${awaitBlock}
@@ -2442,46 +2693,46 @@
         ${branchBlock}
       </article>`;
       }).join("");
-      const payloadBlock = run.triggerPayload !== void 0 ? `<details><summary>${escapeHtml4(t4.workflowRunTriggerPayload)}</summary><pre class="wf-pre">${escapeHtml4(JSON.stringify(run.triggerPayload, null, 2))}</pre></details>` : "";
+      const payloadBlock = run.triggerPayload !== void 0 ? `<details><summary>${escapeHtml5(t5.workflowRunTriggerPayload)}</summary><pre class="wf-pre">${escapeHtml5(JSON.stringify(run.triggerPayload, null, 2))}</pre></details>` : "";
       const awaitingDests = Array.from(new Set(
         (run.steps || []).filter((s) => s.status === "suspended" && s.crossHub).map((s) => String(s.crossHub.peerLabel || s.crossHub.peer))
       ));
-      const parkedBanner = awaitingDests.length ? `<div class="wf-run-parked-banner">${escapeHtml4(t4.workflowRunParkedApproval(awaitingDests))} <a href="#home" class="wf-xhub-inbox-link">${escapeHtml4(t4.workflowRunGoToInbox)}</a></div>` : "";
+      const parkedBanner = awaitingDests.length ? `<div class="wf-run-parked-banner">${escapeHtml5(t5.workflowRunParkedApproval(awaitingDests))} <a href="#home" class="wf-xhub-inbox-link">${escapeHtml5(t5.workflowRunGoToInbox)}</a></div>` : "";
       dom.wfRunDetail.innerHTML = `
       <h4>
-        <span class="wf-run-status wf-run-${escapeHtml4(run.status)}">${escapeHtml4(run.status)}</span>
-        <code>${escapeHtml4(run.runId)}</code>
+        <span class="wf-run-status wf-run-${escapeHtml5(run.status)}">${escapeHtml5(run.status)}</span>
+        <code>${escapeHtml5(run.runId)}</code>
         ${liveTag}
       </h4>
       ${parkedBanner}
-      <p class="hint">${escapeHtml4(t4.workflowRunDuration)}: ${escapeHtml4(dur)} · ${escapeHtml4(t4.workflowRunTriggeredBy)}: <code>${escapeHtml4(run.triggeredByTaskId)}</code></p>
+      <p class="hint">${escapeHtml5(t5.workflowRunDuration)}: ${escapeHtml5(dur)} · ${escapeHtml5(t5.workflowRunTriggeredBy)}: <code>${escapeHtml5(run.triggeredByTaskId)}</code></p>
       ${payloadBlock}
-      ${steps || `<p class="empty">${escapeHtml4(t4.workflowRunNoSteps)}</p>`}
+      ${steps || `<p class="empty">${escapeHtml5(t5.workflowRunNoSteps)}</p>`}
       ${finalBlock}
     `;
     }
     function renderPeerTranscriptSlice(slice) {
       if (!slice || !Array.isArray(slice.events) || slice.events.length === 0) {
-        return `<p class="hint">${escapeHtml4(t4.workflowRunPeerTranscriptEmpty)}</p>`;
+        return `<p class="hint">${escapeHtml5(t5.workflowRunPeerTranscriptEmpty)}</p>`;
       }
-      const head = `<p class="hint">${escapeHtml4(
-        t4.workflowRunPeerTranscriptHead(slice.hubId || "?", slice.taskId || "?")
-      )}${slice.truncated ? " " + escapeHtml4(t4.workflowRunPeerTranscriptTruncated) : ""}</p>`;
+      const head = `<p class="hint">${escapeHtml5(
+        t5.workflowRunPeerTranscriptHead(slice.hubId || "?", slice.taskId || "?")
+      )}${slice.truncated ? " " + escapeHtml5(t5.workflowRunPeerTranscriptTruncated) : ""}</p>`;
       const rows = slice.events.map((ev) => {
         const ts = ev && ev.ts ? new Date(ev.ts).toLocaleTimeString() : "";
-        const data = ev && ev.data !== void 0 ? `<pre class="wf-pre">${escapeHtml4(
+        const data = ev && ev.data !== void 0 ? `<pre class="wf-pre">${escapeHtml5(
           typeof ev.data === "string" ? ev.data : JSON.stringify(ev.data, null, 2)
         )}</pre>` : "";
-        return `<li class="wf-peer-tx-ev"><span class="wf-peer-tx-kind">${escapeHtml4(
+        return `<li class="wf-peer-tx-ev"><span class="wf-peer-tx-kind">${escapeHtml5(
           String(ev && ev.kind || "")
-        )}</span> <span class="wf-step-meta">${escapeHtml4(ts)}</span>${data}</li>`;
+        )}</span> <span class="wf-step-meta">${escapeHtml5(ts)}</span>${data}</li>`;
       }).join("");
       return head + `<ul class="wf-peer-tx-list">${rows}</ul>`;
     }
     async function viewPeerTranscript(runId, stepId, outEl, btnEl, branchId) {
       if (!outEl) return;
       if (btnEl) btnEl.disabled = true;
-      outEl.innerHTML = `<p class="hint">${escapeHtml4(t4.loading)}</p>`;
+      outEl.innerHTML = `<p class="hint">${escapeHtml5(t5.loading)}</p>`;
       try {
         const q = branchId ? `?branch=${encodeURIComponent(branchId)}` : "";
         const r = await fetch(
@@ -2491,12 +2742,12 @@
         if (r.ok && body && body.ok === true) {
           outEl.innerHTML = renderPeerTranscriptSlice(body.slice);
         } else if (body && body.ok === false && body.code) {
-          outEl.innerHTML = `<p class="form-msg err">${escapeHtml4(t4.workflowRunPeerTranscriptFail(body.code))}</p>`;
+          outEl.innerHTML = `<p class="form-msg err">${escapeHtml5(t5.workflowRunPeerTranscriptFail(body.code))}</p>`;
         } else {
-          outEl.innerHTML = `<p class="form-msg err">${escapeHtml4(body.error || body.message || `${r.status}`)}</p>`;
+          outEl.innerHTML = `<p class="form-msg err">${escapeHtml5(body.error || body.message || `${r.status}`)}</p>`;
         }
       } catch (err) {
-        outEl.innerHTML = `<p class="form-msg err">${escapeHtml4(err.message || String(err))}</p>`;
+        outEl.innerHTML = `<p class="form-msg err">${escapeHtml5(err.message || String(err))}</p>`;
       } finally {
         if (btnEl) btnEl.disabled = false;
       }
@@ -2539,13 +2790,13 @@
   (() => {
     const {
       $,
-      t: t5,
+      t: t6,
       applyStaticI18n,
       onLangChange,
-      escapeHtml: escapeHtml5,
+      escapeHtml: escapeHtml6,
       summarize,
       isBadResult,
-      fetchJson: fetchJson4,
+      fetchJson: fetchJson5,
       connectStream,
       syncLangFromConfig,
       formatBytes: formatBytes2,
@@ -2624,6 +2875,7 @@
     let dom = null;
     const services = createServices(ma);
     const mcp = createMcp();
+    const oauthConnect = createOAuthConnect();
     const managedAgents = createManagedAgents({ ma, openBundleImportModal });
     const workflows = createWorkflows({ wf });
     function resolveDom() {
@@ -2862,7 +3114,7 @@
       };
     }
     async function refresh() {
-      const snap = await fetchJson4("/api/state");
+      const snap = await fetchJson5("/api/state");
       state.participants = snap.participants;
       state.transcript = snap.transcript;
       state.pendingApplications = snap.pendingApplications || [];
@@ -2902,14 +3154,14 @@
       if (!live) return "";
       const PREVIEW_MAX = 120;
       const truncated = live.text.length > PREVIEW_MAX ? live.text.slice(0, PREVIEW_MAX) + "…" : live.text;
-      const escaped = escapeHtml5(truncated || "(no text yet)");
+      const escaped = escapeHtml6(truncated || "(no text yet)");
       const tools = live.toolUses > 0 ? `<span class="live-stream-tools" title="tool_use chunks">🔧 ${live.toolUses}</span>` : "";
       if (live.isDone) {
         return `<div class="live-stream-indicator live-stream-done" title="stream ended">✓ ${tools}</div>`;
       }
       return `<div class="live-stream-indicator live-stream-active">
       <span class="live-stream-dot">●</span>
-      <span class="live-stream-by">${escapeHtml5(live.agentId)}</span>
+      <span class="live-stream-by">${escapeHtml6(live.agentId)}</span>
       ${tools}
       <span class="live-stream-text">${escaped}</span>
     </div>`;
@@ -2974,7 +3226,7 @@
           refresh().catch((err) => console.error("task refresh failed:", err));
           return;
         case "service_trashed":
-          services.showServicesToast(t5.servicesToastTrashed);
+          services.showServicesToast(t6.servicesToastTrashed);
           if (document.body.dataset.activeTab === "services") {
             services.refreshServices().catch((err) => console.warn("services refresh failed:", err));
           }
@@ -3018,7 +3270,7 @@
         btn.appendChild(badge);
       }
       badge.textContent = String(n);
-      badge.title = t5.admAgentsWaiting(n);
+      badge.title = t6.admAgentsWaiting(n);
     }
     async function refreshHealth() {
       if (!dom?.hToday) return;
@@ -3039,23 +3291,23 @@
       const weekStart = now - 7 * 24 * 60 * 60 * 1e3;
       let lb = null;
       try {
-        lb = await fetchJson4(`/api/leaderboard?from=${weekStart}&to=${now}`);
+        lb = await fetchJson5(`/api/leaderboard?from=${weekStart}&to=${now}`);
       } catch (err) {
         console.warn("refreshHealth leaderboard fetch failed:", err);
       }
       dom.hToday.textContent = String(todayTasks);
       dom.hOnline.textContent = String(onlineAgents + onlineHumans);
-      const subFn = t5.healthOnlineSub;
+      const subFn = t6.healthOnlineSub;
       dom.hOnlineSub.textContent = typeof subFn === "function" ? subFn(onlineAgents, onlineHumans) : `${onlineAgents} · ${onlineHumans}`;
       dom.hUnrated.textContent = lb ? String(lb.unratedTaskCount) : "—";
       const top3 = lb?.rows?.slice(0, 3) ?? [];
       if (top3.length === 0) {
         dom.hTop3.classList.add("empty");
-        dom.hTop3.textContent = t5.healthTop3Empty ?? "—";
+        dom.hTop3.textContent = t6.healthTop3Empty ?? "—";
       } else {
         dom.hTop3.classList.remove("empty");
         dom.hTop3.innerHTML = top3.map(
-          (row) => `<li><span class="top-id">${escapeHtml5(row.participantId)}</span><span class="top-score">${formatScore(row.totalContribution)}</span></li>`
+          (row) => `<li><span class="top-id">${escapeHtml6(row.participantId)}</span><span class="top-score">${formatScore(row.totalContribution)}</span></li>`
         ).join("");
       }
     }
@@ -3068,7 +3320,7 @@
       const root = dom.pendingAppsList;
       root.innerHTML = "";
       if (state.pendingApplications.length === 0) {
-        root.innerHTML = `<p class="empty">${escapeHtml5(t5.noPendingAgents)}</p>`;
+        root.innerHTML = `<p class="empty">${escapeHtml6(t6.noPendingAgents)}</p>`;
         dom.pendingAppsSection.classList.remove("has-pending");
         return;
       }
@@ -3076,26 +3328,26 @@
       for (const app of state.pendingApplications) {
         const card = document.createElement("div");
         card.className = "pending-app-card";
-        const agents = app.agents.map((a) => `<span class="cap">${escapeHtml5(a.id)}${a.capabilities && a.capabilities.length ? " · " + escapeHtml5(a.capabilities.join(",")) : ""}</span>`).join("");
+        const agents = app.agents.map((a) => `<span class="cap">${escapeHtml6(a.id)}${a.capabilities && a.capabilities.length ? " · " + escapeHtml6(a.capabilities.join(",")) : ""}</span>`).join("");
         const meta = app.meta || {};
         const metaBits = [];
-        if (meta.clientName) metaBits.push(`${escapeHtml5(t5.clientLabel)}: ${escapeHtml5(meta.clientName)}${meta.clientVersion ? " " + escapeHtml5(meta.clientVersion) : ""}`);
-        if (meta.remoteAddress) metaBits.push(`${escapeHtml5(t5.remoteAddress)}: ${escapeHtml5(meta.remoteAddress)}`);
-        metaBits.push(`${escapeHtml5(t5.pendingSince)}: ${new Date(app.pendingSince).toLocaleString()}`);
+        if (meta.clientName) metaBits.push(`${escapeHtml6(t6.clientLabel)}: ${escapeHtml6(meta.clientName)}${meta.clientVersion ? " " + escapeHtml6(meta.clientVersion) : ""}`);
+        if (meta.remoteAddress) metaBits.push(`${escapeHtml6(t6.remoteAddress)}: ${escapeHtml6(meta.remoteAddress)}`);
+        metaBits.push(`${escapeHtml6(t6.pendingSince)}: ${new Date(app.pendingSince).toLocaleString()}`);
         let servicesBlock = "";
         const services2 = Array.isArray(app.services) ? app.services : [];
         if (services2.length > 0) {
           const items = services2.map((s) => {
-            const owner = `${escapeHtml5(s.owner.kind)}/${escapeHtml5(s.owner.id)}`;
+            const owner = `${escapeHtml6(s.owner.kind)}/${escapeHtml6(s.owner.id)}`;
             const methodsArr = Array.isArray(s.methods) ? s.methods : [];
-            const methodsLabel = t5.appServicesMethodsAny || "(any method)";
-            const methodsTxt = methodsArr.length > 0 ? methodsArr.map((m) => `<code>${escapeHtml5(String(m))}</code>`).join(", ") : `<span class="muted">${escapeHtml5(methodsLabel)}</span>`;
-            return `<li><code>${escapeHtml5(s.type)}:${escapeHtml5(s.impl)}</code> <span class="muted">@</span> <code>${owner}</code> <span class="muted">·</span> ${methodsTxt}</li>`;
+            const methodsLabel = t6.appServicesMethodsAny || "(any method)";
+            const methodsTxt = methodsArr.length > 0 ? methodsArr.map((m) => `<code>${escapeHtml6(String(m))}</code>`).join(", ") : `<span class="muted">${escapeHtml6(methodsLabel)}</span>`;
+            return `<li><code>${escapeHtml6(s.type)}:${escapeHtml6(s.impl)}</code> <span class="muted">@</span> <code>${owner}</code> <span class="muted">·</span> ${methodsTxt}</li>`;
           }).join("");
-          const label = t5.appServicesRequested || "Services requested";
-          servicesBlock = `<div class="pending-services"><div class="pending-services-label">${escapeHtml5(label)}</div><ul class="pending-services-list">${items}</ul></div>`;
+          const label = t6.appServicesRequested || "Services requested";
+          servicesBlock = `<div class="pending-services"><div class="pending-services-label">${escapeHtml6(label)}</div><ul class="pending-services-list">${items}</ul></div>`;
         }
-        card.innerHTML = `<div class="t-head"><span class="t-title">${agents}</span></div><div class="pending-meta">${metaBits.join(" · ")}</div>` + servicesBlock + `<div class="pending-actions"><input class="reject-reason" placeholder="${escapeHtml5(t5.rejectReason)}" data-id="${escapeHtml5(app.id)}" /><button class="btn-approve" data-act="approve-app" data-id="${escapeHtml5(app.id)}">${escapeHtml5(t5.approve)}</button><button class="btn-reject" data-act="reject-app" data-id="${escapeHtml5(app.id)}">${escapeHtml5(t5.reject)}</button></div>`;
+        card.innerHTML = `<div class="t-head"><span class="t-title">${agents}</span></div><div class="pending-meta">${metaBits.join(" · ")}</div>` + servicesBlock + `<div class="pending-actions"><input class="reject-reason" placeholder="${escapeHtml6(t6.rejectReason)}" data-id="${escapeHtml6(app.id)}" /><button class="btn-approve" data-act="approve-app" data-id="${escapeHtml6(app.id)}">${escapeHtml6(t6.approve)}</button><button class="btn-reject" data-act="reject-app" data-id="${escapeHtml6(app.id)}">${escapeHtml6(t6.reject)}</button></div>`;
         root.appendChild(card);
       }
     }
@@ -3103,15 +3355,15 @@
       const root = dom.participantsList;
       root.innerHTML = "";
       if (state.participants.length === 0) {
-        root.innerHTML = `<p class="empty">${escapeHtml5(t5.noParticipants)}</p>`;
+        root.innerHTML = `<p class="empty">${escapeHtml6(t6.noParticipants)}</p>`;
         return;
       }
       for (const p of state.participants) {
         const div = document.createElement("div");
         div.className = `participant participant-${p.kind}`;
-        const caps = (p.capabilities || []).map((c) => `<span class="cap">${escapeHtml5(c)}</span>`).join("") || `<em class="empty">${escapeHtml5(t5.noCaps)}</em>`;
-        const kindLabel = t5.pKind[p.kind] || p.kind;
-        div.innerHTML = `<div class="p-head"><span class="p-kind">${escapeHtml5(kindLabel)}</span><span class="p-id">${escapeHtml5(p.id)}</span><span class="p-load">${escapeHtml5(t5.load)} ${p.load}</span></div><div class="p-caps">${caps}</div>`;
+        const caps = (p.capabilities || []).map((c) => `<span class="cap">${escapeHtml6(c)}</span>`).join("") || `<em class="empty">${escapeHtml6(t6.noCaps)}</em>`;
+        const kindLabel = t6.pKind[p.kind] || p.kind;
+        div.innerHTML = `<div class="p-head"><span class="p-kind">${escapeHtml6(kindLabel)}</span><span class="p-id">${escapeHtml6(p.id)}</span><span class="p-load">${escapeHtml6(t6.load)} ${p.load}</span></div><div class="p-caps">${caps}</div>`;
         root.appendChild(div);
       }
     }
@@ -3122,10 +3374,10 @@
       for (let i = state.transcript.length - 1; i >= 0; i--) {
         const e = state.transcript[i];
         const li = document.createElement("li");
-        const taskIdAttr = e.kind === "task_result" ? ` data-taskid="${escapeHtml5(e.data.taskId)}"` : "";
+        const taskIdAttr = e.kind === "task_result" ? ` data-taskid="${escapeHtml6(e.data.taskId)}"` : "";
         const clickableCls = e.kind === "task_result" ? " entry-clickable" : "";
         li.className = `entry entry-${e.kind}${clickableCls}` + (isBadResult(e) ? " bad" : "");
-        li.innerHTML = `<span class="seq">${e.seq}</span><span class="kind">${e.kind}</span><span class="body"${taskIdAttr}>${escapeHtml5(summarize(e))}</span>`;
+        li.innerHTML = `<span class="seq">${e.seq}</span><span class="kind">${e.kind}</span><span class="body"${taskIdAttr}>${escapeHtml6(summarize(e))}</span>`;
         root.appendChild(li);
       }
     }
@@ -3140,7 +3392,7 @@
       const filtered = state.tasks.filter((task) => taskFilter === "all" ? true : task.status === taskFilter).slice().reverse();
       root.innerHTML = "";
       if (filtered.length === 0) {
-        root.innerHTML = `<p class="empty">${escapeHtml5(t5.noTasks)}</p>`;
+        root.innerHTML = `<p class="empty">${escapeHtml6(t6.noTasks)}</p>`;
         return;
       }
       for (const v of filtered) {
@@ -3148,15 +3400,15 @@
         const div = document.createElement("div");
         div.className = `task-card task-${v.status}` + (isOpen ? " expanded" : "");
         div.dataset.taskId = v.id;
-        const statusLabel = v.status === "pending" ? t5.taskStatusPending : v.status === "done" ? t5.taskStatusDone : v.status === "failed" ? t5.taskStatusFailed : t5.taskStatusCancelled;
-        const title = v.task.title || t5.untitled;
+        const statusLabel = v.status === "pending" ? t6.taskStatusPending : v.status === "done" ? t6.taskStatusDone : v.status === "failed" ? t6.taskStatusFailed : t6.taskStatusCancelled;
+        const title = v.task.title || t6.untitled;
         const s = v.task.strategy;
         const target = s.kind === "explicit" ? `to=${s.to}` : s.kind === "capability" ? `caps=[${s.capabilities.join(",")}]` : "broadcast";
         const canRetry = v.status === "failed" || v.status === "cancelled";
         const caret = isOpen ? "▾" : "▸";
-        const headHtml = `<div class="task-head" data-act="toggle-task" data-id="${escapeHtml5(v.id)}" role="button" tabindex="0" aria-expanded="${isOpen ? "true" : "false"}"><span class="task-caret">${caret}</span><span class="task-status task-status-${v.status}">${escapeHtml5(statusLabel)}</span><span class="task-title">${escapeHtml5(title)}</span><span class="task-strategy">${escapeHtml5(s.kind)} · ${escapeHtml5(target)}</span></div>`;
-        const metaHtml = `<div class="task-metrics">${taskMetricsHtml(v)}</div><div class="task-meta"><code class="task-id" data-act="copy-task-id" data-id="${escapeHtml5(v.id)}" title="${escapeHtml5(t5.taskIdHint)}">${escapeHtml5(v.id.slice(0, 8))}…</code>` + (v.result ? ` · ${escapeHtml5(resultSummary(v.result))}` : "") + `</div>`;
-        const retryHtml = canRetry ? `<div class="task-actions"><button data-act="retry" data-id="${escapeHtml5(v.id)}">${escapeHtml5(t5.retry)}</button></div>` : "";
+        const headHtml = `<div class="task-head" data-act="toggle-task" data-id="${escapeHtml6(v.id)}" role="button" tabindex="0" aria-expanded="${isOpen ? "true" : "false"}"><span class="task-caret">${caret}</span><span class="task-status task-status-${v.status}">${escapeHtml6(statusLabel)}</span><span class="task-title">${escapeHtml6(title)}</span><span class="task-strategy">${escapeHtml6(s.kind)} · ${escapeHtml6(target)}</span></div>`;
+        const metaHtml = `<div class="task-metrics">${taskMetricsHtml(v)}</div><div class="task-meta"><code class="task-id" data-act="copy-task-id" data-id="${escapeHtml6(v.id)}" title="${escapeHtml6(t6.taskIdHint)}">${escapeHtml6(v.id.slice(0, 8))}…</code>` + (v.result ? ` · ${escapeHtml6(resultSummary(v.result))}` : "") + `</div>`;
+        const retryHtml = canRetry ? `<div class="task-actions"><button data-act="retry" data-id="${escapeHtml6(v.id)}">${escapeHtml6(t6.retry)}</button></div>` : "";
         const liveHtml = renderLiveStreamIndicator(v.id);
         const detailHtml = isOpen ? renderTaskDetail(v) : "";
         div.innerHTML = headHtml + metaHtml + liveHtml + retryHtml + detailHtml;
@@ -3164,10 +3416,10 @@
       }
     }
     function resultSummary(r) {
-      if (r.kind === "ok") return t5.sumOk(r.by);
-      if (r.kind === "failed") return t5.sumFailed(r.by, r.error);
-      if (r.kind === "cancelled") return t5.sumCancelled(r.reason);
-      return t5.sumNoParticipant(r.reason);
+      if (r.kind === "ok") return t6.sumOk(r.by);
+      if (r.kind === "failed") return t6.sumFailed(r.by, r.error);
+      if (r.kind === "cancelled") return t6.sumCancelled(r.reason);
+      return t6.sumNoParticipant(r.reason);
     }
     function renderTaskDetail(v) {
       const sections = [];
@@ -3178,14 +3430,14 @@
       const completed = v.completedAt ? new Date(v.completedAt).toLocaleString() : "—";
       const dur = v.completedAt ? formatDuration(v.completedAt - v.createdAt) : "—";
       sections.push(
-        `<div class="task-detail-section task-detail-timing"><span><strong>${escapeHtml5(t5.detailCreated)}</strong> ${escapeHtml5(created)}</span><span><strong>${escapeHtml5(t5.detailCompleted)}</strong> ${escapeHtml5(completed)}</span><span><strong>${escapeHtml5(t5.detailDuration)}</strong> ${escapeHtml5(dur)}</span></div>`
+        `<div class="task-detail-section task-detail-timing"><span><strong>${escapeHtml6(t6.detailCreated)}</strong> ${escapeHtml6(created)}</span><span><strong>${escapeHtml6(t6.detailCompleted)}</strong> ${escapeHtml6(completed)}</span><span><strong>${escapeHtml6(t6.detailDuration)}</strong> ${escapeHtml6(dur)}</span></div>`
       );
       if (Array.isArray(v.task.ancestry) && v.task.ancestry.length > 0) {
         const chain = v.task.ancestry.map((node) => {
           const id = String(node.taskId || "");
           const idShort = id ? id.slice(0, 8) + "…" : "?";
-          const by = escapeHtml5(String(node.by || "?"));
-          return `<li><code>${by}</code> <span class="anc-tid" title="${escapeHtml5(id)}">${escapeHtml5(idShort)}</span></li>`;
+          const by = escapeHtml6(String(node.by || "?"));
+          return `<li><code>${by}</code> <span class="anc-tid" title="${escapeHtml6(id)}">${escapeHtml6(idShort)}</span></li>`;
         }).join(' <span class="anc-arrow">→</span> ');
         sections.push(
           `<div class="task-detail-section task-detail-ancestry"><strong>↰ dispatch chain (${v.task.ancestry.length}):</strong> <ol class="anc-chain">${chain}</ol></div>`
@@ -3194,7 +3446,7 @@
       const mm = extractMultimodalBlocks(v.task.payload);
       const mmHtml = mm.length > 0 ? `<div class="task-detail-multimodal">${mm.map(renderMultimodalBlock).join("")}</div>` : "";
       sections.push(
-        `<details class="task-detail-section" open><summary>${escapeHtml5(t5.detailPayload)}</summary>` + mmHtml + `<pre class="task-detail-pre">${escapeHtml5(formatJsonPretty(v.task.payload))}</pre></details>`
+        `<details class="task-detail-section" open><summary>${escapeHtml6(t6.detailPayload)}</summary>` + mmHtml + `<pre class="task-detail-pre">${escapeHtml6(formatJsonPretty(v.task.payload))}</pre></details>`
       );
       if (v.result) {
         sections.push(renderResultBlock(v.result));
@@ -3202,13 +3454,13 @@
       if (Array.isArray(v.evaluations) && v.evaluations.length > 0) {
         const rows = v.evaluations.map((ev) => {
           const when = ev.ts ? new Date(ev.ts).toLocaleString() : "";
-          const rating = typeof ev.rating === "number" ? `★ ${formatScore(ev.rating)}/5` : t5.detailCommentOnly;
-          const comment = ev.comment ? escapeHtml5(ev.comment) : "";
-          const author = ev.from ? `<code>${escapeHtml5(ev.from)}</code>` : "";
-          return `<li><span class="ev-rating">${escapeHtml5(rating)}</span>` + (author ? ` <span class="ev-from">${author}</span>` : "") + (when ? ` <span class="ev-ts">${escapeHtml5(when)}</span>` : "") + (comment ? `<div class="ev-comment">${comment}</div>` : "") + `</li>`;
+          const rating = typeof ev.rating === "number" ? `★ ${formatScore(ev.rating)}/5` : t6.detailCommentOnly;
+          const comment = ev.comment ? escapeHtml6(ev.comment) : "";
+          const author = ev.from ? `<code>${escapeHtml6(ev.from)}</code>` : "";
+          return `<li><span class="ev-rating">${escapeHtml6(rating)}</span>` + (author ? ` <span class="ev-from">${author}</span>` : "") + (when ? ` <span class="ev-ts">${escapeHtml6(when)}</span>` : "") + (comment ? `<div class="ev-comment">${comment}</div>` : "") + `</li>`;
         }).join("");
         sections.push(
-          `<details class="task-detail-section" open><summary>${escapeHtml5(t5.detailEvaluations)} (${v.evaluations.length})</summary><ul class="task-detail-evals">${rows}</ul></details>`
+          `<details class="task-detail-section" open><summary>${escapeHtml6(t6.detailEvaluations)} (${v.evaluations.length})</summary><ul class="task-detail-evals">${rows}</ul></details>`
         );
       }
       if (v.status === "done" || v.status === "failed") {
@@ -3221,24 +3473,24 @@
         const out = r.output;
         if (out && typeof out === "object" && typeof out.text === "string") {
           const meta = [];
-          if (out.by) meta.push(`${escapeHtml5(t5.detailBy)} <code>${escapeHtml5(out.by)}</code>`);
-          if (out.stopReason) meta.push(`${escapeHtml5(t5.detailStopReason)} ${escapeHtml5(out.stopReason)}`);
+          if (out.by) meta.push(`${escapeHtml6(t6.detailBy)} <code>${escapeHtml6(out.by)}</code>`);
+          if (out.stopReason) meta.push(`${escapeHtml6(t6.detailStopReason)} ${escapeHtml6(out.stopReason)}`);
           if (out.usage) {
             const u = out.usage;
             const tokens = [];
             if (typeof u.inputTokens === "number") tokens.push(`in ${u.inputTokens}`);
             if (typeof u.outputTokens === "number") tokens.push(`out ${u.outputTokens}`);
-            if (tokens.length) meta.push(`${escapeHtml5(t5.detailUsage)} ${escapeHtml5(tokens.join(" / "))}`);
+            if (tokens.length) meta.push(`${escapeHtml6(t6.detailUsage)} ${escapeHtml6(tokens.join(" / "))}`);
           }
-          return `<details class="task-detail-section" open><summary>${escapeHtml5(t5.detailOutput)}</summary>` + (meta.length ? `<div class="task-detail-meta">${meta.join(" · ")}</div>` : "") + `<pre class="task-detail-pre task-detail-text">${escapeHtml5(out.text)}</pre></details>`;
+          return `<details class="task-detail-section" open><summary>${escapeHtml6(t6.detailOutput)}</summary>` + (meta.length ? `<div class="task-detail-meta">${meta.join(" · ")}</div>` : "") + `<pre class="task-detail-pre task-detail-text">${escapeHtml6(out.text)}</pre></details>`;
         }
-        return `<details class="task-detail-section" open><summary>${escapeHtml5(t5.detailOutput)}</summary><div class="task-detail-meta">${escapeHtml5(t5.detailBy)} <code>${escapeHtml5(r.by)}</code></div><pre class="task-detail-pre">${escapeHtml5(formatJsonPretty(out))}</pre></details>`;
+        return `<details class="task-detail-section" open><summary>${escapeHtml6(t6.detailOutput)}</summary><div class="task-detail-meta">${escapeHtml6(t6.detailBy)} <code>${escapeHtml6(r.by)}</code></div><pre class="task-detail-pre">${escapeHtml6(formatJsonPretty(out))}</pre></details>`;
       }
       const summary = resultSummary(r);
-      return `<div class="task-detail-section task-detail-error"><strong>${escapeHtml5(t5.detailOutput)}</strong> ${escapeHtml5(summary)}</div>`;
+      return `<div class="task-detail-section task-detail-error"><strong>${escapeHtml6(t6.detailOutput)}</strong> ${escapeHtml6(summary)}</div>`;
     }
     function renderInlineEvalForm(taskId) {
-      return `<div class="task-detail-section task-detail-eval"><strong>${escapeHtml5(t5.detailEvaluate)}</strong><div class="inline-eval-row"><label>${escapeHtml5(t5.evaluateRating)}<input type="number" min="0" max="5" step="0.1" data-inline-eval-rating="${escapeHtml5(taskId)}" /></label><label class="inline-eval-comment-label">${escapeHtml5(t5.evaluateComment)}<textarea rows="2" data-inline-eval-comment="${escapeHtml5(taskId)}"></textarea></label></div><div class="inline-eval-actions"><button data-act="inline-eval-submit" data-id="${escapeHtml5(taskId)}">${escapeHtml5(t5.evaluateButton)}</button><span class="inline-eval-msg" data-inline-eval-msg="${escapeHtml5(taskId)}"></span></div></div>`;
+      return `<div class="task-detail-section task-detail-eval"><strong>${escapeHtml6(t6.detailEvaluate)}</strong><div class="inline-eval-row"><label>${escapeHtml6(t6.evaluateRating)}<input type="number" min="0" max="5" step="0.1" data-inline-eval-rating="${escapeHtml6(taskId)}" /></label><label class="inline-eval-comment-label">${escapeHtml6(t6.evaluateComment)}<textarea rows="2" data-inline-eval-comment="${escapeHtml6(taskId)}"></textarea></label></div><div class="inline-eval-actions"><button data-act="inline-eval-submit" data-id="${escapeHtml6(taskId)}">${escapeHtml6(t6.evaluateButton)}</button><span class="inline-eval-msg" data-inline-eval-msg="${escapeHtml6(taskId)}"></span></div></div>`;
     }
     function formatJsonPretty(value) {
       try {
@@ -3271,26 +3523,26 @@
       const comment = (commentEl?.value ?? "").trim() || void 0;
       if (rating == null && !comment) {
         if (msgEl) {
-          msgEl.textContent = t5.evaluateEmpty;
+          msgEl.textContent = t6.evaluateEmpty;
           msgEl.classList.add("err");
         }
         return;
       }
       btn.disabled = true;
       try {
-        await fetchJson4("/api/admin/evaluate", {
+        await fetchJson5("/api/admin/evaluate", {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ taskId, rating, comment })
         });
         if (msgEl) {
-          msgEl.textContent = t5.evaluateSuccess;
+          msgEl.textContent = t6.evaluateSuccess;
           msgEl.classList.add("ok");
         }
         if (commentEl) commentEl.value = "";
       } catch (err) {
         if (msgEl) {
-          msgEl.textContent = t5.failedAlert(err.message || String(err));
+          msgEl.textContent = t6.failedAlert(err.message || String(err));
           msgEl.classList.add("err");
         }
       } finally {
@@ -3347,7 +3599,7 @@
       let managedCount = 0;
       let workflowCount = 0;
       try {
-        const agentsResp = await fetchJson4("/api/admin/agents");
+        const agentsResp = await fetchJson5("/api/admin/agents");
         managedCount = (agentsResp?.agents || []).filter((a) => !!a.managed).length;
       } catch {
         host.hidden = true;
@@ -3368,37 +3620,37 @@
       }
       let hasModelKey = false;
       try {
-        const s = await fetchJson4("/api/admin/secrets");
+        const s = await fetchJson5("/api/admin/secrets");
         hasModelKey = Object.keys(s?.providers || {}).length > 0 || Object.values(s?.env || {}).some(Boolean);
       } catch {
       }
-      const step3 = hasModelKey ? `<span class="sh-done">${escapeHtml5(t5.startHereKeyDone)}</span>` : `<button type="button" class="sh-btn sh-btn-secondary" data-sh="key">${escapeHtml5(t5.startHereStep3Btn)}</button>
+      const step3 = hasModelKey ? `<span class="sh-done">${escapeHtml6(t6.startHereKeyDone)}</span>` : `<button type="button" class="sh-btn sh-btn-secondary" data-sh="key">${escapeHtml6(t6.startHereStep3Btn)}</button>
          <div class="sh-tryfree">
-           <span class="sh-tryfree-label">${escapeHtml5(t5.startHereTryFreeLabel)}</span>
+           <span class="sh-tryfree-label">${escapeHtml6(t6.startHereTryFreeLabel)}</span>
            <div id="sh-ollama-slot"></div>
-           <button type="button" class="sh-btn sh-btn-ghost" data-sh="demo">${escapeHtml5(t5.startHereDemoBtn)}</button>
-           <p class="sh-tryfree-help">${escapeHtml5(t5.startHereNoKeyHelp)}</p>
+           <button type="button" class="sh-btn sh-btn-ghost" data-sh="demo">${escapeHtml6(t6.startHereDemoBtn)}</button>
+           <p class="sh-tryfree-help">${escapeHtml6(t6.startHereNoKeyHelp)}</p>
          </div>`;
       host.innerHTML = `
       <div class="sh-head">
-        <h2 class="sh-title">${escapeHtml5(t5.startHereTitle)}</h2>
-        <button type="button" class="sh-dismiss" data-sh="dismiss">${escapeHtml5(t5.startHereDismiss)}</button>
+        <h2 class="sh-title">${escapeHtml6(t6.startHereTitle)}</h2>
+        <button type="button" class="sh-dismiss" data-sh="dismiss">${escapeHtml6(t6.startHereDismiss)}</button>
       </div>
-      <p class="sh-intro">${escapeHtml5(t5.startHereIntro)}</p>
+      <p class="sh-intro">${escapeHtml6(t6.startHereIntro)}</p>
       <div class="sh-steps">
         <div class="sh-step sh-step-primary">
-          <h3>${escapeHtml5(t5.startHereStep1Title)}</h3>
-          <p>${escapeHtml5(t5.startHereStep1Desc)}</p>
-          <button type="button" class="sh-btn sh-btn-primary" data-sh="assistant">${escapeHtml5(t5.startHereStep1Btn)}</button>
+          <h3>${escapeHtml6(t6.startHereStep1Title)}</h3>
+          <p>${escapeHtml6(t6.startHereStep1Desc)}</p>
+          <button type="button" class="sh-btn sh-btn-primary" data-sh="assistant">${escapeHtml6(t6.startHereStep1Btn)}</button>
         </div>
         <div class="sh-step">
-          <h3>${escapeHtml5(t5.startHereStep2Title)}</h3>
-          <p>${escapeHtml5(t5.startHereStep2Desc)}</p>
-          <button type="button" class="sh-btn sh-btn-secondary" data-sh="template">${escapeHtml5(t5.startHereStep2Btn)}</button>
+          <h3>${escapeHtml6(t6.startHereStep2Title)}</h3>
+          <p>${escapeHtml6(t6.startHereStep2Desc)}</p>
+          <button type="button" class="sh-btn sh-btn-secondary" data-sh="template">${escapeHtml6(t6.startHereStep2Btn)}</button>
         </div>
         <div class="sh-step">
-          <h3>${escapeHtml5(t5.startHereStep3Title)}</h3>
-          <p>${escapeHtml5(t5.startHereStep3Desc)}</p>
+          <h3>${escapeHtml6(t6.startHereStep3Title)}</h3>
+          <p>${escapeHtml6(t6.startHereStep3Desc)}</p>
           ${step3}
         </div>
       </div>`;
@@ -3431,7 +3683,7 @@
         return;
       }
       ollamaModel = probe.models[0];
-      slot.innerHTML = `<button type="button" class="sh-btn sh-btn-ollama" data-sh="ollama">${escapeHtml5(t5.startHereOllamaBtn)}</button><span class="sh-ollama-hint">${escapeHtml5(t5.startHereOllamaDetected(ollamaModel))}</span>`;
+      slot.innerHTML = `<button type="button" class="sh-btn sh-btn-ollama" data-sh="ollama">${escapeHtml6(t6.startHereOllamaBtn)}</button><span class="sh-ollama-hint">${escapeHtml6(t6.startHereOllamaDetected(ollamaModel))}</span>`;
     }
     function openDemoModal() {
       document.getElementById("sh-demo-overlay")?.remove();
@@ -3440,20 +3692,20 @@
       overlay.className = "sh-demo-overlay";
       overlay.innerHTML = `
       <div class="sh-demo-card" role="dialog" aria-modal="true">
-        <div class="sh-demo-banner">${escapeHtml5(t5.startHereDemoBanner)}</div>
-        <h3 class="sh-demo-title">${escapeHtml5(t5.startHereDemoTitle)}</h3>
+        <div class="sh-demo-banner">${escapeHtml6(t6.startHereDemoBanner)}</div>
+        <h3 class="sh-demo-title">${escapeHtml6(t6.startHereDemoTitle)}</h3>
         <div class="sh-demo-thread">
-          <div class="sh-demo-msg sh-demo-user">${escapeHtml5(t5.startHereDemoUser)}</div>
+          <div class="sh-demo-msg sh-demo-user">${escapeHtml6(t6.startHereDemoUser)}</div>
           <div class="sh-demo-msg sh-demo-steward">
-            <span class="sh-demo-tier">${escapeHtml5(t5.startHereDemoTier)}</span>
-            <span>${escapeHtml5(t5.startHereDemoProposal)}</span>
+            <span class="sh-demo-tier">${escapeHtml6(t6.startHereDemoTier)}</span>
+            <span>${escapeHtml6(t6.startHereDemoProposal)}</span>
           </div>
-          <div class="sh-demo-done" hidden>${escapeHtml5(t5.startHereDemoDone)}</div>
+          <div class="sh-demo-done" hidden>${escapeHtml6(t6.startHereDemoDone)}</div>
         </div>
-        <p class="sh-demo-cta" hidden>${escapeHtml5(t5.startHereDemoCta)}</p>
+        <p class="sh-demo-cta" hidden>${escapeHtml6(t6.startHereDemoCta)}</p>
         <div class="sh-demo-actions">
-          <button type="button" class="sh-btn sh-btn-primary" data-demo="approve">${escapeHtml5(t5.startHereDemoApprove)}</button>
-          <button type="button" class="sh-btn sh-btn-ghost" data-demo="close">${escapeHtml5(t5.startHereDemoClose)}</button>
+          <button type="button" class="sh-btn sh-btn-primary" data-demo="approve">${escapeHtml6(t6.startHereDemoApprove)}</button>
+          <button type="button" class="sh-btn sh-btn-ghost" data-demo="close">${escapeHtml6(t6.startHereDemoClose)}</button>
         </div>
       </div>`;
       overlay.addEventListener("click", (ev) => {
@@ -3481,9 +3733,9 @@
       if (action === "assistant") {
         managedAgents.openAgentForm("create");
         if (dom.maId) dom.maId.value = "assistant";
-        if (dom.maDisplayName) dom.maDisplayName.value = t5.startHereAssistantName;
+        if (dom.maDisplayName) dom.maDisplayName.value = t6.startHereAssistantName;
         if (dom.maCaps) dom.maCaps.value = "chat";
-        if (dom.maSystem) dom.maSystem.value = t5.startHereAssistantSystem;
+        if (dom.maSystem) dom.maSystem.value = t6.startHereAssistantSystem;
         dom.maDisplayName?.focus();
       } else if (action === "template") {
         dom.templateGalleryBtn?.click();
@@ -3498,9 +3750,9 @@
         if (dom.maModel) dom.maModel.value = ollamaModel || "llama3";
         if (dom.maApiKey) dom.maApiKey.value = "ollama";
         if (dom.maId) dom.maId.value = "local-assistant";
-        if (dom.maDisplayName) dom.maDisplayName.value = t5.startHereOllamaName;
+        if (dom.maDisplayName) dom.maDisplayName.value = t6.startHereOllamaName;
         if (dom.maCaps) dom.maCaps.value = "chat";
-        if (dom.maSystem) dom.maSystem.value = t5.startHereAssistantSystem;
+        if (dom.maSystem) dom.maSystem.value = t6.startHereAssistantSystem;
         dom.maDisplayName?.focus();
       } else if (action === "demo") {
         openDemoModal();
@@ -3519,24 +3771,24 @@
     function hubHealthSignalRow(level, text, btnHtml) {
       return `<li class="hh-signal hh-${level}">
       <span class="hh-dot" aria-hidden="true"></span>
-      <span class="hh-text">${escapeHtml5(text)}</span>
+      <span class="hh-text">${escapeHtml6(text)}</span>
       ${btnHtml || ""}
     </li>`;
     }
     function hubHealthNextStep(snap) {
       if (typeof snap.workflowCount === "number") {
         if (snap.workflowCount === 0) {
-          return { text: t5.healthNextNoWorkflow, cta: t5.healthGoWorkflows, action: "workflows" };
+          return { text: t6.healthNextNoWorkflow, cta: t6.healthGoWorkflows, action: "workflows" };
         }
         if ((snap.publishedWorkflowCount || 0) === 0) {
-          return { text: t5.healthNextNoPublished, cta: t5.healthGoPublish, action: "workflows" };
+          return { text: t6.healthNextNoPublished, cta: t6.healthGoPublish, action: "workflows" };
         }
         if (typeof snap.runCount === "number" && snap.runCount === 0) {
-          return { text: t5.healthNextNoRun, cta: t5.healthGoRun, action: "workflows" };
+          return { text: t6.healthNextNoRun, cta: t6.healthGoRun, action: "workflows" };
         }
       }
       if ((snap.mcpServers || []).length === 0) {
-        return { text: t5.healthNextNoMcp, cta: t5.healthGoMcp, action: "mcp" };
+        return { text: t6.healthNextNoMcp, cta: t6.healthGoMcp, action: "mcp" };
       }
       return null;
     }
@@ -3547,14 +3799,14 @@
       if (snap.llmOutage) {
         const downMs = Date.parse(snap.checkedAt || "") - (snap.llmOutage.since || 0);
         const mins = downMs > 0 ? Math.round(downMs / 6e4) : 0;
-        signals.push(hubHealthSignalRow("red", t5.healthLlmOutage(snap.llmOutage.kind, mins), ""));
+        signals.push(hubHealthSignalRow("red", t6.healthLlmOutage(snap.llmOutage.kind, mins), ""));
       }
       for (const a of agents) {
         if (a.missingKey) {
           signals.push(hubHealthSignalRow(
             "red",
-            t5.healthAgentMissingKey(a.id, a.provider),
-            `<button type="button" class="hh-btn" data-hh="key">${escapeHtml5(t5.healthGoAddKey)}</button>`
+            t6.healthAgentMissingKey(a.id, a.provider),
+            `<button type="button" class="hh-btn" data-hh="key">${escapeHtml6(t6.healthGoAddKey)}</button>`
           ));
         }
       }
@@ -3562,47 +3814,47 @@
         if (!m.wired) {
           signals.push(hubHealthSignalRow(
             "yellow",
-            t5.healthMcpUnwired(m.name),
-            `<button type="button" class="hh-btn" data-hh="mcp">${escapeHtml5(t5.healthGoMcp)}</button>`
+            t6.healthMcpUnwired(m.name),
+            `<button type="button" class="hh-btn" data-hh="mcp">${escapeHtml6(t6.healthGoMcp)}</button>`
           ));
         }
       }
       for (const s of snap.connectorSlots || []) {
         if (s.filled) continue;
-        const tag = s.optional ? ` (${t5.healthSlotOptionalTag})` : "";
+        const tag = s.optional ? ` (${t6.healthSlotOptionalTag})` : "";
         signals.push(hubHealthSignalRow(
           "yellow",
-          t5.healthSlotUnfilled(s.pack, s.id) + tag + (s.hint ? ` — ${s.hint}` : ""),
-          `<button type="button" class="hh-btn" data-hh="mcp">${escapeHtml5(t5.healthGoMcp)}</button>`
+          t6.healthSlotUnfilled(s.pack, s.id) + tag + (s.hint ? ` — ${s.hint}` : ""),
+          `<button type="button" class="hh-btn" data-hh="mcp">${escapeHtml6(t6.healthGoMcp)}</button>`
         ));
       }
       if (snap.spaceWritable === false) {
-        signals.push(hubHealthSignalRow("red", t5.healthSpaceUnwritable(snap.spacePath || ""), ""));
+        signals.push(hubHealthSignalRow("red", t6.healthSpaceUnwritable(snap.spacePath || ""), ""));
       }
       const allGreen = signals.length === 0;
       const head = `
       <div class="hh-head">
-        <h2 class="hh-title">${escapeHtml5(t5.healthTitle)}</h2>
-        <button type="button" class="hh-refresh" data-hh="refresh">${escapeHtml5(t5.healthRefresh)}</button>
+        <h2 class="hh-title">${escapeHtml6(t6.healthTitle)}</h2>
+        <button type="button" class="hh-refresh" data-hh="refresh">${escapeHtml6(t6.healthRefresh)}</button>
       </div>
-      <p class="hh-sub ${allGreen ? "hh-ok" : "hh-warn"}">${escapeHtml5(allGreen ? t5.healthAllGreen : t5.healthHasIssues(signals.length))}</p>`;
+      <p class="hh-sub ${allGreen ? "hh-ok" : "hh-warn"}">${escapeHtml6(allGreen ? t6.healthAllGreen : t6.healthHasIssues(signals.length))}</p>`;
       const signalList = allGreen ? "" : `<ul class="hh-signals">${signals.join("")}</ul>`;
       const next = hubHealthNextStep(snap);
       const nextHtml = next ? `<div class="hh-next">
-          <span class="hh-next-label">${escapeHtml5(t5.healthNextLabel)}</span>
-          <span class="hh-next-text">${escapeHtml5(next.text)}</span>
-          <button type="button" class="hh-btn hh-next-btn" data-hh="${escapeHtml5(next.action)}">${escapeHtml5(next.cta)}</button>
+          <span class="hh-next-label">${escapeHtml6(t6.healthNextLabel)}</span>
+          <span class="hh-next-text">${escapeHtml6(next.text)}</span>
+          <button type="button" class="hh-btn hh-next-btn" data-hh="${escapeHtml6(next.action)}">${escapeHtml6(next.cta)}</button>
         </div>` : "";
       const roster = `
       <div class="hh-roster">
-        <h3 class="hh-roster-title">${escapeHtml5(t5.healthRosterTitle(snap.onlineCount || 0, snap.managedCount || 0))}</h3>
+        <h3 class="hh-roster-title">${escapeHtml6(t6.healthRosterTitle(snap.onlineCount || 0, snap.managedCount || 0))}</h3>
         <ul class="hh-agents">
           ${agents.map((a) => `
             <li class="hh-agent">
               <span class="hh-agent-dot ${a.online ? "on" : "off"}" aria-hidden="true"></span>
-              <span class="hh-agent-id">${escapeHtml5(a.id)}</span>
-              <span class="hh-agent-provider">${escapeHtml5(a.provider)}</span>
-              ${a.online ? `<button type="button" class="hh-btn hh-test" data-hh="test" data-agent="${escapeHtml5(a.id)}">${escapeHtml5(t5.healthTest)}</button>` : `<span class="hh-agent-offline">${escapeHtml5(t5.healthOffline)}</span>`}
+              <span class="hh-agent-id">${escapeHtml6(a.id)}</span>
+              <span class="hh-agent-provider">${escapeHtml6(a.provider)}</span>
+              ${a.online ? `<button type="button" class="hh-btn hh-test" data-hh="test" data-agent="${escapeHtml6(a.id)}">${escapeHtml6(t6.healthTest)}</button>` : `<span class="hh-agent-offline">${escapeHtml6(t6.healthOffline)}</span>`}
             </li>`).join("")}
         </ul>
       </div>`;
@@ -3614,14 +3866,14 @@
       const rows = applicable.map((p) => {
         const payload = encodeURIComponent(JSON.stringify(p));
         return `<li class="hh-adapt-row">
-        <span class="hh-adapt-text">${escapeHtml5(p.title || p.id || "")}</span>
-        <button type="button" class="hh-btn" data-act="apply-adaptation" data-adapt="${payload}">${escapeHtml5(t5.resAdaptApply)}</button>
+        <span class="hh-adapt-text">${escapeHtml6(p.title || p.id || "")}</span>
+        <button type="button" class="hh-btn" data-act="apply-adaptation" data-adapt="${payload}">${escapeHtml6(t6.resAdaptApply)}</button>
         <span class="tg-adapt-result" role="status"></span>
       </li>`;
       }).join("");
       return `<div class="hh-adapt">
-      <h3 class="hh-adapt-title">${escapeHtml5(t5.resAdaptPanelTitle)}</h3>
-      <p class="hh-adapt-hint">${escapeHtml5(t5.resAdaptPanelHint)}</p>
+      <h3 class="hh-adapt-title">${escapeHtml6(t6.resAdaptPanelTitle)}</h3>
+      <p class="hh-adapt-hint">${escapeHtml6(t6.resAdaptPanelHint)}</p>
       <ul class="hh-adapt-list">${rows}</ul>
     </div>`;
     }
@@ -3634,22 +3886,22 @@
         return;
       }
       if (rows.length === 0) {
-        el.innerHTML = `<h3 class="im-status-title">${escapeHtml5(t5.imStatusTitle)}</h3>
-        <p class="im-status-none">${escapeHtml5(t5.imStatusNone)}</p>`;
+        el.innerHTML = `<h3 class="im-status-title">${escapeHtml6(t6.imStatusTitle)}</h3>
+        <p class="im-status-none">${escapeHtml6(t6.imStatusNone)}</p>`;
         el.hidden = false;
         return;
       }
       const items = rows.map((r) => {
-        const src = r.source === "vault" ? t5.imSourceVault : r.source === "env" ? t5.imSourceEnv : "";
+        const src = r.source === "vault" ? t6.imSourceVault : r.source === "env" ? t6.imSourceEnv : "";
         return `<li class="im-status-row">
         <span class="im-status-dot" aria-hidden="true"></span>
-        <span class="im-status-platform">${escapeHtml5(r.platform || "")}</span>
-        ${src ? `<span class="im-status-source">${escapeHtml5(src)}</span>` : ""}
+        <span class="im-status-platform">${escapeHtml6(r.platform || "")}</span>
+        ${src ? `<span class="im-status-source">${escapeHtml6(src)}</span>` : ""}
       </li>`;
       }).join("");
-      el.innerHTML = `<h3 class="im-status-title">${escapeHtml5(t5.imStatusTitle)}</h3>
+      el.innerHTML = `<h3 class="im-status-title">${escapeHtml6(t6.imStatusTitle)}</h3>
       <ul class="im-status-list">${items}</ul>
-      <p class="im-status-hint">${escapeHtml5(t5.imStatusHint)}</p>`;
+      <p class="im-status-hint">${escapeHtml6(t6.imStatusHint)}</p>`;
       el.hidden = false;
     }
     async function renderHubHealth(opts = {}) {
@@ -3670,7 +3922,7 @@
       try {
         let snap;
         try {
-          snap = await fetchJson4("/api/admin/health");
+          snap = await fetchJson5("/api/admin/health");
         } catch {
           host.hidden = true;
           renderImStatus(null);
@@ -3683,7 +3935,7 @@
           return;
         }
         try {
-          const a = await fetchJson4("/api/admin/resources/adaptations");
+          const a = await fetchJson5("/api/admin/resources/adaptations");
           lastAdaptations = Array.isArray(a?.proposals) ? a.proposals : null;
         } catch {
           lastAdaptations = null;
@@ -3715,7 +3967,7 @@
     function renderGrowthReports(reports) {
       if (!dom.grTbody) return;
       if (dom.grSummary) {
-        dom.grSummary.textContent = reports.length === 0 ? "" : t5.admReportsCount(reports.length);
+        dom.grSummary.textContent = reports.length === 0 ? "" : t6.admReportsCount(reports.length);
       }
       if (reports.length === 0) {
         dom.grTable.hidden = true;
@@ -3730,15 +3982,15 @@
         const sizeKb = (rep.sizeBytes / 1024).toFixed(1) + " KB";
         const dlHref = "/api/admin/growth-reports/download?path=" + encodeURIComponent(rep.path);
         return `<tr>
-        <td>${escapeHtml5(when)}</td>
-        <td><code>${escapeHtml5(rep.caseId)}</code></td>
-        <td>${escapeHtml5(sizeKb)}</td>
+        <td>${escapeHtml6(when)}</td>
+        <td><code>${escapeHtml6(rep.caseId)}</code></td>
+        <td>${escapeHtml6(sizeKb)}</td>
         <td>
           <button type="button" class="ma-btn ma-btn-secondary"
                   data-act="view-growth-report"
-                  data-path="${escapeHtml5(rep.path)}"
-                  data-when="${escapeHtml5(when)}">${t5.admView}</button>
-          <a class="ma-btn ma-btn-secondary" href="${escapeHtml5(dlHref)}" download>${t5.admDownload}</a>
+                  data-path="${escapeHtml6(rep.path)}"
+                  data-when="${escapeHtml6(when)}">${t6.admView}</button>
+          <a class="ma-btn ma-btn-secondary" href="${escapeHtml6(dlHref)}" download>${t6.admDownload}</a>
         </td>
       </tr>`;
       }).join("");
@@ -3779,20 +4031,20 @@
     }
     async function openGrowthReport(path, when) {
       if (!dom.grReportModal) return;
-      dom.grReportTitle.textContent = t5.admGrowthReportTitle(when);
+      dom.grReportTitle.textContent = t6.admGrowthReportTitle(when);
       dom.grReportDownload.href = "/api/admin/growth-reports/download?path=" + encodeURIComponent(path);
-      dom.grReportBody.innerHTML = `<p class="hint">${escapeHtml5(t5.admLoading)}</p>`;
+      dom.grReportBody.innerHTML = `<p class="hint">${escapeHtml6(t6.admLoading)}</p>`;
       dom.grReportModal.hidden = false;
       try {
         const r = await fetch("/api/admin/growth-reports/download?path=" + encodeURIComponent(path));
         if (!r.ok) {
-          dom.grReportBody.innerHTML = `<p class="hint">${escapeHtml5(t5.admLoadFailedHttp(r.status))}</p>`;
+          dom.grReportBody.innerHTML = `<p class="hint">${escapeHtml6(t6.admLoadFailedHttp(r.status))}</p>`;
           return;
         }
         const text = await r.text();
         dom.grReportBody.innerHTML = renderMarkdown(text);
       } catch (err) {
-        dom.grReportBody.innerHTML = `<p class="hint">${escapeHtml5(t5.admLoadFailedErr(err.message || String(err)))}</p>`;
+        dom.grReportBody.innerHTML = `<p class="hint">${escapeHtml6(t6.admLoadFailedErr(err.message || String(err)))}</p>`;
       }
     }
     function closeGrowthReport() {
@@ -3810,7 +4062,7 @@
         dom.wfStartTitle.textContent = w.name || w.id;
       }
       if (dom.wfStartDesc) {
-        const cap = `<code>${escapeHtml5(w.triggerCapability)}</code>`;
+        const cap = `<code>${escapeHtml6(w.triggerCapability)}</code>`;
         const xhubSteps = Array.isArray(w.crossHubSteps) ? w.crossHubSteps : [];
         const peerDests = Array.from(
           new Set(xhubSteps.filter((s) => s.kind !== "a2a").map((s) => s.peerLabel || s.peer))
@@ -3818,8 +4070,8 @@
         const a2aDests = Array.from(
           new Set(xhubSteps.filter((s) => s.kind === "a2a").map((s) => s.peerLabel || s.peer))
         );
-        const xhub = peerDests.length || a2aDests.length ? `<br/><small class="wf-xhub-note">${escapeHtml5(t5.workflowCrossHubNote(peerDests, a2aDests))}</small>` : "";
-        dom.wfStartDesc.innerHTML = (w.description ? `${escapeHtml5(w.description)}<br/><small>${t5.admDispatchCap(cap)}</small>` : t5.admDispatchCap(cap)) + xhub;
+        const xhub = peerDests.length || a2aDests.length ? `<br/><small class="wf-xhub-note">${escapeHtml6(t6.workflowCrossHubNote(peerDests, a2aDests))}</small>` : "";
+        dom.wfStartDesc.innerHTML = (w.description ? `${escapeHtml6(w.description)}<br/><small>${t6.admDispatchCap(cap)}</small>` : t6.admDispatchCap(cap)) + xhub;
       }
       renderWorkflowStartFields(w.payloadSchema);
       if (dom.wfStartMsg) {
@@ -3839,7 +4091,7 @@
         dom.wfStartFields.innerHTML = `<label>
         <span>Payload (JSON)</span>
         <textarea id="wf-start-json" rows="8" placeholder='{ "key": "value" }'>{}</textarea>
-        <small class="hint">${escapeHtml5(t5.admNoPayloadSchema)}</small>
+        <small class="hint">${escapeHtml6(t6.admNoPayloadSchema)}</small>
       </label>`;
         return;
       }
@@ -3854,24 +4106,24 @@
       const ctx = typeof payload.context === "string" ? payload.context : "";
       const fromAgent = typeof payload.fromAgent === "string" ? payload.fromAgent : "(agent)";
       const fields = qs.map((q, i) => renderAgentQuestionField(v.id, q, i)).join("");
-      return `<div class="task-detail-section agent-question-form" data-aq-id="${escapeHtml5(v.id)}"><div class="aq-header"><strong>${escapeHtml5(t5.admAgentAsksMore(fromAgent, qs.length))}</strong>` + (ctx ? `<p class="aq-context">${escapeHtml5(ctx)}</p>` : "") + `</div><div class="aq-fields">${fields}</div><div class="aq-actions"><button class="primary" data-act="submit-agent-question" data-id="${escapeHtml5(v.id)}">${escapeHtml5(t5.admSubmitAnswer)}</button><button class="secondary" data-act="skip-agent-question" data-id="${escapeHtml5(v.id)}" title="${escapeHtml5(t5.admSkipTitle)}">${escapeHtml5(t5.admSkip)}</button><span class="aq-msg" data-aq-msg="${escapeHtml5(v.id)}"></span></div></div>`;
+      return `<div class="task-detail-section agent-question-form" data-aq-id="${escapeHtml6(v.id)}"><div class="aq-header"><strong>${escapeHtml6(t6.admAgentAsksMore(fromAgent, qs.length))}</strong>` + (ctx ? `<p class="aq-context">${escapeHtml6(ctx)}</p>` : "") + `</div><div class="aq-fields">${fields}</div><div class="aq-actions"><button class="primary" data-act="submit-agent-question" data-id="${escapeHtml6(v.id)}">${escapeHtml6(t6.admSubmitAnswer)}</button><button class="secondary" data-act="skip-agent-question" data-id="${escapeHtml6(v.id)}" title="${escapeHtml6(t6.admSkipTitle)}">${escapeHtml6(t6.admSkip)}</button><span class="aq-msg" data-aq-msg="${escapeHtml6(v.id)}"></span></div></div>`;
     }
     function renderAgentQuestionField(taskId, q, idx) {
       const fid = q && typeof q.id === "string" ? q.id : `q${idx}`;
       const fieldDomId = `aq-${taskId}-${fid}`;
       const label = q && typeof q.label === "string" ? q.label : `Q${idx + 1}`;
-      const hint = q && typeof q.hint === "string" ? `<small class="hint">${escapeHtml5(q.hint)}</small>` : "";
+      const hint = q && typeof q.hint === "string" ? `<small class="hint">${escapeHtml6(q.hint)}</small>` : "";
       const required = q && q.required ? ' <span style="color:#c33">*</span>' : "";
       let control;
       if (q && q.type === "text") {
-        control = `<input type="text" id="${escapeHtml5(fieldDomId)}" data-aq-fid="${escapeHtml5(fid)}" />`;
+        control = `<input type="text" id="${escapeHtml6(fieldDomId)}" data-aq-fid="${escapeHtml6(fid)}" />`;
       } else if (q && q.type === "number") {
-        control = `<input type="number" id="${escapeHtml5(fieldDomId)}" data-aq-fid="${escapeHtml5(fid)}" />`;
+        control = `<input type="number" id="${escapeHtml6(fieldDomId)}" data-aq-fid="${escapeHtml6(fid)}" />`;
       } else {
         const rows = q && typeof q.rows === "number" && q.rows > 0 ? q.rows : 4;
-        control = `<textarea id="${escapeHtml5(fieldDomId)}" data-aq-fid="${escapeHtml5(fid)}" rows="${rows}"></textarea>`;
+        control = `<textarea id="${escapeHtml6(fieldDomId)}" data-aq-fid="${escapeHtml6(fid)}" rows="${rows}"></textarea>`;
       }
-      return `<label class="aq-field"><span>${escapeHtml5(label)}${required}</span>` + control + hint + `</label>`;
+      return `<label class="aq-field"><span>${escapeHtml6(label)}${required}</span>` + control + hint + `</label>`;
     }
     async function submitAgentQuestion(taskId) {
       const card = document.querySelector(`.agent-question-form[data-aq-id="${cssEscape(taskId)}"]`);
@@ -3882,7 +4134,7 @@
         msg.textContent = text;
         msg.className = "aq-msg" + (kind ? " " + kind : "");
       };
-      setMsg(t5.admSubmitting);
+      setMsg(t6.admSubmitting);
       const view = state.tasks.find((x) => x.id === taskId);
       const qs = view?.task?.payload?.questions || [];
       const answers = {};
@@ -3891,42 +4143,42 @@
         if (!el) continue;
         const v = el.value;
         if (q.required && (v == null || String(v).trim() === "")) {
-          setMsg(t5.admFieldRequired(q.label), "err");
+          setMsg(t6.admFieldRequired(q.label), "err");
           return;
         }
         if (v != null && String(v).length > 0) answers[q.id] = String(v);
       }
       try {
-        await fetchJson4(`/api/tasks/${encodeURIComponent(taskId)}/complete`, {
+        await fetchJson5(`/api/tasks/${encodeURIComponent(taskId)}/complete`, {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ output: { answers } })
         });
-        setMsg(t5.admSubmittedAgent, "ok");
+        setMsg(t6.admSubmittedAgent, "ok");
       } catch (err) {
-        setMsg(t5.admSubmitFailedErr(err.message || String(err)), "err");
+        setMsg(t6.admSubmitFailedErr(err.message || String(err)), "err");
       }
     }
     async function skipAgentQuestion(taskId) {
       const card = document.querySelector(`.agent-question-form[data-aq-id="${cssEscape(taskId)}"]`);
       const msg = card?.querySelector(`[data-aq-msg="${cssEscape(taskId)}"]`);
       if (msg) {
-        msg.textContent = t5.admSkipping;
+        msg.textContent = t6.admSkipping;
         msg.className = "aq-msg";
       }
       try {
-        await fetchJson4(`/api/tasks/${encodeURIComponent(taskId)}/reject`, {
+        await fetchJson5(`/api/tasks/${encodeURIComponent(taskId)}/reject`, {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ error: "admin skipped" })
         });
         if (msg) {
-          msg.textContent = t5.admSkipped;
+          msg.textContent = t6.admSkipped;
           msg.className = "aq-msg ok";
         }
       } catch (err) {
         if (msg) {
-          msg.textContent = t5.admSkipFailedErr(err.message || String(err));
+          msg.textContent = t6.admSkipFailedErr(err.message || String(err));
           msg.className = "aq-msg err";
         }
       }
@@ -3989,23 +4241,23 @@
       if (b.type === "file_ref") {
         const url = `/api/admin/uploads?id=${encodeURIComponent(b.artifactId)}`;
         const tail = b.artifactId.split("/").pop() || b.artifactId;
-        const meta = `<div class="mm-meta"><code>${escapeHtml5(b.mime)}</code> · ${escapeHtml5(tail)}</div>`;
+        const meta = `<div class="mm-meta"><code>${escapeHtml6(b.mime)}</code> · ${escapeHtml6(tail)}</div>`;
         if (b.mime.startsWith("image/")) {
           return `<div class="mm-block mm-image">
-          <a href="${escapeHtml5(url)}" target="_blank" rel="noopener">
-            <img src="${escapeHtml5(url)}" alt="${escapeHtml5(tail)}" loading="lazy" />
+          <a href="${escapeHtml6(url)}" target="_blank" rel="noopener">
+            <img src="${escapeHtml6(url)}" alt="${escapeHtml6(tail)}" loading="lazy" />
           </a>
           ${meta}
         </div>`;
         }
         if (b.mime.startsWith("audio/")) {
           return `<div class="mm-block mm-audio">
-          <audio controls src="${escapeHtml5(url)}"></audio>
+          <audio controls src="${escapeHtml6(url)}"></audio>
           ${meta}
         </div>`;
         }
         return `<div class="mm-block mm-file">
-        <a href="${escapeHtml5(url)}" download="${escapeHtml5(tail)}">📎 ${escapeHtml5(tail)}</a>
+        <a href="${escapeHtml6(url)}" download="${escapeHtml6(tail)}">📎 ${escapeHtml6(tail)}</a>
         ${meta}
       </div>`;
       }
@@ -4013,19 +4265,19 @@
         const src = imageOrAudioSourceToSrc(b.source);
         if (!src) return renderUnknownBlock(b);
         return `<div class="mm-block mm-image">
-        <a href="${escapeHtml5(src.url)}" target="_blank" rel="noopener">
-          <img src="${escapeHtml5(src.url)}" alt="image" loading="lazy" />
+        <a href="${escapeHtml6(src.url)}" target="_blank" rel="noopener">
+          <img src="${escapeHtml6(src.url)}" alt="image" loading="lazy" />
         </a>
-        <div class="mm-meta"><code>${escapeHtml5(src.label)}</code></div>
+        <div class="mm-meta"><code>${escapeHtml6(src.label)}</code></div>
       </div>`;
       }
       if (b.type === "audio") {
         const src = imageOrAudioSourceToSrc(b.source);
         if (!src) return renderUnknownBlock(b);
-        const fmt = b.format ? ` · ${escapeHtml5(b.format)}` : "";
+        const fmt = b.format ? ` · ${escapeHtml6(b.format)}` : "";
         return `<div class="mm-block mm-audio">
-        <audio controls src="${escapeHtml5(src.url)}"></audio>
-        <div class="mm-meta"><code>${escapeHtml5(src.label)}</code>${fmt}</div>
+        <audio controls src="${escapeHtml6(src.url)}"></audio>
+        <div class="mm-meta"><code>${escapeHtml6(src.label)}</code>${fmt}</div>
       </div>`;
       }
       return renderUnknownBlock(b);
@@ -4051,27 +4303,27 @@
     }
     function renderUnknownBlock(b) {
       return `<div class="mm-block mm-unknown">
-      <small>${escapeHtml5(t5.admUnknownBlock(String(b && b.type) || "unknown"))}</small>
+      <small>${escapeHtml6(t6.admUnknownBlock(String(b && b.type) || "unknown"))}</small>
     </div>`;
     }
     function renderOneField(f) {
-      const id = `wf-start-field-${escapeHtml5(f.id)}`;
+      const id = `wf-start-field-${escapeHtml6(f.id)}`;
       const required = f.required ? ' <span style="color:#c33">*</span>' : "";
-      const hint = f.hint ? `<small class="hint">${escapeHtml5(f.hint)}</small>` : "";
-      const ph = f.placeholder ? ` placeholder="${escapeHtml5(f.placeholder)}"` : "";
-      const defaultV = f.defaultValue != null ? escapeHtml5(String(f.defaultValue)) : "";
+      const hint = f.hint ? `<small class="hint">${escapeHtml6(f.hint)}</small>` : "";
+      const ph = f.placeholder ? ` placeholder="${escapeHtml6(f.placeholder)}"` : "";
+      const defaultV = f.defaultValue != null ? escapeHtml6(String(f.defaultValue)) : "";
       let control;
       if (f.type === "textarea") {
         const rows = typeof f.rows === "number" ? f.rows : 4;
         control = `<textarea id="${id}" rows="${rows}"${ph}>${defaultV}</textarea>`;
       } else if (f.type === "select") {
-        const opts = (f.options || []).map((o) => `<option value="${escapeHtml5(o.value)}"${o.value === f.defaultValue ? " selected" : ""}>${escapeHtml5(o.label)}</option>`).join("");
+        const opts = (f.options || []).map((o) => `<option value="${escapeHtml6(o.value)}"${o.value === f.defaultValue ? " selected" : ""}>${escapeHtml6(o.label)}</option>`).join("");
         control = `<select id="${id}">${opts}</select>`;
       } else if (f.type === "number") {
         control = `<input type="number" id="${id}"${ph} value="${defaultV}" />`;
       } else if (f.type === "file") {
-        const accept = Array.isArray(f.accept) && f.accept.length > 0 ? ` accept="${escapeHtml5(f.accept.join(","))}"` : "";
-        const sizeHint = typeof f.maxSizeMb === "number" ? `<small class="hint">${escapeHtml5(t5.admMaxSize(f.maxSizeMb))}</small>` : "";
+        const accept = Array.isArray(f.accept) && f.accept.length > 0 ? ` accept="${escapeHtml6(f.accept.join(","))}"` : "";
+        const sizeHint = typeof f.maxSizeMb === "number" ? `<small class="hint">${escapeHtml6(t6.admMaxSize(f.maxSizeMb))}</small>` : "";
         control = `<input type="file" id="${id}" data-gotong-file="1"${accept} />
         <span class="gotong-file-status" data-gotong-file-status="${id}" style="font-size:0.85em;color:#666;margin-left:0.5em;"></span>
         ${sizeHint}`;
@@ -4079,7 +4331,7 @@
         control = `<input type="text" id="${id}"${ph} value="${defaultV}" />`;
       }
       return `<label>
-      <span>${escapeHtml5(f.label)}${required}</span>
+      <span>${escapeHtml6(f.label)}${required}</span>
       ${control}
       ${hint}
     </label>`;
@@ -4102,7 +4354,7 @@
             const files = el.files;
             if (!files || files.length === 0) {
               if (f.required) {
-                dom.wfStartMsg.textContent = t5.admFieldRequired(f.label);
+                dom.wfStartMsg.textContent = t6.admFieldRequired(f.label);
                 dom.wfStartMsg.classList.add("err");
                 return;
               }
@@ -4111,36 +4363,36 @@
             const file = files[0];
             const capMb = typeof f.maxSizeMb === "number" ? f.maxSizeMb : 10;
             if (file.size > capMb * 1024 * 1024) {
-              dom.wfStartMsg.textContent = t5.admFileTooLarge(f.label, capMb);
+              dom.wfStartMsg.textContent = t6.admFileTooLarge(f.label, capMb);
               dom.wfStartMsg.classList.add("err");
               return;
             }
             const statusEl = document.querySelector(
               `[data-gotong-file-status="wf-start-field-${cssEscape(f.id)}"]`
             );
-            if (statusEl) statusEl.textContent = t5.admUploading;
+            if (statusEl) statusEl.textContent = t6.admUploading;
             try {
               const ref = await uploadOneFile(file);
               if (statusEl) {
                 statusEl.style.color = "#080";
                 if (ref.mime && ref.mime.startsWith("image/")) {
                   const url = `/api/admin/uploads?id=${encodeURIComponent(ref.artifactId)}`;
-                  statusEl.innerHTML = `<span>${escapeHtml5(t5.admUploaded(formatBytes2(ref.size)))}</span> <img src="${escapeHtml5(url)}" alt="preview" style="max-height:32px;max-width:80px;vertical-align:middle;border-radius:2px;margin-left:0.4em;" />`;
+                  statusEl.innerHTML = `<span>${escapeHtml6(t6.admUploaded(formatBytes2(ref.size)))}</span> <img src="${escapeHtml6(url)}" alt="preview" style="max-height:32px;max-width:80px;vertical-align:middle;border-radius:2px;margin-left:0.4em;" />`;
                 } else if (ref.mime && ref.mime.startsWith("audio/")) {
                   const url = `/api/admin/uploads?id=${encodeURIComponent(ref.artifactId)}`;
-                  statusEl.innerHTML = `<span>${escapeHtml5(t5.admUploaded(formatBytes2(ref.size)))}</span> <audio controls src="${escapeHtml5(url)}" style="height:24px;max-width:140px;vertical-align:middle;margin-left:0.4em;"></audio>`;
+                  statusEl.innerHTML = `<span>${escapeHtml6(t6.admUploaded(formatBytes2(ref.size)))}</span> <audio controls src="${escapeHtml6(url)}" style="height:24px;max-width:140px;vertical-align:middle;margin-left:0.4em;"></audio>`;
                 } else {
-                  statusEl.textContent = t5.admUploaded(formatBytes2(ref.size));
+                  statusEl.textContent = t6.admUploaded(formatBytes2(ref.size));
                 }
               }
               payload[f.id] = { type: "file_ref", artifactId: ref.artifactId, mime: ref.mime };
             } catch (err) {
               const msg = err && err.message ? err.message : String(err);
               if (statusEl) {
-                statusEl.textContent = t5.admUploadFailedMsg(msg);
+                statusEl.textContent = t6.admUploadFailedMsg(msg);
                 statusEl.style.color = "#c33";
               }
-              dom.wfStartMsg.textContent = t5.admFieldUploadFailed(f.label, msg);
+              dom.wfStartMsg.textContent = t6.admFieldUploadFailed(f.label, msg);
               dom.wfStartMsg.classList.add("err");
               return;
             }
@@ -4148,7 +4400,7 @@
           }
           let v = el.value;
           if (f.required && (v == null || v.trim() === "")) {
-            dom.wfStartMsg.textContent = t5.admFieldRequired(f.label);
+            dom.wfStartMsg.textContent = t6.admFieldRequired(f.label);
             dom.wfStartMsg.classList.add("err");
             return;
           }
@@ -4156,7 +4408,7 @@
           if (f.type === "number") {
             const n = Number(v);
             if (!Number.isFinite(n)) {
-              dom.wfStartMsg.textContent = t5.admFieldMustBeNumber(f.label);
+              dom.wfStartMsg.textContent = t6.admFieldMustBeNumber(f.label);
               dom.wfStartMsg.classList.add("err");
               return;
             }
@@ -4170,7 +4422,7 @@
         try {
           payload = JSON.parse(jsonEl?.value || "{}");
         } catch (err) {
-          dom.wfStartMsg.textContent = t5.admPayloadJsonInvalid(err.message || String(err));
+          dom.wfStartMsg.textContent = t6.admPayloadJsonInvalid(err.message || String(err));
           dom.wfStartMsg.classList.add("err");
           return;
         }
@@ -4187,15 +4439,15 @@
         });
         const body = await r.json().catch(() => ({}));
         if (!r.ok) {
-          dom.wfStartMsg.textContent = t5.admFailedReason(body.error || t5.admHttp(r.status));
+          dom.wfStartMsg.textContent = t6.admFailedReason(body.error || t6.admHttp(r.status));
           dom.wfStartMsg.classList.add("err");
           return;
         }
-        dom.wfStartMsg.textContent = t5.admDispatched;
+        dom.wfStartMsg.textContent = t6.admDispatched;
         dom.wfStartMsg.classList.add("ok");
         setTimeout(closeWorkflowStart, 1500);
       } catch (err) {
-        dom.wfStartMsg.textContent = t5.admFailedReason(err.message || String(err));
+        dom.wfStartMsg.textContent = t6.admFailedReason(err.message || String(err));
         dom.wfStartMsg.classList.add("err");
       }
     }
@@ -4226,7 +4478,7 @@
         text = await file.text();
       }
       if (!text || !text.trim()) {
-        dom.bundleImportMsg.textContent = t5.admBundleNeeded;
+        dom.bundleImportMsg.textContent = t6.admBundleNeeded;
         dom.bundleImportMsg.classList.add("err");
         return;
       }
@@ -4240,7 +4492,7 @@
         });
         const body = await r.json().catch(() => ({}));
         if (!r.ok) {
-          dom.bundleImportMsg.textContent = t5.admFailedReason(body.error || t5.admHttp(r.status));
+          dom.bundleImportMsg.textContent = t6.admFailedReason(body.error || t6.admHttp(r.status));
           dom.bundleImportMsg.classList.add("err");
           return;
         }
@@ -4248,14 +4500,14 @@
         const skippedN = body.team?.skipped?.length ?? 0;
         const wfId = body.workflow?.id;
         const parts = [];
-        if (createdN > 0) parts.push(t5.admCreatedAgents(createdN));
-        if (skippedN > 0) parts.push(t5.admSkippedAgents(skippedN));
-        if (wfId) parts.push(t5.admWorkflowRegistered(wfId));
-        if (body.workflowError) parts.push(t5.admWorkflowWarning(body.workflowError));
+        if (createdN > 0) parts.push(t6.admCreatedAgents(createdN));
+        if (skippedN > 0) parts.push(t6.admSkippedAgents(skippedN));
+        if (wfId) parts.push(t6.admWorkflowRegistered(wfId));
+        if (body.workflowError) parts.push(t6.admWorkflowWarning(body.workflowError));
         if (body.team?.spawnErrors?.length) {
-          parts.push(t5.admSpawnFailed(body.team.spawnErrors.length));
+          parts.push(t6.admSpawnFailed(body.team.spawnErrors.length));
         }
-        dom.bundleImportMsg.textContent = t5.admImportDone + parts.join(t5.admListSep);
+        dom.bundleImportMsg.textContent = t6.admImportDone + parts.join(t6.admListSep);
         dom.bundleImportMsg.classList.add("ok");
         await managedAgents.refreshManagedAgents().catch(() => {
         });
@@ -4263,7 +4515,7 @@
         });
         setTimeout(closeBundleImportModal, 1200);
       } catch (err) {
-        dom.bundleImportMsg.textContent = t5.admFailedReason(err.message || String(err));
+        dom.bundleImportMsg.textContent = t6.admFailedReason(err.message || String(err));
         dom.bundleImportMsg.classList.add("err");
       }
     }
@@ -4277,14 +4529,14 @@
       dom.templateGalleryModal.hidden = false;
       if (galleryLoaded) return;
       if (dom.templateGalleryList) {
-        dom.templateGalleryList.innerHTML = `<p class="hint">${escapeHtml5(t5.loading)}</p>`;
+        dom.templateGalleryList.innerHTML = `<p class="hint">${escapeHtml6(t6.loading)}</p>`;
       }
       try {
         const r = await fetch("/api/admin/templates/catalog");
         if (!r.ok) {
           if (dom.templateGalleryList) dom.templateGalleryList.innerHTML = "";
           if (dom.templateGalleryMsg) {
-            dom.templateGalleryMsg.textContent = t5.admFailedReason(t5.admHttp(r.status));
+            dom.templateGalleryMsg.textContent = t6.admFailedReason(t6.admHttp(r.status));
             dom.templateGalleryMsg.classList.add("err");
           }
           return;
@@ -4295,7 +4547,7 @@
       } catch (err) {
         if (dom.templateGalleryList) dom.templateGalleryList.innerHTML = "";
         if (dom.templateGalleryMsg) {
-          dom.templateGalleryMsg.textContent = t5.admFailedReason(err.message || String(err));
+          dom.templateGalleryMsg.textContent = t6.admFailedReason(err.message || String(err));
           dom.templateGalleryMsg.classList.add("err");
         }
       }
@@ -4306,17 +4558,17 @@
     function renderTemplateGallery(templates) {
       if (!dom?.templateGalleryList) return;
       if (!templates.length) {
-        dom.templateGalleryList.innerHTML = `<p class="hint">${escapeHtml5(t5.templateGalleryEmpty)}</p>`;
+        dom.templateGalleryList.innerHTML = `<p class="hint">${escapeHtml6(t6.templateGalleryEmpty)}</p>`;
         return;
       }
       dom.templateGalleryList.innerHTML = templates.map((tpl) => {
         const counts = [
-          t5.templateGalleryCountAgents(tpl.agents?.length || 0),
-          t5.templateGalleryCountWorkflows(tpl.workflows?.length || 0),
-          t5.templateGalleryCountKbs(tpl.knowledgeBases?.length || 0)
+          t6.templateGalleryCountAgents(tpl.agents?.length || 0),
+          t6.templateGalleryCountWorkflows(tpl.workflows?.length || 0),
+          t6.templateGalleryCountKbs(tpl.knowledgeBases?.length || 0)
         ];
-        const apiHint = tpl.apiKeyPrompt ? `<span class="tg-chip tg-chip-api">${escapeHtml5(t5.templateGalleryNeedsKey(tpl.apiKeyPrompt.label || tpl.apiKeyPrompt.provider))}</span>` : "";
-        return `<div class="tg-card"><div class="tg-card-head"><h4 class="tg-card-name">${escapeHtml5(tpl.name)}</h4><button class="ma-btn tg-install-btn" data-act="install-template" data-id="${escapeHtml5(tpl.id)}">${escapeHtml5(t5.templateGalleryInstall)}</button></div>` + (tpl.description ? `<p class="tg-card-desc">${escapeHtml5(tpl.description)}</p>` : "") + `<div class="tg-card-counts">${counts.map((c) => `<span class="tg-chip">${escapeHtml5(c)}</span>`).join("")}${apiHint}</div><div class="tg-card-result" data-tg-result="${escapeHtml5(tpl.id)}"></div></div>`;
+        const apiHint = tpl.apiKeyPrompt ? `<span class="tg-chip tg-chip-api">${escapeHtml6(t6.templateGalleryNeedsKey(tpl.apiKeyPrompt.label || tpl.apiKeyPrompt.provider))}</span>` : "";
+        return `<div class="tg-card"><div class="tg-card-head"><h4 class="tg-card-name">${escapeHtml6(tpl.name)}</h4><button class="ma-btn tg-install-btn" data-act="install-template" data-id="${escapeHtml6(tpl.id)}">${escapeHtml6(t6.templateGalleryInstall)}</button></div>` + (tpl.description ? `<p class="tg-card-desc">${escapeHtml6(tpl.description)}</p>` : "") + `<div class="tg-card-counts">${counts.map((c) => `<span class="tg-chip">${escapeHtml6(c)}</span>`).join("")}${apiHint}</div><div class="tg-card-result" data-tg-result="${escapeHtml6(tpl.id)}"></div></div>`;
       }).join("");
     }
     async function installTemplate(id) {
@@ -4331,11 +4583,11 @@
         if (kind) card.classList.add(kind);
       };
       if (btn instanceof HTMLButtonElement) btn.disabled = true;
-      setResult(t5.templateGalleryInstalling, null);
+      setResult(t6.templateGalleryInstalling, null);
       try {
         const cr = await fetch(`/api/admin/templates/catalog/${encodeURIComponent(id)}`);
         if (!cr.ok) {
-          setResult(t5.admFailedReason(t5.admHttp(cr.status)), "err");
+          setResult(t6.admFailedReason(t6.admHttp(cr.status)), "err");
           return;
         }
         const { yaml } = await cr.json();
@@ -4346,7 +4598,7 @@
         });
         const ib = await ir.json().catch(() => ({}));
         if (!ir.ok) {
-          setResult(t5.admFailedReason(ib.error || t5.admHttp(ir.status)), "err");
+          setResult(t6.admFailedReason(ib.error || t6.admHttp(ir.status)), "err");
           return;
         }
         const createdN = ib.team?.created?.length ?? 0;
@@ -4354,12 +4606,12 @@
         const wfOk = (ib.workflows || []).filter((w) => w.ok).length;
         const kbN = ib.knowledgeBases?.length ?? 0;
         const parts = [];
-        if (createdN > 0) parts.push(t5.admCreatedAgents(createdN));
-        if (skippedN > 0) parts.push(t5.admSkippedAgents(skippedN));
-        if (wfOk > 0) parts.push(t5.templateGalleryWorkflowsLanded(wfOk));
-        if (kbN > 0) parts.push(t5.templateGalleryKbSlots(kbN));
-        if (ib.team?.spawnErrors?.length) parts.push(t5.admSpawnFailed(ib.team.spawnErrors.length));
-        const summary = t5.admImportDone + parts.join(t5.admListSep);
+        if (createdN > 0) parts.push(t6.admCreatedAgents(createdN));
+        if (skippedN > 0) parts.push(t6.admSkippedAgents(skippedN));
+        if (wfOk > 0) parts.push(t6.templateGalleryWorkflowsLanded(wfOk));
+        if (kbN > 0) parts.push(t6.templateGalleryKbSlots(kbN));
+        if (ib.team?.spawnErrors?.length) parts.push(t6.admSpawnFailed(ib.team.spawnErrors.length));
+        const summary = t6.admImportDone + parts.join(t6.admListSep);
         const checklist = ib.postInstallChecklist || {};
         const kbTodos = Array.isArray(checklist.kbSlotsToWire) ? checklist.kbSlotsToWire : [];
         const keyTodos = Array.isArray(checklist.agentsMissingKey) ? checklist.agentsMissingKey : [];
@@ -4367,30 +4619,30 @@
         if (card && (kbTodos.length || keyTodos.length || adaptTodos.length)) {
           const rows = [];
           for (const kb of kbTodos) {
-            const text = kb.useMcpServer ? t5.templateGalleryKbSlotTodoRef(kb.name, kb.useMcpServer) : t5.templateGalleryKbSlotTodo(kb.name);
+            const text = kb.useMcpServer ? t6.templateGalleryKbSlotTodoRef(kb.name, kb.useMcpServer) : t6.templateGalleryKbSlotTodo(kb.name);
             rows.push(
-              `<li>${escapeHtml5(text)} <button type="button" class="tg-todo-fix" data-act="goto-mcp">${escapeHtml5(t5.templateGalleryTodoGotoMcp)}</button></li>`
+              `<li>${escapeHtml6(text)} <button type="button" class="tg-todo-fix" data-act="goto-mcp">${escapeHtml6(t6.templateGalleryTodoGotoMcp)}</button></li>`
             );
           }
           for (const a of keyTodos) {
             rows.push(
-              `<li>${escapeHtml5(t5.templateGalleryAgentNoKey(a.id, a.provider))} <button type="button" class="tg-todo-fix" data-act="goto-key">${escapeHtml5(t5.templateGalleryTodoGotoKey)}</button></li>`
+              `<li>${escapeHtml6(t6.templateGalleryAgentNoKey(a.id, a.provider))} <button type="button" class="tg-todo-fix" data-act="goto-key">${escapeHtml6(t6.templateGalleryTodoGotoKey)}</button></li>`
             );
           }
           for (const p of adaptTodos) {
             if (!p || typeof p !== "object") continue;
-            const title = escapeHtml5(String(p.title || ""));
+            const title = escapeHtml6(String(p.title || ""));
             if (p.applicable === true) {
               const payload = encodeURIComponent(JSON.stringify(p));
               rows.push(
-                `<li>${title} <button type="button" class="tg-todo-fix" data-act="apply-adaptation" data-adapt="${payload}">${escapeHtml5(t5.resAdaptApply)}</button><span class="tg-adapt-result" role="status"></span></li>`
+                `<li>${title} <button type="button" class="tg-todo-fix" data-act="apply-adaptation" data-adapt="${payload}">${escapeHtml6(t6.resAdaptApply)}</button><span class="tg-adapt-result" role="status"></span></li>`
               );
             } else {
-              rows.push(`<li>${title} <em class="tg-adapt-manual">(${escapeHtml5(t5.resAdaptManual)})</em></li>`);
+              rows.push(`<li>${title} <em class="tg-adapt-manual">(${escapeHtml6(t6.resAdaptManual)})</em></li>`);
             }
           }
           card.className = "tg-card-result ok";
-          card.innerHTML = `<div class="tg-result-summary">${escapeHtml5(summary)}</div><details class="tg-checklist" open><summary>${escapeHtml5(t5.templateGalleryChecklistTitle)}</summary><ul>${rows.join("")}</ul></details>`;
+          card.innerHTML = `<div class="tg-result-summary">${escapeHtml6(summary)}</div><details class="tg-checklist" open><summary>${escapeHtml6(t6.templateGalleryChecklistTitle)}</summary><ul>${rows.join("")}</ul></details>`;
         } else {
           setResult(summary, "ok");
         }
@@ -4399,7 +4651,7 @@
         await workflows.refreshWorkflows().catch(() => {
         });
       } catch (err) {
-        setResult(t5.admFailedReason(err.message || String(err)), "err");
+        setResult(t6.admFailedReason(err.message || String(err)), "err");
       } finally {
         if (btn instanceof HTMLButtonElement) btn.disabled = false;
       }
@@ -4417,7 +4669,7 @@
         if (out) out.textContent = " " + msg;
       };
       if (btn instanceof HTMLButtonElement) btn.disabled = true;
-      say(t5.resAdaptApplying);
+      say(t6.resAdaptApplying);
       try {
         const r = await fetch("/api/admin/resources/adapt", {
           method: "POST",
@@ -4426,17 +4678,17 @@
         });
         const j = await r.json().catch(() => ({}));
         if (!r.ok || !j.ok) {
-          say(t5.resAdaptFailed(j.error || t5.admHttp(r.status)));
+          say(t6.resAdaptFailed(j.error || t6.admHttp(r.status)));
           if (btn instanceof HTMLButtonElement) btn.disabled = false;
           return;
         }
-        say(t5.resAdaptApplied(j.applied?.agentId || proposal.agentId || ""));
+        say(t6.resAdaptApplied(j.applied?.agentId || proposal.agentId || ""));
         await managedAgents.refreshManagedAgents().catch(() => {
         });
         renderHubHealth({}).catch(() => {
         });
       } catch (err) {
-        say(t5.resAdaptFailed(err.message || String(err)));
+        say(t6.resAdaptFailed(err.message || String(err)));
         if (btn instanceof HTMLButtonElement) btn.disabled = false;
       }
     }
@@ -4470,11 +4722,11 @@
     function renderKnownRoster() {
       if (!dom.knownAdminsList || !dom.knownWorkersList) return;
       dom.knownAdminsList.innerHTML = state.known.admins.map(
-        (a) => `<li><strong>${escapeHtml5(a.id)}</strong> · ${escapeHtml5(a.displayName)}</li>`
-      ).join("") || `<li class="empty">${escapeHtml5(t5.noParticipants)}</li>`;
+        (a) => `<li><strong>${escapeHtml6(a.id)}</strong> · ${escapeHtml6(a.displayName)}</li>`
+      ).join("") || `<li class="empty">${escapeHtml6(t6.noParticipants)}</li>`;
       dom.knownWorkersList.innerHTML = state.known.workers.map(
-        (w) => `<li><strong>${escapeHtml5(w.id)}</strong>${w.capabilities.length ? " · " + w.capabilities.map(escapeHtml5).join(", ") : ""}${w.lastSeen ? ` · ${new Date(w.lastSeen).toLocaleString()}` : ""}</li>`
-      ).join("") || `<li class="empty">${escapeHtml5(t5.noParticipants)}</li>`;
+        (w) => `<li><strong>${escapeHtml6(w.id)}</strong>${w.capabilities.length ? " · " + w.capabilities.map(escapeHtml6).join(", ") : ""}${w.lastSeen ? ` · ${new Date(w.lastSeen).toLocaleString()}` : ""}</li>`
+      ).join("") || `<li class="empty">${escapeHtml6(t6.noParticipants)}</li>`;
     }
     function updateDispatchVisibility() {
       const v = dom.dStrategy.value;
@@ -4490,14 +4742,14 @@
       if (kind === "explicit") {
         strategy = { kind, to: dom.dTo.value.trim() };
         if (!strategy.to) {
-          dom.dispatchMsg.textContent = t5.failedAlert("id required");
+          dom.dispatchMsg.textContent = t6.failedAlert("id required");
           dom.dispatchMsg.classList.add("err");
           return;
         }
       } else if (kind === "capability") {
         const caps = dom.dCaps.value.split(",").map((s) => s.trim()).filter(Boolean);
         if (caps.length === 0) {
-          dom.dispatchMsg.textContent = t5.failedAlert("capabilities required");
+          dom.dispatchMsg.textContent = t6.failedAlert("capabilities required");
           dom.dispatchMsg.classList.add("err");
           return;
         }
@@ -4510,7 +4762,7 @@
       try {
         payload = dom.dPayload.value.trim() ? JSON.parse(dom.dPayload.value) : {};
       } catch (err) {
-        dom.dispatchMsg.textContent = t5.failedAlert("payload is not valid JSON");
+        dom.dispatchMsg.textContent = t6.failedAlert("payload is not valid JSON");
         dom.dispatchMsg.classList.add("err");
         return;
       }
@@ -4520,15 +4772,15 @@
       const weightStr = dom.dWeight?.value?.trim?.() ?? "";
       const weight = weightStr ? Number(weightStr) : void 0;
       try {
-        await fetchJson4("/api/admin/dispatch", {
+        await fetchJson5("/api/admin/dispatch", {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ strategy, payload, title, priority, weight })
         });
-        dom.dispatchMsg.textContent = t5.dispatchSuccess;
+        dom.dispatchMsg.textContent = t6.dispatchSuccess;
         dom.dispatchMsg.classList.add("ok");
       } catch (err) {
-        dom.dispatchMsg.textContent = t5.failedAlert(err.message || String(err));
+        dom.dispatchMsg.textContent = t6.failedAlert(err.message || String(err));
         dom.dispatchMsg.classList.add("err");
       }
     }
@@ -4542,35 +4794,35 @@
       const rating = ratingStr ? Number(ratingStr) : void 0;
       const comment = dom.eComment.value.trim() || void 0;
       try {
-        await fetchJson4("/api/admin/evaluate", {
+        await fetchJson5("/api/admin/evaluate", {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ taskId, rating, comment })
         });
-        dom.evaluateMsg.textContent = t5.evaluateSuccess;
+        dom.evaluateMsg.textContent = t6.evaluateSuccess;
         dom.evaluateMsg.classList.add("ok");
         dom.eComment.value = "";
       } catch (err) {
-        dom.evaluateMsg.textContent = t5.failedAlert(err.message || String(err));
+        dom.evaluateMsg.textContent = t6.failedAlert(err.message || String(err));
         dom.evaluateMsg.classList.add("err");
       }
     }
     async function approveApp(appId) {
-      await fetchJson4(`/api/admin/applications/${encodeURIComponent(appId)}/approve`, { method: "POST" });
+      await fetchJson5(`/api/admin/applications/${encodeURIComponent(appId)}/approve`, { method: "POST" });
     }
     async function rejectApp(appId, reason) {
-      await fetchJson4(`/api/admin/applications/${encodeURIComponent(appId)}/reject`, {
+      await fetchJson5(`/api/admin/applications/${encodeURIComponent(appId)}/reject`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ reason: reason || "rejected by admin" })
       });
     }
     async function retryTask(taskId) {
-      await fetchJson4(`/api/admin/tasks/${encodeURIComponent(taskId)}/retry`, { method: "POST" });
+      await fetchJson5(`/api/admin/tasks/${encodeURIComponent(taskId)}/retry`, { method: "POST" });
     }
     async function logout() {
       try {
-        await fetchJson4("/api/admin/logout", { method: "POST" });
+        await fetchJson5("/api/admin/logout", { method: "POST" });
       } catch {
       }
       window.location.href = "/admin";
@@ -4595,6 +4847,7 @@
         if (e.detail?.name === "workflows") refreshGrowthReports().catch(() => {
         });
         if (e.detail?.name === "mcp") mcp.refreshMcp().catch((err) => console.warn("mcp refresh failed:", err));
+        if (e.detail?.name === "reallife") oauthConnect.refreshOAuth().catch((err) => console.warn("reallife refresh failed:", err));
         if (e.detail?.name === "overview") {
           renderStartHere().catch(() => {
           });
@@ -4626,7 +4879,7 @@
       }
       attachContribToggle(dom.contribToggle, dom.contribToggleInput);
       try {
-        const me = await fetchJson4("/api/whoami");
+        const me = await fetchJson5("/api/whoami");
         applyContribToggleState(dom.contribToggle, dom.contribToggleInput, me?.contributionOptOut === true);
       } catch (err) {
         console.warn("whoami failed:", err);
@@ -4678,7 +4931,7 @@
         try {
           const r = await fetch("/builtin-bundles/personal-growth.yaml");
           if (!r.ok) {
-            dom.bundleImportMsg.textContent = t5.admTemplateLoadFailedHttp(r.status);
+            dom.bundleImportMsg.textContent = t6.admTemplateLoadFailedHttp(r.status);
             dom.bundleImportMsg.classList.add("err");
             return;
           }
@@ -4689,11 +4942,11 @@
           if (label && dom.bundleKeyLabel) {
             dom.bundleKeyLabel.textContent = `${label} API key (optional)`;
           }
-          dom.bundleImportMsg.textContent = t5.admGrowthBundleLoaded;
+          dom.bundleImportMsg.textContent = t6.admGrowthBundleLoaded;
           dom.bundleImportMsg.classList.remove("err");
           dom.bundleImportMsg.classList.add("ok");
         } catch (err) {
-          dom.bundleImportMsg.textContent = t5.admTemplateLoadFailedErr(err.message || String(err));
+          dom.bundleImportMsg.textContent = t6.admTemplateLoadFailedErr(err.message || String(err));
           dom.bundleImportMsg.classList.add("err");
         }
       });
@@ -4715,8 +4968,8 @@
       dom.maApiKeyClear?.addEventListener("click", () => {
         ma._clearKeyOnSubmit = true;
         dom.maApiKey.value = "";
-        dom.maApiKey.placeholder = t5.admWillClear;
-        dom.maApiKeyHint.textContent = t5.clearKey + t5.admApiKeyClearHintSuffix;
+        dom.maApiKey.placeholder = t6.admWillClear;
+        dom.maApiKeyHint.textContent = t6.clearKey + t6.admApiKeyClearHintSuffix;
       });
       document.addEventListener("click", (e) => {
         const target = e.target;
@@ -4966,7 +5219,7 @@
             await skipAgentQuestion(id);
           }
         } catch (err) {
-          alert(t5.failedAlert(err.message || String(err)));
+          alert(t6.failedAlert(err.message || String(err)));
           if (actEl instanceof HTMLButtonElement) actEl.disabled = false;
         }
       });
@@ -5005,16 +5258,25 @@
       if (document.body.dataset.activeTab === "mcp") {
         mcp.refreshMcp().catch((err) => console.warn("mcp initial load failed:", err));
       }
+      const oauthQuery = new URLSearchParams(window.location.search);
+      if (oauthQuery.has("oauth_connected") || oauthQuery.has("oauth_error")) {
+        const reallifeBtn = document.querySelector('.tabbar-btn[data-tab="reallife"]');
+        if (reallifeBtn) reallifeBtn.click();
+        oauthConnect.checkConnectBanner();
+      }
+      if (document.body.dataset.activeTab === "reallife") {
+        oauthConnect.refreshOAuth().catch((err) => console.warn("reallife initial load failed:", err));
+      }
       const sweepBtn = document.getElementById("services-sweep-btn");
       if (sweepBtn) {
         sweepBtn.addEventListener("click", async () => {
           sweepBtn.disabled = true;
           try {
-            const r = await fetchJson4("/api/admin/services/sweep", { method: "POST" });
-            services.showServicesToast(t5.servicesSweepResult(r.scanned, r.purged));
+            const r = await fetchJson5("/api/admin/services/sweep", { method: "POST" });
+            services.showServicesToast(t6.servicesSweepResult(r.scanned, r.purged));
             await services.refreshServices();
           } catch (err) {
-            alert(t5.failedAlert(err?.message || String(err)));
+            alert(t6.failedAlert(err?.message || String(err)));
           } finally {
             sweepBtn.disabled = false;
           }
@@ -5025,7 +5287,7 @@
         auditRefreshBtn.addEventListener("click", async () => {
           auditRefreshBtn.disabled = true;
           try {
-            const r = await fetchJson4("/api/admin/transcript/service-calls?limit=200");
+            const r = await fetchJson5("/api/admin/transcript/service-calls?limit=200");
             svc.audit = r.calls || [];
             services.renderServicesAudit();
           } catch (err) {
