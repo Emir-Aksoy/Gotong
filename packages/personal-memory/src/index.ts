@@ -181,7 +181,7 @@ export {
   type CleanOutputsReviewerOptions,
   type CleanOutputsResult,
 } from './clean-outputs.js'
-export { relevanceScore, extractTerms } from './relevance.js'
+export { relevanceScore, extractTerms, extractRecallTerms } from './relevance.js'
 export {
   atomicFactsReviewer,
   parseFacts,

@@ -13,9 +13,16 @@
  * the entries that contain it, so a query's candidates are "everything that shares
  * a term", spanning the WHOLE store regardless of recency, in O(query-terms)
  * instead of O(n). Precise ranking is still {@link relevanceScore} — the index
- * only narrows the candidate set; the SAME tokenizer ({@link extractTerms}) and the
- * SAME scorer rank it, so there is zero drift between "what the index finds" and
- * "how recall ranked before".
+ * only narrows the candidate set.
+ *
+ * The index tokenizes with {@link extractRecallTerms} (bigrams PLUS each CJK
+ * character as a unigram), deliberately WIDER than the bigram-only scorer: a
+ * single-CJK-character query 「茶」 has no bigram, so a bigram-only index would
+ * return nothing for it even though 「珍珠奶茶」 contains it (audit P2). The extra
+ * unigram candidates are still ranked by the precise bigram {@link relevanceScore}
+ * (which scores an irrelevant unigram match 0 and drops it), so a WIDER candidate
+ * net never widens the RESULT set for multi-char queries — it only rescues the
+ * single-char case.
  *
  * # Pure, file-first, no native dep (decision: 纯 JS 倒排, not SQLite FTS5)
  *
@@ -37,13 +44,13 @@ import type { MemoryEntry, MemoryQuery } from '@gotong/services-sdk'
 
 import { isActive } from './bitemporal.js'
 import { compareByImportanceThenRecency } from './importance.js'
-import { extractTerms, relevanceScore } from './relevance.js'
+import { extractRecallTerms, relevanceScore } from './relevance.js'
 import type { MemoryRetriever, RetrieverOptions } from './retriever.js'
 
 /**
  * A serialized index. We persist the ENTRIES (postings are rebuilt from them on
- * load via the same {@link extractTerms} that built them) — one source of truth,
- * no chance of postings drifting from the entries they index. The host writes
+ * load via the same {@link extractRecallTerms} that built them) — one source of
+ * truth, no chance of postings drifting from the entries they index. The host writes
  * this next to the jsonl so the index survives a restart; it is still a derived
  * cache the watermark check can discard and rebuild at any time.
  */
@@ -97,7 +104,7 @@ export class InvertedIndex {
   index(entry: MemoryEntry): void {
     if (this.byId.has(entry.id)) this.remove(entry.id)
     this.byId.set(entry.id, entry)
-    for (const term of new Set(extractTerms(entry.text))) {
+    for (const term of new Set(extractRecallTerms(entry.text))) {
       let set = this.postings.get(term)
       if (!set) {
         set = new Set<string>()
@@ -112,7 +119,7 @@ export class InvertedIndex {
     const e = this.byId.get(id)
     if (!e) return
     this.byId.delete(id)
-    for (const term of new Set(extractTerms(e.text))) {
+    for (const term of new Set(extractRecallTerms(e.text))) {
       const set = this.postings.get(term)
       if (!set) continue
       set.delete(id)
@@ -129,7 +136,7 @@ export class InvertedIndex {
    */
   query(text: string): MemoryEntry[] {
     const ids = new Set<string>()
-    for (const term of new Set(extractTerms(text))) {
+    for (const term of new Set(extractRecallTerms(text))) {
       const set = this.postings.get(term)
       if (set) for (const id of set) ids.add(id)
     }

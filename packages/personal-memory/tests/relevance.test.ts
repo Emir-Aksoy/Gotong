@@ -8,7 +8,7 @@
 
 import { describe, expect, it } from 'vitest'
 
-import { extractTerms, relevanceScore } from '../src/relevance.js'
+import { extractRecallTerms, extractTerms, relevanceScore } from '../src/relevance.js'
 
 describe('extractTerms', () => {
   it('splits a CJK run into character bigrams', () => {
@@ -42,6 +42,21 @@ describe('extractTerms', () => {
 
   it('returns nothing for a separators-only string', () => {
     expect(extractTerms('  ,、 ')).toEqual([])
+  })
+})
+
+describe('extractRecallTerms (candidate-generation tokenizer, audit P2)', () => {
+  it('adds each CJK character as a unigram ON TOP of the bigrams', () => {
+    // The index tokenizes with this so a lone char 「茶」 has a posting to hit.
+    // Bigrams come first (extractTerms order), then the per-char unigrams.
+    expect(extractRecallTerms('奶茶店')).toEqual(['奶茶', '茶店', '奶', '茶', '店'])
+  })
+
+  it('leaves Latin/digit tokens alone — only CJK gains unigrams', () => {
+    expect(extractRecallTerms('coffee茶')).toEqual(['coffee', '茶', '茶'])
+    // ('茶' is both a lone-run bigram-degenerate unigram from extractTerms AND the
+    //  appended per-char unigram; the index dedups via `new Set`, so duplicates are
+    //  harmless — this pins that Latin runs are never split.)
   })
 })
 

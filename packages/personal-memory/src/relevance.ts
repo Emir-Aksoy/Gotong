@@ -82,6 +82,28 @@ export function extractTerms(s: string): string[] {
 }
 
 /**
+ * Recall (candidate-generation) terms: everything {@link extractTerms} yields PLUS
+ * each individual CJK character as a unigram.
+ *
+ * The inverted index tokenizes with THIS, not `extractTerms`, so a single-CJK-
+ * character query still has a posting to hit: a bigram-only index has no term for
+ * 「茶」 (a length-≥2 run only produces bigrams like 奶茶/茶店), so a query 「茶」
+ * finds NOTHING and recall comes back empty — even though 「珍珠奶茶」 obviously
+ * contains it (audit P2). Adding the unigrams gives the single-char query a
+ * candidate to surface.
+ *
+ * This widens CANDIDATE GENERATION only — ranking still uses the precise bigram
+ * scorer {@link relevanceScore}. An extra unigram candidate that isn't actually
+ * relevant scores 0 there and is filtered out, so the wider net never widens the
+ * RESULT set for multi-character queries; it only rescues the single-char case.
+ */
+export function extractRecallTerms(s: string): string[] {
+  const terms = extractTerms(s)
+  for (const ch of s) if (isCjk(ch)) terms.push(ch)
+  return terms
+}
+
+/**
  * Lexical relevance of `text` to `query`, in [0,1].
  *
  *   - Empty query (or no extractable terms) → 0 (nothing to match on).

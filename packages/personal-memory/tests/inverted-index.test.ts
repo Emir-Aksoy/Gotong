@@ -28,6 +28,18 @@ describe('InvertedIndex — pure structure', () => {
     expect(ix.query('奶茶店').map((e) => e.id)).toEqual(['e1'])
   })
 
+  it('query on a single CJK character finds entries containing it (audit P2)', () => {
+    // A length-≥2 CJK run only yields BIGRAMS (奶茶, 茶店…), so a bigram-only index
+    // has no posting for the lone char 「茶」 and a single-char query came back
+    // empty. extractRecallTerms adds the per-char unigrams, so 「茶」 has a posting.
+    const ix = buildInvertedIndex([
+      entry('e1', 'semantic', '珍珠奶茶', 100),
+      entry('e2', 'semantic', '今天天气不错', 200),
+    ])
+    expect(ix.query('茶').map((e) => e.id)).toEqual(['e1']) // finds 珍珠奶茶
+    expect(ix.query('气').map((e) => e.id)).toEqual(['e2']) // finds 天气
+  })
+
   it('remove drops an entry and its postings', () => {
     const ix = buildInvertedIndex([entry('e1', 'semantic', '奶茶', 100)])
     expect(ix.query('奶茶').map((e) => e.id)).toEqual(['e1'])
@@ -98,6 +110,30 @@ describe('invertedIndexRetriever', () => {
       entry('hit', 'semantic', '我爱奶茶', 100),
       entry('miss', 'semantic', '我爱篮球', 200),
     ])
+    const r = await invertedIndexRetriever(ix).retrieve({ text: '奶茶', k: 5 })
+    expect(r.map((e) => e.id)).toEqual(['hit'])
+  })
+
+  it('a single-CJK-character query still recalls (audit P2 — a bigram index returned empty)', async () => {
+    const ix = buildInvertedIndex([
+      entry('drink', 'semantic', '主人最爱的饮料是珍珠奶茶', 100),
+      entry('other', 'semantic', '主人在做一个软件项目', 200),
+    ])
+    // 「茶」 is a lone CJK char with no bigram; before the fix the index held no
+    // posting for it → empty recall despite 珍珠奶茶 obviously containing it. The
+    // full-substring branch of relevanceScore then ranks the surfaced candidate 1.
+    const r = await invertedIndexRetriever(ix).retrieve({ text: '茶', k: 5 })
+    expect(r.map((e) => e.id)).toEqual(['drink'])
+  })
+
+  it('the wider unigram candidate net adds NO noise to a multi-char query', async () => {
+    const ix = buildInvertedIndex([
+      entry('hit', 'semantic', '我爱奶茶', 100),
+      entry('noise', 'semantic', '我爱喝茶', 200), // shares the unigram 茶, NOT the bigram 奶茶
+    ])
+    // 奶茶 → {奶茶} + unigrams {奶,茶}: 'noise' is now a CANDIDATE (shares 茶) but
+    // relevanceScore('奶茶','我爱喝茶') = 0 (no 奶茶 bigram, no substring) → filtered.
+    // Result is identical to the bigram-only era — the net only rescues single chars.
     const r = await invertedIndexRetriever(ix).retrieve({ text: '奶茶', k: 5 })
     expect(r.map((e) => e.id)).toEqual(['hit'])
   })
