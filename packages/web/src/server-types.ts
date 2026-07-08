@@ -42,6 +42,7 @@ import type { TemplatePersonnelSource } from './template-routes.js'
 import type { PeerManifestFederationSurface } from './peer-routes.js'
 import type { OidcLoginSurface } from './oidc-routes.js'
 import type { OAuthConnectSurface } from './oauth-connect-routes.js'
+import type { OAuthConnectorAdminSurface } from './oauth-connector-admin-routes.js'
 import type { OidcProviderAdminSurface } from './oidc-admin-routes.js'
 import type { SamlLoginSurface } from './saml-routes.js'
 import type { SamlProviderAdminSurface } from './saml-admin-routes.js'
@@ -472,6 +473,13 @@ export interface WebServerOptions {
    * the token set. Absent → start 503s, callback bounces to ?oauth_error=not_enabled.
    */
   oauthConnect?: OAuthConnectSurface
+  /**
+   * C-M2-M5a — host-injected outbound OAuth connector CRUD surface. When wired,
+   * /api/admin/oauth/connectors[/:id[/disconnect]] lets an admin register /
+   * list / update / remove connectors + revoke a connection. Absent → 503.
+   * The client_secret + token set stay in the vault; the view never carries them.
+   */
+  oauthConnectorAdmin?: OAuthConnectorAdminSurface
   /**
    * Route B P1-M5e — host-injected SAML 2.0 SP login surface. When wired, the
    * public `/api/auth/saml/{providers,metadata,start,acs}` routes let a browser

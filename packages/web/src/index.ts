@@ -13,6 +13,8 @@ export type { WorkflowWizardSurface } from './wizard-routes.js'
 // SSO login + the admin IdP-provider registry.
 export type { OidcLoginSurface } from './server.js'
 export type { OidcProviderAdminSurface, OidcProviderView } from './server.js'
+// C-M2-M5a — outbound OAuth connector CRUD (host injects the surface).
+export type { OAuthConnectorAdminSurface, OAuthConnectorView } from './server.js'
 // Route B P1-M5e — public SAML SP login routes (host injects the surface).
 export type { SamlLoginSurface } from './server.js'
 // Route B P1-M5f — admin SAML provider registry CRUD (host injects the surface).

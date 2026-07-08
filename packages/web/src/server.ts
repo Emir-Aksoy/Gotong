@@ -90,6 +90,7 @@ import {
 import { handleOidcRoute, type OidcLoginSurface } from './oidc-routes.js'
 import { handleOidcAdminRoute, type OidcProviderAdminSurface } from './oidc-admin-routes.js'
 import { handleOAuthConnectCallbackRoute, handleOAuthConnectAdminRoute, type OAuthConnectSurface } from './oauth-connect-routes.js'
+import { handleOAuthConnectorAdminRoute, type OAuthConnectorAdminSurface } from './oauth-connector-admin-routes.js'
 import { handleSamlRoute, type SamlLoginSurface } from './saml-routes.js'
 import { handleSamlAdminRoute, type SamlProviderAdminSurface } from './saml-admin-routes.js'
 import { handleA2aAdminRoute, type A2aAgentAdminSurface } from './a2a-admin-routes.js'
@@ -121,6 +122,7 @@ export type {
 export type { OidcLoginSurface } from './oidc-routes.js'
 export type { OidcProviderAdminSurface, OidcProviderView } from './oidc-admin-routes.js'
 export type { OAuthConnectSurface } from './oauth-connect-routes.js'
+export type { OAuthConnectorAdminSurface, OAuthConnectorView } from './oauth-connector-admin-routes.js'
 export type { SamlLoginSurface } from './saml-routes.js'
 export type { SamlProviderAdminSurface, SamlProviderView } from './saml-admin-routes.js'
 export type { A2aAgentAdminSurface, A2aAgentView } from './a2a-admin-routes.js'
@@ -347,6 +349,7 @@ export function serveWeb(hub: Hub, opts: WebServerOptions = {}): Promise<WebServ
     peerSummaries: opts.peerSummaries,
     oidcLogin: opts.oidcLogin,
     oauthConnect: opts.oauthConnect,
+    oauthConnectorAdmin: opts.oauthConnectorAdmin,
     samlLogin: opts.samlLogin,
     oidcAdmin: opts.oidcAdmin,
     samlAdmin: opts.samlAdmin,
@@ -545,6 +548,8 @@ interface HandlerCtx {
   oidcLogin: OidcLoginSurface | undefined
   /** C-M2-M3 — outbound OAuth connect (begin admin-gated, callback public). */
   oauthConnect: OAuthConnectSurface | undefined
+  /** C-M2-M5a — outbound OAuth connector CRUD (admin). */
+  oauthConnectorAdmin: OAuthConnectorAdminSurface | undefined
   /** Route B P1-M5e — see WebServerOptions.samlLogin doc above. */
   samlLogin: SamlLoginSurface | undefined
   /** Route B P1-M4f — see WebServerOptions.oidcAdmin doc above. */
@@ -1508,6 +1513,16 @@ async function handle(
   if (
     await handleOAuthConnectAdminRoute(
       { oauthConnect: ctx.oauthConnect, requireAdmin: (rq, rs) => requireAdmin(ctx, rq, rs) },
+      req, res, method, path,
+    )
+  ) {
+    return
+  }
+
+  // C-M2-M5a — outbound OAuth connector CRUD (admin).
+  if (
+    await handleOAuthConnectorAdminRoute(
+      { oauthConnectorAdmin: ctx.oauthConnectorAdmin, requireAdmin: (rq, rs) => requireAdmin(ctx, rq, rs) },
       req, res, method, path,
     )
   ) {

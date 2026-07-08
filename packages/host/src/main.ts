@@ -157,6 +157,7 @@ import { OidcLoginService } from './oidc-login-service.js'
 import { createOAuthConnectSurface } from './oauth-connect-service.js'
 import { makeOAuthSecretSource } from './oauth-secret-source.js'
 import { OAuthTokenRefresher } from './oauth-token-refresh.js'
+import { createOAuthConnectorAdminSurface } from './oauth-connector-admin.js'
 import { SamlLoginService } from './saml-login-service.js'
 import { buildSpMetadata, SamlError } from '@gotong/saml'
 import {
@@ -2220,6 +2221,8 @@ async function main(): Promise<void> {
   }
   // C-M2-M3 — outbound OAuth connect surface. Same identity gate as OIDC.
   const oauthConnect = identity ? createOAuthConnectSurface(identity) : undefined
+  // C-M2-M5a — outbound OAuth connector CRUD surface (admin). Vault-backed.
+  const oauthConnectorAdmin = identity ? createOAuthConnectorAdminSurface(identity) : undefined
   // C-M2-M4b — keep connected oauth tokens fresh so a respawned toolset never
   // injects an expired bearer; inert w/o connectors, stopped in shutdown drain.
   const oauthRefresher = identity ? new OAuthTokenRefresher(identity, { logger: log }) : undefined
@@ -2643,6 +2646,7 @@ async function main(): Promise<void> {
     ...(oidcLogin ? { oidcLogin } : {}),
     // C-M2-M3 — outbound OAuth connect (undefined → /api/*/oauth/* degrades).
     ...(oauthConnect ? { oauthConnect } : {}),
+    ...(oauthConnectorAdmin ? { oauthConnectorAdmin } : {}),
     // Route B P1-M5e — public SAML login (undefined → /api/auth/saml/* degrades).
     ...(samlLogin ? { samlLogin } : {}),
     // Route B P1-M4f — admin OIDC provider registry CRUD (undefined → 503).
