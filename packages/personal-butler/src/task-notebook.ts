@@ -488,6 +488,96 @@ export function composeContextProbes(
   }
 }
 
+// ─── The stall triage (TN-M2 — zero-LLM) ─────────────────────────────────────
+
+/**
+ * TN-M2 defaults — stall/cooldown are TIMESTAMP COMPARISONS, no model anywhere.
+ * A task counts as stalled after `stallMs` without an update; once nudged it is
+ * left alone for `cooldownMs`; one nudge message lists at most `maxListed`
+ * tasks (the rest wait their turn — per-task cooldown keeps this honest).
+ */
+export const TASK_NUDGE_DEFAULTS = {
+  stallMs: 3 * 24 * 60 * 60 * 1000,
+  cooldownMs: 3 * 24 * 60 * 60 * 1000,
+  maxListed: 3,
+} as const
+
+/**
+ * READ-ONLY snapshot of a notebook file for observers (the TN-M2 sweeper).
+ * Missing or corrupt → `[]` and NOTHING ELSE: no quarantine, no rename, no
+ * write — the butler's own turn stays this file's only toucher, so a sweeper
+ * racing a member's chat turn is structurally impossible (writes land via
+ * rename, so a concurrent read sees the old or the new file, never half).
+ */
+export async function readTaskNotesSnapshot(file: string): Promise<TaskNote[]> {
+  let raw: string
+  try {
+    raw = await readFile(file, 'utf8')
+  } catch {
+    return []
+  }
+  const parsed = parseNotebookFile(raw)
+  return parsed ? parsed.tasks.map(cloneNote) : []
+}
+
+export interface TriageStalledInput {
+  tasks: TaskNote[]
+  /** Per-task last-nudge marks (`taskId → epoch ms`) — the sweeper's fact file. */
+  marks: Record<string, number>
+  now: number
+  stallMs?: number
+  cooldownMs?: number
+}
+
+export interface TaskNudgeTriage {
+  /** Open tasks due a nudge, most-stuck first (oldest `updatedAt`). */
+  stalled: TaskNote[]
+  /** Mark ids whose task is gone/closed — prune so the fact file never grows. */
+  pruneIds: string[]
+}
+
+/**
+ * The zero-LLM progression triage: stalled = open AND untouched for `stallMs`
+ * AND not nudged within `cooldownMs`. Pure — the caller owns all I/O. A nudged
+ * task the member then works on gets a fresh `updatedAt`, which resets the
+ * stall clock naturally; closing it prunes its mark.
+ */
+export function triageStalledTaskNotes(input: TriageStalledInput): TaskNudgeTriage {
+  const stallMs = input.stallMs ?? TASK_NUDGE_DEFAULTS.stallMs
+  const cooldownMs = input.cooldownMs ?? TASK_NUDGE_DEFAULTS.cooldownMs
+  const openIds = new Set(input.tasks.filter((t) => t.status === 'open').map((t) => t.id))
+  const stalled = input.tasks
+    .filter((t) => t.status === 'open' && input.now - t.updatedAt >= stallMs)
+    .filter((t) => {
+      const nudgedAt = input.marks[t.id]
+      return nudgedAt === undefined || input.now - nudgedAt >= cooldownMs
+    })
+    .sort((a, b) => a.updatedAt - b.updatedAt)
+    .map(cloneNote)
+  const pruneIds = Object.keys(input.marks).filter((id) => !openIds.has(id))
+  return { stalled, pruneIds }
+}
+
+/**
+ * Member-facing nudge text (IM), from a template — zero LLM. It asks, never
+ * acts: continuing (or dropping) only happens in a conversation turn the
+ * MEMBER initiates, per the notebook-≠-authorization boundary. No tool names
+ * here — members talk, the butler does the tool calls.
+ */
+export function formatTaskNudgeMessage(listed: TaskNote[], totalStalled: number): string {
+  const lines = listed.map((t) => {
+    const doneCount = t.steps.filter((s) => s.done).length
+    const next = t.steps.find((s) => !s.done)
+    const head = `- ${t.title}(${doneCount}/${t.steps.length} 步)`
+    return next ? `${head} 下一步: ${next.text}` : `${head} 步骤都做完了,就差收个尾`
+  })
+  const more = totalStalled > listed.length ? `\n(还有 ${totalStalled - listed.length} 件也停着)` : ''
+  return (
+    `笔记本里这${listed.length > 1 ? '几' : ''}件事有几天没动静了:\n${lines.join('\n')}${more}\n` +
+    '想继续哪件就跟我说一声;不想做了也告诉我,我帮你结掉。'
+  )
+}
+
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
 function parseNotebookFile(raw: string): NotebookFile | null {

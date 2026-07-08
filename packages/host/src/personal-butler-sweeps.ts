@@ -31,6 +31,7 @@ import {
   type ButlerBriefPush,
 } from './personal-butler-proactive.js'
 import { ButlerRunBroadcastSweeper } from './personal-butler-run-broadcast.js'
+import { ButlerTaskNudgeSweeper } from './personal-butler-task-nudge.js'
 
 export interface ButlerSweepsOptions {
   /** Butler memory root (`<space>/butler/memory`) — namespaces + opt-in files. */
@@ -55,6 +56,12 @@ export interface ButlerSweepsOptions {
     /** CARE-M6 — 断供状态文件;给了它,巡检持续断供超阈值会升级一张红牌。 */
     outageFile?: string
   }
+  /**
+   * TN-M2 stalled-task nudge: gate only (cadence is a constant — the stall
+   * threshold is days, so there's nothing to tune). Optional so pre-TN call
+   * sites / tests stay byte-identical.
+   */
+  taskNudge?: { on: boolean; intervalMs?: number }
 }
 
 export interface ButlerSweepsHandle {
@@ -89,6 +96,16 @@ export function armButlerSweeps(opts: ButlerSweepsOptions): ButlerSweepsHandle {
     })
     runBroadcast.start()
   }
+  let taskNudge: ButlerTaskNudgeSweeper | undefined
+  if (opts.taskNudge?.on) {
+    taskNudge = new ButlerTaskNudgeSweeper({
+      rootDir: opts.memoryRoot,
+      push: opts.push,
+      logger: opts.logger,
+      ...(opts.taskNudge.intervalMs !== undefined ? { intervalMs: opts.taskNudge.intervalMs } : {}),
+    })
+    taskNudge.start()
+  }
   let patrol: ButlerPatrolSweeper | undefined
   if (opts.patrol?.on) {
     patrol = new ButlerPatrolSweeper({
@@ -106,6 +123,7 @@ export function armButlerSweeps(opts: ButlerSweepsOptions): ButlerSweepsHandle {
     stop() {
       proactive?.stop()
       runBroadcast?.stop()
+      taskNudge?.stop()
       patrol?.stop()
     },
   }

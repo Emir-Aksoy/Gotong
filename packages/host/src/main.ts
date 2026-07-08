@@ -1862,10 +1862,8 @@ async function main(): Promise<void> {
     )
   }
 
-  // S3-M2 + BE-M5 — arm the butler's delivery sweeps (proactive daily brief +
-  // run-result broadcast; both DEFAULT-OFF per member until they opt in). The
-  // push is the F1 `pushToMember`, read LAZILY — bridges start ~500 lines down,
-  // the first tick lands one interval later. Full posture story in the module.
+  // S3-M2 + BE-M5 + CARE-M3 + TN-M2 — arm the butler's background sweeps. Push is
+  // the F1 `pushToMember` read LAZILY (bridges start later); posture per module.
   const butlerSweeps = armButlerSweeps({
     memoryRoot: butlerMemoryRoot,
     push: (userId, msg) =>
@@ -1894,6 +1892,8 @@ async function main(): Promise<void> {
       // (恢复静默,交给 CARE-M2/M5 的即时「✅ 恢复了」)。
       outageFile: join(space.root, 'runtime', 'llm-outage.json'),
     },
+    // TN-M2 — 卡壳任务提醒骑管家总开关;零 LLM 纯时间戳分诊,节律常量零新旋钮。
+    taskNudge: { on: butlerDefaultOn },
   })
   let patrolHealthRef: AdminHealthSurface | undefined
 
