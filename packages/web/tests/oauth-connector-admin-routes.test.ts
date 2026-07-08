@@ -264,4 +264,39 @@ describe('/api/admin/oauth/connectors — admin CRUD (C-M2-M5a)', () => {
     const r = await fetch(`${b.baseUrl}${BASE}`, { method: 'PUT', headers: auth(b) })
     expect(r.status).toBe(405)
   })
+
+  // C-M2-M5b — the built-in preset catalog is a pure web constant sharing this
+  // handler: admin-gated, but answered BEFORE the surface gate so it never 503s.
+  const CATALOG = '/api/admin/oauth/catalog'
+
+  it('GET catalog lists the built-in presets (bearer ref, no baked secret)', async () => {
+    b = await boot()
+    const r = await fetch(`${b.baseUrl}${CATALOG}`, { headers: auth(b) })
+    expect(r.status).toBe(200)
+    const j = await r.json()
+    expect(j.connectors.map((c: { id: string }) => c.id)).toEqual(['google-calendar', 'gmail'])
+    const gcal = j.connectors[0]
+    expect(gcal.mcpServer.headers.Authorization).toBe('Bearer ${OAUTH_ACCESS_TOKEN}')
+    expect(gcal).not.toHaveProperty('clientSecret')
+    expect(gcal).not.toHaveProperty('clientId')
+  })
+
+  it('GET catalog works even when the CRUD surface is unwired (never 503)', async () => {
+    b = await boot({ wired: false })
+    const r = await fetch(`${b.baseUrl}${CATALOG}`, { headers: auth(b) })
+    expect(r.status).toBe(200)
+    expect((await r.json()).connectors).toHaveLength(2)
+  })
+
+  it('401 on catalog without the admin bearer', async () => {
+    b = await boot()
+    const r = await fetch(`${b.baseUrl}${CATALOG}`)
+    expect(r.status).toBe(401)
+  })
+
+  it('405 on a non-GET method against the catalog', async () => {
+    b = await boot()
+    const r = await fetch(`${b.baseUrl}${CATALOG}`, { method: 'POST', headers: auth(b) })
+    expect(r.status).toBe(405)
+  })
 })

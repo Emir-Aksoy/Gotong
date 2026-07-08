@@ -15,6 +15,9 @@ export type { OidcLoginSurface } from './server.js'
 export type { OidcProviderAdminSurface, OidcProviderView } from './server.js'
 // C-M2-M5a — outbound OAuth connector CRUD (host injects the surface).
 export type { OAuthConnectorAdminSurface, OAuthConnectorView } from './server.js'
+// C-M2-M5b — built-in outbound OAuth connector directory (pure web constant).
+export { BUILTIN_OAUTH_CONNECTORS, OAUTH_CONNECTOR_CATEGORIES, OAUTH_CONNECTOR_ADMIN_FIELDS } from './builtin-oauth-connectors.js'
+export type { BuiltinOAuthConnector, OAuthConnectorCategory } from './builtin-oauth-connectors.js'
 // Route B P1-M5e — public SAML SP login routes (host injects the surface).
 export type { SamlLoginSurface } from './server.js'
 // Route B P1-M5f — admin SAML provider registry CRUD (host injects the surface).

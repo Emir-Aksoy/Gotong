@@ -14,10 +14,14 @@
  *   PATCH  /api/admin/oauth/connectors/:id         targeted update (rotate/clear secret, toggle)
  *   DELETE /api/admin/oauth/connectors/:id         remove + revoke secret + token
  *   POST   /api/admin/oauth/connectors/:id/disconnect   clear the token set (keep config)
+ *   GET    /api/admin/oauth/catalog                 built-in OAuth connector presets (C-M2-M5b)
  *
- * Absent (no identity store) → every route 503s. `接入 ≠ 授权行动`: registering a
- * connector only lets an agent CALL the provider once connected; high-risk
- * actions still pass the butler's governed approval gate.
+ * The CRUD routes are absent (no identity store) → 503. The catalog is a pure
+ * web constant (`BUILTIN_OAUTH_CONNECTORS`), so — like the MCP connector
+ * directory — it's answered BEFORE the surface gate and never 503s: browsing
+ * presets is always available; installing one drives the CRUD routes above.
+ * `接入 ≠ 授权行动`: registering a connector only lets an agent CALL the provider
+ * once connected; high-risk actions still pass the butler's governed approval gate.
  */
 
 import type { IncomingMessage, ServerResponse } from 'node:http'
@@ -25,6 +29,7 @@ import type { AdminRecord } from '@gotong/core'
 import { createLogger } from '@gotong/core'
 
 import { readJsonBody, sendJson } from './http-helpers.js'
+import { BUILTIN_OAUTH_CONNECTORS } from './builtin-oauth-connectors.js'
 
 const log = createLogger('oauth-connector-admin-routes')
 
@@ -98,6 +103,7 @@ export interface OAuthConnectorAdminCtx {
 }
 
 const BASE = '/api/admin/oauth/connectors'
+const CATALOG = '/api/admin/oauth/catalog'
 
 const ERROR_STATUS: Record<string, number> = {
   oauth_connector_exists: 409,
@@ -212,10 +218,23 @@ export async function handleOAuthConnectorAdminRoute(
   method: string,
   path: string,
 ): Promise<boolean> {
-  if (path !== BASE && !path.startsWith(`${BASE}/`)) return false
+  if (path !== BASE && !path.startsWith(`${BASE}/`) && path !== CATALOG) return false
 
   const admin = await ctx.requireAdmin(req, res)
   if (!admin) return true
+
+  // C-M2-M5b — built-in preset catalog. A pure web constant, so it's answered
+  // before the surface gate and never 503s (unlike the CRUD routes below, which
+  // need the host store). Read-only: installing a preset drives the POST routes.
+  if (path === CATALOG) {
+    if (method === 'GET') {
+      sendJson(res, { connectors: BUILTIN_OAUTH_CONNECTORS })
+      return true
+    }
+    sendJson(res, { error: `method ${method} not allowed` }, 405)
+    return true
+  }
+
   if (!ctx.oauthConnectorAdmin) {
     sendJson(res, { error: 'oauth connector admin not enabled on this host' }, 503)
     return true
