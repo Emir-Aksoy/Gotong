@@ -302,6 +302,33 @@ describe('LocalAgentPool — agent with mcpServers attaches a toolset', () => {
     await pool.stopAll()
   })
 
+  it('threads the per-server oauth secret source into spawn credential resolution (C-M2-M4a)', async () => {
+    // Prove the pool routes each server's `${...}` refs through the injected
+    // `mcpSecretSource(serverName)` (not a hard-coded env source): the stub
+    // records which server names it was asked to resolve during spawn.
+    const askedFor: string[] = []
+    const stubSource = (serverName: string): SecretSource => {
+      askedFor.push(serverName)
+      return () => undefined
+    }
+    await persistAgent({
+      id: 'oauth-bot',
+      allowedCapabilities: ['draft'],
+      createdAt: new Date().toISOString(),
+      managed: {
+        kind: 'llm',
+        provider: 'mock',
+        system: 'x',
+        mcpServers: [{ name: 'cal', command: process.execPath, args: [FAKE_MCP_SERVER] }],
+      },
+    })
+
+    const pool = new LocalAgentPool({ hub, space, mcpSecretSource: stubSource })
+    await pool.start()
+    expect(askedFor).toContain('cal')
+    await pool.stopAll()
+  })
+
   it('stop() disconnects the toolset (child process is reaped)', async () => {
     await persistAgent({
       id: 'fs-bot-2',

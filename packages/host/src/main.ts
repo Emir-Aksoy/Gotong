@@ -155,6 +155,7 @@ import { armImBridgeWiring } from './im-bridge-wiring.js'
 import { OidcClient } from './oidc-client.js'
 import { OidcLoginService } from './oidc-login-service.js'
 import { createOAuthConnectSurface } from './oauth-connect-service.js'
+import { makeOAuthSecretSource } from './oauth-secret-source.js'
 import { SamlLoginService } from './saml-login-service.js'
 import { buildSpMetadata, SamlError } from '@gotong/saml'
 import {
@@ -1108,7 +1109,8 @@ async function main(): Promise<void> {
     // hook for LLM agents whose key came from the vault. A 401 from
     // the provider revokes that vault entry + writes audit + flushes
     // the OrgApiPool cache so next call doesn't reuse the dead key.
-    ...(identity ? { identity } : {}),
+    // C-M2-M4a — `${OAUTH_ACCESS_TOKEN}` → live connector token; inert w/o connectors.
+    ...(identity ? { identity, mcpSecretSource: makeOAuthSecretSource(identity) } : {}),
     // #2-M3 — cross-hub MCP refs (`useMcpServers: ['<peer>:<server>']`)
     // resolve the peer link lazily through the registry, which is wired
     // further down (peerRegistryRef is a forward-declared `let`). Reading

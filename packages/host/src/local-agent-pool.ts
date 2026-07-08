@@ -40,7 +40,9 @@ import {
   resolveMcpServerConfig,
   envSecretSource,
   mergeAgentMcpSpecs,
+  type SecretSource,
 } from './mcp-config.js'
+import type { ServerSecretSource } from './oauth-secret-source.js'
 import { RemoteMcpToolset, parseRemoteMcpRef } from './mcp-proxy.js'
 import {
   resolveOwner,
@@ -365,6 +367,14 @@ export class LocalAgentPool implements ManagedAgentLifecycle {
    * Only consulted when `butlerFactory` is present.
    */
   private readonly butlerDefaultOn: boolean
+  /**
+   * C-M2-M4a — per-server oauth-backed secret source (see
+   * {@link makeOAuthSecretSource}). When present, an MCP server's
+   * `${OAUTH_ACCESS_TOKEN}` ref resolves to the live token of the connector
+   * wired to it; every other ref (and the default, when this is omitted) falls
+   * through to `process.env`. Omitting it is byte-for-byte today's behaviour.
+   */
+  private readonly mcpSecretSource?: ServerSecretSource
 
   constructor(opts: {
     hub: Hub
@@ -417,12 +427,19 @@ export class LocalAgentPool implements ManagedAgentLifecycle {
      * doc). The host sets this from `GOTONG_BUTLER`. Default `false`.
      */
     butlerDefaultOn?: boolean
+    /**
+     * C-M2-M4a — per-server oauth-backed secret source (see field doc). The
+     * host wires `makeOAuthSecretSource(identity)`; omit to resolve MCP creds
+     * from `process.env` only (byte-for-byte today's behaviour).
+     */
+    mcpSecretSource?: ServerSecretSource
   }) {
     this.hub = opts.hub
     this.space = opts.space
     this.services = opts.services
     this.orgApiPool = opts.orgApiPool
     this.identity = opts.identity
+    this.mcpSecretSource = opts.mcpSecretSource
     this.peerLinkResolver = opts.peerLinkResolver
     this.pricingTable = opts.pricingTable ?? DEFAULT_PRICING
     this.artifactResolver = opts.artifactResolver
@@ -667,9 +684,19 @@ export class LocalAgentPool implements ManagedAgentLifecycle {
     return this.mcpToolsetForAgent.get(id)?.serverNames() ?? []
   }
 
+  /**
+   * The `SecretSource` for one MCP server. C-M2-M4a: routes `${...}` refs
+   * through the oauth-backed per-server source when wired (so
+   * `${OAUTH_ACCESS_TOKEN}` becomes that server's live connector token), else
+   * straight `process.env` — the exact default before this seam existed.
+   */
+  private secretSourceFor(mcpServerName: string): SecretSource {
+    return this.mcpSecretSource?.(mcpServerName) ?? envSecretSource
+  }
+
   /** Resolve a registry record's spec to a live config (creds expanded). */
   private resolveRegistryConfig(record: HubMcpServerRecord, agentId: ParticipantId) {
-    return resolveMcpServerConfig(record.spec, envSecretSource, {
+    return resolveMcpServerConfig(record.spec, this.secretSourceFor(record.spec.name), {
       onMissingSecret: (varName, server) =>
         log.warn('mcp env ref missing — expanded to empty string', {
           agentId,
@@ -754,7 +781,7 @@ export class LocalAgentPool implements ManagedAgentLifecycle {
     let mcpToolset: McpToolset | undefined
     const mcpSpecs = await this.resolveAgentMcpSpecs(record.id, record.managed)
     if (mcpSpecs.length > 0) {
-      mcpToolset = buildToolset(record.id, mcpSpecs)
+      mcpToolset = buildToolset(record.id, mcpSpecs, (name) => this.secretSourceFor(name))
       try {
         await mcpToolset.connect()
       } catch (err) {
@@ -1787,12 +1814,13 @@ function buildProvider(
  * Two transformations happen here vs. raw `McpServerConfig`:
  *
  *   1. **Credential resolution** — `resolveMcpServerConfig` expands
- *      `${ENV_VAR}` refs in stdio `env` / http-sse `headers` against the
- *      host env, so credentials stay out of `agents.json`. A missing
- *      var expands to an empty string + a warning; the MCP server fails
- *      loudly itself if it actually needed it (typical: `401` bubbling
- *      up as a `server-stderr` line). The `SecretSource` seam lets a
- *      future installer feed the vault here instead of `process.env`.
+ *      `${ENV_VAR}` refs in stdio `env` / http-sse `headers` against a
+ *      per-server `SecretSource` (`secretSourceFor(name)`), so credentials
+ *      stay out of `agents.json`. A missing var expands to an empty string +
+ *      a warning; the MCP server fails loudly itself if it actually needed it
+ *      (typical: `401` bubbling up as a `server-stderr` line). C-M2-M4a: that
+ *      source resolves `${OAUTH_ACCESS_TOKEN}` to the live connector token,
+ *      else falls through to `process.env`.
  *
  *   2. **Server stderr → host log forwarding** — auto-subscribe to
  *      `'server-stderr'` events and dump them to the structured
@@ -1803,9 +1831,10 @@ function buildProvider(
 function buildToolset(
   agentId: ParticipantId,
   servers: readonly McpServerSpec[],
+  secretSourceFor: (mcpServerName: string) => SecretSource,
 ): McpToolset {
   const configs: McpServerConfig[] = servers.map((s) =>
-    resolveMcpServerConfig(s, envSecretSource, {
+    resolveMcpServerConfig(s, secretSourceFor(s.name), {
       onMissingSecret: (varName, serverName) =>
         log.warn('mcp env ref missing — expanded to empty string', {
           agentId,

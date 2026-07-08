@@ -209,7 +209,7 @@ export interface UpdateOidcProviderInput {
  * them. Plaintext is reached only via the dedicated accessors on the store.
  */
 export interface OAuthConnector {
-  /** Admin-supplied stable id — the M4 `${OAUTH:<id>}` reference key. */
+  /** Admin-supplied stable id (primary key). */
   id: string
   /** Human label for the UI ("Google Calendar"); null = fall back to id. */
   displayName: string | null
@@ -221,7 +221,11 @@ export interface OAuthConnector {
   scope: string
   /** Provider-specific extra authorize params (e.g. access_type=offline); null = none. */
   extraAuthParams: Record<string, string> | null
-  /** Informational: which MCP connector this feeds a bearer to; null = unset. */
+  /**
+   * The MCP server this connector feeds a bearer to — the linkage key
+   * (C-M2-M4a): that server's `${OAUTH_ACCESS_TOKEN}` ref resolves to this
+   * connector's live token. null = not linked to any server yet.
+   */
   mcpServerName: string | null
   /** True iff a confidential client_secret is stored (confidential client). */
   hasClientSecret: boolean
@@ -235,7 +239,7 @@ export interface OAuthConnector {
 }
 
 export interface RegisterOAuthConnectorInput {
-  /** Admin-supplied stable id (the reference key). Must be non-empty + unique. */
+  /** Admin-supplied stable id (primary key). Must be non-empty + unique. */
   id: string
   displayName?: string | null
   authorizationEndpoint: string
