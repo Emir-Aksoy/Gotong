@@ -1028,6 +1028,11 @@ async function main(): Promise<void> {
     24 * 60 * 60 * 1000,
     Math.max(60_000, Number(process.env.GOTONG_BUTLER_MAINTENANCE_MS) || BUTLER_MAINTENANCE_INTERVAL_MS),
   )
+  // MU-M5 — opt-in per-member git snapshot in the 6h sweep (GOTONG_BUTLER_MEMORY_GIT
+  // ∈ {1,true,on,yes}; off by default, best-effort, byte-unchanged when unset).
+  const butlerMemoryGitOn =
+    butlerMaintenanceOn &&
+    ['1', 'true', 'on', 'yes'].includes((process.env.GOTONG_BUTLER_MEMORY_GIT ?? '').trim().toLowerCase())
   // S3-M2 — the proactive daily-brief sweep: per member, on a ~15min poll, send a
   // short morning brief IF they opted in (via `set_daily_brief`). ON whenever the
   // butler is on; opt out with GOTONG_BUTLER_PROACTIVE ∈ {0,false,off,no}. The FEATURE
@@ -1147,6 +1152,7 @@ async function main(): Promise<void> {
       buildProvider: () => localAgents.buildButlerProvider(),
       logger: log,
       intervalMs: butlerMaintenanceMs,
+      gitSnapshot: butlerMemoryGitOn,
     })
     butlerMaintenanceSweeper.start()
   }

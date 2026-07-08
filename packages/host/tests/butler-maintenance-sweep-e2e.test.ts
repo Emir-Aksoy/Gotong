@@ -39,6 +39,7 @@ import type { LlmAgentOptions } from '@gotong/llm'
 import { levelOf, tierOf, type MemoryEntry } from '@gotong/personal-memory'
 import type { MemoryHandle } from '@gotong/services-sdk'
 
+import type { GitRunner } from '../src/butler-memory-git.js'
 import { HostButlerMemoryService } from '../src/butler-memory-service.js'
 import { LocalAgentPool, type ButlerFactory } from '../src/local-agent-pool.js'
 import {
@@ -209,5 +210,30 @@ describe('BF-M8 — butler 蒸馏 + 6h maintenance in the production host sweep'
     })
     await sw.runOnce() // no <root>/user/* dirs yet
     expect(providerBuilds).toBe(0) // returns before building — nothing to distill
+  })
+
+  it('MU-M5 — gitSnapshot opt-in reaches the member dir; default off invokes no git', async () => {
+    await space.upsertAgent({
+      id: 'assistant',
+      allowedCapabilities: ['chat'],
+      createdAt: new Date().toISOString(),
+      managed: { kind: 'llm', provider: 'mock', system: 'butler' },
+    })
+    const pool = butlerPool()
+    await seedEpisodic(memRoot, 'alice', 40)
+
+    // Default (gitSnapshot unset) → the git runner is never called, even when one
+    // is passed. Opt-in means opt-in: the knob defaults false.
+    const offCwds: string[] = []
+    const offGit: GitRunner = async (_args, cwd) => { offCwds.push(cwd); return { code: 0, stdout: '', stderr: '' } }
+    await sweeper(pool, { git: offGit }).runOnce()
+    expect(offCwds).toEqual([])
+
+    // gitSnapshot:true → alice's memory dir is snapshotted through the injected
+    // runner (clean status → 'nothing', but the dir was still visited).
+    const onCwds: string[] = []
+    const onGit: GitRunner = async (_args, cwd) => { onCwds.push(cwd); return { code: 0, stdout: '', stderr: '' } }
+    await sweeper(pool, { gitSnapshot: true, git: onGit }).runOnce()
+    expect(onCwds).toContain(join(memRoot, 'user', 'alice'))
   })
 })

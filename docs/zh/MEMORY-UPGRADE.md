@@ -6,11 +6,12 @@
 > 差距不在骨架,在**检索质量**(多信号/知识图谱)和**可测性**(零 benchmark)。
 > 本 track 补这两块,延续 MR1–4 记忆里程碑。
 >
-> Last updated: 2026-07-08 · M0–M4 完(M1 立尺 benchmark 承重门;M2 融合召回把
+> Last updated: 2026-07-08 · M0–M5 完(M1 立尺 benchmark 承重门;M2 融合召回把
 > MRR 从 0.548 抬到 0.738、已成管家默认 recall,零新旋钮;M3 原子事实抽取把 semantic
 > 类 recall 从 0 抬到 100%、已并进 6h 蒸馏,零新旋钮;M4 外部记忆 provider = Mem0 托管
-> 云连接器 + `dataLeavesBox` 数据离盒披露原语,opt-in 未装字节不变、仍 106 旋钮);
-> M5 git 快照 / capstone 待做。
+> 云连接器 + `dataLeavesBox` 数据离盒披露原语,opt-in 未装字节不变、仍 106 旋钮;M5 记忆树
+> git 快照,6h 维护里 per-user `git commit`、best-effort、缺 git 优雅降级,**opt-in
+> `GOTONG_BUTLER_MEMORY_GIT` = MU track 首个新旋钮 106→107**、未开字节不变);capstone 待做。
 
 ---
 
@@ -67,7 +68,9 @@ dreaming、程序技能。但两处短板在退:
    索引当年也是直接换成管家默认、没设旋钮)**作为管家默认发**——弱模型用户自动受益,
    无需配置。retriever 原语的**默认仍是 keyword**(直接调用者/既有测试逐字节不变),
    是**管家装配层**显式开融合。**零新 env 旋钮(仍 106)**;embedder 注入缝就是 M4 的
-   opt-in 入口。
+   opt-in 入口。**M5 的 git 快照是本 track 唯一带门槛的项**——它在磁盘上造 `.git`(可能
+   嵌在另一个仓库里、或部署方压根不想要),正落「有门槛才 opt-in」这条:故 M5 是 MU
+   track **首个也是唯一一个新旋钮**(`GOTONG_BUTLER_MEMORY_GIT`,106→107),未开逐字节不变。
 
 3. **数据边界**。M4 外部 provider **数据离盒**必须 opt-in + **凭证进 vault** + 面板
    **显式告知「记忆离开本机」**;框架自身绝不存第二份(「全走 MCP 不存数据」同源)。
@@ -99,8 +102,9 @@ Embed     Embedder=(texts)=>number[][],注入式 —— M2 默认 localBigramEmb
           check:memory-recall(vitest 门,镜像 check:templates)。注意不进
           packages/evals:evals 是「结构合规」检查器(自述 Not a benchmark suite
           for accuracy),尺子该跟检索器同包,retriever 在这里,benchmark 就在这里。
-落盘缝    <rootDir>/user/<userId>/ jsonl 树 —— M5 在 6h 维护里做周期 git 快照(轻量,
-          非每写即 commit),per-user 隔离、缺 git 优雅降级。
+落盘缝    <rootDir>/user/<userId>/ jsonl 树 —— ✅ M5:6h 维护里做周期 git 快照(轻量,
+          非每写即 commit,status 无变化即 no-op),per-user `.git` 隔离、缺 git/init 失败
+          优雅降级(never throws),opt-in `GOTONG_BUTLER_MEMORY_GIT`。
 ```
 
 ## 五、五项 → 里程碑(一一映射)
@@ -112,7 +116,7 @@ Embed     Embedder=(texts)=>number[][],注入式 —— M2 默认 localBigramEmb
 | **MU-M2** | ① 多信号融合 | `fusedRetriever`(keyword ⊕ 本地 TF cosine,relative-score 融合)+ 本地确定性 embedder + factory 接线成默认;MRR 0.548→0.738(cross-session 0.333→1.0),recall 不变、semantic 仍 0(本地天花板) | **完** |
 | **MU-M3** | ④ 实体抽取 | 6h 蒸馏并列 `atomicFactsReviewer`(单遍法,含类别词+具体词的自足事实)+ relevanceScore 去重(跨 pass + pass 内);semantic 类 recall@5 0→100% | **完** |
 | **MU-M4** | ⑤ 外部 provider | opt-in Mem0 托管云连接器进目录(官方远程 HTTP + Bearer)+ 新 `dataLeavesBox` 数据离盒披露原语(面板无条件印「记忆离开本机」);凭证 `${MEM0_API_KEY}` 进 header 不入库、全走 MCP 不存第二份、接入≠授权 | **完** |
-| **MU-M5** | ③ git 背书 | 6h 维护里记忆树周期 git 快照(**轻量**,用户拍板 A=a);审计历史零热路径成本 | 计划 |
+| **MU-M5** | ③ git 背书 | 6h 维护里记忆树周期 git 快照(**轻量**,用户拍板 A=a):per-user `.git`、status 无变化即 no-op、best-effort never-throws、缺 git 优雅降级;opt-in `GOTONG_BUTLER_MEMORY_GIT`(106→107,MU 唯一新旋钮),审计历史零热路径成本 | **完** |
 | **MU-capstone** | —— | `examples/memory-upgrade`:同组事实纯 keyword vs 融合+抽取,recall@k 明显变好;self-assert exit 0 + 文档收尾 | 计划 |
 
 **排序纪律**:benchmark(M1)**先做**——「先量后改」,M2/M3 每步拿 M1 分数证伪抬升;
@@ -327,6 +331,61 @@ governed 动作、得成员点头(「发现≠信任」在记忆域的延伸)。
 memory 类标签已进包);四门 PASS(`check:guards`:**旋钮仍 106**、line-budget 三热文件不动)。
 内核(core/workflow/protocol)零改动、host 零改动(纯 web 层)。顺手补 C-M1 的 i18n 缺漏:
 `mcpDirCat` 补 `tasks` 中英标签(此前落回原始英文串)。
+
+### MU-M5 —— 记忆树 git 快照(给 file-first 记忆免费的历史 / 时光机 / 审计)
+
+**为什么(Letta MemFS 的洞见)**:前沿正把 agent 记忆投影成 **git-backed 文件**(Letta
+MemFS)——git 给**免费的历史**:时光旅行、审计、从一次坏蒸馏里恢复,全在一棵你本来就能
+读的盘上。Gotong 的管家记忆**已经是** file-first jsonl(`<root>/user/<id>/`),M5 只要在周期
+维护里裹一层 `git commit`,历史就有了,且**零热路径成本**。
+
+**用户拍板 A=a(轻量)**:五项里的「③ git 背书」有两条路——(a) 轻量:周期快照;(b) 重:
+每写即 commit / 完整 MemFS 工具面。用户选 **a**。M5 就是最小可用的轻量版:一次 6h tick 一次
+commit,且**仅当真有变化**(`git status --porcelain` 空 → no-op),捕获热路径永不碰 git。
+
+**三条让它安全的属性**:
+- **非每写即 commit**。一次 6h 维护 tick 顶多一次 commit,`status` 无变化直接 no-op。审计
+  热路径零 git 调用。
+- **per-user 仓库**(`<memberDir>/.git`)。搬走一个成员的目录 = 带走它自己的历史(「搬走
+  目录 = 搬走房间」);一个成员的仓库锁/损坏**永不**波及另一个——和维护 sweep 本就有的
+  隔离同源。
+- **best-effort,永不抛**。没有 `git` 二进制(ENOENT)、init 失败、锁冲突——任何故障都
+  记 warn 后吞掉,返回 `'skipped'`。快照是审计便利,**绝不能**打断一次维护 tick 或改动
+  jsonl 真相。加固:commit 带 `-c commit.gpgsign=false`——自动化后台 commit 绝不触发 gpg
+  (全局开签名会调 gpg、可能卡在 passphrase 提示 → 挂住 sweep;拿人的密钥签 bot commit
+  本也不对)。
+
+**opt-in(`GOTONG_BUTLER_MEMORY_GIT`)**:默认关,免得部署方的记忆目录**无声变成 git 仓库**
+(它们可能已嵌在另一个仓库里,或运维压根不想要)。**未开时逐字节不变**——无 `.git`、无 git
+进程;框架在这里也不跑 LLM,快照纯 git。这是 MU track **唯一带门槛的项**,故也是**唯一
+新旋钮**(106→107,合边界 2 的「有门槛才 opt-in」)。
+
+**交付(host 装配层,内核零改动)**:
+- **`butler-memory-git.ts`**(新):`snapshotMemoryTree({dir, logger, now?, git?})` 状态机——
+  `hasOwnGitDir`(直接 fs stat `<dir>/.git`,symlink-proof、不花 git 调用)→ 没有则 `git init`
+  + 写 `.gitignore`(`*.tmp`/`*.lock` 写临时件从不入库)→ `git add -A` → `status --porcelain`
+  空则 `'nothing'` → 否则带 bot 身份 commit → `'committed'`。可注入 `GitRunner`(测试无需真
+  git)+ `now`(commit 讯息 ISO 确定性)。非零退出是**结果**(code 存进 `GitResult`)不是抛;
+  只有 spawn 失败(git 缺失)rejects,被外层 catch 收成干净 skip。
+- **`personal-butler-maintenance.ts`**:`ButlerMaintenanceSweeperOptions` 加 `gitSnapshot?`
+  + `git?`;`maintainOne` 蒸馏完(**无论本 tick 是否 consolidate**)按 `gitSnapshot` 调
+  `snapshotMemoryTree`——把此刻盘上的东西 commit 下来。
+- **`main.ts`**:解析 `GOTONG_BUTLER_MEMORY_GIT`(仅 `butlerMaintenanceOn` 时有意义,复用同
+  一 truthy 集)→ 传 `gitSnapshot`。装配层 +6 行,line-budget main.ts 显式抬 2990→2996。
+
+**测得(会红的门)**:
+- `tests/butler-memory-git.test.ts`(+10):注入 `GitRunner` 单测钉状态机 + 「永不抛,诚实
+  出码」契约——no-repo→init-then-commit、`.git` 已存跳过 init 不重写 `.gitignore`、clean→
+  `'nothing'`、init/add/commit 非零 → `'skipped'`、git 缺失(ENOENT throw)→ `'skipped'`、
+  commit 讯息 + bot 身份 + gpgsign-off 从注入 `now` 确定;真 git 集成(有 git 才跑)证产出
+  的仓库真会 commit / 未变即 no-op / 再变再 commit / `.tmp` 被 gitignore。
+- `tests/butler-maintenance-sweep-e2e.test.ts`(+1):**wiring 门**——默认(`gitSnapshot` 未设)
+  即便传了 git runner 也**一次不调**(opt-in 就是 opt-in);`gitSnapshot:true` 时成员的记忆
+  dir(`<root>/user/alice`)确经注入 runner 快照。
+
+**验收**:host **1930** 单测全绿(+11)/typecheck 干净;四门 PASS(`check:guards`:kernel-deps
+6 不变式、env-registry **107 旋钮**[+`GOTONG_BUTLER_MEMORY_GIT`]、line-budget main.ts
+2996/2996)。内核(core/workflow/protocol)零改动——纯 host 装配 + 一个新叶子模块。
 
 ## 七、相关文档
 

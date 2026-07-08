@@ -75,6 +75,7 @@ import {
 } from '@gotong/personal-memory'
 import type { MemoryHandle } from '@gotong/services-sdk'
 
+import { snapshotMemoryTree, type GitRunner } from './butler-memory-git.js'
 import { openButlerMemory } from './personal-butler-memory.js'
 import {
   openButlerStatusFile,
@@ -226,6 +227,14 @@ export interface ButlerMaintenanceSweeperOptions {
   budgetBytes?: number
   /** Recent episodic count handed to the review context. Default {@link DEFAULT_RECALL_K}. */
   recallK?: number
+  /**
+   * MU-M5 — after each member's distillation, take a lightweight git snapshot of
+   * their memory dir (`<rootDir>/user/<id>`). Opt-in (`GOTONG_BUTLER_MEMORY_GIT`),
+   * off by default. Best-effort: a snapshot failure never disturbs the tick.
+   */
+  gitSnapshot?: boolean
+  /** Injectable git runner for the snapshot (tests). Default = real `git`. */
+  git?: GitRunner
 }
 
 /**
@@ -249,6 +258,8 @@ export class ButlerMaintenanceSweeper {
   private readonly tierConfig?: TierConfig
   private readonly budgetBytes?: number
   private readonly recallK: number
+  private readonly gitSnapshot: boolean
+  private readonly git?: GitRunner
 
   private timer?: ReturnType<typeof setInterval>
   private running = false
@@ -264,6 +275,8 @@ export class ButlerMaintenanceSweeper {
     this.tierConfig = opts.tierConfig
     this.budgetBytes = opts.budgetBytes
     this.recallK = opts.recallK ?? DEFAULT_RECALL_K
+    this.gitSnapshot = opts.gitSnapshot ?? false
+    this.git = opts.git
   }
 
   /** Start the interval. `.unref()` so a pending tick never keeps the process alive. */
@@ -340,7 +353,7 @@ export class ButlerMaintenanceSweeper {
 
   /** Run the maintenance reviewer once for one member; returns its summary (or ''). */
   private async maintainOne(userId: string, summarize: MemorySummarizer): Promise<string> {
-    return runButlerMaintenanceOnce({
+    const summary = await runButlerMaintenanceOnce({
       rootDir: this.rootDir,
       userId,
       summarize,
@@ -350,6 +363,18 @@ export class ButlerMaintenanceSweeper {
       ...(this.budgetBytes !== undefined ? { budgetBytes: this.budgetBytes } : {}),
       recallK: this.recallK,
     })
+    // MU-M5 — snapshot the member's memory dir after distillation (opt-in,
+    // best-effort: snapshotMemoryTree never throws). Whatever's on disk NOW is
+    // committed, whether or not this tick consolidated anything.
+    if (this.gitSnapshot) {
+      await snapshotMemoryTree({
+        dir: join(this.rootDir, 'user', userId),
+        logger: this.log,
+        ...(this.now !== Date.now ? { now: this.now } : {}),
+        ...(this.git ? { git: this.git } : {}),
+      })
+    }
+    return summary
   }
 
   /**
