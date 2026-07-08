@@ -1,0 +1,17 @@
+{
+  "name": "@gotong/example-butler-task-notebook",
+  "version": "0.0.0",
+  "type": "module",
+  "private": true,
+  "description": "TN-M3 capstone — a deliberately AMNESIAC mock model finishes a 5-step mission across 6 independent turns, because the plan lives in the butler's task notebook (file) and each turn only needs 'read digest → do ONE step → tick it'. Deterministic, no API key.",
+  "scripts": {
+    "start": "tsx src/index.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@gotong/core": "workspace:*",
+    "@gotong/llm": "workspace:*",
+    "@gotong/personal-butler": "workspace:*",
+    "@gotong/services-sdk": "workspace:*"
+  }
+}

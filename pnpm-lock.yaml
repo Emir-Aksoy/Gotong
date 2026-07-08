@@ -106,6 +106,21 @@ importers:
         specifier: workspace:*
         version: link:../../packages/services-sdk
 
+  examples/butler-task-notebook:
+    dependencies:
+      '@gotong/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      '@gotong/llm':
+        specifier: workspace:*
+        version: link:../../packages/llm
+      '@gotong/personal-butler':
+        specifier: workspace:*
+        version: link:../../packages/personal-butler
+      '@gotong/services-sdk':
+        specifier: workspace:*
+        version: link:../../packages/services-sdk
+
   examples/butler-vector-recall:
     dependencies:
       '@gotong/personal-memory':
