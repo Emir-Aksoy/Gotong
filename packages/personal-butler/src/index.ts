@@ -41,6 +41,12 @@ export {
 } from './agent.js'
 
 export {
+  buildButlerClockProbe,
+  renderClockCard,
+  type ButlerClockProbeOptions,
+} from './butler-clock.js'
+
+export {
   openTaskNotebook,
   createTaskNotebookToolset,
   composeContextProbes,

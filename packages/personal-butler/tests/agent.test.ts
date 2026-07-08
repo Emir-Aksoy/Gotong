@@ -22,6 +22,7 @@ import { describe, expect, it } from 'vitest'
 import {
   GovernedActionToolset,
   PersonalButlerAgent,
+  buildButlerClockProbe,
   readButlerGateState,
   type GovernedClassifier,
 } from '../src/index.js'
@@ -134,6 +135,32 @@ describe('PersonalButlerAgent — benign tools run inline', () => {
     expect(okText(res)).toBe('done')
     expect(log).toEqual(['echo:hi'])
     expect(exec).toEqual([]) // governed executor never touched
+  })
+})
+
+describe('PersonalButlerAgent — current-time awareness (clock probe → system tail)', () => {
+  it('injects the current-time card AFTER the persona, as the variable prompt tail', async () => {
+    // 2025-07-08 22:34 in Asia/Kuala_Lumpur (== 14:34Z).
+    const FIXED = 1_751_985_240_000
+    const provider = new ScriptProvider([textTurn('ok')])
+    const agent = new PersonalButlerAgent({
+      id: 'butler',
+      provider,
+      memory: emptyMemory(),
+      system: 'base',
+      captureTurns: false,
+      contextProbe: buildButlerClockProbe({ now: () => FIXED, timeZone: 'Asia/Kuala_Lumpur' }),
+    })
+
+    await agent.onTask(task('a', '现在几点'))
+    const sys = provider.requests[0]!.system!
+    const card = '【当前时间】2025-07-08 星期二 22:34（Asia/Kuala_Lumpur, UTC+08:00）· UTC 2025-07-08T14:34Z'
+    // The persona leads; the time card is appended as the tail (order matters —
+    // the cache-stable prefix stays in front, the variable clock trails it).
+    expect(sys).toContain('base')
+    expect(sys).toContain(card)
+    expect(sys.indexOf('base')).toBeLessThan(sys.indexOf(card))
+    expect(sys.trimEnd().endsWith('· UTC 2025-07-08T14:34Z')).toBe(true)
   })
 })
 

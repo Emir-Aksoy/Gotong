@@ -29,6 +29,7 @@ import type { Hub, Logger } from '@gotong/core'
 import type { LlmProvider } from '@gotong/llm'
 import {
   PersonalButlerAgent,
+  buildButlerClockProbe,
   composeContextProbes,
   createTaskNotebookToolset,
   openTaskNotebook,
@@ -395,11 +396,14 @@ export function buildButlerFactory(deps: ButlerFactoryDeps): ButlerFactory {
           captureMeta: { userId },
           ...(benign.length > 0 ? { benign } : {}),
           ...(governed.length > 0 ? { governed } : {}),
-          // CARE-M4 probe slot, composed (TN-M1): the onboarding 现状卡 (when
-          // wired) leads, then the task-notebook recitation digest. Both parts
-          // decide per turn; no onboarding gaps + no open tasks → null → the
-          // prompt stays byte-identical to today.
+          // CARE-M4 probe slot, composed: the current-time card LEADS (a butler
+          // must always know "now" — pure Date, zero LLM, rides the variable
+          // prompt tail so the byte-stable frozen block is untouched; timezone
+          // honors the deployment's `TZ`, pin `TZ=Asia/Kuala_Lumpur` for a KL
+          // user), then the onboarding 现状卡 (when wired), then the task-notebook
+          // recitation digest. The latter two still self-gate per turn.
           contextProbe: composeContextProbes(
+            buildButlerClockProbe(),
             deps.onboarding
               ? buildButlerOnboardingProbe({
                   stateFile: deps.onboarding.stateFile,
