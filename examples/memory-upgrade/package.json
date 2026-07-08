@@ -1,0 +1,15 @@
+{
+  "name": "@gotong/example-memory-upgrade",
+  "version": "0.0.0",
+  "type": "module",
+  "private": true,
+  "description": "MU capstone — the same butler memory, measured by the same ruler (MU-M1), gets progressively better as each MU milestone's REAL code layers in: M2 fusion reranks the focused fact to #1 (MRR up), M3 atomic-fact extraction closes the synonym gap (recall 0→1). Deterministic, no API key.",
+  "scripts": {
+    "start": "tsx src/index.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@gotong/personal-memory": "workspace:*",
+    "@gotong/services-sdk": "workspace:*"
+  }
+}

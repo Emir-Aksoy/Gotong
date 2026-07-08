@@ -442,6 +442,15 @@ importers:
         specifier: ^4.7.0
         version: 4.22.0
 
+  examples/memory-upgrade:
+    dependencies:
+      '@gotong/personal-memory':
+        specifier: workspace:*
+        version: link:../../packages/personal-memory
+      '@gotong/services-sdk':
+        specifier: workspace:*
+        version: link:../../packages/services-sdk
+
   examples/multimodal-vision:
     dependencies:
       '@anthropic-ai/sdk':

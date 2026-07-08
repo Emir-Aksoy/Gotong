@@ -45,6 +45,7 @@ pnpm demo                          # = hello-collab（官方第一步，见 QUIC
 | [`open-space`](../../examples/open-space) | admin-approval 入场闸 + admin/worker web UI + 需批准才能加入的远程写手 | 零 |
 | [`butler-vector-recall`](../../examples/butler-vector-recall) | 管家语义召回：本地 embed + cosine / chroma-mcp 接缝——框架从不算向量，注入式 | 零 |
 | [`butler-task-notebook`](../../examples/butler-task-notebook) | 弱模型跨轮办完 5 步事：故意失忆的模型每轮只靠注入的笔记本摘要「做一步勾一步」，敏感步照 park（笔记本≠授权） | 零 |
+| [`memory-upgrade`](../../examples/memory-upgrade) | MU capstone：同一份管家记忆用同一把尺子（MU-M1）量，召回逐里程碑变好——M2 融合把聚焦金标提到第 1（MRR↑）、M3 抽取把同义词 recall 0→100%；真 MU 代码零重写，框架跑 0 个模型 | 零 |
 | [`reallife-oauth`](../../examples/reallife-oauth) | 用 Google 登录接日历：授权 URL → 换码进 vault（明文不落盘）→ `${OAUTH_ACCESS_TOKEN}` 注入 MCP 头 → 到期自动刷，同一条缝永远新鲜 | 零（假令牌端点） |
 
 ## ③ 接真东西（需 key / 本地 MCP server / 跨进程）
@@ -119,7 +120,7 @@ pnpm demo                          # = hello-collab（官方第一步，见 QUIC
 
 - **人在环 / HITL** → `hello-collab` · `cli-human` · `cafe-ops` · `personal-butler` · `cross-org-rfp`
 - **工作流** → `workflow-architect` · `workflow-assistant` · `cross-hub-workflow` · `tea-supply-link` · `tea-chain-hq`
-- **记忆 / 管家** → `personal-butler` · `butler-task-notebook` · `butler-vector-recall` · `butler-cross-hub`（更多能力细节见 [`ledger/MEMORY-ADVANCED-FINAL.md`](ledger/MEMORY-ADVANCED-FINAL.md)）
+- **记忆 / 管家** → `personal-butler` · `butler-task-notebook` · `butler-vector-recall` · `memory-upgrade` · `butler-cross-hub`（更多能力细节见 [`ledger/MEMORY-ADVANCED-FINAL.md`](ledger/MEMORY-ADVANCED-FINAL.md)）
 - **MCP / 知识库** → `mcp-tools-quickstart` · `mcp-tools-llm-agent` · `rag-mcp` · `elasticsearch-kb` · `obsidian-kb` · `cross-hub-mcp`
 - **跨 hub / 联邦** → 见 ④；真网络看 `cross-hub-federation`
 - **桥接外部 agent** → 见 ⑤；契约看 [`AGENT-ADAPTER-CONTRACT.md`](AGENT-ADAPTER-CONTRACT.md)
