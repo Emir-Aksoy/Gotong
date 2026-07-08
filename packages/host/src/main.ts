@@ -142,6 +142,7 @@ import {
   printUsage,
 } from './main-cli.js'
 import { friendlyBootError } from './boot-error.js'
+import { installProcessSafetyNet } from './process-safety.js'
 
 const log = createLogger('host')
 import { serveWebSocket } from '@gotong/transport-ws'
@@ -341,6 +342,9 @@ if (ARGV[0] === 'rotate-master-key') {
 }
 
 async function main(): Promise<void> {
+  // A rejected background timer (butler sweeps etc.) must degrade to a log line,
+  // not crash the host on Node's default unhandledRejection → exit (audit P1).
+  installProcessSafetyNet(log)
   const SPACE_DIR = env('GOTONG_SPACE', '.gotong')!
 
   // Build the SpaceConfig overrides from env. Anything unset falls back to

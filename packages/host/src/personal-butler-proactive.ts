@@ -311,7 +311,13 @@ export class ButlerProactiveSweeper {
   start(): void {
     if (this.timer) return
     this.timer = setInterval(() => {
-      void this.runOnce()
+      // Fire-and-forget: a rejected tick must degrade to a log line, never an
+      // unhandledRejection that crashes the host.
+      void this.runOnce().catch((err) =>
+        this.log.warn('butler proactive: tick failed', {
+          err: err instanceof Error ? err.message : String(err),
+        }),
+      )
     }, this.intervalMs)
     this.timer.unref?.()
     this.log.info('butler proactive sweep armed', { intervalMs: this.intervalMs, rootDir: this.rootDir })

@@ -22,7 +22,7 @@
  * not a task.
  */
 
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -191,6 +191,29 @@ describe('BF-M8 — butler 蒸馏 + 6h maintenance in the production host sweep'
     expect(await episodicCount(memRoot, 'alice')).toBe(40)
     expect(await digests(memRoot, 'alice')).toHaveLength(0)
     expect(await openButlerStatusFile({ rootDir: memRoot, userId: 'alice', logger: silentLogger }).read()).toBeNull()
+  })
+
+  it('audit P1 — corrupt agents.json → buildButlerProvider null (no throw) → sweep no-op', async () => {
+    await space.upsertAgent({
+      id: 'assistant',
+      allowedCapabilities: ['chat'],
+      createdAt: new Date().toISOString(),
+      managed: { kind: 'llm', provider: 'mock', system: 'butler' },
+    })
+    const pool = butlerPool()
+    await seedEpisodic(memRoot, 'alice', 40)
+
+    // Corrupt the agents file: space.agents() → readJson → JSON.parse now throws.
+    // Before the fix, buildButlerProvider() let that propagate through the sweep's
+    // fire-and-forget `void runOnce()` → unhandledRejection → host crash.
+    await writeFile(space.paths.agents, 'not valid json {{{', 'utf8')
+
+    expect(await pool.buildButlerProvider()).toBeNull() // skips the tick, does not throw
+    await expect(sweeper(pool).runOnce()).resolves.toBeUndefined() // must not reject
+
+    // The tick honestly no-op'd — nothing distilled, alice's episodic untouched.
+    expect(await episodicCount(memRoot, 'alice')).toBe(40)
+    expect(await digests(memRoot, 'alice')).toHaveLength(0)
   })
 
   it('no members on disk → sweep never even builds a provider', async () => {

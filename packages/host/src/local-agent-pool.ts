@@ -1328,7 +1328,17 @@ export class LocalAgentPool implements ManagedAgentLifecycle {
    * honestly rather than throwing on the interval.
    */
   async buildButlerProvider(): Promise<LlmProvider | null> {
-    const row = (await this.space.agents()).find((r) => this.butlerEnabledFor(r))
+    let rows: readonly AgentRecord[]
+    try {
+      rows = await this.space.agents()
+    } catch {
+      // A corrupt agents.json throws here (readJson → JSON.parse). This runs on
+      // the 6h maintenance timer via a fire-and-forget `void runOnce()`, so an
+      // unguarded throw becomes an unhandledRejection that would crash the host.
+      // Skip the tick instead — same posture as `resolveLlmProbeTarget` below.
+      return null
+    }
+    const row = rows.find((r) => this.butlerEnabledFor(r))
     if (!row?.managed) return null
     let resolution: LlmApiKeyResolution | undefined
     try {
