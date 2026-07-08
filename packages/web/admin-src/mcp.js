@@ -143,6 +143,12 @@ export function createMcp() {
       const needsEnv = c.needsEnv && c.needsEnv.length
         ? `<p class="mcp-card-env">${escapeHtml(t.mcpDirNeedsEnv(c.needsEnv.join(', ')))}</p>`
         : ''
+      // MU-M4 boundary #3: any connector that ships your data off the machine
+      // (dataLeavesBox) gets an unconditional, prominent "数据离开本机" line — the
+      // disclosure is a structural guarantee tied to the flag, not per-entry copy.
+      const leavesBox = c.dataLeavesBox
+        ? `<p class="mcp-card-leavesbox">${escapeHtml(t.mcpDirLeavesBox)}</p>`
+        : ''
       const caveat = c.caveat ? `<p class="mcp-card-caveat">${escapeHtml(c.caveat)}</p>` : ''
       const action = isInstalled
         ? `<span class="mcp-card-installed">${escapeHtml(t.mcpInstalled)}</span>`
@@ -153,6 +159,7 @@ export function createMcp() {
           <span class="mcp-cat-badge">${escapeHtml(catLabel)}</span>
         </div>
         <p class="mcp-card-what">${escapeHtml(c.whatFor)}</p>
+        ${leavesBox}
         ${needsEnv}
         ${caveat}
         <div class="mcp-card-foot">${homepage}${action}</div>

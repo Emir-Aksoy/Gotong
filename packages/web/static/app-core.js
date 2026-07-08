@@ -94,7 +94,8 @@
       mcpDirHomepage: '官网',
       mcpDirNeedsEnv: (vars) => `需在 host 环境设 ${vars}（只填变量名，密钥不入库）`,
       mcpDirInstalledMsg: (name) => `已安装「${name}」。可在上方列表查看，或在智能体「编辑」表单里按名勾选。`,
-      mcpDirCat: { discovery: '发现', rag: 'RAG', notes: '笔记', search: '搜索', files: '文件', web: '网络' },
+      mcpDirCat: { discovery: '发现', rag: 'RAG', notes: '笔记', tasks: '任务', memory: '记忆', search: '搜索', files: '文件', web: '网络' },
+      mcpDirLeavesBox: '⚠️ 数据离开本机：用它你的内容会发往第三方云，隐私边界交给对方。接入≠授权——挂上工具≠自动把私密内容同步出去。',
       // --- C-M2-M5c: 连接现实生活 (outbound OAuth connectors) ---
       reallifePanel: '连接现实生活',
       reallifeIntro: '用 OAuth「登录」把日历、邮件等现实工具接给你的 AI。凭证进 vault、永不明文;令牌自动刷新。接上只是「能读写」——真发信 / 改日程仍要过审批闸。',
@@ -2092,7 +2093,8 @@
       mcpDirHomepage: 'Homepage',
       mcpDirNeedsEnv: (vars) => `Set ${vars} in the host environment (variable names only — secrets are never stored)`,
       mcpDirInstalledMsg: (name) => `Installed “${name}”. See it in the list above, or tick it by name on an agent’s Edit form.`,
-      mcpDirCat: { discovery: 'Discovery', rag: 'RAG', notes: 'Notes', search: 'Search', files: 'Files', web: 'Web' },
+      mcpDirCat: { discovery: 'Discovery', rag: 'RAG', notes: 'Notes', tasks: 'Tasks', memory: 'Memory', search: 'Search', files: 'Files', web: 'Web' },
+      mcpDirLeavesBox: '⚠️ Data leaves your machine: your content is sent to a third-party cloud and the privacy boundary becomes theirs. Connecting ≠ authorizing — mounting the tools does NOT auto-sync your private content out.',
       // --- C-M2-M5c: Connect Real Life (outbound OAuth connectors) ---
       reallifePanel: 'Connect Real Life',
       reallifeIntro: 'Use OAuth “sign-in” to connect real-life tools — calendar, email — to your AI. Credentials go to the vault, never plaintext; tokens auto-refresh. Connecting only grants read/write — actually sending mail / changing a schedule still passes the approval gate.',

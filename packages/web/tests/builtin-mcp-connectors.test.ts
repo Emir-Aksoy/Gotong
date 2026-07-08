@@ -32,12 +32,32 @@ const EXPECTED_IDS = [
   'obsidian-notes',
   'notion-notes',
   'todoist-tasks',
+  'mem0-memory',
   'elasticsearch',
   'filesystem',
 ]
 
-const envOf = (c: BuiltinMcpConnector): Record<string, string> | undefined =>
-  (c.spec as { env?: Record<string, string> }).env
+// MU-M4: the data-leaves-box disclosure set. Pinning it makes "someone flipped a
+// connector's off-box status" a visible diff — and enforces the honest-coverage
+// rule (every cloud-SaaS connector carries the flag; local ones don't).
+const DATA_LEAVES_BOX_IDS = ['notion-notes', 'todoist-tasks', 'mem0-memory']
+
+/**
+ * Every place a credential can live in a spec, transport-agnostic: `env` values
+ * (stdio) AND `headers` values (http/sse). MU-M4's Mem0 connector rides a bearer
+ * token in an Authorization header, so the "never plaintext" rules must look there
+ * too, not only in `env`.
+ */
+const credentialSlotsOf = (c: BuiltinMcpConnector): Array<{ where: string; value: string }> => {
+  const spec = c.spec as {
+    env?: Record<string, string>
+    headers?: Record<string, string>
+  }
+  const slots: Array<{ where: string; value: string }> = []
+  for (const [k, v] of Object.entries(spec.env ?? {})) slots.push({ where: `env[${k}]`, value: v })
+  for (const [k, v] of Object.entries(spec.headers ?? {})) slots.push({ where: `headers[${k}]`, value: v })
+  return slots
+}
 
 describe('built-in MCP connector directory (MCD-M1)', () => {
   it('ships exactly the curated set, in order, with unique ids', () => {
@@ -96,31 +116,55 @@ describe('built-in MCP connector directory (MCD-M1)', () => {
     expect(registry?.caveat, 'discovery entry must warn about fetch breadth').toBeTruthy()
   })
 
-  it('every needsEnv credential is a ${ENV} placeholder, never plaintext', () => {
+  it('every needsEnv credential is referenced only as a ${ENV} placeholder, never plaintext', () => {
     for (const c of BUILTIN_MCP_CONNECTORS) {
       if (!c.needsEnv || c.needsEnv.length === 0) continue
-      const env = envOf(c)
-      expect(env, `${c.id} declares needsEnv but spec has no env`).toBeTruthy()
+      const slots = credentialSlotsOf(c)
+      expect(slots.length, `${c.id} declares needsEnv but spec has no env/headers`).toBeGreaterThan(0)
       for (const name of c.needsEnv) {
-        expect(env?.[name], `${c.id} env[${name}]`).toBe('${' + name + '}')
+        const ref = '${' + name + '}'
+        // The ref may be the whole value (stdio env `${NOTION_TOKEN}`) or embedded
+        // in a header (`Bearer ${MEM0_API_KEY}`) — either way the literal secret
+        // never appears; only the placeholder does.
+        const found = slots.some((s) => s.value.includes(ref))
+        expect(found, `${c.id} needsEnv ${name} not referenced as ${ref} in any env/header`).toBe(true)
       }
     }
   })
 
-  it('no env value hardcodes a secret-shaped literal', () => {
-    // Any value that LOOKS like it should be a placeholder (has ${...}) must be
-    // a clean ${NAME} ref; fixed config literals (e.g. OTEL_LOG_LEVEL=none) are
-    // fine. This catches a half-typed placeholder like "${ES_API_KEY" too.
+  it('no credential value hardcodes a secret; every ${...} is a clean ref', () => {
+    // Strip every well-formed ${NAME} ref; any surviving `${` is a malformed /
+    // half-typed placeholder (e.g. "${ES_API_KEY"). Fixed literals with no ${}
+    // (Bearer prefix, OTEL_LOG_LEVEL=none) are fine. Transport-agnostic: covers
+    // http/sse header credentials, not just stdio env.
     for (const c of BUILTIN_MCP_CONNECTORS) {
-      const env = envOf(c)
-      if (!env) continue
-      for (const [k, v] of Object.entries(env)) {
-        if (v.includes('${') || v.includes('}')) {
-          expect(v, `${c.id} env[${k}] malformed placeholder`).toMatch(
-            /^\$\{[A-Za-z_][A-Za-z0-9_]*\}$/,
-          )
-        }
+      for (const s of credentialSlotsOf(c)) {
+        const stripped = s.value.replace(/\$\{[A-Za-z_][A-Za-z0-9_]*\}/g, '')
+        expect(stripped.includes('${'), `${c.id} ${s.where} malformed placeholder`).toBe(false)
       }
     }
+  })
+
+  // —— MU-M4: the data-leaves-box disclosure primitive ——
+  it('pins the data-leaves-box set; the flag is a boolean where present', () => {
+    const flagged = BUILTIN_MCP_CONNECTORS.filter((c) => c.dataLeavesBox).map((c) => c.id)
+    expect(flagged.sort()).toEqual([...DATA_LEAVES_BOX_IDS].sort())
+    for (const c of BUILTIN_MCP_CONNECTORS) {
+      if (c.dataLeavesBox !== undefined) {
+        expect(typeof c.dataLeavesBox, `${c.id} dataLeavesBox`).toBe('boolean')
+      }
+    }
+  })
+
+  it('the Mem0 memory connector is an off-box hosted-HTTP memory provider', () => {
+    const mem0 = BUILTIN_MCP_CONNECTORS.find((c) => c.id === 'mem0-memory')
+    expect(mem0?.category).toBe('memory')
+    expect(mem0?.dataLeavesBox).toBe(true)
+    expect(mem0?.needsEnv).toContain('MEM0_API_KEY')
+    const spec = mem0?.spec as { transport?: string; url?: string; headers?: Record<string, string> }
+    expect(spec?.transport).toBe('http')
+    expect(spec?.url).toBe('https://mcp.mem0.ai/mcp')
+    // The credential rides an Authorization header as a ${ENV} ref, never plaintext.
+    expect(spec?.headers?.Authorization).toBe('Bearer ${MEM0_API_KEY}')
   })
 })

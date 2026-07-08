@@ -330,6 +330,18 @@ describe('/api/admin/mcp-connectors/catalog (MCD-M2)', () => {
     expect(discovery?.spec?.name).toBe('registry_search')
   })
 
+  it('serializes the MU-M4 data-leaves-box disclosure through to the frontend', async () => {
+    // Boundary #3: the panel must be able to warn "记忆离开本机". That warning is
+    // driven by the connector's dataLeavesBox flag, so the catalog route must
+    // serialize it — not strip it. Assert the round-trip for the Mem0 memory card.
+    b = await boot()
+    const r = await fetch(`${b.baseUrl}/api/admin/mcp-connectors/catalog`, { headers: auth(b) })
+    const j = await r.json()
+    const mem0 = j.connectors.find((c: { id: string }) => c.id === 'mem0-memory')
+    expect(mem0?.category).toBe('memory')
+    expect(mem0?.dataLeavesBox).toBe(true)
+  })
+
   it('catalog is available even with no registry surface wired (pure constant, never 503)', async () => {
     b = await boot({ withRegistry: false })
     const r = await fetch(`${b.baseUrl}/api/admin/mcp-connectors/catalog`, { headers: auth(b) })

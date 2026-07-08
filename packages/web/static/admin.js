@@ -363,6 +363,7 @@
         const catLabel = t2.mcpDirCat && t2.mcpDirCat[c.category] || c.category;
         const homepage = c.homepage ? `<a class="mcp-card-home" href="${escapeHtml2(c.homepage)}" target="_blank" rel="noopener noreferrer">${escapeHtml2(t2.mcpDirHomepage)}</a>` : "";
         const needsEnv = c.needsEnv && c.needsEnv.length ? `<p class="mcp-card-env">${escapeHtml2(t2.mcpDirNeedsEnv(c.needsEnv.join(", ")))}</p>` : "";
+        const leavesBox = c.dataLeavesBox ? `<p class="mcp-card-leavesbox">${escapeHtml2(t2.mcpDirLeavesBox)}</p>` : "";
         const caveat = c.caveat ? `<p class="mcp-card-caveat">${escapeHtml2(c.caveat)}</p>` : "";
         const action = isInstalled ? `<span class="mcp-card-installed">${escapeHtml2(t2.mcpInstalled)}</span>` : `<button type="button" class="mcp-card-install">${escapeHtml2(t2.mcpInstallBtn)}</button>`;
         card.innerHTML = `
@@ -371,6 +372,7 @@
           <span class="mcp-cat-badge">${escapeHtml2(catLabel)}</span>
         </div>
         <p class="mcp-card-what">${escapeHtml2(c.whatFor)}</p>
+        ${leavesBox}
         ${needsEnv}
         ${caveat}
         <div class="mcp-card-foot">${homepage}${action}</div>

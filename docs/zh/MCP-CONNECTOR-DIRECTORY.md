@@ -69,7 +69,8 @@
 | `chroma-rag` | Chroma 向量知识库 | `rag` | 本地向量 RAG:灌文档 + 相似度检索 | — |
 | `obsidian-notes` | Obsidian 笔记库 | `notes` | 连本地 Obsidian(需 Local REST API 插件):全文搜 + 读笔记 | `OBSIDIAN_API_KEY` |
 | `notion-notes` | Notion 笔记 / 文档 | `notes` | 连你的 Notion:搜索 / 读写页面与数据库(Notion 官方 server) | `NOTION_TOKEN` |
-| `todoist-tasks` | Todoist 任务 | `tasks` | 连你的 Todoist:查看 / 新建 / 完成任务(Doist 官方 server) | `TODOIST_API_KEY` |
+| `todoist-tasks` | Todoist 任务 | `tasks` | 连你的 Todoist:查看 / 新建 / 完成任务(Doist 官方 server)⚠️数据离盒 | `TODOIST_API_KEY` |
+| `mem0-memory` | Mem0 记忆云 | `memory` | 把 AI 长期记忆托管到 Mem0 云:存事实 + 语义召回(官方托管 MCP,Bearer 头)⚠️数据离盒 | `MEM0_API_KEY` |
 | `elasticsearch` | Elasticsearch 搜索索引 | `search` | 查 ES 索引:列索引 / 看 mapping / query DSL | `ES_URL` `ES_API_KEY` |
 | `filesystem` | 本地文件系统 | `files` | 读写指定沙箱目录的文件(官方参考实现) | — |
 
@@ -78,10 +79,21 @@
 > **日历 / 邮件 / 记账**等已整体迁到「托管远程 + OAuth」,那层由 **C-M2** 补出站 OAuth
 > 后接入 —— 见 [REAL-LIFE-CONNECTORS.md](REAL-LIFE-CONNECTORS.md)。
 
+> **「记忆升级」track(MU-M4):外部记忆 provider + 数据离盒披露原语**。`mem0-memory`
+> 把管家的长期记忆托管到 **Mem0 云**(官方现推**托管远程 HTTP + Bearer** 端点
+> `https://mcp.mem0.ai/mcp`,静态 stdio 版随 OpenMemory 退场 —— 同 C-M2 抓到的
+> 「托管+令牌」市场大势)。同轮引入 `BuiltinMcpConnector.dataLeavesBox` **诚实披露
+> 原语**:凡把你的数据搬去第三方云的连接器(mem0 记忆 / Notion / Todoist)都标 `true`,
+> 面板对这类卡**无条件**印醒目的「数据离开本机」提示(不靠每条 caveat 自觉)。三条边界
+> 不破:**全走 MCP 框架不存第二份**(搬走 `.gotong/` 无残留)、**凭证只 `${MEM0_API_KEY}`
+> 占位进 header**(密钥不入库)、**接入≠授权**(挂上工具能读写云记忆,真同步私密内容仍过
+> 管家 governed 闸)。见 [MEMORY-UPGRADE.md](MEMORY-UPGRADE.md)。
+
 分类单一真相源 = `MCP_CONNECTOR_CATEGORIES`(`discovery` / `rag` / `notes` /
-`tasks` / `search` / `files` / `web`)。防腐测试钉死:目录顺序固定、id / 展示名 / `spec.name`
-三者各自唯一、`category` 必在允许集、整组过 `validateMcpServersArray`、且
-**每个 `needsEnv` 凭证在 `spec.env` 里只能是 `${NAME}` 占位、绝不写明文**
+`tasks` / `memory` / `search` / `files` / `web`)。防腐测试钉死:目录顺序固定、id / 展示名 / `spec.name`
+三者各自唯一、`category` 必在允许集、整组过 `validateMcpServersArray`、`dataLeavesBox`
+标记集固定(增删即可见 diff)、且**每个 `needsEnv` 凭证只能以 `${NAME}` 占位出现在
+`spec.env`(stdio)或 `headers`(http/sse,如 mem0 的 `Bearer ${MEM0_API_KEY}`)里、绝不写明文**
 (连「写一半的占位」`${ES_API_KEY` 都会被逮)。
 
 **catalog 路由**:`GET /api/admin/mcp-connectors/catalog` → `{ connectors: [...] }`,

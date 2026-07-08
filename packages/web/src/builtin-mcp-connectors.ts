@@ -27,6 +27,7 @@ export const MCP_CONNECTOR_CATEGORIES = [
   'rag',
   'notes',
   'tasks',
+  'memory',
   'search',
   'files',
   'web',
@@ -54,6 +55,17 @@ export interface BuiltinMcpConnector {
   needsEnv?: string[]
   /** 风险提示 —— 宽能力连接器(fetch / filesystem)的诚实警示。 */
   caveat?: string
+  /**
+   * **数据离盒告知**(MU-M4,北极星第 1 层「凭证/数据只在本机」的诚实披露原语):
+   * `true` = 用这个连接器,你的内容会**离开本机**发往第三方云(SaaS)。面板据此对
+   * 这类卡**无条件**印一条醒目的「数据离开本机」提示(不靠每条 caveat 自觉写),让
+   * 「接入前就知道数据去哪」成为结构保证而非文案善意。诚实覆盖:凡是把用户数据搬去
+   * 外部云的都标(mem0 记忆云 / Notion / Todoist 云 API),本地进程(chroma 本地 /
+   * filesystem / obsidian 本地 REST)不标。尤其记忆连接器(dataLeavesBox 的首要对象)
+   * ——「接入≠授权」:挂上工具能读写 ≠ 自动把你的私密记忆同步出去,那仍是管家的
+   * governed 动作,得你点头。
+   */
+  dataLeavesBox?: boolean
   /** 溯源:这条预设在哪个 example / 包里被演示过(可核对,非字节相等)。 */
   sourceRef?: string
   /** 装进 hub MCP 注册表的实际配置。安装 = `POST /api/admin/mcp-servers {spec}`。 */
@@ -144,6 +156,8 @@ export const BUILTIN_MCP_CONNECTORS: BuiltinMcpConnector[] = [
       '并把要给 AI 用的页面 / 数据库「共享」给该集成:没共享的内容它看不到。',
     homepage: 'https://developers.notion.com/docs/get-started-with-mcp',
     needsEnv: ['NOTION_TOKEN'],
+    // 云 SaaS:你的页面/数据库内容经该集成读写,数据离开本机(MU-M4 诚实披露)。
+    dataLeavesBox: true,
     sourceRef: 'https://github.com/makenotion/notion-mcp-server(Notion 官方)',
     // 静态内部集成 token(非 OAuth)。env 一设子进程只继承列出的 key,故显式带 PATH。
     spec: {
@@ -167,6 +181,8 @@ export const BUILTIN_MCP_CONNECTORS: BuiltinMcpConnector[] = [
       '前置 —— 在 Todoist 账号 Settings → Integrations → Developer 复制个人 API token。',
     homepage: 'https://github.com/Doist/todoist-mcp',
     needsEnv: ['TODOIST_API_KEY'],
+    // 云 SaaS:本地 stdio 进程,但你的任务数据经 Todoist 云 API 往返(MU-M4 诚实披露)。
+    dataLeavesBox: true,
     sourceRef: 'https://github.com/Doist/todoist-mcp(Doist 官方)',
     // 本地 stdio 走静态个人 API token;托管 ai.todoist.net/mcp 才走 OAuth(留 C-M2)。
     spec: {
@@ -176,6 +192,37 @@ export const BUILTIN_MCP_CONNECTORS: BuiltinMcpConnector[] = [
       env: {
         TODOIST_API_KEY: '${TODOIST_API_KEY}',
         PATH: '${PATH}',
+      },
+    },
+  },
+
+  // —— memory:Mem0 记忆云(官方托管 MCP,数据离盒)——
+  {
+    id: 'mem0-memory',
+    name: 'Mem0 记忆云',
+    category: 'memory',
+    whatFor:
+      '把 AI 的长期记忆托管到 Mem0 云:add_memory 存下事实、search_memory 按语义召回。' +
+      '工具以 mem0__ 前缀挂载。适合想要托管式、跨设备共享记忆层的用户 —— 由 Mem0 做' +
+      '服务端的事实抽取与多信号检索(它的强项)。前置 —— 在 app.mem0.ai 注册拿平台 API key。',
+    homepage: 'https://docs.mem0.ai/platform/mem0-mcp',
+    needsEnv: ['MEM0_API_KEY'],
+    // 数据离盒:记忆是最私密的东西,存进 Mem0 云 = 离开本机。面板据 dataLeavesBox 醒目告知。
+    dataLeavesBox: true,
+    caveat:
+      '⚠️ 你的记忆会存到 Mem0 的云端(离开本机)。它是「托管记忆层」而非本机 .gotong/ 文件:' +
+      '搬走目录不会带走 Mem0 里的数据,隐私边界也交给 Mem0。接入≠授权 —— 挂上工具只是让' +
+      '管家「能」读写云记忆,真把私密内容同步出去仍是管家的 governed 动作,得你点头。',
+    sourceRef: 'https://docs.mem0.ai/platform/mem0-mcp(Mem0 官方托管 MCP)',
+    // 官方托管远程 MCP:Streamable HTTP + Bearer(密钥走 ${ENV} 占位,spawn 时对 host 环境
+    // 展开,不落库)。静态 stdio 版已随 OpenMemory 退场,官方现推云端点 —— 与现代连接器
+    // 「托管+令牌」大势一致(同 C-M2 抓到的市场真相)。
+    spec: {
+      name: 'mem0',
+      transport: 'http',
+      url: 'https://mcp.mem0.ai/mcp',
+      headers: {
+        Authorization: 'Bearer ${MEM0_API_KEY}',
       },
     },
   },
