@@ -21,10 +21,16 @@
  *   statusProjectingReviewer({                      // ④写状态 → STATUS.md (/me sees it)
  *     statusFile,
  *     inner: composeReviewers(
- *       tieredReviewer({ summarize, budgetBytes? }),  // 蒸馏 episodic→cluster→profile
+ *       tieredReviewer({ summarize, budgetBytes }),   // 蒸馏 episodic→cluster→profile + 字节封顶
  *       atomicFactsReviewer({ summarize }),           // MU-M3 抽取自包含原子事实
  *     ),
  *   })
+ *
+ * The `budgetBytes` always has a value now (audit P2): `buildButlerMaintenanceReviewer`
+ * defaults it to {@link DEFAULT_BUTLER_MEMORY_BUDGET_BYTES} so `enforceBudget`
+ * caps each member's namespace — without it `semantic` grew unbounded as atomic
+ * facts accreted every 6h. Eviction is keep-value ordered (episodic + low-
+ * importance ad-hoc first, digests/profiles last), so the curated profile stays.
  *
  * MU-M3 note: the 6h pass now makes TWO model calls (distillation + atomic fact
  * extraction), both on the butler's own model, both 6h-BACKGROUND — the per-turn
@@ -86,6 +92,20 @@ import {
 /** Default maintenance cadence — 6h (the MR4 §八 upkeep rhythm). */
 export const BUTLER_MAINTENANCE_INTERVAL_MS = 6 * 60 * 60 * 1000
 
+/**
+ * Default whole-namespace byte ceiling for one member's butler memory. Without a
+ * ceiling `enforceBudget` never runs and `semantic` grows UNBOUNDED over a
+ * long-lived butler's life (audit P2): atomic-fact extraction adds self-contained
+ * facts every 6h and nothing ever caps the total. This is a GENEROUS backstop,
+ * not a tight quota — a healthy butler holds far under it, so eviction never
+ * touches curated data in normal use; it only bounds pathological accretion. And
+ * when it DOES bite, `enforceBudget` evicts by keep-value — raw episodic and
+ * low-importance ad-hoc facts first, cluster digests and profiles last — so the
+ * curated profile survives. An operator can still override via the sweeper's
+ * `budgetBytes`; the host injects no env knob for it (still 107).
+ */
+export const DEFAULT_BUTLER_MEMORY_BUDGET_BYTES = 8 * 1024 * 1024 // 8 MiB / member
+
 /** How many recent episodic entries to hand the review context per tick. */
 const DEFAULT_RECALL_K = 200
 
@@ -120,8 +140,9 @@ export interface ButlerMaintenanceReviewerOptions {
   /** Tier layout; defaults (inside `tieredReviewer`) to `DEFAULT_TIERS` — the same
    *  tiers the butler agent uses, so consolidation routes into the same clusters. */
   tierConfig?: TierConfig
-  /** Optional whole-namespace byte ceiling (deterministic eviction backstop after
-   *  consolidation reclaims what it can). Omit = no ceiling (per-layer caps only). */
+  /** Whole-namespace byte ceiling (deterministic eviction backstop after
+   *  consolidation reclaims what it can). Omit = {@link DEFAULT_BUTLER_MEMORY_BUDGET_BYTES}
+   *  (audit P2 — a member's memory must always be bounded, never grow unbounded). */
   budgetBytes?: number
 }
 
@@ -147,7 +168,11 @@ export function buildButlerMaintenanceReviewer(
       tieredReviewer({
         summarize: opts.summarize,
         ...(opts.tierConfig ? { config: opts.tierConfig } : {}),
-        ...(opts.budgetBytes !== undefined ? { budgetBytes: opts.budgetBytes } : {}),
+        // Always bound the namespace (audit P2 — else `semantic` grows unbounded
+        // as atomic-fact extraction accretes forever). A caller override wins;
+        // otherwise the generous default backstop applies. Eviction is
+        // importance-aware, so the curated profile outlives the disposable tail.
+        budgetBytes: opts.budgetBytes ?? DEFAULT_BUTLER_MEMORY_BUDGET_BYTES,
       }),
       atomicFactsReviewer({ summarize: opts.summarize }),
     ),

@@ -59,6 +59,31 @@ describe('atomicFactsReviewer', () => {
     expect(facts.map((e) => e.text)).toEqual(['用户养的宠物是一只叫大黄的金毛'])
   })
 
+  it('dedups against an OLD fact buried beyond the former newest-200 window (audit P2)', async () => {
+    // 210 newer, unrelated semantic fillers sit ON TOP of one old duplicate
+    // target. A newest-200 recall window would never see the buried fact, so the
+    // model's re-statement of it would be written AGAIN every 6h — semantic bloat.
+    // The full-store scan catches it and stays quiet.
+    const fillers = Array.from({ length: 210 }, (_, i) =>
+      entry(`f${i}`, 'semantic', `无关事实编号 ${i}`, T + 1000 + i),
+    )
+    const memory = makeFakeMemory([
+      ...episodicTurns(),
+      entry('old', 'semantic', '用户最爱的饮料是珍珠奶茶', T + 1), // oldest → outside newest-200
+      ...fillers,
+    ])
+    const reviewer = atomicFactsReviewer({
+      summarize: fixedSummarizer('用户最爱的饮料是珍珠奶茶'), // a re-statement of the buried fact
+    })
+    const out = await reviewer({ memory, episodic: episodicTurns(), now: T + 100 })
+
+    expect(out).toEqual({}) // deduped against the buried old fact → nothing written
+    const drink = (await memory.list({ kind: 'semantic', limit: 10_000 })).filter(
+      (e) => e.text === '用户最爱的饮料是珍珠奶茶',
+    )
+    expect(drink).toHaveLength(1) // still exactly one copy, not re-written
+  })
+
   it('dedups repeats WITHIN one pass', async () => {
     const memory = makeFakeMemory(episodicTurns())
     const reviewer = atomicFactsReviewer({

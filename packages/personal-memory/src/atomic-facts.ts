@@ -40,8 +40,18 @@ export const META_ATOMIC_FACT = 'atomicFact'
 /** Default: need at least this many recent episodic entries before extraction bothers. */
 export const DEFAULT_ATOMIC_FACTS_TRIGGER_ENTRIES = 4
 
-/** Default: existing semantic entries pulled for the dedup check. */
-export const ATOMIC_FACTS_RECALL_WINDOW = 200
+/**
+ * Default: how many existing semantic entries the dedup check scans. Extraction
+ * runs in the 6h background (never the hot path), so this scans the WHOLE store,
+ * not a recency window: a candidate that duplicates an OLD fact — one the butler
+ * distilled months ago, now buried under hundreds of newer entries — must still
+ * be caught, or the same fact is re-extracted every 6h and `semantic` bloats with
+ * near-duplicates (audit P2). A newest-`k` recall could only see the freshest `k`
+ * and would miss anything older. The store is byte-bounded by the maintenance
+ * `budgetBytes`, so a generous scan covers all of it; this mirrors
+ * `BUDGET_SCAN_LIMIT`.
+ */
+export const ATOMIC_FACTS_RECALL_WINDOW = 10_000
 
 /**
  * Default: a candidate whose lexical overlap with an already-known fact is at or
@@ -77,7 +87,7 @@ export interface AtomicFactsReviewerOptions {
   dedupThreshold?: number
   /** Cap on facts written per pass. Default {@link DEFAULT_MAX_FACTS_PER_PASS}. */
   maxFacts?: number
-  /** Existing semantic pulled for dedup. Default {@link ATOMIC_FACTS_RECALL_WINDOW}. */
+  /** Existing semantic entries scanned for dedup. Default {@link ATOMIC_FACTS_RECALL_WINDOW}. */
   recallWindow?: number
 }
 
@@ -105,9 +115,13 @@ export function atomicFactsReviewer(opts: AtomicFactsReviewerOptions): MemoryRev
     const candidates = parseFacts(raw, maxFacts)
     if (candidates.length === 0) return {}
 
-    // Dedup against what's already stored (lexical overlap; NO second model call)
-    // plus the facts accepted so far this pass.
-    const existing = await ctx.memory.recall({ kinds: ['semantic'], k: recallWindow })
+    // Dedup against ALL existing semantic (lexical overlap; NO second model call)
+    // plus the facts accepted so far this pass. `list` enumerates the store
+    // newest-first with no recency/text filter, so a candidate that duplicates a
+    // buried OLD fact is caught too — a newest-`k` recall would only surface the
+    // freshest `k` and miss anything older, re-writing it every 6h (audit P2).
+    // Cheap: one 6h-background scan of a byte-bounded store.
+    const existing = await ctx.memory.list({ kind: 'semantic', limit: recallWindow })
     const knownTexts = existing.map((e) => e.text)
     const accepted: string[] = []
     for (const fact of candidates) {
