@@ -500,6 +500,7 @@ docs(audit): v4 Phase 5 full audit — 15 modules, no P1/P2 hotfixes (F1)
 | 防再膨胀惯例 + GUARD 承重门（依赖方向 / 旋钮登记 / 行数预算；`pnpm check:guards`） | `docs/zh/CONVENTIONS.md` |
 | 协议规约（v1.2） | `docs/PROTOCOL.md` |
 | 产品定位（赛道地图 + 产品级矩阵 + 目标用户） | `docs/zh/COMPETITIVE-LANDSCAPE.md` · `docs/zh/PRODUCT-MATRIX.md` |
+| 2026-07 战略盘点（5 路市场再核：主权 hub×联邦×人机同权×治理闸四项合一全球+中国均无人占 / 管家差异全在治理面 / 未来框架八性质 / 基础设施九判据体检 + 12-24 个月窗口 + 产品先行路径裁决 + 微信 iLink·家庭 hub·AIP 三方向细化规划 + 命名/可持续性两岔口） | `docs/zh/STRATEGY-2026-07.md` |
 | 部署视角（`GOTONG_PROFILE=hub\|federation` 入口先讲 hub 内 vs 跨 hub；呈现视角非行为开关；unset=字节不变） | `docs/zh/DEPLOYMENT-PROFILE.md` |
 
 **上手 / 打包 / 案例**
