@@ -196,6 +196,7 @@ function findOwnerUserId(identity: IdentityStore): string | null {
 // registration block lives in main() where identity is in scope.
 
 import { createAdminHealthService, type AdminHealthSurface } from './admin-health.js'
+import { RoutingHealthTracker } from './routing-health.js'
 import { readOutageSnapshotFile } from './llm-outage.js'
 import { BUTLER_PATROL_INTERVAL_MS } from './personal-butler-patrol.js'
 import { createConnectorSlotStore } from './template-connector-slots.js'
@@ -1104,6 +1105,9 @@ async function main(): Promise<void> {
     },
   })
 
+  // MR-M3 — shared per-provider routing-health projection, fed by every routed
+  // provider the pool builds, read by the health service below (in-memory; see routing-health.ts).
+  const routingHealth = new RoutingHealthTracker()
   const localAgents = new LocalAgentPool({
     butlerFactory,
     butlerDefaultOn,
@@ -1112,31 +1116,26 @@ async function main(): Promise<void> {
     services,
     orgApiPool,
     pricingTable,
-    // Audit P1 — close the Phase 9 upload → multimodal-input loop: managed
-    // agents' providers resolve `artifact_ref` / `file_ref` blocks against
-    // the same shared uploads handle the upload routes write to.
+    routingHealth,
+    // Audit P1 — managed agents resolve `artifact_ref` / `file_ref` blocks
+    // against the same shared uploads handle the upload routes write to.
     ...(uploadsRef
       ? { artifactResolver: (artifactId: string) => uploadsRef.get(artifactId) }
       : {}),
-    // Phase 6 #2 — when present, LocalAgentPool wires an onAuthFailure
-    // hook for LLM agents whose key came from the vault. A 401 from
-    // the provider revokes that vault entry + writes audit + flushes
-    // the OrgApiPool cache so next call doesn't reuse the dead key.
-    // C-M2-M4a — `${OAUTH_ACCESS_TOKEN}` → live connector token; inert w/o connectors.
+    // Phase 6 #2 — with identity, the pool wires an onAuthFailure hook: a 401
+    // from a vault-keyed agent revokes that entry + audits + flushes the OrgApiPool
+    // cache. C-M2-M4a — `${OAUTH_ACCESS_TOKEN}` → live connector token, inert w/o.
     ...(identity ? { identity, mcpSecretSource: makeOAuthSecretSource(identity) } : {}),
-    // #2-M3 — cross-hub MCP refs (`useMcpServers: ['<peer>:<server>']`)
-    // resolve the peer link lazily through the registry, which is wired
-    // further down (peerRegistryRef is a forward-declared `let`). Reading
-    // it at call time means a not-yet-connected / reconnected peer is
-    // handled by RemoteMcpToolset's own offline path.
+    // #2-M3 — cross-hub MCP refs (`useMcpServers: ['<peer>:<server>']`) resolve the
+    // peer link lazily through the registry (peerRegistryRef forward `let` below);
+    // reading at call time lets RemoteMcpToolset's offline path handle it.
     peerLinkResolver: (peerId) => peerRegistryRef?.linkForHub(peerId) ?? null,
   })
   await localAgents.start()
 
-  // S2-M2 — the pool can now resolve the butler's own model. Bind the provider
-  // builder the on-demand "整理记忆" tool uses (same source as the 6h sweep's
-  // `buildProvider`), read lazily at butler-build time. Assigned unconditionally;
-  // the factory still gates the tool on `butlerMaintenanceOn`.
+  // S2-M2 — bind the provider builder the on-demand "整理记忆" tool uses (same
+  // source as the 6h sweep's `buildProvider`), read lazily at butler-build time.
+  // Assigned unconditionally; the factory still gates on `butlerMaintenanceOn`.
   butlerProviderBuilderRef = () => localAgents.buildButlerProvider()
   // CARE-M4 — the 活体校验 rides the pool's spawn-time key-resolution chain
   // (agentId → provider/key/baseURL) + the read-only models-list GET.
@@ -2401,9 +2400,8 @@ async function main(): Promise<void> {
     resolvesKey: (id, provider) => localAgents.hasResolvableLlmKey(id, provider),
     listMcpServers: () => space.mcpServers(),
     spacePath: space.root,
-    // EH-M1 — 配置进度 (工作流总/可跑 + run 总数) 喂体检面板的「下一步建议」
-    // 常驻引导。listAll 含全状态草稿, list 只含可跑 (published/live); countRuns
-    // 取 active 集精确总数。全只读, 复用 workflowController 现成方法零新机制。
+    // EH-M1 — 配置进度 (工作流总/可跑 + run 总数) 喂面板「下一步建议」。listAll 含
+    // 全状态草稿, list 只含可跑; countRuns 取 active 集。全只读, 零新机制。
     countWorkflows: async () => {
       const [all, live] = await Promise.all([
         workflowController.listAll(),
@@ -2412,10 +2410,9 @@ async function main(): Promise<void> {
       return { total: all.length, published: live.length }
     },
     countRuns: async () => (await workflowController.countRuns()).total,
-    // DEPLOY-B3 — live IM bridge rows for the admin settings page. `imBridges`
-    // is assigned well after this closure is BUILT but before any admin can
-    // fetch a snapshot in practice; the `?? []` keeps the boot window honest
-    // ("no live bridge yet" is literally true then).
+    // DEPLOY-B3 — live IM bridge rows for the settings page. `imBridges` is
+    // assigned after this closure is built; the `?? []` keeps the boot window
+    // honest ("no live bridge yet" is literally true then).
     imStatus: () => imBridges?.status() ?? [],
     // FDE-M1b — flatten the per-pack registry to the rows the 体检 wants;
     // fulfilment (filled) is admin-health's job, not the file's.
@@ -2431,14 +2428,17 @@ async function main(): Promise<void> {
     // CARE-M7 — 断供当下事实上体检面板(同 CARE-M2/M6 那份 runtime/llm-outage.json;
     // 无阈值,面板要即时真相)。readOutageSnapshotFile 无缓存新读 + 损坏当空,不抛。
     readLlmOutage: () => readOutageSnapshotFile(join(space.root, 'runtime', 'llm-outage.json')),
+    // MR-M3 — per-provider routing health (degraded fallback candidates), read
+    // from the in-memory tracker the pool feeds. Pure, synchronous, never throws.
+    routingHealth: () => routingHealth.snapshot(),
   })
   patrolHealthRef = adminHealth
 
   // RES-M1 — read-only resource inventory for the "resource adaptation" panel.
   // Deterministic + zero-LLM: env/vault EXISTENCE (never key values), a bounded
-  // localhost model-server probe, PATH existsSync for CLI agents, installed MCP
-  // servers. `listVaultProviders` reuses the pool's non-decrypting provider list
-  // (absent when no orgApiPool → vault side reports "none", honest degradation).
+  // localhost model-server probe, PATH existsSync for CLI agents, installed MCP.
+  // `listVaultProviders` reuses the pool's non-decrypting provider list (absent
+  // w/o orgApiPool → vault side reports "none").
   const resourceInventory = createResourceInventoryService({
     env: process.env,
     ...(orgApiPool ? { listVaultProviders: () => orgApiPool!.listProviders() } : {}),

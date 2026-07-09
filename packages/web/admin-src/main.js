@@ -1390,6 +1390,15 @@ import { createWorkflows } from './workflows.js'
       const mins = downMs > 0 ? Math.round(downMs / 60000) : 0
       signals.push(hubHealthSignalRow('red', t.healthLlmOutage(snap.llmOutage.kind, mins), ''))
     }
+    // MR-M3 — YELLOW: per-provider routing degradation. A tripped / degraded
+    // fallback candidate means the routed agent is FAILING OVER (still working
+    // on a backup) — not down (that red case is llmOutage above). Absent field
+    // → loop over [] → nothing. Beyond CARE-M7's binary: names WHICH provider.
+    for (const r of snap.routing || []) {
+      const agoMs = Date.parse(snap.checkedAt || '') - (r.since || 0)
+      const mins = agoMs > 0 ? Math.round(agoMs / 60000) : 0
+      signals.push(hubHealthSignalRow('yellow', t.healthRouting(r.agentId, r.candidate, r.state, r.errorKind, mins), ''))
+    }
     // RED — managed agents whose key does not resolve (the headline signal).
     for (const a of agents) {
       if (a.missingKey) {

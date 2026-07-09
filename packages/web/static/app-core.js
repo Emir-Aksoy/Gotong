@@ -1062,6 +1062,14 @@
         const tail = mins > 0 ? `已断供约 ${mins} 分钟` : '刚刚断供'
         return `管家大脑当前不可用(${why})— ${tail}。命令面仍可用;查供应商状态 / key / 额度。`
       },
+      // --- MR-M3 — per-provider 路由降级(黄条:已切备用,服务未断)---
+      healthRouting: (agentId, candidate, state, kind, mins) => {
+        const kinds = { auth: '认证失败', quota: '额度用尽', rate_limited: '被限流', network: '连不上', timeout: '超时', model_not_found: '模型不存在' }
+        const st = { open: '熔断中', half_open: '冷却结束·即将重试', degraded: '最近失败' }
+        const why = kind && kinds[kind] ? `,${kinds[kind]}` : ''
+        const ago = mins > 0 ? ` 约 ${mins} 分钟` : ''
+        return `路由降级:智能体「${agentId}」的候选「${candidate}」${st[state] || state}${why}${ago} — 已切下一候选,服务未中断`
+      },
       healthRosterTitle: (online, total) => `智能体(${online}/${total} 在线)`,
       healthTest: '测连接',
       healthOffline: '未上线',
@@ -3060,6 +3068,14 @@
         const why = names[kind] || String(kind)
         const tail = mins > 0 ? `down for ~${mins} min` : 'just went down'
         return `The butler's brain is currently unavailable (${why}) — ${tail}. Commands still work; check provider status / key / quota.`
+      },
+      // --- MR-M3 — per-provider routing degradation (yellow: failed over, still serving) ---
+      healthRouting: (agentId, candidate, state, kind, mins) => {
+        const kinds = { auth: 'auth failed', quota: 'quota exhausted', rate_limited: 'rate limited', network: 'unreachable', timeout: 'timeout', model_not_found: 'model not found' }
+        const st = { open: 'circuit open', half_open: 'cooldown elapsed · retrying next', degraded: 'recently failing' }
+        const why = kind && kinds[kind] ? `, ${kinds[kind]}` : ''
+        const ago = mins > 0 ? ` ~${mins} min` : ''
+        return `Routing degraded: agent "${agentId}" candidate "${candidate}" ${st[state] || state}${why}${ago} — failed over to the next candidate, service uninterrupted`
       },
       healthRosterTitle: (online, total) => `Agents (${online}/${total} online)`,
       healthTest: 'Test',

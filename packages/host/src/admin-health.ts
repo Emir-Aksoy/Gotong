@@ -32,6 +32,8 @@
 
 import { access, constants as FS } from 'node:fs/promises'
 
+import type { HealthRoutingRow } from './routing-health.js'
+
 /** One managed LLM agent's at-a-glance health. */
 export interface HealthAgentRow {
   id: string
@@ -106,6 +108,16 @@ export interface HealthSnapshot {
    * 30 分钟阈值只为不刷 IM,不是面板的事)。
    */
   llmOutage?: HealthLlmOutageRow | null
+  /**
+   * MR-M3 — per-provider routing health (degraded / circuit-open fallback
+   * candidates), surfaced beyond CARE-M7's binary "brain out". A LIST, like
+   * `connectorSlots`: field absent → host didn't wire routing health (no
+   * agents route, or bare host); `[]` → wired, every candidate healthy; rows →
+   * candidates a routed agent is currently failing over from. All rows render
+   * YELLOW — a tripped breaker means the agent is still working on a backup,
+   * not down (that's `llmOutage`). Minutes/cooldown fold in the panel.
+   */
+  routing?: HealthRoutingRow[]
   /** ISO timestamp the snapshot was taken. */
   checkedAt: string
 }
@@ -212,6 +224,13 @@ export interface AdminHealthDeps {
    * readOutageSnapshotFile 内(损坏当空),故这里的实现体不会抛。
    */
   readLlmOutage?(): Promise<{ kind: string; since: number } | null>
+  /**
+   * MR-M3 — read the in-memory routing-health projection (host injects
+   * `() => routingHealthTracker.snapshot()`). Synchronous + pure (no disk, no
+   * network). 可选:absent → snapshot 不含 routing(host 未接路由健康的诚实
+   * 「未知」);注入了但一切正常 → `[]`。实现体不抛(纯读内存 Map)。
+   */
+  routingHealth?(): HealthRoutingRow[]
 }
 
 /** The duck-typed surface injected into `serveWeb`. */
@@ -348,6 +367,17 @@ export function createAdminHealthService(deps: AdminHealthDeps): AdminHealthSurf
         }))
       }
 
+      // MR-M3 — per-provider routing health. best-effort: a sink fault → [] (an
+      // empty, honest "nothing degraded"), never blocks the rest of the panel.
+      let routing: HealthRoutingRow[] | undefined
+      if (deps.routingHealth) {
+        try {
+          routing = deps.routingHealth()
+        } catch {
+          routing = []
+        }
+      }
+
       return {
         agents: rows,
         agentsMissingKey: rows.filter((r) => r.missingKey).length,
@@ -367,6 +397,7 @@ export function createAdminHealthService(deps: AdminHealthDeps): AdminHealthSurf
         ...(imRows !== undefined ? { imBridges: imRows } : {}),
         ...(slotRows !== undefined ? { connectorSlots: slotRows } : {}),
         ...(llmOutage !== undefined ? { llmOutage } : {}),
+        ...(routing !== undefined ? { routing } : {}),
         checkedAt: new Date().toISOString(),
       }
     },

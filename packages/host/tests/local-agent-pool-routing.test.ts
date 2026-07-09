@@ -34,6 +34,7 @@ import {
 
 import { LocalAgentPool } from '../src/local-agent-pool.js'
 import { OrgApiPool } from '../src/org-api-pool.js'
+import { RoutingHealthTracker } from '../src/routing-health.js'
 import { bootstrapServices, type HubServices } from '../src/services/index.js'
 
 const logger = createLogger('lap-routing-test', { disabled: true })
@@ -78,7 +79,7 @@ describe('LocalAgentPool — buildRoutedProvider (MR-M2 model routing)', () => {
   // A providerFactory that keys behaviour on `spec.model`:
   //   'boom-*'  → throws synchronously from .stream() (pre-first-chunk hard fail)
   //   otherwise → yields a single text chunk `served:<model>`
-  function makePool(): LocalAgentPool {
+  function makePool(routingHealth?: RoutingHealthTracker): LocalAgentPool {
     const orgApiPool = new OrgApiPool({ identity })
     return new LocalAgentPool({
       hub,
@@ -86,6 +87,7 @@ describe('LocalAgentPool — buildRoutedProvider (MR-M2 model routing)', () => {
       services,
       identity,
       orgApiPool,
+      ...(routingHealth ? { routingHealth } : {}),
       providerFactory: (spec): LlmProvider => {
         factoryModels.push(spec.model)
         if (spec.model && spec.model.startsWith('boom-')) {
@@ -156,5 +158,33 @@ describe('LocalAgentPool — buildRoutedProvider (MR-M2 model routing)', () => {
     expect((res.output as { text?: string }).text).toBe('served:backup-model')
     // Ordered chain: primary built first, fallback second — both via the seam.
     expect(factoryModels).toEqual(['boom-primary', 'backup-model'])
+  })
+
+  it('MR-M3 — a failover feeds the injected routing-health sink (candidate degraded)', async () => {
+    await space.upsertAgent({
+      id: 'watched',
+      allowedCapabilities: ['echo'],
+      createdAt: new Date().toISOString(),
+      managed: {
+        kind: 'llm',
+        provider: 'mock',
+        system: 'hi',
+        model: 'boom-primary',
+        fallbacks: [{ provider: 'mock', model: 'backup-model' }],
+      },
+    } satisfies AgentRecord)
+    const tracker = new RoutingHealthTracker()
+    const pool = makePool(tracker)
+    await pool.start()
+
+    expect(tracker.snapshot()).toEqual([]) // nothing has failed yet
+    const res = await dispatchEcho()
+    expect(res.kind).toBe('ok') // served by the fallback
+
+    // The primary's pre-first-chunk failure reached the sink → a degraded row
+    // for candidate index 0 (one failure < breaker threshold, so not yet open).
+    const rows = tracker.snapshot()
+    expect(rows).toHaveLength(1)
+    expect(rows[0]).toMatchObject({ agentId: 'watched', index: 0, state: 'degraded' })
   })
 })

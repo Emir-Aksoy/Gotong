@@ -28,8 +28,10 @@ import {
   type LlmUsage,
   type LlmUsageSinkMeta,
   type RoutingCandidate,
+  type RoutingEvent,
 } from '@gotong/llm'
 import { PersonalGrowthAgent } from './agents/personal-growth-agent.js'
+import type { RoutingHealthRecorder } from './routing-health.js'
 import {
   DEFAULT_PRICING,
   estimateCostMicros,
@@ -355,6 +357,13 @@ export class LocalAgentPool implements ManagedAgentLifecycle {
     artifactResolver?: LlmArtifactResolver,
   ) => LlmProvider
   /**
+   * MR-M3 — optional per-provider routing-health sink. When wired, every
+   * RoutingProvider this pool builds feeds its candidate events here so the
+   * admin panel can show which provider is degraded. Absent (bare host / tests)
+   * → no `onEvent`, so routed providers cost exactly what they did in MR-M2.
+   */
+  private readonly routingHealth?: RoutingHealthRecorder
+  /**
    * BF-M3 — optional resident-butler factory. When wired (host with identity +
    * inbox), a `chat`-capable managed LLM row that opts in (per-agent
    * `managed.butler` or the pool default below) is spawned via this factory —
@@ -421,6 +430,12 @@ export class LocalAgentPool implements ManagedAgentLifecycle {
       artifactResolver?: LlmArtifactResolver,
     ) => LlmProvider
     /**
+     * MR-M3 — per-provider routing-health sink (see field doc). The host wires
+     * a shared {@link RoutingHealthTracker}; omit → routed providers emit no
+     * events (bare host / tests unchanged).
+     */
+    routingHealth?: RoutingHealthRecorder
+    /**
      * BF-M3 — resident-butler factory (see field doc). The host injects a
      * closure that opens per-user memory and builds a `PersonalButlerAgent`
      * router; omit to keep chat agents as plain `LlmAgent`s.
@@ -448,6 +463,7 @@ export class LocalAgentPool implements ManagedAgentLifecycle {
     this.pricingTable = opts.pricingTable ?? DEFAULT_PRICING
     this.artifactResolver = opts.artifactResolver
     this.providerFactory = opts.providerFactory ?? buildProvider
+    this.routingHealth = opts.routingHealth
     this.butlerFactory = opts.butlerFactory
     this.butlerDefaultOn = opts.butlerDefaultOn ?? false
     // Built once: the gate is a stateless closure over `identity`,
@@ -1374,6 +1390,12 @@ export class LocalAgentPool implements ManagedAgentLifecycle {
       candidates,
       // Adapt the host logger (message-first) to RoutingLogger (meta-first).
       logger: { warn: (meta, msg) => log.warn(msg, meta) },
+      // MR-M3 — feed candidate health to the panel sink, tagged with this agent.
+      // best-effort by contract (RoutingProvider wraps onEvent in try/catch), so
+      // a health-sink fault can never disturb the stream.
+      ...(this.routingHealth
+        ? { onEvent: (ev: RoutingEvent) => this.routingHealth!.record(agentId, ev) }
+        : {}),
     })
   }
 

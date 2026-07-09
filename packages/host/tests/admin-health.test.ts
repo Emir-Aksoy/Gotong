@@ -17,6 +17,7 @@ import {
   type HealthAgentLike,
   type HealthMcpLike,
 } from '../src/admin-health.js'
+import type { HealthRoutingRow } from '../src/routing-health.js'
 
 function svc(opts: {
   agents: HealthAgentLike[]
@@ -37,6 +38,8 @@ function svc(opts: {
   >
   // CARE-M7 — 断供读取;same optional-dep contract (absent → snapshot 无 llmOutage).
   readLlmOutage?: () => Promise<{ kind: string; since: number } | null>
+  // MR-M3 — routing-health projection; same optional-dep contract.
+  routingHealth?: () => HealthRoutingRow[]
 }) {
   return createAdminHealthService({
     listAgents: async () => opts.agents,
@@ -50,6 +53,7 @@ function svc(opts: {
     ...(opts.imStatus ? { imStatus: opts.imStatus } : {}),
     ...(opts.listConnectorSlots ? { listConnectorSlots: opts.listConnectorSlots } : {}),
     ...(opts.readLlmOutage ? { readLlmOutage: opts.readLlmOutage } : {}),
+    ...(opts.routingHealth ? { routingHealth: opts.routingHealth } : {}),
   })
 }
 
@@ -327,6 +331,50 @@ describe('createAdminHealthService.snapshot', () => {
         },
       }).snapshot()
       expect(s.llmOutage).toBe(null) // fail-open:体检读盘出错 ≠ 断供
+      expect(s.managedCount).toBe(1)
+    })
+  })
+
+  describe('routing (MR-M3)', () => {
+    const row: HealthRoutingRow = {
+      agentId: 'a1',
+      candidate: 'anthropic',
+      index: 0,
+      state: 'open',
+      errorKind: 'network',
+      since: 1_700_000_000_000,
+      openUntil: 1_700_000_030_000,
+    }
+
+    it('omits the field entirely when the dep is not injected (honest unknown)', async () => {
+      const s = await svc({ agents: [managed('a1', 'anthropic')] }).snapshot()
+      expect('routing' in s).toBe(false)
+    })
+
+    it('empty array when wired but every candidate is healthy', async () => {
+      const s = await svc({
+        agents: [managed('a1', 'anthropic')],
+        routingHealth: () => [],
+      }).snapshot()
+      expect(s.routing).toEqual([])
+    })
+
+    it('passes through the degraded candidate rows verbatim', async () => {
+      const s = await svc({
+        agents: [managed('a1', 'anthropic')],
+        routingHealth: () => [row],
+      }).snapshot()
+      expect(s.routing).toEqual([row])
+    })
+
+    it('degrades a sink fault to [] — a projection fault must never sink the panel', async () => {
+      const s = await svc({
+        agents: [managed('a1', 'anthropic')],
+        routingHealth: () => {
+          throw new Error('sink boom')
+        },
+      }).snapshot()
+      expect(s.routing).toEqual([])
       expect(s.managedCount).toBe(1)
     })
   })

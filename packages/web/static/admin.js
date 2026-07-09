@@ -3807,6 +3807,11 @@
         const mins = downMs > 0 ? Math.round(downMs / 6e4) : 0;
         signals.push(hubHealthSignalRow("red", t6.healthLlmOutage(snap.llmOutage.kind, mins), ""));
       }
+      for (const r of snap.routing || []) {
+        const agoMs = Date.parse(snap.checkedAt || "") - (r.since || 0);
+        const mins = agoMs > 0 ? Math.round(agoMs / 6e4) : 0;
+        signals.push(hubHealthSignalRow("yellow", t6.healthRouting(r.agentId, r.candidate, r.state, r.errorKind, mins), ""));
+      }
       for (const a of agents) {
         if (a.missingKey) {
           signals.push(hubHealthSignalRow(
