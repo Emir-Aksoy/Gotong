@@ -66,3 +66,14 @@ export {
   llmErrorSummary,
   type LlmErrorKind,
 } from './errors.js'
+// MR-M1 — 确定性多 provider 有序降级 + per-candidate 熔断
+export {
+  RoutingProvider,
+  RoutingExhaustedError,
+  DEFAULT_BREAKER,
+  type RoutingCandidate,
+  type RoutingProviderOptions,
+  type RoutingEvent,
+  type RoutingLogger,
+  type BreakerConfig,
+} from './routing-provider.js'
