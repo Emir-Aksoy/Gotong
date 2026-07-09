@@ -60,7 +60,13 @@ import {
   type WorkflowGrantSink,
 } from './workflow-routes.js'
 import { handleWizardAdminRoute, type WorkflowWizardSurface } from './wizard-routes.js'
-import { handleAgentsRoute, type AgentGrantSink, type ConnectorSlotSink, type LlmKeyProbe } from './agents-routes.js'
+import {
+  handleAgentsRoute,
+  type AgentGrantSink,
+  type ConnectorSlotSink,
+  type LlmKeyProbe,
+  type RoutingProbeSurface,
+} from './agents-routes.js'
 import { handleTemplateAcceptanceRoute, type TemplateAcceptanceSurface } from './template-acceptance-routes.js'
 import { handleAdminStewardRoute } from './admin-steward-routes.js'
 import { handleServicesRoute } from './services-routes.js'
@@ -309,6 +315,7 @@ export function serveWeb(hub: Hub, opts: WebServerOptions = {}): Promise<WebServ
     workerCreateLimiter,
     lifecycle: opts.lifecycle,
     llmKeyProbe: opts.llmKeyProbe,
+    routingProbe: opts.routingProbe,
     connectorSlots: opts.connectorSlots,
     templateAcceptance: opts.templateAcceptance,
     scheduleSuggestions: opts.scheduleSuggestions,
@@ -470,6 +477,8 @@ interface HandlerCtx {
   lifecycle: ManagedAgentLifecycle | undefined
   /** ease-of-use ③-M1 — see WebServerOptions.llmKeyProbe doc above. */
   llmKeyProbe: LlmKeyProbe | undefined
+  /** MR-M5 — see WebServerOptions.routingProbe doc (server-types.ts). */
+  routingProbe: RoutingProbeSurface | undefined
   /** FDE-M1b — see WebServerOptions.connectorSlots doc (server-types.ts). */
   connectorSlots: ConnectorSlotSink | undefined
   /** FDE-M2 — see WebServerOptions.templateAcceptance doc (server-types.ts). */
@@ -1397,6 +1406,7 @@ async function handle(
         space: ctx.space,
         lifecycle: ctx.lifecycle,
         llmKeyProbe: ctx.llmKeyProbe,
+        routingProbe: ctx.routingProbe,
         connectorSlots: ctx.connectorSlots,
         templateAcceptance: ctx.templateAcceptance,
         scheduleSuggestions: ctx.scheduleSuggestions,

@@ -71,6 +71,46 @@ export interface LlmKeyProbe {
 }
 
 /**
+ * MR-M5 — one candidate's verdict from the manual "test routing" diagnostic.
+ * Structural mirror of the host's `RoutingCandidateProbe` (`code` widened to
+ * `string` so the web layer keeps zero host/llm runtime dep — the panel maps
+ * the code to localized words via the same `describeKeyTest` table).
+ */
+export interface RoutingProbeRow {
+  /** 0 = primary, 1.. = the fallback at that position in the declared chain. */
+  index: number
+  /** Human label (provider + model) for the panel row. */
+  label: string
+  /** Candidate provider id, e.g. 'anthropic' | 'openai-compatible' | 'mock'. */
+  provider: string
+  /** Produced a chunk → network reached + key accepted + model exists. */
+  ok: boolean
+  /** The model id actually probed. */
+  model: string
+  /** Round-trip to first chunk (or to failure), milliseconds. */
+  latencyMs: number
+  /** Stable outcome code on failure (UI maps to localized words). */
+  code?: string
+  /** Short, key-scrubbed diagnostic. */
+  message?: string
+}
+
+/**
+ * MR-M5 — duck-typed per-candidate routing probe. The host's LocalAgentPool
+ * satisfies it via `probeRoutingCandidates(agentId)`. The manual "test routing"
+ * diagnostic probes EVERY candidate (primary + each declared fallback)
+ * independently with one minimal completion, so an operator learns whether each
+ * declared fallback actually works — unlike passive routing health, which only
+ * lights a candidate up once real traffic has already failed over onto it. The
+ * probe is isolated from the circuit breaker (a manual test never trips live
+ * routing). Absent → the probe-routing route 503s and the panel hides its
+ * 「测试路由」 button.
+ */
+export interface RoutingProbeSurface {
+  probeRoutingCandidates(agentId: string): Promise<RoutingProbeRow[]>
+}
+
+/**
  * RES-M2 — duck-typed adaptation proposal engine. The host wires
  * `createResourceAdaptationService`; the template-import handler asks it for
  * proposals about the freshly-created agents + unwired KB slots, and attaches
@@ -147,6 +187,13 @@ export interface AgentsRoutesCtx {
    * are still derived from the parsed template).
    */
   llmKeyProbe?: LlmKeyProbe
+  /**
+   * MR-M5 — optional per-candidate routing probe (the manual 「测试路由」
+   * diagnostic). The host wires it to LocalAgentPool.probeRoutingCandidates.
+   * Absent → the probe-routing route 503s (zero regression for hosts that
+   * don't wire it; the panel hides the button).
+   */
+  routingProbe?: RoutingProbeSurface
   /**
    * RES-M2 — optional adaptation proposal engine. The template-import handler
    * asks it for proposals about the freshly-created agents + unwired KB slots.
@@ -1121,6 +1168,33 @@ export async function handleAgentsRoute(
       'content-disposition': `attachment; filename="${encodeURIComponent(id)}.gotong-agent.json"`,
     })
     res.end(JSON.stringify(renderAgentManifest(rec), null, 2))
+    return true
+  }
+
+  // --- MR-M5 — manual "test routing" diagnostic ---
+  // Probe EVERY declared candidate (primary + each fallback) independently, so
+  // an operator can confirm each fallback actually works before relying on it.
+  // Admin-gated (a probe spends real tokens/quota) and viewer-scoped like export.
+  // The probe is isolated from the live circuit breaker — testing never trips
+  // routing. Opt-in: absent surface → 503 (panel hides the button).
+  const probeRoutingMatch = path.match(/^\/api\/admin\/agents\/([^/]+)\/probe-routing$/)
+  if (method === 'POST' && probeRoutingMatch) {
+    const admin = await ctx.requireAdmin(req, res)
+    if (!admin) return true
+    const id = decodeURIComponent(probeRoutingMatch[1]!)
+    if (denyIfNoAgentPerm(ctx, req, res, id, 'viewer')) return true
+    if (!ctx.routingProbe) {
+      sendJson(res, { error: 'routing probe not available on this host' }, 503)
+      return true
+    }
+    const rec = (await ctx.space.agents()).find((a) => a.id === id)
+    if (!rec) { sendJson(res, { error: `unknown agent '${id}'` }, 404); return true }
+    if (!rec.managed) {
+      sendJson(res, { error: `agent '${id}' is externally-connected (no routing to probe)` }, 400)
+      return true
+    }
+    const candidates = await ctx.routingProbe.probeRoutingCandidates(id)
+    sendJson(res, { agentId: id, candidates }, 200)
     return true
   }
 

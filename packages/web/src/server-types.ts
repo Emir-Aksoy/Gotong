@@ -33,7 +33,12 @@ import type {
   MeHubStewardSurface,
 } from './me-routes.js'
 import type { WorkflowWizardSurface } from './wizard-routes.js'
-import type { ConnectorSlotSink, LlmKeyProbe, ScheduleSuggestionSink } from './agents-routes.js'
+import type {
+  ConnectorSlotSink,
+  LlmKeyProbe,
+  RoutingProbeSurface,
+  ScheduleSuggestionSink,
+} from './agents-routes.js'
 import type { TemplateAcceptanceSurface } from './template-acceptance-routes.js'
 import type { SetupRoutesCtx } from './setup-routes.js'
 import type { McpRegistrySurface, McpFederationSurface } from './mcp-routes.js'
@@ -126,6 +131,13 @@ export interface WebServerOptions {
    * the "agent X still needs a key" advisories are omitted.
    */
   llmKeyProbe?: LlmKeyProbe
+  /**
+   * MR-M5 — optional per-candidate routing probe for the manual 「测试路由」
+   * diagnostic. The host wires it to LocalAgentPool.probeRoutingCandidates.
+   * Absent → the `/api/admin/agents/:id/probe-routing` route 503s and the
+   * panel hides its button (zero regression on hosts that don't wire it).
+   */
+  routingProbe?: RoutingProbeSurface
   /**
    * FDE-M1b — optional durable sink for template-declared connector slots
    * (`requires.connectors`), recorded at import so the admin 体检 shows slot

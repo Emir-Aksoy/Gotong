@@ -2539,6 +2539,10 @@ async function main(): Promise<void> {
     llmKeyProbe: {
       resolvesKey: (id, provider) => localAgents.hasResolvableLlmKey(id, provider),
     },
+    // MR-M5 — per-candidate routing probe for the manual 「测试路由」 button.
+    // Reuses the pool's spawn-time resolveApiKey → providerFactory chain so a
+    // probe pass means the real failover path works; isolated from the breaker.
+    routingProbe: localAgents,
     // FDE-M1b/M3 — durable sinks for template-declared connector slots and
     // schedule suggestions (recorded at import; absent → response-only).
     connectorSlots,

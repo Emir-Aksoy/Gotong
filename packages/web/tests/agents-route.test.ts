@@ -24,6 +24,7 @@ import { Hub, Space } from '@gotong/core'
 import { loadOrCreateMasterKey, openIdentityStore, type IdentityStore } from '@gotong/identity'
 
 import { serveWeb, type WebServerHandle } from '../src/server.js'
+import type { RoutingProbeSurface } from '../src/agents-routes.js'
 
 interface Boot {
   tmp: string
@@ -199,6 +200,124 @@ describe('agents-route: fallbacks (MR-M2 model routing)', () => {
     })
     expect(drop.status).toBe(200)
     expect((await b.space.agents()).find((a) => a.id === 'edited')?.managed.fallbacks).toBeUndefined()
+  })
+})
+
+describe('agents-route: probe-routing (MR-M5)', () => {
+  // This route needs an injected `routingProbe` surface, so it boots its own
+  // server per case (the shared `boot()` wires none). Pins the web-layer
+  // contract of the manual 「测试路由」 diagnostic: admin-gated, opt-in (absent
+  // surface → 503), guards run BEFORE the surface is touched (unknown → 404 with
+  // zero probe calls), and the per-candidate rows pass through verbatim.
+  let tmp: string
+  let hub: Hub
+  let space: Space
+  let server: WebServerHandle
+  let baseUrl: string
+  let token: string
+  // Records every id the fake surface is asked to probe — proves the route
+  // reached it (and, for the 404 case, that it did NOT).
+  let probed: string[]
+
+  async function bootProbe(routingProbe?: RoutingProbeSurface): Promise<void> {
+    tmp = await mkdtemp(join(tmpdir(), 'gotong-probe-route-'))
+    const init = await Space.init(tmp, { name: 'probe-route-test' })
+    space = init.space
+    hub = new Hub({ space })
+    await hub.start()
+    ;({ token } = await space.createAdmin('TestAdmin'))
+    server = await serveWeb(hub, {
+      host: '127.0.0.1',
+      port: 0,
+      ...(routingProbe ? { routingProbe } : {}),
+    })
+    baseUrl = server.url
+  }
+
+  afterEach(async () => {
+    await server.close()
+    await hub.stop()
+    await rm(tmp, { recursive: true, force: true })
+  })
+
+  // A fake surface returning two candidate rows (one ok, one failing), recording
+  // every id it probes.
+  function fakeProbe(): RoutingProbeSurface {
+    probed = []
+    return {
+      probeRoutingCandidates: async (id: string) => {
+        probed.push(id)
+        return [
+          { index: 0, label: 'anthropic·claude', provider: 'anthropic', ok: true, model: 'claude', latencyMs: 12 },
+          {
+            index: 1,
+            label: 'openai·gpt',
+            provider: 'openai',
+            ok: false,
+            model: 'gpt',
+            latencyMs: 8,
+            code: 'invalid_key',
+            message: 'nope',
+          },
+        ]
+      },
+    }
+  }
+
+  async function makeAgent(id: string): Promise<void> {
+    await fetch(`${baseUrl}/api/admin/agents`, {
+      method: 'POST',
+      headers: auth(token),
+      body: JSON.stringify({ ...base, id }),
+    })
+  }
+
+  it('POST → 200 with the surface’s per-candidate rows (wired surface)', async () => {
+    await bootProbe(fakeProbe())
+    await makeAgent('routed')
+    const res = await fetch(`${baseUrl}/api/admin/agents/routed/probe-routing`, {
+      method: 'POST',
+      headers: auth(token),
+    })
+    expect(res.status).toBe(200)
+    const body = await res.json()
+    expect(body.agentId).toBe('routed')
+    expect(body.candidates).toHaveLength(2)
+    expect(body.candidates[0]).toMatchObject({ index: 0, ok: true, model: 'claude' })
+    expect(body.candidates[1]).toMatchObject({ index: 1, ok: false, code: 'invalid_key' })
+    // The route reached the surface with the decoded id.
+    expect(probed).toEqual(['routed'])
+  })
+
+  it('absent surface → 503 (opt-in; panel hides the button)', async () => {
+    await bootProbe() // no routingProbe wired
+    await makeAgent('routed')
+    const res = await fetch(`${baseUrl}/api/admin/agents/routed/probe-routing`, {
+      method: 'POST',
+      headers: auth(token),
+    })
+    expect(res.status).toBe(503)
+  })
+
+  it('unknown agent → 404, surface never probed (guard runs first)', async () => {
+    await bootProbe(fakeProbe())
+    const res = await fetch(`${baseUrl}/api/admin/agents/ghost/probe-routing`, {
+      method: 'POST',
+      headers: auth(token),
+    })
+    expect(res.status).toBe(404)
+    expect(probed).toEqual([]) // no wasted probe on a nonexistent agent
+  })
+
+  it('requires admin auth → 401 without a token, surface never probed', async () => {
+    await bootProbe(fakeProbe())
+    await makeAgent('routed')
+    const res = await fetch(`${baseUrl}/api/admin/agents/routed/probe-routing`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+    })
+    expect(res.status).toBe(401)
+    expect(probed).toEqual([]) // admin gate runs before the probe
   })
 })
 
