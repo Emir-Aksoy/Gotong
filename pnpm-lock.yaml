@@ -879,6 +879,9 @@ importers:
       '@gotong/im-telegram':
         specifier: workspace:*
         version: link:../im-telegram
+      '@gotong/im-wechat':
+        specifier: workspace:*
+        version: link:../im-wechat
       '@gotong/inbox':
         specifier: workspace:*
         version: link:../inbox

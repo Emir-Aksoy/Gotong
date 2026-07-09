@@ -9,7 +9,7 @@
 # 作用域 = 生产源码 (packages/<pkg>/src 下的 .ts)。测试脚手架里的 GOTONG_* 不算旋钮，
 # 不登记。每项一行的「是什么 / 默认」说明是 GUARD-M2 惯例文档的活儿，不在本表。
 #
-# 当前登记数: 107  (其中 GOTONG_BOOTSTRAP 是 app.html 注入占位符——非旋钮, 见该行注释;
+# 当前登记数: 109  (其中 GOTONG_BOOTSTRAP 是 app.html 注入占位符——非旋钮, 见该行注释;
 #                  MU-M5 新增 GOTONG_BUTLER_MEMORY_GIT 记忆树 git 快照 opt-in, 106→107)
 # 重新播种 (审慎变更后):  node scripts/env-registry-gate.mjs --list > scripts/gotong-env-registry.txt
 #
@@ -117,6 +117,8 @@ GOTONG_TRANSCRIPT_KEEP_SEGMENTS
 GOTONG_TRUST_PROXY
 GOTONG_URL
 GOTONG_WEB_PORT
+GOTONG_WECHAT_BASE_URL
+GOTONG_WECHAT_BOT_TOKEN
 GOTONG_WORKFLOWS_DIR
 GOTONG_WORKFLOW_RESUME_GRACE_MS
 GOTONG_WS_HARDENING_PROFILE

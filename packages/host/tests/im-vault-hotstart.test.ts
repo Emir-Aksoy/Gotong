@@ -78,12 +78,14 @@ class FakeBridge implements ImBridge {
   }
 }
 
-// Every env var the telegram/lark gates read — cleared per test so a dev
-// shell exporting a real token can't flip outcomes.
+// Every env var the telegram/lark/wechat gates read — cleared per test so a
+// dev shell exporting a real token can't flip outcomes.
 const KEYS = [
   'GOTONG_TELEGRAM_BOT_TOKEN',
   'GOTONG_LARK_APP_ID',
   'GOTONG_LARK_APP_SECRET',
+  'GOTONG_WECHAT_BOT_TOKEN',
+  'GOTONG_WECHAT_BASE_URL',
 ]
 const saved: Record<string, string | undefined> = {}
 
@@ -111,6 +113,7 @@ function putVaultRow(input: {
   platform: ImVaultPlatform
   secret: string
   appId?: string
+  baseUrl?: string
 }): string {
   const entry = identity.createVaultEntry({
     kind: 'im_bridge',
@@ -121,6 +124,7 @@ function putVaultRow(input: {
     metadata: {
       platform: input.platform,
       ...(input.appId ? { appId: input.appId } : {}),
+      ...(input.baseUrl ? { baseUrl: input.baseUrl } : {}),
       registeredBy: 'test',
     },
   })
@@ -186,6 +190,49 @@ describe('resolveImCreds — env first, vault fallback, never a mix', () => {
   it('platform tags do not cross-match', () => {
     putVaultRow({ platform: 'lark', secret: 's', appId: 'cli_1' })
     expect(resolveImCreds('telegram', identity)).toBeUndefined()
+    expect(resolveImCreds('wechat', identity)).toBeUndefined()
+  })
+
+  // ── WX-M2b — the iLink bot token minted by `gotong wechat-login` ──
+
+  it('wechat: returns undefined with nothing configured', () => {
+    expect(resolveImCreds('wechat', identity)).toBeUndefined()
+  })
+
+  it('wechat: env wins over a vault row; env base URL rides along', () => {
+    putVaultRow({ platform: 'wechat', secret: 'vault-bot-token' })
+    process.env.GOTONG_WECHAT_BOT_TOKEN = 'env-bot-token'
+    expect(resolveImCreds('wechat', identity)).toEqual({
+      source: 'env',
+      fields: { token: 'env-bot-token' },
+    })
+    process.env.GOTONG_WECHAT_BASE_URL = 'https://sh.ilinkai.weixin.qq.com'
+    expect(resolveImCreds('wechat', identity)).toEqual({
+      source: 'env',
+      fields: { token: 'env-bot-token', baseUrl: 'https://sh.ilinkai.weixin.qq.com' },
+    })
+  })
+
+  it('wechat: a lone base URL env is NOT credentials (no mixed halves)', () => {
+    process.env.GOTONG_WECHAT_BASE_URL = 'https://sh.ilinkai.weixin.qq.com'
+    putVaultRow({ platform: 'wechat', secret: 'vault-bot-token' })
+    // The vault row wins whole — its own (absent) baseUrl, never env's.
+    expect(resolveImCreds('wechat', identity)).toEqual({
+      source: 'vault',
+      fields: { token: 'vault-bot-token' },
+    })
+  })
+
+  it('wechat: vault row carries the QR-login base URL as non-secret metadata', () => {
+    putVaultRow({
+      platform: 'wechat',
+      secret: 'vault-bot-token',
+      baseUrl: 'https://sz.ilinkai.weixin.qq.com',
+    })
+    expect(resolveImCreds('wechat', identity)).toEqual({
+      source: 'vault',
+      fields: { token: 'vault-bot-token', baseUrl: 'https://sz.ilinkai.weixin.qq.com' },
+    })
   })
 })
 
@@ -225,6 +272,39 @@ describe('startImBridges — vault row activates a bridge at boot', () => {
     try {
       const handle = await startImBridges({ hub, identity, log: silentLogger })
       expect(handle).toBeUndefined()
+    } finally {
+      await hub.stop()
+    }
+  })
+
+  it('starts wechat from a vault row (token + base URL) with no env var set', async () => {
+    putVaultRow({
+      platform: 'wechat',
+      secret: 'vault-bot-token',
+      baseUrl: 'https://sh.ilinkai.weixin.qq.com',
+    })
+    const hub = Hub.inMemory()
+    await hub.start()
+    const made: FakeBridge[] = []
+    try {
+      const handle = await startImBridges({
+        hub,
+        identity,
+        log: silentLogger,
+        makeBridge: (platform, creds) => {
+          const b = new FakeBridge(platform, creds)
+          made.push(b)
+          return b
+        },
+      })
+      expect(handle).toBeDefined()
+      expect(handle!.bridges.map((b) => b.platform)).toEqual(['wechat'])
+      expect(made[0]!.creds).toEqual({
+        source: 'vault',
+        fields: { token: 'vault-bot-token', baseUrl: 'https://sh.ilinkai.weixin.qq.com' },
+      })
+      expect(handle!.status()).toEqual([{ platform: 'wechat', source: 'vault' }])
+      await handle!.stop()
     } finally {
       await hub.stop()
     }

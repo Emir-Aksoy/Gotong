@@ -45,6 +45,7 @@ const PLATFORM_NAMES: Record<string, string> = {
   discord: 'Discord',
   matrix: 'Matrix',
   qq: 'QQ',
+  wechat: '微信 (WeChat)',
 }
 
 /** Extract the IM platform from a task's `from` (preferred — universal to every

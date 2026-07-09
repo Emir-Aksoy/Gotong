@@ -49,6 +49,7 @@ describe('platformDisplayName', () => {
     expect(platformDisplayName('telegram')).toBe('Telegram')
     expect(platformDisplayName('lark')).toContain('飞书')
     expect(platformDisplayName('qq')).toBe('QQ')
+    expect(platformDisplayName('wechat')).toContain('微信')
   })
   it('falls back to the raw id for an unknown platform (never fabricates)', () => {
     expect(platformDisplayName('signal')).toBe('signal')

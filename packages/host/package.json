@@ -71,6 +71,7 @@
     "@gotong/im-qq": "workspace:*",
     "@gotong/im-slack": "workspace:*",
     "@gotong/im-telegram": "workspace:*",
+    "@gotong/im-wechat": "workspace:*",
     "@gotong/inbox": "workspace:*",
     "@gotong/llm": "workspace:*",
     "@gotong/llm-anthropic": "workspace:*",

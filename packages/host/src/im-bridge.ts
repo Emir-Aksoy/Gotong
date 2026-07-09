@@ -49,6 +49,7 @@ import { TelegramBridge } from '@gotong/im-telegram'
 import { QqBridge } from '@gotong/im-qq'
 import { LarkBridge } from '@gotong/im-lark'
 import { SlackBridge, type WebSocketCtor as SlackWebSocketCtor } from '@gotong/im-slack'
+import { WechatBridge } from '@gotong/im-wechat'
 import { WebSocket as NodeWebSocket } from 'ws'
 
 import { ButlerOutbox } from './butler-outbox.js'
@@ -537,17 +538,20 @@ function settingHelpText(setting: HostImSettingConfig): string {
 // rows use `metadata.provider` for) so a fresh box gets IM without anyone
 // hand-editing an env file. Env vars still WIN: an operator who set
 // GOTONG_TELEGRAM_BOT_TOKEN keeps exactly today's behaviour, vault unread.
-// Only the two wizard-offered platforms resolve from vault; QQ/Slack stay
-// env-only — their multi-field + webhook tuning is operator-level config,
-// not a first-boot form.
+// Three platforms resolve from vault: telegram + lark (wizard-pasted) and
+// wechat, whose token can't be pasted at all — `gotong wechat-login` MINTS
+// it via QR scan and writes the row (WX-M2c). QQ/Slack stay env-only —
+// their multi-field + webhook tuning is operator-level config, not a
+// first-boot form.
 // ---------------------------------------------------------------------------
 
-/** Platforms whose credentials can live in the vault (setup-wizard set). */
-export type ImVaultPlatform = 'telegram' | 'lark'
+/** Platforms whose credentials can live in the vault (wizard or login CLI). */
+export type ImVaultPlatform = 'telegram' | 'lark' | 'wechat'
 
 export interface ResolvedImCreds {
   source: 'env' | 'vault'
-  /** telegram: `{ token }` · lark: `{ appId, appSecret }` */
+  /** telegram: `{ token }` · lark: `{ appId, appSecret }` ·
+   *  wechat: `{ token, baseUrl? }` */
   fields: Record<string, string>
 }
 
@@ -559,6 +563,13 @@ export function resolveImCreds(
   if (platform === 'telegram') {
     const token = process.env.GOTONG_TELEGRAM_BOT_TOKEN?.trim()
     if (token) return { source: 'env', fields: { token } }
+  } else if (platform === 'wechat') {
+    // Token alone suffices; the base URL (IDC affinity from the QR login) is
+    // an optional companion and never mixes sources — env token pairs only
+    // with env base URL, a vault row carries its own.
+    const token = process.env.GOTONG_WECHAT_BOT_TOKEN?.trim()
+    const baseUrl = process.env.GOTONG_WECHAT_BASE_URL?.trim()
+    if (token) return { source: 'env', fields: { token, ...(baseUrl ? { baseUrl } : {}) } }
   } else {
     // Both-or-nothing from env: a lone GOTONG_LARK_APP_ID never pairs with a
     // vault secret — mixed-source halves would make "which app is this?"
@@ -577,6 +588,17 @@ export function resolveImCreds(
     if (!chosen) return undefined
     const secret = identity.readVaultSecret(chosen.id)
     if (platform === 'telegram') return { source: 'vault', fields: { token: secret } }
+    if (platform === 'wechat') {
+      // baseUrl is non-secret companion metadata (the lark-appId convention).
+      const baseUrl = (chosen.metadata as Record<string, unknown> | null)?.baseUrl
+      return {
+        source: 'vault',
+        fields: {
+          token: secret,
+          ...(typeof baseUrl === 'string' && baseUrl.length > 0 ? { baseUrl } : {}),
+        },
+      }
+    }
     const appId = (chosen.metadata as Record<string, unknown> | null)?.appId
     if (typeof appId !== 'string' || appId.length === 0) {
       // Half-written row (secret without its non-secret app id) — refuse
@@ -606,6 +628,13 @@ function buildVaultablePlatformBridge(
     return new TelegramBridge({
       token: creds.fields.token!,
       onError: (err) => log.warn('telegram bridge error', { err: String(err) }),
+    })
+  }
+  if (platform === 'wechat') {
+    return new WechatBridge({
+      token: creds.fields.token!,
+      ...(creds.fields.baseUrl ? { baseUrl: creds.fields.baseUrl } : {}),
+      onError: (err) => log.warn('wechat bridge error', { err: String(err) }),
     })
   }
   return new LarkBridge({
@@ -747,9 +776,9 @@ const OUTBOX_FLUSH_INTERVAL_MS = 2 * 60 * 1000
  * on the `ImBridge` contract — so all four platforms share one `config`
  * and drop into one `bridges` array. They differ only in reachability:
  *
- *   - Telegram (long-poll), Lark (official long connection), and Slack
- *     (Socket Mode) dial OUT → a home box behind NAT works with no public
- *     endpoint.
+ *   - Telegram (long-poll), Lark (official long connection), Slack
+ *     (Socket Mode), and WeChat (iLink long-poll) dial OUT → a home box
+ *     behind NAT works with no public endpoint.
  *   - QQ's official Bot API discontinued its WebSocket and pushes an
  *     INBOUND webhook (public domain + TLS), so the QQ bridge runs its own
  *     HTTP listener that an operator fronts with a reverse proxy on a
@@ -761,6 +790,8 @@ const OUTBOX_FLUSH_INTERVAL_MS = 2 * 60 * 1000
  *             (+ GOTONG_QQ_WEBHOOK_PORT / _HOST / _PATH to tune the listener)
  *   Lark      GOTONG_LARK_APP_ID + GOTONG_LARK_APP_SECRET — or vault (wizard)
  *   Slack     GOTONG_SLACK_APP_TOKEN (xapp-) + GOTONG_SLACK_BOT_TOKEN (xoxb-)
+ *   WeChat    GOTONG_WECHAT_BOT_TOKEN (+ optional GOTONG_WECHAT_BASE_URL)
+ *             — or vault (minted by `gotong wechat-login`, WX-M2c)
  */
 export async function startImBridges(
   opts: StartImBridgesOptions,
@@ -809,6 +840,11 @@ export async function startImBridges(
   const lark = resolveImCreds('lark', opts.identity, opts.log)
   if (lark) {
     factories.push({ source: lark.source, make: () => makeVaultable('lark', lark) })
+  }
+
+  const wechat = resolveImCreds('wechat', opts.identity, opts.log)
+  if (wechat) {
+    factories.push({ source: wechat.source, make: () => makeVaultable('wechat', wechat) })
   }
 
   const slackBotToken = process.env.GOTONG_SLACK_BOT_TOKEN?.trim()
