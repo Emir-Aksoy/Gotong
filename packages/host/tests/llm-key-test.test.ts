@@ -9,6 +9,7 @@ import { describe, it, expect } from 'vitest'
 import type { LlmProvider, LlmRequest, LlmStreamChunk } from '@gotong/llm'
 import {
   testLlmKey,
+  probeProvider,
   createLlmKeyTestSurface,
   type LlmKeyTestInput,
 } from '../src/llm-key-test.js'
@@ -204,5 +205,47 @@ describe('createLlmKeyTestSurface', () => {
   it('exposes testLlmKey and uses the real builder by default (no network here)', () => {
     const surface = createLlmKeyTestSurface()
     expect(typeof surface.testLlmKey).toBe('function')
+  })
+})
+
+describe('probeProvider — MR-M5 shared probe core (already-constructed provider)', () => {
+  it('returns ok with the given model when the stream yields', async () => {
+    const r = await probeProvider(okProvider(), { model: 'claude-x' })
+    expect(r.ok).toBe(true)
+    expect(r.model).toBe('claude-x')
+    expect(r.code).toBeUndefined()
+    expect(r.latencyMs).toBeGreaterThanOrEqual(0)
+  })
+
+  it('classifies a pre-first-chunk throw via the SAME classifier (401 → invalid_key)', async () => {
+    const r = await probeProvider(throwingProvider(httpError(401)), { model: 'm' })
+    expect(r.ok).toBe(false)
+    expect(r.code).toBe('invalid_key')
+    expect(r.model).toBe('m') // the attempted model is echoed even on failure
+  })
+
+  it('has NO empty-key short-circuit — it probes the provider it was handed', async () => {
+    // This is exactly why MR-M5 can test a SAVED agent's fallback: probeProvider
+    // trusts the caller (the host) to have resolved the key already, so an empty
+    // apiKey here does NOT force invalid_key the way testLlmKey's typed-key guard
+    // does — it actually calls the provider and reports what happened.
+    const r = await probeProvider(okProvider(), { model: 'm', apiKey: '' })
+    expect(r.ok).toBe(true)
+  })
+
+  it('still scrubs the key from an error message when one is supplied', async () => {
+    const key = 'sk-secret-DO-NOT-LEAK-654321'
+    const r = await probeProvider(
+      throwingProvider(httpError(400, `bad key ${key}`)),
+      { model: 'm', apiKey: key },
+    )
+    expect(r.message ?? '').not.toContain(key)
+    expect(r.message ?? '').toContain('***')
+  })
+
+  it('measures latency from the injected clock', async () => {
+    let t = 500
+    const r = await probeProvider(okProvider(), { model: 'm', now: () => (t += 40) })
+    expect(r.latencyMs).toBe(40)
   })
 })

@@ -33,6 +33,12 @@ import {
 import { PersonalGrowthAgent } from './agents/personal-growth-agent.js'
 import type { RoutingHealthRecorder } from './routing-health.js'
 import {
+  probeProvider,
+  defaultModelFor,
+  normalizeProvider,
+  type LlmKeyTestResult,
+} from './llm-key-test.js'
+import {
   DEFAULT_PRICING,
   estimateCostMicros,
   resolveModelPrice,
@@ -247,6 +253,22 @@ export type ButlerFactory = (base: LlmAgentOptions, mcp?: ButlerMcpHandoff) => P
  * pass through free. Quota exceeded → preCallHook throws → LlmAgent
  * fails the task with `quota_exceeded`.
  */
+/**
+ * MR-M5 — one candidate's verdict from {@link LocalAgentPool.probeRoutingCandidates}.
+ * Extends the shared key-test {@link LlmKeyTestResult} (ok / model / latencyMs /
+ * code / message) with which candidate produced it. The code vocabulary is the
+ * one the admin UI already localizes (describeKeyTest), so the panel renders each
+ * row for free.
+ */
+export interface RoutingCandidateProbe extends LlmKeyTestResult {
+  /** 0 = the primary provider; ≥1 = a declared fallback, in order. */
+  index: number
+  /** Readable routing label — the same string routing events / health rows use. */
+  label: string
+  /** The provider kind (anthropic / openai / openai-compatible / mock). */
+  provider: ManagedAgentSpec['provider']
+}
+
 export class LocalAgentPool implements ManagedAgentLifecycle {
   private readonly hub: Hub
   private readonly space: Space
@@ -1397,6 +1419,94 @@ export class LocalAgentPool implements ManagedAgentLifecycle {
         ? { onEvent: (ev: RoutingEvent) => this.routingHealth!.record(agentId, ev) }
         : {}),
     })
+  }
+
+  /**
+   * MR-M5 — manual "test routing" diagnostic: probe EACH candidate (primary +
+   * every declared fallback) INDEPENDENTLY, so an operator who configured a
+   * fallback chain can confirm every link works — not just "some candidate is
+   * alive" (quick-chat / the passive MR-M3 health tracker show that, but never
+   * touch a fallback while the primary is healthy).
+   *
+   * Each candidate resolves its key + builds its provider through the SAME spawn
+   * chain (resolveApiKey → providerFactory), then gets ONE minimal ping via the
+   * shared {@link probeProvider} core — so a pass means that candidate's real
+   * call path works, no divergent probe. Verdict `code`s match the vocabulary
+   * the admin UI already localizes.
+   *
+   * DELIBERATELY does NOT feed the RoutingHealthTracker / circuit breaker: this
+   * is operator-triggered, not real traffic; a probe failure must never trip a
+   * breaker that would then skip the candidate for real requests. Isolated.
+   *
+   * Never throws — corrupt agents.json / unknown id / unmanaged row → []; an
+   * unbuildable candidate → an honest verdict row. Serial by design: N is tiny
+   * (a chain is a handful of candidates) and serial keeps provider load minimal.
+   */
+  async probeRoutingCandidates(agentId: ParticipantId): Promise<RoutingCandidateProbe[]> {
+    let rows: readonly AgentRecord[]
+    try {
+      rows = await this.space.agents()
+    } catch {
+      return [] // corrupt agents.json — never crash the caller
+    }
+    const row = rows.find((r) => r.id === agentId)
+    if (!row?.managed) return []
+    const spec = row.managed
+    const probes: RoutingCandidateProbe[] = []
+    // Candidate 0 = the primary — its own spec, its own key.
+    probes.push(await this.probeOneCandidate(agentId, spec, 0, routingLabel(spec)))
+    // Candidates 1..N = declared fallbacks, in order. Mirror buildRoutedProvider's
+    // minimal fallback spec (buildProvider reads only provider/baseURL/label/model).
+    const fallbacks = spec.fallbacks ?? []
+    for (let i = 0; i < fallbacks.length; i++) {
+      const fb = fallbacks[i]!
+      const fbSpec: ManagedAgentSpec = {
+        kind: spec.kind,
+        system: spec.system,
+        provider: fb.provider,
+        ...(fb.model !== undefined ? { model: fb.model } : {}),
+        ...(fb.baseURL !== undefined ? { baseURL: fb.baseURL } : {}),
+        ...(fb.providerLabel !== undefined ? { providerLabel: fb.providerLabel } : {}),
+      }
+      probes.push(await this.probeOneCandidate(agentId, fbSpec, i + 1, routingLabel(fbSpec)))
+    }
+    return probes
+  }
+
+  /** Probe ONE candidate: resolve key → build provider → ping. Never throws. */
+  private async probeOneCandidate(
+    agentId: ParticipantId,
+    spec: ManagedAgentSpec,
+    index: number,
+    label: string,
+  ): Promise<RoutingCandidateProbe> {
+    const base = { index, label, provider: spec.provider }
+    // mock is always "alive" — no key, no network; report ok without a call.
+    if (spec.provider === 'mock') {
+      return { ...base, ok: true, model: spec.model ?? 'mock', latencyMs: 0 }
+    }
+    let key: string | undefined
+    try {
+      key = (await this.resolveApiKey(agentId, spec.provider))?.apiKey
+    } catch {
+      key = undefined // a key source threw (vault locked, …) → treat as no key
+    }
+    let provider: LlmProvider
+    try {
+      provider = this.providerFactory(spec, key, this.artifactResolver)
+    } catch (err) {
+      // Unbuildable — the SAME misconfig that sinks a spawn (no key / no baseURL).
+      // Report an honest verdict rather than throw: a missing baseURL reads as
+      // bad_request, everything else (no key) as invalid_key.
+      const msg = err instanceof Error ? err.message : String(err)
+      const code: LlmKeyTestResult['code'] = /baseURL/i.test(msg) ? 'bad_request' : 'invalid_key'
+      return { ...base, ok: false, model: spec.model ?? '', latencyMs: 0, code, message: msg.slice(0, 300) }
+    }
+    const model =
+      (spec.model && spec.model.trim()) ||
+      defaultModelFor(normalizeProvider(spec.provider), spec.baseURL)
+    const verdict = await probeProvider(provider, { model, ...(key ? { apiKey: key } : {}) })
+    return { ...base, ...verdict }
   }
 
   /**

@@ -71,7 +71,7 @@ const DEFAULT_TIMEOUT_MS = 15_000
 
 type NormalizedProvider = 'anthropic' | 'openai' | 'openai-compatible'
 
-function normalizeProvider(p: string): NormalizedProvider {
+export function normalizeProvider(p: string): NormalizedProvider {
   const v = (p || '').trim().toLowerCase()
   if (v === 'anthropic') return 'anthropic'
   if (v === 'openai') return 'openai'
@@ -87,7 +87,7 @@ function normalizeProvider(p: string): NormalizedProvider {
  * we fall back to a common small id and let a 404 honestly report "model not
  * found" if the endpoint disagrees.
  */
-function defaultModelFor(provider: NormalizedProvider, baseURL?: string): string {
+export function defaultModelFor(provider: NormalizedProvider, baseURL?: string): string {
   switch (provider) {
     case 'anthropic':
       return 'claude-haiku-4-5-20251001'
@@ -184,26 +184,26 @@ function classifyKeyError(
 }
 
 /**
- * Probe a provider+key with one minimal streamed request. Resolves to a
- * verdict; never throws (all errors are classified into the result).
+ * Probe an ALREADY-CONSTRUCTED provider with one minimal streamed request.
+ * Resolves to a verdict; never throws (all errors are classified into the
+ * result). This is the shared probe core: {@link testLlmKey} builds a provider
+ * from a TYPED key and calls this; the host's per-candidate routing probe
+ * (`LocalAgentPool.probeRoutingCandidates`, MR-M5) builds each candidate through
+ * the SAME spawn chain (resolveApiKey → providerFactory) and calls this — so a
+ * "pass" here means the real call path for that candidate works, with no
+ * separate divergent probe.
+ *
+ * `apiKey` is used ONLY to scrub the key out of any error message (defense in
+ * depth; vendor SDK errors don't embed it). Pass '' when there's no key to hide.
  */
-export async function testLlmKey(
-  input: LlmKeyTestInput,
-  opts: LlmKeyTestOptions = {},
+export async function probeProvider(
+  provider: LlmProvider,
+  opts: { model: string; apiKey?: string; now?: () => number; timeoutMs?: number },
 ): Promise<LlmKeyTestResult> {
   const now = opts.now ?? (() => Date.now())
-  const make = opts.buildProvider ?? buildProvider
   const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS
-
-  const apiKey = (input.apiKey || '').trim()
-  if (apiKey.length === 0) {
-    return { ok: false, model: '', latencyMs: 0, code: 'invalid_key', message: 'apiKey is empty' }
-  }
-
-  const provider = make({ ...input, apiKey })
-  const model =
-    (input.model && input.model.trim()) ||
-    defaultModelFor(normalizeProvider(input.provider), input.baseURL)
+  const { model } = opts
+  const apiKey = opts.apiKey ?? ''
 
   const started = now()
   const ctrl = new AbortController()
@@ -225,6 +225,31 @@ export async function testLlmKey(
   } finally {
     clearTimeout(timer)
   }
+}
+
+/**
+ * Probe a provider+key with one minimal streamed request. Resolves to a
+ * verdict; never throws (all errors are classified into the result).
+ */
+export async function testLlmKey(
+  input: LlmKeyTestInput,
+  opts: LlmKeyTestOptions = {},
+): Promise<LlmKeyTestResult> {
+  const now = opts.now ?? (() => Date.now())
+  const make = opts.buildProvider ?? buildProvider
+  const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS
+
+  const apiKey = (input.apiKey || '').trim()
+  if (apiKey.length === 0) {
+    return { ok: false, model: '', latencyMs: 0, code: 'invalid_key', message: 'apiKey is empty' }
+  }
+
+  const provider = make({ ...input, apiKey })
+  const model =
+    (input.model && input.model.trim()) ||
+    defaultModelFor(normalizeProvider(input.provider), input.baseURL)
+
+  return probeProvider(provider, { model, apiKey, now, timeoutMs })
 }
 
 /**

@@ -187,4 +187,58 @@ describe('LocalAgentPool — buildRoutedProvider (MR-M2 model routing)', () => {
     expect(rows).toHaveLength(1)
     expect(rows[0]).toMatchObject({ agentId: 'watched', index: 0, state: 'degraded' })
   })
+
+  // MR-M5 — the manual "test routing" diagnostic. Unlike a dispatch (which stops
+  // at the first healthy candidate), this probes EVERY candidate independently,
+  // so an operator learns whether each declared fallback actually works. Uses
+  // `openai-compatible` candidates (not `mock`, which short-circuits to ok) so
+  // the boom-model factory can produce a genuinely-failing candidate.
+  it('MR-M5 — probeRoutingCandidates verifies EACH candidate independently', async () => {
+    await space.upsertAgent({
+      id: 'probed',
+      allowedCapabilities: ['echo'],
+      createdAt: new Date().toISOString(),
+      managed: {
+        kind: 'llm',
+        provider: 'openai-compatible',
+        system: 'hi',
+        model: 'boom-primary',
+        baseURL: 'https://primary.test/v1',
+        fallbacks: [
+          { provider: 'openai-compatible', model: 'backup-model', baseURL: 'https://backup.test/v1' },
+        ],
+      },
+    } satisfies AgentRecord)
+    const pool = makePool()
+
+    const probes = await pool.probeRoutingCandidates('probed')
+    expect(probes).toHaveLength(2)
+    // Primary (index 0) threw before the first chunk → an honest not-ok verdict.
+    expect(probes[0]).toMatchObject({ index: 0, ok: false })
+    // Fallback (index 1) streamed → ok, with the model it tested echoed back.
+    expect(probes[1]).toMatchObject({ index: 1, ok: true, model: 'backup-model' })
+    // Both candidates built through the SAME providerFactory, primary-first —
+    // the exact spawn chain, so a pass proves the real call path.
+    expect(factoryModels).toEqual(['boom-primary', 'backup-model'])
+  })
+
+  it('MR-M5 — a mock candidate reports ok without calling the provider factory', async () => {
+    await space.upsertAgent({
+      id: 'mockprobe',
+      allowedCapabilities: ['echo'],
+      createdAt: new Date().toISOString(),
+      managed: { kind: 'llm', provider: 'mock', system: 'hi' },
+    } satisfies AgentRecord)
+    const pool = makePool()
+
+    const probes = await pool.probeRoutingCandidates('mockprobe')
+    expect(probes).toHaveLength(1)
+    expect(probes[0]).toMatchObject({ index: 0, provider: 'mock', ok: true })
+    expect(factoryModels).toEqual([]) // mock short-circuits — no provider call, no cost
+  })
+
+  it('MR-M5 — unknown agent id yields an empty probe list (never throws)', async () => {
+    const pool = makePool()
+    expect(await pool.probeRoutingCandidates('does-not-exist')).toEqual([])
+  })
 })
