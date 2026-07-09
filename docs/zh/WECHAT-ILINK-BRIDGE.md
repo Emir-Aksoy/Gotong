@@ -4,9 +4,11 @@
 > 「先 A 后 B」。华人个人用户的默认 IM 是微信；方向 B（家庭 hub）的目标家庭也都在微信上——
 > A 是 B 的前置渠道。
 >
-> 状态：**WX-M0 侦察完（本文档）** · M1 协议纯核 → M2 桥接入 → M3 真机验证 待做
+> 状态：**M0 侦察 ✅ · M1 协议纯核 ✅（`26e15b7`）· M2 桥 + host 装配 + CLI ✅**
+> （M2a `6820885` 桥纯核 · M2b `1b5aab0` host 装配 · M2c CLI `wechat-login`）
+> · **M3 真机验证 待做**（需用户微信号；止损线见 §六）
 >
-> Last updated: 2026-07-09（侦察当日核实）
+> Last updated: 2026-07-09（侦察当日核实；M1/M2 同日落地）
 
 ---
 
@@ -145,15 +147,19 @@ WebFetch 但 gh 可用）；独立拆解 `x1ah/wechat-ilink-demo`（单文件 bo
 `fetchImpl` 注入 / `message.ts` 纯解析 / `bridge.ts` implements ImBridge / `types.ts`
 wire 类型），仅依赖 `@gotong/im-adapter`。
 
-**凭证心智**（与 Telegram「BotFather 拿 token」对齐）：扫码流产出 `bot_token` + `baseurl`
-→ 存 env（`GOTONG_WECHAT_BOT_TOKEN` + 可选 `GOTONG_WECHAT_BASE_URL`）或 vault
-（`kind='im_bridge'`, platform='wechat'，加入向导可热启的 vault-capable 集合）。
+**凭证心智**（与 Telegram「BotFather 拿 token」对齐，M2 落地形态）：`gotong wechat-login`
+扫码产出 `bot_token` + `baseurl`，stdout 打成 env 两行（`GOTONG_WECHAT_BOT_TOKEN` +
+可选 `GOTONG_WECHAT_BASE_URL`）——**env 是当前文档正道**。host 侧 `resolveImCreds` 同时
+支持 vault（`kind='im_bridge'`, `metadata.platform='wechat'`，secret=token、
+`metadata.baseUrl` 非密随行，env 赢、绝不混源）；但 vault 行今天没有写入方——CLI 刻意
+无状态（不复制 host 的 master-key 解析），web 向导白名单仍 telegram|lark（无扫码表单），
+vault 读取路径是给将来面板扫码卡的前向兼容。
 
 | 里程碑 | 内容 | 交付门 |
 |---|---|---|
 | **WX-M0 侦察 + 计划** ✅ | 本文档（协议面/海外可用性/条款/生态坑全核） | 计划落盘 + 无停做岔口 |
-| **WX-M1 协议纯核**（~1 天） | `client.ts`（登录二维码/轮询状态/getupdates 长轮询/sendmessage/getconfig，强制查 `ret`，`X-WECHAT-UIN` 随机头，`base_info` 注入）+ `message.ts`（iLink msg → `ImMessage`，`message_type:2` 回显过滤，`context_token` 提取）+ wire fixture 单测**零真实凭证**；实现前 `gh api` 逐字核官方 `src/api/{types,api,session-guard}.ts` | 单测全绿；fixture 对齐官方源码字段 |
-| **WX-M2 桥 + host 装配**（~1-1.5 天） | `bridge.ts`（长轮询循环 start/stop 幂等、per-用户 `context_token` 台账[内存+TTL]、被动回复姿态、`ret=-14` 60min 冷却）+ host `im-bridge.ts` factory 块 + vault-capable 注册 + `PLATFORM_NAMES` 加 `wechat: '微信 (WeChat)'`（A4 渠道感知自动覆盖）+ env-registry 登记 + CLI `gotong wechat-login`（终端打二维码→轮询→打印 token 指路 env/vault） | host 全绿；未配=字节不变；四门 PASS |
+| **WX-M1 协议纯核** ✅（`26e15b7`+`2ed938d`） | `client.ts`（登录二维码/轮询状态/getupdates 长轮询/sendmessage/getconfig/notifystart·stop，强制查 `ret`[官方 #197 静默失败的反面]，`X-WECHAT-UIN` 随机头，`base_info` 注入，外部 abort 折叠成空页）+ `message.ts`（iLink msg → `ImMessage`，`message_type:2` 回显过滤承重，GENERATING 帧丢弃，语音走服务端转写，媒体=诚实无字节 stub）+ `types.ts` 官方逐字字段名；实现前 `gh api` 逐字核官方 5 文件，纠社区讹传 3 处（qrcode 是 POST / `-14` 在 `errcode` 不在 `ret` / `iLink-App-Id: "bot"` 是公开常量） | ✅ 21 单测全绿零真实凭证；fixture 对齐官方源码字段 |
+| **WX-M2 桥 + host 装配 + CLI** ✅（M2a `6820885` / M2b `1b5aab0` / M2c） | **M2a** `bridge.ts`：长轮询循环镜像 TelegramBridge + 四个 iLink 差异（字符串游标 `get_updates_buf`；per-peer `context_token` 台账——**改为容量逐出无本地 TTL**，token 新旧由服务器裁决、发失败走 outbox 补投，比计划的「内存+TTL」更诚实；被动回复无台账=诚实抛错；`errcode=-14` 60min 冷却仅报一次自愈恢复；stop() abort 在飞长轮询不等 35s）10 单测。**M2b** host：`ImVaultPlatform` 扩 `wechat`（env 先行 `GOTONG_WECHAT_BOT_TOKEN`+可选 `_BASE_URL`，vault 行 secret=token/metadata.baseUrl 非密随行，绝不混源）+ factory 块 + `PLATFORM_NAMES` 加微信（A4 渠道感知自动覆盖）+ 旋钮 107→109 登记；web 向导白名单仍 telegram\|lark 不外泄。**M2c** CLI `gotong wechat-login`：官方状态机全镜像（IDC redirect 换轮询主机/配对数字 stdin 输错重问/过期与输错封锁刷码上限 3/binded_redirect 指路解绑），stdout 只打 env 两行可 `>> host.env`，二维码+引导走 stderr，qrcode-terminal 渲染 + 链接兜底；**刻意无状态**：CLI 不写 vault（无 master-key 解析面，复制会漂移），env 是文档正道，M2b 的 vault 读取为将来面板扫码卡前向兼容；15 单测 | ✅ im-wechat 31 / host 2022 / cli 269 全绿；未配=字节不变；四门 PASS（旋钮 109） |
 | **WX-M3 真机验证 + runbook**（~1 天，**需要你的微信号**） | 真机 round-trip（扫码→绑定→管家对话→审批 park 回推）；**马来西亚国际版号可用性最终答案**；GO-LIVE 加节 + FEDERATION/IM 文档指针；CLAUDE.md 账本收口 | 真机收发成功（或诚实记录灰度未放开+国内号验证） |
 
 ## 五、显式推迟（不做的说清楚）
@@ -163,7 +169,9 @@ wire 类型），仅依赖 `@gotong/im-adapter`。
   等文本链路稳了按需加。
 - **群聊**——官方能力元数据都未声明支持，不预造。
 - **面板扫码卡**——CLI `wechat-login` 先行（镜像 DEPLOY 向导「粘 token」心智）；面板内
-  嵌二维码需要 web 新出站面，等真需求。
+  嵌二维码需要 web 新出站面，等真需求。**wechat vault 行的写入方也归它**：M2b 的
+  vault 读取已就位，面板卡落地时「扫码→写 vault→hot-start」一条龙即可接上（hot-start
+  缝对 wechat 已免费覆盖）。
 - **typing 指示器**（`sendtyping`）与**主动消息条数配额探测**——加分项，后置。
 - **多账号**（官方插件支持多号在线）——Gotong 一桥一平台惯例，一个 hub 一个微信号，
   多号=多 hub（主权模型本来的答案）。
