@@ -96,6 +96,28 @@ describe('RoutingProvider — 基本透传 + 构造', () => {
   it('空候选 → 构造即抛', () => {
     expect(() => new RoutingProvider({ candidates: [] })).toThrow(/at least one/i)
   })
+
+  it('每个候选用自己的 model 覆盖 req.model(含降级后)', async () => {
+    const seen: Array<string | undefined> = []
+    const rec = (name: string, o: Outcome): LlmProvider => ({
+      name,
+      stream(req: LlmRequest): AsyncIterable<LlmStreamChunk> {
+        seen.push(req.model)
+        if (o.kind === 'throwSync') throw new Error(`${name}-x`)
+        return (async function* () {
+          if (o.kind === 'chunks') for (const c of o.chunks) yield c
+        })()
+      },
+    })
+    const rp = new RoutingProvider({
+      candidates: [
+        { provider: rec('A', { kind: 'throwSync' }), model: 'model-A' },
+        { provider: rec('B', { kind: 'chunks', chunks: okChunks('ok') }), model: 'model-B' },
+      ],
+    })
+    await collect(rp.stream({ messages: [], model: 'orig' }))
+    expect(seen).toEqual(['model-A', 'model-B']) // 各自覆盖,不透传 'orig'
+  })
 })
 
 describe('RoutingProvider — failover(首 chunk 前)', () => {

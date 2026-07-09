@@ -1021,6 +1021,7 @@
       ma._editingMcpServers = mode === "edit" && Array.isArray(agent?.managed?.useMcpServers) ? [...agent.managed.useMcpServers] : [];
       loadMcpOptIn(ma._editingMcpServers).catch(() => {
       });
+      ma._editingFallbacks = mode === "edit" && Array.isArray(agent?.managed?.fallbacks) ? agent.managed.fallbacks : null;
       if (dom.maForm) dom.maForm.hidden = false;
       if (dom.maQuickchat) dom.maQuickchat.hidden = true;
       ma._quickChatAgentId = null;
@@ -1183,6 +1184,9 @@
         ).map((c) => c.value);
       } else if (Array.isArray(ma._editingMcpServers) && ma._editingMcpServers.length > 0) {
         body.useMcpServers = ma._editingMcpServers;
+      }
+      if (Array.isArray(ma._editingFallbacks) && ma._editingFallbacks.length > 0) {
+        body.fallbacks = ma._editingFallbacks;
       }
       if (dom.maHeartbeatEnabled?.checked) {
         const minutes = Math.max(1, Math.round(Number(dom.maHeartbeatInterval?.value.trim()) || 30));

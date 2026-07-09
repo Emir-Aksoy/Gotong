@@ -1,6 +1,7 @@
 import {
   createLogger,
   type AgentRecord,
+  type FallbackCandidate,
   type Hub,
   type ManagedAgentLifecycle,
   type ManagedAgentSpec,
@@ -18,6 +19,7 @@ import {
   DispatchToolset,
   LlmAgent,
   MockLlmProvider,
+  RoutingProvider,
   readMultimodalInlineCapFromEnv,
   type LlmAgentOptions,
   type LlmAgentToolset,
@@ -25,6 +27,7 @@ import {
   type LlmProvider,
   type LlmUsage,
   type LlmUsageSinkMeta,
+  type RoutingCandidate,
 } from '@gotong/llm'
 import { PersonalGrowthAgent } from './agents/personal-growth-agent.js'
 import {
@@ -771,7 +774,14 @@ export class LocalAgentPool implements ManagedAgentLifecycle {
 
     const resolution = await this.resolveApiKey(record.id, record.managed.provider)
     const apiKey = resolution?.apiKey
-    const provider = this.providerFactory(record.managed, apiKey, this.artifactResolver)
+    // MR-M2 — routes through RoutingProvider when the row declares `fallbacks`;
+    // otherwise byte-identical to `providerFactory(record.managed, apiKey, …)`.
+    const provider = await this.buildRoutedProvider(
+      record.managed,
+      apiKey,
+      record.id,
+      this.artifactResolver,
+    )
 
     // If the manifest declared `mcpServers:`, spawn the toolset NOW
     // (before constructing LlmAgent) so the connect()'s child-process
@@ -1296,6 +1306,78 @@ export class LocalAgentPool implements ManagedAgentLifecycle {
   }
 
   /**
+   * MR-M2 — build the effective provider for an agent. No `fallbacks` declared →
+   * exactly today's single provider (byte-identical). Declared → the primary plus
+   * each buildable fallback wrapped in a deterministic {@link RoutingProvider}.
+   *
+   * Contracts preserved:
+   *  - The PRIMARY still builds via {@link providerFactory} and throws loudly on
+   *    misconfig (no key / no baseURL) — routing never masks a broken primary at
+   *    construction time.
+   *  - Each FALLBACK is best-effort: an unbuildable one (missing key / baseURL) is
+   *    skipped with a warn, never sinks the agent. Its key resolves through the SAME
+   *    {@link resolveApiKey} chain, keyed on the candidate's own provider.
+   *  - Only ≥2 buildable candidates get a RoutingProvider; a lone survivor returns
+   *    the single provider (still byte-identical to today).
+   * Runtime failover (the RoutingProvider) only kicks in on a pre-first-chunk
+   * failure; see docs/zh/MODEL-ROUTING.md.
+   */
+  private async buildRoutedProvider(
+    spec: ManagedAgentSpec,
+    primaryKey: string | undefined,
+    agentId: ParticipantId,
+    artifactResolver?: LlmArtifactResolver,
+  ): Promise<LlmProvider> {
+    if (!spec.fallbacks || spec.fallbacks.length === 0) {
+      return this.providerFactory(spec, primaryKey, artifactResolver)
+    }
+    // Primary first — a misconfigured primary still throws loudly (today's contract).
+    // The primary candidate carries NO model override so per-task model overrides +
+    // the agent's default (= spec.model) pass through untouched.
+    const primary = this.providerFactory(spec, primaryKey, artifactResolver)
+    const candidates: RoutingCandidate[] = [{ provider: primary, label: routingLabel(spec) }]
+    for (const fb of spec.fallbacks) {
+      let key: string | undefined
+      try {
+        key = (await this.resolveApiKey(agentId, fb.provider))?.apiKey
+      } catch {
+        key = undefined // a key source threw (vault locked, …) → treat as no key
+      }
+      // buildProvider only reads provider / baseURL / providerLabel, so a minimal
+      // spec suffices (kind + system satisfy the type but are ignored here).
+      const fbSpec: ManagedAgentSpec = {
+        kind: spec.kind,
+        system: spec.system,
+        provider: fb.provider,
+        ...(fb.model !== undefined ? { model: fb.model } : {}),
+        ...(fb.baseURL !== undefined ? { baseURL: fb.baseURL } : {}),
+        ...(fb.providerLabel !== undefined ? { providerLabel: fb.providerLabel } : {}),
+      }
+      try {
+        candidates.push({
+          provider: this.providerFactory(fbSpec, key, artifactResolver),
+          label: routingLabel(fbSpec),
+          ...(fb.model ? { model: fb.model } : {}),
+        })
+      } catch (err) {
+        // One unbuildable fallback must not sink the agent — skip it; the primary
+        // and any other fallbacks still route.
+        log.warn('routing: skipping unbuildable fallback', {
+          agent: agentId,
+          provider: fb.provider,
+          err: err instanceof Error ? err.message : String(err),
+        })
+      }
+    }
+    if (candidates.length < 2) return primary // every fallback failed to build
+    return new RoutingProvider({
+      candidates,
+      // Adapt the host logger (message-first) to RoutingLogger (meta-first).
+      logger: { warn: (meta, msg) => log.warn(msg, meta) },
+    })
+  }
+
+  /**
    * ease-of-use ③-M1 — advisory probe used by the template-import post-install
    * checklist (web `LlmKeyProbe`). Answers "does this agent already have a
    * resolvable LLM key?" so the gallery can tell the importer which freshly-
@@ -1350,7 +1432,8 @@ export class LocalAgentPool implements ManagedAgentLifecycle {
     // mock needs no key; every real provider must resolve one (spawn's rule).
     if (row.managed.provider !== 'mock' && !resolution?.apiKey) return null
     try {
-      return this.providerFactory(row.managed, resolution?.apiKey, this.artifactResolver)
+      // MR-M2 — same routing as spawn: single provider unless `fallbacks` declared.
+      return await this.buildRoutedProvider(row.managed, resolution?.apiKey, row.id, this.artifactResolver)
     } catch {
       // buildProvider throws on a misconfigured row (openai-compatible with no
       // baseURL, etc.) — that fault already surfaces at spawn; the sweep just
@@ -1853,6 +1936,27 @@ function buildProvider(
       const exhaustive: never = spec.provider
       throw new Error(`unknown provider: ${exhaustive as string}`)
     }
+  }
+}
+
+/**
+ * MR-M2 — a readable, mostly-unique label for a routing candidate (surfaced in
+ * routing events / health). `openai-compatible` has no fixed vendor name, so fall
+ * back to the label → baseURL host → generic; append the model id when present.
+ */
+function routingLabel(spec: ManagedAgentSpec): string {
+  const base =
+    spec.provider === 'openai-compatible'
+      ? spec.providerLabel?.trim() || (spec.baseURL ? safeHost(spec.baseURL) : 'openai-compatible')
+      : spec.providerLabel?.trim() || spec.provider
+  return spec.model ? `${base}:${spec.model}` : base
+}
+
+function safeHost(url: string): string {
+  try {
+    return new URL(url).host
+  } catch {
+    return 'openai-compatible'
   }
 }
 

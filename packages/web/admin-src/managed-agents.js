@@ -359,6 +359,14 @@ export function createManagedAgents({ ma, openBundleImportModal }) {
       ? [...agent.managed.useMcpServers]
       : []
     loadMcpOptIn(ma._editingMcpServers).catch(() => {})
+    // MR-M2 — capture the agent's fallback chain (deterministic model routing)
+    // as the edit baseline. This form has no structured fallbacks editor yet
+    // (author them via manifest export → edit YAML → re-import); but a PUT
+    // replaces `managed` wholesale, so we MUST echo the captured chain on save
+    // or a plain edit would silently drop it. Same discipline as useMcpServers.
+    ma._editingFallbacks = (mode === 'edit' && Array.isArray(agent?.managed?.fallbacks))
+      ? agent.managed.fallbacks
+      : null
     // ease-of-use ②TC — always open on the form, never a stale quick-chat
     // panel left over from a prior create (closeAgentForm also resets, but be
     // defensive so the entry point is self-sufficient).
@@ -565,6 +573,12 @@ export function createManagedAgents({ ma, openBundleImportModal }) {
       ).map((c) => c.value)
     } else if (Array.isArray(ma._editingMcpServers) && ma._editingMcpServers.length > 0) {
       body.useMcpServers = ma._editingMcpServers
+    }
+    // MR-M2 — echo the captured fallback chain so a structured-form edit (which
+    // has no fallbacks widget) doesn't wipe an agent's model routing. Omitted
+    // entirely when the agent has none (unset stays unset = byte-stable).
+    if (Array.isArray(ma._editingFallbacks) && ma._editingFallbacks.length > 0) {
+      body.fallbacks = ma._editingFallbacks
     }
     // v5 D-M4 — heartbeat. Checked → persist { enabled, intervalMs (from the
     // minutes input), checklist? }. Unchecked → omit so a PUT (which replaces

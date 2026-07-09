@@ -15,6 +15,7 @@ export type {
   AdminRecord,
   AgentRecord,
   ManagedAgentSpec,
+  FallbackCandidate,
   ManagedAgentLifecycle,
   McpServerSpec,
   McpStdioServerSpec,

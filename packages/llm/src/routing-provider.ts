@@ -40,6 +40,12 @@ export interface RoutingCandidate {
   provider: LlmProvider
   /** 稳定标签;缺省用 `provider.name`。两个同名 provider 用它区分。 */
   label?: string
+  /**
+   * 该候选的模型 id。设了就覆盖 `req.model` —— 不同 vendor 认不同模型名
+   * (主 anthropic `claude-*` 降级到 deepseek 就得换成 `deepseek-chat`),
+   * 而模型 id 本是 agent 按主 provider 设的。不设 = 用 provider 自己的默认。
+   */
+  model?: string
 }
 
 /** 熔断参数。全常量,不是 env 旋钮。 */
@@ -176,13 +182,16 @@ export class RoutingProvider implements LlmProvider {
     let lastKind: LlmErrorKind = 'unknown'
     for (let i = 0; i < this.candidates.length; i++) {
       if (!this.available(i, this.clock())) continue
+      const cand = this.candidates[i]!
       const label = this.labelOf(i)
+      // 每个候选用自己的模型 id(不同 vendor 认不同模型名);不设则透传原 req。
+      const creq = cand.model ? { ...req, model: cand.model } : req
       let iterator: AsyncIterator<LlmStreamChunk>
       let first: IteratorResult<LlmStreamChunk>
       try {
         // 两种硬失败都在此逮住:stream() 同步抛(参数校验)、首次 next() 抛(generator
         // 体抛)—— 都在产出任何 chunk 之前,可安全换下一候选。
-        iterator = this.candidates[i]!.provider.stream(req, signal)[Symbol.asyncIterator]()
+        iterator = cand.provider.stream(creq, signal)[Symbol.asyncIterator]()
         first = await iterator.next()
       } catch (err) {
         if (signal?.aborted) throw err // 主动取消,绝不 failover

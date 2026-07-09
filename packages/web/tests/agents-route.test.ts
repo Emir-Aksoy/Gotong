@@ -128,6 +128,80 @@ describe('agents-route: useMcpServers (#2-M4a)', () => {
   })
 })
 
+describe('agents-route: fallbacks (MR-M2 model routing)', () => {
+  let b: Boot
+  beforeEach(async () => { b = await boot() })
+  afterEach(async () => { await teardown(b) })
+
+  const chain = [
+    { provider: 'openai', model: 'gpt-5' },
+    { provider: 'openai-compatible', baseURL: 'https://api.deepseek.com/v1', model: 'deepseek-chat' },
+  ]
+
+  it('POST persists a fallback chain into managed', async () => {
+    const res = await fetch(`${b.baseUrl}/api/admin/agents`, {
+      method: 'POST',
+      headers: auth(b.token),
+      body: JSON.stringify({ ...base, id: 'routed', fallbacks: chain }),
+    })
+    expect(res.status).toBe(200)
+    const body = await res.json()
+    expect(body.agent.managed.fallbacks).toEqual(chain)
+    const rec = (await b.space.agents()).find((a) => a.id === 'routed')
+    expect(rec?.managed.fallbacks).toEqual(chain)
+  })
+
+  it('omitting fallbacks leaves it undefined (opt-in byte-stable)', async () => {
+    const res = await fetch(`${b.baseUrl}/api/admin/agents`, {
+      method: 'POST',
+      headers: auth(b.token),
+      body: JSON.stringify({ ...base, id: 'plain' }),
+    })
+    expect(res.status).toBe(200)
+    const rec = (await b.space.agents()).find((a) => a.id === 'plain')
+    expect(rec?.managed.fallbacks).toBeUndefined()
+  })
+
+  it('an openai-compatible fallback with no baseURL → 400, nothing persisted', async () => {
+    const res = await fetch(`${b.baseUrl}/api/admin/agents`, {
+      method: 'POST',
+      headers: auth(b.token),
+      body: JSON.stringify({
+        ...base,
+        id: 'bad-fb',
+        fallbacks: [{ provider: 'openai-compatible', model: 'x' }],
+      }),
+    })
+    expect(res.status).toBe(400)
+    expect((await b.space.agents()).some((a) => a.id === 'bad-fb')).toBe(false)
+  })
+
+  it('PUT carrying the chain preserves it; omitting it drops it (wholesale replace)', async () => {
+    await fetch(`${b.baseUrl}/api/admin/agents`, {
+      method: 'POST',
+      headers: auth(b.token),
+      body: JSON.stringify({ ...base, id: 'edited', fallbacks: chain }),
+    })
+    // A PUT that echoes the chain keeps it (mirrors the admin form's capture-echo).
+    const keep = await fetch(`${b.baseUrl}/api/admin/agents/edited`, {
+      method: 'PUT',
+      headers: auth(b.token),
+      body: JSON.stringify({ ...base, id: 'edited', fallbacks: chain }),
+    })
+    expect(keep.status).toBe(200)
+    expect((await b.space.agents()).find((a) => a.id === 'edited')?.managed.fallbacks).toEqual(chain)
+    // A PUT that omits it drops it — documents the wholesale-replace contract the
+    // admin form's echo defends against.
+    const drop = await fetch(`${b.baseUrl}/api/admin/agents/edited`, {
+      method: 'PUT',
+      headers: auth(b.token),
+      body: JSON.stringify({ ...base, id: 'edited' }),
+    })
+    expect(drop.status).toBe(200)
+    expect((await b.space.agents()).find((a) => a.id === 'edited')?.managed.fallbacks).toBeUndefined()
+  })
+})
+
 describe('agents-route: heartbeat (v5 D-M4)', () => {
   let b: Boot
   let reconcileCalls: number

@@ -23,6 +23,7 @@ import { readJsonBody, readTextBody, sendJson } from './http-helpers.js'
 import type {
   AdminRecord,
   AgentRecord,
+  FallbackCandidate,
   Hub,
   ManagedAgentLifecycle,
   ManagedAgentSpec,
@@ -40,6 +41,7 @@ import {
   validateUsesArray,
   validateUseMcpServersArray,
   validateHeartbeatSpec,
+  validateFallbacksArray,
   type ParsedAgent,
 } from './manifest.js'
 import { decryptJson } from './template-crypto.js'
@@ -255,6 +257,10 @@ function validateAgentBody(body: Record<string, unknown>): ParsedAgent {
     if (typeof body.providerLabel === 'string' && body.providerLabel.length > 0) {
       managed.providerLabel = body.providerLabel
     }
+  }
+  // MR-M2 — optional ordered fallback providers (opt-in model routing / failover).
+  if (body.fallbacks !== undefined) {
+    managed.fallbacks = validateFallbacksArray(body.fallbacks, 'fallbacks')
   }
   if (body.uses !== undefined) {
     managed.uses = validateUsesArray(body.uses, 'uses')

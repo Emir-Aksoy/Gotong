@@ -422,6 +422,153 @@ agent:
   })
 })
 
+// MR-M2 — agent manifests can declare an ordered `fallbacks:` chain for
+// deterministic model routing / failover. The parser validates shape only;
+// the RoutingProvider that consumes them is built at spawn time in
+// LocalAgentPool. Absent / empty = today's single-provider behaviour.
+describe('parseManifest — fallbacks: (model routing)', () => {
+  it('parses an ordered fallback chain across vendors', () => {
+    const yaml = `
+schema: gotong.agent/v1
+agent:
+  id: w
+  capabilities: [x]
+  provider: anthropic
+  system: hi
+  fallbacks:
+    - provider: openai
+      model: gpt-5
+    - provider: openai-compatible
+      baseURL: https://api.deepseek.com/v1
+      model: deepseek-chat
+      providerLabel: DeepSeek
+`
+    const m = parseManifest(yaml)
+    const fb = m.agents[0]!.managed.fallbacks
+    expect(fb).toHaveLength(2)
+    expect(fb![0]).toEqual({ provider: 'openai', model: 'gpt-5' })
+    expect(fb![1]).toEqual({
+      provider: 'openai-compatible',
+      baseURL: 'https://api.deepseek.com/v1',
+      model: 'deepseek-chat',
+      providerLabel: 'DeepSeek',
+    })
+  })
+
+  it('an agent without fallbacks parses cleanly and reports undefined', () => {
+    const yaml = `
+schema: gotong.agent/v1
+agent: { id: w, capabilities: [x], provider: mock, system: hi }
+`
+    const m = parseManifest(yaml)
+    expect(m.agents[0]!.managed.fallbacks).toBeUndefined()
+  })
+
+  it('rejects fallbacks that is not an array', () => {
+    const yaml = `
+schema: gotong.agent/v1
+agent: { id: w, capabilities: [x], provider: mock, system: hi, fallbacks: openai }
+`
+    expect(() => parseManifest(yaml)).toThrow(/fallbacks must be an array/)
+  })
+
+  it('rejects a fallback with an unknown provider', () => {
+    const yaml = `
+schema: gotong.agent/v1
+agent:
+  id: w
+  capabilities: [x]
+  provider: mock
+  system: hi
+  fallbacks:
+    - provider: gemini
+`
+    expect(() => parseManifest(yaml)).toThrow(/fallbacks\[0\]\.provider must be/)
+  })
+
+  it('rejects an openai-compatible fallback with no baseURL', () => {
+    const yaml = `
+schema: gotong.agent/v1
+agent:
+  id: w
+  capabilities: [x]
+  provider: mock
+  system: hi
+  fallbacks:
+    - provider: openai-compatible
+      model: llama3
+`
+    expect(() => parseManifest(yaml)).toThrow(/fallbacks\[0\]\.baseURL is required/)
+  })
+
+  it('rejects a baseURL on a non-compatible fallback provider', () => {
+    const yaml = `
+schema: gotong.agent/v1
+agent:
+  id: w
+  capabilities: [x]
+  provider: mock
+  system: hi
+  fallbacks:
+    - provider: anthropic
+      baseURL: https://nope.example/v1
+`
+    expect(() => parseManifest(yaml)).toThrow(/baseURL is only valid when provider is/)
+  })
+
+  it('rejects a chain longer than the cap', () => {
+    const yaml = `
+schema: gotong.agent/v1
+agent:
+  id: w
+  capabilities: [x]
+  provider: mock
+  system: hi
+  fallbacks:
+    - { provider: openai }
+    - { provider: openai }
+    - { provider: openai }
+    - { provider: openai }
+    - { provider: openai }
+    - { provider: openai }
+`
+    expect(() => parseManifest(yaml)).toThrow(/at most 5 fallback candidates/)
+  })
+
+  it('renderAgentManifest round-trips fallbacks byte-for-byte', () => {
+    const rec = {
+      id: 'router',
+      allowedCapabilities: ['x'],
+      managed: {
+        kind: 'llm' as const,
+        provider: 'anthropic' as const,
+        system: 'be brief',
+        fallbacks: [
+          { provider: 'openai' as const, model: 'gpt-5' },
+          {
+            provider: 'openai-compatible' as const,
+            baseURL: 'https://api.deepseek.com/v1',
+            model: 'deepseek-chat',
+            providerLabel: 'DeepSeek',
+          },
+        ],
+      },
+    }
+    const rendered = renderAgentManifest(rec)
+    const parsed = parseManifest(JSON.stringify(rendered))
+    expect(parsed.agents[0]!.managed.fallbacks).toEqual(rec.managed.fallbacks)
+  })
+
+  it('renderAgentManifest omits fallbacks entirely when not declared', () => {
+    const rendered = renderAgentManifest({
+      id: 'plain',
+      allowedCapabilities: ['x'],
+      managed: { kind: 'llm', provider: 'mock', system: 'hi' },
+    })
+    expect((rendered.agent as Record<string, unknown>).fallbacks).toBeUndefined()
+  })
+})
+
 // v0.3+ — agent manifests can declare third-party MCP servers under
 // `mcpServers:`. The parser validates shape (name regex, type
 // constraints) at import time; the actual spawn happens later in

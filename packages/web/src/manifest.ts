@@ -1,6 +1,7 @@
 import { parse as parseYaml } from 'yaml'
 
 import type {
+  FallbackCandidate,
   HeartbeatSpec,
   ManagedAgentSpec,
   McpServerSpec,
@@ -428,6 +429,13 @@ function validateAgent(a: Record<string, unknown>, path: string): ParsedAgent {
   if (a.heartbeat !== undefined) {
     managed.heartbeat = validateHeartbeatSpec(a.heartbeat, `${path}.heartbeat`)
   }
+  // Optional `fallbacks:` — MR-M2 deterministic model routing / failover.
+  // Shape-only here; the RoutingProvider that reads them is built at spawn
+  // time in LocalAgentPool. Carried through manifests so an exported agent's
+  // fallback chain survives export → re-import.
+  if (a.fallbacks !== undefined) {
+    managed.fallbacks = validateFallbacksArray(a.fallbacks, `${path}.fallbacks`)
+  }
   const out: ParsedAgent = { id: a.id, capabilities, managed }
   if (typeof a.displayName === 'string') out.displayName = a.displayName
   return out
@@ -677,6 +685,85 @@ export function validateHeartbeatSpec(raw: unknown, path: string): HeartbeatSpec
   return spec
 }
 
+// MR-M2 — an ordered fallback chain caps at 5 candidates. Long enough for
+// "cheap → strong" or "vendor A → B → C" escalation ladders; short enough
+// that a typo can't wire a runaway retry storm. The RoutingProvider itself
+// has no cap — the ceiling is imposed here, at the config door.
+const MAX_FALLBACKS = 5
+
+/**
+ * Validate an optional `fallbacks:` array (MR-M2 — deterministic model
+ * routing / failover). Shape-only, plugin-agnostic; the RoutingProvider
+ * that consumes these is wired at spawn time in `LocalAgentPool`.
+ *
+ * Rules enforced here:
+ *   - top-level must be an array of at most {@link MAX_FALLBACKS} entries
+ *   - each entry's `provider` ∈ the same four provider strings as the
+ *     primary spec
+ *   - `baseURL` (non-empty string) is **required** when the candidate's
+ *     provider is `openai-compatible` — same reason as the primary: it
+ *     can't be spawned without an endpoint
+ *   - `model` / `providerLabel` are optional strings
+ *
+ * Exported so the admin POST/PUT path (`agents-routes.ts`) runs the exact
+ * same checks the manifest importer does — one validator, no drift.
+ */
+export function validateFallbacksArray(raw: unknown, path: string): FallbackCandidate[] {
+  if (!Array.isArray(raw)) {
+    throw new ManifestError(`${path} must be an array`)
+  }
+  if (raw.length > MAX_FALLBACKS) {
+    throw new ManifestError(`${path} may list at most ${MAX_FALLBACKS} fallback candidates`)
+  }
+  const out: FallbackCandidate[] = []
+  for (let i = 0; i < raw.length; i++) {
+    const entry = raw[i]
+    const ep = `${path}[${i}]`
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+      throw new ManifestError(`${ep} must be an object`)
+    }
+    const e = entry as Record<string, unknown>
+    const provider = e.provider
+    if (
+      provider !== 'anthropic' &&
+      provider !== 'openai' &&
+      provider !== 'openai-compatible' &&
+      provider !== 'mock'
+    ) {
+      throw new ManifestError(
+        `${ep}.provider must be 'anthropic', 'openai', 'openai-compatible', or 'mock'`,
+      )
+    }
+    const cand: FallbackCandidate = { provider }
+    if (provider === 'openai-compatible') {
+      if (typeof e.baseURL !== 'string' || e.baseURL.length === 0) {
+        throw new ManifestError(
+          `${ep}.baseURL is required when provider is 'openai-compatible'`,
+        )
+      }
+      cand.baseURL = e.baseURL
+    } else if (e.baseURL !== undefined) {
+      // A baseURL on a non-compatible provider is meaningless — reject it
+      // loudly rather than silently carry a field the pool will ignore.
+      throw new ManifestError(`${ep}.baseURL is only valid when provider is 'openai-compatible'`)
+    }
+    if (e.model !== undefined) {
+      if (typeof e.model !== 'string' || e.model.length === 0) {
+        throw new ManifestError(`${ep}.model must be a non-empty string when present`)
+      }
+      cand.model = e.model
+    }
+    if (e.providerLabel !== undefined) {
+      if (typeof e.providerLabel !== 'string' || e.providerLabel.length === 0) {
+        throw new ManifestError(`${ep}.providerLabel must be a non-empty string when present`)
+      }
+      cand.providerLabel = e.providerLabel
+    }
+    out.push(cand)
+  }
+  return out
+}
+
 /**
  * Validate an optional `{ string: string }` map (used for both stdio
  * `env` and http/sse `headers`). Returns `undefined` when the field is
@@ -772,6 +859,17 @@ export function renderAgentManifest(rec: {
     const out: Record<string, unknown> = { enabled: hb.enabled, intervalMs: hb.intervalMs }
     if (hb.checklist !== undefined) out.checklist = hb.checklist
     agent.heartbeat = out
+  }
+  if (rec.managed.fallbacks && rec.managed.fallbacks.length > 0) {
+    // Echo the MR-M2 fallback chain so export → re-import preserves the
+    // routing config byte-for-byte. Deep-clone each candidate.
+    agent.fallbacks = rec.managed.fallbacks.map((fb) => {
+      const out: Record<string, unknown> = { provider: fb.provider }
+      if (fb.model !== undefined) out.model = fb.model
+      if (fb.baseURL !== undefined) out.baseURL = fb.baseURL
+      if (fb.providerLabel !== undefined) out.providerLabel = fb.providerLabel
+      return out
+    })
   }
   if (rec.displayName) agent.displayName = rec.displayName
   return {

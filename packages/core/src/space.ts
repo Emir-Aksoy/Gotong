@@ -1048,6 +1048,27 @@ export interface AgentRecord {
 }
 
 /**
+ * MR-M2 — 一个降级候选,用于 {@link ManagedAgentSpec.fallbacks}。
+ *
+ * 只镜像主 spec 的 **provider 选择**字段(system prompt / tools / services 是
+ * agent 级、不是 per-candidate —— 一个 fallback 只换模型端点,agent 本身不变)。
+ * 它的 API key 走和主 provider **完全相同**的解析链(per-agent → workspace →
+ * org pool → owner vault → env),按本候选的 `provider` 解析;key 绝不进本文件。
+ *
+ * 已知边界(MR-M2 显式推迟):两个不同的 `openai-compatible` vendor 若都只靠
+ * per-agent key,会共用同一把 —— 需要 per-candidate 凭证时再扩。
+ */
+export interface FallbackCandidate {
+  provider: 'anthropic' | 'openai' | 'openai-compatible' | 'mock'
+  /** 本候选的模型 id(不同 vendor 认不同模型名);缺省用 provider 默认。 */
+  model?: string
+  /** `provider === 'openai-compatible'` 时必填 —— 该 vendor 的 /v1 端点。 */
+  baseURL?: string
+  /** 可选的可读标签,呈现在路由事件 / 健康面。 */
+  providerLabel?: string
+}
+
+/**
  * Recipe for an agent the **host** will spawn in-process and keep alive.
  * The `kind` discriminator picks which agent class the loader
  * instantiates:
@@ -1118,6 +1139,15 @@ export interface ManagedAgentSpec {
    * omitted. Ignored for other provider strings.
    */
   providerLabel?: string
+  /**
+   * MR-M2 — 可选的**有序降级候选**。给了(≥1)host 就把主 provider + 这些候选
+   * 包进一个确定性 RoutingProvider:主 provider 在**吐出第一个 token 之前**失败
+   * (auth / 限流 / 网络 / 5xx)就顺次降级到下一候选,带 per-candidate 熔断。顺序
+   * 即偏好(便宜/本地打头 + 强模型兜底,或同能力跨 vendor)。缺省 / 空 = 今天的
+   * 单 provider 行为,逐字节一致 —— **这是唯一打开路由的开关**,opt-in。详见
+   * `docs/zh/MODEL-ROUTING.md`。
+   */
+  fallbacks?: FallbackCandidate[]
   /**
    * Hub Services this agent uses (v2.2 — see docs/services-rfc.md §6).
    * Empty / absent means the agent has no service handles at runtime;
