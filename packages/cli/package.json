@@ -40,8 +40,10 @@
   "dependencies": {
     "@gotong/a2a": "workspace:*",
     "@gotong/core": "workspace:*",
+    "@gotong/im-wechat": "workspace:*",
     "@gotong/protocol": "workspace:*",
     "@gotong/workflow": "workspace:*",
+    "qrcode-terminal": "^0.12.0",
     "tar": "^7.4.3",
     "ws": "^8.20.1"
   },

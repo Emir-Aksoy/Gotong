@@ -33,6 +33,7 @@ import { repl } from './commands/repl.js'
 import { connect } from './commands/connect.js'
 import { mintPeerToken } from './commands/mint-peer-token.js'
 import { peerCard } from './commands/peer-card.js'
+import { wechatLogin } from './commands/wechat-login.js'
 import { setting } from './commands/setting.js'
 import { provision } from './commands/provision.js'
 import { update } from './commands/update.js'
@@ -91,6 +92,8 @@ export async function runCli(argv: readonly string[] = process.argv.slice(2)): P
         return mintPeerToken(rest)
       case 'peer-card':
         return await peerCard(rest)
+      case 'wechat-login':
+        return await wechatLogin(rest)
       case 'setting':
         return await setting(rest)
       case 'provision':

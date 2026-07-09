@@ -769,12 +769,18 @@ importers:
       '@gotong/core':
         specifier: workspace:*
         version: link:../core
+      '@gotong/im-wechat':
+        specifier: workspace:*
+        version: link:../im-wechat
       '@gotong/protocol':
         specifier: workspace:*
         version: link:../protocol
       '@gotong/workflow':
         specifier: workspace:*
         version: link:../workflow
+      qrcode-terminal:
+        specifier: ^0.12.0
+        version: 0.12.0
       tar:
         specifier: ^7.4.3
         version: 7.5.19
@@ -2964,6 +2970,10 @@ packages:
 
   pumpify@1.5.1:
     resolution: {integrity: sha512-oClZI37HvuUJJxSKKrC17bZ9Cu0ZYhEAGPsPUy9KlMUmv9dKX2o77RUmq7f3XjIxbwyGwYzbzQ1L2Ks8sIradQ==}
+
+  qrcode-terminal@0.12.0:
+    resolution: {integrity: sha512-EXtzRZmC+YGmGlDFbXKxQiMZNwCLEO6BANKXG4iCtSIM0yqc/pappSx3RIKr4r0uh5JsBckOXeKrB3Iz7mdQpQ==}
+    hasBin: true
 
   qs@6.14.2:
     resolution: {integrity: sha512-V/yCWTTF7VJ9hIh18Ugr2zhJMP01MY7c5kh4J870L7imm6/DIzBsNLTXzMwUA3yZ5b/KBqLx8Kp3uRvd7xSe3Q==}
@@ -5184,6 +5194,8 @@ snapshots:
       duplexify: 3.7.1
       inherits: 2.0.4
       pump: 2.0.1
+
+  qrcode-terminal@0.12.0: {}
 
   qs@6.14.2:
     dependencies:

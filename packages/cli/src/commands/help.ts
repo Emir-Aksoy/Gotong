@@ -18,6 +18,7 @@ Commands:
   connect [agent]             Print MCP quick-connect config for a coding agent
   mint-peer-token             Generate a federation peer bearer token
   peer-card <url>             Preflight a peer hub: fetch + explain its A2A agent card
+  wechat-login                Mint a WeChat iLink bot token by QR scan (prints env lines)
   setting [subcommand]        Deterministic ops console (status/check/cold-start/restore/…)
   provision <pack.yaml>       Install a template pack + schedules + acceptance in one go
   backup <space> <dir>        Archive a workspace to .tar.gz (manifest + sha256, WAL-safe)
@@ -281,6 +282,35 @@ Examples:
   gotong peer-card https://hub-b.example.com
   gotong peer-card https://hub-b.example.com/.well-known/agent-card.json
   gotong peer-card https://hub-b.example.com --expect-kid t9Xq...43chars
+`,
+  'wechat-login': `gotong wechat-login [--base-url=URL] [--timeout=SECONDS]
+
+Mint a WeChat iLink bot token by QR scan (WX-M2c). WeChat is the one IM
+bridge whose credential can't be copy-pasted from a vendor console: scan
+the QR with the phone's WeChat, confirm, and the official login flow
+returns a bot token (1 WeChat account = 1 bot).
+
+Credentials go to stdout as ready-to-paste env lines; everything else
+(QR, progress, guidance) goes to stderr:
+
+  GOTONG_WECHAT_BOT_TOKEN=...
+  GOTONG_WECHAT_BASE_URL=...   (the IDC the login assigned, when returned)
+
+Add those to the host's environment and restart — the wechat bridge
+activates on its env gate, then members bind with /bind <code> as on any
+other bridge. The token is a SECRET: never commit it or paste it in
+public channels. Note WeChat is passive-reply only — the bot answers
+conversations members open; it cannot push first.
+
+Options:
+  --base-url=URL       Login host override (default the official bootstrap)
+  --timeout=SECONDS    Whole-flow budget, 30–3600 (default 480)
+
+Exit codes: 0 credentials printed · 1 login failed / timed out · 2 usage.
+
+Examples:
+  gotong wechat-login
+  gotong wechat-login >> gotong-host.env   # env lines only; QR on stderr
 `,
   setting: `gotong setting [<subcommand> [args]]
 
