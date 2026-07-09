@@ -519,6 +519,7 @@ docs(audit): v4 Phase 5 full audit — 15 modules, no P1/P2 hotfixes (F1)
 | 统一 `setting` 运维控制台（一命名空间 + 三入口 + 零大模型 + tier 边界） | `docs/zh/SETTING-OPS-CONSOLE.md` |
 | MCP 接入（client + server） · 连接器目录 | `docs/zh/MCP.md` · `docs/zh/MCP-CONNECTOR-DIRECTORY.md` |
 | 接入现实生活 track（C：把连接器目录伸向日历/邮件/消息/笔记/任务；C-M1 静态 token 首批 Notion/Todoist，**C-M2 出站 OAuth 全完**=纯核+存储+连接流+注入+刷新+admin CRUD+目录预设+「连接现实生活」面板+`reallife-oauth` capstone；三边界=全走 MCP 不存数据、凭证纪律、接入≠授权行动） | `docs/zh/REAL-LIFE-CONNECTORS.md` |
+| 微信 iLink 桥 track（WX：第 7 座 IM 桥走官方 iLink 协议[2026-03 首条合法个人号通道，HTTP/JSON 长轮询同构 Telegram]；M0 侦察完=端点/头/消息结构/条款红线/77-issue 坑单/海外灰度中全核；M1 协议纯核 → M2 `packages/im-wechat`+host 装配 → M3 真机验证；五边界=只走官方、opt-in 字节不变、接入≠授权、内核零改动、被动回复诚实） | `docs/zh/WECHAT-ILINK-BRIDGE.md` |
 | 知识库连接器 / RAG（全走 MCP，框架不存知识） | `docs/zh/KB-CONNECTORS.md` · `docs/zh/RAG-VIA-MCP.md` |
 
 **社区 / 上线**
