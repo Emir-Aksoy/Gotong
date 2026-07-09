@@ -61,6 +61,7 @@ import {
   type ButlerUsageSurface,
 } from './personal-butler-observe.js'
 import { buildButlerAskPeerToolset } from './personal-butler-ask-peer.js'
+import { buildButlerPendingProbe, type ButlerPendingSource } from './personal-butler-pending.js'
 import { buildButlerPeersToolset, type ButlerPeerSurface } from './personal-butler-peers.js'
 import {
   buildButlerOnboardingProbe,
@@ -108,6 +109,8 @@ export interface ButlerFactoryRefs {
   askRoster: ButlerAskRosterSource | undefined
   /** NET-M1 — sanitized mesh roster for the `list_peers` network eye. */
   peerRoster: ButlerPeerSurface | undefined
+  /** A1 — the member's pending /me inbox, for the待办 reminder card (read-only). */
+  pendingInbox: ButlerPendingSource | undefined
   /** WIZ-M4c — six-phase wizard compose service. */
   wizard: ButlerWizardSource | undefined
   /** S2-M2 — fresh-per-call distillation provider (assigned after pool start). */
@@ -400,10 +403,15 @@ export function buildButlerFactory(deps: ButlerFactoryDeps): ButlerFactory {
           // must always know "now" — pure Date, zero LLM, rides the variable
           // prompt tail so the byte-stable frozen block is untouched; timezone
           // honors the deployment's `TZ`, pin `TZ=Asia/Kuala_Lumpur` for a KL
-          // user), then the onboarding 现状卡 (when wired), then the task-notebook
-          // recitation digest. The latter two still self-gate per turn.
+          // user), then the A1 待办提醒 (parked /me approvals the member forgot),
+          // then the onboarding 现状卡 (when wired), then the task-notebook
+          // recitation digest. All but the clock self-gate per turn (null → not
+          // injected → byte-identical prompt).
           contextProbe: composeContextProbes(
             buildButlerClockProbe(),
+            refs.pendingInbox
+              ? buildButlerPendingProbe({ userId, pending: () => refs.pendingInbox, logger: log })
+              : undefined,
             deps.onboarding
               ? buildButlerOnboardingProbe({
                   stateFile: deps.onboarding.stateFile,

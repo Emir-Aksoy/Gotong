@@ -1019,6 +1019,7 @@ async function main(): Promise<void> {
   // other member services further down; forward-declared `let` read at
   // butler-build time (same lazy pattern).
   let butlerMemoryViewRef: HostButlerMemoryService | undefined
+  let butlerPendingInboxRef: HostInboxService | undefined // A1 — /me pending inbox for the待办 reminder card
   // BF-M8 — the background memory-maintenance sweep: per member, on a 6h cadence,
   // consolidate captured episodic into the curated semantic profile (蒸馏) and
   // record it to STATUS.md (/me's "上次维护" line). ON by default whenever the
@@ -1090,6 +1091,7 @@ async function main(): Promise<void> {
       wizard: butlerWizardRef,
       providerBuilder: butlerProviderBuilderRef,
       memoryView: butlerMemoryViewRef,
+      pendingInbox: butlerPendingInboxRef,
     }),
     // CARE-M4 — 开箱陪跑: zero-LLM 现状卡 injection at the free-chat entry +
     // the read-only key 活体校验. Health rides the SAME lazy adminHealth ref
@@ -1820,14 +1822,11 @@ async function main(): Promise<void> {
   // `gotong.human/v1` capability; the broker parks it as an inbox item and
   // suspends (Phase 11). A member resolves it from /me, and HostInboxService
   // runs the two-step resume (child broker → parent workflow run). Gated on
-  // identity: durable parking lives in suspended_tasks (identity SQLite), and
-  // /me itself requires a v4 user — so without identity there is no inbox.
-  // The store itself was built earlier (so the Phase 18 approval gate could
-  // share it); here we register the human-step broker + the resume service.
-  // The butler push-back ref (S1-M3). HostInboxService is built here, but the IM
-  // bridges that expose `pushToMember` start ~500 lines below — forward-declare
-  // the ref so the resolve hook reads it lazily; assigned right after
-  // `startImBridges` returns. Until then undefined → the optional call is a no-op.
+  // identity: durable parking lives in suspended_tasks + /me needs a v4 user —
+  // so without identity there is no inbox. The store was built earlier (Phase 18
+  // approval gate shares it). Butler push-back ref (S1-M3): the IM bridges that
+  // expose `pushToMember` start ~500 lines below, so forward-declare it — the
+  // resolve hook reads it lazily, assigned after `startImBridges` returns.
   let butlerPushRef: ImBridgesHandle['pushToMember']
 
   let inboxService: HostInboxService | undefined
@@ -1850,6 +1849,7 @@ async function main(): Promise<void> {
     })
     log.info('member task inbox enabled', { capability: HUMAN_CAPABILITY })
   }
+  butlerPendingInboxRef = inboxService // A1 — feed the /me pending inbox to the butler待办 card
 
   // S3-M1 — the resident butler's reminder broker. Registered on the SAME
   // butler-on gate as the `set_reminder` tool (a butler feature; disabling the
