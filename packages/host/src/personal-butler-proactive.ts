@@ -45,7 +45,15 @@ import { readdir } from 'node:fs/promises'
 import { join } from 'node:path'
 
 import type { Logger } from '@gotong/core'
-import { drainStream, type LlmProvider } from '@gotong/llm'
+import {
+  drainStream,
+  type LlmAgentToolset,
+  type LlmContentBlock,
+  type LlmMessage,
+  type LlmProvider,
+  type LlmToolDefinition,
+  type LlmToolResultBlock,
+} from '@gotong/llm'
 import { ownerDir } from '@gotong/service-memory-file'
 
 import { openButlerMemory } from './personal-butler-memory.js'
@@ -81,6 +89,15 @@ export interface ButlerProactiveConfig {
   hour: number
   /** Member's UTC offset in minutes (Malaysia = 480 = +08:00). */
   tzOffsetMinutes: number
+  /**
+   * B2 — opt-in to letting the brief call the member's CONNECTED read-only
+   * connectors (weather / calendar / news) for real data. DEFAULT-OFF (absent ⇒
+   * off): attaching a connector authorizes on-demand chat use, but an unattended
+   * brief that auto-calls it every morning is a stronger authorization the member
+   * flips ON explicitly (via `set_daily_brief`). Off ⇒ the brief is the historical
+   * tool-less pass, byte-identical.
+   */
+  enrich?: boolean
   /** Member-local `YYYY-MM-DD` of the last brief ATTEMPT — the once-per-day dedup. */
   lastSentDate?: string
 }
@@ -118,6 +135,7 @@ function normalizeConfig(raw: Partial<ButlerProactiveConfig>): ButlerProactiveCo
       ? raw.tzOffsetMinutes
       : DEFAULT_TZ_OFFSET_MIN
   const out: ButlerProactiveConfig = { enabled, hour, tzOffsetMinutes }
+  if (raw.enrich === true) out.enrich = true
   if (typeof raw.lastSentDate === 'string') out.lastSentDate = raw.lastSentDate
   return out
 }
@@ -194,6 +212,27 @@ const BUTLER_BRIEF_SYSTEM = [
   `如果实在没有值得主动说的,就只回复 ${BRIEF_SKIP_SENTINEL}(不要多写)。用中文。`,
 ].join('\n')
 
+/**
+ * B2 — the enrich addendum, appended to {@link BUTLER_BRIEF_SYSTEM} only when the
+ * member opted the brief into their connectors. Keeps the "don't fabricate" rule
+ * and adds a hard round cap so an unattended brief can't loop the model.
+ */
+const BRIEF_ENRICH_SYSTEM = [
+  BUTLER_BRIEF_SYSTEM,
+  '',
+  '你还连了成员的一些只读工具(可能包含天气、日历/日程、新闻等)。如果其中有助于今早的问候,',
+  '可以调用它们查一两条真实信息(例如今天天气、今天的安排),自然地融进问候里;查不到、失败或不相关就跳过,',
+  '绝不要编造数字或日程。最多查两三次就给出最终问候。',
+].join('\n')
+
+/** Max provider round-trips for an enriched brief (tool calls + the final text).
+ *  A morning brief needs one round of look-ups then the greeting; 3 is generous. */
+const BRIEF_MAX_TOOL_ROUNDS = 3
+
+/** Cap a single tool result's text so a chatty connector can't blow the brief's
+ *  context (weather/calendar payloads are tiny; this only bounds a pathological one). */
+const BRIEF_TOOL_RESULT_CHAR_CAP = 2000
+
 /** Resolve the butler's provider for a brief (usually `() => pool.buildButlerProvider()`).
  *  Called per compose so a key added after boot is picked up; a null result ⇒ no brief. */
 export type ButlerBriefProviderBuilder = () => Promise<LlmProvider | null>
@@ -202,10 +241,102 @@ export interface ButlerBriefComposerOptions {
   rootDir: string
   buildProvider: ButlerBriefProviderBuilder
   logger: Logger
+  /**
+   * B2 — resolve the member's connected READ-ONLY connector tools (weather /
+   * calendar / news), or null when none is live. Only consulted for a member who
+   * opted the brief in (`enrich`). Read-only by construction (the butler's WRITE
+   * MCP half is a governed gate that would PARK — never handed here), so an
+   * unattended brief can look but never act. Absent ⇒ enrichment simply never runs.
+   */
+  mcpReadTools?: () => Promise<LlmAgentToolset | null>
   /** Per-request model / token overrides for the brief call. */
   model?: string
   maxTokens?: number
   now?: () => number
+}
+
+/** Flatten a tool result's content blocks to text (images/handles dropped — the
+ *  model can't read them here), capped so one connector can't bloat the brief. */
+function flattenToolResultText(content: LlmToolCallResultContent): string {
+  const text = content
+    .filter((b): b is { type: 'text'; text: string } => b.type === 'text')
+    .map((b) => b.text)
+    .join('\n')
+  return text.length > BRIEF_TOOL_RESULT_CHAR_CAP ? text.slice(0, BRIEF_TOOL_RESULT_CHAR_CAP) : text
+}
+
+/** The `content` shape an `LlmAgentToolset.callTool` returns (a small text-block
+ *  array in practice); typed locally to avoid importing the full result type. */
+type LlmToolCallResultContent = ReadonlyArray<{ type: string; text?: string }>
+
+/**
+ * Run the enriched brief: a BOUNDED read-only tool-use loop that lets the model
+ * call the member's connectors and weave real data in. Mirrors the LlmAgent loop
+ * (feed assistant tool_use + our tool_result back) but hard-capped at
+ * {@link BRIEF_MAX_TOOL_ROUNDS} and read-only. Returns the brief, or null on
+ * SKIP / empty. A tool that throws becomes an `isError` result the model can
+ * recover from — a flaky connector never crashes the brief.
+ */
+async function composeEnrichedBrief(
+  provider: LlmProvider,
+  facts: string,
+  toolset: LlmAgentToolset,
+  opts: ButlerBriefComposerOptions,
+): Promise<string | null> {
+  let tools: LlmToolDefinition[]
+  try {
+    tools = await toolset.listTools()
+  } catch {
+    tools = []
+  }
+  const messages: LlmMessage[] = [
+    {
+      role: 'user',
+      content: `这是你长期记住的关于他的信息:\n${facts}\n\n请写今天的主动问候(没有值得说的就回 ${BRIEF_SKIP_SENTINEL})。`,
+    },
+  ]
+  let lastText = ''
+  for (let round = 0; round < BRIEF_MAX_TOOL_ROUNDS; round++) {
+    const res = await drainStream(
+      provider.stream({
+        system: BRIEF_ENRICH_SYSTEM,
+        messages,
+        maxTokens: opts.maxTokens ?? 300,
+        ...(tools.length > 0 ? { tools } : {}),
+        ...(opts.model ? { model: opts.model } : {}),
+      }),
+    )
+    lastText = res.text.trim()
+    const toolUses = res.stopReason === 'tool_use' ? (res.toolUses ?? []) : []
+    if (toolUses.length === 0) break // the model produced its final greeting
+    // Feed the assistant's tool_use blocks + our tool_result blocks back.
+    const assistantBlocks: LlmContentBlock[] = []
+    if (res.text) assistantBlocks.push({ type: 'text', text: res.text })
+    assistantBlocks.push(...toolUses)
+    messages.push({ role: 'assistant', content: assistantBlocks })
+    const results: LlmToolResultBlock[] = []
+    for (const tu of toolUses) {
+      try {
+        const out = await toolset.callTool(tu.name, tu.input)
+        results.push({
+          type: 'tool_result',
+          toolUseId: tu.id,
+          content: flattenToolResultText(out.content as LlmToolCallResultContent),
+          ...(out.isError ? { isError: true } : {}),
+        })
+      } catch (err) {
+        results.push({
+          type: 'tool_result',
+          toolUseId: tu.id,
+          content: err instanceof Error ? err.message : String(err),
+          isError: true,
+        })
+      }
+    }
+    messages.push({ role: 'user', content: results })
+  }
+  if (lastText.length === 0 || lastText === BRIEF_SKIP_SENTINEL) return null
+  return lastText
 }
 
 /**
@@ -215,13 +346,17 @@ export interface ButlerBriefComposerOptions {
  * model to phrase it — so the proactive voice never disagrees with the
  * conversational one and its usage bills to the same place.
  *
+ * When the member opted in (`ctx.enrich`) AND a read-only connector is live, the
+ * brief runs a bounded tool-use loop (B2) so it can weave in real weather / agenda
+ * / news; otherwise it's the historical single tool-less pass, byte-identical.
+ *
  * Returns `null` (stay silent) when there's no provider (no key / no butler row),
  * no curated profile yet, or the model replies with the SKIP sentinel / empty.
  */
 export function buildButlerBriefComposer(
   opts: ButlerBriefComposerOptions,
-): (userId: string) => Promise<string | null> {
-  return async (userId: string): Promise<string | null> => {
+): (userId: string, ctx?: { enrich?: boolean }) => Promise<string | null> {
+  return async (userId: string, ctx?: { enrich?: boolean }): Promise<string | null> => {
     const provider = await opts.buildProvider()
     if (!provider) return null // no key / no butler row — nothing to compose with
     const memory = openButlerMemory({
@@ -233,6 +368,23 @@ export function buildButlerBriefComposer(
     const profile = await memory.recall({ kinds: ['semantic'], k: DEFAULT_BRIEF_PROFILE_K })
     if (profile.length === 0) return null // nothing curated yet — stay silent
     const facts = profile.map((e) => `- ${e.text}`).join('\n')
+
+    // B2 — enriched path: only when the member opted in AND a read-only connector
+    // is actually live. A resolver throw / null (butler row not spawned, no MCP)
+    // degrades to the plain pass below — enrichment is a bonus, never a gate.
+    if (ctx?.enrich && opts.mcpReadTools) {
+      let readTools: LlmAgentToolset | null = null
+      try {
+        readTools = await opts.mcpReadTools()
+      } catch (err) {
+        opts.logger.warn('butler brief: resolve connectors failed — plain brief', {
+          userId,
+          err: err instanceof Error ? err.message : String(err),
+        })
+      }
+      if (readTools) return composeEnrichedBrief(provider, facts, readTools, opts)
+    }
+
     const res = await drainStream(
       provider.stream({
         system: BUTLER_BRIEF_SYSTEM,
@@ -267,8 +419,10 @@ export type ButlerBriefPush = (
 export interface ButlerProactiveSweeperOptions {
   /** Butler memory root (`<space>/butler/memory`) — the same one the factory + /me view use. */
   rootDir: string
-  /** Compose a brief for a member (or `null` = nothing to say). Called only when DUE. */
-  composeBrief: (userId: string) => Promise<string | null>
+  /** Compose a brief for a member (or `null` = nothing to say). Called only when
+   *  DUE; `ctx.enrich` (B2) forwards the member's connector opt-in from the config
+   *  the sweeper already read, so the composer needn't re-read it. */
+  composeBrief: (userId: string, ctx?: { enrich?: boolean }) => Promise<string | null>
   /** Deliver a brief to the member's IM (the F1 `pushToMember`, read lazily in main.ts). */
   push: ButlerBriefPush
   logger: Logger
@@ -289,7 +443,7 @@ export interface ButlerProactiveSweeperOptions {
  */
 export class ButlerProactiveSweeper {
   private readonly rootDir: string
-  private readonly composeBrief: (userId: string) => Promise<string | null>
+  private readonly composeBrief: (userId: string, ctx?: { enrich?: boolean }) => Promise<string | null>
   private readonly push: ButlerBriefPush
   private readonly log: Logger
   private readonly intervalMs: number
@@ -378,9 +532,10 @@ export class ButlerProactiveSweeper {
     if (cfg.lastSentDate === date) return { fired: false, reason: 'already-today' }
 
     // Due. Compose the brief (the only place the butler's model runs for a brief).
+    // Forward the member's connector opt-in (B2) so the composer can enrich.
     let brief: string | null
     try {
-      brief = await this.composeBrief(userId)
+      brief = await this.composeBrief(userId, { enrich: cfg.enrich === true })
     } catch (err) {
       // A compose fault must NOT mark the day — retry next tick (best-effort).
       this.log.warn('butler proactive: compose failed', {

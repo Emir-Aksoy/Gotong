@@ -20,6 +20,7 @@
  */
 
 import type { Logger } from '@gotong/core'
+import type { LlmAgentToolset } from '@gotong/llm'
 
 import type { AdminHealthSurface } from './admin-health.js'
 import type { ButlerRunSurface } from './personal-butler-observe.js'
@@ -39,8 +40,15 @@ export interface ButlerSweepsOptions {
   /** The F1 `pushToMember`, read lazily (the bridges start after arming). */
   push: ButlerBriefPush
   logger: Logger
-  /** S3-M2 daily brief: gate, cadence, fresh-per-compose provider builder. */
-  proactive: { on: boolean; intervalMs: number; buildProvider: ButlerBriefProviderBuilder }
+  /** S3-M2 daily brief: gate, cadence, fresh-per-compose provider builder; B2 —
+   *  optional resolver for the butler's read-only connectors (weather/calendar/
+   *  news) so an opted-in member's brief can enrich. Absent ⇒ enrichment never runs. */
+  proactive: {
+    on: boolean
+    intervalMs: number
+    buildProvider: ButlerBriefProviderBuilder
+    mcpReadTools?: () => Promise<LlmAgentToolset | null>
+  }
   /** BE-M5 run broadcast: gate, cadence, the BE-M1 runs projection (undefined = unwired ⇒ off). */
   runBroadcast: { on: boolean; intervalMs: number; runs: ButlerRunSurface | undefined }
   /**
@@ -78,6 +86,7 @@ export function armButlerSweeps(opts: ButlerSweepsOptions): ButlerSweepsHandle {
         rootDir: opts.memoryRoot,
         buildProvider: opts.proactive.buildProvider,
         logger: opts.logger,
+        ...(opts.proactive.mcpReadTools ? { mcpReadTools: opts.proactive.mcpReadTools } : {}),
       }),
       push: opts.push,
       logger: opts.logger,

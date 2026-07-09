@@ -43,6 +43,7 @@ import {
   type SecretSource,
 } from './mcp-config.js'
 import type { ServerSecretSource } from './oauth-secret-source.js'
+import { buildButlerMcpToolsets } from './personal-butler-mcp.js'
 import { RemoteMcpToolset, parseRemoteMcpRef } from './mcp-proxy.js'
 import {
   resolveOwner,
@@ -1355,6 +1356,43 @@ export class LocalAgentPool implements ManagedAgentLifecycle {
       // baseURL, etc.) — that fault already surfaces at spawn; the sweep just
       // skips rather than crash the maintenance interval.
       return null
+    }
+  }
+
+  /**
+   * B2 — the resident butler's READ-ONLY connector tools (weather / calendar /
+   * news), for the proactive daily-brief enrichment (see `personal-butler-proactive`).
+   * Returns the SAME read/write split the factory applies at spawn — only the
+   * benign READ half, so an unattended brief can look but never act (the WRITE
+   * half is a governed gate that would PARK). Null when the butler row isn't
+   * running, has no attached MCP, or its `listTools` fails — the brief then
+   * degrades to the plain tool-less pass rather than throwing on the interval.
+   *
+   * The connectors are the butler ROW's (shared by every per-user butler), so
+   * this needs no userId: a member opts THEIR brief in, but the tools resolved
+   * are whatever the butler is connected to. Resolved fresh each call so a
+   * connector installed after boot is picked up.
+   */
+  async butlerMcpReadToolset(): Promise<LlmAgentToolset | null> {
+    let rows: readonly AgentRecord[]
+    try {
+      rows = await this.space.agents()
+    } catch {
+      return null // corrupt agents.json — skip enrichment this tick (see buildButlerProvider)
+    }
+    const row = rows.find((r) => this.butlerEnabledFor(r))
+    if (!row) return null
+    const mcpToolset = this.mcpToolsetForAgent.get(row.id)
+    if (!mcpToolset) return null // butler not running / no connectors attached
+    try {
+      const tools = await mcpToolset.listTools()
+      const { readBenign } = buildButlerMcpToolsets({
+        tools,
+        callTool: (name, args) => mcpToolset.callTool(name, args),
+      })
+      return readBenign
+    } catch {
+      return null // a dead connector must not crash the brief — plain pass instead
     }
   }
 

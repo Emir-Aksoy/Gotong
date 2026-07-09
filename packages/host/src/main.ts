@@ -1885,14 +1885,14 @@ async function main(): Promise<void> {
       on: butlerProactiveOn,
       intervalMs: butlerProactiveMs,
       buildProvider: () => localAgents.buildButlerProvider(),
+      mcpReadTools: () => localAgents.butlerMcpReadToolset(), // B2 — connectors for enriched brief
     },
     runBroadcast: {
       on: butlerRunBroadcastOn,
       intervalMs: butlerRunBroadcastMs,
       runs: butlerObserveRunsRef,
     },
-    // CARE-M3 — 巡检骑管家总开关,零新旋钮;health 是 lazy getter,adminHealth
-    // 在 ~500 行下面才建,首 tick(10 分钟)时早已就位。
+    // CARE-M3 — 巡检骑管家总开关,零新旋钮;health lazy getter(adminHealth 在下方才建,首 tick 前就位)。
     patrol: {
       on: butlerDefaultOn,
       intervalMs: BUTLER_PATROL_INTERVAL_MS,

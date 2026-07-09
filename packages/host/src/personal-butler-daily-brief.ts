@@ -55,6 +55,11 @@ const DAILY_BRIEF_TOOLS: LlmToolDefinition[] = [
           type: 'number',
           description: '用户时区相对 UTC 的分钟偏移(马来西亚 = 480);一般不用填。',
         },
+        enrichWithConnectors: {
+          type: 'boolean',
+          description:
+            '是否让早报自动调用用户已连接的只读工具(天气/日历/新闻)取真实信息融进问候。用户明确想要就 true,想关就 false;不填沿用之前的设置(默认 false)。注意:开启后早报每天会自动把相关信息(如所在地天气、当天日程)发给对应服务方——这是比"聊天里按需查"更强的授权,不确定就先问用户。',
+        },
       },
       required: ['enabled'],
       additionalProperties: false,
@@ -103,7 +108,13 @@ class ButlerDailyBriefToolset implements LlmAgentToolset {
         ? args.tzOffsetMinutes
         : base.tzOffsetMinutes
 
+    // B2 — connector enrichment opt-in: keep the prior setting unless the member
+    // re-specified it (default OFF the first time).
+    const enrich =
+      typeof args.enrichWithConnectors === 'boolean' ? args.enrichWithConnectors : base.enrich === true
+
     const next: ButlerProactiveConfig = { enabled, hour, tzOffsetMinutes }
+    if (enrich) next.enrich = true
     // Carry the dedup mark so toggling the hour mid-day doesn't re-send today — EXCEPT
     // on a fresh turn-ON (disabled→enabled), where dropping it lets a just-requested
     // brief fire today once the hour is reached.
@@ -117,9 +128,13 @@ class ButlerDailyBriefToolset implements LlmAgentToolset {
       return text('设置失败,没能保存你的偏好,待会儿再试一次吧。', true)
     }
 
-    return enabled
-      ? text(`好,我以后每天大约 ${hour} 点(你所在时区)会主动跟你说一声。想停就跟我说一声。`)
-      : text('好,以后早上不主动打扰你了。')
+    if (!enabled) return text('好,以后早上不主动打扰你了。')
+    const enrichNote = enrich
+      ? '早报会顺带查一下你连接的天气/日程/新闻(每天自动去取,想关跟我说)。'
+      : ''
+    return text(
+      `好,我以后每天大约 ${hour} 点(你所在时区)会主动跟你说一声。${enrichNote}想停就跟我说一声。`,
+    )
   }
 }
 
