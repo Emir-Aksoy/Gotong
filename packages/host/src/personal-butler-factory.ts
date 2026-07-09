@@ -44,6 +44,7 @@ import type { FailureLang } from './failure-translator.js'
 import type { ButlerFactory } from './local-agent-pool.js'
 import type { StewardAgentDirectory, StewardWorkflowEditor } from './hub-steward-service.js'
 import { buildButlerAskAgentToolset, type ButlerAskRosterSource } from './personal-butler-ask-agent.js'
+import { buildButlerCapabilitiesToolset } from './personal-butler-capabilities.js'
 import { buildButlerConsolidateToolset } from './personal-butler-consolidate.js'
 import { buildButlerDailyBriefToolset } from './personal-butler-daily-brief.js'
 import {
@@ -370,6 +371,15 @@ export function buildButlerFactory(deps: ButlerFactoryDeps): ButlerFactory {
               logger: log,
             })
           : undefined
+        // B1 — benign "你能帮我做什么" list, DERIVED from the tools actually
+        // composed below (never a hard-coded lie). The getter reads the FINAL
+        // benign + governed sets, assigned just after they're built — a plain
+        // forward binding, resolved lazily at call time (long post-boot), so it
+        // always reflects exactly what THIS member's butler has wired.
+        let composedToolNames: () => Promise<readonly string[]> = async () => []
+        const capabilitiesToolset = buildButlerCapabilitiesToolset({
+          toolNames: () => composedToolNames(),
+        })
         const benign = [
           ...(tools ? [tools] : []),
           // S1-M2 — the READ half of the row's MCP servers (search notes, list
@@ -385,6 +395,7 @@ export function buildButlerFactory(deps: ButlerFactoryDeps): ButlerFactory {
           remindersToolset,
           taskNotebookToolset,
           languageToolset,
+          capabilitiesToolset,
           ...(dailyBriefToolset ? [dailyBriefToolset] : []),
           ...(runBroadcastToolset ? [runBroadcastToolset] : []),
           ...(profileToolset ? [profileToolset] : []),
@@ -400,6 +411,13 @@ export function buildButlerFactory(deps: ButlerFactoryDeps): ButlerFactory {
           ...(askPeerGov ? [askPeerGov] : []),
           ...(mcpSplit?.writeGoverned ? [mcpSplit.writeGoverned] : []),
         ]
+        // B1 — now that both sets exist, point the capability getter at their
+        // live tool names (includes MCP `<server>__<tool>` so connectors show up).
+        // `listTools` may be async on some toolsets, so resolve them all.
+        composedToolNames = async () => {
+          const lists = await Promise.all([...benign, ...governed].map((ts) => ts.listTools()))
+          return lists.flat().map((t) => t.name)
+        }
 
         return new PersonalButlerAgent({
           ...rest,
