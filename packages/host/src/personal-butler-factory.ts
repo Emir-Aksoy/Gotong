@@ -61,6 +61,10 @@ import {
   type ButlerUsageSurface,
 } from './personal-butler-observe.js'
 import { buildButlerAskPeerToolset } from './personal-butler-ask-peer.js'
+import {
+  buildButlerLanguageProbe,
+  buildButlerLanguageToolset,
+} from './personal-butler-language.js'
 import { buildButlerLastSeenProbe } from './personal-butler-last-seen.js'
 import { buildButlerPendingProbe, type ButlerPendingSource } from './personal-butler-pending.js'
 import { buildButlerPeersToolset, type ButlerPeerSurface } from './personal-butler-peers.js'
@@ -214,6 +218,14 @@ export function buildButlerFactory(deps: ButlerFactoryDeps): ButlerFactory {
           ownerDir(join(dirname(memoryRoot), 'presence'), { kind: 'user', id: userId }),
           'last-seen.json',
         )
+        // A3 — per-user pinned reply language (set_reply_language). Same `prefs/`
+        // sibling-of-memory placement; the benign tool writes it, the probe below
+        // injects "用<语言>回复" while it's set.
+        const languageFile = join(
+          ownerDir(join(dirname(memoryRoot), 'prefs'), { kind: 'user', id: userId }),
+          'reply-language.json',
+        )
+        const languageToolset = buildButlerLanguageToolset({ file: languageFile, logger: log })
         const { tools, ...rest } = base
         // BF-M7 — the per-user governed action set, scoped to THIS member (the
         // executor's RBAC keys off `userId`). Built only when the flag is on AND
@@ -371,6 +383,7 @@ export function buildButlerFactory(deps: ButlerFactoryDeps): ButlerFactory {
           ...(consolidateToolset ? [consolidateToolset] : []),
           remindersToolset,
           taskNotebookToolset,
+          languageToolset,
           ...(dailyBriefToolset ? [dailyBriefToolset] : []),
           ...(runBroadcastToolset ? [runBroadcastToolset] : []),
           ...(profileToolset ? [profileToolset] : []),
@@ -411,14 +424,15 @@ export function buildButlerFactory(deps: ButlerFactoryDeps): ButlerFactory {
           // must always know "now" — pure Date, zero LLM, rides the variable
           // prompt tail so the byte-stable frozen block is untouched; timezone
           // honors the deployment's `TZ`, pin `TZ=Asia/Kuala_Lumpur` for a KL
-          // user), then the A2 时段问候/间隔 (greet after a real gap away), then
-          // the A1 待办提醒 (parked /me approvals the member forgot), then the
-          // onboarding 现状卡 (when wired), then the task-notebook recitation
-          // digest. All but the clock self-gate per turn (null → not injected →
-          // byte-identical prompt).
+          // user), then the A2 时段问候/间隔 (greet after a real gap away), the A3
+          // 语言偏好 (reply in the member's pinned language), the A1 待办提醒
+          // (parked /me approvals the member forgot), the onboarding 现状卡 (when
+          // wired), then the task-notebook recitation digest. All but the clock
+          // self-gate per turn (null → not injected → byte-identical prompt).
           contextProbe: composeContextProbes(
             buildButlerClockProbe(),
             buildButlerLastSeenProbe({ file: presenceFile, logger: log }),
+            buildButlerLanguageProbe({ file: languageFile, logger: log }),
             refs.pendingInbox
               ? buildButlerPendingProbe({ userId, pending: () => refs.pendingInbox, logger: log })
               : undefined,
