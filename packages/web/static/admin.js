@@ -851,10 +851,13 @@
           providerText = host ? `openai-compat · ${host}` : "openai-compat";
         }
         const meta = managed ? `${kindBadge}<span class="ma-provider">${escapeHtml4(providerText)}${managed.model ? " · " + escapeHtml4(managed.model) : ""}</span>` : `${kindBadge}<span class="ma-external">${escapeHtml4(t4.externalAgent)}</span>`;
+        const hasFallbacks = !!(managed && Array.isArray(managed.fallbacks) && managed.fallbacks.length > 0);
+        const routingBtn = hasFallbacks ? `<button class="ma-action" data-act="probe-routing" data-id="${escapeHtml4(a.id)}">${escapeHtml4(t4.probeRoutingBtn)}</button>` : "";
         const actions = managed ? `
         <button class="ma-action" data-act="edit-agent" data-id="${escapeHtml4(a.id)}">${escapeHtml4(t4.edit)}</button>
         <button class="ma-action" data-act="manage-agent-access" data-id="${escapeHtml4(a.id)}">${escapeHtml4(t4.agentAccessManage)}</button>
         <button class="ma-action" data-act="export-agent" data-id="${escapeHtml4(a.id)}">${escapeHtml4(t4.export_)}</button>
+        ${routingBtn}
         <button class="ma-action ma-danger" data-act="remove-agent" data-id="${escapeHtml4(a.id)}">${escapeHtml4(t4.remove)}</button>
       ` : "";
         const keyWarn = managed && ma.health?.[a.id]?.missingKey ? `<button type="button" class="ma-keywarn" data-act="fix-agent-key" data-id="${escapeHtml4(a.id)}" title="${escapeHtml4(t4.agentKeyWarnHint)}">${escapeHtml4(t4.agentKeyWarnBadge)}</button>` : "";
@@ -1471,6 +1474,64 @@
     async function exportAgent(id) {
       window.location.href = `/api/admin/agents/${encodeURIComponent(id)}/export`;
     }
+    async function probeRouting(id) {
+      let btn = null;
+      document.querySelectorAll('.ma-action[data-act="probe-routing"]').forEach((b) => {
+        if (b.dataset.id === id) btn = b;
+      });
+      const row = btn ? btn.closest(".ma-row") : null;
+      if (!row) return;
+      let out = row.querySelector(".ma-routing-result");
+      if (!out) {
+        out = document.createElement("div");
+        out.className = "ma-routing-result";
+        row.append(out);
+      }
+      out.textContent = t4.probeRoutingTesting;
+      out.classList.remove("ok", "err");
+      const prevLabel = btn ? btn.textContent : "";
+      if (btn) {
+        btn.disabled = true;
+        btn.textContent = t4.probeRoutingTesting;
+      }
+      try {
+        const r = await fetchJson4(`/api/admin/agents/${encodeURIComponent(id)}/probe-routing`, {
+          method: "POST"
+        });
+        renderRoutingResult(out, Array.isArray(r?.candidates) ? r.candidates : []);
+      } catch (err) {
+        out.textContent = t4.probeRoutingFailed(err.message || String(err));
+        out.classList.add("err");
+      } finally {
+        if (btn) {
+          btn.disabled = false;
+          btn.textContent = prevLabel || t4.probeRoutingBtn;
+        }
+      }
+    }
+    function renderRoutingResult(out, candidates) {
+      out.textContent = "";
+      out.classList.remove("ok", "err");
+      if (candidates.length === 0) {
+        out.textContent = t4.probeRoutingEmpty;
+        return;
+      }
+      let okCount = 0;
+      const lines = document.createDocumentFragment();
+      candidates.forEach((c) => {
+        const d = window.Gotong.describeKeyTest(c);
+        if (d.level === "ok") okCount++;
+        const line = document.createElement("div");
+        line.className = `ma-routing-line ${d.level === "ok" ? "ok" : "err"}`;
+        const name = c.index === 0 ? t4.probeRoutingPrimary : t4.probeRoutingFallback(c.index);
+        line.textContent = `${name} · ${c.label || c.provider || "?"} — ${d.text}`;
+        lines.append(line);
+      });
+      const summary = document.createElement("div");
+      summary.className = `ma-routing-summary ${okCount === candidates.length ? "ok" : "err"}`;
+      summary.textContent = t4.probeRoutingSummary(okCount, candidates.length);
+      out.append(summary, lines);
+    }
     async function removeAgent(id) {
       if (!confirm(t4.confirmRemoveAgent(id))) return;
       try {
@@ -1632,6 +1693,7 @@
       closeGithubImportModal,
       submitGithubImport,
       exportAgent,
+      probeRouting,
       removeAgent,
       openAccessModal,
       closeAccessModal,
@@ -5087,6 +5149,8 @@
           if (a) managedAgents.openAgentForm("edit", a);
         } else if (act === "export-agent") {
           managedAgents.exportAgent(id);
+        } else if (act === "probe-routing") {
+          managedAgents.probeRouting(id);
         } else if (act === "manage-agent-access") {
           managedAgents.openAccessModal(id);
         } else if (act === "remove-agent") {

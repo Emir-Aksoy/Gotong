@@ -120,6 +120,14 @@ export function createManagedAgents({ ma, openBundleImportModal }) {
       const meta = managed
         ? `${kindBadge}<span class="ma-provider">${escapeHtml(providerText)}${managed.model ? ' · ' + escapeHtml(managed.model) : ''}</span>`
         : `${kindBadge}<span class="ma-external">${escapeHtml(t.externalAgent)}</span>`
+      // MR-M5 — "测试路由" is shown ONLY on agents that declared fallbacks: with
+      // no routing there's nothing to test per-candidate (the existing quick-chat
+      // 测连接 already answers "is this one agent reachable"). This is the panel's
+      // read of the opt-in — matching the server route's 400/503 posture.
+      const hasFallbacks = !!(managed && Array.isArray(managed.fallbacks) && managed.fallbacks.length > 0)
+      const routingBtn = hasFallbacks
+        ? `<button class="ma-action" data-act="probe-routing" data-id="${escapeHtml(a.id)}">${escapeHtml(t.probeRoutingBtn)}</button>`
+        : ''
       // v5 E4-M2 — "管理访问" opens the resource-RBAC grants modal. Shown on
       // managed agents (the ones an admin owns/edits); the modal itself is
       // owner-gated server-side, so a non-owner admin gets a notice inside it.
@@ -127,6 +135,7 @@ export function createManagedAgents({ ma, openBundleImportModal }) {
         <button class="ma-action" data-act="edit-agent" data-id="${escapeHtml(a.id)}">${escapeHtml(t.edit)}</button>
         <button class="ma-action" data-act="manage-agent-access" data-id="${escapeHtml(a.id)}">${escapeHtml(t.agentAccessManage)}</button>
         <button class="ma-action" data-act="export-agent" data-id="${escapeHtml(a.id)}">${escapeHtml(t.export_)}</button>
+        ${routingBtn}
         <button class="ma-action ma-danger" data-act="remove-agent" data-id="${escapeHtml(a.id)}">${escapeHtml(t.remove)}</button>
       ` : ''
       // EH-M2 — per-row「key 未配置」warning, cross-referenced from the health
@@ -919,6 +928,76 @@ export function createManagedAgents({ ma, openBundleImportModal }) {
     window.location.href = `/api/admin/agents/${encodeURIComponent(id)}/export`
   }
 
+  // MR-M5 — "测试路由": probe EVERY declared candidate (primary + each fallback)
+  // of a SAVED agent through its vault key, so the operator confirms which
+  // fallback truly works BEFORE relying on failover. Unlike test-connection (a
+  // typed key) and unlike quick-chat 测连接 (which only exercises whichever
+  // candidate the router picks first), this walks the whole chain independently.
+  // Results render inline under the row's actions; the row is rebuilt on the
+  // next refresh, so this transient block needs no template HTML.
+  async function probeRouting(id) {
+    // Locate the clicked row's action button by scanning (not a CSS selector, so
+    // an arbitrary agent id can't break the query) → its .ma-row → a lazily
+    // created result slot that we replace on each run.
+    let btn = null
+    document.querySelectorAll('.ma-action[data-act="probe-routing"]').forEach((b) => {
+      if (b.dataset.id === id) btn = b
+    })
+    const row = btn ? btn.closest('.ma-row') : null
+    if (!row) return
+    let out = row.querySelector('.ma-routing-result')
+    if (!out) {
+      out = document.createElement('div')
+      out.className = 'ma-routing-result'
+      row.append(out)
+    }
+    out.textContent = t.probeRoutingTesting
+    out.classList.remove('ok', 'err')
+    const prevLabel = btn ? btn.textContent : ''
+    if (btn) { btn.disabled = true; btn.textContent = t.probeRoutingTesting }
+    try {
+      const r = await fetchJson(`/api/admin/agents/${encodeURIComponent(id)}/probe-routing`, {
+        method: 'POST',
+      })
+      renderRoutingResult(out, Array.isArray(r?.candidates) ? r.candidates : [])
+    } catch (err) {
+      // 503 (probe surface absent) / 404 / network — surface the server string.
+      out.textContent = t.probeRoutingFailed(err.message || String(err))
+      out.classList.add('err')
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = prevLabel || t.probeRoutingBtn }
+    }
+  }
+
+  // Render the per-candidate verdicts. Each candidate carries the SAME verdict
+  // shape as the key-test route ({ ok, model, latencyMs, code }), so we reuse the
+  // shared describeKeyTest mapping — the routing panel and the key-test button
+  // never drift on what "限流 / 余额不足 / 连不上" reads as. textContent-only, so
+  // nothing needs escaping.
+  function renderRoutingResult(out, candidates) {
+    out.textContent = ''
+    out.classList.remove('ok', 'err')
+    if (candidates.length === 0) {
+      out.textContent = t.probeRoutingEmpty
+      return
+    }
+    let okCount = 0
+    const lines = document.createDocumentFragment()
+    candidates.forEach((c) => {
+      const d = window.Gotong.describeKeyTest(c)
+      if (d.level === 'ok') okCount++
+      const line = document.createElement('div')
+      line.className = `ma-routing-line ${d.level === 'ok' ? 'ok' : 'err'}`
+      const name = c.index === 0 ? t.probeRoutingPrimary : t.probeRoutingFallback(c.index)
+      line.textContent = `${name} · ${c.label || c.provider || '?'} — ${d.text}`
+      lines.append(line)
+    })
+    const summary = document.createElement('div')
+    summary.className = `ma-routing-summary ${okCount === candidates.length ? 'ok' : 'err'}`
+    summary.textContent = t.probeRoutingSummary(okCount, candidates.length)
+    out.append(summary, lines)
+  }
+
   async function removeAgent(id) {
     if (!confirm(t.confirmRemoveAgent(id))) return
     try {
@@ -1103,6 +1182,7 @@ export function createManagedAgents({ ma, openBundleImportModal }) {
     closeGithubImportModal,
     submitGithubImport,
     exportAgent,
+    probeRouting,
     removeAgent,
     openAccessModal,
     closeAccessModal,

@@ -1857,6 +1857,17 @@
       // already says network/Base-URL, so the hint points at what it doesn't —
       // is the provider actually reachable, is the port right.
       errFixNetwork: '→ 确认服务商在线、端口没填错。',
+      // MR-M5 —「测试路由」逐候选诊断。跟「测试连接」(测你现在填的 Key)不同，
+      // 这个对一个已保存助手的每个候选(主模型 + 各备用)分别用它金库里的 Key
+      // 各发一次最小请求，让你看清哪个备用真能顶上。每个候选的判定文案复用
+      // describeKeyTest(与测试连接同一套人话，不另造一套)。
+      probeRoutingBtn: '测试路由',
+      probeRoutingTesting: '逐个测试候选中…',
+      probeRoutingPrimary: '主模型',
+      probeRoutingFallback: (n) => `备用 ${n}`,
+      probeRoutingEmpty: '这个助手没有配置备用模型 — 无需测试路由。',
+      probeRoutingFailed: (msg) => `测试失败：${msg}`,
+      probeRoutingSummary: (ok, total) => `${total} 个候选中 ${ok} 个可用`,
       // ease-of-use ②TC — after a CREATE, the user is nudged to talk to the
       // brand-new agent right here and see it respond. The reply comes from the
       // agent itself (reuses the wait:true dispatch path).
@@ -3866,6 +3877,18 @@
       errFixModel: '→ Check the model name is correct.',
       errFixProvider: '→ Confirm the provider / Base URL is right.',
       errFixNetwork: '→ Make sure the provider is reachable and the port is right.',
+      // MR-M5 — the 「test routing」 per-candidate diagnostic. Unlike test-connection
+      // (which probes the key you just typed), this probes EVERY candidate (primary
+      // + each fallback) of a SAVED agent through its vault key, so you see which
+      // fallback actually works. Each candidate's verdict reuses describeKeyTest
+      // (the same words as test-connection — one source of truth, not a new set).
+      probeRoutingBtn: 'Test routing',
+      probeRoutingTesting: 'Probing candidates…',
+      probeRoutingPrimary: 'Primary',
+      probeRoutingFallback: (n) => `Fallback ${n}`,
+      probeRoutingEmpty: 'This agent has no fallback models — nothing to test.',
+      probeRoutingFailed: (msg) => `Test failed: ${msg}`,
+      probeRoutingSummary: (ok, total) => `${ok} of ${total} candidates OK`,
       // ease-of-use ②TC — after a CREATE, the user is nudged to talk to the
       // brand-new agent right here and see it respond. The reply comes from the
       // agent itself (reuses the wait:true dispatch path).

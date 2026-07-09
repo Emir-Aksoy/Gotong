@@ -2026,6 +2026,23 @@ body.admin[data-active-tab="settings"] main.admin-grid {
 .ma-action:hover { background: #f5f5f0; }
 .ma-action.ma-danger { color: #c84242; border-color: #e8b5b5; }
 .ma-action.ma-danger:hover { background: #fdf0f0; }
+/* MR-M5 —「测试路由」per-candidate probe results, injected under a row's
+   actions. Same flat-card visual language as .ma-meta / .ma-caps; there's no
+   global .ok/.err, so the states are scoped here. */
+.ma-routing-result {
+  margin-top: 0.4rem;
+  font-size: 0.72rem;
+  line-height: 1.55;
+}
+.ma-routing-summary { font-weight: 600; margin-bottom: 0.2rem; color: #555; }
+.ma-routing-summary.ok { color: #1a6a3a; }
+.ma-routing-summary.err { color: #c84242; }
+.ma-routing-line {
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  padding: 1px 0;
+}
+.ma-routing-line.ok { color: #1a6a3a; }
+.ma-routing-line.err { color: #c84242; }
 
 /* --- v2.1: modal layer ----------------------------------------------- */
 .modal[hidden] { display: none; }

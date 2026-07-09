@@ -3072,6 +3072,8 @@ import { createWorkflows } from './workflows.js'
         if (a) managedAgents.openAgentForm('edit', a)
       } else if (act === 'export-agent') {
         managedAgents.exportAgent(id)
+      } else if (act === 'probe-routing') {
+        managedAgents.probeRouting(id)
       } else if (act === 'manage-agent-access') {
         managedAgents.openAccessModal(id)
       } else if (act === 'remove-agent') {
