@@ -35,7 +35,7 @@
   "dependencies": {
     "@gotong/core": "workspace:*",
     "@gotong/protocol": "workspace:*",
-    "ws": "^8.20.1"
+    "ws": "^8.21.0"
   },
   "devDependencies": {
     "@types/ws": "^8.5.13",
