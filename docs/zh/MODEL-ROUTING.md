@@ -6,7 +6,9 @@
 > 有序降级 + 熔断 + 逐 provider 健康监测,让「一个厂商挂了」不等于「管家哑了」。
 > 全程 opt-in、零内核行为改动、预计零新 env 旋钮。
 >
-> Last updated: 2026-07-08 · 状态:**规划中**(MR-M0 计划文档;M1→M4 待开)。
+> Last updated: 2026-07-09 · 状态:**全完 M0→M4**(计划 `c4a3c63` → 纯核 `b5d85de` →
+> opt-in 配置+接线 `52a66c5` → per-provider 健康上面板 `9e37634` → capstone 本 commit)。
+> 四条边界全程守住,旋钮仍 **107**(零新增),`main.ts` 顶格 3000/3000。
 
 ---
 
@@ -109,13 +111,13 @@ provider 内部**:
 
 ## 四、里程碑
 
-| 里程碑 | 内容 | 交付门 |
-|---|---|---|
-| **MR-M0** | 本计划文档 + 侦察记录 | 文档落地、链接自洽 |
-| **MR-M1** | `RoutingProvider` 纯核(`packages/llm`):有序候选 + 熔断 + 首-chunk-前 failover + 复用 `classifyLlmError`;零依赖、可注入 now/onEvent;单测 | packages/llm 全绿;不接线=零行为变;kernel-deps 门绿 |
-| **MR-M2** | 配置面 + 接线(opt-in):扩 `ManagedAgentSpec.fallbacks`;`buildProvider` 有候选才包;admin `agents-routes` 校验;401 语义文档化 | host 全绿;未配 fallbacks 字节不变;旋钮不增 |
-| **MR-M3** | per-provider 健康监测:`RoutingProvider.onEvent` 喂进 CARE 健康投影;`HealthSnapshot` 加逐候选健康行;面板渲染(超越二元断供);可选主动逐候选探活 | host+web 全绿;面板真见 per-provider 健康 |
-| **MR-M4** | capstone `examples/model-routing`(主 provider 抛错→failover→续跑;连续失败→熔断;健康投影显示;self-assert exit 0)+ 文档收尾 + CLAUDE.md 账本 | `pnpm demo:model-routing` exit 0;四门 PASS |
+| 里程碑 | 内容 | 交付门 | 状态 |
+|---|---|---|---|
+| **MR-M0** | 本计划文档 + 侦察记录 | 文档落地、链接自洽 | ✅ `c4a3c63` |
+| **MR-M1** | `RoutingProvider` 纯核(`packages/llm`):有序候选 + 熔断 + 首-chunk-前 failover + 复用 `classifyLlmError`;零依赖、可注入 now/onEvent;单测 | packages/llm 全绿;不接线=零行为变;kernel-deps 门绿 | ✅ `b5d85de` |
+| **MR-M2** | 配置面 + 接线(opt-in):扩 `ManagedAgentSpec.fallbacks`;`buildRoutedProvider` 有候选才包;admin `agents-routes`+`manifest` 校验;per-candidate `model` 覆盖;401 语义文档化 | host 全绿;未配 fallbacks 字节不变;旋钮不增 | ✅ `52a66c5` |
+| **MR-M3** | per-provider 健康监测:`RoutingProvider.onEvent` → 新 `RoutingHealthTracker`(**in-memory**,寿命对齐 in-memory 熔断器,重启即清);`HealthSnapshot.routing` 逐候选健康行(list,同 connectorSlots 三态)+ 面板黄条渲染(超越 CARE-M7 二元断供) | host+web 全绿;面板真见 per-provider 健康 | ✅ `9e37634` |
+| **MR-M4** | capstone `examples/model-routing`(主 provider 抛错→failover→续跑;连续失败→熔断快速跳过;健康投影=面板数据;主自愈→探针→弹回;self-assert exit 0)+ 文档收尾 + CLAUDE.md 账本 | `pnpm demo:model-routing` exit 0;四门 PASS | ✅ 本 commit |
 
 ## 五、市场对照(先查市面 · 2026-07)
 
@@ -137,8 +139,17 @@ provider 内部**:
 - **opt-in 字节不变**:未配 `fallbacks` 的 agent,`buildProvider` 走单 provider 老路。
 - **kernel-deps 门**:`RoutingProvider` 只依赖 `packages/llm` 内部;`fallbacks` 是 core
   additive 可选字段、Hub 不解释。
-- **旋钮登记 / 行数预算**:预计零新 `GOTONG_*` 旋钮(阈值常量);`main.ts` 顶格,增行靠
-  压注释净零。
+- **旋钮登记 / 行数预算**:零新 `GOTONG_*` 旋钮(阈值常量);`main.ts` 顶格 3000/3000,
+  M3 接线增行靠压注释净零。
+
+**落地实证**(capstone [`examples/model-routing`](../../examples/model-routing)):一个确定性
+脚本用真 `RoutingProvider` + 真 `RoutingHealthTracker`(只 stub 两个 provider)四幕跑通
+failover → 熔断快速跳过 → 健康投影(= 面板 `snap.routing` 的确切数据)→ 主自愈弹回,
+12 条自断言 + `pnpm demo:model-routing` exit 0。单测另有:`packages/llm` `routing-provider.test.ts`
+(纯核:首-chunk-前 failover / 熔断三态 / per-candidate model 覆盖)、`packages/host`
+`routing-health.test.ts`(9 例事件折叠 + `breaker_close` 即恢复)+ `admin-health.test.ts`
+(routing 三态)+ `local-agent-pool-routing.test.ts`(opt-in 字节稳 + 真 failover 喂 tracker)、
+`packages/web` `manifest.test.ts` / `agents-route.test.ts`(fallbacks 校验 + 往返)。
 
 ## 七、相关文档
 

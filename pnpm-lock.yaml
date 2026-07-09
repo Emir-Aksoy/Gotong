@@ -451,6 +451,15 @@ importers:
         specifier: workspace:*
         version: link:../../packages/services-sdk
 
+  examples/model-routing:
+    dependencies:
+      '@gotong/host':
+        specifier: workspace:*
+        version: link:../../packages/host
+      '@gotong/llm':
+        specifier: workspace:*
+        version: link:../../packages/llm
+
   examples/multimodal-vision:
     dependencies:
       '@anthropic-ai/sdk':

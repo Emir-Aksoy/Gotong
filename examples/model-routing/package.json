@@ -1,0 +1,15 @@
+{
+  "name": "@gotong/example-model-routing",
+  "version": "0.0.0",
+  "type": "module",
+  "private": true,
+  "description": "MR capstone (模型路由 track) — 主模型挂了,管家不断线. The whole deterministic failover chain in one run, no network, no API key: a flaky primary throws before its first token → the RoutingProvider fails over to the backup and the answer still arrives → three failures trip the per-candidate circuit breaker so the 4th call skips the dead primary fast → the SAME events feed the MR-M3 health projection the admin panel reads (you can see WHICH provider is degraded, not just a binary outage) → the primary heals, a half-open probe closes the breaker, and routing snaps back to it. Real @gotong/llm RoutingProvider + @gotong/host RoutingHealthTracker underneath; only the two providers are stubbed.",
+  "scripts": {
+    "start": "tsx src/demo.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@gotong/host": "workspace:*",
+    "@gotong/llm": "workspace:*"
+  }
+}

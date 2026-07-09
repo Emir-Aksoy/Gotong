@@ -37,6 +37,10 @@
     "./ops": {
       "types": "./dist/ops-core.d.ts",
       "import": "./dist/ops-core.js"
+    },
+    "./routing-health": {
+      "types": "./dist/routing-health.d.ts",
+      "import": "./dist/routing-health.js"
     }
   },
   "files": [
