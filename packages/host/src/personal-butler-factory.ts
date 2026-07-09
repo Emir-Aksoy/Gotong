@@ -66,6 +66,7 @@ import {
   buildButlerLanguageToolset,
 } from './personal-butler-language.js'
 import { buildButlerLastSeenProbe } from './personal-butler-last-seen.js'
+import { buildButlerSourceProbe } from './personal-butler-source.js'
 import { buildButlerPendingProbe, type ButlerPendingSource } from './personal-butler-pending.js'
 import { buildButlerPeersToolset, type ButlerPeerSurface } from './personal-butler-peers.js'
 import {
@@ -425,14 +426,16 @@ export function buildButlerFactory(deps: ButlerFactoryDeps): ButlerFactory {
           // prompt tail so the byte-stable frozen block is untouched; timezone
           // honors the deployment's `TZ`, pin `TZ=Asia/Kuala_Lumpur` for a KL
           // user), then the A2 时段问候/间隔 (greet after a real gap away), the A3
-          // 语言偏好 (reply in the member's pinned language), the A1 待办提醒
-          // (parked /me approvals the member forgot), the onboarding 现状卡 (when
-          // wired), then the task-notebook recitation digest. All but the clock
-          // self-gate per turn (null → not injected → byte-identical prompt).
+          // 语言偏好 (reply in the member's pinned language), the A4 来源渠道 (shape
+          // the reply for the IM chat bubble it came from), the A1 待办提醒 (parked
+          // /me approvals the member forgot), the onboarding 现状卡 (when wired),
+          // then the task-notebook recitation digest. All but the clock self-gate
+          // per turn (null → not injected → byte-identical prompt).
           contextProbe: composeContextProbes(
             buildButlerClockProbe(),
             buildButlerLastSeenProbe({ file: presenceFile, logger: log }),
             buildButlerLanguageProbe({ file: languageFile, logger: log }),
+            buildButlerSourceProbe(),
             refs.pendingInbox
               ? buildButlerPendingProbe({ userId, pending: () => refs.pendingInbox, logger: log })
               : undefined,
