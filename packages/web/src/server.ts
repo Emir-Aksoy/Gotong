@@ -60,13 +60,7 @@ import {
   type WorkflowGrantSink,
 } from './workflow-routes.js'
 import { handleWizardAdminRoute, type WorkflowWizardSurface } from './wizard-routes.js'
-import {
-  handleAgentsRoute,
-  type AgentGrantSink,
-  type ConnectorSlotSink,
-  type LlmKeyProbe,
-  type RoutingProbeSurface,
-} from './agents-routes.js'
+import { handleAgentsRoute, type AgentGrantSink, type ConnectorSlotSink, type LlmKeyProbe, type RoutingProbeSurface } from './agents-routes.js'
 import { handleTemplateAcceptanceRoute, type TemplateAcceptanceSurface } from './template-acceptance-routes.js'
 import { handleAdminStewardRoute } from './admin-steward-routes.js'
 import { handleServicesRoute } from './services-routes.js'
@@ -475,15 +469,11 @@ interface HandlerCtx {
   adminLoginLimiter: RateLimiter
   workerCreateLimiter: RateLimiter
   lifecycle: ManagedAgentLifecycle | undefined
-  /** ease-of-use ③-M1 — see WebServerOptions.llmKeyProbe doc above. */
   llmKeyProbe: LlmKeyProbe | undefined
   /** MR-M5 — see WebServerOptions.routingProbe doc (server-types.ts). */
   routingProbe: RoutingProbeSurface | undefined
-  /** FDE-M1b — see WebServerOptions.connectorSlots doc (server-types.ts). */
   connectorSlots: ConnectorSlotSink | undefined
-  /** FDE-M2 — see WebServerOptions.templateAcceptance doc (server-types.ts). */
   templateAcceptance: TemplateAcceptanceSurface | undefined
-  /** FDE-M3 — see WebServerOptions.scheduleSuggestions doc (server-types.ts). */
   scheduleSuggestions: WebServerOptions['scheduleSuggestions']
   adminHealth: AdminHealthSurface | undefined
   /** RES-M1 — see WebServerOptions.resourceInventory doc above. */

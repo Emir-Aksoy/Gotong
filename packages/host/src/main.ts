@@ -2533,15 +2533,11 @@ async function main(): Promise<void> {
     port: config.webPort,
     cookieSecure: config.cookieSecure,
     lifecycle: localAgents,
-    // ease-of-use ③-M1 — LLM-key probe for the template-import post-install
-    // checklist ("agent X still needs a key"). Reuses the pool's spawn-time
-    // resolution chain so the checklist never disagrees with reality.
+    // ease-of-use ③-M1 — LLM-key probe for the template-import checklist (reuses the pool's spawn-time key resolution).
     llmKeyProbe: {
       resolvesKey: (id, provider) => localAgents.hasResolvableLlmKey(id, provider),
     },
-    // MR-M5 — per-candidate routing probe for the manual 「测试路由」 button.
-    // Reuses the pool's spawn-time resolveApiKey → providerFactory chain so a
-    // probe pass means the real failover path works; isolated from the breaker.
+    // MR-M5 — per-candidate manual 「测试路由」 probe (reuses the pool's spawn-time key→factory chain; breaker-isolated).
     routingProbe: localAgents,
     // FDE-M1b/M3 — durable sinks for template-declared connector slots and
     // schedule suggestions (recorded at import; absent → response-only).
