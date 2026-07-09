@@ -1,8 +1,9 @@
 /**
- * @gotong/im-wechat — public surface (WX-M1: protocol core only; the
- * ImBridge implementation lands in WX-M2).
+ * @gotong/im-wechat — public surface: iLink protocol client (WX-M1) +
+ * the `ImBridge` implementation (WX-M2).
  */
 
+export { WechatBridge, type WechatBridgeOptions } from './bridge.js'
 export {
   createWechatIlinkClient,
   buildIlinkClientVersion,
