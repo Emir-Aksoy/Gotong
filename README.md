@@ -17,6 +17,8 @@ Most AI tools give you two options: hand everything to a cloud you don't control
 - **Your keys and data stay on your disk.** Credentials live encrypted in your own `.gotong/` directory. Federating with another hub shares a capability, not your vault.
 - **Nothing decides in the dark.** Every dispatch and result is an append-only transcript you can read. The framework never runs the model, so there's no hidden judgment call.
 
+Fronting all of this for each member is **Atong (阿同)** — the resident personal butler: it remembers you across sessions, runs errands through your connected tools, and parks anything consequential (spending money, messaging outsiders) in your inbox until you approve. The name rides on Go**tong** — 同 as in 共同, your "together" companion. ([Design doc](docs/zh/PERSONAL-BUTLER-DESIGN.md), zh.)
+
 → See the [**flagship templates**](docs/zh/FLAGSHIP-TEMPLATES.md) for hubs a non-technical person can import and run today (smart home, café ops, a family learning hub, a personal coding hub), each with the governance gate shown plainly and a one-command demo. Want to share your own? [`templates/community/templates/`](templates/community/templates/).
 
 ## Core ideas

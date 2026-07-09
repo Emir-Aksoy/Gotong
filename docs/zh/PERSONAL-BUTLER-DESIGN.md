@@ -1,4 +1,4 @@
-# 个人 Hub 管家 (Personal Butler) — 设计文档
+# 个人 Hub 管家「阿同 (Atong)」 — 设计文档
 
 > 把现有 `HubStewardAgent` 升级成「**可快速投入工作、类似 OpenClaw / Hermes 的常驻个人管家**」:
 > 记忆 + 会话上下文引擎 + 良性灵活调用 + 治理动作审批,落在 Gotong 北极星上。
@@ -9,7 +9,34 @@
 > **状态:M1–M6 全完。** 收口见 [`docs/zh/ledger/PERSONAL-BUTLER-FINAL.md`](./ledger/PERSONAL-BUTLER-FINAL.md)
 > (commit / 数据流 / §七 验收门结果 / 测试矩阵 / 显式推迟)。
 >
-> Last updated: 2026-06-29 · 状态:M1–M6 全完(收口已写)
+> Last updated: 2026-07-09 · 状态:M1–M6 全完(收口已写)· 命名「阿同」已拍板
+
+---
+
+## 名字:阿同 (Atong)
+
+2026-07-09 用户拍板(见 [`STRATEGY-2026-07.md`](STRATEGY-2026-07.md) §七):常驻个人管家的
+**产品名 = 「阿同」,拉丁写法 Atong**。「同」取自 Go**tong**,也是「共同 / 同伴」的同——
+南洋华人惯用的「阿 + 单字」称呼,一听就是自己人。传播时说「Gotong 框架 + 阿同管家」。
+
+四条落地边界(改名不改代码):
+
+1. **纯品牌层**。包名 `@gotong/personal-butler`、`PersonalButlerAgent`、`GOTONG_BUTLER_*`
+   旋钮、`.gotong/butler/` 目录等一切代码标识符**不改**——名字是给人记的,不是给代码用的。
+2. **成员人设优先**。管家聊天路径的自称由成员自己 agent 行的 `system` 人设定义;「阿同」
+   是**推荐默认**(见下),成员给自家管家起了别的名字,框架任何注入卡都不会顶撞它——
+   B1 能力卡 / A2 问候卡刻意保持名字中立。
+3. **框架自声处用名**。唯一由框架书写 persona 的模型调用(晨报 sweep 的
+   `BUTLER_BRIEF_SYSTEM`,`personal-butler-proactive.ts`)自称阿同——那里成员人设不在场。
+4. **与「站点管家 (hub steward)」区分**。web UI 里的「管家 / 站点管家」是 Stream SW 的
+   `HubStewardAgent`(大白话改 hub 设置);阿同专指**常驻个人管家**(本文档的主角)。
+   两者以后对外表述:「阿同」vs「站点管家」,不再共用裸「管家」二字。
+
+**推荐默认 system 人设首行**(建 agent 行 / 模板时可直接抄):
+
+```
+你叫「阿同」(Atong),是我的常驻私人管家。记得我说过的事,用大白话帮我干活;拿不准、要花钱、要对外发的,先停下来问我。
+```
 
 ---
 

@@ -204,9 +204,11 @@ export function memberLocalNow(
 // ---------------------------------------------------------------------------
 
 /** System prompt for a daily brief. Grounded, short, with an explicit SKIP out so
- *  the model can decline when there's genuinely nothing worth a morning note. */
+ *  the model can decline when there's genuinely nothing worth a morning note.
+ *  自称「阿同」(Atong,「同」取自 Gotong / 同伴)——这是唯一一处框架自声的管家
+ *  persona prompt(成员配置的 system 人设不在晨报 sweep 现场),品牌名落在这。 */
 const BUTLER_BRIEF_SYSTEM = [
-  '你是这位成员的常驻私人管家,现在是他当地的早晨。',
+  '你叫「阿同」(Atong),是这位成员的常驻私人管家,现在是他当地的早晨。',
   '根据你长期记住的关于他的信息,写一条简短(1-3 句)、自然、贴心的主动问候,',
   '可以顺带提一件你觉得他今天可能想跟进的事。只依据给你的信息,不要编造具体日程、时间或数字。',
   `如果实在没有值得主动说的,就只回复 ${BRIEF_SKIP_SENTINEL}(不要多写)。用中文。`,
