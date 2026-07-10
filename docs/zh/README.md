@@ -14,6 +14,7 @@
 - [`../../QUICKSTART.md`](../../QUICKSTART.md) — **do-this → see-that 上手漏斗**（零 key 先跑 `pnpm demo`）
 - [`OVERVIEW.md`](OVERVIEW.md) — 5 分钟读懂这是什么、为什么这么设计
 - [`HANDS-ON-HUBS.md`](HANDS-ON-HUBS.md) — 五个开箱即抄的 hub 对照
+- [`FAMILY-HUB.md`](FAMILY-HUB.md) — **家庭 hub 一页纸**（一家人的 AI 管家：家人不同权限 / 凭证互不可见 / 对外动作有人批 + 开箱 15 分钟验收标准）
 - [`EXAMPLES.md`](EXAMPLES.md) — **50 个 demo 的分级索引**（先跑哪个 → 深到哪；绝大多数零前置）
 - [`LEARN.md`](LEARN.md) — 社区精选视频 / 教程
 
