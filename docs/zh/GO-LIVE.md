@@ -57,24 +57,27 @@
 
 成员要的只是：你的**机器人用户名**（如 `@my_hub_bot`）+ 一个**绑定码**。
 
-### 2.1 例外：QQ 官方 webhook 需要公网（其余五桥免穿透）
+### 2.1 例外：QQ 官方 webhook 需要公网（其余六桥免穿透）
 
-上面这套「出站、免穿透」对 Telegram / Lark / Slack / Discord / Matrix 全成立——它们
-都主动拨向平台云端（Telegram / Matrix 长轮询，Discord / Lark / Slack 持久 WS）。
-**唯一的例外是 QQ**：官方 Bot API 在 2024 底把 WebSocket 判死、只推**入站 webhook**，
-所以 QQ 桥必须有公网域名 + TLS + 反代，跑 T2/T3 云主机，家用 NAT 后面收不到。理由与
-取舍见 [`IM-OFFICIAL-REARCH.md`](IM-OFFICIAL-REARCH.md)。
+上面这套「出站、免穿透」对 Telegram / Lark / Slack / Discord / Matrix / 微信全成立——
+它们都主动拨向平台云端（Telegram / Matrix / 微信 iLink 长轮询，Discord / Lark / Slack
+持久 WS）。**唯一的例外是 QQ**：官方 Bot API 在 2024 底把 WebSocket 判死、只推**入站
+webhook**，所以 QQ 桥必须有公网域名 + TLS + 反代，跑 T2/T3 云主机，家用 NAT 后面收
+不到。理由与取舍见 [`IM-OFFICIAL-REARCH.md`](IM-OFFICIAL-REARCH.md)。
 
 | 桥 | 方向 | 免穿透 | 需公网入口 | 主动推送 |
 |---|---|---|---|---|
 | Telegram / Discord / Matrix | 出站 | ✅ | ❌ | ✅ |
 | Lark（官方长连接） | 出站 | ✅ | ❌ | ✅ |
 | Slack（Socket Mode） | 出站 | ✅ | ❌ | ✅ |
+| **微信（官方 iLink 长轮询）** | 出站 | ✅ | ❌ | **❌（仅被动回复）** |
 | **QQ（官方 webhook）** | **入站** | **❌** | **✅（域名 + TLS + 反代）** | **❌（仅被动回复）** |
 
-> host 的 `startImBridges()` 按 env 起桥（Telegram / Lark / Slack / QQ 已 env-gate，
-> Discord / Matrix 走示例 router）。本文以 Telegram 作 T1/T2 的默认 IM——它最省事、零
-> 公网面；要接其他桥按上表的方向选合适拓扑（QQ → 必上云 + 反代）。
+> host 的 `startImBridges()` 按 env 起桥（Telegram / Lark / Slack / QQ / 微信已
+> env-gate，Discord / Matrix 走示例 router）。本文以 Telegram 作 T1/T2 的默认 IM——它
+> 最省事、零公网面；华人家庭首选微信见 §T1.1b；要接其他桥按上表的方向选合适拓扑
+> （QQ → 必上云 + 反代）。「仅被动回复」= bot 不能先开口，成员先说话才能回——提醒 /
+> 审批推送会进 outbox，成员下次说话时补投（CARE-M8 机制,不丢）。
 
 ---
 
@@ -121,6 +124,34 @@
 
 1. Telegram 里找 **@BotFather** → `/newbot` → 起名字 → 拿到 **token**（形如 `123456789:AAH...`）。
 2. 记下机器人用户名（`@your_hub_bot`），等下发给成员。
+
+### T1.1b 变体 — 微信（官方 iLink 桥，WX-M2 落地）
+
+华人家庭的默认 IM。走**腾讯官方 iLink 协议**（2026-03 首条合法个人号通道，非 hook /
+协议模拟，无封号灰产风险）。与 Telegram 的差别：token 不是网页上复制的，是**扫码换的**
+（1 个微信号 = 1 个 bot，建议用一个专门的号当管家号）：
+
+```bash
+gotong wechat-login >> .env.local       # 终端出二维码（stderr）;凭证两行进文件（stdout）
+# 手机微信「扫一扫」→ 确认;若手机上显示配对数字,按提示在终端输入
+$EDITOR .env.local                      # 核对多了这两行:
+#   GOTONG_WECHAT_BOT_TOKEN=...
+#   GOTONG_WECHAT_BASE_URL=...          # 登录分配的机房,有就带上
+```
+
+之后照 §T1.2 启动，日志出现 `IM bridge enabled platform=wechat` 即通；成员绑定照 §六
+（微信里私信 bot `/bind <码>`）。**微信桥的四个行为差异**（协议决定，不是缺陷）：
+
+- **仅被动回复**：bot 不能先开口。晨报 / 提醒 / 审批推送进 outbox，成员**下次说话时
+  秒到**（不丢）;长期沉默（约 24h+）的会话窗口会失效，也是成员一开口即恢复。
+- **无群聊**：协议未开放群，只能私聊。
+- **文本 only**：语音会走微信服务端转写成文字进来;图片 / 文件暂不落字节（诚实占位）。
+- **会话过期自愈**：服务器报 `-14` 时桥自动停 60 分钟再恢复（镜像官方节律）;若反复
+  出现，重跑 `gotong wechat-login` 换新 token。
+
+> **国际版注记（2026-07-09）**：国内微信号确定可用;国际版（WeChat）2026-06 起灰度
+> 放开中（香港已证实）。马来西亚开发机已实测**网络可达生产端点**（241ms 拿到真二维
+> 码），账号是否在灰度内以扫码能否走完为准——**真机 round-trip 实录待 WX-M3 补录**。
 
 ### T1.2 配置 + 启动
 
