@@ -6,9 +6,10 @@
 >
 > 状态：**M0 侦察 ✅ · M1 协议纯核 ✅（`26e15b7`）· M2 桥 + host 装配 + CLI ✅**
 > （M2a `6820885` 桥纯核 · M2b `1b5aab0` host 装配 · M2c CLI `wechat-login`）
-> · **M3 真机验证 待做**（需用户微信号；止损线见 §六）
+> · **M3a 登录流真机 ✅（2026-07-09 用户实测：马来西亚号在国际灰度内，凭证到手，止损线不触发）**
+> · **M3b 消息 round-trip 待做**（待用户回微信侧；见里程碑表）
 >
-> Last updated: 2026-07-09（侦察当日核实；M1/M2 同日落地）
+> Last updated: 2026-07-09（M0→M2 同日落地；M3a 同日真机实测）
 
 ---
 
@@ -100,6 +101,13 @@ iLink-App-Id / iLink-App-ClientVersion     ← 官方插件从 package.json 读
   正常返回。说明 ①网络路径马来西亚→`ilinkai.weixin.qq.com` 无阻（无 GFW/SSL 问题）
   ②我们的头/`base_info`/UIN 被**生产服务器**接受（wire 实现对真机成立）。M3 剩余未知只有
   一个：**用户的微信账号是否在灰度内**（扫码→确认能否走完）。
+- **M3a 登录流真机实录（2026-07-09，用户马来西亚号实测）**：`gotong wechat-login` 全状态机
+  真机走通——终端渲染二维码（**浏览器链接兜底真实派上用场**：用户用 `liteapp.weixin.qq.com`
+  链接展示的同一张码完成扫码）→ 手机确认 → `confirmed` 返回全套凭证：`bot_token`（形如
+  `…@im.bot:06…`，值不入库）+ `baseurl=https://ilinkai.weixin.qq.com`（主端点，登录未换 IDC）
+  + `ilink_user_id`（形如 `…@im.wechat`）。**结论：马来西亚个人微信号在国际灰度内**——
+  §2.3 的最后一个未知正式解除，止损线（§六）不触发。剩余待验收口为 **M3b 消息 round-trip**
+  （`/bind` 绑定回执 → 管家对话往返 → 审批 park 在下次开口时补投），用户微信侧暂离线，延后。
 
 ### 2.4 条款红线（《微信 ClawBot 功能使用条款》要点）
 
@@ -165,7 +173,8 @@ vault 读取路径是给将来面板扫码卡的前向兼容。
 | **WX-M0 侦察 + 计划** ✅ | 本文档（协议面/海外可用性/条款/生态坑全核） | 计划落盘 + 无停做岔口 |
 | **WX-M1 协议纯核** ✅（`26e15b7`+`2ed938d`） | `client.ts`（登录二维码/轮询状态/getupdates 长轮询/sendmessage/getconfig/notifystart·stop，强制查 `ret`[官方 #197 静默失败的反面]，`X-WECHAT-UIN` 随机头，`base_info` 注入，外部 abort 折叠成空页）+ `message.ts`（iLink msg → `ImMessage`，`message_type:2` 回显过滤承重，GENERATING 帧丢弃，语音走服务端转写，媒体=诚实无字节 stub）+ `types.ts` 官方逐字字段名；实现前 `gh api` 逐字核官方 5 文件，纠社区讹传 3 处（qrcode 是 POST / `-14` 在 `errcode` 不在 `ret` / `iLink-App-Id: "bot"` 是公开常量） | ✅ 21 单测全绿零真实凭证；fixture 对齐官方源码字段 |
 | **WX-M2 桥 + host 装配 + CLI** ✅（M2a `6820885` / M2b `1b5aab0` / M2c） | **M2a** `bridge.ts`：长轮询循环镜像 TelegramBridge + 四个 iLink 差异（字符串游标 `get_updates_buf`；per-peer `context_token` 台账——**改为容量逐出无本地 TTL**，token 新旧由服务器裁决、发失败走 outbox 补投，比计划的「内存+TTL」更诚实；被动回复无台账=诚实抛错；`errcode=-14` 60min 冷却仅报一次自愈恢复；stop() abort 在飞长轮询不等 35s）10 单测。**M2b** host：`ImVaultPlatform` 扩 `wechat`（env 先行 `GOTONG_WECHAT_BOT_TOKEN`+可选 `_BASE_URL`，vault 行 secret=token/metadata.baseUrl 非密随行，绝不混源）+ factory 块 + `PLATFORM_NAMES` 加微信（A4 渠道感知自动覆盖）+ 旋钮 107→109 登记；web 向导白名单仍 telegram\|lark 不外泄。**M2c** CLI `gotong wechat-login`：官方状态机全镜像（IDC redirect 换轮询主机/配对数字 stdin 输错重问/过期与输错封锁刷码上限 3/binded_redirect 指路解绑），stdout 只打 env 两行可 `>> host.env`，二维码+引导走 stderr，qrcode-terminal 渲染 + 链接兜底；**刻意无状态**：CLI 不写 vault（无 master-key 解析面，复制会漂移），env 是文档正道，M2b 的 vault 读取为将来面板扫码卡前向兼容；15 单测 | ✅ im-wechat 31 / host 2022 / cli 269 全绿；未配=字节不变；四门 PASS（旋钮 109） |
-| **WX-M3 真机验证 + runbook**（~1 天，**需要你的微信号**） | 真机 round-trip（扫码→绑定→管家对话→审批 park 回推）；**马来西亚国际版号可用性最终答案**；GO-LIVE 加节 + FEDERATION/IM 文档指针；CLAUDE.md 账本收口 | 真机收发成功（或诚实记录灰度未放开+国内号验证） |
+| **WX-M3a 登录流真机 ✅（2026-07-09 用户实测）** | `gotong wechat-login` 真机全状态机走通（终端 QR + 浏览器链接兜底均可用）→ `confirmed` 发全套凭证；**马来西亚国际版号可用性最终答案 = 在灰度内**（§2.3 实录）；GO-LIVE §T1.1b 已有接入节 | ✅ 真机凭证到手；止损线不触发 |
+| **WX-M3b 消息 round-trip**（待用户回微信侧） | 本机 host 带 env 起桥 → `/me` 领绑定码 → 微信 `/bind` 回执（=双向通道证明）→ 管家对话往返 → 审批 park 下次开口补投；GO-LIVE §T1.1b 实录占位补齐；CLAUDE.md 账本收口 | 真机收发成功 |
 
 ## 五、显式推迟（不做的说清楚）
 
