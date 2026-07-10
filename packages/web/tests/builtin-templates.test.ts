@@ -34,6 +34,7 @@ const EXPECTED_IDS = [
   'morning-brief-hub',
   'battle-monk-training',
   'smart-home-hub',
+  'family-hub',
   'cafe-ops',
   'warband-club',
   'tea-supply-link',

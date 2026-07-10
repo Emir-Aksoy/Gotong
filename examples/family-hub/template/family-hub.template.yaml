@@ -1,0 +1,248 @@
+# 家庭 hub — 一家人的 AI 管家开箱包 (gotong.template/v1)
+#
+# FAM-M1:把 docs/zh/FAMILY-HUB.md 的「开箱 15 分钟」阶梯里 10→15 分钟那一段
+# (第一张审批卡) 从「自己想怎么配」压成「装完照按钮点」。装走的是:
+#   - 2 个托管 LLM agent (家庭帮手 / 家庭晨报员);
+#   - 2 条声明式工作流:
+#       family-approval-demo —— 家人在 /me 发起一件想让 AI 帮家里办的事,
+#         AI 先整理成一页申请 (要做什么/大约代价/风险), **然后停在真人审批步**,
+#         指定的家长在自己的 /me 收件箱批准后才继续、拒绝就到此为止。
+#         这就是 FAMILY-HUB.md 验收 checklist 的「时刻 C(对外动作有人批)」,
+#         装完即可照按钮点出来。
+#       family-brief —— 家庭晨报,/me 一键跑;配好定时后每早自动跑。
+#   - 3 个生活连接器槽位 (日历/笔记/任务, 全部可选 —— 不挂照样跑, 晨报进诚实模式);
+#   - 1 条 golden-run 验收 (装完面板「跑验收」机器判卷) + 1 条定时建议 (只带节奏不带人)。
+#
+# ── 与管家的关系 (谁演示什么) ────────────────────────────────────────────────
+#   hub 自带的管家「阿同」本来就有 governed 闸:你在 IM 里让它对外发消息,它会
+#   自己停靠等审批。本模板的 family-approval-demo 是**结构化**的那条路 —— 审批
+#   步写死在工作流里、审批人由发起时指定,适合家庭第一次「照按钮点出时刻 C」;
+#   管家路径适合日常随口使唤。两条路走的是同一套 /me 收件箱。
+#
+# ── 诚实边界 (这条演示流不真的对外发东西) ────────────────────────────────────
+#   family-approval-demo 批准后的产出是**一页可执行方案 + 家庭记录**,不是真实的
+#   对外动作 —— 模板不携带任何出站凭证,也绝不预授权(接入≠授权行动)。要让 AI
+#   真的替家里发消息/动日程,给 agent 挂对应连接器后,那些动作仍逐次过审批闸。
+#
+# ── 审批流为什么不进 acceptance ──────────────────────────────────────────────
+#   golden-run 必须无人值守跑完 (带 human: 步的流会按设计停在审批步直到超时),
+#   而「家长真的批了一次」恰恰是这条流要人来验的东西 —— 它的验收就是
+#   FAMILY-HUB.md §4.2 checklist 的 A5/A6 (时刻 C),由试点家庭照跑打钩。
+#   acceptance 里放的是纯 AI 的 family-brief (诚实模式即合格线)。
+#
+# 导入: admin UI →「工作流 / 模板画廊」→ 安装, 或
+#   curl -X POST -H "Authorization: Bearer <admin-token>" \
+#     -H 'content-type: application/json' \
+#     -d "$(jq -Rs '{template: .}' examples/family-hub/template/family-hub.template.yaml)" \
+#     http://127.0.0.1:8745/api/admin/templates/import
+# 一条命令开荒 (含补人启用定时): gotong provision <本文件> --url <hub> --token <admin> --user <成员id>
+schema: gotong.template/v1
+template:
+  name: 家庭 hub(一家人的 AI 管家)
+  description: |-
+    一家人共用 hub 的开箱包:家庭帮手 + 家庭晨报两个 agent、两条工作流。
+    family-approval-demo 让任何家人在 /me 发起「想让 AI 帮家里办一件事」,AI 整理成
+    一页申请后停在真人审批步 —— 指定家长批准才继续,拒绝就不做,中途重启卡还在。
+    family-brief 是家庭晨报,配好定时每早自动跑。三个生活连接器槽位(日历/笔记/任务)
+    全部可选:不挂照样跑,晨报按诚实模式(不编造日程)。导入时填一次 DeepSeek key。
+
+  version: 1
+
+  # ── 2 个 agent ───────────────────────────────────────────────────────────────
+  agents:
+    - id: family-helper
+      displayName: 家庭帮手
+      capabilities: [family.assist]
+      kind: llm
+      provider: openai-compatible
+      baseURL: https://api.deepseek.com/v1
+      providerLabel: DeepSeek
+      model: deepseek-chat
+      system: |
+        你是这个家庭 hub 里的「家庭帮手」,一次只被派两种活,按任务 payload 里的
+        step 字段区分。全程中文、口吻像靠谱的家人,不寒暄、不解释你在做什么。
+
+        【step = prepare 整理申请】把 request(家人想让 AI 帮家里办的事)整理成
+        一页申请,给审批的家长 30 秒能看懂。结构(全文 ≤ 250 字):
+        1. 想办的事 —— 一句话复述,含谁受益;
+        2. 大约代价 —— 花钱/花时间/要用到什么(不知道就写「未知,建议问清再批」,不要编数字);
+        3. 需要留意 —— 1-2 条风险或注意点(对外发东西/花钱/涉及孩子的,务必点名);
+        4. 我的建议 —— 一句话(可以建议「先问清 X 再批」)。
+
+        【step = carry_out 出执行方案】审批已通过(能走到这一步就说明家长批了)。
+        把申请变成一页可执行方案:
+        1. 怎么办 —— 3-5 步具体步骤,家里谁来做哪步;
+        2. 家庭记录 —— 一句话记录「某年某月这件事经家长批准」(日期用 payload 里给的,没给就不写日期);
+        3. 下一步 —— 如果有的步骤需要 AI 真的对外操作(发消息/下单),明说
+           「这一步会再次经过审批闸」,不要假装已经替家里做完了。
+
+        诚实规矩(最重要):你没有支付能力、不会真的对外发消息或下单。你的产出是
+        申请和方案文本;真实的对外动作由挂了连接器的 agent 逐次过审批闸执行。
+        绝不假装「已下单/已发送」。
+
+    - id: family-brief-writer
+      displayName: 家庭晨报员
+      capabilities: [family.brief.compose]
+      kind: llm
+      provider: openai-compatible
+      baseURL: https://api.deepseek.com/v1
+      providerLabel: DeepSeek
+      model: deepseek-chat
+      system: |
+        你是这个家庭的晨报员, 每次被派到就写**一份**简短的中文家庭晨报, 直接给
+        正文, 不寒暄、不解释你在做什么。
+
+        结构 (全文 200-400 字, 用短小节):
+        1. 今日重点 —— 围绕 focus 主题给 2-3 条今天全家值得关注的要点或行动建议;
+        2. 家庭提醒 —— 1-2 条当日自查 (如"今天有没有谁要接送/要交的东西/要回的消息");
+        3. 今日一学 —— 1 条适合全家饭桌上聊的小知识。
+
+        诚实规矩 (最重要):
+        - 你没有实时新闻,也默认拿不到这家人的日程/待办。**没有的数据就不要编** ——
+          不要伪造"今天的新闻"或"你们家的日程", 要点写成常识性、不依赖时效的建议。
+        - 如果你的工具列表里有日历 / 笔记 / 任务类 MCP 工具, 先调它们拿真实数据,
+          "家庭提醒"一节改用真实条目; 没有工具就按上面的通用写法。
+        - focus 为空时, 主题取"全家高效开始这一天"。
+      # 要读真实日程/清单, 运行时在这里挂 MCP server (见下方 requires.connectors)。
+      # 模板不预挂 —— 接哪个源是这家人的运行时决定。
+
+  # ── 2 条声明式工作流 ─────────────────────────────────────────────────────────
+  workflows:
+    # 时刻 C 演示:发起 → AI 整理 → 家长批 → 才有方案。审批步是 Phase 16 human:
+    # 真人节点 —— 挂起等家长, 拒绝即止, 重启幸存。
+    - id: family-approval-demo
+      name: 家庭审批演示(第一张审批卡)
+      description: 家人发起一件想让 AI 帮家里办的事;AI 整理成一页申请后停在指定家长的审批步,批准才出执行方案,拒绝就不做。
+      governance:
+        data_sensitivity: internal
+        required_credentials: [deepseek]
+        required_human_roles: [审批家长 (approver)]
+        notes: 开箱零外部系统;产出是申请与方案文本,真实对外动作不在本流内(逐次另过审批闸)。
+      trigger:
+        capability: family.request
+        payload_schema:
+          - id: request
+            label: 想请 AI 帮家里办什么事?
+            type: textarea
+            rows: 4
+            required: true
+          - id: approver_id
+            label: 谁来批?(家长在 hub 里的用户名)
+            type: text
+            required: true
+      surface:
+        me:
+          enabled: true
+          label: 请家里的 AI 办件事
+          description: 说清想办的事,AI 整理成申请,家长批准后给出执行方案。
+          allowed_roles: [owner, admin, member]
+          user_scope_field: requester_id
+      steps:
+        - id: prepare
+          description: 家庭帮手把请求整理成一页申请(要办的事/大约代价/需要留意/建议)。
+          dispatch:
+            strategy: { kind: capability, capabilities: [family.assist] }
+            title: 整理家庭申请
+            payload:
+              step: prepare
+              request: $trigger.payload.request
+              requester_id: $trigger.payload.requester_id
+        - id: approve
+          description: 指定家长在 /me 收件箱批准这件事(拒绝则工作流到此为止)。
+          human:
+            assignee: $trigger.payload.approver_id
+            kind: approval
+            prompt: 有家人想让 AI 帮家里办一件事,申请已整理好(见上一步产出),允许吗?
+            title: 家庭事项审批
+        - id: carry-out
+          description: 批准后,家庭帮手把申请变成一页可执行方案 + 家庭记录。
+          dispatch:
+            strategy: { kind: capability, capabilities: [family.assist] }
+            title: 出执行方案
+            payload:
+              step: carry_out
+              request: $trigger.payload.request
+              prepared: $prepare.output
+      output:
+        plan: $carry-out.output
+
+    # 家庭晨报:/me 一键跑;配好定时后每早自动跑, 跑完管家播到 IM (BE-M5)。
+    - id: family-brief
+      name: 家庭晨报
+      description: 写一份全家视角的中文晨报;配好定时后每早自动跑,跑完管家播到 IM。
+      governance:
+        data_sensitivity: internal
+        required_credentials: [deepseek]
+        notes: 开箱零外部系统;挂了日历/笔记/任务 MCP 后晨报读真实数据,数据留在本 hub。
+      trigger:
+        capability: family.brief.request
+        payload_schema:
+          - id: focus
+            label: 今天想让全家重点关注什么?
+            type: text
+            required: false
+      surface:
+        me:
+          enabled: true
+          label: 来份家庭晨报
+          description: 立刻写一份今日家庭晨报;配好定时后每早自动送到 IM。
+          allowed_roles: [owner, admin, member]
+          user_scope_field: reader_id
+      steps:
+        - id: compose
+          description: 家庭晨报员写今日晨报 (有 MCP 工具就读真实数据, 没有就按诚实模式)。
+          dispatch:
+            strategy: { kind: capability, capabilities: [family.brief.compose] }
+            title: 写今日家庭晨报
+            payload:
+              focus: $trigger.payload.focus
+              reader_id: $trigger.payload.reader_id
+      output:
+        brief: $compose.output
+
+  # ── FDE-M1: 生活连接器槽位 —— 全部可选, 不挂照样跑(晨报进诚实模式) ──────────
+  # 槽位 id = 期望存在的 MCP server 名;选哪个后端是这家人的运行时决定, 模板不点名
+  # 厂商。接入 ≠ 授权行动:挂上后能读写, 但替家里发消息/花钱仍逐次过审批闸。
+  requires:
+    connectors:
+      - id: calendar
+        kind: mcp
+        optional: true
+        capability: calendar.read
+        hint: 连接器目录「日历」组任选后端(如 Google 日历走「连接现实生活」OAuth), server 名用 calendar;不挂则晨报不写日程
+      - id: notes
+        kind: mcp
+        optional: true
+        capability: notes.read
+        hint: 连接器目录「笔记」组任选后端(如 notion-notes), server 名用 notes;家庭清单/备忘从这里读
+      - id: tasks
+        kind: mcp
+        optional: true
+        capability: tasks.read
+        hint: 连接器目录「任务」组任选后端(如 todoist-tasks), server 名用 tasks;家务/作业清单从这里读
+
+  # ── FDE-M2: 黄金验收 —— 装完面板「跑验收」, 零 LLM 结构断言判卷 ──────────────
+  # 只放纯 AI 的晨报流:合格线 = 诚实模式(开箱不挂任何连接器也必须绿)。
+  # family-approval-demo 刻意不进这里 —— 带 human: 步的流无人值守必然停在审批步,
+  # 它的验收就是 FAMILY-HUB.md §4.2 的 A5/A6(家长真人批一次), 机器替不了。
+  acceptance:
+    - id: smoke-family-brief
+      workflowId: family-brief
+      trigger: { focus: 全家高效开始这一天 }
+      assert:
+        contains: [今日重点, 家庭提醒, 今日一学]
+        forbid: [作为一个AI, 我无法访问]
+      note: 开箱无连接器状态下也必须绿(诚实模式即合格线)
+
+  # ── FDE-M3: 定时建议 —— 只带节奏不带人;装完「定时」卡点「补人启用」选成员 ────
+  schedules:
+    - workflowId: family-brief
+      cadence: { kind: daily, hour: 7 }
+      note: 装完在「定时」卡补人启用, 每早 7 点自动跑, 早餐前送到 IM
+
+  # ── 一键: 导入时提示填一次 API key, 自动应用到两个 agent ─────────────────────
+  defaults:
+    apiKeyPrompt:
+      provider: openai-compatible
+      baseURL: https://api.deepseek.com/v1
+      label: DeepSeek
