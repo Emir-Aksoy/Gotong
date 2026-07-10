@@ -72,7 +72,8 @@
 - [`PROD-HARDENING-RUNBOOK.md`](PROD-HARDENING-RUNBOOK.md) · [`PRE-LAUNCH-TEST-PLAN.md`](PRE-LAUNCH-TEST-PLAN.md) · [`REAL-WORLD-TESTING.md`](REAL-WORLD-TESTING.md) — 生产加固 / 上线前测试 / 真机测试
 - [`CLOUD-RESOURCE-FOOTPRINT.md`](CLOUD-RESOURCE-FOOTPRINT.md) — 云资源占用
 - [`FEDERATION.md`](FEDERATION.md) · [`FEDERATION-RUNBOOK.md`](FEDERATION-RUNBOOK.md) · [`HUB-MESH.md`](HUB-MESH.md) — 跨 hub 联邦（两机操作员）
-- [`REPUTATION-ROUTING.md`](REPUTATION-ROUTING.md) · [`SECURITY.md`](SECURITY.md) — 信誉路由 / 安全
+- [`THREAT-MODEL.md`](THREAT-MODEL.md) — **威胁模型（部署者/家庭视角）**：托付了什么 / 谁能看什么 / 防住什么 / 防不住什么 + 备份恢复演练
+- [`REPUTATION-ROUTING.md`](REPUTATION-ROUTING.md) · [`SECURITY.md`](SECURITY.md) — 信誉路由 / 安全（报告者视角 + 缓解清单）
 
 **跟练一个完整场景**：[`FAMILY-LEARNING-HUB-DESIGN.md`](FAMILY-LEARNING-HUB-DESIGN.md) → [`FAMILY-LEARNING-GO-LIVE.md`](FAMILY-LEARNING-GO-LIVE.md)（家庭学习 hub，从设计到上线）
 

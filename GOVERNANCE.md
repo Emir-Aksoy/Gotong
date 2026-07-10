@@ -199,6 +199,29 @@ adapters, transports, UI, templates — is open to change.
 
 ---
 
+## License permanence
+
+Gotong is MIT, and it stays MIT:
+
+> **We will not relicense.** Code published in this repository under the MIT
+> license remains MIT forever. Future versions of the framework will not move
+> to a more restrictive license — no BSL, no SSPL, no source-available pivot,
+> and no CLA designed to enable one later.
+
+Why write this down? Because the pattern is well-worn by now: a popular
+infrastructure project takes funding, "clarifies" its license, and the
+community routes around it with a fork (Redis → Valkey is the canonical
+case). Rules that stay put matter more than rules that are generous —
+people build on foundations, not on weather.
+
+MIT itself already guarantees the escape hatch (anyone may fork the last MIT
+commit), so this section adds exactly one thing: our stated intent that no
+such fork should ever be necessary. If stewardship of the project changes
+hands, this commitment binds the new stewards the same way
+[The one non-negotiable](#the-one-non-negotiable) does.
+
+---
+
 ## Path to a component committee
 
 The long-term shape of this project is a **marketplace of governed,
@@ -300,5 +323,6 @@ more.
 
 Governance changes the same way code does: open an issue, send a PR, get
 maintainer review. Changes to [The one non-negotiable](#the-one-non-negotiable)
-require steward sign-off and a clear statement of why the design line should
-move. We expect that section to never change. The rest is meant to grow.
+or [License permanence](#license-permanence) require steward sign-off and a
+clear statement of why the line should move. We expect those two sections to
+never change. The rest is meant to grow.

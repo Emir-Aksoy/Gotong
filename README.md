@@ -33,7 +33,7 @@ Fronting all of this for each member is **Atong (阿同)** — the resident pers
 
 **Self-hosted, file-first, and governed for multi-org use.** A workspace is a directory on disk (`.gotong/`) — drop the directory and the space is gone; copy it and you've handed the room to a teammate; restarts are transparent. On top of that: a per-org credential vault, cross-org federation with per-link trust contracts (capability allowlist · data-class gate · quota · revocation), human-in-the-loop approval inboxes, and a usage / cost ledger. The Hub still never runs an LLM — every decision stays with the participants.
 
-The npm packages are scoped `@gotong/*`; the Python SDK is `gotong` on PyPI. License: [MIT](LICENSE).
+The npm packages are scoped `@gotong/*`; the Python SDK is `gotong` on PyPI. License: [MIT](LICENSE) — permanently: we [commit to never relicensing](GOVERNANCE.md#license-permanence).
 
 ## Pick your door
 

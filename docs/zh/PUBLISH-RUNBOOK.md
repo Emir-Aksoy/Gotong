@@ -120,3 +120,24 @@ npm deprecate @gotong/host@1.0.0 "broken, use 1.0.1"
 2. 生产机可从 git 形态继续 `gotong update`；新装机器多了
    `npm i -g gotong` / `npx gotong start` 两条路。
 3. 把发布结果登记进 `docs/zh/PROGRESS-LEDGER.md`（PUB-M3 收口）。
+
+## 六、npm provenance（构建来源证明）— 调研结论（FAM-M3，2026-07-09）
+
+**现状：拿不到，且是结构性的。** npm 官方要求 provenance 只能在**受支持的云
+CI**（GitHub Actions / GitLab CI 的云托管 runner）里构建发布时生成——本机手动
+`npm publish`（我们现行模式，见 §二）**不支持**。所以 36 个包目前都没有
+provenance 徽章，这不是疏忽，是发布模式决定的；威胁模型页
+（[`THREAT-MODEL.md`](THREAT-MODEL.md) §四）已如实披露。
+
+**启用路径（三步，将来要做时照抄）**：
+
+1. 启用仓库 GitHub Actions（现仓库级禁用；仓库已公开，Actions 免费）；
+2. npm 侧给各包配 **trusted publishing**（OIDC 信任 GitHub 仓库 + workflow 身份，
+   发布不再走本机 OTP）——用 trusted publishing 时 provenance **自动生成**，
+   连 `--provenance` 旗标都不用；
+3. 写发布 workflow 盖 36 包（发布前门 §一 全部进 CI 复刻）。
+
+**显式推迟，不并入 FAM-M3**：这是把整条发布流水线从「本机 + OTP」迁到
+「CI + OIDC」的工程（36 包 workflow + 密钥治理 + 彩排），收益是供应链证明，
+风险是发布通道复杂化。等下一次批量发版需求时作为 PUB track 新里程碑评估。
+在那之前，介意供应链的用户按威胁模型页建议：从 GitHub 源码构建替代 npm 安装。
