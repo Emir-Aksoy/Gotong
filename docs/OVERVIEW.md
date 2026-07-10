@@ -119,6 +119,7 @@ trust contract below.
 |---|---|---|
 | **Solo developer / want it running in 5 min** | `docker compose up` (or from source: `pnpm install && pnpm build && pnpm host`) → open the first-run admin URL in your browser | [`README.md` Quick start](../README.md#quick-start) |
 | **Just want to *try a real hub*** | Import a ready-made personal / team / cross-org hub and run it | [`zh/HANDS-ON-HUBS.md`](./zh/HANDS-ON-HUBS.md) (zh) |
+| **Setting up a family / home hub** | One-click gallery template: per-member roles, vaulted credentials, outbound actions parked for a parent's approval | [`zh/FAMILY-HUB.md`](./zh/FAMILY-HUB.md) (zh) |
 | **Small-team operator / opening a hub for a team** | LAN mode (bind `0.0.0.0`) or VPS + Caddy + systemd | [`DEPLOY.md`](./DEPLOY.md) |
 | **A regular user invited into a room** | Open the invite URL → pick a nickname → check your capabilities → you're in | [`HUMAN.md`](./HUMAN.md) |
 | **Want to understand the whole design** | This page → `ARCHITECTURE.md` → `PROTOCOL.md` | [`ARCHITECTURE.md`](./ARCHITECTURE.md) |
@@ -141,6 +142,9 @@ Full FAQ in [`LICENSE-FAQ.md`](./LICENSE-FAQ.md) — it answers the typical
 questions: "Can I embed Gotong in my own closed-source product? / Do I have to
 attribute these templates when I use them commercially? / Can I change the
 LICENSE and repackage?"
+
+And it stays MIT: the project [commits to never
+relicensing](../GOVERNANCE.md#license-permanence) — no BSL/SSPL pivot, ever.
 
 ---
 
