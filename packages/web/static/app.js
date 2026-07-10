@@ -821,6 +821,10 @@
     await loadMyOwnAgents()
     await loadMyCredentials()
     await loadButlerMemory()
+    await loadMyImBindings()
+    // WX-M3b — IM binding card: mint a 6-digit /bind code + manage bindings.
+    bindOnce(document.getElementById('me-im-bind-btn'), 'click', mintImBindingCode)
+    bindOnce(document.getElementById('me-im-bindings'), 'click', onImBindingsClick)
     bindOnce(document.getElementById('me-dispatch-btn'), 'click', submitDispatch)
     // SW-M7 — the hub steward ("管家"): one chat box drives plan → preview →
     // apply. The send button asks for a proposal; clicks inside the output area
@@ -882,6 +886,70 @@
       `
     } catch (err) {
       info.textContent = t('meLoadFailedErr', err?.message || err)
+    }
+  }
+
+  // --- IM binding (WX-M3b) --------------------------------------------------
+  // The /me face of GO-LIVE §六: mint a 6-digit code, DM the bot
+  // `/bind <code>`, and the platform identity maps to this member. The
+  // backend trio (/api/me/im, POST binding-code, DELETE bindings/:p/:id)
+  // predates this card; everything here is a plain projection of it.
+
+  async function loadMyImBindings() {
+    const box = document.getElementById('me-im-bindings')
+    if (!box) return
+    try {
+      const r = await fetch('/api/me/im')
+      const j = await r.json().catch(() => null)
+      if (!r.ok) { box.textContent = t('meLoadFailedHttp', r.status); return }
+      const rows = Array.isArray(j?.bindings) ? j.bindings : []
+      if (rows.length === 0) { box.textContent = t('meImBindNone'); return }
+      box.innerHTML = `${t('meImBindListTitle')} ` + rows.map((b) => {
+        const platform = escape(String(b.platform || ''))
+        const pid = escape(String(b.platformUserId || ''))
+        return `<code>${platform}</code> ${pid} <button type="button" class="me-secondary-btn" data-unbind-platform="${platform}" data-unbind-pid="${pid}">${t('meImBindUnbind')}</button>`
+      }).join(' · ')
+    } catch (err) {
+      box.textContent = t('meLoadFailedErr', err?.message || err)
+    }
+  }
+
+  async function mintImBindingCode() {
+    const out = document.getElementById('me-im-bind-out')
+    if (out) out.textContent = t('meImBindMinting')
+    try {
+      const r = await fetch('/api/me/im/binding-code', { method: 'POST' })
+      const j = await r.json().catch(() => null)
+      if (!r.ok || !j?.ok) {
+        if (out) out.textContent = t('meImBindFailed', j?.error || `HTTP ${r.status}`)
+        return
+      }
+      const mins = Math.max(1, Math.round((new Date(j.expiresAt).getTime() - Date.now()) / 60000))
+      if (out) out.innerHTML =
+        `<strong style="font-size:1.5em;letter-spacing:.2em"><code>${escape(String(j.code))}</code></strong> — ${t('meImBindCodeMsg', mins)}`
+    } catch (err) {
+      if (out) out.textContent = t('meImBindFailed', err?.message || err)
+    }
+  }
+
+  async function onImBindingsClick(ev) {
+    const btn = ev.target.closest('button[data-unbind-platform]')
+    if (!btn) return
+    try {
+      const r = await fetch(
+        `/api/me/im/bindings/${encodeURIComponent(btn.dataset.unbindPlatform)}/${encodeURIComponent(btn.dataset.unbindPid)}`,
+        { method: 'DELETE' },
+      )
+      if (!r.ok) {
+        const j = await r.json().catch(() => null)
+        const out = document.getElementById('me-im-bind-out')
+        if (out) out.textContent = t('meImBindUnbindFailed', j?.error || `HTTP ${r.status}`)
+        return
+      }
+      await loadMyImBindings()
+    } catch (err) {
+      const out = document.getElementById('me-im-bind-out')
+      if (out) out.textContent = t('meImBindUnbindFailed', err?.message || err)
     }
   }
 

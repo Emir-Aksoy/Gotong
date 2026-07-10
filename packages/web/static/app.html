@@ -243,7 +243,9 @@
            DANGEROUS (delete) + CROSS-HUB workflow edits need a SECOND
            confirmation — they're parked in the 待处理任务 inbox below (the
            user's two hard constraints). The tier + execution are decided
-           SERVER-SIDE; this panel only previews + drives plan/apply. -->
+           SERVER-SIDE; this panel only previews + drives plan/apply.
+           UI-A4 moved this card (and the inbox) above the tooling cards:
+           talk-to-your-butler + approve-things IS the member home page. -->
       <div class="me-steward">
         <h2 data-i18n="meStewardTitle">管家</h2>
         <p class="me-meta" data-i18n="meStewardHint">用大白话跟管家说你想做什么 — 它能帮你搭 / 改自己的 AI 助手,或按你的说法改你的工作流。管家只会「提议」,你预览后再决定执行;删除助手、跨 hub 的工作流改动会送到下面「待处理任务」里让你再确认一次。</p>
@@ -264,6 +266,37 @@
         <div id="me-steward-status" class="me-status"></div>
         <div id="me-steward-output" class="me-steward-output"></div>
       </div>
+
+      <div class="me-inbox">
+        <h2><span data-i18n="meInboxTitle">待处理任务</span> <span id="me-inbox-count" class="me-badge"></span></h2>
+        <p class="me-meta" data-i18n="meInboxHint">工作流在某一步需要你拍板时,会出现在这里。处理后工作流会带着你的决定继续往下走。</p>
+        <button id="me-inbox-refresh-btn" type="button" class="me-secondary-btn" data-i18n="refresh">刷新</button>
+        <div id="me-inbox-list" class="me-inbox-list"></div>
+      </div>
+
+      <!-- WX-M3b — IM binding self-service. The backend trio (mint code /
+           list bindings / unbind, /api/me/im*) predates this card and
+           GO-LIVE §六 documents it, but the card itself was never built —
+           real-device WeChat testing surfaced the gap. One button mints the
+           6-digit code (10 min TTL, one live code per user; re-minting
+           rotates the old one out); the member DMs the bot `/bind <code>`
+           on any bridged platform. -->
+      <div class="me-im-bind">
+        <h2 data-i18n="meImBindTitle">绑定 IM</h2>
+        <p class="me-meta" data-i18n-html="meImBindHint">在微信 / Telegram / 飞书等聊天里直接用你的 AI:点下面生成 6 位绑定码,然后在聊天里发给机器人:<code>/bind 你的码</code>。码 10 分钟有效;重新生成会作废旧码。</p>
+        <button id="me-im-bind-btn" type="button" class="me-primary-btn" data-i18n="meImBindBtn">生成绑定码</button>
+        <div id="me-im-bind-out" class="me-status"></div>
+        <div id="me-im-bindings" class="me-meta"></div>
+      </div>
+
+      <!-- UI-A4 — the tooling cards (dispatch / explain / edit / create /
+           runs / reports / agents / own-agents / keys / butler memory) fold
+           behind one <details>. A parent's home page is butler + approvals;
+           ten flat power-cards buried those two and cost a full screen of
+           scrolling on mobile. Everything inside stays in the DOM, so
+           app.js loaders and getElementById bindings work unchanged. -->
+      <details class="me-advanced">
+        <summary data-i18n="meAdvancedTools">更多工具（发起工作流 / 搭助手 / 密钥 / 记忆…）</summary>
 
       <div class="me-dispatch">
         <h2 data-i18n="meDispatchTitle">触发新一次工作流</h2>
@@ -342,13 +375,6 @@
             <tr><td colspan="4" class="me-meta" data-i18n="meNotLoaded">尚未加载</td></tr>
           </tbody>
         </table>
-      </div>
-
-      <div class="me-inbox">
-        <h2><span data-i18n="meInboxTitle">待处理任务</span> <span id="me-inbox-count" class="me-badge"></span></h2>
-        <p class="me-meta" data-i18n="meInboxHint">工作流在某一步需要你拍板时,会出现在这里。处理后工作流会带着你的决定继续往下走。</p>
-        <button id="me-inbox-refresh-btn" type="button" class="me-secondary-btn" data-i18n="refresh">刷新</button>
-        <div id="me-inbox-list" class="me-inbox-list"></div>
       </div>
 
       <div class="me-reports">
@@ -474,6 +500,7 @@
         <h3 class="me-meta" data-i18n="meButlerMemRecent">最近记下的</h3>
         <div id="me-butler-mem-recent" class="me-agents-list"></div>
       </div>
+      </details>
     </section>
 
     <!-- Settings tab — visible to every signed-in role. C1a ships only

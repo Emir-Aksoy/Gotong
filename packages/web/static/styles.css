@@ -2996,9 +2996,27 @@ body.admin[data-active-tab="settings"] main.admin-grid {
   max-width: 48rem;
   padding: 1rem 1.25rem 1.5rem;
 }
-.me-whoami, .me-steward, .me-dispatch, .me-runs, .me-inbox, .me-reports, .me-agents, .settings-actions, .settings-form {
+.me-whoami, .me-steward, .me-dispatch, .me-runs, .me-inbox, .me-reports, .me-agents, .me-im-bind, .settings-actions, .settings-form {
   margin-bottom: 1.5rem;
 }
+/* UI-A4 — the fold hiding the ten tooling cards under the member home.
+   Cards inside keep their own classes/margins; only the shell is styled. */
+.me-advanced {
+  margin: 0.5rem 0 1.5rem;
+  border: 1px solid #e3ddd2;
+  border-radius: 6px;
+  padding: 0 0.9rem;
+  background: #fbfaf7;
+}
+.me-advanced > summary {
+  cursor: pointer;
+  padding: 0.65rem 0;
+  font-size: 0.92rem;
+  color: #666;
+  user-select: none;
+}
+.me-advanced[open] > summary { border-bottom: 1px solid #eee; margin-bottom: 0.9rem; }
+.me-advanced > summary:hover { color: #333; }
 #home-panel h2, #settings-panel h2 {
   font-size: 1.05rem;
   margin: 0 0 0.4rem;

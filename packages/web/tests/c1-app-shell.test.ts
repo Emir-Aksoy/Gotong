@@ -2,12 +2,13 @@
  * C1a — unified SPA shell tests.
  *
  * Coverage:
- *   1. GET /  with no cookie         → serves worker.html (legacy, unchanged)
+ *   1. GET /  with no cookie         → app.html anonymous login shell (UI-A1)
  *   2. GET /  with v4 member cookie  → serves app.html with role=member meta
  *   3. GET /  with v3 admin cookie   → serves app.html with role=owner meta
- *   4. GET /admin (no cookie)        → 401 prompt (unchanged)
- *   5. GET /admin (v3 admin cookie)  → app.html with role=owner meta
- *   6. GET /admin (v4 member cookie) → app.html with role=member meta
+ *   4. GET /room                     → worker.html (legacy join page moved)
+ *   5. GET /admin (no cookie)        → 302 → / (login shell; UI-A2)
+ *   6. GET /admin (v3 admin cookie)  → app.html with role=owner meta
+ *   7. GET /admin (v4 member cookie) → app.html with role=member meta
  *   7. Forged/garbage role on a hand-crafted cookie → meta resolves empty
  *      (anonymous fallback) — the SET enum gate works.
  *   8. app.html bytes contain the expected unified shell markers
@@ -116,13 +117,22 @@ describe('C1 — unified SPA shell', () => {
   afterEach(async () => { await teardown(b) })
 
   describe('GET /', () => {
-    it('no cookie → serves worker.html (legacy v3 anonymous join page)', async () => {
+    it('no cookie → app.html anonymous login shell (UI-A1)', async () => {
+      // The root always serves the unified SPA now; anonymous visitors
+      // get role='' which app.js renders as the login form. The old
+      // worker join page moved to /room (asserted below).
       const r = await fetch(`${b.baseUrl}/`)
       expect(r.status).toBe(200)
       const html = await r.text()
-      expect(html).toContain('Gotong')
-      // worker.html-specific marker — its title / nav are distinct from
-      // app.html's tabbar with home/settings buttons.
+      expect(metaRole(html)).toBe('')
+      expect(html).toContain('id="login-shell"')
+    })
+
+    it('GET /room → worker.html (legacy v3 anonymous join page)', async () => {
+      const r = await fetch(`${b.baseUrl}/room`)
+      expect(r.status).toBe(200)
+      const html = await r.text()
+      expect(html).toContain('switch-to-admin-btn')
       expect(html).not.toContain('x-gotong-role')
     })
 
@@ -150,9 +160,10 @@ describe('C1 — unified SPA shell', () => {
   })
 
   describe('GET /admin', () => {
-    it('no cookie → 401 (unchanged from v3)', async () => {
-      const r = await fetch(`${b.baseUrl}/admin`)
-      expect(r.status).toBe(401)
+    it('no cookie → 302 to / (UI-A2 — the login shell lives at the root)', async () => {
+      const r = await fetch(`${b.baseUrl}/admin`, { redirect: 'manual' })
+      expect(r.status).toBe(302)
+      expect(r.headers.get('location')).toBe('/')
     })
 
     it('v3 admin cookie → app.html with role=owner meta', async () => {

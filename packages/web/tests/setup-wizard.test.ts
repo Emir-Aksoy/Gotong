@@ -552,24 +552,25 @@ describe('POST /api/setup/owner-im', () => {
   })
 })
 
-// Ease-of-use ①-M1 followup — the friendly first-run banner the host prints
-// tells a fresh user to "open / to finish setup (no token needed)". For that
-// to be true the web ROOT must surface the setup wizard (which lives in
-// app.html) during the loopback bootstrap window — otherwise anonymous lands
-// on worker.html and the banner is a dead end. These assert the `/` handler
-// serves the SPA shell (id="setup-wizard") exactly when bootstrap is pending
-// and the request is loopback, and reverts to worker.html otherwise.
-//
-// The boot() server binds to 127.0.0.1, so the test's own fetch IS loopback —
-// the same property the owner-password / owner-llm-key happy paths rely on.
+// Ease-of-use ①-M1 followup, reshaped by UI-A1 — the web ROOT now always
+// serves the unified SPA (login shell for anonymous). What distinguishes the
+// first-run wizard from the plain login form is the server-injected
+// x-gotong-bootstrap meta hint: '1' while the bootstrap window is open
+// (identity wired, single owner, no password), '' otherwise. These assert
+// the hint tracks the window and the legacy worker join page still exists
+// at /room. Wizard WRITES stay loopback-gated in setup-routes regardless.
 describe('GET / (root) during first-run bootstrap', () => {
   // app.html (the unified SPA, which renders the wizard) carries the static
   // id="setup-wizard"; worker.html (the v3 join page) carries the
   // switch-to-admin button and never the wizard id.
   const isAppShell = (html: string) => html.includes('id="setup-wizard"')
   const isWorkerShell = (html: string) => html.includes('switch-to-admin-btn')
+  const bootstrapHint = (html: string) => {
+    const m = html.match(/name="x-gotong-bootstrap" content="([^"]*)"/)
+    return m ? m[1]! : '__missing__'
+  }
 
-  it('bootstrap pending + loopback → serves the SPA so the wizard surfaces', async () => {
+  it('bootstrap pending → serves the SPA with the wizard hint ON', async () => {
     const b = await boot()
     try {
       const r = await fetch(`${b.baseUrl}/`)
@@ -577,35 +578,47 @@ describe('GET / (root) during first-run bootstrap', () => {
       const html = await r.text()
       expect(isAppShell(html)).toBe(true)
       expect(isWorkerShell(html)).toBe(false)
+      expect(bootstrapHint(html)).toBe('1')
     } finally { await teardown(b) }
   })
 
-  it('owner already has a password → reverts to worker.html', async () => {
+  it('owner already has a password → still the SPA, hint OFF (login form, not wizard)', async () => {
     const b = await boot({ preSetPassword: true })
     try {
       const r = await fetch(`${b.baseUrl}/`)
       expect(r.status).toBe(200)
       const html = await r.text()
-      expect(isWorkerShell(html)).toBe(true)
-      expect(isAppShell(html)).toBe(false)
+      expect(isAppShell(html)).toBe(true)
+      expect(bootstrapHint(html)).toBe('')
     } finally { await teardown(b) }
   })
 
-  it('identity unwired → worker.html (no bootstrap window at all)', async () => {
+  it('identity unwired → SPA with hint OFF (no bootstrap window at all)', async () => {
     const b = await boot({ withIdentity: false })
     try {
       const r = await fetch(`${b.baseUrl}/`)
       expect(r.status).toBe(200)
       const html = await r.text()
-      expect(isWorkerShell(html)).toBe(true)
-      expect(isAppShell(html)).toBe(false)
+      expect(isAppShell(html)).toBe(true)
+      expect(bootstrapHint(html)).toBe('')
     } finally { await teardown(b) }
   })
 
-  it('multi-user host → worker.html (setup already done)', async () => {
+  it('multi-user host → SPA with hint OFF (setup already done)', async () => {
     const b = await boot({ preCreateExtraUser: true })
     try {
       const r = await fetch(`${b.baseUrl}/`)
+      expect(r.status).toBe(200)
+      const html = await r.text()
+      expect(isAppShell(html)).toBe(true)
+      expect(bootstrapHint(html)).toBe('')
+    } finally { await teardown(b) }
+  })
+
+  it('/room keeps serving the legacy worker join page', async () => {
+    const b = await boot()
+    try {
+      const r = await fetch(`${b.baseUrl}/room`)
       expect(r.status).toBe(200)
       const html = await r.text()
       expect(isWorkerShell(html)).toBe(true)

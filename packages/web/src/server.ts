@@ -65,7 +65,7 @@ import { handleTemplateAcceptanceRoute, type TemplateAcceptanceSurface } from '.
 import { handleAdminStewardRoute } from './admin-steward-routes.js'
 import { handleServicesRoute } from './services-routes.js'
 import { handleUploadsRoute } from './uploads-routes.js'
-import { handleSetupRoute, isBootstrapPending, isLoopbackReq, type SetupRoutesCtx } from './setup-routes.js'
+import { handleSetupRoute, isBootstrapPending, type SetupRoutesCtx } from './setup-routes.js'
 import { handleAdminRoute } from './admin-routes.js'
 import {
   handleMcpRoute,
@@ -438,7 +438,7 @@ export function serveWeb(hub: Hub, opts: WebServerOptions = {}): Promise<WebServ
           hub.register(new HumanParticipant({ id: a.id, capabilities: [] }))
         }
       }
-      log.info('worker URL', { url: `${url}/` })
+      log.info('worker URL', { url: `${url}/room` })
       resolve({
         host,
         port: actualPort,
@@ -1058,18 +1058,14 @@ async function handle(
       return
     }
     const sess = await ctx.space.findAdminSession(readCookie(req, ADMIN_COOKIE))
-    // C1 — even without a v3 admin session, fall through to the
-    // unified SPA if the visitor carries a v4 identity cookie. They'll
-    // see the role-aware shell (admin tabs for owner/admin, just
-    // home+settings for member/viewer). Pure-anonymous visitors get the
-    // legacy 401 prompt to nudge them toward the `?token=` flow.
-    if (!sess) {
-      const v4Cookie = readCookie(req, IDENTITY_COOKIE)
-      if (!v4Cookie) {
-        res.writeHead(401, { 'content-type': 'text/html; charset=utf-8' })
-        res.end('<!doctype html><meta charset=utf-8><title>Gotong admin</title><body style="font-family:sans-serif;max-width:30rem;margin:6rem auto;color:#333"><h1>401 — admin token required</h1><p>Open this page with <code>?token=YOUR_TOKEN</code> appended, or sign in at <a href="/">/</a>.</p></body>')
-        return
-      }
+    // UI-A2 — pure-anonymous /admin bounces to the root login shell.
+    // The old hardcoded 401 page pointed back at `/`, which used to
+    // serve a join page with no login link — a dead loop. Signed-in
+    // visitors (either cookie generation) keep the role-aware SPA.
+    if (!sess && !readCookie(req, IDENTITY_COOKIE)) {
+      res.writeHead(302, { location: '/' })
+      res.end()
+      return
     }
     await serveAppHtml(ctx, req, res)
     return
@@ -2055,32 +2051,17 @@ async function handle(
 
   // --- static files -------------------------------------------------------
   if (method === 'GET') {
-    // C1 — root path routing. Visitors with a v4 identity cookie OR a
-    // v3 admin cookie get the unified SPA (role meta injected). Pure
-    // anonymous visitors keep landing on the v3 worker join page so
-    // classroom / demo URLs continue working unchanged.
+    // UI-A1 — the root ALWAYS serves the unified SPA. serveAppHtml
+    // natively covers every visitor class: signed-in cookies (either
+    // generation) get the role-aware shell, anonymous gets the login
+    // form, and the first-run wizard surfaces via the bootstrap meta
+    // hint (wizard WRITES stay loopback-gated in setup-routes). The
+    // v3 worker join page moved to /room for classroom / demo links.
     if (path === '/') {
-      const hasV4 = ctx.identity && readCookie(req, IDENTITY_COOKIE)
-      const hasV3 = readCookie(req, ADMIN_COOKIE)
-      if (hasV4 || hasV3) {
-        await serveAppHtml(ctx, req, res)
-        return
-      }
-      // ease-of-use ①-M1 followup — during the loopback first-run bootstrap
-      // window (identity wired, single owner, no password yet) serve the
-      // unified SPA so the setup wizard surfaces at the web ROOT. Without
-      // this, a fresh anonymous browser lands on worker.html and never sees
-      // the wizard, making the host's friendly first-run banner ("open / to
-      // finish setup — no token needed") a dead end. The wizard's writes
-      // (owner-password / owner-llm-key) are themselves loopback-only, so we
-      // gate the same way: a remote visitor still gets worker.html. Reverts
-      // automatically once the owner sets a password (isBootstrapPending →
-      // false). Every API call stays server-gated — this only changes which
-      // static shell anonymous loopback gets during a single setup window.
-      if (isLoopbackReq(req) && isBootstrapPending(ctx.identity)) {
-        await serveAppHtml(ctx, req, res)
-        return
-      }
+      await serveAppHtml(ctx, req, res)
+      return
+    }
+    if (path === '/room' || path === '/room/') {
       await serveStatic(res, 'worker.html')
       return
     }

@@ -153,9 +153,9 @@ async function setupTrustAnchor(
 
 /**
  * The "first-run bootstrap is still pending" predicate, shared between the
- * `/api/setup/needs-bootstrap` flag route and the `/` root handler (the
- * latter serves the unified SPA — so the wizard surfaces — instead of
- * worker.html while this is true and the request is loopback).
+ * `/api/setup/needs-bootstrap` flag route and the SPA's injected
+ * x-gotong-bootstrap meta hint (serveAppHtml) — the root always serves the
+ * SPA since UI-A1; this flag decides wizard-vs-login inside it.
  *
  * True iff: identity is wired AND there is exactly one user (the owner the
  * host bootstrapped) AND that owner has no password credential yet. Any

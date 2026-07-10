@@ -298,14 +298,14 @@
       renderAll()
     })
 
-    // View switcher — jump to the admin (`/admin`) view. If the user
-    // already has an `gotong_admin` cookie they land in the admin
-    // console directly; otherwise the admin page presents the usual
-    // login flow. No client-side state is saved here.
+    // View switcher — jump to the unified SPA at `/`. Signed-in
+    // cookies land in the role-aware shell; anonymous visitors get
+    // the login form (UI-A: `/` always serves the SPA, this room
+    // page lives at /room). No client-side state is saved here.
     const switchToAdminBtn = document.getElementById('switch-to-admin-btn')
     if (switchToAdminBtn) {
       switchToAdminBtn.addEventListener('click', () => {
-        window.location.href = '/admin'
+        window.location.href = '/'
       })
     }
 
