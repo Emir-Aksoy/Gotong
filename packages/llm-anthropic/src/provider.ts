@@ -60,6 +60,21 @@ export interface AnthropicProviderOptions {
    * single block exceeds the cap.
    */
   maxInlineBytes?: number
+  /**
+   * NA-M1 — prompt-cache breakpoints. Anthropic's cache is explicit opt-in:
+   * without `cache_control` markers in the request, every call pays full
+   * price for the whole prompt — including each round of a tool loop
+   * re-sending the identical tools + system + history prefix.
+   *
+   * - `undefined` (default) = AUTO: requests that carry tools get markers
+   *   (a tool loop structurally guarantees within-turn prefix reuse, so the
+   *   1.25× cache-write premium is always earned back by 0.1× reads on the
+   *   following rounds); tool-less one-shot calls stay byte-identical to
+   *   today (a written-never-read cache would be pure premium).
+   * - `true` / `false` force markers always / never (tests, byte-for-byte
+   *   comparison).
+   */
+  promptCaching?: boolean
 }
 
 /**
@@ -94,6 +109,7 @@ export class AnthropicProvider implements LlmProvider {
   private readonly defaultMaxTokens: number
   private readonly artifactResolver?: LlmArtifactResolver
   private readonly maxInlineBytes: number
+  private readonly promptCaching: boolean | undefined
 
   constructor(opts: AnthropicProviderOptions = {}) {
     // Default to Claude's most capable model. Override via `defaultModel` for
@@ -102,6 +118,7 @@ export class AnthropicProvider implements LlmProvider {
     this.defaultMaxTokens = opts.defaultMaxTokens ?? 1024
     this.artifactResolver = opts.artifactResolver
     this.maxInlineBytes = opts.maxInlineBytes ?? DEFAULT_MULTIMODAL_INLINE_BYTE_CAP
+    this.promptCaching = opts.promptCaching
     if (opts.client) {
       this.client = opts.client
     } else {
@@ -343,9 +360,63 @@ export class AnthropicProvider implements LlmProvider {
         return out
       })
     }
+    if (this.promptCaching ?? (req.tools !== undefined && req.tools.length > 0)) {
+      applyCacheBreakpoints(body)
+    }
     return body
   }
 
+}
+
+/**
+ * NA-M1 — place up to 3 of Anthropic's 4 allowed `cache_control` breakpoints:
+ *
+ *   1. last tool          — caches the tool definitions: the largest, most
+ *                           stable slice of a tool-loop request (a butler
+ *                           carries ~34+ schemas), immune to system churn.
+ *   2. system tail        — caches tools + system. A string system is
+ *                           upgraded to a single text block (semantically
+ *                           identical on-wire form) so it can carry the
+ *                           marker. Constant across the rounds of one turn.
+ *   3. last message tail  — a MOVING marker: round N writes the prefix up
+ *                           to here, round N+1 (same prefix + new tool
+ *                           results) re-reads it at the 0.1× cache rate.
+ *
+ * `thinking` / `redacted_thinking` blocks cannot carry `cache_control`
+ * (API restriction), so the message marker walks back to the nearest
+ * eligible block; a message with none is simply left unmarked. Server-side,
+ * markers on a prompt shorter than the model's minimum cacheable length are
+ * ignored (no error, no charge) — so this needs no size gating here.
+ */
+function applyCacheBreakpoints(body: Record<string, unknown>): void {
+  const ephemeral = () => ({ type: 'ephemeral' })
+  const tools = body.tools as Array<Record<string, unknown>> | undefined
+  const lastTool = tools?.[tools.length - 1]
+  if (lastTool !== undefined) {
+    lastTool.cache_control = ephemeral()
+  }
+  if (typeof body.system === 'string' && body.system.length > 0) {
+    body.system = [{ type: 'text', text: body.system, cache_control: ephemeral() }]
+  }
+  const messages = body.messages as Array<Record<string, unknown>>
+  const last = messages[messages.length - 1]
+  if (last === undefined) return
+  if (typeof last.content === 'string') {
+    if (last.content.length > 0) {
+      last.content = [{ type: 'text', text: last.content, cache_control: ephemeral() }]
+    }
+    return
+  }
+  const blocks = last.content as Array<Record<string, unknown>>
+  for (let i = blocks.length - 1; i >= 0; i--) {
+    const block = blocks[i]
+    if (block === undefined) continue
+    if (block.type === 'thinking' || block.type === 'redacted_thinking') continue
+    // An empty text block can't be sent at all; don't pin a marker to one.
+    if (block.type === 'text' && block.text === '') continue
+    block.cache_control = ephemeral()
+    return
+  }
 }
 
 /**

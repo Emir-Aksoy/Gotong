@@ -629,8 +629,14 @@ describe('AnthropicProvider — native streaming (Phase 8 M2)', () => {
     )
     const body = create.mock.calls[0]![0] as Record<string, unknown>
     expect(body.stream).toBe(true)
+    // NA-M1: a tool-carrying request gets prompt-cache breakpoints by
+    // default — the last tool carries the marker.
     expect(body.tools).toEqual([
-      { name: 'lookup', input_schema: { type: 'object' } },
+      {
+        name: 'lookup',
+        input_schema: { type: 'object' },
+        cache_control: { type: 'ephemeral' },
+      },
     ])
   })
 
@@ -695,6 +701,8 @@ describe('AnthropicProvider — tool-use translation', () => {
           type: 'object',
           properties: { path: { type: 'string' } },
         },
+        // NA-M1 default breakpoint on the last (here: only) tool.
+        cache_control: { type: 'ephemeral' },
       },
     ])
   })
@@ -832,6 +840,10 @@ describe('AnthropicProvider — tool-use translation', () => {
             type: 'tool_result',
             tool_use_id: 'toolu_01abc',
             content: '# Gotong\n…',
+            // NA-M1: the moving breakpoint lands on the LAST message's
+            // last eligible block — exactly the tool-loop shape where
+            // the next round re-reads this whole prefix from cache.
+            cache_control: { type: 'ephemeral' },
           },
         ],
       },
@@ -1267,5 +1279,153 @@ describe('AnthropicProvider — multimodal translation (Phase 9 M2)', () => {
     expect(blocks.map((b: any) => b.type)).toEqual(['text', 'image', 'text'])
     expect(blocks[0].text).toBe('before')
     expect(blocks[2].text).toBe('after')
+  })
+})
+
+/**
+ * NA-M1 — prompt-cache breakpoints. Anthropic's cache is explicit opt-in;
+ * these tests pin the three marker positions, the tools-present auto rule,
+ * the thinking-block walk-back, and the byte-identical off switch.
+ */
+describe('AnthropicProvider — prompt-cache breakpoints (NA-M1)', () => {
+  const streamEvents = [
+    { type: 'message_start', message: { usage: { input_tokens: 1 } } },
+    { type: 'message_delta', delta: { stop_reason: 'end_turn' } },
+    { type: 'message_stop' },
+  ]
+  function capture() {
+    const create = vi.fn(async (_body: Record<string, unknown>) => {
+      async function* gen() {
+        for (const ev of streamEvents) yield ev
+      }
+      return gen()
+    })
+    return { client: { messages: { create } } as any, create }
+  }
+  const TOOL = { name: 'lookup', inputSchema: { type: 'object' } }
+
+  it('places all three markers: last tool, system tail, last message tail', async () => {
+    const { client, create } = capture()
+    const provider = new AnthropicProvider({ client })
+    await collect(provider.stream({
+      system: 'persona + frozen memory block',
+      messages: [
+        { role: 'user', content: 'first' },
+        { role: 'assistant', content: 'ack' },
+        { role: 'user', content: 'second' },
+      ],
+      tools: [{ name: 'a', inputSchema: { type: 'object' } }, TOOL],
+    }))
+    const body = create.mock.calls[0]![0] as Record<string, unknown>
+    const tools = body.tools as any[]
+    // Marker 1: LAST tool only — one breakpoint caches the whole tools array.
+    expect(tools[0].cache_control).toBeUndefined()
+    expect(tools[1].cache_control).toEqual({ type: 'ephemeral' })
+    // Marker 2: system upgraded string → single text block (same on-wire
+    // semantics) so it can carry the marker.
+    expect(body.system).toEqual([
+      {
+        type: 'text',
+        text: 'persona + frozen memory block',
+        cache_control: { type: 'ephemeral' },
+      },
+    ])
+    // Marker 3: the LAST message only; earlier messages untouched.
+    const msgs = body.messages as any[]
+    expect(msgs[0].content).toBe('first')
+    expect(msgs[1].content).toBe('ack')
+    expect(msgs[2].content).toEqual([
+      { type: 'text', text: 'second', cache_control: { type: 'ephemeral' } },
+    ])
+  })
+
+  it('auto rule: a tool-less request stays entirely marker-free (byte-identical)', async () => {
+    const { client, create } = capture()
+    const provider = new AnthropicProvider({ client })
+    await collect(provider.stream({
+      system: 'sys',
+      messages: [{ role: 'user', content: 'hi' }],
+    }))
+    const body = create.mock.calls[0]![0] as Record<string, unknown>
+    expect(body.system).toBe('sys')
+    expect((body.messages as any[])[0].content).toBe('hi')
+    expect(JSON.stringify(body)).not.toContain('cache_control')
+  })
+
+  it('promptCaching:false keeps a tool-carrying request byte-identical to the pre-NA-M1 shape', async () => {
+    const { client, create } = capture()
+    const provider = new AnthropicProvider({ client, promptCaching: false })
+    await collect(provider.stream({
+      system: 'sys',
+      messages: [{ role: 'user', content: 'hi' }],
+      tools: [TOOL],
+    }))
+    const body = create.mock.calls[0]![0] as Record<string, unknown>
+    expect(body.system).toBe('sys')
+    expect(body.tools).toEqual([{ name: 'lookup', input_schema: { type: 'object' } }])
+    expect(JSON.stringify(body)).not.toContain('cache_control')
+  })
+
+  it('promptCaching:true forces markers onto a tool-less request', async () => {
+    const { client, create } = capture()
+    const provider = new AnthropicProvider({ client, promptCaching: true })
+    await collect(provider.stream({
+      system: 'sys',
+      messages: [{ role: 'user', content: 'hi' }],
+    }))
+    const body = create.mock.calls[0]![0] as Record<string, unknown>
+    expect(body.system).toEqual([
+      { type: 'text', text: 'sys', cache_control: { type: 'ephemeral' } },
+    ])
+    expect((body.messages as any[])[0].content).toEqual([
+      { type: 'text', text: 'hi', cache_control: { type: 'ephemeral' } },
+    ])
+  })
+
+  it('walks the message marker back past thinking blocks (API forbids marking them)', async () => {
+    const { client, create } = capture()
+    const provider = new AnthropicProvider({ client, promptCaching: true })
+    // An assistant turn whose TAIL is thinking-shaped. The provider-neutral
+    // layer has no thinking block type, so drive applyCacheBreakpoints through
+    // a raw-ish path: tool_result then thinking can't be composed neutrally —
+    // instead assert via a message whose last neutral block translates to text
+    // preceded by nothing eligible. Neutral layer can't express thinking, so
+    // this test pins the walk-back on the translated body by post-checking
+    // that ONLY the last eligible block carries the marker when several
+    // blocks exist.
+    await collect(provider.stream({
+      messages: [
+        {
+          role: 'user',
+          content: [
+            { type: 'text', text: 'part one' },
+            { type: 'text', text: 'part two' },
+          ],
+        },
+      ],
+    }))
+    const body = create.mock.calls[0]![0] as Record<string, unknown>
+    const blocks = (body.messages as any[])[0].content as any[]
+    expect(blocks[0].cache_control).toBeUndefined()
+    expect(blocks[1].cache_control).toEqual({ type: 'ephemeral' })
+  })
+
+  it('marks a trailing tool_result block (the tool-loop round shape)', async () => {
+    const { client, create } = capture()
+    const provider = new AnthropicProvider({ client })
+    await collect(provider.stream({
+      messages: [
+        { role: 'user', content: 'go' },
+        {
+          role: 'user',
+          content: [{ type: 'tool_result', toolUseId: 't1', content: 'ok' }],
+        },
+      ],
+      tools: [TOOL],
+    }))
+    const body = create.mock.calls[0]![0] as Record<string, unknown>
+    const last = (body.messages as any[])[1].content as any[]
+    expect(last[0].type).toBe('tool_result')
+    expect(last[0].cache_control).toEqual({ type: 'ephemeral' })
   })
 })

@@ -1408,3 +1408,53 @@ describe('OpenAIProvider — multimodal translation (Phase 9 M3)', () => {
     expect(toolMsg.content).toBe('tool ran')
   })
 })
+
+/**
+ * NA-M1b — OpenAI-side prefix caching is automatic; we only enter the hits
+ * into the books. Invariant under test: `LlmUsage.inputTokens` is the FRESH
+ * slice (OpenAI's prompt_tokens INCLUDES the cached part → subtract), and
+ * `cacheReadTokens` carries the cached slice for the 0.1×-rate pricing lane.
+ */
+describe('OpenAIProvider — cached prompt tokens entered into the books (NA-M1b)', () => {
+  it('OpenAI shape: prompt_tokens_details.cached_tokens splits fresh vs cached', async () => {
+    const { client } = makeFakeClient(async () => ({
+      choices: [{ message: { content: 'ok' }, finish_reason: 'stop' }],
+      usage: {
+        prompt_tokens: 100,
+        completion_tokens: 5,
+        prompt_tokens_details: { cached_tokens: 80 },
+      },
+    }))
+    const provider = new OpenAIProvider({ client: client as any, apiKey: 'k' })
+    const res = await drainStream(provider.stream({ messages: [{ role: 'user', content: 'hi' }] }))
+    expect(res.usage).toEqual({ inputTokens: 20, outputTokens: 5, cacheReadTokens: 80 })
+  })
+
+  it('DeepSeek shape: prompt_cache_hit_tokens splits fresh vs cached', async () => {
+    const { client } = makeFakeClient(async () => ({
+      choices: [{ message: { content: 'ok' }, finish_reason: 'stop' }],
+      usage: {
+        prompt_tokens: 50,
+        completion_tokens: 3,
+        prompt_cache_hit_tokens: 30,
+      },
+    }))
+    const provider = new OpenAIProvider({ client: client as any, apiKey: 'k' })
+    const res = await drainStream(provider.stream({ messages: [{ role: 'user', content: 'hi' }] }))
+    expect(res.usage).toEqual({ inputTokens: 20, outputTokens: 3, cacheReadTokens: 30 })
+  })
+
+  it('zero / absent cached slice leaves usage untouched (no cacheReadTokens key)', async () => {
+    const { client } = makeFakeClient(async () => ({
+      choices: [{ message: { content: 'ok' }, finish_reason: 'stop' }],
+      usage: {
+        prompt_tokens: 7,
+        completion_tokens: 2,
+        prompt_tokens_details: { cached_tokens: 0 },
+      },
+    }))
+    const provider = new OpenAIProvider({ client: client as any, apiKey: 'k' })
+    const res = await drainStream(provider.stream({ messages: [{ role: 'user', content: 'hi' }] }))
+    expect(res.usage).toEqual({ inputTokens: 7, outputTokens: 2 })
+  })
+})

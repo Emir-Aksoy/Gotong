@@ -226,6 +226,21 @@ export class OpenAIProvider implements LlmProvider {
           inputTokens: chunk.usage.prompt_tokens ?? 0,
           outputTokens: chunk.usage.completion_tokens ?? 0,
         }
+        // NA-M1b — OpenAI-side prefix caching is automatic (no request
+        // opt-in), but the hits were never entered into the books. Their
+        // `prompt_tokens` INCLUDES the cached slice (unlike Anthropic,
+        // whose input_tokens excludes it), and `LlmUsage.inputTokens` is
+        // documented as the FRESH slice — so subtract before recording.
+        // OpenAI reports the slice under prompt_tokens_details.cached_tokens;
+        // DeepSeek as prompt_cache_hit_tokens (prompt_tokens = hit + miss).
+        const cached =
+          chunk.usage.prompt_tokens_details?.cached_tokens ??
+          chunk.usage.prompt_cache_hit_tokens ??
+          0
+        if (cached > 0) {
+          usage.cacheReadTokens = cached
+          usage.inputTokens = Math.max(0, usage.inputTokens - cached)
+        }
       }
       const choice = chunk.choices?.[0]
       if (!choice) continue
@@ -811,7 +826,14 @@ interface OpenAIStreamChunkLike {
     }
     finish_reason?: string | null
   }>
-  usage?: { prompt_tokens?: number; completion_tokens?: number }
+  usage?: {
+    prompt_tokens?: number
+    completion_tokens?: number
+    /** OpenAI's automatic prefix cache — cached slice of prompt_tokens. */
+    prompt_tokens_details?: { cached_tokens?: number }
+    /** DeepSeek's equivalent field (their prompt_tokens = hit + miss). */
+    prompt_cache_hit_tokens?: number
+  }
 }
 
 function mapStopReason(reason: string | null | undefined): LlmStopReason {
