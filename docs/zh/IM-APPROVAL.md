@@ -55,9 +55,15 @@ IM 里批**;未标 = web-only。谁标:
 ### 钉子③ 审计如实记通道
 
 `HostInboxService.resolve` 加可选 `via?: string`;IM 批的审计行 `actorSource`
-写 `im:<platform>`(如 `im:telegram`),web 路径不传 = `'v4-session'` 字节不变。
-「谁在哪个通道批的」在 audit_log 里可查——IM 通道弱于 web session 是已知事实,
-诚实入账而不是抹平。
+写闭集新值 **`'im'`**、渠道细节(`im:telegram`)入 **`metadata.via`**,web 路径
+不传 = `'v4-session'` 字节不变。「谁在哪个通道批的」在 audit_log 里可查——IM
+通道弱于 web session 是已知事实,诚实入账而不是抹平。
+
+> 实现修正(M2 落地时发现):`AuditActorSource` 是**闭集联合**且读侧有钳制守卫
+> (`rowToAuditLog` 认不出的值一律压成 `'system'`)——把 `im:telegram` 整串写进
+> `actorSource` 会在读出时被抹成 system,**恰好丢掉要记的事实**。故走 FED-M4
+> `'federated'` 同款先例:枚举只加一个值 `'im'`(identity 类型 + 写入白名单 +
+> web 镜像联合三处),平台细节走 metadata——闭集保持小而封闭,细节不丢。
 
 ### 命令面(六桥同款,动词英文镜像 /bind 惯例)
 
@@ -85,14 +91,35 @@ IM 消息 → parseImCommand → handleImMessage 新 case
 批准后的结果回推**零新代码**——S1-M3 的 `onResolved` → pushback 已经会把管家的
 完成话术推回成员 IM。
 
-## 四、里程碑
+## 四、里程碑(全完,2026-07-11)
 
 | 里程碑 | 内容 | 状态 |
 |---|---|---|
-| M0 | 本计划文档 | 本 commit |
-| M1 | 纯核:im-adapter 三命令解析 + inbox `imApprovable` 字段 + human broker 标记(各带单测) | |
-| M2 | host:escalation 按形状标记 + `im-approval-service.ts` + im-bridge 三 case + `via` 审计 + main.ts 接线(压注释守 3000) | |
-| M3 | hermetic e2e(假桥全链路:列表→短码批→resume→回推;webOnly 拒批指路;歧义拒绝)+ 文档收口 | |
+| M0 | 本计划文档 | ✅ `105dabd` |
+| M1 | 纯核:im-adapter 三命令解析 + inbox `imApprovable` 字段 + human broker 标记(各带单测) | ✅ `4edce68` |
+| M2 | host:escalation 按形状标记 + `im-approval-service.ts` + im-bridge 三 case + `via` 审计 + main.ts 接线(压注释守 3000) | ✅ `5a9bc3b` |
+| M3 | hermetic e2e(假桥全链路:列表→短码批→resume→回推;webOnly 拒批指路)+ 文档收口 | ✅ 本 commit |
+
+### 落地实录(与计划的差异点)
+
+- **审计通道走枚举+metadata**(见钉子③的实现修正)——比计划的「actorSource 直写
+  `im:<platform>`」更对:闭集守卫本会抹掉它。
+- **park 回执顺手闭环**:`summariseResult` 的 suspended 文案在接了审批面时改指
+  「发 /inbox 看,再 /approve <id>」而非「到网页 我的 → 收件箱」——park→提醒→批
+  →回推四步全在同一个聊天窗,不再中途赶人去浏览器。未接审批面时旧文案字节不变。
+- **装配零 main.ts 膨胀**:`ImApprovalService` 在 `im-bridge-wiring.ts` 构造
+  (`approvals: { store: inboxStore, inbox: inboxService }` 双依赖),main.ts 只加
+  一行 spread + 一行注释,压既有注释净零,3000/3000 顶格不动。
+- **e2e 三幕**(`packages/host/tests/im-approval-e2e.test.ts`,真 Hub/真
+  FileInboxStore/真 WorkflowController/真 HostInboxService/真 ImApprovalService,
+  只有桥是假的):幕1 工作流 `human:` 步 IM 批准→run done+决定流入下游步+审计行
+  `actorSource='im'`+`metadata.via='im:telegram'`;幕2 管家 governed park
+  (delete_agent)IM 批准→child resume→**S1-M3 回推把管家完成话术推回同一成员**
+  +挂起行清干净;幕3 `ask_peer` park 列表标「需在网页处理」→`/approve` 被
+  `web_only` 拒,item 仍 pending、挂起行仍在、零回推零审计行(fail-closed 全程)。
+- 验收:host 2058(im-approval-service 12 + escalation 白名单 5 + 桥三动词 8 +
+  inbox-service via 1 + e2e 3 新增)/ identity 654 / inbox 24 / im-adapter 33 /
+  web 1365 全绿;四门 PASS(旋钮 109 零新增,main.ts 3000/3000)。
 
 ## 五、边界与显式不做
 
