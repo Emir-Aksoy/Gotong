@@ -124,6 +124,26 @@ export type ImWorkflowResolver = (input: {
   userId: string
 }) => Promise<{ payload: unknown; strategy: DispatchStrategy; title?: string } | null>
 
+/**
+ * IMA-M2 — optional `/inbox` / `/approve` / `/deny` surface. Production binds
+ * it to `ImApprovalService`; absent → the three verbs reply "not enabled"
+ * (the `resolveWorkflow` posture). The risk gate — WHICH items are answerable
+ * from IM — lives behind this surface (the write-time `imApprovable`
+ * whitelist, re-checked server-side); the bridge only renders text and never
+ * makes the risk call.
+ */
+export interface ImApprovalSurface {
+  listForIm(userId: string): Promise<
+    Array<{ shortId: string; title: string; kind: string; imApprovable: boolean }>
+  >
+  resolveByShortId(args: {
+    userId: string
+    shortId: string
+    approved: boolean
+    via: string
+  }): Promise<{ title: string }>
+}
+
 // ── setting console (setting-ops M5) ─────────────────────────────────────────
 // The IM face of the unified deterministic `setting` ops console — the THIRD
 // surface over the one host `ops-core` (CLI + admin web + IM). An operator DMs
@@ -184,6 +204,8 @@ export interface HostImConfig {
   listAgents?: ImAgentLister
   /** Optional `/workflow` resolver; absent → router replies "not enabled". */
   resolveWorkflow?: ImWorkflowResolver
+  /** IMA-M2 — optional approval surface; absent → the three verbs reply "not enabled". */
+  approvals?: ImApprovalSurface
   log: ImLogger
   /**
    * setting-ops M5 — owner/operator-only deterministic ops command mode, entered
@@ -239,6 +261,9 @@ const HELP_TEXT = [
   '  /unbind                 — drop the binding',
   '  /agents                 — list agents you can talk to',
   '  /workflow <name> <args> — start a named workflow',
+  '  /inbox                  — list items waiting for your approval',
+  '  /approve <id>           — approve one (id from /inbox)',
+  '  /deny <id>              — reject one',
   '  <anything else>         — chat with your default agent',
 ].join('\n')
 
@@ -349,7 +374,65 @@ export async function handleImMessage(
         title: wf.title ?? `im:${platform}:workflow:${cmd.name}`,
         origin: { orgId: 'local', userId },
       })
-      await reply(bridge, msg, summariseResult(result))
+      await reply(bridge, msg, summariseResult(result, config.approvals !== undefined))
+      return
+    }
+
+    // IMA-M2 — the approval loop's three verbs. All authority (ownership,
+    // race guard, the imApprovable whitelist re-check, two-step resume, the
+    // S1-M3 outcome push-back) lives behind `config.approvals`; this router
+    // only renders text.
+    case 'inbox': {
+      if (!config.approvals) {
+        await reply(bridge, msg, APPROVALS_NOT_ENABLED)
+        return
+      }
+      const rows = await config.approvals.listForIm(userId)
+      if (rows.length === 0) {
+        await reply(bridge, msg, '没有等你处理的事项。/ Nothing is waiting on you.')
+        return
+      }
+      const lines = rows.map((r) =>
+        r.imApprovable
+          ? `  • [${r.shortId}] ${r.title}`
+          : `  • [${r.shortId}] ${r.title} (需在网页处理 / web only)`,
+      )
+      await reply(
+        bridge,
+        msg,
+        [
+          `等你处理的事项 / Waiting on you (${rows.length}):`,
+          '',
+          ...lines,
+          '',
+          '回复 /approve <id> 或 /deny <id>。/ Reply /approve <id> or /deny <id>.',
+        ].join('\n'),
+      )
+      return
+    }
+
+    case 'approve':
+    case 'deny': {
+      if (!config.approvals) {
+        await reply(bridge, msg, APPROVALS_NOT_ENABLED)
+        return
+      }
+      const approved = cmd.kind === 'approve'
+      try {
+        const out = await config.approvals.resolveByShortId({
+          userId,
+          shortId: cmd.shortId,
+          approved,
+          via: `im:${platform}`,
+        })
+        await reply(
+          bridge,
+          msg,
+          approved ? `✓ 已批准 / Approved — ${out.title}` : `✓ 已拒绝 / Denied — ${out.title}`,
+        )
+      } catch (err) {
+        await reply(bridge, msg, describeApprovalError(err, cmd.shortId))
+      }
       return
     }
 
@@ -369,7 +452,7 @@ export async function handleImMessage(
       if (config.llmOutage && (await handleLlmOutageOnFreeText(bridge, msg, config, config.llmOutage, result))) {
         return
       }
-      await reply(bridge, msg, summariseResult(result))
+      await reply(bridge, msg, summariseResult(result, config.approvals !== undefined))
       return
     }
 
@@ -656,6 +739,8 @@ export interface StartImBridgesOptions {
   freeTextCapability?: string
   listAgents?: ImAgentLister
   resolveWorkflow?: ImWorkflowResolver
+  /** IMA-M2 — `/inbox` `/approve` `/deny`; absent → the verbs reply "not enabled". */
+  approvals?: ImApprovalSurface
   /**
    * DEPLOY-B1 — opt into the hot-start seam: return a handle even when no
    * platform resolved credentials at boot, exposing `startPlatform` so the
@@ -960,6 +1045,7 @@ export async function startImBridges(
     },
     listAgents: opts.listAgents,
     resolveWorkflow: opts.resolveWorkflow,
+    ...(opts.approvals ? { approvals: opts.approvals } : {}),
     log: opts.log,
     ...(opts.setting ? { setting: opts.setting } : {}),
     ...(llmOutage ? { llmOutage } : {}),
@@ -1220,7 +1306,7 @@ function recordReachable(
   })
 }
 
-function summariseResult(result: TaskResult): string {
+function summariseResult(result: TaskResult, imApprovals = false): string {
   switch (result.kind) {
     case 'ok': {
       const output = result.output
@@ -1245,12 +1331,53 @@ function summariseResult(result: TaskResult): string {
     case 'suspended':
       // A human-resolved park (butler governed action / workflow human step /
       // approval gate) uses the NEVER_RESUME_AT sentinel — phrase it as "waiting
-      // on you in /me", not a nonsensical year-2286 timestamp. A finite resumeAt
-      // is a genuine timed suspend (e.g. a long-running poll) — keep the ETA.
+      // on you", not a nonsensical year-2286 timestamp. A finite resumeAt is a
+      // genuine timed suspend (e.g. a long-running poll) — keep the ETA. With
+      // the IMA approval surface wired, point at `/inbox` RIGHT HERE instead of
+      // sending the member to the web (hub-internal items resolve in-chat).
       return result.resumeAt >= NEVER_RESUME_AT
-        ? '这件事需要你先确认一下,我已经放进你的「我的 → 收件箱」了。你在那儿点确认或拒绝,处理好我再回来告诉你结果。'
+        ? imApprovals
+          ? '这件事需要你先确认一下。发 /inbox 看详情,再用 /approve <id> 或 /deny <id> 答复(部分敏感事项仍需到网页「我的 → 收件箱」处理);处理好我再回来告诉你结果。'
+          : '这件事需要你先确认一下,我已经放进你的「我的 → 收件箱」了。你在那儿点确认或拒绝,处理好我再回来告诉你结果。'
         : `⏸ 已安排,预计 ${new Date(result.resumeAt).toISOString()} 前后继续。`
     case 'no_participant':
       return `⚠️ No agent picked it up: ${result.reason}`
+  }
+}
+
+// ── IMA-M2 approval-verb rendering ──────────────────────────────────────────
+
+const APPROVALS_NOT_ENABLED =
+  '此 host 未启用 IM 审批,请到网页「我的 → 收件箱」处理。/ IM approval is not enabled on this host — use the web (/me).'
+
+/**
+ * Map an approval-resolve failure to a bilingual reply. Covers BOTH error
+ * vocabularies crossing the surface: `ImApprovalError` (short-id gates) and
+ * `InboxError` passing through from `HostInboxService.resolve`
+ * (`already_resolved`, `forbidden`, …). Duck-typed on `.code` so this module
+ * needs no dep on either class.
+ */
+function describeApprovalError(err: unknown, shortId: string): string {
+  const code =
+    typeof err === 'object' && err !== null && 'code' in err
+      ? String((err as { code: unknown }).code)
+      : ''
+  switch (code) {
+    case 'short_id_too_short':
+      return '编号太短,至少要 4 位(用 /inbox 查看编号)。/ That id is too short — at least 4 chars (see /inbox).'
+    case 'not_found':
+      return `没有找到匹配「${shortId}」的待办事项(可能已被处理)。发 /inbox 查看最新列表。/ No pending item matches — see /inbox.`
+    case 'ambiguous':
+      return `「${shortId}」匹配了多个事项,请用 /inbox 显示的完整编号。/ That prefix is ambiguous — use the full id from /inbox.`
+    case 'web_only':
+      return '这件事涉及对外或跨 hub 动作,需要在网页上处理:我的 → 收件箱。/ This one must be handled on the web (/me → inbox).'
+    case 'not_approval_kind':
+      return '这件事需要填写具体内容,不是批准/拒绝就能答的,请到网页上处理。/ This one needs a typed answer — use the web.'
+    case 'already_resolved':
+      return '这件事已经被处理过了。发 /inbox 查看最新待办。/ Already resolved — see /inbox.'
+    case 'forbidden':
+      return '这件事不归你处理(可能刚被转派)。/ Not yours to resolve (it may have been delegated).'
+    default:
+      return `处理失败 / Failed — ${err instanceof Error ? err.message : String(err)}`
   }
 }

@@ -2496,10 +2496,8 @@ async function main(): Promise<void> {
     ...(identity ? { audit: identity } : {}),
   })
 
-  // setting-ops M5 — IM bridges start HERE (deferred from ~400 lines up) so the
-  // IM `/setting` console reuses the SAME live `adminHealth` as the web overview.
-  // 装配块已整体外迁 im-bridge-wiring.ts(CARE-M2 前置腾挪),语义逐字保留;
-  // CARE-M2 断供接线(canned 回复 + 边沿播报)在该模块内。
+  // setting-ops M5 — IM bridges start HERE (deferred) so the IM `/setting`
+  // console reuses the SAME live `adminHealth` as web;装配块外迁 im-bridge-wiring.ts。
   if (identity) {
     imBridges = await armImBridgeWiring({
       hub,
@@ -2508,6 +2506,8 @@ async function main(): Promise<void> {
       spaceRoot: space.root,
       health: adminHealth,
       defaultLang: config.defaultLang,
+      // IMA-M2 — /inbox /approve /deny:读走 InboxStore、写走 HostInboxService(既有权威)。
+      ...(inboxStore && inboxService ? { approvals: { store: inboxStore, inbox: inboxService } } : {}),
       // CARE-M5 — 主动恢复探活的探针,复用 onboarding key check 的只读活体
       // (models-list GET,零 token)解析链;lazy 读 ref(此刻已赋值,但 lazy
       // 也兜住未就绪 = 视作没通,无害)。status==='ok' 才算大脑真的回来了

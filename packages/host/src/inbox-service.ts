@@ -119,7 +119,18 @@ export class HostInboxService {
     return items.map(toView)
   }
 
-  async resolve(args: { itemId: string; userId: string; decision: unknown }): Promise<void> {
+  async resolve(args: {
+    itemId: string
+    userId: string
+    decision: unknown
+    /**
+     * IMA-M2 — audit channel tag. The web route omits it (audit row keeps
+     * 'v4-session' byte-for-byte); the IM approval path passes `im:<platform>`,
+     * recorded as actorSource 'im' + metadata.via — "who decided WHERE" stays
+     * an honest queryable fact, not flattened away.
+     */
+    via?: string
+  }): Promise<void> {
     const { itemId, userId, decision } = args
     const item = await this.store.get(itemId)
     if (!item) throw new InboxError('not_found', `inbox item '${itemId}' not found`)
@@ -140,7 +151,7 @@ export class HostInboxService {
     // after the race guard, BEFORE resume mechanics, so the row faithfully
     // reflects "this member made this decision" regardless of downstream
     // resume outcome. Best-effort: never fail a committed decision.
-    this.recordResolveAudit(item, validated, userId)
+    this.recordResolveAudit(item, validated, userId, args.via)
 
     // Two-step resume — child strictly before parent.
     const child = await this.resumeChild(item, validated)
@@ -162,18 +173,27 @@ export class HostInboxService {
   }
 
   /** inbox-gov M1 — write one `inbox_resolve` audit row (best-effort). */
-  private recordResolveAudit(item: InboxItem, decision: InboxDecision, userId: string): void {
+  private recordResolveAudit(
+    item: InboxItem,
+    decision: InboxDecision,
+    userId: string,
+    via?: string,
+  ): void {
     if (typeof this.identity.writeAuditLog !== 'function') return
     try {
       this.identity.writeAuditLog({
         action: AUDIT_ACTIONS.INBOX_RESOLVE,
-        actorSource: 'v4-session',
+        // IMA-M2 — the enum stays a closed set ('im' is one value, the FED-M4
+        // 'federated' pattern); the channel detail (`im:telegram`) rides in
+        // metadata.via. Web path (via unset) keeps 'v4-session' byte-for-byte.
+        actorSource: via ? 'im' : 'v4-session',
         actorUserId: userId,
         metadata: {
           itemId: item.itemId,
           kind: item.kind,
           parentKind: item.parentKind,
           outcome: outcomeOf(decision),
+          ...(via ? { via } : {}),
         },
         success: true,
       })

@@ -505,6 +505,11 @@ export interface IssuedAdminToken {
  * stash `task.origin` in `metadata.origin` so downstream readers can
  * trace back to the original org+user.
  *
+ * IMA-M2 — `'im'` covers a decision made from a bound IM chat (the
+ * `/approve` / `/deny` verbs). The writer stashes the channel string
+ * (`im:<platform>`) in `metadata.via` — same pattern as `'federated'`:
+ * the enum stays a small closed set, the detail lives in metadata.
+ *
  * A2.2 (v4 Phase 5) — `'v3-admin'` was removed. v4 IdentityStore is the
  * single source of identity truth; the legacy v3 admin path (Space.admins
  * cookie / `/admin?token=...` URL) is still served by the host for
@@ -519,6 +524,7 @@ export type AuditActorSource =
   | 'anonymous'
   | 'system'
   | 'federated'
+  | 'im'
 
 export interface AuditLogEntry {
   id: string

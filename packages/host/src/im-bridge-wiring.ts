@@ -28,6 +28,7 @@ import type { IdentityStore } from '@gotong/identity'
 
 import type { AdminHealthSurface } from './admin-health.js'
 import type { FailureLang } from './failure-translator.js'
+import { ImApprovalService, type ImApprovalServiceOptions } from './im-approval-service.js'
 import { startImBridges, type ImBridgesHandle, type ImLogger } from './im-bridge.js'
 import { listOpsCommands, runOpsCommand } from './ops-core.js'
 
@@ -47,6 +48,13 @@ export interface ImBridgeWiringDeps {
    * 链(lazy 读 ref),缺省 → 恢复仍只走反应式。
    */
   probeLiveness?: () => Promise<boolean>
+  /**
+   * IMA-M2 — 审批面双依赖(读=InboxStore.listPending,写=HostInboxService.resolve)。
+   * 给了它,三个审批动词(/inbox /approve /deny)在绑定成员的 IM 里生效——只对
+   * 写入时标了 `imApprovable` 白名单的 hub 内动作;缺省 → 动词回「未启用」,
+   * 其余分支字节不变。风险裁决在写入方与 resolve 权威点,这里只是装配。
+   */
+  approvals?: ImApprovalServiceOptions
 }
 
 /** 装配并启动 IM 桥(语义=当年 main.ts 内联块 + CARE-M2 断供接线)。 */
@@ -71,6 +79,8 @@ export async function armImBridgeWiring(deps: ImBridgeWiringDeps): Promise<ImBri
     // F1 — 出站推送地基:绑定成员的每条入站消息都记下最新可达聊天,
     // 后续提醒 / 审批回推 / 播报走返回的 pushToMember。
     reachableDir: join(deps.spaceRoot, 'butler', 'reachable'),
+    // IMA-M2 — /inbox /approve /deny 的审批面(有 inbox 才有)。
+    ...(deps.approvals ? { approvals: new ImApprovalService(deps.approvals) } : {}),
     // CARE-M8 — 投递失败入盘、成员可达时重投的每成员 outbox。给了它,
     // reachable push 的失败不再只是一行日志(短暂失联的成员不漏播报/提醒)。
     outboxDir: join(deps.spaceRoot, 'butler', 'outbox'),

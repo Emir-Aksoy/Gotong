@@ -268,6 +268,160 @@ describe('GO-LIVE T1 — env gate (zero behaviour change when unset)', () => {
   })
 })
 
+// ---------------------------------------------------------------------------
+// IMA-M2 — the approval verbs (/inbox /approve /deny). The surface is a
+// recording fake: the router's job is verb → surface call → bilingual text,
+// nothing more (all authority lives behind the surface).
+// ---------------------------------------------------------------------------
+
+describe('IMA-M2 — IM approval verbs', () => {
+  let hub: Hub
+  let identity: IdentityStore
+  let bridge: FakeBridge
+  let config: HostImConfig
+
+  beforeEach(async () => {
+    hub = Hub.inMemory()
+    await hub.start()
+    identity = openIdentityStore({ dbPath: ':memory:' })
+    const alice = identity.createUser({ email: 'alice@example.com', displayName: 'Alice' })
+    const code = identity.issueImBindingCode({ userId: alice.id }).code
+    bridge = new FakeBridge()
+    await bridge.start()
+    config = {
+      hub,
+      resolver: makeIdentityImBindingResolver(identity),
+      freeTextCapability: 'chat',
+      onUnbind: async () => ({ removed: false }),
+      log: silentLogger,
+    }
+    bridge.onMessage((m) => handleImMessage(bridge, m, config))
+    await bridge.inject(imMsg(`/bind ${code}`))
+  })
+
+  afterEach(async () => {
+    await bridge.stop()
+    await hub.stop()
+    identity.close()
+  })
+
+  it('replies "not enabled" for all three verbs when no surface is wired', async () => {
+    for (const cmd of ['/inbox', '/approve abcd1234', '/deny abcd1234']) {
+      await bridge.inject(imMsg(cmd))
+      expect(last(bridge).text).toContain('未启用 IM 审批')
+    }
+  })
+
+  it('lists pending rows with short ids and marks web-only ones', async () => {
+    config.approvals = {
+      listForIm: async () => [
+        { shortId: 'aaaa1111', title: '删除 mailer', kind: 'approval', imApprovable: true },
+        { shortId: 'bbbb2222', title: '发一封邮件', kind: 'approval', imApprovable: false },
+      ],
+      resolveByShortId: async () => ({ title: 'x' }),
+    }
+    await bridge.inject(imMsg('/inbox'))
+    const text = last(bridge).text
+    expect(text).toContain('[aaaa1111] 删除 mailer')
+    expect(text).toContain('[bbbb2222] 发一封邮件 (需在网页处理 / web only)')
+    expect(text).toContain('/approve <id>')
+  })
+
+  it('renders an explicit empty state', async () => {
+    config.approvals = {
+      listForIm: async () => [],
+      resolveByShortId: async () => ({ title: 'x' }),
+    }
+    await bridge.inject(imMsg('/inbox'))
+    expect(last(bridge).text).toContain('没有等你处理的事项')
+  })
+
+  it('routes /approve and /deny to the surface with the bound user + via tag', async () => {
+    const calls: Array<{ userId: string; shortId: string; approved: boolean; via: string }> = []
+    config.approvals = {
+      listForIm: async () => [],
+      resolveByShortId: async (args) => {
+        calls.push(args)
+        return { title: '删除 mailer' }
+      },
+    }
+    await bridge.inject(imMsg('/approve aaaa1111'))
+    expect(last(bridge).text).toBe('✓ 已批准 / Approved — 删除 mailer')
+    await bridge.inject(imMsg('/deny aaaa1111'))
+    expect(last(bridge).text).toBe('✓ 已拒绝 / Denied — 删除 mailer')
+    expect(calls).toEqual([
+      { userId: calls[0]!.userId, shortId: 'aaaa1111', approved: true, via: 'im:telegram' },
+      { userId: calls[0]!.userId, shortId: 'aaaa1111', approved: false, via: 'im:telegram' },
+    ])
+    expect(calls[0]!.userId).not.toBe('') // the bound Gotong userId, not the IM handle
+    expect(calls[0]!.userId).not.toBe(ALICE.platformUserId)
+  })
+
+  it('maps every gate code to an actionable bilingual line', async () => {
+    const cases: Array<[string, string]> = [
+      ['short_id_too_short', '至少要 4 位'],
+      ['not_found', '没有找到匹配'],
+      ['ambiguous', '完整编号'],
+      ['web_only', '需要在网页上处理'],
+      ['not_approval_kind', '填写具体内容'],
+      ['already_resolved', '已经被处理过'],
+      ['forbidden', '不归你处理'],
+    ]
+    for (const [code, expected] of cases) {
+      config.approvals = {
+        listForIm: async () => [],
+        resolveByShortId: async () => {
+          throw Object.assign(new Error(code), { code })
+        },
+      }
+      await bridge.inject(imMsg('/approve aaaa1111'))
+      expect(last(bridge).text, code).toContain(expected)
+    }
+  })
+
+  it('falls back to the raw message for an unknown failure', async () => {
+    config.approvals = {
+      listForIm: async () => [],
+      resolveByShortId: async () => {
+        throw new Error('disk on fire')
+      },
+    }
+    await bridge.inject(imMsg('/deny aaaa1111'))
+    expect(last(bridge).text).toContain('处理失败')
+    expect(last(bridge).text).toContain('disk on fire')
+  })
+
+  it('the /help text advertises the three verbs', async () => {
+    await bridge.inject(imMsg('/help'))
+    const text = last(bridge).text
+    expect(text).toContain('/inbox')
+    expect(text).toContain('/approve <id>')
+    expect(text).toContain('/deny <id>')
+  })
+
+  it('a parked free-text reply points at /inbox when the surface is wired', async () => {
+    // A hub with no participant for 'chat' is irrelevant here — we only need
+    // the suspended summary path, so dispatch against a parking participant.
+    const { SuspendTaskError } = await import('@gotong/core')
+    class ParkingAgent extends AgentParticipant {
+      constructor() {
+        super({ id: 'parker', capabilities: ['chat'] })
+      }
+      protected async handleTask(): Promise<unknown> {
+        throw new SuspendTaskError({ resumeAt: 9_999_999_999_000, state: {} })
+      }
+    }
+    hub.register(new ParkingAgent())
+    config.approvals = {
+      listForIm: async () => [],
+      resolveByShortId: async () => ({ title: 'x' }),
+    }
+    await bridge.inject(imMsg('请帮我删掉 mailer'))
+    expect(last(bridge).text).toContain('/inbox')
+    expect(last(bridge).text).toContain('/approve')
+  })
+})
+
 function last(bridge: FakeBridge): { to: ImUser; text: string; chatId?: string } {
   const out = bridge.outbound.at(-1)
   if (!out) throw new Error('no outbound message was sent')

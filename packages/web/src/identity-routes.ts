@@ -113,12 +113,15 @@ export interface IdentityCredentialDTO {
 // A2.2: 'v3-admin' removed from writable vocabulary — v4 IdentityStore
 // is the only auth surface this route consumes. Old rows persisted
 // with 'v3-admin' are clamped to 'system' by the store on read.
+// IMA-M2: `'im'` added for decisions made from a bound IM chat
+// (`/approve` / `/deny`); channel detail rides in metadata.via.
 export type IdentityAuditActorSource =
   | 'v4-session'
   | 'v4-bearer'
   | 'anonymous'
   | 'system'
   | 'federated'
+  | 'im'
 
 export interface IdentityAuditLogEntryDTO {
   id: string

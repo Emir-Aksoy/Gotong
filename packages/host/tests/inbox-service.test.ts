@@ -169,6 +169,23 @@ describe('HostInboxService — two-step resume', () => {
     ])
   })
 
+  it('records an IM decision as actorSource=im with the channel in metadata.via (IMA-M2)', async () => {
+    const childId = await park({ assignee: 'user-a', kind: 'approval', prompt: 'ok?' })
+    parkParent()
+    await service.resolve({
+      itemId: childId,
+      userId: 'user-a',
+      decision: { kind: 'approval', approved: true },
+      via: 'im:telegram',
+    })
+
+    const rows = identity.listAuditLog({ action: 'inbox_resolve' })
+    expect(rows).toHaveLength(1)
+    // The enum stays closed ('im' one value); the platform detail is metadata.
+    expect(rows[0]).toMatchObject({ actorSource: 'im', actorUserId: 'user-a' })
+    expect(rows[0]!.metadata).toMatchObject({ itemId: childId, via: 'im:telegram' })
+  })
+
   it('audit outcome reflects the decision; edit free-text never enters metadata', async () => {
     // Rejected approval → outcome 'rejected'.
     const rej = await park({ assignee: 'user-a', kind: 'approval', prompt: 'ok?' })

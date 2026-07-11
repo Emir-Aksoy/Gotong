@@ -99,3 +99,60 @@ describe('butlerApprovalItemFor', () => {
     expect(item!.title).toBe('删除 mailer')
   })
 })
+
+// IMA-M2 — the plan-b whitelist: hub-INTERNAL actions get `imApprovable`,
+// cross-hub egress (`ask_peer`) and MCP connector actions (`<server>__<tool>`)
+// stay web-only. The gate is by NAME SHAPE, anchored to the tool-use the
+// approvedId actually points at — never a sibling in the same round.
+describe('butlerApprovalItemFor — imApprovable whitelist (IMA-M2)', () => {
+  function stateFor(toolName: string, opts: { approvedId?: string } = {}) {
+    return butlerGateState({
+      messages: [{ role: 'user', content: 'do it' }],
+      pending: {
+        toolUses: [{ type: 'tool_use', id: 'g1', name: toolName, input: {} }],
+        approvedId: opts.approvedId ?? 'g1',
+        verdicts: { g1: { decision: 'approve', reason: 'governed' } },
+        approval: { toolName, title: `${toolName}(x)`, reason: 'governed action' },
+      },
+    })
+  }
+  const shape = (toolName: string, opts: { approvedId?: string } = {}) =>
+    butlerApprovalItemFor(task('ti'), 'butler', stateFor(toolName, opts), { approver: APPROVER })
+
+  it('marks a hub-internal action (create/edit/delete config verbs)', () => {
+    for (const name of ['delete_agent', 'create_workflow', 'edit_agent']) {
+      expect(shape(name)!.imApprovable).toBe(true)
+    }
+  })
+
+  it('does NOT mark ask_peer (cross-hub egress stays web-only)', () => {
+    expect(shape('ask_peer')!.imApprovable).toBeUndefined()
+  })
+
+  it('does NOT mark an MCP connector action (`<server>__<tool>` shape)', () => {
+    for (const name of ['gmail__send_email', 'todoist__create_task']) {
+      expect(shape(name)!.imApprovable).toBeUndefined()
+    }
+  })
+
+  it('anchors to the APPROVED tool, not a benign sibling in the round', () => {
+    const state = butlerGateState({
+      messages: [{ role: 'user', content: 'ask the peer' }],
+      pending: {
+        toolUses: [
+          { type: 'tool_use', id: 'b1', name: 'list_agents', input: {} },
+          { type: 'tool_use', id: 'g1', name: 'ask_peer', input: {} },
+        ],
+        approvedId: 'g1',
+        verdicts: { g1: { decision: 'approve', reason: 'governed' } },
+        approval: { toolName: 'ask_peer', title: 'ask_peer(hub-b)', reason: 'cross-hub' },
+      },
+    })
+    const item = butlerApprovalItemFor(task('ti2'), 'butler', state, { approver: APPROVER })
+    expect(item!.imApprovable).toBeUndefined()
+  })
+
+  it('fails closed when the approvedId matches no tool-use (defensive)', () => {
+    expect(shape('delete_agent', { approvedId: 'missing' })!.imApprovable).toBeUndefined()
+  })
+})

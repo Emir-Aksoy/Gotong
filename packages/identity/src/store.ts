@@ -296,6 +296,7 @@ const AUDIT_ACTOR_SOURCES: readonly AuditActorSource[] = [
   'anonymous',
   'system',
   'federated', // FED-M4
+  'im', // IMA-M2 — decision from a bound IM chat; channel detail in metadata.via
   // A2.2 (v4 Phase 5) — 'v3-admin' removed from the writable enum.
   // rowToAuditLog still tolerates pre-A2.2 rows that carry the old
   // string in `actor_source` (clamped to 'system' via the fallback).

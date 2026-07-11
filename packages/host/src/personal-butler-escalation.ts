@@ -85,6 +85,16 @@ export function butlerApprovalItemFor(
     status: 'pending',
     createdAt: now(),
   }
+  // IMA-M2 — whitelist hub-INTERNAL actions for IM approval (plan b). The
+  // gate is by SHAPE, not an enumerated list: `ask_peer` (cross-hub egress)
+  // and any `<server>__<tool>` MCP connector action (the data-leaves-box
+  // direction — sending, spending, editing the outside world) stay web-only,
+  // so every future connector lands on the conservative side automatically.
+  const approvedTool = gate.pending.toolUses.find((t) => t.id === gate.pending!.approvedId)
+  const toolName = approvedTool?.name ?? ''
+  if (toolName !== '' && toolName !== 'ask_peer' && !toolName.includes('__')) {
+    item.imApprovable = true
+  }
   if (task.title !== undefined) item.title = task.title
   if (parentNode) item.parent = { taskId: parentNode.taskId, by: parentNode.by }
   return item
