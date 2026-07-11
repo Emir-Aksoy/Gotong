@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import {
   createLogger,
   type AgentRecord,
@@ -412,6 +413,26 @@ export class LocalAgentPool implements ManagedAgentLifecycle {
    * through to `process.env`. Omitting it is byte-for-byte today's behaviour.
    */
   private readonly mcpSecretSource?: ServerSecretSource
+
+  /**
+   * NA-M6b — per-call live chunk sinks (the steward's WFEDIT-D4 pattern at
+   * pool scope). A caller that wants THIS dispatch's chunks registers a sink
+   * under a private random key and rides the key in `payload.__streamSinkKey`;
+   * the spawn-time stream hook routes text chunks back to exactly that call.
+   * The transcript append is unchanged — sinks are an additional tap, and an
+   * unknown/absent key falls through to today's behaviour byte-for-byte.
+   */
+  private readonly chatChunkSinks = new Map<string, (text: string) => void>()
+
+  registerChatChunkSink(sink: (text: string) => void): string {
+    const key = randomUUID()
+    this.chatChunkSinks.set(key, sink)
+    return key
+  }
+
+  releaseChatChunkSink(key: string): void {
+    this.chatChunkSinks.delete(key)
+  }
 
   constructor(opts: {
     hub: Hub
@@ -994,6 +1015,7 @@ export class LocalAgentPool implements ManagedAgentLifecycle {
     // still produces its final response.
     const hubRef = this.hub
     const agentIdRef = record.id
+    const chunkSinks = this.chatChunkSinks
     const onStreamChunk = (chunk: unknown, task: Task): void => {
       try {
         hubRef.transcript.append({
@@ -1005,6 +1027,18 @@ export class LocalAgentPool implements ManagedAgentLifecycle {
         log.warn('transcript append failed for llm_stream_chunk', {
           err: err instanceof Error ? err.message : String(err),
         })
+      }
+      // NA-M6b — route text chunks to the per-call sink when the dispatch
+      // carried a registered `__streamSinkKey` (steward's exact discipline:
+      // text-only, throwing sinks never break the stream, unknown key = no-op).
+      const sinkKey = (task.payload as { __streamSinkKey?: unknown } | undefined)?.__streamSinkKey
+      const c = chunk as { type?: unknown; text?: unknown } | undefined
+      if (typeof sinkKey === 'string' && c?.type === 'text' && typeof c.text === 'string' && c.text) {
+        try {
+          chunkSinks.get(sinkKey)?.(c.text)
+        } catch {
+          /* a throwing caller sink must never break the agent's reply */
+        }
       }
     }
 

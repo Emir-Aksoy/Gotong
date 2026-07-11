@@ -736,3 +736,19 @@ export interface MeHubStewardSurface {
   /** Apply ONE accepted action (validated + re-classified server-side). */
   apply(input: { userId: string; action: unknown }): Promise<MeHubStewardApplyResult>
 }
+
+/**
+ * NA-M6b — per-call live chunk sinks for the member quick-chat route. The
+ * host wires the agent pool's `registerChatChunkSink`/`releaseChatChunkSink`
+ * pair; the route registers a sink, rides the returned key inside the
+ * dispatched payload (`__streamSinkKey`), and the pool's spawn-time stream
+ * hook routes THAT dispatch's text chunks back to exactly this call. Duck
+ * type — web has no runtime dep on the host pool. With tools the loop
+ * replays rounds and only the LAST round's text is the reply, so callers
+ * treat chunks as a typing preview and the dispatch result stays
+ * authoritative (the steward-box discipline).
+ */
+export interface MeChatStreamSurface {
+  register(sink: (text: string) => void): string
+  release(key: string): void
+}

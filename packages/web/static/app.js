@@ -1830,7 +1830,7 @@
       })
       let j
       if ((r.headers.get('content-type') || '').includes('application/x-ndjson') && r.body) {
-        j = await readStewardStream(r)
+        j = await readNdjsonStream(r, paintStewardTyping)
         removeStewardTyping()
         if (!j) {
           status.className = 'me-status error'
@@ -1859,12 +1859,11 @@
     }
   }
 
-  // NA-M6a — consume the steward's NDJSON plan stream (WFEDIT-D4 shape).
-  // The steward's raw LLM output is a JSON proposal ({"reply":…,"actions":…}),
-  // so chunks are NOT painted verbatim: we extract the partial `reply` string
-  // as it grows and show that as the typing preview. The final `result` line
-  // (or null on a dropped connection) stays the authoritative outcome.
-  async function readStewardStream(r) {
+  // NA-M6a/M6b — consume a WFEDIT-D4 NDJSON stream: accumulate chunk text and
+  // hand the growing raw string to `onRaw` (the caller's typing painter);
+  // return the terminal `result` line, or null on a dropped connection. The
+  // steward passes a partial-JSON extractor; quick-chat paints text verbatim.
+  async function readNdjsonStream(r, onRaw) {
     const reader = r.body.getReader()
     const decoder = new TextDecoder()
     let buf = ''
@@ -1880,7 +1879,7 @@
       }
       if (msg && msg.kind === 'chunk' && typeof msg.text === 'string') {
         raw += msg.text
-        paintStewardTyping(raw)
+        onRaw(raw)
       } else if (msg && msg.kind === 'result') result = msg
     }
     try {
@@ -2846,12 +2845,32 @@
       const r = await fetch(`/api/me/agents/${encodeURIComponent(agentId)}/chat`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ prompt }),
+        // NA-M6b: stream=true asks for NDJSON (live typing). Pre-stream errors
+        // (rate-limit / 404 / 503) still arrive as plain JSON — both handled.
+        body: JSON.stringify({ prompt, stream: true }),
       })
-      const j = await r.json().catch(() => ({}))
-      if (!r.ok) {
-        // 429 / 503 / 504 / 4xx — fold the server error to plain words + a fix, and
-        // offer a one-click jump to the key panel when it's a key/quota issue (③TC-ME).
+      let j
+      if ((r.headers.get('content-type') || '').includes('application/x-ndjson') && r.body) {
+        // Typing preview: paint raw chunk text into the reply pane as it
+        // arrives. The terminal result line REPLACES it wholesale — a
+        // tool-using agent's LAST round is the reply; chunks are preview only.
+        j = await readNdjsonStream(r, (raw) => {
+          if (replyEl) { replyEl.textContent = raw; replyEl.hidden = false }
+        })
+        if (!j) {
+          if (replyEl) { replyEl.hidden = true; replyEl.textContent = '' }
+          statusEl.className = 'me-status error'
+          statusEl.textContent = t('meChatStreamBroken')
+          return
+        }
+      } else {
+        j = await r.json().catch(() => ({}))
+      }
+      if (!r.ok || (j && j.ok === false)) {
+        // 429 / 503 / 504 / 4xx — or a stream whose terminal line carried the
+        // failure (timeout / refused dispatch). Fold the server error to plain
+        // words + a fix (one-click jump to the key panel on key/quota, ③TC-ME).
+        if (replyEl) { replyEl.hidden = true; replyEl.textContent = '' }
         setChatFailure(statusEl, window.Gotong.describeError(j?.error || `HTTP ${r.status}`), 'quickChatFailed')
         return
       }

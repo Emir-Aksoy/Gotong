@@ -31,6 +31,7 @@ import type {
   MeWorkflowEditSurface,
   MeWorkflowCreateSurface,
   MeHubStewardSurface,
+  MeChatStreamSurface,
 } from './me-routes.js'
 import type { WorkflowWizardSurface } from './wizard-routes.js'
 import type {
@@ -332,6 +333,12 @@ export interface WebServerOptions {
    * type, and the action it forwards is `unknown` (the host validates it).
    */
   hubSteward?: MeHubStewardSurface
+  /**
+   * NA-M6b — optional pool chunk-sink pair (the host wires the agent pool's
+   * `registerChatChunkSink`/`releaseChatChunkSink`). When absent, `stream:true`
+   * on the member quick-chat route degrades to the plain JSON reply.
+   */
+  meChatStream?: MeChatStreamSurface
   /**
    * SW-M9 A-M6 — optional OPERATOR-console hub steward surface. The host wires a
    * SECOND `HostStewardService` here (the site-wide operator one). When absent,

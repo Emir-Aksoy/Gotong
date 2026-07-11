@@ -239,6 +239,7 @@ import type {
   MeWorkflowCreateSurface,
   StewardHistoryTurn,
   MeHubStewardSurface,
+  MeChatStreamSurface,
 } from './me-routes-types.js'
 export type {
   MeWorkflowSummaryLike,
@@ -281,6 +282,7 @@ export type {
   MeHubStewardApplyResult,
   StewardHistoryTurn,
   MeHubStewardSurface,
+  MeChatStreamSurface,
 } from './me-routes-types.js'
 
 export interface HandleMeRouteCtx {
@@ -386,6 +388,12 @@ export interface HandleMeRouteCtx {
    * hide the 管家 panel.
    */
   hubSteward: MeHubStewardSurface | undefined
+  /**
+   * NA-M6b — pool chunk-sink pair for quick-chat streaming. Undefined when the
+   * host wired no pool surface; `stream:true` on the chat route then falls
+   * through to today's plain-JSON reply (old hosts / old SPAs both keep working).
+   */
+  meChatStream: MeChatStreamSurface | undefined
   /**
    * ease-of-use ①TC-ME — member "test connection" probe for a BYO key. Same
    * object the setup/admin probe uses (server.ts `ctx.llmKeyTest`), inlined here
@@ -2402,22 +2410,50 @@ async function handleMeChatAgent(
   }
   const rawTimeout = typeof body.timeoutMs === 'number' ? body.timeoutMs : 60_000
   const timeoutMs = Math.max(1000, Math.min(600_000, rawTimeout))
-  try {
-    const result = await Promise.race([
+  const dispatchChat = (extra?: Record<string, unknown>) =>
+    Promise.race([
       ctx.hub.dispatch({
         from: userId,
         // Stamp the dispatcher so the org quota gate debits per-user — same
         // attribution as /me/dispatch. orgId 'local' marks same-hub origin.
         origin: { orgId: 'local', userId },
         strategy: { kind: 'explicit', to: agentId },
-        payload: { prompt },
+        payload: { prompt, ...(extra ?? {}) },
         title: `chat — ${userId}`,
       }),
       new Promise<never>((_, reject) =>
         setTimeout(() => reject(new Error('chat wait timeout')), timeoutMs),
       ),
     ])
-    sendJson(res, { ok: true, result })
+  // NA-M6b — `stream:true` + pool sinks wired ⇒ NDJSON (the steward box's
+  // exact shape). Chunks are a typing preview only — a tool-using agent
+  // replays rounds and only the LAST round's text is the reply, so the SPA
+  // wholesale-replaces the preview with the result line. No surface ⇒ JSON.
+  if (body.stream === true && ctx.meChatStream) {
+    res.writeHead(200, {
+      'content-type': 'application/x-ndjson; charset=utf-8',
+      'cache-control': 'no-store',
+      'x-accel-buffering': 'no',
+    })
+    const writeLine = (obj: unknown) => {
+      try { res.write(JSON.stringify(obj) + '\n') } catch { /* client hung up; the dispatch still finishes */ }
+    }
+    const sinks = ctx.meChatStream
+    const key = sinks.register((text) => writeLine({ kind: 'chunk', text }))
+    try {
+      const result = await dispatchChat({ __streamSinkKey: key })
+      writeLine({ kind: 'result', ok: true, result })
+    } catch (err) {
+      // Headers are already out as 200 — carry the failure in the result line.
+      writeLine({ kind: 'result', ok: false, error: err instanceof Error ? err.message : String(err), code: 'chat_failed' })
+    } finally {
+      sinks.release(key)
+    }
+    res.end()
+    return
+  }
+  try {
+    sendJson(res, { ok: true, result: await dispatchChat() })
   } catch (err) {
     // 504 = timed out, or dispatch rejected (eg. quota fail-closed). The SPA
     // folds this through describeError, so a timeout / refused key reads as

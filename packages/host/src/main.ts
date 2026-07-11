@@ -2616,16 +2616,16 @@ async function main(): Promise<void> {
     // agent service / workflow editor / identity / steward key is missing, in
     // which case /api/me/steward/{plan,apply} return 503.
     ...(hubSteward ? { hubSteward } : {}),
+    // NA-M6b — quick-chat NDJSON typing preview; the sinks live on the pool.
+    meChatStream: { register: (s) => localAgents.registerChatChunkSink(s), release: (k) => localAgents.releaseChatChunkSink(k) },
     // SW-M9 A-M7 — the OPERATOR-console steward (site-wide twin); null on the same
     // conditions, in which case /api/admin/steward/{plan,apply} return 503.
     ...(operatorSteward ? { operatorSteward } : {}),
-    // Phase 13 M3 — null when no API key / disabled. Web responds 503
-    // on /api/admin/workflows/assist in that case so the UI can hide
-    // the "AI assistant" button cleanly.
+    // Phase 13 M3 — null when no API key / disabled; web 503s
+    // /api/admin/workflows/assist so the UI hides the AI-assistant button.
     ...(workflowAssist ? { workflowAssist } : {}),
-    // ease-of-use ① — "test connection" probe. Always available: it uses
-    // the key the caller types, no host config. Powers the 测试连接 button
-    // in the setup wizard and the agent-create form.
+    // ease-of-use ① — "test connection" probe; uses the key the caller types
+    // (no host config). Powers the setup-wizard / agent-form 测试连接 buttons.
     llmKeyTest: createLlmKeyTestSurface(),
     // DEPLOY-B2 — the setup wizard's IM step hot-starts the bridge it just
     // wrote a token for, through the B1 seam. Reads `imBridges` lazily so

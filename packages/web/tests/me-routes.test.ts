@@ -47,7 +47,7 @@ import {
 // ②TC-ME — the member quick-chat route's ownership gate is `MeAgentAdminSurface`;
 // `server.ts` only imports these (doesn't re-export), so pull them straight from
 // the route module where they're declared.
-import type { MeAgentAdminSurface, MeOwnedAgentView } from '../src/me-routes.js'
+import type { MeAgentAdminSurface, MeChatStreamSurface, MeOwnedAgentView } from '../src/me-routes.js'
 
 /**
  * ease-of-use ①TC-ME — a recording fake for the member key probe. Captures
@@ -274,6 +274,8 @@ async function boot(
     llmKeyTest?: RecordingKeyTest
     /** ease-of-use ②TC-ME — wire an ownership-gate fake for /api/me/agents/:id/chat. */
     meAgentAdmin?: MeAgentAdminSurface
+    /** NA-M6b — wire a fake chunk-sink pair for quick-chat `stream:true`. */
+    meChatStream?: MeChatStreamSurface
   } = {},
 ): Promise<BootResult> {
   const withGrowthReports = opts.withGrowthReports ?? true
@@ -331,6 +333,7 @@ async function boot(
     ...(uploads ? { uploads } : {}),
     ...(opts.llmKeyTest ? { llmKeyTest: opts.llmKeyTest } : {}),
     ...(opts.meAgentAdmin ? { meAgentAdmin: opts.meAgentAdmin } : {}),
+    ...(opts.meChatStream ? { meChatStream: opts.meChatStream } : {}),
     ...(opts.adminLoginRateLimit
       ? { adminLoginRateLimit: opts.adminLoginRateLimit }
       : {}),
@@ -1446,6 +1449,156 @@ describe('POST /api/me/agents/:id/chat — rate limit (②TC-ME)', () => {
     // The rate-limit check fires BEFORE dispatch, so the rejected hit never
     // reached the agent (only 2 dispatches landed, not 3).
     expect(stub.received.length).toBe(2)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// NA-M6b — quick-chat `stream:true` (NDJSON typing preview)
+//
+// The fake sink pair mirrors the pool surface: register() hands out a key and
+// keeps the sink; the stub agent — like the real pool's stream hook — looks up
+// `payload.__streamSinkKey` and feeds chunks DURING the dispatch, so the route
+// sees them between headers-out and the terminal result line.
+// ---------------------------------------------------------------------------
+
+class FakeChatStreamSinks implements MeChatStreamSurface {
+  readonly sinks = new Map<string, (text: string) => void>()
+  readonly registered: string[] = []
+  readonly released: string[] = []
+  private n = 0
+  register(sink: (text: string) => void): string {
+    const key = `sink-${++this.n}`
+    this.sinks.set(key, sink)
+    this.registered.push(key)
+    return key
+  }
+  release(key: string): void {
+    this.sinks.delete(key)
+    this.released.push(key)
+  }
+}
+
+/** Parse an NDJSON body into its per-line JSON objects. */
+function ndjsonLines(text: string): Array<Record<string, unknown>> {
+  return text
+    .trim()
+    .split('\n')
+    .filter((l) => l.trim())
+    .map((l) => JSON.parse(l) as Record<string, unknown>)
+}
+
+describe('POST /api/me/agents/:id/chat — stream: true (NA-M6b)', () => {
+  let b: BootResult
+  let sinks: FakeChatStreamSinks
+  let stub: StubChatAgent
+
+  beforeEach(async () => {
+    sinks = new FakeChatStreamSinks()
+    b = await boot({
+      // 'slow-agent' is owned too — the timeout case below needs to get past
+      // the ownership gate to reach the dispatch race.
+      meAgentAdmin: new StubMeAgentAdmin(new Set([OWNED_AGENT_ID, 'slow-agent'])),
+      meChatStream: sinks,
+    })
+    // Mirror the pool's stream hook: feed the registered sink for the task's
+    // own key while the dispatch is in flight, then return the final reply.
+    stub = new StubChatAgent(OWNED_AGENT_ID, (task) => {
+      const key = (task.payload as { __streamSinkKey?: string }).__streamSinkKey
+      if (key) for (const c of ['阿', '同', '在']) sinks.sinks.get(key)?.(c)
+      return okChatReply('阿同在。有什么可以帮你?')(task)
+    })
+    b.hub.register(stub)
+  })
+  afterEach(async () => {
+    await teardown(b)
+  })
+
+  const post = (body: unknown) =>
+    fetch(`${b.baseUrl}/api/me/agents/${OWNED_AGENT_ID}/chat`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', cookie: b.memberCookie },
+      body: JSON.stringify(body),
+    })
+
+  it('streams NDJSON chunk lines then a terminal ok result line', async () => {
+    const r = await post({ prompt: '你好', stream: true })
+    expect(r.status).toBe(200)
+    expect(r.headers.get('content-type')).toContain('application/x-ndjson')
+    const lines = ndjsonLines(await r.text())
+    expect(lines.map((l) => l.kind)).toEqual(['chunk', 'chunk', 'chunk', 'result'])
+    expect(lines.slice(0, 3).map((l) => l.text)).toEqual(['阿', '同', '在'])
+    const result = lines[3]!
+    expect(result.ok).toBe(true)
+    const out = (result.result as { output?: { text?: string } }).output
+    expect(out?.text).toBe('阿同在。有什么可以帮你?')
+    // The sink key rode inside the dispatched payload, and register/release
+    // paired up exactly once around the call.
+    expect(sinks.registered.length).toBe(1)
+    expect(sinks.released).toEqual(sinks.registered)
+    expect(
+      (stub.received[0]?.payload as { __streamSinkKey?: string }).__streamSinkKey,
+    ).toBe(sinks.registered[0])
+  })
+
+  it('carries a timeout failure in the result line (headers already 200) and still releases', async () => {
+    // Agent slower than the (clamped-to-1s) timeout → dispatchChat rejects
+    // after headers went out; the failure must ride the terminal line.
+    stub = new StubChatAgent(OWNED_AGENT_ID, okChatReply('unused'))
+    const slow = new (class implements Participant {
+      readonly kind = 'agent' as const
+      readonly capabilities: readonly string[] = []
+      constructor(readonly id: string) {}
+      async onTask(task: Task): Promise<TaskResult> {
+        await new Promise((resolve) => setTimeout(resolve, 1400))
+        return okChatReply('too late')(task)
+      }
+    })('slow-agent')
+    b.hub.register(slow)
+    const r = await fetch(`${b.baseUrl}/api/me/agents/slow-agent/chat`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', cookie: b.memberCookie },
+      body: JSON.stringify({ prompt: 'hi', stream: true, timeoutMs: 5 }),
+    })
+    expect(r.status).toBe(200)
+    const lines = ndjsonLines(await r.text())
+    const last = lines[lines.length - 1]!
+    expect(last.kind).toBe('result')
+    expect(last.ok).toBe(false)
+    expect(last.code).toBe('chat_failed')
+    // finally released the sink even on the failure path.
+    expect(sinks.released).toEqual(sinks.registered)
+  }, 10_000)
+
+  it('stays plain JSON without stream:true — and never touches the sinks', async () => {
+    const r = await post({ prompt: '你好' })
+    expect(r.status).toBe(200)
+    expect(r.headers.get('content-type')).toContain('application/json')
+    const j = await r.json()
+    expect(j.ok).toBe(true)
+    expect(sinks.registered.length).toBe(0)
+    // No key was stamped into the payload on the non-stream path.
+    expect('__streamSinkKey' in (stub.received[0]?.payload as Record<string, unknown>)).toBe(false)
+  })
+
+  it('falls back to plain JSON when the host wired no meChatStream surface', async () => {
+    const noSurface = await boot({
+      meAgentAdmin: new StubMeAgentAdmin(new Set([OWNED_AGENT_ID])),
+    })
+    try {
+      noSurface.hub.register(new StubChatAgent(OWNED_AGENT_ID, okChatReply('plain')))
+      const r = await fetch(`${noSurface.baseUrl}/api/me/agents/${OWNED_AGENT_ID}/chat`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', cookie: noSurface.memberCookie },
+        body: JSON.stringify({ prompt: 'hi', stream: true }),
+      })
+      expect(r.status).toBe(200)
+      expect(r.headers.get('content-type')).toContain('application/json')
+      const j = await r.json()
+      expect(j.ok).toBe(true)
+      expect(j.result?.output?.text).toBe('plain')
+    } finally {
+      await teardown(noSurface)
+    }
   })
 })
 
