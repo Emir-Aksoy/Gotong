@@ -54,6 +54,15 @@
   function fmtInt(n) {
     return Number.isFinite(n) ? String(n) : '0'
   }
+  // NA-M4 — 缓存命中率:cacheRead / 提示词全量。NA-M1b 之后 inputTokens
+  // 只计「新鲜段」,所以模型实际看到的提示词 = input + cacheCreation +
+  // cacheRead 三段互斥之和;没有提示词流量时显示 '—' 而非 0%。
+  function fmtHitRate(r) {
+    var read = r.cacheReadTokens || 0
+    var total = (r.inputTokens || 0) + (r.cacheCreationTokens || 0) + read
+    if (total <= 0) return '—'
+    return ((read / total) * 100).toFixed(1) + '%'
+  }
 
   function setStatus(root, msg, kind) {
     const el = $('#usage-status', root)
@@ -100,9 +109,9 @@
       '<section class="usage-list-wrap">' +
       '  <table class="usage-table">' +
       '    <thead><tr>' +
-      '      <th>' + escHtml(d.usgColDimension) + '</th><th>' + escHtml(d.usgColCalls) + '</th><th>' + escHtml(d.usgColInputTokens) + '</th><th>' + escHtml(d.usgColOutputTokens) + '</th><th>' + escHtml(d.usgColCostUsd) + '</th>' +
+      '      <th>' + escHtml(d.usgColDimension) + '</th><th>' + escHtml(d.usgColCalls) + '</th><th>' + escHtml(d.usgColInputTokens) + '</th><th>' + escHtml(d.usgColOutputTokens) + '</th><th>' + escHtml(d.usgColCacheRead) + '</th><th>' + escHtml(d.usgColCacheHit) + '</th><th>' + escHtml(d.usgColCostUsd) + '</th>' +
       '    </tr></thead>' +
-      '    <tbody id="usage-rows"><tr><td colspan="5" class="usage-empty">' + escHtml(d.usgLoadingCell) + '</td></tr></tbody>' +
+      '    <tbody id="usage-rows"><tr><td colspan="7" class="usage-empty">' + escHtml(d.usgLoadingCell) + '</td></tr></tbody>' +
       '    <tfoot id="usage-foot"></tfoot>' +
       '  </table>' +
       '</section>' +
@@ -149,15 +158,17 @@
     if (!tbody) return
     if (rows.length === 0) {
       tbody.innerHTML =
-        '<tr><td colspan="5" class="usage-empty">' + escHtml(t().usgEmpty) + '</td></tr>'
+        '<tr><td colspan="7" class="usage-empty">' + escHtml(t().usgEmpty) + '</td></tr>'
       if (tfoot) tfoot.innerHTML = ''
       return
     }
-    let totCalls = 0, totIn = 0, totOut = 0, totCost = 0
+    let totCalls = 0, totIn = 0, totOut = 0, totCost = 0, totCacheRead = 0, totCacheWrite = 0
     tbody.innerHTML = rows.map(function (r) {
       totCalls += r.calls || 0
       totIn += r.inputTokens || 0
       totOut += r.outputTokens || 0
+      totCacheRead += r.cacheReadTokens || 0
+      totCacheWrite += r.cacheCreationTokens || 0
       totCost += r.costMicros || 0
       return (
         '<tr>' +
@@ -165,17 +176,22 @@
         '<td>' + fmtInt(r.calls) + '</td>' +
         '<td>' + fmtInt(r.inputTokens) + '</td>' +
         '<td>' + fmtInt(r.outputTokens) + '</td>' +
+        '<td>' + fmtInt(r.cacheReadTokens) + '</td>' +
+        '<td>' + escHtml(fmtHitRate(r)) + '</td>' +
         '<td class="usage-cost">' + escHtml(fmtUsd(r.costMicros)) + '</td>' +
         '</tr>'
       )
     }).join('')
     if (tfoot) {
+      // 合计行的命中率从合计数算(而非各行平均),口径与逐行一致。
       tfoot.innerHTML =
         '<tr class="usage-total">' +
         '<td>' + escHtml(t().usgTotal) + '</td>' +
         '<td>' + fmtInt(totCalls) + '</td>' +
         '<td>' + fmtInt(totIn) + '</td>' +
         '<td>' + fmtInt(totOut) + '</td>' +
+        '<td>' + fmtInt(totCacheRead) + '</td>' +
+        '<td>' + escHtml(fmtHitRate({ inputTokens: totIn, cacheCreationTokens: totCacheWrite, cacheReadTokens: totCacheRead })) + '</td>' +
         '<td class="usage-cost">' + escHtml(fmtUsd(totCost)) + '</td>' +
         '</tr>'
     }
