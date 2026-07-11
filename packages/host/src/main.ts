@@ -1143,18 +1143,18 @@ async function main(): Promise<void> {
     resolveTarget: (agentId) => localAgents.resolveLlmProbeTarget(agentId),
   })
 
-  // BF-M8 — arm the butler memory-maintenance sweep. It borrows the pool's
-  // provider-resolution (`buildButlerProvider`, resolved fresh each tick so a
-  // key added after boot is picked up) and walks the per-user namespaces under
-  // `<space>/butler/memory/user/*`, distilling each member's captured episodic
-  // into their curated profile + writing STATUS.md. Off when the butler is off
-  // or `GOTONG_BUTLER_MAINTENANCE` opts out. First tick lands one interval in — a
-  // 6h job must not re-fire on every restart.
+  // BF-M8 — arm the butler memory-maintenance sweep. Borrows the pool's
+  // provider resolution + NA-M5 model override (both re-resolved each tick so
+  // a key/spec edit after boot is picked up) and walks the per-user namespaces
+  // under `<space>/butler/memory/user/*`, distilling captured episodic into
+  // curated profiles + STATUS.md. Off when the butler is off or
+  // `GOTONG_BUTLER_MAINTENANCE` opts out. First tick lands one interval in.
   let butlerMaintenanceSweeper: ButlerMaintenanceSweeper | undefined
   if (butlerMaintenanceOn) {
     butlerMaintenanceSweeper = new ButlerMaintenanceSweeper({
       rootDir: butlerMemoryRoot,
       buildProvider: () => localAgents.buildButlerProvider(),
+      resolveModel: () => localAgents.butlerMaintenanceModel(),
       logger: log,
       intervalMs: butlerMaintenanceMs,
       gitSnapshot: butlerMemoryGitOn,

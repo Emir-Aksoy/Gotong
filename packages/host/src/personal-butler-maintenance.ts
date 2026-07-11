@@ -246,6 +246,14 @@ export interface ButlerMaintenanceSweeperOptions {
   now?: () => number
   /** Per-request model / token overrides for the distillation call. */
   model?: string
+  /**
+   * NA-M5 — resolve the maintenance-model override at EACH tick (usually
+   * `() => pool.butlerMaintenanceModel()`, reading the butler spec's opt-in
+   * `maintenanceModel`). Mirrors `buildProvider`'s per-tick discipline so an
+   * admin edit lands next tick without restart. When present it wins over the
+   * static `model`; resolving to undefined = no override (provider default).
+   */
+  resolveModel?: () => Promise<string | undefined>
   maxTokens?: number
   /** Forwarded to the maintenance reviewer. */
   tierConfig?: TierConfig
@@ -279,6 +287,7 @@ export class ButlerMaintenanceSweeper {
   private readonly intervalMs: number
   private readonly now: () => number
   private readonly model?: string
+  private readonly resolveModel?: () => Promise<string | undefined>
   private readonly maxTokens?: number
   private readonly tierConfig?: TierConfig
   private readonly budgetBytes?: number
@@ -296,6 +305,7 @@ export class ButlerMaintenanceSweeper {
     this.intervalMs = opts.intervalMs ?? BUTLER_MAINTENANCE_INTERVAL_MS
     this.now = opts.now ?? Date.now
     this.model = opts.model
+    this.resolveModel = opts.resolveModel
     this.maxTokens = opts.maxTokens
     this.tierConfig = opts.tierConfig
     this.budgetBytes = opts.budgetBytes
@@ -356,8 +366,18 @@ export class ButlerMaintenanceSweeper {
         })
         return
       }
+      // NA-M5 — per-tick model override (opt-in `maintenanceModel` on the butler
+      // spec). Resolver faults degrade to "no override", never a failed tick.
+      let model = this.model
+      if (this.resolveModel) {
+        try {
+          model = (await this.resolveModel()) ?? this.model
+        } catch {
+          model = this.model
+        }
+      }
       const summarize = butlerSummarizer(provider, {
-        ...(this.model ? { model: this.model } : {}),
+        ...(model ? { model } : {}),
         ...(this.maxTokens !== undefined ? { maxTokens: this.maxTokens } : {}),
       })
 

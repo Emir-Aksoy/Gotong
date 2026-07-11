@@ -203,6 +203,71 @@ describe('agents-route: fallbacks (MR-M2 model routing)', () => {
   })
 })
 
+describe('agents-route: maintenanceModel (NA-M5 maintenance model override)', () => {
+  let b: Boot
+  beforeEach(async () => { b = await boot() })
+  afterEach(async () => { await teardown(b) })
+
+  it('POST persists a trimmed maintenanceModel; GET exposes it via managed', async () => {
+    const res = await fetch(`${b.baseUrl}/api/admin/agents`, {
+      method: 'POST',
+      headers: auth(b.token),
+      body: JSON.stringify({ ...base, id: 'maint', maintenanceModel: '  cheap-distill-v1  ' }),
+    })
+    expect(res.status).toBe(200)
+    const body = await res.json()
+    expect(body.agent.managed.maintenanceModel).toBe('cheap-distill-v1')
+    const list = await fetch(`${b.baseUrl}/api/admin/agents`, { headers: auth(b.token) })
+    const agents = (await list.json()).agents as Array<{ id: string; managed?: { maintenanceModel?: string } }>
+    expect(agents.find((a) => a.id === 'maint')?.managed?.maintenanceModel).toBe('cheap-distill-v1')
+  })
+
+  it('omitting maintenanceModel leaves it undefined (opt-in byte-stable)', async () => {
+    const res = await fetch(`${b.baseUrl}/api/admin/agents`, {
+      method: 'POST',
+      headers: auth(b.token),
+      body: JSON.stringify({ ...base, id: 'no-maint' }),
+    })
+    expect(res.status).toBe(200)
+    expect((await b.space.agents()).find((a) => a.id === 'no-maint')?.managed.maintenanceModel).toBeUndefined()
+  })
+
+  it('an empty or non-string maintenanceModel → 400, nothing persisted', async () => {
+    for (const bad of ['', '   ', 42]) {
+      const res = await fetch(`${b.baseUrl}/api/admin/agents`, {
+        method: 'POST',
+        headers: auth(b.token),
+        body: JSON.stringify({ ...base, id: 'bad-maint', maintenanceModel: bad }),
+      })
+      expect(res.status).toBe(400)
+    }
+    expect((await b.space.agents()).some((a) => a.id === 'bad-maint')).toBe(false)
+  })
+
+  it('PUT echoing the value keeps it; omitting it drops it (wholesale replace)', async () => {
+    await fetch(`${b.baseUrl}/api/admin/agents`, {
+      method: 'POST',
+      headers: auth(b.token),
+      body: JSON.stringify({ ...base, id: 'maint-edit', maintenanceModel: 'cheap-distill-v1' }),
+    })
+    const keep = await fetch(`${b.baseUrl}/api/admin/agents/maint-edit`, {
+      method: 'PUT',
+      headers: auth(b.token),
+      body: JSON.stringify({ ...base, id: 'maint-edit', maintenanceModel: 'cheap-distill-v1' }),
+    })
+    expect(keep.status).toBe(200)
+    expect((await b.space.agents()).find((a) => a.id === 'maint-edit')?.managed.maintenanceModel).toBe('cheap-distill-v1')
+    // Omission drops — the admin form's capture-echo (managed-agents.js) defends this.
+    const drop = await fetch(`${b.baseUrl}/api/admin/agents/maint-edit`, {
+      method: 'PUT',
+      headers: auth(b.token),
+      body: JSON.stringify({ ...base, id: 'maint-edit' }),
+    })
+    expect(drop.status).toBe(200)
+    expect((await b.space.agents()).find((a) => a.id === 'maint-edit')?.managed.maintenanceModel).toBeUndefined()
+  })
+})
+
 describe('agents-route: probe-routing (MR-M5)', () => {
   // This route needs an injected `routingProbe` surface, so it boots its own
   // server per case (the shared `boot()` wires none). Pins the web-layer

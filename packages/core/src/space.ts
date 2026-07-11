@@ -1149,6 +1149,13 @@ export interface ManagedAgentSpec {
    */
   fallbacks?: FallbackCandidate[]
   /**
+   * NA-M5 — 可选的 6h 维护低价模型。设了,管家后台记忆蒸馏(6h 维护 sweep)
+   * 的 LLM 调用就带 `model: <此值>` —— 同 provider 同 key 同计费,只换模型名,
+   * 数据边界不动;对话热路径完全不受影响。缺省 = 维护沿用 provider 默认模型,
+   * 字节不变。Hub 不解释本字段;只有 host 的维护 sweep 读它(opt-in)。
+   */
+  maintenanceModel?: string
+  /**
    * Hub Services this agent uses (v2.2 — see docs/services-rfc.md §6).
    * Empty / absent means the agent has no service handles at runtime;
    * its ctx is `EMPTY_SERVICE_CTX`. Two rules enforced at yaml parse:

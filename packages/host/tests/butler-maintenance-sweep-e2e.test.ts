@@ -35,7 +35,7 @@ import {
   type Logger,
   type Task,
 } from '@gotong/core'
-import type { LlmAgentOptions } from '@gotong/llm'
+import type { LlmAgentOptions, LlmProvider, LlmRequest, LlmStreamChunk } from '@gotong/llm'
 import { levelOf, tierOf, type MemoryEntry } from '@gotong/personal-memory'
 import type { MemoryHandle } from '@gotong/services-sdk'
 
@@ -258,5 +258,94 @@ describe('BF-M8 — butler 蒸馏 + 6h maintenance in the production host sweep'
     const onGit: GitRunner = async (_args, cwd) => { onCwds.push(cwd); return { code: 0, stdout: '', stderr: '' } }
     await sweeper(pool, { gitSnapshot: true, git: onGit }).runOnce()
     expect(onCwds).toContain(join(memRoot, 'user', 'alice'))
+  })
+
+  /**
+   * NA-M5 — 维护低价模型 override:spec 的 `maintenanceModel` 经
+   * `pool.butlerMaintenanceModel()`(main.ts 的 `resolveModel` 接线)在每个
+   * tick 解析,落到每次蒸馏调用的 `req.model` 上。未设 = 无 override,与今天
+   * 逐字节一致;resolver 抛错降级为无 override,绝不让 tick 失败。
+   */
+  describe('NA-M5 — maintenance model override', () => {
+    function capturingProvider(): { provider: LlmProvider; seen: LlmRequest[] } {
+      const seen: LlmRequest[] = []
+      const provider: LlmProvider = {
+        name: 'na-m5-capture',
+        async *stream(req: LlmRequest): AsyncIterable<LlmStreamChunk> {
+          seen.push(req)
+          yield { type: 'text', text: 'digest' }
+          yield { type: 'end', stopReason: 'end_turn' }
+        },
+      }
+      return { provider, seen }
+    }
+
+    it('spec maintenanceModel → butlerMaintenanceModel() → every distillation req.model', async () => {
+      await space.upsertAgent({
+        id: 'assistant',
+        allowedCapabilities: ['chat'],
+        createdAt: new Date().toISOString(),
+        managed: {
+          kind: 'llm', provider: 'mock', system: 'you are the butler',
+          maintenanceModel: '  cheap-distill-v1  ', // whitespace → accessor trims
+        },
+      })
+      const pool = butlerPool()
+      expect(await pool.butlerMaintenanceModel()).toBe('cheap-distill-v1')
+
+      await seedEpisodic(memRoot, 'alice', 40)
+      const { provider, seen } = capturingProvider()
+      await sweeper(pool, {
+        buildProvider: async () => provider,
+        // Exactly main.ts's wiring shape — per-tick resolution off the live row.
+        resolveModel: () => pool.butlerMaintenanceModel(),
+      }).runOnce()
+
+      expect(seen.length).toBeGreaterThan(0)
+      for (const req of seen) expect(req.model).toBe('cheap-distill-v1')
+    })
+
+    it('unset maintenanceModel → no override (req.model stays undefined, byte-identical)', async () => {
+      await space.upsertAgent({
+        id: 'assistant',
+        allowedCapabilities: ['chat'],
+        createdAt: new Date().toISOString(),
+        managed: { kind: 'llm', provider: 'mock', system: 'you are the butler' },
+      })
+      const pool = butlerPool()
+      expect(await pool.butlerMaintenanceModel()).toBeUndefined()
+
+      await seedEpisodic(memRoot, 'alice', 40)
+      const { provider, seen } = capturingProvider()
+      await sweeper(pool, {
+        buildProvider: async () => provider,
+        resolveModel: () => pool.butlerMaintenanceModel(),
+      }).runOnce()
+
+      expect(seen.length).toBeGreaterThan(0)
+      for (const req of seen) expect(req.model).toBeUndefined()
+    })
+
+    it('a throwing resolver degrades to no-override — the tick still completes', async () => {
+      await space.upsertAgent({
+        id: 'assistant',
+        allowedCapabilities: ['chat'],
+        createdAt: new Date().toISOString(),
+        managed: { kind: 'llm', provider: 'mock', system: 'you are the butler' },
+      })
+      const pool = butlerPool()
+      await seedEpisodic(memRoot, 'alice', 40)
+      const { provider, seen } = capturingProvider()
+
+      await expect(
+        sweeper(pool, {
+          buildProvider: async () => provider,
+          resolveModel: async () => { throw new Error('boom') },
+        }).runOnce(),
+      ).resolves.toBeUndefined()
+
+      expect(seen.length).toBeGreaterThan(0) // maintenance still ran
+      for (const req of seen) expect(req.model).toBeUndefined()
+    })
   })
 })

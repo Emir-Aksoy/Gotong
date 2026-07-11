@@ -569,6 +569,70 @@ agent:
   })
 })
 
+// NA-M5 — agent manifests can declare a `maintenanceModel:` override so the 6h
+// butler maintenance sweep runs on a cheaper model. Same provider / same key —
+// only `req.model` changes, and only for background distillation. Absent =
+// maintenance uses the provider's default model, byte-identical to today.
+describe('parseManifest — maintenanceModel: (NA-M5 maintenance override)', () => {
+  it('parses and trims a maintenanceModel string', () => {
+    const yaml = `
+schema: gotong.agent/v1
+agent:
+  id: w
+  capabilities: [x]
+  provider: anthropic
+  system: hi
+  maintenanceModel: '  claude-haiku-4-5  '
+`
+    const m = parseManifest(yaml)
+    expect(m.agents[0]!.managed.maintenanceModel).toBe('claude-haiku-4-5')
+  })
+
+  it('an agent without maintenanceModel parses cleanly and reports undefined', () => {
+    const yaml = `
+schema: gotong.agent/v1
+agent: { id: w, capabilities: [x], provider: mock, system: hi }
+`
+    const m = parseManifest(yaml)
+    expect(m.agents[0]!.managed.maintenanceModel).toBeUndefined()
+  })
+
+  it('rejects an empty or non-string maintenanceModel', () => {
+    for (const bad of ["maintenanceModel: ''", 'maintenanceModel: 42']) {
+      const yaml = `
+schema: gotong.agent/v1
+agent: { id: w, capabilities: [x], provider: mock, system: hi, ${bad} }
+`
+      expect(() => parseManifest(yaml)).toThrow(/maintenanceModel must be a non-empty string/)
+    }
+  })
+
+  it('renderAgentManifest round-trips maintenanceModel', () => {
+    const rec = {
+      id: 'maint',
+      allowedCapabilities: ['x'],
+      managed: {
+        kind: 'llm' as const,
+        provider: 'anthropic' as const,
+        system: 'be brief',
+        maintenanceModel: 'claude-haiku-4-5',
+      },
+    }
+    const rendered = renderAgentManifest(rec)
+    const parsed = parseManifest(JSON.stringify(rendered))
+    expect(parsed.agents[0]!.managed.maintenanceModel).toBe('claude-haiku-4-5')
+  })
+
+  it('renderAgentManifest omits maintenanceModel entirely when not declared', () => {
+    const rendered = renderAgentManifest({
+      id: 'plain',
+      allowedCapabilities: ['x'],
+      managed: { kind: 'llm', provider: 'mock', system: 'hi' },
+    })
+    expect((rendered.agent as Record<string, unknown>).maintenanceModel).toBeUndefined()
+  })
+})
+
 // v0.3+ — agent manifests can declare third-party MCP servers under
 // `mcpServers:`. The parser validates shape (name regex, type
 // constraints) at import time; the actual spawn happens later in

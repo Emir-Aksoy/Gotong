@@ -436,6 +436,11 @@ function validateAgent(a: Record<string, unknown>, path: string): ParsedAgent {
   if (a.fallbacks !== undefined) {
     managed.fallbacks = validateFallbacksArray(a.fallbacks, `${path}.fallbacks`)
   }
+  // Optional `maintenanceModel:` — NA-M5 opt-in cheaper model for the butler's
+  // 6h memory-maintenance pass. Host-side seam reads it per tick.
+  if (a.maintenanceModel !== undefined) {
+    managed.maintenanceModel = validateMaintenanceModel(a.maintenanceModel, `${path}.maintenanceModel`)
+  }
   const out: ParsedAgent = { id: a.id, capabilities, managed }
   if (typeof a.displayName === 'string') out.displayName = a.displayName
   return out
@@ -692,6 +697,19 @@ export function validateHeartbeatSpec(raw: unknown, path: string): HeartbeatSpec
 const MAX_FALLBACKS = 5
 
 /**
+ * Validate an optional `maintenanceModel:` (NA-M5 — opt-in cheaper model for
+ * the butler's 6h maintenance pass). Same rule as a fallback candidate's
+ * `model`: a non-empty string when present. Shared by the manifest importer
+ * and the admin POST/PUT path — one validator, no drift.
+ */
+export function validateMaintenanceModel(raw: unknown, path: string): string {
+  if (typeof raw !== 'string' || raw.trim().length === 0) {
+    throw new ManifestError(`${path} must be a non-empty string when present`)
+  }
+  return raw.trim()
+}
+
+/**
  * Validate an optional `fallbacks:` array (MR-M2 — deterministic model
  * routing / failover). Shape-only, plugin-agnostic; the RoutingProvider
  * that consumes these is wired at spawn time in `LocalAgentPool`.
@@ -870,6 +888,10 @@ export function renderAgentManifest(rec: {
       if (fb.providerLabel !== undefined) out.providerLabel = fb.providerLabel
       return out
     })
+  }
+  if (rec.managed.maintenanceModel) {
+    // NA-M5 — echo so export → re-import preserves the maintenance override.
+    agent.maintenanceModel = rec.managed.maintenanceModel
   }
   if (rec.displayName) agent.displayName = rec.displayName
   return {

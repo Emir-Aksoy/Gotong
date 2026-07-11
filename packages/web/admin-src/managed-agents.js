@@ -376,6 +376,10 @@ export function createManagedAgents({ ma, openBundleImportModal }) {
     ma._editingFallbacks = (mode === 'edit' && Array.isArray(agent?.managed?.fallbacks))
       ? agent.managed.fallbacks
       : null
+    // NA-M5 — same capture/echo discipline for the maintenance-model override.
+    ma._editingMaintenanceModel = (mode === 'edit' && typeof agent?.managed?.maintenanceModel === 'string')
+      ? agent.managed.maintenanceModel
+      : null
     // ease-of-use ②TC — always open on the form, never a stale quick-chat
     // panel left over from a prior create (closeAgentForm also resets, but be
     // defensive so the entry point is self-sufficient).
@@ -588,6 +592,12 @@ export function createManagedAgents({ ma, openBundleImportModal }) {
     // entirely when the agent has none (unset stays unset = byte-stable).
     if (Array.isArray(ma._editingFallbacks) && ma._editingFallbacks.length > 0) {
       body.fallbacks = ma._editingFallbacks
+    }
+    // NA-M5 — echo the captured maintenance-model override (no form widget;
+    // authored via manifest). Same must-echo reason as fallbacks: PUT replaces
+    // `managed` wholesale, so omitting it here would silently drop the opt-in.
+    if (typeof ma._editingMaintenanceModel === 'string' && ma._editingMaintenanceModel) {
+      body.maintenanceModel = ma._editingMaintenanceModel
     }
     // v5 D-M4 — heartbeat. Checked → persist { enabled, intervalMs (from the
     // minutes input), checklist? }. Unchecked → omit so a PUT (which replaces

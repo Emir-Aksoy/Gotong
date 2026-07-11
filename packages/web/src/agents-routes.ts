@@ -42,6 +42,7 @@ import {
   validateUseMcpServersArray,
   validateHeartbeatSpec,
   validateFallbacksArray,
+  validateMaintenanceModel,
   type ParsedAgent,
 } from './manifest.js'
 import { decryptJson } from './template-crypto.js'
@@ -308,6 +309,10 @@ function validateAgentBody(body: Record<string, unknown>): ParsedAgent {
   // MR-M2 — optional ordered fallback providers (opt-in model routing / failover).
   if (body.fallbacks !== undefined) {
     managed.fallbacks = validateFallbacksArray(body.fallbacks, 'fallbacks')
+  }
+  // NA-M5 — optional cheaper model for the butler's 6h maintenance pass.
+  if (body.maintenanceModel !== undefined) {
+    managed.maintenanceModel = validateMaintenanceModel(body.maintenanceModel, 'maintenanceModel')
   }
   if (body.uses !== undefined) {
     managed.uses = validateUsesArray(body.uses, 'uses')

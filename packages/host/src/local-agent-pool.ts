@@ -1589,6 +1589,25 @@ export class LocalAgentPool implements ManagedAgentLifecycle {
   }
 
   /**
+   * NA-M5 — the butler row's opt-in maintenance-model override. The 6h sweep
+   * distills on the butler's own provider; this lets the spec pin a CHEAPER
+   * model id for that background pass (same vendor / key / billing — only
+   * `req.model` changes). Resolved at CALL time so an admin edit takes effect
+   * next tick without restart. Undefined = unset / unreadable → the sweep
+   * keeps today's behavior (provider default model), byte-identical.
+   */
+  async butlerMaintenanceModel(): Promise<string | undefined> {
+    let rows: readonly AgentRecord[]
+    try {
+      rows = await this.space.agents()
+    } catch {
+      return undefined // corrupt agents.json — same posture as buildButlerProvider
+    }
+    const m = rows.find((r) => this.butlerEnabledFor(r))?.managed?.maintenanceModel
+    return typeof m === 'string' && m.trim().length > 0 ? m.trim() : undefined
+  }
+
+  /**
    * B2 — the resident butler's READ-ONLY connector tools (weather / calendar /
    * news), for the proactive daily-brief enrichment (see `personal-butler-proactive`).
    * Returns the SAME read/write split the factory applies at spawn — only the
