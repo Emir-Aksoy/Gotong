@@ -75,13 +75,18 @@ class FakeHubSteward implements MeHubStewardSurface {
     result: { kind: 'create_agent', agent: { id: 'me.u1.mailer', handle: 'mailer' } },
   }
 
+  /** NA-M6a — chunks to emit through `onChunk` when a stream caller passes one. */
+  planChunks: string[] = []
+
   async plan(input: {
     userId: string
     instruction: string
     history?: StewardHistoryTurn[]
+    onChunk?: (chunk: string) => void
   }): Promise<MeHubStewardPlanResult> {
     this.planCalls.push(input)
     if (this.planThrows) throw this.planThrows
+    if (input.onChunk) for (const c of this.planChunks) input.onChunk(c)
     return this.planResult
   }
   async apply(input: { userId: string; action: unknown }): Promise<MeHubStewardApplyResult> {
@@ -306,6 +311,86 @@ describe('/api/me/steward/plan', () => {
       headers: { cookie: b.memberCookie },
     })
     expect(res.status).toBe(404)
+  })
+})
+
+// NA-M6a — streaming mode (body `stream: true`): NDJSON over the same response,
+// the WFEDIT-D4 shape. Chunks flow only into the caller's own request/response
+// pair; the final `result` line carries the authoritative reply+actions (or the
+// failure, since headers are already committed as 200 once the stream opens).
+describe('/api/me/steward/plan — stream: true (NA-M6a)', () => {
+  let b: Boot
+  beforeEach(async () => {
+    b = await boot()
+  })
+  afterEach(() => teardown(b))
+
+  async function readLines(res: Response): Promise<Array<Record<string, unknown>>> {
+    const text = await res.text()
+    return text
+      .split('\n')
+      .filter((l) => l.trim())
+      .map((l) => JSON.parse(l) as Record<string, unknown>)
+  }
+
+  it('emits chunk lines then an ok result line with reply+actions', async () => {
+    b.steward.planChunks = ['{"reply":"我', '可以帮你"', ',"actions":[]}']
+    const res = await fetch(`${b.server.url}/api/me/steward/plan`, {
+      method: 'POST',
+      headers: { cookie: b.memberCookie, 'content-type': 'application/json' },
+      body: JSON.stringify({ instruction: '帮我建一个总结邮件的助手', stream: true }),
+    })
+    expect(res.status).toBe(200)
+    expect(res.headers.get('content-type')).toContain('application/x-ndjson')
+    const lines = await readLines(res)
+    const chunks = lines.filter((l) => l.kind === 'chunk')
+    expect(chunks.map((c) => c.text)).toEqual(['{"reply":"我', '可以帮你"', ',"actions":[]}'])
+    const result = lines[lines.length - 1]!
+    expect(result.kind).toBe('result')
+    expect(result.ok).toBe(true)
+    expect(String(result.reply)).toContain('邮件')
+    expect(Array.isArray(result.actions)).toBe(true)
+    // userId is still server-forced in stream mode.
+    expect(b.steward.planCalls[0]?.userId).toBe(b.memberUserId)
+  })
+
+  it('a plan failure lands as an ok:false result line on the open stream (HTTP stays 200)', async () => {
+    b.steward.planThrows = new Error('steward LLM failed')
+    const res = await fetch(`${b.server.url}/api/me/steward/plan`, {
+      method: 'POST',
+      headers: { cookie: b.memberCookie, 'content-type': 'application/json' },
+      body: JSON.stringify({ instruction: '建个助手', stream: true }),
+    })
+    expect(res.status).toBe(200)
+    const lines = await readLines(res)
+    const result = lines[lines.length - 1]!
+    expect(result).toMatchObject({ kind: 'result', ok: false, code: 'steward_failed' })
+    expect(String(result.error)).toContain('steward LLM failed')
+  })
+
+  it('without stream:true the response stays plain JSON (byte-stable non-stream path)', async () => {
+    b.steward.planChunks = ['should-not-be-emitted']
+    const res = await fetch(`${b.server.url}/api/me/steward/plan`, {
+      method: 'POST',
+      headers: { cookie: b.memberCookie, 'content-type': 'application/json' },
+      body: JSON.stringify({ instruction: '建个助手' }),
+    })
+    expect(res.status).toBe(200)
+    expect(res.headers.get('content-type') || '').not.toContain('x-ndjson')
+    const body = (await res.json()) as MeHubStewardPlanResult
+    expect(Array.isArray(body.actions)).toBe(true)
+    // Non-stream calls never receive an onChunk sink at all.
+    expect('onChunk' in (b.steward.planCalls[0] ?? {})).toBe(false)
+  })
+
+  it('401 without a session — the stream branch never opens', async () => {
+    const res = await fetch(`${b.server.url}/api/me/steward/plan`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ instruction: '建个助手', stream: true }),
+    })
+    expect(res.status).toBe(401)
+    expect(b.steward.planCalls).toHaveLength(0)
   })
 })
 

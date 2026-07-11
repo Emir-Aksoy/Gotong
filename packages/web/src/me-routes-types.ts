@@ -725,6 +725,13 @@ export interface MeHubStewardSurface {
     instruction: string
     /** Prior turns of this steward conversation (multi-step follow-ups). */
     history?: StewardHistoryTurn[]
+    /**
+     * NA-M6a — live LLM chunks for THIS call only (WFEDIT-D4 pattern; the host
+     * routes them via a one-shot private key, never the global transcript).
+     * Note the steward's raw output is a JSON proposal — callers treat chunks
+     * as a typing preview, the returned result stays authoritative.
+     */
+    onChunk?: (chunk: string) => void
   }): Promise<MeHubStewardPlanResult>
   /** Apply ONE accepted action (validated + re-classified server-side). */
   apply(input: { userId: string; action: unknown }): Promise<MeHubStewardApplyResult>

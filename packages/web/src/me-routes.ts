@@ -77,15 +77,10 @@ function parseCaseIdFromReportPath(path: string): string | null {
   return rest.slice(0, slashIdx)
 }
 
-// ---------------------------------------------------------------------------
-// Member-facing workflow resolution (Phase 14)
-//
-// Replaces the hardcoded ALLOWED_WORKFLOWS table: the catalog of workflows
-// a member may run is DERIVED at request time from the live workflow list,
-// keeping only those that declare `surface.me.enabled` and allow the
-// caller's role. The trust boundary moves from a source edit of this file
-// to an import-time review of the workflow YAML (admin-gated import).
-// ---------------------------------------------------------------------------
+// Member-facing workflow resolution (Phase 14) — the runnable catalog is
+// DERIVED at request time from the live workflow list (`surface.me.enabled`
+// + caller role), so the trust boundary is the admin-gated YAML import, not
+// a source edit of this file.
 
 /** Roles that may run a member-facing workflow when it doesn't say otherwise.
  *  Viewer is excluded by convention (read-only); a workflow opts them in. */
@@ -1280,15 +1275,13 @@ async function handleMeWorkflowEdit(
   )
 }
 
-// ---------------------------------------------------------------------------
 // ARCH-M6 — member workflow AUTHORING (新建) + member EXPLAIN ("工作流架构师").
 // `create` authors a brand-new draft from plain language (local-only — cross-hub
 // egress rejected by the host); `explain` narrates a catalog-visible workflow at
 // an adjustable depth + emits its flowchart. Both server-force userId, drive an
 // LLM call (rate-limited), and support per-call NDJSON streaming (same member-
-// safety-by-construction as the editor: chunks only ever flow into the caller's
-// own request/response pair).
-// ---------------------------------------------------------------------------
+// safety-by-construction as the editor: chunks only flow into the caller's own
+// request/response pair).
 
 const WORKFLOW_DETAIL_LEVELS = new Set<MeWorkflowDetailLevel>(['oneliner', 'brief', 'detailed'])
 
@@ -1676,6 +1669,44 @@ async function handleMeStewardPlan(
     return
   }
   const history = coerceStewardHistory(rawHistory)
+  // NA-M6a — streaming mode (body `stream: true`): NDJSON over THIS response,
+  // the WFEDIT-D4 shape (chunks only flow into the member's own request/response
+  // pair → member-safe by construction). The steward's raw LLM output is a JSON
+  // proposal, so the SPA paints chunks as a typing preview only; the final
+  // `result` line stays the authoritative reply+actions.
+  if (body && typeof body === 'object' && (body as { stream?: unknown }).stream === true) {
+    res.writeHead(200, {
+      'content-type': 'application/x-ndjson; charset=utf-8',
+      'cache-control': 'no-store',
+      'x-accel-buffering': 'no',
+    })
+    const writeLine = (obj: unknown) => {
+      try {
+        res.write(JSON.stringify(obj) + '\n')
+      } catch {
+        /* client may have hung up; the plan call still finishes */
+      }
+    }
+    try {
+      const out = await ctx.hubSteward.plan({
+        userId,
+        instruction,
+        ...(history.length ? { history } : {}),
+        onChunk: (chunk) => writeLine({ kind: 'chunk', text: chunk }),
+      })
+      writeLine({ kind: 'result', ok: true, ...out })
+    } catch (err) {
+      // Headers are already out as 200 — carry the failure in the result line.
+      writeLine({
+        kind: 'result',
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+        code: 'steward_failed',
+      })
+    }
+    res.end()
+    return
+  }
   try {
     const out = await ctx.hubSteward.plan({
       userId,
@@ -1853,13 +1884,9 @@ async function handleMeListAgents(
   sendJson(res, { agents })
 }
 
-// ---------------------------------------------------------------------------
-// Member agent ownership + self-service CRUD (v5 A-M2)
-//
-// The web layer shape-checks the body and maps the host's status-coded errors
-// to HTTP; every privileged decision (id namespacing, ownership, provider
-// availability, grant writes) stays in the host surface.
-// ---------------------------------------------------------------------------
+// Member agent ownership + self-service CRUD (v5 A-M2) — web shape-checks the
+// body and maps host status-coded errors to HTTP; every privileged decision
+// (id namespacing, ownership, provider availability, grants) stays host-side.
 
 /** Map a host surface error to an HTTP status (default 500). */
 function meAgentErrStatus(err: unknown): number {
@@ -2040,14 +2067,10 @@ async function handleMeDeleteAgent(
   }
 }
 
-// ---------------------------------------------------------------------------
-// Member agent access grants (v5 A-M4)
-//
-// Shape-check only. The principal-kind / perm allow-lists are stable wire
-// contracts mirrored here so the web layer needs no identity dep; the host
-// re-validates authoritatively against the real Principal / perm enums and
-// owns the owner gate + orphan guard.
-// ---------------------------------------------------------------------------
+// Member agent access grants (v5 A-M4) — shape-check only. The principal-kind
+// / perm allow-lists are stable wire contracts mirrored here so web needs no
+// identity dep; the host re-validates authoritatively and owns the owner gate
+// + orphan guard.
 
 const GRANT_PRINCIPAL_KINDS = new Set(['hub', 'user', 'agent', 'peer'])
 const GRANT_PERM_LEVELS = new Set(['viewer', 'editor', 'owner'])
@@ -2210,14 +2233,10 @@ async function handleMeDeleteCredential(
   }
 }
 
-// ---------------------------------------------------------------------------
-// Member butler-memory privacy view (Personal Butler M6c — 被遗忘权)
-//
-// GET reads the snapshot, GET /export returns everything, DELETE forgets one or
-// all. The host (HostButlerMemoryService) opens the per-user memory handle by
-// the SESSION userId — never a client-supplied id — so the no-leak namespace
-// boundary holds at the route layer. Undefined surface → empty (GET) / 503.
-// ---------------------------------------------------------------------------
+// Member butler-memory privacy view (Personal Butler M6c — 被遗忘权): GET
+// snapshot / GET export / DELETE one-or-all. The host opens the per-user memory
+// handle by the SESSION userId — never a client-supplied id — so the no-leak
+// namespace boundary holds here. Undefined surface → empty (GET) / 503.
 
 async function handleMeButlerMemoryRead(
   ctx: HandleMeRouteCtx,
@@ -2341,25 +2360,13 @@ async function handleMeTestLlmKey(
 }
 
 /**
- * ease-of-use ②TC-ME — POST /api/me/agents/:id/chat. After a member builds
- * their assistant (打造我的助手) and tests the key (①TC-ME), THIS is the payoff:
- * actually talk to it in the UI, with no detour through a workflow. Mirror of
- * the admin post-create quick-chat (server.ts /api/admin/dispatch wait:true),
- * but member-scoped:
- *
- *  - Ownership gate = meAgentAdmin.read (the read FLOOR of the grant ladder):
- *    the caller must hold at least 'viewer' on this agent, else 403/404 (anti-
- *    enumeration). So you can only chat with an agent you can already see.
- *  - Quota debits the CALLER (origin.userId), exactly like /me/dispatch, so one
- *    member can't burn another's budget. (Which per-user KEY a member-owned
- *    agent runs on is resolved host-side from the agent's OWNER grant — that's
- *    unchanged A-M3 attribution; chat opens no new spend path beyond what the
- *    grant already permits, since a viewer-granted member can already cause the
- *    agent to run via other dispatch paths.)
- *  - Synchronous (Promise.race + timeout, the same idiom as the admin wait:true
- *    path) so the reply returns in this response. The body is { ok, result } so
- *    the SPA renders it with the SAME logic the admin quick-chat uses, including
- *    the ③TC friendly-error folding (describeError).
+ * ease-of-use ②TC-ME — POST /api/me/agents/:id/chat: member quick-chat, the
+ * member-scoped mirror of the admin wait:true dispatch. Ownership gate =
+ * meAgentAdmin.read ('viewer' floor, 403/404 anti-enumeration); quota debits
+ * the CALLER (origin.userId) like /me/dispatch — the per-user KEY still
+ * resolves host-side from the OWNER grant (A-M3), so chat opens no new spend
+ * path. Synchronous Promise.race + timeout; body { ok, result } renders with
+ * the same SPA logic as admin quick-chat (③TC describeError folding).
  */
 async function handleMeChatAgent(
   ctx: HandleMeRouteCtx,
@@ -2419,13 +2426,9 @@ async function handleMeChatAgent(
   }
 }
 
-// ---------------------------------------------------------------------------
-// /api/me/im/* — member IM-account linking (GO-LIVE GL-1c)
-//
-// Same shape as the credential handlers: GET degrades to an empty list when no
-// surface is wired; POST/DELETE return 503; host status-coded errors map to
-// HTTP via meAgentErrStatus (notably 404 for a binding the caller doesn't own).
-// ---------------------------------------------------------------------------
+// /api/me/im/* — member IM-account linking (GO-LIVE GL-1c). Same shape as the
+// credential handlers: GET degrades to empty when no surface; POST/DELETE 503;
+// host status-coded errors map via meAgentErrStatus (404 = not the owner).
 
 async function handleMeListIm(
   ctx: HandleMeRouteCtx,

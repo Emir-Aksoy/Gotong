@@ -1823,10 +1823,24 @@
       const r = await fetch('/api/me/steward/plan', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ instruction, history: stewardChat.slice(-12) }),
+        // NA-M6a: stream=true asks for NDJSON (live typing). Errors raised
+        // before the stream opens (rate-limit / 503 / bad body) still come
+        // back as plain JSON, so both shapes are handled below.
+        body: JSON.stringify({ instruction, stream: true, history: stewardChat.slice(-12) }),
       })
-      const j = await r.json().catch(() => ({}))
-      if (!r.ok || !j || typeof j !== 'object' || !Array.isArray(j.actions)) {
+      let j
+      if ((r.headers.get('content-type') || '').includes('application/x-ndjson') && r.body) {
+        j = await readStewardStream(r)
+        removeStewardTyping()
+        if (!j) {
+          status.className = 'me-status error'
+          status.textContent = t('meStewardStreamBroken')
+          return
+        }
+      } else {
+        j = await r.json().catch(() => ({}))
+      }
+      if (!r.ok || !j || typeof j !== 'object' || j.ok === false || !Array.isArray(j.actions)) {
         status.className = 'me-status error'
         status.textContent = (j && (j.error || j.message)) || t('meOpFailedHttp', r.status)
         return
@@ -1839,9 +1853,92 @@
       input.value = ''
       renderStewardProposal(j)
     } catch (err) {
+      removeStewardTyping()
       status.className = 'me-status error'
       status.textContent = t('meStewardPlanFailed', err?.message || err)
     }
+  }
+
+  // NA-M6a — consume the steward's NDJSON plan stream (WFEDIT-D4 shape).
+  // The steward's raw LLM output is a JSON proposal ({"reply":…,"actions":…}),
+  // so chunks are NOT painted verbatim: we extract the partial `reply` string
+  // as it grows and show that as the typing preview. The final `result` line
+  // (or null on a dropped connection) stays the authoritative outcome.
+  async function readStewardStream(r) {
+    const reader = r.body.getReader()
+    const decoder = new TextDecoder()
+    let buf = ''
+    let raw = ''
+    let result = null
+    const handleLine = (line) => {
+      if (!line.trim()) return
+      let msg
+      try {
+        msg = JSON.parse(line)
+      } catch {
+        return
+      }
+      if (msg && msg.kind === 'chunk' && typeof msg.text === 'string') {
+        raw += msg.text
+        paintStewardTyping(raw)
+      } else if (msg && msg.kind === 'result') result = msg
+    }
+    try {
+      for (;;) {
+        const { done, value } = await reader.read()
+        if (done) break
+        buf += decoder.decode(value, { stream: true })
+        let nl
+        while ((nl = buf.indexOf('\n')) >= 0) {
+          handleLine(buf.slice(0, nl))
+          buf = buf.slice(nl + 1)
+        }
+      }
+      if (buf) handleLine(buf)
+    } catch {
+      /* dropped mid-stream — caller treats a missing result as the error */
+    }
+    return result
+  }
+
+  // Pull the partial value of `"reply": "…"` out of the accumulating JSON.
+  // Incomplete escapes at the tail (a lone `\`, a cut-off `\u12`) are clipped
+  // before decoding so a chunk boundary can never paint garbage. Returns null
+  // until the reply field starts — the pane then shows the header line alone.
+  function extractPartialReply(raw) {
+    const m = /"reply"\s*:\s*"((?:[^"\\]|\\.)*)/.exec(raw)
+    if (!m) return null
+    let s = m[1]
+    if (/(?:^|[^\\])(?:\\\\)*\\$/.test(s)) s = s.slice(0, -1)
+    s = s.replace(/\\u[0-9a-fA-F]{0,3}$/, '')
+    return s.replace(/\\(u[0-9a-fA-F]{4}|.)/g, (_, g) =>
+      g[0] === 'u'
+        ? String.fromCharCode(parseInt(g.slice(1), 16))
+        : { n: '\n', t: '\t', r: '\r', '"': '"', '\\': '\\', '/': '/' }[g] || g,
+    )
+  }
+
+  // The steward twin of the workflow-editor typing pane (same .me-wf-stream
+  // look). Prepended above the previous proposal; renderStewardProposal's
+  // wholesale innerHTML replace (or removeStewardTyping on error) clears it.
+  function paintStewardTyping(raw) {
+    const out = document.getElementById('me-steward-output')
+    if (!out) return
+    let el = out.querySelector('.me-steward-typing')
+    if (!el) {
+      el = document.createElement('div')
+      el.className = 'me-wf-stream me-steward-typing'
+      el.innerHTML = `<div class="me-wf-stream-head">${escape(t('meStewardTyping'))}</div><pre></pre>`
+      out.prepend(el)
+    }
+    const partial = extractPartialReply(raw)
+    const pre = el.querySelector('pre')
+    if (pre && partial) pre.textContent = partial
+  }
+
+  function removeStewardTyping() {
+    const el = document.querySelector('#me-steward-output .me-steward-typing')
+    if (el) el.remove()
   }
 
   // Render the steward's reply + one card per proposed action. `stewardActions`
