@@ -346,7 +346,13 @@ export class AnthropicProvider implements LlmProvider {
       max_tokens: req.maxTokens ?? this.defaultMaxTokens,
       messages: translatedMessages,
     }
-    if (req.system !== undefined) body.system = req.system
+    // NA-M3 — `systemVolatile` IS system prompt, carried separately only so the
+    // cache breakpoint can stop before it. On the wire (and for the no-caching
+    // path) the two concatenate verbatim — byte-identical to callers that
+    // pre-concatenate themselves.
+    if (req.system !== undefined || req.systemVolatile !== undefined) {
+      body.system = (req.system ?? '') + (req.systemVolatile ?? '')
+    }
     if (req.temperature !== undefined && !isThinkingModel(model)) {
       body.temperature = req.temperature
     }
@@ -361,7 +367,7 @@ export class AnthropicProvider implements LlmProvider {
       })
     }
     if (this.promptCaching ?? (req.tools !== undefined && req.tools.length > 0)) {
-      applyCacheBreakpoints(body)
+      applyCacheBreakpoints(body, req.system, req.systemVolatile)
     }
     return body
   }
@@ -378,6 +384,13 @@ export class AnthropicProvider implements LlmProvider {
  *                           upgraded to a single text block (semantically
  *                           identical on-wire form) so it can carry the
  *                           marker. Constant across the rounds of one turn.
+ *                           NA-M3: when the request splits system into a
+ *                           stable slice + volatile tail (per-turn probe
+ *                           cards — the clock card changes every MESSAGE),
+ *                           the marker lands on the stable slice and the
+ *                           tail rides after it as an unmarked block, so
+ *                           persona + frozen memory keep hitting cache
+ *                           ACROSS messages, not just across rounds.
  *   3. last message tail  — a MOVING marker: round N writes the prefix up
  *                           to here, round N+1 (same prefix + new tool
  *                           results) re-reads it at the 0.1× cache rate.
@@ -388,7 +401,11 @@ export class AnthropicProvider implements LlmProvider {
  * markers on a prompt shorter than the model's minimum cacheable length are
  * ignored (no error, no charge) — so this needs no size gating here.
  */
-function applyCacheBreakpoints(body: Record<string, unknown>): void {
+function applyCacheBreakpoints(
+  body: Record<string, unknown>,
+  sysStable?: string,
+  sysVolatile?: string,
+): void {
   const ephemeral = () => ({ type: 'ephemeral' })
   const tools = body.tools as Array<Record<string, unknown>> | undefined
   const lastTool = tools?.[tools.length - 1]
@@ -396,7 +413,21 @@ function applyCacheBreakpoints(body: Record<string, unknown>): void {
     lastTool.cache_control = ephemeral()
   }
   if (typeof body.system === 'string' && body.system.length > 0) {
-    body.system = [{ type: 'text', text: body.system, cache_control: ephemeral() }]
+    const blocks: Array<Record<string, unknown>> = []
+    if (sysStable !== undefined && sysStable.length > 0) {
+      blocks.push({ type: 'text', text: sysStable, cache_control: ephemeral() })
+    }
+    // The volatile tail deliberately carries NO marker — caching it would be
+    // a written-never-read entry (it changes next message by design).
+    if (sysVolatile !== undefined && sysVolatile.length > 0) {
+      blocks.push({ type: 'text', text: sysVolatile })
+    }
+    if (blocks.length === 0) {
+      // Caller didn't split (pre-concatenated system) — whole string is the
+      // stable slice, same shape as before NA-M3.
+      blocks.push({ type: 'text', text: body.system, cache_control: ephemeral() })
+    }
+    body.system = blocks
   }
   const messages = body.messages as Array<Record<string, unknown>>
   const last = messages[messages.length - 1]

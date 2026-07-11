@@ -348,8 +348,11 @@ export class OpenAIProvider implements LlmProvider {
       maxInlineBytes: this.maxInlineBytes,
     }
     const messages: Array<Record<string, unknown>> = []
-    if (req.system !== undefined) {
-      messages.push({ role: 'system', content: req.system })
+    // NA-M3 — `systemVolatile` IS system prompt (see LlmRequest); OpenAI-compat
+    // caching is server-side automatic prefix matching, so the volatile-last
+    // ordering already helps it — we just concatenate verbatim.
+    if (req.system !== undefined || req.systemVolatile !== undefined) {
+      messages.push({ role: 'system', content: (req.system ?? '') + (req.systemVolatile ?? '') })
     }
     // Translate sequentially across messages to preserve order, but
     // each message internally fans out artifact reads in parallel.

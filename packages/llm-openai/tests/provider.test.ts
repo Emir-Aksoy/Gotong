@@ -1458,3 +1458,37 @@ describe('OpenAIProvider — cached prompt tokens entered into the books (NA-M1b
     expect(res.usage).toEqual({ inputTokens: 7, outputTokens: 2 })
   })
 })
+
+/**
+ * NA-M3 — OpenAI 侧 systemVolatile 语义:与 system 原样拼接进首条 system
+ * 消息(服务端自动前缀缓存自然受益于「易变在尾」的顺序,无需显式断点)。
+ */
+describe('OpenAIProvider — systemVolatile concatenates into the system message (NA-M3)', () => {
+  it('system + systemVolatile → one leading system message, verbatim concat', async () => {
+    const { client, create } = makeFakeClient(async () => ({
+      choices: [{ message: { content: 'ok' }, finish_reason: 'stop' }],
+    }))
+    const provider = new OpenAIProvider({ client: client as any, apiKey: 'k' })
+    await drainStream(provider.stream({
+      system: 'persona',
+      systemVolatile: '\n\n【当前时间】22:34',
+      messages: [{ role: 'user', content: 'hi' }],
+    }))
+    const body = create.mock.calls[0]![0] as Record<string, unknown>
+    const msgs = body.messages as Array<Record<string, unknown>>
+    expect(msgs[0]).toEqual({ role: 'system', content: 'persona\n\n【当前时间】22:34' })
+  })
+
+  it('volatile-only still produces the system message', async () => {
+    const { client, create } = makeFakeClient(async () => ({
+      choices: [{ message: { content: 'ok' }, finish_reason: 'stop' }],
+    }))
+    const provider = new OpenAIProvider({ client: client as any, apiKey: 'k' })
+    await drainStream(provider.stream({
+      systemVolatile: 'card',
+      messages: [{ role: 'user', content: 'hi' }],
+    }))
+    const msgs = (create.mock.calls[0]![0] as any).messages
+    expect(msgs[0]).toEqual({ role: 'system', content: 'card' })
+  })
+})

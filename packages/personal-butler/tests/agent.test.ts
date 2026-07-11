@@ -153,14 +153,19 @@ describe('PersonalButlerAgent — current-time awareness (clock probe → system
     })
 
     await agent.onTask(task('a', '现在几点'))
-    const sys = provider.requests[0]!.system!
+    const req = provider.requests[0]!
     const card = '【当前时间】2025-07-08 星期二 22:34（Asia/Kuala_Lumpur, UTC+08:00）· UTC 2025-07-08T14:34Z'
-    // The persona leads; the time card is appended as the tail (order matters —
-    // the cache-stable prefix stays in front, the variable clock trails it).
-    expect(sys).toContain('base')
-    expect(sys).toContain(card)
-    expect(sys.indexOf('base')).toBeLessThan(sys.indexOf(card))
-    expect(sys.trimEnd().endsWith('· UTC 2025-07-08T14:34Z')).toBe(true)
+    // NA-M3 — the persona stays alone in the STABLE slice (`system`): the
+    // minute-level clock card must never churn the cached persona +
+    // frozen-block prefix. The card rides `systemVolatile`, carrying its own
+    // '\n\n' separator so providers' verbatim concatenation reproduces the
+    // exact pre-M3 on-wire bytes.
+    expect(req.system).toContain('base')
+    expect(req.system).not.toContain('【当前时间】')
+    expect(req.systemVolatile).toBeDefined()
+    expect(req.systemVolatile!.startsWith('\n\n')).toBe(true)
+    expect(req.systemVolatile).toContain(card)
+    expect(req.systemVolatile!.trimEnd().endsWith('· UTC 2025-07-08T14:34Z')).toBe(true)
   })
 })
 

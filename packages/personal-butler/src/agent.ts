@@ -174,11 +174,18 @@ export class PersonalButlerAgent extends MemoryAugmentedAgent {
    * first, then persona, then the per-turn card). Tail position is deliberate:
    * the leading bytes stay identical across turns, so prompt caching keeps
    * working; only the variable tail changes when the probe has something.
+   *
+   * NA-M3 — the card rides `systemVolatile`, not `system`: providers send the
+   * exact same concatenation (the `\n\n` separator travels WITH the volatile
+   * part, so on-wire bytes are unchanged), but a cache-aware provider can now
+   * stop its breakpoint before the card — the clock probe changes every
+   * MESSAGE, and it must not drag the cached persona + frozen-block prefix
+   * down with it across messages.
    */
   protected override buildRequest(task: Task): LlmRequest {
     const req = super.buildRequest(task)
     if (this.turnContext) {
-      req.system = req.system ? `${req.system}\n\n${this.turnContext}` : this.turnContext
+      req.systemVolatile = req.system ? `\n\n${this.turnContext}` : this.turnContext
     }
     return req
   }

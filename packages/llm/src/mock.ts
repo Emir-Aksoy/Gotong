@@ -208,7 +208,7 @@ export class MockLlmProvider implements LlmProvider {
 }
 
 function estimateTokens(req: LlmRequest): number {
-  let chars = req.system?.length ?? 0
+  let chars = (req.system?.length ?? 0) + (req.systemVolatile?.length ?? 0)
   for (const m of req.messages) {
     if (typeof m.content === 'string') {
       chars += m.content.length

@@ -176,6 +176,12 @@ describe('CARE-M4 — 开箱陪跑验收(注入内容断言,零 LLM 判卷)', ()
     return { butler, provider }
   }
 
+
+  /** NA-M3 — 探针卡走 systemVolatile;模型眼前的完整 system = 两段拼接。 */
+  function fullSystem(req: { system?: string; systemVolatile?: string }): string {
+    return (req.system ?? '') + (req.systemVolatile ?? '')
+  }
+
   async function chat(to: string, text: string): Promise<void> {
     await r.hub.dispatch({ from: `user:${USER}`, strategy: { kind: 'explicit', to }, payload: text })
   }
@@ -184,7 +190,7 @@ describe('CARE-M4 — 开箱陪跑验收(注入内容断言,零 LLM 判卷)', ()
     const { provider } = butlerFor('butler:a', 'plain')
     await chat('butler:a', '你好')
     expect(provider.requests.length).toBeGreaterThan(0)
-    const sys = provider.requests[0]!.system ?? ''
+    const sys = fullSystem(provider.requests[0]!)
     expect(sys).toContain('【现状卡 · 开箱陪跑】')
     expect(sys).toContain('LLM key:0/1')
     expect(sys).toContain('IM 通道')
@@ -199,17 +205,17 @@ describe('CARE-M4 — 开箱陪跑验收(注入内容断言,零 LLM 判卷)', ()
   it('② 补齐配置后再聊:一字不注入 + gaps_cleared 落盘 + 之后止步于 state 读', async () => {
     const { provider } = butlerFor('butler:b', 'plain')
     await chat('butler:b', '第一句') // 缺口在 → 注卡
-    expect(provider.requests[0]!.system ?? '').toContain('【现状卡')
+    expect(fullSystem(provider.requests[0]!)).toContain('【现状卡')
 
     r.holder.snap = GREEN
     await chat('butler:b', '第二句') // 缺口清零 → 不注 + 自动写完成态
-    expect(provider.requests[1]!.system ?? '').not.toContain('【现状卡')
+    expect(fullSystem(provider.requests[1]!)).not.toContain('【现状卡')
     const state = JSON.parse(await readFile(r.stateFile, 'utf8')) as { done: boolean; reason: string }
     expect(state).toMatchObject({ done: true, reason: 'gaps_cleared' })
 
     const before = r.snapshotCalls.n
     await chat('butler:b', '第三句') // 完成态 → 连体检都不再做
-    expect(provider.requests[2]!.system ?? '').not.toContain('【现状卡')
+    expect(fullSystem(provider.requests[2]!)).not.toContain('【现状卡')
     expect(r.snapshotCalls.n).toBe(before)
   })
 
@@ -222,7 +228,7 @@ describe('CARE-M4 — 开箱陪跑验收(注入内容断言,零 LLM 判卷)', ()
     // 缺口依旧(holder 仍是 GAPPY),但下一回合一字不注入。
     await chat('butler:c', '随便聊聊')
     const lastReq = provider.requests[provider.requests.length - 1]!
-    expect(lastReq.system ?? '').not.toContain('【现状卡')
+    expect(fullSystem(lastReq)).not.toContain('【现状卡')
   })
 
   it('④ 坏 key 活体校验:tool_result 出现 CARE-M1 翻译文案(认证失败)', async () => {

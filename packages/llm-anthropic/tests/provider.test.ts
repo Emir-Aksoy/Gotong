@@ -1429,3 +1429,101 @@ describe('AnthropicProvider — prompt-cache breakpoints (NA-M1)', () => {
     expect(last[0].cache_control).toEqual({ type: 'ephemeral' })
   })
 })
+
+/**
+ * NA-M3 — system 分块:稳定块(人设+冻结块)挂断点,易变尾(每分钟都变的
+ * 探针卡)不挂。钉两件事:①稳定块跨消息字节一致(缓存真能命中的前提);
+ * ②不缓存路径拼接后与旧单串逐字节一致(systemVolatile 纯属缓存布局,
+ * 语义零漂移)。
+ */
+describe('AnthropicProvider — system stable/volatile split (NA-M3)', () => {
+  const streamEvents = [
+    { type: 'message_start', message: { usage: { input_tokens: 1 } } },
+    { type: 'message_delta', delta: { stop_reason: 'end_turn' } },
+    { type: 'message_stop' },
+  ]
+  function capture() {
+    const create = vi.fn(async (_body: Record<string, unknown>) => {
+      async function* gen() {
+        for (const ev of streamEvents) yield ev
+      }
+      return gen()
+    })
+    return { client: { messages: { create } } as any, create }
+  }
+  const TOOL = { name: 'lookup', inputSchema: { type: 'object' } }
+
+  it('splits: stable slice carries the marker, volatile tail rides unmarked after it', async () => {
+    const { client, create } = capture()
+    const provider = new AnthropicProvider({ client })
+    await collect(provider.stream({
+      system: 'persona + frozen block',
+      systemVolatile: '\n\n【当前时间】22:34',
+      messages: [{ role: 'user', content: 'hi' }],
+      tools: [TOOL],
+    }))
+    const body = create.mock.calls[0]![0] as Record<string, unknown>
+    expect(body.system).toEqual([
+      {
+        type: 'text',
+        text: 'persona + frozen block',
+        cache_control: { type: 'ephemeral' },
+      },
+      { type: 'text', text: '\n\n【当前时间】22:34' },
+    ])
+  })
+
+  it('stable slice is byte-identical across two calls whose volatile tails differ', async () => {
+    const { client, create } = capture()
+    const provider = new AnthropicProvider({ client })
+    const base = {
+      system: 'persona + frozen block',
+      messages: [{ role: 'user' as const, content: 'hi' }],
+      tools: [TOOL],
+    }
+    await collect(provider.stream({ ...base, systemVolatile: '\n\n【当前时间】22:34' }))
+    await collect(provider.stream({ ...base, systemVolatile: '\n\n【当前时间】22:35' }))
+    const sys1 = (create.mock.calls[0]![0] as any).system
+    const sys2 = (create.mock.calls[1]![0] as any).system
+    // 稳定块两次逐字节一致 —— 这就是跨消息缓存命中的前提;时钟只动尾块。
+    expect(JSON.stringify(sys1[0])).toBe(JSON.stringify(sys2[0]))
+    expect(sys1[1].text).not.toBe(sys2[1].text)
+  })
+
+  it('no-caching path concatenates verbatim — byte-identical to a pre-split single string', async () => {
+    const { client, create } = capture()
+    const provider = new AnthropicProvider({ client, promptCaching: false })
+    await collect(provider.stream({
+      system: 'persona',
+      systemVolatile: '\n\ncard',
+      messages: [{ role: 'user', content: 'hi' }],
+      tools: [TOOL],
+    }))
+    const body = create.mock.calls[0]![0] as Record<string, unknown>
+    expect(body.system).toBe('persona\n\ncard')
+    expect(JSON.stringify(body)).not.toContain('cache_control')
+  })
+
+  it('tool-less request (auto rule off) also concatenates to a plain string', async () => {
+    const { client, create } = capture()
+    const provider = new AnthropicProvider({ client })
+    await collect(provider.stream({
+      system: 'persona',
+      systemVolatile: '\n\ncard',
+      messages: [{ role: 'user', content: 'hi' }],
+    }))
+    const body = create.mock.calls[0]![0] as Record<string, unknown>
+    expect(body.system).toBe('persona\n\ncard')
+  })
+
+  it('volatile-only system never gets a system marker (nothing stable to cache)', async () => {
+    const { client, create } = capture()
+    const provider = new AnthropicProvider({ client, promptCaching: true })
+    await collect(provider.stream({
+      systemVolatile: '【当前时间】22:34',
+      messages: [{ role: 'user', content: 'hi' }],
+    }))
+    const body = create.mock.calls[0]![0] as Record<string, unknown>
+    expect(body.system).toEqual([{ type: 'text', text: '【当前时间】22:34' }])
+  })
+})

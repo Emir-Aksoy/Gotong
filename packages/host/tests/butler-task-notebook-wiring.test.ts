@@ -65,7 +65,8 @@ class NotebookScriptProvider implements LlmProvider {
   readonly toolNames: string[][] = []
 
   async *stream(req: LlmRequest): AsyncIterable<LlmStreamChunk> {
-    this.systems.push(req.system ?? '')
+    // NA-M3 — 探针/复述卡走 systemVolatile;这里捕获模型眼前的完整拼接。
+    this.systems.push((req.system ?? '') + (req.systemVolatile ?? ''))
     this.toolNames.push((req.tools ?? []).map((t) => t.name))
     const last = [...req.messages].reverse().find((m) => m.role === 'user')
     const content = last?.content

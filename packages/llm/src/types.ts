@@ -318,6 +318,17 @@ export interface LlmToolDefinition {
 export interface LlmRequest {
   /** Top-level system prompt (Anthropic-style). Translators map to whatever the provider expects. */
   system?: string
+  /**
+   * NA-M3 — volatile tail of the system prompt (per-turn probe cards: clock,
+   * pending approvals, …). Semantically it IS system prompt: every provider
+   * sends `system + systemVolatile` concatenated verbatim (the caller owns any
+   * separator bytes, so splitting vs pre-concatenating is byte-identical).
+   * The split exists for prompt caching: a cache-aware provider may place its
+   * breakpoint after the stable `system` slice, so minute-level churn here
+   * (a clock card changes every message) no longer invalidates the cached
+   * persona + frozen-memory prefix across messages.
+   */
+  systemVolatile?: string
   messages: LlmMessage[]
   /** Soft cap on output length. Provider may clamp to its own maximum. */
   maxTokens?: number
