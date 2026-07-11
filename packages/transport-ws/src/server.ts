@@ -1,11 +1,15 @@
+import type { IncomingMessage } from 'node:http'
+
 import type { Hub } from '@gotong/core'
 import {
   DEFAULT_HEARTBEAT_INTERVAL_MS,
+  HELLO_TIMEOUT_MS,
   type ServiceOwner,
   type ServiceType,
 } from '@gotong/protocol'
-import { WebSocketServer } from 'ws'
+import { WebSocketServer, type RawData, type WebSocket } from 'ws'
 
+import type { MeshConnection } from './hub-link.js'
 import { Session, type SessionInfo } from './session.js'
 
 /**
@@ -160,14 +164,28 @@ export interface WebSocketTransportHandle {
   readonly port: number
   readonly url: string
   /**
-   * D1 — federation reuses the same ws.Server for inbound peer HELLO
-   * via `acceptHubLinks({wss: handle.wss, ...})`. Exposed read-only so
-   * the host's PeerRegistry can attach a 'connection'-listener sibling
-   * to the agent-session handler without spinning up a second listener
-   * on a different port.
+   * D1 — the underlying ws.Server. Exposed read-only. NOTE: to accept
+   * inbound federation peers on this SAME port, do NOT attach a second
+   * 'connection' listener here (the agent Session and the mesh handshake
+   * would both grab every socket and the Session's terminate() on a
+   * MESH_HELLO first frame kills the peer's handshake). Use
+   * `routeMeshTo` instead — it demultiplexes by the first frame.
    */
   readonly wss: WebSocketServer
   sessions(): SessionInfo[]
+  /**
+   * D1 fix — register a federation mesh acceptor that co-tenants this
+   * agent WebSocket server on the SAME port. Once registered, every
+   * inbound connection is demultiplexed by its FIRST frame: a
+   * `MESH_HELLO` is handed to `acceptor` (a federation peer), anything
+   * else is wrapped in an agent `Session`. Returns a disposer that
+   * unregisters it; at most one acceptor may be registered at a time.
+   *
+   * This is the "peek the HELLO frame to decide peer vs agent" demux the
+   * peer-registry always documented but which was previously
+   * mis-implemented as a blind sibling 'connection' listener.
+   */
+  routeMeshTo(acceptor: MeshConnection): () => void
   close(): Promise<void>
 }
 
@@ -198,6 +216,87 @@ function buildOriginCheck(
   if (typeof allowed === 'function') return allowed
   const set = new Set(allowed)
   return (origin) => origin !== undefined && set.has(origin)
+}
+
+/**
+ * D1 fix — read a socket's first frame just far enough to route it.
+ * Returns the wire `type` string, or null for binary / unparseable
+ * frames (which fall through to the agent path for a clean reject).
+ */
+function peekFrameType(data: RawData, isBinary: boolean): string | null {
+  if (isBinary) return null
+  const text =
+    typeof data === 'string'
+      ? data
+      : Array.isArray(data)
+        ? Buffer.concat(data).toString('utf8')
+        : (data as Buffer).toString('utf8')
+  try {
+    const obj = JSON.parse(text) as { type?: unknown }
+    return typeof obj.type === 'string' ? obj.type : null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * D1 fix — demultiplex one freshly-upgraded socket by peeking its first
+ * frame, then hand it to the right protocol state machine and replay the
+ * peeked frame in. Both `Session` and `WebSocketHubLinkImpl` attach their
+ * `message` listener synchronously in their constructor, so a synchronous
+ * `ws.emit('message', ...)` after construction delivers the frame.
+ *
+ * `MESH_HELLO` → federation `acceptor`; everything else → `makeSession`
+ * (the agent protocol, which validates HELLO and rejects a non-HELLO
+ * first frame itself). A silent client (no first frame) is closed after
+ * HELLO_TIMEOUT_MS — the same budget the agent path's own HELLO timer
+ * uses — so a stalled peek can't leak the socket.
+ */
+function demuxConnection(
+  ws: WebSocket,
+  req: IncomingMessage,
+  acceptor: MeshConnection,
+  makeSession: (ws: WebSocket, req: IncomingMessage) => void,
+): void {
+  let settled = false
+  let timer: ReturnType<typeof setTimeout> | undefined
+
+  function cleanup(): void {
+    if (timer) clearTimeout(timer)
+    ws.off('message', onFirst)
+    ws.off('close', onQuiet)
+    ws.off('error', onQuiet)
+  }
+  function onFirst(data: RawData, isBinary: boolean): void {
+    if (settled) return
+    settled = true
+    cleanup()
+    if (peekFrameType(data, isBinary) === 'MESH_HELLO') acceptor(ws, req)
+    else makeSession(ws, req)
+    // Replay the peeked frame into the state machine we just built.
+    ws.emit('message', data, isBinary)
+  }
+  function onQuiet(): void {
+    if (settled) return
+    settled = true
+    cleanup()
+  }
+
+  timer = setTimeout(() => {
+    if (settled) return
+    settled = true
+    cleanup()
+    try {
+      ws.close()
+    } catch {
+      /* swallow */
+    }
+  }, HELLO_TIMEOUT_MS)
+  timer.unref?.()
+
+  ws.on('message', onFirst)
+  ws.on('close', onQuiet)
+  ws.on('error', onQuiet)
 }
 
 export function serveWebSocket(
@@ -253,7 +352,13 @@ export function serveWebSocket(
       const url = `ws://${host}:${actualPort}`
       console.log(`[gotong-ws] listening at ${url}`)
 
-      wss.on('connection', (ws, req) => {
+      // D1 fix — optional federation co-tenant, registered via the
+      // handle's `routeMeshTo`. When null (the default), the connection
+      // handler is byte-identical to the agent-only server it has always
+      // been. Only a host that opts into federation pays for the peek.
+      let meshAcceptor: MeshConnection | null = null
+
+      const makeSession = (ws: WebSocket, req: IncomingMessage): void => {
         const session = new Session(ws, hub, {
           remoteAddress: req.socket.remoteAddress,
           heartbeatIntervalMs,
@@ -263,6 +368,16 @@ export function serveWebSocket(
         })
         sessions.add(session)
         session.onClosed(() => sessions.delete(session))
+      }
+
+      wss.on('connection', (ws, req) => {
+        // No federation co-tenant → agent-only fast path (unchanged).
+        if (!meshAcceptor) {
+          makeSession(ws, req)
+          return
+        }
+        // Shared port: peek the first frame to route peer vs agent.
+        demuxConnection(ws, req, meshAcceptor, makeSession)
       })
 
       wss.on('error', (err) => console.error('[gotong-ws] server error:', err))
@@ -273,6 +388,15 @@ export function serveWebSocket(
         url,
         wss,
         sessions: () => [...sessions].map((s) => s.info()),
+        routeMeshTo: (acceptor: MeshConnection): (() => void) => {
+          if (meshAcceptor) {
+            throw new Error('serveWebSocket: a mesh acceptor is already registered')
+          }
+          meshAcceptor = acceptor
+          return () => {
+            if (meshAcceptor === acceptor) meshAcceptor = null
+          }
+        },
         close: () =>
           new Promise<void>((res, rej) => {
             for (const s of sessions) s.close('server_shutdown')

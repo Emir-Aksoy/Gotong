@@ -293,6 +293,58 @@ owner 打开 `/me` → 收件箱 → 看到一条 approval 待办「批准把出
 | 断链 + 重拨韧性（挂起不丢、重拨后批准跑完） | `packages/host/tests/cross-hub-redial-resilience-e2e.test.ts` |
 | 多组织隔离（夹紧一条不外溢） | `packages/host/tests/peer-isolation-ws-e2e.test.ts` |
 | 管家出网（问 → 成员确认 → 跨界 → 答案回同轮 + 双闸顺序） | `pnpm demo:butler-cross-hub`（`examples/butler-cross-hub/`）+ `packages/host/tests/butler-ask-peer-e2e.test.ts`（双真 Hub 四场景） |
+| **真·两进程整链（各自 vault/端口 + 工作流状态机 + 重启自愈，三拓扑）** | `pnpm check:cross-hub`（`scripts/test-cross-hub-e2e.mjs`，见下 §5.1） |
+
+### 5.1 测试金字塔与 L3/L4「真·两进程」门（`pnpm check:cross-hub`）
+
+上面那些 `*-ws-e2e` 测试都是 **L2**：两个真 `Hub` 对象过一个真 `WebSocketServer`，
+但两个 Hub 跑在**同一个 Node 进程、共享内存**。它们证明了联邦「逻辑」，却证明不了
+真实部署形态——两个独立进程、各自独立的 `GOTONG_SPACE`、各自加密 vault、真占两个端口、
+其中一个断电重启后从磁盘恢复 peer 记录并自动重拨。`scripts/test-cross-hub-e2e.mjs`
+补的就是 **L3/L4**：驱动两个真的 `packages/host/dist/main.js`（生产二进制），五幕硬断言——
+
+- **幕 A** 握手 + 派活 + 回传（能力解析到对端 wrapper，跨 socket 落到对端 agent，结果真回传）；
+- **幕 D** 多组织隔离（未在 `outboundCaps` 授权的能力跨 hub 派活被拒，一条边的授权不外溢）；
+- **幕 E** 跨 hub 工作流状态机：真 YAML 工作流的步落在对端——顺跑 `run=done` + 步 `output`
+  真来自对端 + `executedBy=对端 id`；未授权能力步 `run=failed`（工作流层的隔离，不止裸派活层）；
+- **幕 C** 重启自动重拨：重启**可控的那一侧**——重启 B 证 A 退避重拨自愈；只有 A 可控时重启 A
+  证「本地电脑重启后从磁盘恢复 peer 行、开机自动重拨」；两侧都不可控则**显式 SKIP** 绝不静默；
+- **幕 B** 出站审批闸（PATCH 边走面板同款 `refreshPolicy` 热重装，**不重启进程**）：裸派活
+  park 到 owner 收件箱批准前零字节出门；工作流 run 停在 `running`+步 `status='suspended'`，
+  批准后 `run=done`；再跑一发拒绝，`run=failed`+步错误 `outbound_approval_denied`。
+
+工作流 run 的「通用状态」全谱因此都有硬断言：`done` / `failed`(无参与者) /
+`running`+步`suspended`(挂起) / 批准续跑→`done` / 拒绝→`failed` / 对端宕机派活失败→重启自愈。
+
+**三种拓扑，同一份脚本**（每侧独立 attach-or-spawn，`XHUB_X_URL` 设了就贴上已在跑的 hub）：
+
+| 拓扑 | 怎么跑 | 覆盖的现实形态 |
+|---|---|---|
+| 本机双 spawn（默认，零变量） | `pnpm check:cross-hub` | L3 回归门；也即「**同一台 vps 上两个 hub**」（在那台 vps 上跑即是） |
+| 双 attach | `XHUB_A_URL/TOKEN + XHUB_B_URL/TOKEN/WS_URL` | 「**不同 vps 之间**」（或同 vps 已跑的两个 systemd 实例）；脚本零 spawn 纯 HTTP 驱动 |
+| A spawn × B attach | 只设 `XHUB_B_URL/TOKEN/WS_URL` | 「**本地电脑 × vps**」——A 主动拨出，本地在 NAT 后零入站端口也通 |
+
+attach 侧要点：token 用该侧 owner 的 `aipk_` key；幕 C 在 attach 侧走可选命令钩子
+`XHUB_X_STOP_CMD`/`XHUB_X_START_CMD`（如 `ssh vps 'systemctl stop/start gotong'`）或单条
+`XHUB_X_RESTART_CMD`（只验重启后自愈）；脚本造的 peer 边 / mock agent / 工作流全带时间戳
+唯一化，结束 **best-effort 删除并还原改过的开关**（复用已存在的边时要求它已授权 `xhub-review`，
+且不动它的 token）。本机彩排 attach 拓扑：`XHUB_PROVISION=1 pnpm check:cross-hub` 起两台
+驻留 host 并打印整套 attach 变量（也可当 L4 演练夹具）。
+
+零真实 LLM：对端 worker 走 `provider: 'mock'`，回确定的 `[mock reply to: …]`，每幕都能硬断言。
+
+> **这道门是靠自己挣来的**：写它的过程里，它一次性揪出两个 L2 结构性照不到的**真生产 bug**，
+> 都已随本 track 修掉并各配防回归门——
+> 1. **共享端口握手互杀**：生产 `main.ts` 让 agent 协议与联邦 mesh 共用一个 `GOTONG_WS_PORT`，
+>    两个 `'connection'` 监听器都无 peek 地抢每个 socket；agent `Session` 先注册，把对端的
+>    `MESH_HELLO` 当非法首帧 `terminate()`，真单端口联邦**从来没握手成功过**。修法=`serveWebSocket`
+>    首帧 peek 分流（`MESH_HELLO`→mesh / 否则→agent Session），`routeMeshTo` opt-in 注册，未接
+>    mesh acceptor 时字节不变。防回归：`packages/transport-ws/tests/shared-port-demux.test.ts`。
+> 2. **重启重拨 participant 泄漏**：`PeerRegistry` 的 link `'closed'` handler 只 `installed.delete()`
+>    没调 `install.uninstall()`，peer 死后 wrapper participant（稳定 peer hubId）在 hub registry
+>    泄漏；下次重拨 `installPeerLink`→`hub.register()` 抛「already registered」，派活路由到死 wrapper
+>    →`link_closed`，**联邦无法从 peer 重启恢复**。修法=抽 `onLinkClosed` 助手（带 `cur.link===link`
+>    守卫 + `uninstall()`），出/入站两个 close handler 都走它，永不再各自漂移。防回归：幕 C 本身。
 
 ---
 

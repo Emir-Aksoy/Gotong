@@ -36,6 +36,7 @@ import type {
 import { installPeerLink, type InstalledPeerLink } from '@gotong/core'
 import type { IdentityStore, PeerRegistration } from '@gotong/identity'
 import { acceptHubLinks, bearerAuth, connectHubLink } from '@gotong/transport-ws'
+import type { MeshConnection } from '@gotong/transport-ws'
 import { gateKnowledgeBaseRpc, type RpcResponder } from './peer-kb-gate.js'
 import { denyPeerSummaryRpc } from './peer-summary.js'
 import { denyPeerTranscriptRpc } from './peer-transcript.js'
@@ -58,6 +59,15 @@ export interface PeerRegistryOptions {
    * dials outbound peers).
    */
   wss?: WebSocketServerLike
+  /**
+   * D1 fix — preferred over `wss` on the shared-port host. A registrar
+   * (serveWebSocket's `routeMeshTo`) that installs our inbound mesh
+   * handler into the agent server's first-frame demux, instead of
+   * attaching a racing sibling 'connection' listener that the agent
+   * Session would kill on a MESH_HELLO first frame. When set, `wss` is
+   * ignored for inbound acceptance.
+   */
+  acceptInbound?: (handler: MeshConnection) => () => void
   /**
    * If set, every inbound peer HELLO must present this exact string.
    * Outbound dials are unaffected (those use per-peer vault tokens).
@@ -277,7 +287,7 @@ export class PeerRegistry {
    */
   start(): void {
     if (this.intervalHandle) return
-    if (this.opts.wss) {
+    if (this.opts.wss || this.opts.acceptInbound) {
       // Phase 6 #4 — wire a per-peer token resolver when identity is
       // present and the operator hasn't opted out. The resolver runs on
       // each inbound HELLO; misses (unknown peer / disabled / vault read
@@ -326,7 +336,11 @@ export class PeerRegistry {
             })
           : undefined
       this.detachAccept = acceptHubLinks({
-        server: this.opts.wss,
+        // D1 fix — prefer the demux registrar (shared-port host) over
+        // attaching a racing sibling 'connection' listener on `wss`.
+        ...(this.opts.acceptInbound
+          ? { register: this.opts.acceptInbound }
+          : { server: this.opts.wss }),
         selfId: this.opts.selfHubId,
         ...(inboundAuth ? { auth: inboundAuth } : {}),
         ...(onConnectionAttempt ? { onConnectionAttempt } : {}),
@@ -674,20 +688,9 @@ export class PeerRegistry {
         endpointUrl: row.endpointUrl,
       })
       this.writeAudit('peer_connect', row, { direction: 'outbound' })
-      // If the link closes later (peer drops), drop it from `installed`
-      // so the next tick redials.
-      link.on('closed', () => {
-        const cur = this.installed.get(row.id)
-        // Only drop if the live entry STILL points at this same link —
-        // a fresh reconnect during the brief window between close + this
-        // callback could leave a fresh entry we don't want to evict.
-        if (cur && cur.link === link) {
-          this.installed.delete(row.id)
-          this.writeAudit('peer_disconnect', row, {
-            reason: 'remote_closed',
-          })
-        }
-      })
+      // If the link closes later (peer drops / restarts), evict it AND
+      // unregister the wrapper so the next tick can redial cleanly.
+      link.on('closed', () => this.onLinkClosed(row.id, link))
     } catch (err) {
       this.bumpBackoff(row.id)
       this.log('warn', 'peer dial failed; will retry', {
@@ -756,13 +759,7 @@ export class PeerRegistry {
     this.backoff.delete(row.id)
     this.log('info', 'peer connected (inbound)', { peerId })
     this.writeAudit('peer_connect', row, { direction: 'inbound' })
-    link.on('closed', () => {
-      const cur = this.installed.get(row.id)
-      if (cur && cur.link === link) {
-        this.installed.delete(row.id)
-        this.writeAudit('peer_disconnect', row, { reason: 'remote_closed' })
-      }
-    })
+    link.on('closed', () => this.onLinkClosed(row.id, link))
   }
 
   private teardown(peerRowId: string, reason = 'removed_or_disabled'): void {
@@ -774,6 +771,31 @@ export class PeerRegistry {
     this.writeAudit('peer_disconnect', state.row, {
       reason,
     })
+  }
+
+  /**
+   * A live link closed on its own (peer dropped / restarted). Evict its
+   * `installed` entry AND `uninstall()` the wrapper participant. The
+   * `uninstall()` is load-bearing: `installPeerLink` registers the wrapper
+   * under the STABLE peer hub id and only ever unregisters it here, so
+   * skipping it leaks the registration — the next redial's `installPeerLink`
+   * then throws "participant <id> already registered", the dial fails, and
+   * dispatches keep routing to the dead wrapper (`link_closed`). That made
+   * federation unable to recover from a peer restart. Both the inbound and
+   * outbound close handlers funnel here so they can never drift apart again
+   * (they used to each inline this and both forgot the uninstall).
+   *
+   * The `cur.link === link` guard makes eviction safe against a fresh
+   * reconnect that already replaced the map entry between this link's close
+   * and this callback: only tear down when the live entry STILL points at
+   * this exact closed link.
+   */
+  private onLinkClosed(peerRowId: string, link: HubLink): void {
+    const cur = this.installed.get(peerRowId)
+    if (!cur || cur.link !== link) return
+    this.installed.delete(peerRowId)
+    void cur.install.uninstall().catch(() => { /* best effort — link already closed */ })
+    this.writeAudit('peer_disconnect', cur.row, { reason: 'remote_closed' })
   }
 
   private backoffAllowsAttempt(peerRowId: string): boolean {

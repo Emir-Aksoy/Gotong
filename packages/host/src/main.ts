@@ -1587,7 +1587,8 @@ async function main(): Promise<void> {
       hub,
       identity,
       selfHubId,
-      wss: ws.wss,
+      // D1 fix — inbound mesh rides serveWebSocket's first-frame demux, not a sibling ws.wss listener (see server.ts routeMeshTo).
+      acceptInbound: (h) => ws.routeMeshTo(h),
       ...(inboundToken ? { sharedInboundPeerToken: inboundToken } : {}),
       pollIntervalMs: pollMs,
       inboundRateLimit,
@@ -1604,9 +1605,8 @@ async function main(): Promise<void> {
     })
     peerRegistry.start()
     // D2 — make this registry visible to the Hub's cross-hub resolver
-    // closure declared above. From here on, any explicit dispatch whose
-    // target isn't local + whose task.origin points at a connected peer
-    // will be forwarded over the live HubLink.
+    // closure above: any explicit dispatch whose target isn't local but whose
+    // task.origin points at a connected peer forwards over the live HubLink.
     peerRegistryRef = peerRegistry
     // NET-M1 — the butler's sanitized mesh roster rides the same registry
     // (live connected state) + identity rows (outbound posture).

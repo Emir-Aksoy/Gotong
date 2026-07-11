@@ -907,9 +907,42 @@ export async function connectHubLink(opts: ConnectHubLinkOptions): Promise<HubLi
   return link
 }
 
+/**
+ * D1 fix — the per-connection mesh handler that `acceptHubLinks` builds.
+ * Exported so the host's shared-port demux
+ * (`serveWebSocket(...).routeMeshTo`) can accept exactly this shape and
+ * hand a socket it has already identified as a federation peer straight
+ * to the mesh handshake. `req` carries only what the rate limiter needs
+ * (source IP); it's optional so unit tests can invoke without an upgrade
+ * request.
+ */
+export type MeshConnection = (
+  ws: WebSocket,
+  req?: {
+    socket?: { remoteAddress?: string | null }
+    headers?: Record<string, string | string[] | undefined>
+  },
+) => void
+
 export interface AcceptHubLinksOptions {
-  /** A live `ws.WebSocketServer` whose `connection` events should be wrapped as HubLinks. */
-  server: WebSocketServer
+  /**
+   * A live `ws.WebSocketServer` whose `connection` events should be
+   * wrapped as HubLinks. Provide EITHER `server` OR `register`. When
+   * both are set, `register` wins and `server` is ignored.
+   */
+  server?: WebSocketServer
+  /**
+   * D1 fix — alternative to `server` for the shared-port topology.
+   * Instead of attaching our own 'connection' listener to a server that
+   * ALSO hosts agent sessions — where the two blind listeners race and
+   * the agent `Session`'s `terminate()` on a MESH_HELLO first frame
+   * kills the peer handshake before its ACK can flush — hand our
+   * per-connection handler to a demultiplexer that has already peeked
+   * the first frame and decided this socket is a mesh peer. Returns a
+   * disposer that unregisters the handler. Wired in the host as
+   * `serveWebSocket(...).routeMeshTo`.
+   */
+  register?: (handler: MeshConnection) => () => void
   selfId: ParticipantId
   /** Called once per peer that completes the handshake successfully. */
   onLink: (link: HubLink) => void
@@ -1045,8 +1078,18 @@ export function acceptHubLinks(opts: AcceptHubLinksOptions): () => void {
       })
   }
 
-  opts.server.on('connection', handler)
+  if (opts.register) {
+    // D1 fix — shared-port host: register with serveWebSocket's
+    // first-frame demux instead of racing a sibling 'connection'
+    // listener on the same server (which the agent Session would kill).
+    return opts.register(handler)
+  }
+  const server = opts.server
+  if (!server) {
+    throw new Error('acceptHubLinks: either `server` or `register` must be provided')
+  }
+  server.on('connection', handler)
   return () => {
-    opts.server.off('connection', handler)
+    server.off('connection', handler)
   }
 }

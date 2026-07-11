@@ -243,3 +243,12 @@ peer 行内 `requireApprovalOutbound`);节律/上限如需一律常量。B track
 - `pnpm check:guards` 四门全绿(kernel 依赖方向 / env 注册表 / 行数棘轮);
   main.ts 预算内接线,超了先抽取腾预算(factory 先例)。
 - 全量 host 测试零红;动到 web 面时 web 也零红。
+
+> **真·两进程 L3/L4 门(2026-07-10 补)**：本 track 的跨 hub 派活主张此前只有 L2
+> (同进程双 Hub 过真 ws)背书。`pnpm check:cross-hub`(`scripts/test-cross-hub-e2e.mjs`)
+> 把它抬到 L3/L4——驱动两个真生产二进制(各自 vault/端口),五幕盖住裸派活 + **跨 hub
+> 工作流全状态机**(done/failed/suspended→批准→done/拒绝→failed)+ 重启自愈;每侧
+> attach-or-spawn,三拓扑同一份脚本(本机双进程=同 vps / 双 attach=不同 vps /
+> A spawn×B attach=本地电脑×vps)。写这道门时一次性揪出两个 L2 照不到的真生产 bug
+> (共享端口握手互杀 + 重启重拨 participant 泄漏),均已修 + 各配防回归门。详见
+> [`FEDERATION-RUNBOOK.md §5.1`](./FEDERATION-RUNBOOK.md)。

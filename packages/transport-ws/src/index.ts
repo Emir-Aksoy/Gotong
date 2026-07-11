@@ -18,6 +18,7 @@ export {
 } from './hub-link.js'
 export type {
   MeshFrame,
+  MeshConnection,
   WebSocketHubLinkOptions,
   ConnectHubLinkOptions,
   AcceptHubLinksOptions,
