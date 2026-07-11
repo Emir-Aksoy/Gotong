@@ -10,6 +10,9 @@
  *   `/agents` `/who`          → { kind: 'agents' }
  *   `/workflow <name> <args>` → { kind: 'workflow', name, args }
  *   `/wf <name> <args>`       (alias)
+ *   `/inbox` `/pending`       → { kind: 'inbox' }            (IMA-M1)
+ *   `/approve <shortId>`      → { kind: 'approve', shortId }
+ *   `/deny <shortId>`         → { kind: 'deny', shortId }    (`/reject` alias)
  *
  * Anything else (including leading-`/` text whose verb we don't
  * recognise) falls through to `{ kind: 'free', text }` with the
@@ -86,6 +89,26 @@ export function parseImCommand(raw: string): ImCommand {
     case 'agents':
     case 'who':
       return { kind: 'agents' }
+
+    // IMA-M1 — the approval loop. `/inbox` lists; `/approve`+`/deny` act on an
+    // itemId prefix. A missing prefix falls through to `free` (like `/bind`
+    // with no code) so the bridge renders the help reply instead of guessing.
+    case 'inbox':
+    case 'pending':
+      return { kind: 'inbox' }
+
+    case 'approve': {
+      const shortId = rest.split(/\s+/)[0] ?? ''
+      if (shortId.length === 0) return { kind: 'free', text: trimmed }
+      return { kind: 'approve', shortId }
+    }
+
+    case 'deny':
+    case 'reject': {
+      const shortId = rest.split(/\s+/)[0] ?? ''
+      if (shortId.length === 0) return { kind: 'free', text: trimmed }
+      return { kind: 'deny', shortId }
+    }
 
     case 'workflow':
     case 'wf': {

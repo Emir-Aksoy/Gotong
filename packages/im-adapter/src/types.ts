@@ -107,6 +107,11 @@ export type ImCommand =
   | { kind: 'unbind' }
   | { kind: 'agents' }
   | { kind: 'workflow'; name: string; args: string }
+  // IMA-M1 — the approval loop's three verbs. `shortId` is an itemId PREFIX
+  // (≥4 chars); the host resolves it within the caller's own pending items.
+  | { kind: 'inbox' }
+  | { kind: 'approve'; shortId: string }
+  | { kind: 'deny'; shortId: string }
   | { kind: 'free'; text: string }
 
 // ---------------------------------------------------------------------------

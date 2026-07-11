@@ -147,6 +147,43 @@ describe('parseImCommand', () => {
     expect(parseImCommand('   ')).toEqual({ kind: 'free', text: '' })
   })
 
+  // --- IMA-M1: /inbox /approve /deny ------------------------------
+
+  it('parses /inbox and /pending alias', () => {
+    expect(parseImCommand('/inbox')).toEqual({ kind: 'inbox' })
+    expect(parseImCommand('/pending')).toEqual({ kind: 'inbox' })
+    expect(parseImCommand('/INBOX')).toEqual({ kind: 'inbox' })
+  })
+
+  it('parses /approve <shortId>', () => {
+    expect(parseImCommand('/approve 1a2b3c4d')).toEqual({ kind: 'approve', shortId: '1a2b3c4d' })
+  })
+
+  it('parses /deny and /reject alias', () => {
+    expect(parseImCommand('/deny 1a2b3c4d')).toEqual({ kind: 'deny', shortId: '1a2b3c4d' })
+    expect(parseImCommand('/reject 1a2b3c4d')).toEqual({ kind: 'deny', shortId: '1a2b3c4d' })
+  })
+
+  it('approve/deny ignore extra args after the shortId', () => {
+    expect(parseImCommand('/approve 1a2b3c4d please')).toEqual({
+      kind: 'approve',
+      shortId: '1a2b3c4d',
+    })
+  })
+
+  it('bare /approve and /deny fall through to free so bridge shows help', () => {
+    expect(parseImCommand('/approve')).toEqual({ kind: 'free', text: '/approve' })
+    expect(parseImCommand('/deny  ')).toEqual({ kind: 'free', text: '/deny' })
+  })
+
+  it('strips bot-mention suffix on the new verbs', () => {
+    expect(parseImCommand('/approve@MyBot 1a2b3c4d')).toEqual({
+      kind: 'approve',
+      shortId: '1a2b3c4d',
+    })
+    expect(parseImCommand('/inbox@MyBot')).toEqual({ kind: 'inbox' })
+  })
+
   // --- defensive --------------------------------------------------
 
   it('non-string input → empty free (defensive fallback)', () => {

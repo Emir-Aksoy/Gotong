@@ -73,6 +73,9 @@ export class HumanInboxParticipant extends AgentParticipant {
       kind: payload.kind,
       prompt: payload.prompt,
       parentKind,
+      // IMA-M1 — a human step is addressed to exactly this person; answering
+      // from their bound IM chat is the same person on another channel.
+      imApprovable: true,
       status: 'pending',
       createdAt: this.now(),
     }

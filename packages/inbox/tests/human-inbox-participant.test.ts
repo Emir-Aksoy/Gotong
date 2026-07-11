@@ -91,6 +91,9 @@ describe('HumanInboxParticipant.handleTask', () => {
       prompt: 'Approve the plan?',
       parent: { taskId: 'wf-trigger', by: 'workflow:demo' },
       parentKind: 'workflow',
+      // IMA-M1 — a human step is addressed to exactly this person, so it is
+      // answerable from their bound IM chat too (whitelist flag, set at write).
+      imApprovable: true,
       status: 'pending',
       createdAt: 1234,
     })
