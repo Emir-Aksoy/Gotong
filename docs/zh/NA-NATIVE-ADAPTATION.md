@@ -3,10 +3,10 @@
 > Track 代号 **NA**(native adaptation)。用户问题原文:「目前我们的助理atong和框架gotong
 > 是否能加强原生适配?以便有更强的稳定性和更高的效率?」
 >
-> 本文 = M0 体检报告 + M1–M5 设计/落地 + M6 流式侦察。先体检后开工:每个缺口都有
-> file:line 证据,不做想象中的优化。
+> 本文 = M0 体检报告 + M1–M5 设计/落地 + M6 流式(侦察 + M6a/M6b 落地)。先体检后
+> 开工:每个缺口都有 file:line 证据,不做想象中的优化。
 >
-> Last updated: 2026-07-10
+> Last updated: 2026-07-11
 
 ---
 
@@ -176,9 +176,9 @@ usage-routes 的 DTO/CSV/聚合从 M1 入账起就带 `cacheCreationTokens`/`cac
 render 省略)。旋钮仍 109(spec 字段非 env 旋钮);main.ts 3000/3000(压 BF-M8 注释
 净零)。
 
-### NA-M6 · /me 网页聊天流式(侦察结论;实现待用户拍板)
+### NA-M6 · /me 网页聊天流式(M6a+M6b 已落;侦察结论存档)
 
-只侦察不实现。四条结论:
+先侦察后实现。四条侦察结论(M6a/M6b 的设计依据,保留存档):
 
 1. **流式管道其实已铺九成**:`LlmAgent.onStreamChunk` 逐 chunk 钩子(Phase 8 M5)
    在三处装配点(pool / hub-steward / workflow-assist)都把 chunk append 进
@@ -198,16 +198,37 @@ render 省略)。旋钮仍 109(spec 字段非 env 旋钮);main.ts 3000/3000(压 
    SPA 照做即可,不新增协议)。
 4. **IM 桥(管家主通道)结构性不能流式**(整条消息投递),流式收益 web-only。
 
-**岔口(待拍板,按成本升序)**:
-- **A · 管家框(steward)流式** —— host 零改动,web 路由分支 + SPA ~80 行,约半天。
-  首屏最疼(每问 10–30s 静默),**推荐先做**。
-- **B · quick-chat/阿同流式** —— pool 加 sink registry(镜像 steward ~20 行)+ 把
-  dispatch 从 me-routes 收进 host surface(顺手修孤例,架构一致)+ web 分支 + SPA;
-  约 1 天;main.ts 接线需压注释守 3000。
-- **C · 成员级 SSE(`/api/me/stream` 按 origin userId 过滤)** —— 通用任务进度流,
-  但过滤正确性=新安全面(滤错=看见别人的 chunk)+重连/背压/taskId 键控;2–3 天;
-  **显式不推荐**——per-request NDJSON 正是为避开这类风险选的形状。
-- **D · 不做** —— 有界等待(60s 上限)+ NA-M2 看门狗已兜底,体验痛但不失联。
+**岔口拍板与落地**(用户定「先 A 后 B」,两段均已落):
+
+- **M6a · steward 管家框流式**(`63aae42`,web-only)——host 零改动(侦察结论②:
+  `HubStewardPlanInput.onChunk` + `chunkSinks` 缝早就在,只是从未被 web 用)。
+  `/api/me/steward/plan` 加 `stream:true` NDJSON 分支,逐字镜像 WFEDIT-D4 形状:
+  200 + `application/x-ndjson` + `no-store` + `x-accel-buffering:no`,逐行
+  `{kind:'chunk',text}`、终行 `{kind:'result',…}`,头已出后的失败**骑 result 行**
+  (`ok:false`+code)绝不半截挂断;body 无 `stream:true` 纯 JSON 原路不动。SPA 加
+  `readNdjsonStream` 读流器 + `.me-steward-typing` 打字预览面板(chunk 累积渲染,
+  管家带工具故预览用 `extractPartialReply` 增量提取部分 reply),result 到达**整体
+  替换**为终版提案(诚实性要点③照做,拼接 chunk 从不冒充回复)。
+- **M6b · quick-chat/阿同流式**(`eb246a8`,pool 缝 + web 缝)——pool 加 per-call
+  `chatChunkSinks`(steward 同款纪律推广到 pool 作用域):`registerChatChunkSink`
+  发一次性随机 key,key 骑 `payload.__streamSinkKey`,spawn 时 `onStreamChunk` 只把
+  text 类 chunk 喂对应 sink——sink 抛错绝不断 agent 回复、未知/缺失 key = no-op、
+  transcript append 原样不动(sink 是**额外的 tap** 不是替代,admin SSE 打字照旧)。
+  web 侧 `handleMeChatAgent` 加 `stream:true` 分支,鸭子 `MeChatStreamSurface`
+  (只 register/release 两方法)注入——**刻意选了比侦察预估更浅的缝**:dispatch 仍在
+  me-routes(`Promise.race` 超时逻辑不动),孤例(web 直 `hub.dispatch`)保留不迁,
+  surface 只暴露 sink 注册面;无 surface ⇒ `stream:true` 静默回落纯 JSON(旧 host/
+  旧 SPA 双向兼容)。main.ts 接线 2 行压 2 行注释净零(3000/3000 顶格)。SPA 复用
+  M6a 读流器(`readStewardStream` 通用化为 `readNdjsonStream`),chunk 直贴
+  `data-chat-reply` 当打字预览、result 整体替换。
+- **C · 成员级 SSE(按 origin userId 过滤 firehose)** —— **仍显式不推荐**:过滤
+  正确性=新安全面(滤错=看见别人的 chunk),per-request NDJSON 正是为避开它选的形状。
+
+验收:host 2029 全绿(chunk-sink 4 例:keyed 分流拼接===回复且 transcript 照旧/
+无 key·释放后 key 零喂/sink 抛错回复完好/两并发 key 各回各家)+ web 1365 全绿
+(M6a、M6b 各 4 例路由测试:NDJSON 行序/超时骑 result 行/无 stream 纯 JSON/无
+surface 回落)+ 两段各真浏览器 round-trip(mock provider:MutationObserver 抓到
+预览先现、result 后替换;网络层头齐全 chunk/result 两行;console 零错误)。
 
 ## 六、显式推迟
 
@@ -224,5 +245,6 @@ render 省略)。旋钮仍 109(spec 字段非 env 旋钮);main.ts 3000/3000(压 
 
 每里程碑:vitest 全绿 + `pnpm check:guards` 四门 PASS(旋钮 109 全程零新增——
 `maintenanceModel` 是 spec 字段非 env 旋钮;main.ts 3000/3000——M1/M3 在 provider 层、
-M2 装配在 pool、M4 纯前端,M5 的 main.ts 接线靠压注释净零)+ 独立 commit。真机验证
-(生产机 Anthropic 通道)属 L4,待用户侧窗口。
+M2 装配在 pool、M4 纯前端,M5/M6b 的 main.ts 接线各靠压注释净零)+ 独立 commit。
+M6a/M6b 另各过一道真浏览器 round-trip(mock provider,打字预览时序 + NDJSON 头形 +
+console 零错误)。真机验证(生产机 Anthropic 通道)属 L4,待用户侧窗口。
