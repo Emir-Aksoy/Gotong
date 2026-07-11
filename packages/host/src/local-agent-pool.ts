@@ -21,6 +21,8 @@ import {
   MockLlmProvider,
   RoutingProvider,
   readMultimodalInlineCapFromEnv,
+  withCallWatchdog,
+  withTransientRetry,
   type LlmAgentOptions,
   type LlmAgentToolset,
   type LlmArtifactResolver,
@@ -1367,12 +1369,22 @@ export class LocalAgentPool implements ManagedAgentLifecycle {
     artifactResolver?: LlmArtifactResolver,
   ): Promise<LlmProvider> {
     if (!spec.fallbacks || spec.fallbacks.length === 0) {
-      return this.providerFactory(spec, primaryKey, artifactResolver)
+      // NA-M2 — single-provider form: hang watchdog + ONE transient retry
+      // (network/timeout/rate-limit before the first chunk). The retry layer
+      // exists ONLY here: with a fallback chain, RoutingProvider's failover
+      // IS the retry story — stacking both would double worst-case latency.
+      return withTransientRetry(
+        withCallWatchdog(this.providerFactory(spec, primaryKey, artifactResolver)),
+      )
     }
     // Primary first — a misconfigured primary still throws loudly (today's contract).
     // The primary candidate carries NO model override so per-task model overrides +
     // the agent's default (= spec.model) pass through untouched.
-    const primary = this.providerFactory(spec, primaryKey, artifactResolver)
+    // NA-M2 — the watchdog wraps EVERY leaf (primary + each fallback): a hung
+    // stream becomes that candidate's 'timeout' failure before any chunk, so
+    // RoutingProvider's failover can actually take over (it can only act on
+    // thrown errors, never on a silently wedged connection).
+    const primary = withCallWatchdog(this.providerFactory(spec, primaryKey, artifactResolver))
     const candidates: RoutingCandidate[] = [{ provider: primary, label: routingLabel(spec) }]
     for (const fb of spec.fallbacks) {
       let key: string | undefined
@@ -1393,7 +1405,7 @@ export class LocalAgentPool implements ManagedAgentLifecycle {
       }
       try {
         candidates.push({
-          provider: this.providerFactory(fbSpec, key, artifactResolver),
+          provider: withCallWatchdog(this.providerFactory(fbSpec, key, artifactResolver)),
           label: routingLabel(fbSpec),
           ...(fb.model ? { model: fb.model } : {}),
         })
@@ -1407,7 +1419,9 @@ export class LocalAgentPool implements ManagedAgentLifecycle {
         })
       }
     }
-    if (candidates.length < 2) return primary // every fallback failed to build
+    // Every fallback failed to build → effectively the single-provider form,
+    // so it gets the retry layer too (primary already carries the watchdog).
+    if (candidates.length < 2) return withTransientRetry(primary)
     return new RoutingProvider({
       candidates,
       // Adapt the host logger (message-first) to RoutingLogger (meta-first).

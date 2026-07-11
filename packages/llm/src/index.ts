@@ -77,3 +77,15 @@ export {
   type RoutingLogger,
   type BreakerConfig,
 } from './routing-provider.js'
+// NA-M2 — 调用韧性:挂死看门狗 + 瞬态单次重试(装配缝见 host 的 buildRoutedProvider)
+export {
+  withCallWatchdog,
+  withTransientRetry,
+  LlmCallTimeoutError,
+  DEFAULT_WATCHDOG,
+  DEFAULT_RETRY,
+  TRANSIENT_KINDS,
+  type WatchdogConfig,
+  type WatchdogOptions,
+  type TransientRetryOptions,
+} from './resilience.js'

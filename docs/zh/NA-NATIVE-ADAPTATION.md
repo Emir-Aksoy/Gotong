@@ -122,6 +122,9 @@ walk-back ③无工具请求不带任何 `cache_control`(auto 规则)④`promptC
 
 - **C · 工具面瘦身/按来源裁剪** — 先度量后动:M1 落地后缓存把此项收益打薄;若将来
   数据显示工具 schema 仍是大头,再议确定性裁剪(绝不能引入热路径 LLM 选工具)。
+- **hub-steward / workflow-assist 各自 new provider 的韧性接线** — 与 MR-M5 同一条
+  推迟(它们不走 pool 咽喉);M2 装配缝盖住 管家+全 managed agent+后台 sweep+工作流步。
+  M1 缓存断点在 provider 内部,这两处**天然已享受**,只有 M2 的包装层未及。
 - **每轮输入 token 构成打点面板** — ledger 已记 cache 四列,面板聚合视图按需再加。
 - **1h 长 TTL 缓存(beta)** — 5min 默认 TTL 先跑;IM 对话节奏数据出来后再评估。
 - **llm-key-test/probe 路径的缓存** — 探针是单发最小请求,auto 规则天然不下断点,无需特判。
