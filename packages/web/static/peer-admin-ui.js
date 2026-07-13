@@ -447,6 +447,8 @@
     const acl = p.acl || {}
     const quota = p.perLinkQuotaBudget == null ? '' : String(p.perLinkQuotaBudget)
     const revoked = p.revocationState === 'revoked'
+    // GT-M3 — graded trust tier ('' = un-graded, falls back to the T1 floor).
+    const tier = p.trustTier || ''
     return (
       '<div class="pa-policy">' +
       '  <div class="pa-policy-grid">' +
@@ -483,6 +485,17 @@
       // is what `gotong peer-card <url> --expect-kid <kid>` re-verifies against.
       '    <label>' + escHtml(d.padmPolPinnedKid) + ' <small>' + escHtml(d.padmPolPinnedKidHint) + '</small>' +
       '      <input class="pa-pol-pinnedkid" type="text" value="' + escHtml(p.pinnedKid || '') + '" /></label>' +
+      // GT-M3 — the owner's chosen trust tier. Blank = un-graded (the T1 floor).
+      // Advisory friction-selector: a higher tier only makes approval lighter,
+      // it never removes a confirmation floor. Owner sets it explicitly.
+      '    <label>' + escHtml(d.padmPolTrustTier) + ' <small>' + escHtml(d.padmPolTrustTierHint) + '</small>' +
+      '      <select class="pa-pol-trusttier">' +
+      '        <option value=""' + (tier ? '' : ' selected') + '>' + escHtml(d.padmPolTrustTierNone) + '</option>' +
+      '        <option value="T0"' + (tier === 'T0' ? ' selected' : '') + '>T0 · ' + escHtml(d.padmPolTrustTierT0) + '</option>' +
+      '        <option value="T1"' + (tier === 'T1' ? ' selected' : '') + '>T1 · ' + escHtml(d.padmPolTrustTierT1) + '</option>' +
+      '        <option value="T2"' + (tier === 'T2' ? ' selected' : '') + '>T2 · ' + escHtml(d.padmPolTrustTierT2) + '</option>' +
+      '        <option value="T3"' + (tier === 'T3' ? ' selected' : '') + '>T3 · ' + escHtml(d.padmPolTrustTierT3) + '</option>' +
+      '      </select></label>' +
       '  </div>' +
       '  <button type="button" class="pa-pol-save">' + escHtml(d.padmPolSave) + '</button>' +
       '</div>'
@@ -506,6 +519,10 @@
     // STD-M2b — empty pin field CLEARS the anchor (null); a value is sent as-is
     // and the server validates the RFC 7638 shape (rejects a paste typo).
     const pinnedRaw = $('.pa-pol-pinnedkid', detail).value.trim()
+    // GT-M3 — empty tier CLEARS the grade (null = un-graded, the T1 floor); a
+    // value is one of T0..T3 (the <select> can only emit those) and the server
+    // re-validates it.
+    const tierRaw = $('.pa-pol-trusttier', detail).value
     const body = {
       acl: acl,
       outboundCaps: textToArr($('.pa-pol-outcaps', detail).value),
@@ -517,6 +534,7 @@
       shareSummary: $('.pa-pol-sharesummary', detail).checked,
       shareTranscript: $('.pa-pol-sharetranscript', detail).checked,
       pinnedKid: pinnedRaw === '' ? null : pinnedRaw,
+      trustTier: tierRaw === '' ? null : tierRaw,
     }
     setStatus(root, t().padmSavingPolicy, 'loading')
     try {

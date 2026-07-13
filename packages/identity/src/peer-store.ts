@@ -30,6 +30,7 @@ import {
   type PeerKind,
   type PeerRegistration,
   type PeerRevocationState,
+  type PeerTrustTier,
   type UpdatePeerInput,
 } from './types.js'
 
@@ -61,6 +62,9 @@ interface PeerRow {
   // STD-M2b — owner-pinned signing-key thumbprint (schema v35). NULL = no
   // trust anchor; identity rests on the token handshake (pre-STD default).
   pinned_kid: string | null
+  // GT-M3 — owner-chosen trust tier (schema v37). NULL = un-graded; the
+  // consumer resolves NULL to the fail-closed floor T1. Orthogonal axis.
+  trust_tier: string | null
 }
 
 export class PeerStore {
@@ -148,6 +152,8 @@ export class PeerStore {
           input.shareTranscript ? 1 : 0,
           // STD-M2b — pinned signing-key thumbprint; omitted → NULL = no anchor.
           input.pinnedKid ?? null,
+          // GT-M3 — trust tier; omitted → NULL = un-graded (floor T1 at consumer).
+          input.trustTier ?? null,
         )
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err)
@@ -285,6 +291,10 @@ export class PeerStore {
       // pin (back to token-only trust), same contract as `label`.
       const pinnedKid =
         input.pinnedKid !== undefined ? input.pinnedKid : existing.pinned_kid
+      // GT-M3 — trust tier. undefined preserves; explicit null CLEARS the grade
+      // (back to un-graded = floor T1), same contract as `label` / `pinnedKid`.
+      const trustTier =
+        input.trustTier !== undefined ? input.trustTier : existing.trust_tier
       this.stmtPeerUpdate.run(
         endpointUrl,
         label,
@@ -301,6 +311,7 @@ export class PeerStore {
         shareSummary,
         shareTranscript,
         pinnedKid,
+        trustTier,
         Date.now(),
         id,
       )
@@ -350,8 +361,8 @@ export class PeerStore {
          kind, acl_json, outbound_caps_json, require_approval_outbound,
          revocation_state, per_link_quota_budget, allowed_data_classes_json,
          allowed_knowledge_bases_json, share_summary, share_transcript,
-         pinned_kid
-       ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         pinned_kid, trust_tier
+       ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ))
   }
   private get stmtPeerById(): SqliteStmt {
@@ -383,7 +394,7 @@ export class PeerStore {
              revocation_state = ?, per_link_quota_budget = ?,
              allowed_data_classes_json = ?, allowed_knowledge_bases_json = ?,
              share_summary = ?, share_transcript = ?,
-             pinned_kid = ?,
+             pinned_kid = ?, trust_tier = ?,
              updated_at = ?
        WHERE id = ?`,
     ))
@@ -408,6 +419,13 @@ function assertNonEmptyId(id: unknown, label: string): asserts id is string {
       message: `${label} must be a non-empty string`,
     })
   }
+}
+
+/** GT-M3 — local value guard (identity is zero-dep, so it can't reuse core's
+ *  `isTrustTier`). An unrecognised stored value projects to null (un-graded),
+ *  the conservative direction — the consumer then applies the floor T1. */
+function isPeerTrustTier(v: unknown): v is PeerTrustTier {
+  return v === 'T0' || v === 'T1' || v === 'T2' || v === 'T3'
 }
 
 function rowToPeerRegistration(r: PeerRow): PeerRegistration {
@@ -445,6 +463,9 @@ function rowToPeerRegistration(r: PeerRow): PeerRegistration {
     shareTranscript: r.share_transcript !== 0,
     // STD-M2b — owner-pinned signing-key thumbprint projection (NULL = no anchor).
     pinnedKid: r.pinned_kid ?? null,
+    // GT-M3 — owner-chosen trust tier projection. NULL (un-graded) or any
+    // unrecognised value → null; the consumer resolves null to the floor T1.
+    trustTier: isPeerTrustTier(r.trust_tier) ? r.trust_tier : null,
   }
   // Omit on healthy rows so the record shape is unchanged for the common case
   // (mirrors `SuspendedTask.corrupt`).

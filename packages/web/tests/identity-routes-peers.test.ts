@@ -608,6 +608,96 @@ describe('peer pinned signing key (STD-M2b)', () => {
   })
 })
 
+// GT-M3 — the graded trust tier (T0..T3) over the same CRUD routes. The DECISION
+// matrix that consumes it lives in core (trust-tier.ts); what these pin is the
+// WEB seam: the field validates, persists, round-trips via getPeer AND the list
+// DTO, and — like pinnedKid — a tier-only edit stays on the plain invalidate
+// path (it selects approval friction, it is NOT a mesh gating input, so it must
+// never re-dial a connected peer).
+describe('peer graded trust tier (GT-M3)', () => {
+  let b: BootResult
+  beforeEach(async () => { b = await boot() })
+  afterEach(async () => { await teardown(b) })
+
+  it('POST persists trustTier + round-trips via getPeer AND the list DTO', async () => {
+    const r = await fetch(`${b.baseUrl}/api/admin/identity/peers`, {
+      method: 'POST',
+      headers: { cookie: b.ownerCookie, 'content-type': 'application/json' },
+      body: JSON.stringify({
+        peerId: 'hub_tier', endpointUrl: 'wss://tier.example', peerToken: 'tok-tier-12345',
+        trustTier: 'T2',
+      }),
+    })
+    expect(r.status).toBe(200)
+    const j = (await r.json()) as { peer: { id: string; trustTier: string | null } }
+    expect(j.peer.trustTier).toBe('T2')
+    // Persisted, not just echoed.
+    expect(b.identity.getPeer(j.peer.id)!.trustTier).toBe('T2')
+    // Exposed in the list DTO so the admin panel can pre-fill the selector.
+    const lr = await fetch(`${b.baseUrl}/api/admin/identity/peers`, { headers: { cookie: b.ownerCookie } })
+    const lj = (await lr.json()) as { peers: Array<{ peerId: string; trustTier: string | null }> }
+    expect(lj.peers.find((p) => p.peerId === 'hub_tier')!.trustTier).toBe('T2')
+  })
+
+  it('POST without trustTier → null (un-graded by default; core resolves to the T1 floor)', async () => {
+    const r = await fetch(`${b.baseUrl}/api/admin/identity/peers`, {
+      method: 'POST',
+      headers: { cookie: b.ownerCookie, 'content-type': 'application/json' },
+      body: JSON.stringify({ peerId: 'hub_notier', endpointUrl: 'wss://nt.example', peerToken: 'tok-notier-123' }),
+    })
+    expect(r.status).toBe(200)
+    const j = (await r.json()) as { peer: { trustTier: string | null } }
+    expect(j.peer.trustTier).toBeNull()
+  })
+
+  it('POST an invalid trustTier (outside T0..T3) → 400', async () => {
+    const r = await fetch(`${b.baseUrl}/api/admin/identity/peers`, {
+      method: 'POST',
+      headers: { cookie: b.ownerCookie, 'content-type': 'application/json' },
+      body: JSON.stringify({
+        peerId: 'hub_badtier', endpointUrl: 'wss://bt.example', peerToken: 'tok-badtier-12',
+        trustTier: 'T9',
+      }),
+    })
+    // A tier the decision matrix will never recognise must be rejected up front,
+    // not silently stored (it would else quietly fall through to the floor).
+    expect(r.status).toBe(400)
+  })
+
+  it('PATCH sets then clears the tier (explicit null clears the grade)', async () => {
+    const id = b.identity.addPeer({
+      peerId: 'hub_tierpatch', endpointUrl: 'wss://tp.example', peerToken: 'tok-tierpatch',
+    }).id
+    const set = await fetch(`${b.baseUrl}/api/admin/identity/peers/${id}`, {
+      method: 'PATCH', headers: { cookie: b.ownerCookie, 'content-type': 'application/json' },
+      body: JSON.stringify({ trustTier: 'T3' }),
+    })
+    expect(set.status).toBe(200)
+    expect(b.identity.getPeer(id)!.trustTier).toBe('T3')
+    const clear = await fetch(`${b.baseUrl}/api/admin/identity/peers/${id}`, {
+      method: 'PATCH', headers: { cookie: b.ownerCookie, 'content-type': 'application/json' },
+      body: JSON.stringify({ trustTier: null }),
+    })
+    expect(clear.status).toBe(200)
+    expect(b.identity.getPeer(id)!.trustTier).toBeNull()
+  })
+
+  it('PATCH trustTier-only stays on the plain invalidate path — advisory ≠ re-gate', async () => {
+    const id = b.identity.addPeer({
+      peerId: 'hub_tieronly', endpointUrl: 'wss://to.example', peerToken: 'tok-tieronly-1',
+    }).id
+    const inv = b.invalidateCount.n
+    const rp = b.refreshPolicyCount.n
+    const r = await fetch(`${b.baseUrl}/api/admin/identity/peers/${id}`, {
+      method: 'PATCH', headers: { cookie: b.ownerCookie, 'content-type': 'application/json' },
+      body: JSON.stringify({ trustTier: 'T2' }),
+    })
+    expect(r.status).toBe(200)
+    expect(b.invalidateCount.n).toBe(inv + 1) // plain reconcile
+    expect(b.refreshPolicyCount.n).toBe(rp) // the tier never re-dials a connected peer
+  })
+})
+
 // Phase 19 P4-M4 — the per-link trust-contract trio (revocationState /
 // perLinkQuotaBudget / allowedDataClasses) over the same CRUD routes. The host
 // ENFORCEMENT is pinned in host/tests/peer-isolation-e2e.test.ts +

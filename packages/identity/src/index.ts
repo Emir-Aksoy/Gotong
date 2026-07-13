@@ -78,6 +78,7 @@ export type {
   SweepUsageResult,
   // Peer registry (D1 — Phase 5)
   PeerRegistration,
+  PeerTrustTier,
   AddPeerInput,
   UpdatePeerInput,
   ListPeersQuery,

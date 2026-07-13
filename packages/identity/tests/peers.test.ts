@@ -795,4 +795,76 @@ describe('IdentityStore — peers (D1)', () => {
       expect(u.pinnedKid).toBe(KID) // untouched by an unrelated policy change
     })
   })
+
+  describe('trustTier grade (GT-M3)', () => {
+    it('addPeer without the field → null (un-graded; consumer applies floor T1)', () => {
+      const p = store.addPeer({
+        peerId: 'hub_ttdef', endpointUrl: 'wss://tt.example', peerToken: 'tok-tt-1',
+      })
+      expect(p.trustTier).toBeNull()
+    })
+
+    it('addPeer round-trips an explicit grade', () => {
+      const p = store.addPeer({
+        peerId: 'hub_tton', endpointUrl: 'wss://tton.example', peerToken: 'tok-tton-1',
+        trustTier: 'T2',
+      })
+      for (const r of [p, store.getPeerByPeerId('hub_tton')!]) {
+        expect(r.trustTier).toBe('T2')
+      }
+    })
+
+    it('updatePeer preserves on undefined, replaces on a new grade, CLEARS on null', () => {
+      const p = store.addPeer({
+        peerId: 'hub_ttupd', endpointUrl: 'wss://ttu.example', peerToken: 'tok-ttu-1',
+        trustTier: 'T2',
+      })
+      const preserved = store.updatePeer(p.id, { label: 'renamed' })
+      expect(preserved.trustTier).toBe('T2') // undefined preserves
+      const promoted = store.updatePeer(p.id, { trustTier: 'T3' })
+      expect(promoted.trustTier).toBe('T3') // a new grade replaces
+      const cleared = store.updatePeer(p.id, { trustTier: null })
+      expect(cleared.trustTier).toBeNull() // explicit null clears (back to un-graded)
+    })
+
+    it('the grade is independent of the pin and of policy fields (orthogonal axes)', () => {
+      const p = store.addPeer({
+        peerId: 'hub_ttiso', endpointUrl: 'wss://tti.example', peerToken: 'tok-tti-1',
+        trustTier: 'T2',
+        pinnedKid: 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLM1234',
+      })
+      // Changing outbound authorization must NOT disturb the trust grade,
+      // nor the identity anchor — trustTier / outboundCaps / pinnedKid are
+      // three decoupled axes (GRADED-TRUST.md 八).
+      const u = store.updatePeer(p.id, { outboundCaps: ['draft'] })
+      expect(u.outboundCaps).toEqual(['draft'])
+      expect(u.trustTier).toBe('T2')
+      expect(u.pinnedKid).toBe('abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLM1234')
+      // ...and clearing the pin leaves the grade intact (岔口 3 纯软连接:
+      // identity confidence and authorization tier never move together).
+      const v = store.updatePeer(p.id, { pinnedKid: null })
+      expect(v.pinnedKid).toBeNull()
+      expect(v.trustTier).toBe('T2')
+    })
+
+    it('an unrecognised stored tier projects to null (defensive, like `kind`)', async () => {
+      // Plant a tier this build doesn't know via a second raw connection
+      // (close-then-reopen, mirroring the audit-L13 helper). The projection
+      // must fail safe to null (un-graded → floor T1), never surface a bogus
+      // value the decision matrix can't map.
+      const tmp2 = await mkdtemp(join(tmpdir(), 'gotong-id-peers-tt-'))
+      const path = join(tmp2, 'identity.sqlite')
+      const mk = randomBytes(MASTER_KEY_LEN_BYTES)
+      const s1 = openIdentityStore({ dbPath: path, masterKey: mk })
+      s1.addPeer({ peerId: 'hub_ttbad', endpointUrl: 'wss://ttb.example', peerToken: 'tok-ttb-1', trustTier: 'T1' })
+      s1.close()
+      const raw = openDb(path)
+      raw.prepare('UPDATE peers SET trust_tier = ? WHERE peer_id = ?').run('T9', 'hub_ttbad')
+      raw.close()
+      const s2 = openIdentityStore({ dbPath: path, masterKey: mk })
+      expect(s2.getPeerByPeerId('hub_ttbad')!.trustTier).toBeNull()
+      s2.close()
+      await rm(tmp2, { recursive: true, force: true })
+    })
+  })
 })

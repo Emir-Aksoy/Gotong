@@ -158,6 +158,16 @@ const PEER_KINDS: readonly PeerKind[] = ['personal', 'organization', 'project', 
 // connection gate (no dial, inbound HELLO rejected, live link torn down).
 export type PeerRevocationState = 'active' | 'revoked'
 const PEER_REVOCATION_STATES: readonly PeerRevocationState[] = ['active', 'revoked']
+// GT-M3 — the owner's chosen TRUST TIER for this peer edge (graded trust).
+// T0 discoverable / T1 token (default floor) / T2 verified / T3 trusted:
+// each step up = more verification (or more human confirmation) but lighter
+// friction. Advisory friction-selector — it only picks HOW LIGHT approval is,
+// never removes a confirmation floor and never touches mesh gating (so a
+// tier-only edit does NOT re-dial). null = un-graded (core resolves to the T1
+// floor at consumption). Local mirror of identity's PeerTrustTier — web keeps
+// zero identity runtime dep.
+export type PeerTrustTier = 'T0' | 'T1' | 'T2' | 'T3'
+const PEER_TRUST_TIERS: readonly PeerTrustTier[] = ['T0', 'T1', 'T2', 'T3']
 export interface PeerInboundAcl {
   capabilities?: string[]
   requireOrigin?: boolean
@@ -195,6 +205,10 @@ export interface IdentityPeerDTO {
   // for this peer's signed A2A card (always present from a v35 store; null = no
   // anchor). Advisory only: a mismatch on the live card flags but never blocks.
   pinnedKid: string | null
+  // GT-M3 — the owner's chosen trust tier for this edge (present from a v37
+  // store; null = un-graded, core resolves to the T1 floor). Advisory friction
+  // selector, never a gate.
+  trustTier: PeerTrustTier | null
 }
 
 export interface IdentityOrgQuotaDTO {
@@ -307,6 +321,7 @@ export interface IdentitySurface {
     shareSummary?: boolean
     shareTranscript?: boolean
     pinnedKid?: string | null
+    trustTier?: PeerTrustTier | null
   }): IdentityPeerDTO
   listPeers?(): IdentityPeerDTO[]
   updatePeer?(
@@ -327,6 +342,7 @@ export interface IdentitySurface {
       shareSummary?: boolean
       shareTranscript?: boolean
       pinnedKid?: string | null
+      trustTier?: PeerTrustTier | null
     },
   ): IdentityPeerDTO
   removePeer?(id: string): boolean
@@ -2123,6 +2139,8 @@ interface PeerPolicyFields {
   shareTranscript?: boolean
   // STD-M2b — owner-pinned signing-key thumbprint (null = clear the anchor).
   pinnedKid?: string | null
+  // GT-M3 — graded trust tier (null = clear, un-graded). Advisory, non-gating.
+  trustTier?: PeerTrustTier | null
 }
 
 /**
@@ -2173,6 +2191,7 @@ function parsePeerPolicyFields(b: {
   shareSummary?: unknown
   shareTranscript?: unknown
   pinnedKid?: unknown
+  trustTier?: unknown
 }): { ok: true; value: PeerPolicyFields } | { ok: false; error: string } {
   const value: PeerPolicyFields = {}
   if (b.kind !== undefined) {
@@ -2260,6 +2279,22 @@ function parsePeerPolicyFields(b: {
       return {
         ok: false,
         error: 'pinnedKid must be a 43-char base64url RFC 7638 thumbprint, or null to clear',
+      }
+    }
+  }
+  // GT-M3 — the owner's chosen trust tier. null CLEARS it (edge falls back to
+  // the T1 floor); a string MUST be one of T0/T1/T2/T3 so a typo can't quietly
+  // store a tier the decision matrix will never recognise. Owner sets it
+  // explicitly — never auto-derived (a signed card or a referral only SUGGESTS,
+  // the owner adjudicates; 发现≠信任).
+  if (b.trustTier !== undefined) {
+    if (b.trustTier === null) value.trustTier = null
+    else if (typeof b.trustTier === 'string' && PEER_TRUST_TIERS.includes(b.trustTier as PeerTrustTier)) {
+      value.trustTier = b.trustTier as PeerTrustTier
+    } else {
+      return {
+        ok: false,
+        error: `trustTier must be one of ${PEER_TRUST_TIERS.join('/')}, or null to clear`,
       }
     }
   }
@@ -2410,9 +2445,11 @@ async function handlePatchPeer(
   // A policy or endpoint change must re-gate / re-dial a CONNECTED peer;
   // invalidate() alone won't (tick keeps the existing link). Label / enabled
   // / token-only edits are fine with a plain reconcile. STD-M2b `pinnedKid` is
-  // an advisory trust anchor that never touches mesh gating, so a pin-only edit
-  // must NOT force a re-dial — exclude it from the relink trigger.
-  const gatingChanged = Object.keys(policy.value).some((k) => k !== 'pinnedKid')
+  // an advisory trust anchor that never touches mesh gating, and GT-M3
+  // `trustTier` only selects approval friction at the ask_peer / dispatch layer
+  // (never a mesh input) — so a pin- or tier-only edit must NOT force a re-dial;
+  // exclude both from the relink trigger.
+  const gatingChanged = Object.keys(policy.value).some((k) => k !== 'pinnedKid' && k !== 'trustTier')
   const needsRelink = gatingChanged || input.endpointUrl !== undefined
   try {
     const updated = ctx.identity.updatePeer!(id, input)

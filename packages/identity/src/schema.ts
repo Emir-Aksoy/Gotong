@@ -1217,6 +1217,29 @@ const MIGRATIONS: Migration[] = [
       );
     `,
   },
+  {
+    // GT-M3 — the owner's chosen TRUST TIER for a peer edge: one of the
+    // enum values T0/T1/T2/T3 (docs/zh/GRADED-TRUST.md 六). This is a NEW,
+    // dedicated authorization axis — orthogonal to PeerKind (what the peer IS),
+    // to pinnedKid (identity confidence), and to outboundCaps (the concrete
+    // allowlist). It answers only "how much do I trust this edge to do risky
+    // things", and it selects the CONFIRMATION WEIGHT the decision matrix
+    // applies (决策矩阵: 出站动作风险 × 信任档).
+    //
+    // Additive, nullable, NOT a secret — a plain owner-set label, so it keeps
+    // the "credentials live in vault, not columns" discipline. NULL = the owner
+    // hasn't graded this edge; consumers resolve NULL to the fail-closed floor
+    // DEFAULT_TRUST_TIER ('T1' = token federation, today's default). So this
+    // migration is byte-invisible to every existing row: an un-graded peer
+    // behaves exactly as a T1 peer, which is what a token-handshaked edge
+    // already was. The owner sets it EXPLICITLY; a wire-self-reported tier is
+    // advisory and NEVER auto-applied (发现≠信任, GT 边界 2).
+    version: 37,
+    name: 'peer-trust-tier',
+    sql: `
+      ALTER TABLE peers ADD COLUMN trust_tier TEXT;
+    `,
+  },
 ]
 
 /**

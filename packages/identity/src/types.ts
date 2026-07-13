@@ -1520,6 +1520,17 @@ export interface UpdatePeerSummaryAlertChannelInput {
 export type PeerKind = 'personal' | 'organization' | 'project' | 'service'
 
 /**
+ * GT-M3 — the owner's chosen trust tier for a peer edge. A same-valued mirror
+ * of core's `TrustTier` (identity stays zero-dep, so it cannot import core;
+ * the two unions are kept in lockstep by GT-M6 wire tests). T0 discoverable /
+ * T1 token / T2 verified / T3 trusted (docs/zh/GRADED-TRUST.md 六). Orthogonal
+ * to PeerKind, pinnedKid, and outboundCaps — it selects the CONFIRMATION WEIGHT
+ * the decision matrix applies, nothing else. `null` (un-graded) resolves to the
+ * fail-closed floor T1 at the consumer, so an existing peer is byte-identical.
+ */
+export type PeerTrustTier = 'T0' | 'T1' | 'T2' | 'T3'
+
+/**
  * Inbound trust contract — what this host ACCEPTS from a peer (Phase 18
  * B-M1). A structural mirror of core's `PeerLinkAcl` so identity stays
  * core-free; the host maps it straight onto `installPeerLink({acl})`.
@@ -1612,6 +1623,14 @@ export interface PeerRegistration {
    */
   pinnedKid: string | null
   /**
+   * GT-M3 — the owner's chosen trust tier for this edge (T0/T1/T2/T3). NULL =
+   * un-graded; consumers treat NULL as the fail-closed floor T1. Set EXPLICITLY
+   * by the owner (never TOFU, never from a peer's wire self-report). Selects the
+   * confirmation weight in the outbound decision matrix (决策矩阵); orthogonal to
+   * pinnedKid (identity confidence) and outboundCaps (the concrete allowlist).
+   */
+  trustTier: PeerTrustTier | null
+  /**
    * Audit L13 — corruption trail. Present (and non-empty) ONLY when one or
    * more stored policy JSON columns were unparseable or the wrong shape and
    * had to be normalised on read (e.g. `outbound_caps_json` held `"chat"`
@@ -1661,6 +1680,9 @@ export interface AddPeerInput {
   // ---- STD-M2b — owner-pinned signing-key thumbprint (omitted → NULL = no
   //      anchor; identity rests on the token handshake, the pre-STD default). ----
   pinnedKid?: string | null
+  // ---- GT-M3 — owner-chosen trust tier (omitted → NULL = un-graded, resolves
+  //      to the fail-closed floor T1 at the consumer). ----
+  trustTier?: PeerTrustTier | null
 }
 
 export interface UpdatePeerInput {
@@ -1697,6 +1719,9 @@ export interface UpdatePeerInput {
   // ---- STD-M2b — pinned signing-key thumbprint. undefined = preserve;
   //      explicit null CLEARS the anchor (back to token-only trust). ----
   pinnedKid?: string | null
+  // ---- GT-M3 — trust tier. undefined = preserve; explicit null CLEARS the
+  //      grade (back to un-graded = the fail-closed floor T1). ----
+  trustTier?: PeerTrustTier | null
 }
 
 export interface ListPeersQuery {
