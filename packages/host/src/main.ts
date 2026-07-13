@@ -254,6 +254,7 @@ import { HostButlerMemoryService } from './butler-memory-service.js'
 // many bound users each get a butler that remembers ONLY them across sessions.
 // Assembly lives in personal-butler-factory.ts; main.ts only wires refs.
 import { buildButlerFactory } from './personal-butler-factory.js'
+import { butlerEmbedderFromEnv } from './butler-embedder.js'
 import {
   buildOnboardingKeyCheck,
   type ButlerOnboardingKeyCheck,
@@ -954,16 +955,14 @@ async function main(): Promise<void> {
   const butlerMemoryRoot = join(space.root, 'butler', 'memory')
   const butlerEnv = (process.env.GOTONG_BUTLER ?? '').trim().toLowerCase()
   const butlerDefaultOn = !['0', 'false', 'off', 'no'].includes(butlerEnv)
-  // BF-M7 — the governed action set (create / edit / delete a member's own agent +
-  // edit their own workflow), each APPROVAL-GATED to the member's /me inbox. ON by
-  // default; opt out with GOTONG_BUTLER_GOVERNED ∈ {0,false,off,no}. Wired only when
-  // the member services exist — the executors are the SAME `HostMeAgentService` /
-  // `MeWorkflowEditService` the /me hub-steward uses, so the butler is structurally
-  // incapable of exceeding what the member could do by hand (RBAC + the WFEDIT
-  // cross-hub lock apply). The services are constructed further down, so these are
-  // forward-declared `let`s (the peerRegistryRef pattern) read at butler-build time
-  // — safe because a per-user butler is built LAZILY on that member's first task,
-  // well after boot. Absent refs (no identity / no workflowAssist) ⇒ pure-memory.
+  // M-EMB1 — opt-in real embedder for 阿同 recall (unset ⇒ local default, byte-identical).
+  const butlerEmbedder = butlerEmbedderFromEnv()
+  if (butlerEmbedder) log.info(butlerEmbedder.disclosure, { dataLeavesBox: butlerEmbedder.dataLeavesBox })
+  // BF-M7 — governed set (create/edit/delete a member's own agent + edit their workflow),
+  // each APPROVAL-GATED to /me. Executors are the SAME HostMeAgentService /
+  // MeWorkflowEditService the /me steward uses (butler can't exceed hand-RBAC + WFEDIT
+  // cross-hub lock). Forward-declared `let`s read lazily at butler-build; absent refs
+  // (no identity / no workflowAssist) ⇒ pure-memory.
   const butlerGovernedEnv = (process.env.GOTONG_BUTLER_GOVERNED ?? '').trim().toLowerCase()
   const butlerGovernedOn = !['0', 'false', 'off', 'no'].includes(butlerGovernedEnv)
   let butlerGovernedAgentsRef: StewardAgentDirectory | undefined
@@ -1077,6 +1076,7 @@ async function main(): Promise<void> {
     maintenanceOn: butlerMaintenanceOn,
     proactiveOn: butlerProactiveOn,
     runBroadcastOn: butlerRunBroadcastOn,
+    embedder: butlerEmbedder?.embed,
     refs: () => ({
       governedAgents: butlerGovernedAgentsRef,
       workflowEditor: butlerGovernedWorkflowEditorRef,

@@ -27,6 +27,7 @@ import { dirname, join } from 'node:path'
 
 import type { Hub, Logger } from '@gotong/core'
 import type { LlmProvider } from '@gotong/llm'
+import type { Embedder } from '@gotong/personal-memory'
 import {
   PersonalButlerAgent,
   buildButlerClockProbe,
@@ -142,6 +143,13 @@ export interface ButlerFactoryDeps {
   /** Read the CURRENT forward-declared refs (called at butler-build time). */
   refs: () => ButlerFactoryRefs
   /**
+   * M-EMB1 — opt-in REAL semantic embedder for fusion recall. Present ⇒ each
+   * per-user recall index fuses keyword + this embedder (bridges synonyms the
+   * local lexical embedder can't reach). Absent ⇒ `fusion: {}` (local default,
+   * byte-identical). Fail-soft: a throwing embedder degrades to keyword ranking.
+   */
+  embedder?: Embedder
+  /**
    * CARE-M4 — 开箱陪跑. When present, every per-user butler gets (a) the
    * zero-LLM context probe that injects the 现状卡 while key gaps exist and
    * `onboarding-state.json` isn't done, and (b) the benign
@@ -193,14 +201,15 @@ export function buildButlerFactory(deps: ButlerFactoryDeps): ButlerFactory {
         // (dependency-free, no network / key / data movement), so the on-demand
         // `recall` tool surfaces the on-topic fact FIRST instead of the newest
         // passing mention — what a weak model needs. `fusion: {}` = local default
-        // embedder; a real embedding provider (MU-M4) would be injected as
-        // `fusion: { embed }`. The byte-stable frozen block is untouched (fusion
-        // only rides the recall path).
+        // embedder. M-EMB1: when `deps.embedder` is configured (opt-in env), the
+        // semantic arm becomes a REAL embedder that bridges synonyms char-overlap
+        // can't; unset ⇒ `fusion: {}` (byte-identical). The byte-stable frozen
+        // block is untouched either way (fusion only rides the recall path).
         const recallIndex = openButlerRecallIndex({
           rootDir: memoryRoot,
           userId,
           logger: log,
-          fusion: {},
+          fusion: deps.embedder ? { embed: deps.embedder } : {},
         })
         // TN-M1 — the member's task notebook: cross-turn mission ledger, file
         // next to the user's jsonl (same `ownerDir` safety as STATUS.md). The
