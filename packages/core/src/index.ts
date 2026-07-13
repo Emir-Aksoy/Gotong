@@ -147,6 +147,22 @@ export type {
 export { extractRequiredCapabilities, checkOutboundDataClasses } from './peer-acl.js'
 export type { OutboundVerdict } from './peer-acl.js'
 
+// GT-M1 分级信任(Graded Trust)—— 一条 mesh 边的信任档 + 决策矩阵。纯函数、
+// 零依赖、热路径零 LLM;与 reputation / pinnedKid / PeerKind 全部正交。
+// 见 docs/zh/GRADED-TRUST.md。
+export {
+  TRUST_TIERS,
+  TRUST_TIER_CODENAMES,
+  DEFAULT_TRUST_TIER,
+  tierRank,
+  isTrustTier,
+  isUpgrade,
+  isDowngrade,
+  decideTrust,
+  decisionRequiresHuman,
+} from './trust-tier.js'
+export type { TrustTier, OutboundActionRisk, TrustDecision } from './trust-tier.js'
+
 // Lightweight FS sandbox — layer 1 (portable argv path jail). Layer 2 (OS
 // kernel jail) wires beside it; both keep hub-driven commands inside the roots.
 export { jailArgv, isInsideRoots, DEFAULT_INTERPRETERS } from './workspace-jail.js'
