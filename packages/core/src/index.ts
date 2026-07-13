@@ -162,6 +162,8 @@ export {
   decisionRequiresHuman,
   // GT-M4 纯软连接:身份确证 → advisory 升降档建议(绝不自动改档)。
   suggestTierFromIdentity,
+  // GT-M5 信任引荐:可信 peer 引荐 → advisory 初始档建议(信任不传递,恒地板 T1)。
+  suggestTierFromReferral,
 } from './trust-tier.js'
 export type {
   TrustTier,
@@ -169,6 +171,7 @@ export type {
   TrustDecision,
   IdentityConfidence,
   TierSuggestion,
+  ReferralSuggestion,
 } from './trust-tier.js'
 
 // Lightweight FS sandbox — layer 1 (portable argv path jail). Layer 2 (OS

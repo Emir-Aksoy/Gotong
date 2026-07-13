@@ -196,3 +196,46 @@ export function suggestTierFromIdentity(
   }
   return null // pin_absent(或任何未知信号)→ 无建议
 }
+
+// ---------------------------------------------------------------------------
+// GT-M5 — 信任引荐 / 传递(岔口 4):可信 peer 引荐一个新 peer → 系统据引荐关系
+// 建议一个初始档 → owner 确认才落档。**引荐只降「发现 + 初始配置」的成本 +
+// 建议初始档,绝不自动赋予信任**(守岔口 3)。这是「信任不传递」的具体形状:
+// 哪怕引荐人是我给的 T3,新 peer 也只建议地板 T1——信任的根仍是我对新 peer 自己
+// 的 PIN / 提升,X 信任 Y 不等于我信任 Y。
+// ---------------------------------------------------------------------------
+
+/**
+ * 一条 advisory 引荐建议。**永远只是建议**(同 M4 铁律):owner 确认才落档,可改
+ * 成别的档、也可拒绝。`referrerTier` 记引荐人的档(供 owner 面板显示出处:「你的
+ * T3 伙伴引荐了它」),`to` 是建议的初始档 —— 结构上恒为地板 `DEFAULT_TRUST_TIER`。
+ */
+export interface ReferralSuggestion {
+  to: TrustTier
+  referrerTier: TrustTier
+  reason: 'referral'
+}
+
+/**
+ * 信任引荐(GT-M5):给定**引荐人这条边的信任档**,产出一条 advisory 初始档建议
+ * (或 null = 引荐不够格,无建议)。纯函数,不碰存储。
+ *
+ *   引荐人 ≥ T2(已验证 / 已信任)→ 建议新 peer 初始档 = 地板 T1。
+ *   引荐人 < T2(或无效档)→ null:不够可信的 peer,其「介绍」不产出信任信号。
+ *
+ * 为什么目标恒为 T1(信任不传递):引荐**只**降低「发现 + 初始配置」的成本——它替
+ * owner 找到了 hub-Y、预填了连接。但信任的根永远是 owner 对 Y 自己的单边决定:
+ * Y 要到 T2 得 owner 亲自 PIN 它的公钥,到 T3 得 owner 显式提升。引荐人再高的档
+ * 都传递不过来。所以哪怕 T3 伙伴引荐,建议的也只是「先给个 T1,你自己再决定」。
+ *
+ * 为什么引荐人要 ≥ T2 才算数:引荐是一条信任信号,只有我已经「验证过身份」
+ * (T2)乃至「信任为伙伴」(T3)的边,它的介绍才值得作为一条建议浮给 owner;
+ * T0/T1 的边我自己都还在令牌地板将信将疑,它的引荐不构成信号(fail-closed)。
+ */
+export function suggestTierFromReferral(referrerTier: TrustTier): ReferralSuggestion | null {
+  if (!isTrustTier(referrerTier)) return null
+  // 引荐人不够可信(< T2)→ 引荐不产出信号。
+  if (tierRank(referrerTier) < tierRank('T2')) return null
+  // 信任不传递:目标恒为地板,与 fail-closed 默认同一个常量。
+  return { to: DEFAULT_TRUST_TIER, referrerTier, reason: 'referral' }
+}

@@ -11,6 +11,7 @@ import {
   decideTrust,
   decisionRequiresHuman,
   suggestTierFromIdentity,
+  suggestTierFromReferral,
   type TrustTier,
   type OutboundActionRisk,
   type TrustDecision,
@@ -210,5 +211,51 @@ describe('GT-M4 纯软连接 suggestTierFromIdentity(建议 ≠ 自动改档)', 
     expect(a).toMatchObject({ kind: 'upgrade', from: 'T1', reason: 'pin_verified' })
     // from ≠ to:建议永远描述一个「变化」,不是「保持」。
     if (a) expect(a.from).not.toBe(a.to)
+  })
+})
+
+describe('GT-M5 信任引荐 suggestTierFromReferral(引荐 = 建议初始档,不自动赋信)', () => {
+  it('T3 引荐人 → 建议初始档 T1(plan 第六节的确切例子)', () => {
+    expect(suggestTierFromReferral('T3')).toEqual({
+      to: 'T1', referrerTier: 'T3', reason: 'referral',
+    })
+  })
+  it('T2 引荐人(已验证)→ 建议初始档 T1', () => {
+    expect(suggestTierFromReferral('T2')).toEqual({
+      to: 'T1', referrerTier: 'T2', reason: 'referral',
+    })
+  })
+  it('T1 引荐人(仅令牌地板,不够可信)→ null 无建议', () => {
+    expect(suggestTierFromReferral('T1')).toBeNull()
+  })
+  it('T0 引荐人 → null 无建议', () => {
+    expect(suggestTierFromReferral('T0')).toBeNull()
+  })
+  it('无效引荐人档 → null(fail-closed)', () => {
+    expect(suggestTierFromReferral('T9' as TrustTier)).toBeNull()
+    expect(suggestTierFromReferral('' as TrustTier)).toBeNull()
+  })
+
+  // 核心纪律(信任不传递):无论引荐人多高档,建议的初始档恒为地板 —— 绝不「X 是 T3
+  // 所以 Y 也 T3」。目标恒等于 fail-closed 地板常量,且永不高于 T1。
+  it('信任不传递:任何够格引荐建议目标恒为地板 T1', () => {
+    for (const referrer of TRUST_TIERS) {
+      const sug = suggestTierFromReferral(referrer)
+      if (sug) {
+        expect(sug.to).toBe(DEFAULT_TRUST_TIER) // = 'T1'
+        expect(tierRank(sug.to)).toBeLessThanOrEqual(tierRank('T1'))
+      }
+    }
+  })
+
+  // 核心纪律(引荐 = 建议,不自动赋信 + owner 确认才落):函数纯、无副作用,返回的是
+  // 一条带出处(referrerTier + reason='referral')的「建议」,不是可直接写进 trust_tier
+  // 的裸档。落档是 owner 另点头的另一步(capstone 证:引荐建议出现 → owner 确认 →
+  // 才 addPeer,拒绝则那条边根本不建)。
+  it('纯函数:同输入同输出、返回带出处的建议而非裸档值', () => {
+    const a = suggestTierFromReferral('T3')
+    const b = suggestTierFromReferral('T3')
+    expect(a).toEqual(b) // 幂等
+    expect(a).toMatchObject({ to: 'T1', referrerTier: 'T3', reason: 'referral' })
   })
 })
