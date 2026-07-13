@@ -1,0 +1,14 @@
+{
+  "name": "@gotong/example-graded-trust",
+  "version": "0.0.0",
+  "type": "module",
+  "private": true,
+  "description": "GT capstone (分级信任 track) — 一条边的信任是长出来的,审批摩擦随它变. The whole graded-trust chain in one deterministic run, no network, no key, no LLM: a freshly-handshaken peer lands on the fail-closed floor T1 (every action needs a human) → owner PINs its signing key, a re-verify returns pin_verified and suggestTierFromIdentity proposes T2 — but the suggestion never auto-applies (the effective tier stays T1 until the owner accepts) → owner elevates to T3 and the SAME action's approval keeps getting lighter, yet the most dangerous action still needs a member confirmation even at T3 (trust lowers friction, never removes the floor) → the now-T3 partner refers a brand-new hub-Z and suggestTierFromReferral proposes the FLOOR T1, not T3 (trust is not transitive). Real @gotong/core decideTrust / suggestTierFrom* pure functions underneath; nothing stubbed.",
+  "scripts": {
+    "start": "tsx src/demo.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@gotong/core": "workspace:*"
+  }
+}

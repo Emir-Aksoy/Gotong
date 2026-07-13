@@ -71,6 +71,7 @@ pnpm demo                          # = hello-collab（官方第一步，见 QUIC
 |---|---|---|
 | [`cross-hub-workflow`](../../examples/cross-hub-workflow) | 两个 hub 一个进程：工作流派一步到 peer hub 的能力，出站审批闸后跨过组织边界 | 零（inproc） |
 | [`butler-cross-hub`](../../examples/butler-cross-hub) | 管家出网：成员一句大白话 → `/me` 确认 → capability 跨界（真 wrapper 盖 origin）→ 对端答案回同一轮 | 零（inproc） |
+| [`graded-trust`](../../examples/graded-trust) | GT capstone：一条边从陌生 T1 → PIN 建议 T2（建议≠自动升）→ owner 提升 T3 → 引荐建初始档，同一动作审批随档变轻但危险格底线不塌；真 `decideTrust`/`suggestTierFrom*` 纯函数 | 零（无网络无 LLM） |
 | [`cross-org-rfp`](../../examples/cross-org-rfp) | 最小真·跨组织流：买方发 RFP，卖方起草 + HITL 批 + 回报价 | 零（inproc） |
 | [`cross-hub-mcp`](../../examples/cross-hub-mcp) | hub A 共享 MCP server，hub B 经联邦链调它的工具——子进程 + 凭证留在 A | 零 + 本地 MCP |
 | [`cross-hub-federation`](../../examples/cross-hub-federation) | 真 WebSocket 跨组织联邦：双向 bearer token，approve 跨界、reject fail-closed、错 token 握手拒 | 需 socket |

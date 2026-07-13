@@ -2,7 +2,9 @@
 
 > **文档地位**:M0 计划文档(计划 + 侦察实录 + 决策固化 + 落地路线)。
 > 本文是 GT track 的北极星,写码前先读它。
-> **写于** 2026-07-13　**状态** 计划待审(方案门)→ 用户拍板后进 M1
+> **写于** 2026-07-13　**状态** ✅ **全完**(M1→M7 + capstone,2026-07-13 用户拍板七
+> 决策后一轮落地)。wire 规范见 [`MESH-PROTOCOL.md`](MESH-PROTOCOL.md);跑一遍全链
+> `pnpm demo:graded-trust`([`examples/graded-trust`](../../examples/graded-trust))。
 
 ---
 
