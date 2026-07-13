@@ -160,8 +160,16 @@ export {
   isDowngrade,
   decideTrust,
   decisionRequiresHuman,
+  // GT-M4 纯软连接:身份确证 → advisory 升降档建议(绝不自动改档)。
+  suggestTierFromIdentity,
 } from './trust-tier.js'
-export type { TrustTier, OutboundActionRisk, TrustDecision } from './trust-tier.js'
+export type {
+  TrustTier,
+  OutboundActionRisk,
+  TrustDecision,
+  IdentityConfidence,
+  TierSuggestion,
+} from './trust-tier.js'
 
 // Lightweight FS sandbox — layer 1 (portable argv path jail). Layer 2 (OS
 // kernel jail) wires beside it; both keep hub-driven commands inside the roots.

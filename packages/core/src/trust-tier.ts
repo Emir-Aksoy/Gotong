@@ -131,3 +131,68 @@ export function decideTrust(tier: TrustTier, risk: OutboundActionRisk): TrustDec
 export function decisionRequiresHuman(d: TrustDecision): boolean {
   return d === 'member_notify' || d === 'member_approve' || d === 'owner_approve'
 }
+
+// ---------------------------------------------------------------------------
+// GT-M4 — 纯软连接(岔口 3):身份确证 ↔ 授权档 只做 advisory 提示。
+//
+// 一条铁律:**身份确证只提示,升降档永远是 owner 的决定**。这里的函数产出的是
+// 「给 owner 看的建议」,绝不改任何存储、绝不自动改 trust_tier。装配层(host /
+// web / CLI)拿到建议只负责「显示」,落不落档是 owner 点头才发生的另一步。
+// ---------------------------------------------------------------------------
+
+/**
+ * 身份确证信号 —— 纯软连接的输入。它是 STD 层 pinnedKid 复验结果的抽象:core
+ * 只认「结果类」,不认怎么验的(取活名片、算签名、比指纹都是 a2a / host 的事)。
+ *   pin_verified — 活名片签名钥的 RFC 7638 指纹 == owner PIN 的 pinnedKid。身份锚定成立。
+ *   pin_mismatch — 复验出的指纹 != PIN 值(钥换了 / 可能根本是别的 hub)。身份存疑。
+ *   pin_absent   — owner 没 PIN(无锚点),或对端没签名卡:没有身份信号。
+ */
+export type IdentityConfidence = 'pin_verified' | 'pin_mismatch' | 'pin_absent'
+
+/**
+ * 一条 advisory 升降档建议。**永远只是建议**(纯软连接铁律,岔口 3):系统绝不
+ * 拿它自动改 trust_tier;它只是喂给 owner 面板 / CLI 的一行提示。`reason` 是稳定
+ * 代号(面板 i18n 在 web 层,core 只给代号)。
+ */
+export interface TierSuggestion {
+  kind: 'upgrade' | 'downgrade'
+  from: TrustTier
+  to: TrustTier
+  reason: 'pin_verified' | 'pin_mismatch'
+}
+
+/**
+ * 纯软连接(GT-M4):从身份确证信号 + 当前档,产出一条 advisory 升降档建议
+ * (或 null = 无建议)。**此函数是纯的,不碰任何存储**——返回值是提示,落档是
+ * owner 另点头的事。
+ *
+ *   pin_verified 且当前 < T2 → 建议升到 **T2**(身份锚定成立,可考虑「已验证」)。
+ *     当前已 ≥ T2 → null(已经锚定过,不重复建议)。
+ *   pin_mismatch 且当前 > T1 → 建议降到 **T1**(钥变了,身份存疑,退回令牌地板)。
+ *     当前已 ≤ T1 → null(已在地板,无处可降)。
+ *   pin_absent / 无效当前档 → null(没有信号 / 基线不可信,不动 = fail-closed)。
+ *
+ * 为什么升只到 T2、降只到 T1:PIN 只证明**身份**(=T2 门槛),证明不了「值得信任
+ * 做危险事」(那是 T3,owner 显式提升,pinnedKid 给不了);mismatch 是「请重新
+ * 确认」的软提示,退回令牌地板 T1,不是「断交」(不 deny、不 T0)。
+ */
+export function suggestTierFromIdentity(
+  current: TrustTier,
+  signal: IdentityConfidence,
+): TierSuggestion | null {
+  // 基线不可信就不建议(不拿垃圾当当前档去推升降),保守方向。
+  if (!isTrustTier(current)) return null
+  if (signal === 'pin_verified') {
+    if (tierRank(current) < tierRank('T2')) {
+      return { kind: 'upgrade', from: current, to: 'T2', reason: 'pin_verified' }
+    }
+    return null
+  }
+  if (signal === 'pin_mismatch') {
+    if (tierRank(current) > tierRank('T1')) {
+      return { kind: 'downgrade', from: current, to: 'T1', reason: 'pin_mismatch' }
+    }
+    return null
+  }
+  return null // pin_absent(或任何未知信号)→ 无建议
+}

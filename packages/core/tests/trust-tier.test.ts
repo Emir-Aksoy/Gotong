@@ -10,9 +10,11 @@ import {
   isDowngrade,
   decideTrust,
   decisionRequiresHuman,
+  suggestTierFromIdentity,
   type TrustTier,
   type OutboundActionRisk,
   type TrustDecision,
+  type IdentityConfidence,
 } from '../src/trust-tier.js'
 
 describe('GT-M1 trust-tier 纯核', () => {
@@ -120,5 +122,93 @@ describe('GT-M1 trust-tier 纯核', () => {
       expect(TRUST_TIER_CODENAMES.T3).toBe('trusted')
       for (const t of TRUST_TIERS) expect(TRUST_TIER_CODENAMES[t]).toBeTruthy()
     })
+  })
+})
+
+describe('GT-M4 纯软连接 suggestTierFromIdentity(建议 ≠ 自动改档)', () => {
+  describe('pin_verified → 建议升到 T2(仅当前 < T2)', () => {
+    it('T1 → 建议升 T2', () => {
+      expect(suggestTierFromIdentity('T1', 'pin_verified')).toEqual({
+        kind: 'upgrade', from: 'T1', to: 'T2', reason: 'pin_verified',
+      })
+    })
+    it('T0 → 建议升 T2(from 记真实当前)', () => {
+      expect(suggestTierFromIdentity('T0', 'pin_verified')).toEqual({
+        kind: 'upgrade', from: 'T0', to: 'T2', reason: 'pin_verified',
+      })
+    })
+    it('T2 → null(已锚定,不重复建议)', () => {
+      expect(suggestTierFromIdentity('T2', 'pin_verified')).toBeNull()
+    })
+    it('T3 → null(已高于 T2,不建议降)', () => {
+      expect(suggestTierFromIdentity('T3', 'pin_verified')).toBeNull()
+    })
+  })
+
+  describe('pin_mismatch → 建议降到 T1 地板(仅当前 > T1)', () => {
+    it('T3 → 建议降 T1', () => {
+      expect(suggestTierFromIdentity('T3', 'pin_mismatch')).toEqual({
+        kind: 'downgrade', from: 'T3', to: 'T1', reason: 'pin_mismatch',
+      })
+    })
+    it('T2 → 建议降 T1', () => {
+      expect(suggestTierFromIdentity('T2', 'pin_mismatch')).toEqual({
+        kind: 'downgrade', from: 'T2', to: 'T1', reason: 'pin_mismatch',
+      })
+    })
+    it('T1 → null(已在地板,无处可降)', () => {
+      expect(suggestTierFromIdentity('T1', 'pin_mismatch')).toBeNull()
+    })
+    it('T0 → null(已在地板下,不建议)', () => {
+      expect(suggestTierFromIdentity('T0', 'pin_mismatch')).toBeNull()
+    })
+  })
+
+  it('pin_absent → 恒 null(没有身份信号,不动)', () => {
+    for (const t of TRUST_TIERS) {
+      expect(suggestTierFromIdentity(t, 'pin_absent')).toBeNull()
+    }
+  })
+
+  it('无效当前档 → null(基线不可信不建议,fail-closed)', () => {
+    expect(suggestTierFromIdentity('T9' as TrustTier, 'pin_verified')).toBeNull()
+    expect(suggestTierFromIdentity('' as TrustTier, 'pin_mismatch')).toBeNull()
+  })
+
+  it('未知信号 → null(保守)', () => {
+    expect(suggestTierFromIdentity('T1', 'bogus' as IdentityConfidence)).toBeNull()
+  })
+
+  // 核心纪律 1:PIN 只证身份(=T2 门槛),永远给不了 T3(那是 owner 显式提升)。
+  // 无论从哪档、无论信号,建议的目标档绝不是 T3。
+  it('建议目标绝不为 T3(PIN 证不了「值得做危险事」)', () => {
+    for (const t of TRUST_TIERS) {
+      for (const s of ['pin_verified', 'pin_mismatch', 'pin_absent'] as IdentityConfidence[]) {
+        const sug = suggestTierFromIdentity(t, s)
+        if (sug) expect(sug.to).not.toBe('T3')
+      }
+    }
+  })
+
+  // 核心纪律 2:mismatch 是「请重新确认」的软提示,退回令牌地板 T1,绝不 deny /
+  // 绝不 T0(不是「断交」)。所有降级建议的目标恒为 T1。
+  it('降级建议目标恒为 T1(重新确认,非断交)', () => {
+    for (const t of TRUST_TIERS) {
+      const sug = suggestTierFromIdentity(t, 'pin_mismatch')
+      if (sug) expect(sug.to).toBe('T1')
+    }
+  })
+
+  // 核心纪律 3(建议 ≠ 自动改档):这个函数是纯的 —— 同输入同输出,且返回的是一条
+  // 「描述」(kind/from/to/reason)而不是一个「直接拿去写库的新档」。它没有任何
+  // 副作用,升降档要 owner 另点头(capstone 里证全链路)。这里钉死纯度 + 形状。
+  it('纯函数:同输入同输出、返回描述而非可直接落库的裁决', () => {
+    const a = suggestTierFromIdentity('T1', 'pin_verified')
+    const b = suggestTierFromIdentity('T1', 'pin_verified')
+    expect(a).toEqual(b) // 幂等
+    // 返回值带完整出处(from + reason),证明它是「给人看的建议」而非裸档值。
+    expect(a).toMatchObject({ kind: 'upgrade', from: 'T1', reason: 'pin_verified' })
+    // from ≠ to:建议永远描述一个「变化」,不是「保持」。
+    if (a) expect(a.from).not.toBe(a.to)
   })
 })
