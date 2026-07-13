@@ -183,15 +183,19 @@ describe('Route B P1-M9 — per-link isolation holds over real WebSocket transpo
       hub: home,
       link: linkHomeToY,
       remoteCapabilities: ['svc-y'],
+      // GT-M2: even the "wide open" peer needs an explicit cap allowlist now.
+      outboundCaps: ['svc-y'],
       selfHubId: 'orgHome',
       originResolver: (from) => ({ userId: from, userRole: 'member' }),
     })
     // peer edges back to home advertise `home-task` so each peer can push an
     // inbound task that the home quota gate (or lack of one) then judges.
+    // GT-M2: the pushing side must allowlist `home-task` to dispatch it out.
     installPeerLink({
       hub: hubX.hub,
       link: linkXToHome,
       remoteCapabilities: ['home-task'],
+      outboundCaps: ['home-task'],
       selfHubId: 'orgX',
       originResolver: (from) => ({ userId: from, userRole: 'member' }),
     })
@@ -199,6 +203,7 @@ describe('Route B P1-M9 — per-link isolation holds over real WebSocket transpo
       hub: hubY.hub,
       link: linkYToHome,
       remoteCapabilities: ['home-task'],
+      outboundCaps: ['home-task'],
       selfHubId: 'orgY',
       originResolver: (from) => ({ userId: from, userRole: 'member' }),
     })

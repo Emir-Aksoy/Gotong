@@ -83,6 +83,9 @@ describe('peer inbound ACL from the identity row gates tasks (Phase 18 B-M2)', (
       hub: hubA,
       link: a,
       remoteCapabilities: ['probe', 'sensitive-op'],
+      // GT-M2: the sender must allowlist what it sends (this test exercises the
+      // RECEIVER's inbound ACL, so the outbound side is opened for both caps).
+      outboundCaps: ['probe', 'sensitive-op'],
       selfHubId: 'orgA-hub',
       originResolver: (from) => ({ userId: from, userRole: 'member' }),
     })

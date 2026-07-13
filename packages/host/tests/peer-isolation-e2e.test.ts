@@ -114,12 +114,16 @@ describe('Phase 19 P4-M4 — per-link trust contracts are isolated across peers'
       allowedDataClasses: ['public'],
       perLinkQuotaBudget: 1,
     })
-    // orgY — wide open (no contract); the legacy accept-all peer.
+    // orgY — no data-class / quota clamps; carries only the cap allowlist that
+    // GT-M2 now requires of every edge (was the "legacy accept-all peer" before
+    // fail-closed became the default). The isolation this test measures is
+    // orthogonal to that allowlist.
     store.addPeer({
       peerId: 'orgY',
       endpointUrl: 'wss://y.example',
       peerToken: 'tok-orgy-12345678',
       kind: 'organization',
+      outboundCaps: ['svc-y'],
     })
     const rowX = store.getPeerByPeerId('orgX')!
     const rowY = store.getPeerByPeerId('orgY')!
@@ -162,10 +166,12 @@ describe('Phase 19 P4-M4 — per-link trust contracts are isolated across peers'
     })
     // peer edges back to home advertise `home-task` so each peer can push an
     // inbound task that the home quota gate (or lack of one) then judges.
+    // GT-M2: the pushing side must allowlist `home-task` to dispatch it out.
     installPeerLink({
       hub: hubX,
       link: pairX.b,
       remoteCapabilities: ['home-task'],
+      outboundCaps: ['home-task'],
       selfHubId: 'orgX',
       originResolver: (from) => ({ userId: from, userRole: 'member' }),
     })
@@ -173,6 +179,7 @@ describe('Phase 19 P4-M4 — per-link trust contracts are isolated across peers'
       hub: hubY,
       link: pairY.b,
       remoteCapabilities: ['home-task'],
+      outboundCaps: ['home-task'],
       selfHubId: 'orgY',
       originResolver: (from) => ({ userId: from, userRole: 'member' }),
     })

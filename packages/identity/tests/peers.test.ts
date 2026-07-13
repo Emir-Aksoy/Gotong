@@ -507,7 +507,7 @@ describe('IdentityStore — peers (D1)', () => {
 
     it('an all-junk array collapses to [] (deny-all, fail-closed), never a passthrough', async () => {
       const p = await readWithMangledColumn('outbound_caps_json', '[1, 2, 3]', seedFor('hub_l13_alljunk'))
-      expect(p.outboundCaps).toEqual([]) // [] = deny-all, distinct from null = send-all
+      expect(p.outboundCaps).toEqual([]) // [] = explicit deny-all; storage still keeps null (unset) distinct from [], though the acl gate fail-closes both since GT-M2
       expect(p.policyCorrupt).toEqual(['outboundCaps'])
     })
 

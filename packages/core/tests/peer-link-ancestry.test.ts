@@ -55,7 +55,7 @@ describe('installPeerLink — ancestry crosses the hub boundary', () => {
       aPeerId: 'hubB',
       bPeerId: 'hubA',
     })
-    installPeerLink({ hub: hubA, link: linkAtoB, remoteCapabilities: ['draft'] })
+    installPeerLink({ hub: hubA, link: linkAtoB, remoteCapabilities: ['draft'], outboundCaps: ['draft'] })
     installPeerLink({ hub: hubB, link: linkBtoA, remoteCapabilities: [] })
 
     const chain: AncestryNode[] = [
@@ -86,7 +86,7 @@ describe('installPeerLink — ancestry crosses the hub boundary', () => {
       aPeerId: 'hubB',
       bPeerId: 'hubA',
     })
-    installPeerLink({ hub: hubA, link: linkAtoB, remoteCapabilities: ['draft'] })
+    installPeerLink({ hub: hubA, link: linkAtoB, remoteCapabilities: ['draft'], outboundCaps: ['draft'] })
     installPeerLink({ hub: hubB, link: linkBtoA, remoteCapabilities: [] })
 
     // ancestry already at the boundary on the sender side; once it
@@ -120,7 +120,7 @@ describe('installPeerLink — ancestry crosses the hub boundary', () => {
       aPeerId: 'hubB',
       bPeerId: 'hubA',
     })
-    installPeerLink({ hub: hubA, link: linkAtoB, remoteCapabilities: ['draft'] })
+    installPeerLink({ hub: hubA, link: linkAtoB, remoteCapabilities: ['draft'], outboundCaps: ['draft'] })
     installPeerLink({ hub: hubB, link: linkBtoA, remoteCapabilities: [] })
 
     const result = await hubA.dispatch({
@@ -150,7 +150,7 @@ describe('installPeerLink — data-class labels cross the relay hop (audit A4)',
       aPeerId: 'hubB',
       bPeerId: 'hubA',
     })
-    installPeerLink({ hub: hubA, link: linkAtoB, remoteCapabilities: ['draft'] })
+    installPeerLink({ hub: hubA, link: linkAtoB, remoteCapabilities: ['draft'], outboundCaps: ['draft'] })
     installPeerLink({ hub: hubB, link: linkBtoA, remoteCapabilities: [] })
 
     const result = await hubA.dispatch({
@@ -188,13 +188,14 @@ describe('installPeerLink — data-class labels cross the relay hop (audit A4)',
       hub: hubB,
       link: bc.a,
       remoteCapabilities: ['remote-svc'],
+      outboundCaps: ['remote-svc'],
       allowedDataClasses: ['public'],
     })
     installPeerLink({ hub: hubC, link: bc.b, remoteCapabilities: [] })
 
     // A ↔ B, open (no data-class contract on this leg).
     const ab = createInprocHubLinkPair({ aPeerId: 'hubB', bPeerId: 'hubA' })
-    installPeerLink({ hub: hubA, link: ab.a, remoteCapabilities: ['remote-svc'] })
+    installPeerLink({ hub: hubA, link: ab.a, remoteCapabilities: ['remote-svc'], outboundCaps: ['remote-svc'] })
     installPeerLink({ hub: hubB, link: ab.b, remoteCapabilities: [] })
 
     const result = await hubA.dispatch({

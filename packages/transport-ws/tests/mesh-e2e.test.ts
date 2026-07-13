@@ -161,6 +161,7 @@ describe('Mesh E2E §4.1 — personal hub joins team hub', () => {
       hub: A.hub,
       link: linkAtoB,
       remoteCapabilities: ['long-form-research'],
+      outboundCaps: ['long-form-research'], // GT-M2: allowlist the cap A sends out
       autoMarkRead: false,
     })
 
@@ -244,6 +245,7 @@ describe('Mesh E2E §4.2 — triangle, only C owns the capability', () => {
       hub: A.hub,
       link: linkA_C,
       remoteCapabilities: ['deep-research'],
+      outboundCaps: ['deep-research'], // GT-M2: allowlist the cap A sends out
       autoMarkRead: false,
     })
 

@@ -45,7 +45,7 @@ describe('installPeerLink — cross-hub transcript correlation handle', () => {
       aPeerId: 'hubB',
       bPeerId: 'hubA',
     })
-    installPeerLink({ hub: hubA, link: linkAtoB, remoteCapabilities: ['draft'] })
+    installPeerLink({ hub: hubA, link: linkAtoB, remoteCapabilities: ['draft'], outboundCaps: ['draft'] })
     installPeerLink({ hub: hubB, link: linkBtoA, remoteCapabilities: [] })
 
     const result = await hubA.dispatch({
@@ -95,12 +95,12 @@ describe('installPeerLink — cross-hub transcript correlation handle', () => {
 
     // B ↔ C (B relays onward to C).
     const bc = createInprocHubLinkPair({ aPeerId: 'hubC', bPeerId: 'hubB' })
-    installPeerLink({ hub: hubB, link: bc.a, remoteCapabilities: ['remote-svc'] })
+    installPeerLink({ hub: hubB, link: bc.a, remoteCapabilities: ['remote-svc'], outboundCaps: ['remote-svc'] })
     installPeerLink({ hub: hubC, link: bc.b, remoteCapabilities: [] })
 
     // A ↔ B.
     const ab = createInprocHubLinkPair({ aPeerId: 'hubB', bPeerId: 'hubA' })
-    installPeerLink({ hub: hubA, link: ab.a, remoteCapabilities: ['remote-svc'] })
+    installPeerLink({ hub: hubA, link: ab.a, remoteCapabilities: ['remote-svc'], outboundCaps: ['remote-svc'] })
     installPeerLink({ hub: hubB, link: ab.b, remoteCapabilities: [] })
 
     const result = await hubA.dispatch({

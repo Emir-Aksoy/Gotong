@@ -661,7 +661,12 @@ export class PeerRegistry {
         // exactly the pre-B-M2 behaviour.
         ...(row.acl ? { acl: row.acl } : {}),
         // Phase 19 P4-M1 — apply the persisted OUTBOUND capability allowlist.
-        // null (unset row) → omitted → send-anything (legacy); `[]` → lockdown.
+        // GT-M2: null (unset row) → omitted → installPeerLink FAILS CLOSED
+        // (`no_outbound_allowlist`); `[]` → lockdown. Both reach the same end
+        // state — an admin must curate outboundCaps before anything leaves this
+        // edge. (A null edge also advertises nothing below, so capability
+        // dispatch never routes to it either; the chokepoint is defence in depth
+        // for an explicit dispatch aimed straight at the wrapper id.)
         ...(row.outboundCaps ? { outboundCaps: row.outboundCaps } : {}),
         // v5 Stream G-M1 — advertise = authorize. The per-link outbound
         // allowlist doubles as the wrapper's ADVERTISED capabilities, so a local
@@ -741,6 +746,7 @@ export class PeerRegistry {
       ...(row.acl ? { acl: row.acl } : {}),
       // Phase 19 P4-M1 — the same outbound allowlist guards a wrapper installed
       // off an inbound-accepted link (we can still dispatch TO this peer).
+      // GT-M2: null → omitted → fail closed, same as the outbound-dial site.
       ...(row.outboundCaps ? { outboundCaps: row.outboundCaps } : {}),
       // v5 Stream G-M1 — advertise = authorize (see dialOne). A peer connected
       // via an inbound-accepted link is just as orchestrable, so its curated

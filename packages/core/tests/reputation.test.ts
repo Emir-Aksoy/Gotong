@@ -267,9 +267,9 @@ describe('Hub integration: scheduler picks higher-reputation peer', () => {
     // A is linked to both
     const ab = createInprocHubLinkPair({ aPeerId: 'hubB', bPeerId: 'hubA' })
     const ac = createInprocHubLinkPair({ aPeerId: 'hubC', bPeerId: 'hubA' })
-    installPeerLink({ hub: hubA, link: ab.a, remoteCapabilities: ['draft'] })
+    installPeerLink({ hub: hubA, link: ab.a, remoteCapabilities: ['draft'], outboundCaps: ['draft'] })
     installPeerLink({ hub: hubB, link: ab.b })
-    installPeerLink({ hub: hubA, link: ac.a, remoteCapabilities: ['draft'] })
+    installPeerLink({ hub: hubA, link: ac.a, remoteCapabilities: ['draft'], outboundCaps: ['draft'] })
     installPeerLink({ hub: hubC, link: ac.b })
 
     // Seed reputation: hubC scores high, hubB scores low.
@@ -312,9 +312,9 @@ describe('Hub integration: scheduler picks higher-reputation peer', () => {
 
     const ab = createInprocHubLinkPair({ aPeerId: 'hubB', bPeerId: 'hubA' })
     const ac = createInprocHubLinkPair({ aPeerId: 'hubC', bPeerId: 'hubA' })
-    installPeerLink({ hub: hubA, link: ab.a, remoteCapabilities: ['draft'] })
+    installPeerLink({ hub: hubA, link: ab.a, remoteCapabilities: ['draft'], outboundCaps: ['draft'] })
     installPeerLink({ hub: hubB, link: ab.b })
-    installPeerLink({ hub: hubA, link: ac.a, remoteCapabilities: ['draft'] })
+    installPeerLink({ hub: hubA, link: ac.a, remoteCapabilities: ['draft'], outboundCaps: ['draft'] })
     installPeerLink({ hub: hubC, link: ac.b })
 
     expect(hubA.reputation.scoreOf('hubB')).toBe(0)

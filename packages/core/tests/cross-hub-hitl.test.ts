@@ -139,6 +139,7 @@ describe('cross-hub HITL — end-to-end with inproc HubLink (D2)', () => {
       hub: hubB,
       link: linkBtoA,
       remoteCapabilities: ['research'],
+      outboundCaps: ['research'],
       selfHubId: 'hub_B',
       originResolver: () => ({ orgId: 'hub_B', userId: 'user_b' }),
     })

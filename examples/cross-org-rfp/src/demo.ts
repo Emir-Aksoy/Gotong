@@ -179,6 +179,9 @@ async function main(): Promise<void> {
     hub: orgAHub,
     link: aLink,
     remoteCapabilities: ['vendor-quote'],
+    // GT-M2 — an unconfigured edge now fails closed; curate the same allowlist
+    // that G-M1 advertises so this legitimate cross-org RFP can leave the hub.
+    outboundCaps: ['vendor-quote'],
     localWrapperId: 'org-b-bridge',
     // FED-M2 — stamp `origin` on outbound tasks so Org B knows who
     // from Org A is asking. In production `originResolver` would call

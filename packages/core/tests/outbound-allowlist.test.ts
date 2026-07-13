@@ -43,9 +43,18 @@ function makeTask(strategy: DispatchStrategy): Task {
 describe('checkOutboundCapabilities — pure verdict', () => {
   const cap = (caps: string[]): DispatchStrategy => ({ kind: 'capability', capabilities: caps })
 
-  it('no allowlist (undefined / null) → accept anything (legacy)', () => {
-    expect(checkOutboundCapabilities(makeTask(cap(['draft'])), undefined).ok).toBe(true)
-    expect(checkOutboundCapabilities(makeTask(cap(['draft'])), null).ok).toBe(true)
+  it('no allowlist (undefined / null) → FAIL-CLOSED deny (GT-M2)', () => {
+    // Reversed from the pre-GT accept-all default. An unconfigured edge sends
+    // nothing until its owner declares an allowlist — matches FEDERATION-RUNBOOK
+    // §4, which always documented null = fail-closed. See GRADED-TRUST.md 问题 1.
+    expect(checkOutboundCapabilities(makeTask(cap(['draft'])), undefined)).toEqual({
+      ok: false,
+      reason: 'no_outbound_allowlist',
+    })
+    expect(checkOutboundCapabilities(makeTask(cap(['draft'])), null)).toEqual({
+      ok: false,
+      reason: 'no_outbound_allowlist',
+    })
   })
 
   it('required caps ⊆ allowlist → ok', () => {
@@ -159,7 +168,7 @@ describe('installPeerLink — outbound allowlist enforcement (mesh edge)', () =>
     await hubB.stop()
   })
 
-  it('no allowlist configured → legacy accept-all (the cap that was blocked above now passes)', async () => {
+  it('no allowlist configured → FAIL-CLOSED, nothing crosses (GT-M2 reversal)', async () => {
     const hubA = Hub.inMemory()
     const hubB = Hub.inMemory()
     await Promise.all([hubA.start(), hubB.start()])
@@ -171,17 +180,24 @@ describe('installPeerLink — outbound allowlist enforcement (mesh edge)', () =>
       aPeerId: 'hubB',
       bPeerId: 'hubA',
     })
-    // outboundCaps omitted → no allowlist → send anything.
+    // outboundCaps omitted → no allowlist. Before GT-M2 this meant "send
+    // anything" (accept-all); now an unconfigured edge FAILS CLOSED — an owner
+    // must declare the allowlist before anything leaves the hub. See
+    // docs/zh/GRADED-TRUST.md 问题 1 (runbook always said null = fail-closed).
     installPeerLink({ hub: hubA, link: linkAtoB, remoteCapabilities: ['review'] })
     installPeerLink({ hub: hubB, link: linkBtoA, remoteCapabilities: [] })
 
     const res = await hubA.dispatch({
       from: 'system',
       strategy: { kind: 'capability', capabilities: ['review'] },
-      payload: { topic: 'legacy' },
+      payload: { topic: 'unconfigured' },
     })
-    expect(res.kind).toBe('ok')
-    expect(bAgent.invocations).toBe(1)
+    expect(res.kind).toBe('failed')
+    if (res.kind === 'failed') {
+      expect(res.error).toContain('outbound_capability_denied:no_outbound_allowlist')
+    }
+    // The whole point of fail-closed: nothing crossed the wire.
+    expect(bAgent.invocations).toBe(0)
 
     await hubA.stop()
     await hubB.stop()
@@ -264,6 +280,7 @@ describe('installPeerLink — outbound data-class enforcement (mesh edge)', () =
       hub: hubA,
       link: linkAtoB,
       remoteCapabilities: ['draft'],
+      outboundCaps: ['draft'],
       allowedDataClasses: ['public'],
     })
     installPeerLink({ hub: hubB, link: linkBtoA, remoteCapabilities: [] })
@@ -321,6 +338,7 @@ describe('installPeerLink — outbound data-class redaction (Phase 19 P1-M10)', 
       hub: hubA,
       link: linkAtoB,
       remoteCapabilities: ['draft'],
+      outboundCaps: ['draft'],
       allowedDataClasses: ['public'],
       redactor,
     })
@@ -358,6 +376,7 @@ describe('installPeerLink — outbound data-class redaction (Phase 19 P1-M10)', 
       hub: hubA,
       link: linkAtoB,
       remoteCapabilities: ['draft'],
+      outboundCaps: ['draft'],
       allowedDataClasses: ['public'],
       redactor: () => null,
     })
@@ -395,6 +414,7 @@ describe('installPeerLink — outbound data-class redaction (Phase 19 P1-M10)', 
       hub: hubA,
       link: linkAtoB,
       remoteCapabilities: ['draft'],
+      outboundCaps: ['draft'],
       allowedDataClasses: ['public'],
       redactor: () => ({ payload: { looks: 'clean' }, dataClasses: ['pii'] }),
     })
@@ -430,6 +450,7 @@ describe('installPeerLink — outbound data-class redaction (Phase 19 P1-M10)', 
       hub: hubA,
       link: linkAtoB,
       remoteCapabilities: ['draft'],
+      outboundCaps: ['draft'],
       allowedDataClasses: ['public'],
       redactor: () => {
         throw new Error('boom')
@@ -465,7 +486,7 @@ describe('installPeerLink — inbound policy gate (Phase 19 P4-M4)', () => {
       aPeerId: 'hubB',
       bPeerId: 'hubA',
     })
-    installPeerLink({ hub: hubA, link: linkAtoB, remoteCapabilities: ['draft'] })
+    installPeerLink({ hub: hubA, link: linkAtoB, remoteCapabilities: ['draft'], outboundCaps: ['draft'] })
     // hubB gates inbound: the first task passes, the rest are over-quota.
     let seen = 0
     installPeerLink({

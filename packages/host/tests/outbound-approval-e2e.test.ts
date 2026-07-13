@@ -95,6 +95,7 @@ describe('Phase 18 B-M3b — outbound approval gate acceptance gate', () => {
       hub: hubA,
       link: a,
       remoteCapabilities: [CAP],
+      outboundCaps: [CAP],
       selfHubId: 'orgA',
       wrapOutbound: (inner) =>
         new ApprovalGatedParticipant({

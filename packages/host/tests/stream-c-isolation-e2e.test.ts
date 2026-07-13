@@ -124,6 +124,7 @@ describe('v5 C-M3 — Stream C contracts (KB + node I/O) are isolated across pee
       hub: home,
       link: pairX.a,
       remoteCapabilities: ['svc-x'],
+      outboundCaps: ['svc-x'], // GT-M2: cap allowlist required to dispatch out
       selfHubId: 'orgHome',
       originResolver: (from) => ({ userId: from, userRole: 'member' }),
       ...(rowX.allowedDataClasses ? { allowedDataClasses: rowX.allowedDataClasses } : {}),
@@ -133,6 +134,7 @@ describe('v5 C-M3 — Stream C contracts (KB + node I/O) are isolated across pee
       hub: home,
       link: pairY.a,
       remoteCapabilities: ['svc-y'],
+      outboundCaps: ['svc-y'], // GT-M2: cap allowlist required to dispatch out
       selfHubId: 'orgHome',
       originResolver: (from) => ({ userId: from, userRole: 'member' }),
       ...(rowY.allowedDataClasses ? { allowedDataClasses: rowY.allowedDataClasses } : {}),

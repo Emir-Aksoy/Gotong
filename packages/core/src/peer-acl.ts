@@ -50,21 +50,26 @@ export type OutboundVerdict = { ok: true } | { ok: false; reason: string }
  * check, run inside `RemoteHubViaLink.onTask` right before the task crosses
  * the wire.
  *
- *   - `outboundCaps === null | undefined` → no allowlist configured → every
- *     task passes (legacy / accept-all; an unset peer row keeps pre-P4
- *     behaviour).
+ *   - `outboundCaps === null | undefined` → NO allowlist configured →
+ *     FAIL-CLOSED: deny every task (GT-M2). An unconfigured edge sends nothing
+ *     until its owner declares what may cross. This REVERSES the pre-GT
+ *     accept-all default, which silently contradicted both the "every edge is
+ *     an explicit contract" stance AND the runbook — FEDERATION-RUNBOOK §4 has
+ *     always documented `null` = fail-closed. See docs/zh/GRADED-TRUST.md 问题 1.
  *   - otherwise → the task's required capabilities must ALL be in the
  *     allowlist. A non-allowlistable strategy (explicit / unfiltered
  *     broadcast) is denied outright — letting those past a configured
  *     allowlist would silently bypass it.
- *   - `outboundCaps === []` (explicit empty) → deny everything: a legitimate
- *     "send nothing to this peer" lockdown.
+ *   - `outboundCaps === []` (explicit empty) → deny everything, the same
+ *     verdict as unconfigured now, but a DELIBERATE "send nothing" lockdown.
  */
 export function checkOutboundCapabilities(
   task: Task,
   outboundCaps: readonly string[] | null | undefined,
 ): OutboundVerdict {
-  if (outboundCaps === null || outboundCaps === undefined) return { ok: true }
+  if (outboundCaps === null || outboundCaps === undefined) {
+    return { ok: false, reason: 'no_outbound_allowlist' }
+  }
   const required = extractRequiredCapabilities(task.strategy)
   if (required === null) {
     return { ok: false, reason: 'strategy_not_allowlisted' }

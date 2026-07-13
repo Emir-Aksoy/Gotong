@@ -60,6 +60,7 @@ describe('v5 C-M2 — workflow node-level I/O authorization over a clamped link'
       hub: home,
       link: pair.a,
       remoteCapabilities: ['remote-svc'],
+      outboundCaps: ['remote-svc'],
       selfHubId: 'orgHome',
       originResolver: (from) => ({ userId: from, userRole: 'member' }),
       allowedDataClasses: ['public'],

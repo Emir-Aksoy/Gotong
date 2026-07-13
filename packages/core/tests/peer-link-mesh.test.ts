@@ -57,7 +57,7 @@ describe('installPeerLink — minimal A ↔ B', () => {
       aPeerId: 'hubB',
       bPeerId: 'hubA',
     })
-    installPeerLink({ hub: hubA, link: linkAtoB, remoteCapabilities: ['draft'] })
+    installPeerLink({ hub: hubA, link: linkAtoB, remoteCapabilities: ['draft'], outboundCaps: ['draft'] })
     installPeerLink({ hub: hubB, link: linkBtoA, remoteCapabilities: [] })
 
     const result = await hubA.dispatch({
@@ -88,7 +88,7 @@ describe('installPeerLink — minimal A ↔ B', () => {
       bPeerId: 'hubA',
     })
     installPeerLink({ hub: hubA, link: a, remoteCapabilities: [] })
-    installPeerLink({ hub: hubB, link: b, remoteCapabilities: ['review'] })
+    installPeerLink({ hub: hubB, link: b, remoteCapabilities: ['review'], outboundCaps: ['review'] })
 
     const result = await hubB.dispatch({
       from: 'system',
@@ -121,6 +121,7 @@ describe('installPeerLink — minimal A ↔ B', () => {
       hub: hubA,
       link: a,
       remoteCapabilities: ['draft'],
+      outboundCaps: ['draft'],
     })
     installPeerLink({ hub: hubB, link: b })
 
@@ -165,6 +166,7 @@ describe('mesh triangle: 3 hubs, capability lives on C', () => {
       hub: hubA,
       link: ac.a,
       remoteCapabilities: ['long-form-research'], // C claims this
+      outboundCaps: ['long-form-research'],
     })
     installPeerLink({ hub: hubC, link: ac.b, remoteCapabilities: [] })
 
@@ -211,6 +213,7 @@ describe('mesh triangle: 3 hubs, capability lives on C', () => {
       hub: hubB,
       link: bc.a,
       remoteCapabilities: ['long-form-research'],
+      outboundCaps: ['long-form-research'],
     })
     installPeerLink({ hub: hubC, link: bc.b, remoteCapabilities: [] })
 
@@ -322,6 +325,7 @@ describe('installPeerLink — FED-M2 origin stamping', () => {
       hub: hubA,
       link: a,
       remoteCapabilities: ['probe'],
+      outboundCaps: ['probe'],
       ...(opts.aSelfHubId !== undefined ? { selfHubId: opts.aSelfHubId } : {}),
       ...(opts.aOriginResolver !== undefined ? { originResolver: opts.aOriginResolver } : {}),
     })
@@ -493,6 +497,7 @@ describe('installPeerLink — FED-M3 receiver ACL', () => {
       // Sender treats peer as covering both possible capabilities so
       // dispatch reaches the link regardless of ACL on the other side.
       remoteCapabilities: ['probe', 'sensitive-op'],
+      outboundCaps: ['probe', 'sensitive-op'],
       selfHubId: 'orgA-hub',
       ...(opts.aOriginResolver !== undefined ? { originResolver: opts.aOriginResolver } : {}),
     })
