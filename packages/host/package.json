@@ -89,10 +89,10 @@
     "@gotong/web": "workspace:*",
     "@gotong/workflow": "workspace:*",
     "@gotong/workflow-assistant": "workspace:*",
-    "@anthropic-ai/sdk": "^0.96.0",
-    "openai": "^6.38.0",
-    "better-sqlite3": "^12.10.0",
-    "ws": "^8.20.1"
+    "@anthropic-ai/sdk": "^0.111.0",
+    "openai": "^6.46.0",
+    "better-sqlite3": "^12.11.1",
+    "ws": "^8.21.0"
   },
   "devDependencies": {
     "@gotong/cli": "workspace:*",
