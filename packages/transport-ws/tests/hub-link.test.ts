@@ -14,12 +14,18 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { WebSocketServer } from 'ws'
 
-import type { HubLink, Message, Task, TaskResult } from '@gotong/core'
+import type { HubLink, Message, Task, TaskResult, TrustTier } from '@gotong/core'
 
 import { acceptHubLinks, connectHubLink } from '../src/hub-link.js'
 import { bearerAuth } from '../src/peer-auth.js'
 
 const delay = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
+
+// GT-M6 — the advisory peer-declared tier getter lives on the concrete
+// `WebSocketHubLinkImpl`, NOT the `HubLink` contract (deliberate: it is
+// observability, not a load-bearing gate). Read it via a narrow cast.
+const declaredTierOf = (link: HubLink): TrustTier | null =>
+  (link as unknown as { peerDeclaredTrustTier: TrustTier | null }).peerDeclaredTrustTier
 
 interface Bench {
   wss: WebSocketServer
@@ -31,7 +37,7 @@ interface Bench {
 
 async function startBench(
   selfId: string,
-  opts: { peerToken?: string } = {},
+  opts: { peerToken?: string; declaredTrustTier?: TrustTier } = {},
 ): Promise<Bench> {
   const wss = new WebSocketServer({ port: 0 })
   await new Promise<void>((resolve) => wss.once('listening', () => resolve()))
@@ -45,6 +51,7 @@ async function startBench(
     server: wss,
     selfId,
     ...(opts.peerToken !== undefined ? { auth: bearerAuth({ token: opts.peerToken }) } : {}),
+    ...(opts.declaredTrustTier ? { declaredTrustTier: opts.declaredTrustTier } : {}),
     onLink: (link) => {
       const w = waiters.shift()
       if (w) w(link)
@@ -484,5 +491,163 @@ describe('WebSocketHubLink — FED-M1 mutual peer auth', () => {
     expect(() => bearerAuth({ token: '' })).toThrow(
       /token must be a non-empty string/,
     )
+  })
+})
+
+// ---------------------------------------------------------------------------
+// GT-M6 — advisory trust-tier self-declaration on the mesh handshake.
+//
+// The wire carries an OPTIONAL `trustTier` on MESH_HELLO (OUT→IN) and
+// MESH_HELLO_ACK (IN→OUT). It is PURELY ADVISORY context for the peer's
+// owner — a self-report, never a credential, never verified, and the
+// receiver NEVER auto-applies it to any gate. These tests pin exactly that:
+//   1. a valid declaration round-trips into the peer's
+//      `peerDeclaredTrustTier` (both directions, symmetric);
+//   2. an unknown value is dropped to null (fail-safe, never trusted);
+//   3. absence stays null (byte-identical-to-today default);
+//   4. the IRON LAW — a declaration NEVER changes the handshake verdict:
+//      a wrong-token HELLO that ALSO declares T3 still fails auth and
+//      never captures the tier (声明 ≠ 信任).
+// ---------------------------------------------------------------------------
+
+describe('WebSocketHubLink — GT-M6 advisory trust-tier declaration', () => {
+  it('OUT declares a tier on HELLO → IN captures it (advisory context)', async () => {
+    const bench = await startBench('hubB')
+    try {
+      const aLink = await connectHubLink({
+        url: bench.url,
+        selfId: 'hubA',
+        declaredTrustTier: 'T3',
+      })
+      const bLink = await bench.nextLink()
+      // The handshake succeeded and B captured A's self-declared tier.
+      expect(bLink.status).toBe('open')
+      expect(declaredTierOf(bLink)).toBe('T3')
+      // Symmetry sanity: A declared, B did not → A sees no declaration.
+      expect(declaredTierOf(aLink)).toBe(null)
+      await aLink.close()
+    } finally {
+      await bench.stop()
+    }
+  })
+
+  it('IN declares a tier on HELLO_ACK → OUT captures it (symmetric)', async () => {
+    const bench = await startBench('hubB', { declaredTrustTier: 'T2' })
+    try {
+      const aLink = await connectHubLink({ url: bench.url, selfId: 'hubA' })
+      const bLink = await bench.nextLink()
+      // A (OUT) captured B's declaration echoed on the ACK.
+      expect(aLink.status).toBe('open')
+      expect(declaredTierOf(aLink)).toBe('T2')
+      // B never received a declaration from A.
+      expect(declaredTierOf(bLink)).toBe(null)
+      await aLink.close()
+    } finally {
+      await bench.stop()
+    }
+  })
+
+  it('both sides declare → each captures the other (fully symmetric)', async () => {
+    const bench = await startBench('hubB', { declaredTrustTier: 'T1' })
+    try {
+      const aLink = await connectHubLink({
+        url: bench.url,
+        selfId: 'hubA',
+        declaredTrustTier: 'T3',
+      })
+      const bLink = await bench.nextLink()
+      expect(declaredTierOf(bLink)).toBe('T3') // B saw A's HELLO
+      expect(declaredTierOf(aLink)).toBe('T1') // A saw B's ACK
+      await aLink.close()
+    } finally {
+      await bench.stop()
+    }
+  })
+
+  it('unknown declared value is dropped to null (never trusted, handshake still succeeds)', async () => {
+    const bench = await startBench('hubB')
+    try {
+      // A malformed/unknown tier string must not poison the capture — it
+      // is ignored (stays null) and the handshake is unaffected. Cast past
+      // the type guard to simulate a peer on a newer/older/hostile build.
+      const aLink = await connectHubLink({
+        url: bench.url,
+        selfId: 'hubA',
+        declaredTrustTier: 'T9' as unknown as TrustTier,
+      })
+      const bLink = await bench.nextLink()
+      expect(bLink.status).toBe('open')
+      expect(declaredTierOf(bLink)).toBe(null)
+      await aLink.close()
+    } finally {
+      await bench.stop()
+    }
+  })
+
+  it('no declaration → null on both sides (byte-identical-to-today default)', async () => {
+    const bench = await startBench('hubB')
+    try {
+      const aLink = await connectHubLink({ url: bench.url, selfId: 'hubA' })
+      const bLink = await bench.nextLink()
+      expect(declaredTierOf(aLink)).toBe(null)
+      expect(declaredTierOf(bLink)).toBe(null)
+      await aLink.close()
+    } finally {
+      await bench.stop()
+    }
+  })
+
+  it('IRON LAW: a wrong-token HELLO that declares T3 still fails auth and NEVER captures the tier', async () => {
+    // 声明 ≠ 信任. The declaration must not buy the peer past the auth
+    // gate, and a rejected handshake must record nothing. We capture the
+    // IN-side link even on failure to assert it never saw the tier.
+    const wss = new WebSocketServer({ port: 0 })
+    await new Promise<void>((resolve) => wss.once('listening', () => resolve()))
+    const addr = wss.address()
+    const port = typeof addr === 'object' && addr ? addr.port : 0
+    const url = `ws://127.0.0.1:${port}`
+
+    // Grab the raw inbound link the instant it is constructed — before its
+    // handshake resolves or rejects — so we can inspect it post-mortem. We
+    // reach into acceptHubLinks' onLink (only fires on SUCCESS), plus a
+    // fallback timer, to prove onLink never fires for a rejected peer.
+    let acceptedLink: HubLink | null = null
+    acceptHubLinks({
+      server: wss,
+      selfId: 'hubB',
+      auth: bearerAuth({ token: 'server-secret' }),
+      // The IN side declares its own T2, but that is irrelevant — the point
+      // is the OUT side's bad-token+T3 HELLO gets rejected.
+      declaredTrustTier: 'T2',
+      onLink: (link) => {
+        acceptedLink = link
+      },
+    })
+
+    try {
+      await expect(
+        connectHubLink({
+          url,
+          selfId: 'hubA',
+          auth: bearerAuth({ token: 'client-WRONG-secret' }),
+          declaredTrustTier: 'T3',
+          handshakeTimeoutMs: 1000,
+        }),
+      ).rejects.toThrow(/closed during handshake|peer_disconnected|handshake/i)
+
+      // The rejected peer NEVER became an accepted link. The declaration
+      // bought it nothing: no capture, no membership, no trust.
+      await delay(50)
+      expect(acceptedLink).toBe(null)
+    } finally {
+      for (const client of wss.clients) {
+        try {
+          client.terminate()
+        } catch {
+          /* swallow */
+        }
+      }
+      await new Promise<void>((resolve) => wss.close(() => resolve()))
+    }
   })
 })

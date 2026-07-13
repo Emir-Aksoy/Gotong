@@ -33,6 +33,7 @@ import { randomUUID } from 'node:crypto'
 
 import { WebSocket, type WebSocketServer } from 'ws'
 
+import { isTrustTier } from '@gotong/core'
 import type {
   FeedbackEntry,
   HubLink,
@@ -42,6 +43,7 @@ import type {
   ParticipantId,
   Task,
   TaskResult,
+  TrustTier,
 } from '@gotong/core'
 
 import type { PeerAuthEnvelope, PeerAuthScheme, PeerAuthVerdict } from './peer-auth.js'
@@ -54,17 +56,29 @@ export type MeshFrame =
   // receiver accepts that only if IT also has no auth scheme configured.
   // When the receiver has a scheme, an absent or mismatched envelope is a
   // fatal handshake error.
+  // GT-M6 — `trustTier` is an OPTIONAL, purely ADVISORY self-declaration: the
+  // sender discloses the graded-trust tier it believes the edge warrants. It is
+  // NOT a credential and NOT verified — the receiver captures it only for the
+  // owner's context (`link.peerDeclaredTrustTier`) and NEVER auto-applies it.
+  // Trust stays anchored in structurally-unforgeable places (the bearer token
+  // in `auth`, the owner-pinned key, the owner's own tier assignment); a wire
+  // self-report of "I'm T3" can never make an edge T3 (声明 ≠ 信任). Being an
+  // ignore-if-unknown optional field, it is backward/forward compatible, so the
+  // exact-string MESH_PROTOCOL_VERSION stays '1' — which is itself proof the
+  // field is not load-bearing: a v1 peer that ignores it must still interop.
   | {
       type: 'MESH_HELLO'
       peerId: ParticipantId
       protocolVersion: typeof MESH_PROTOCOL_VERSION
       auth?: PeerAuthEnvelope
+      trustTier?: TrustTier
     }
   | {
       type: 'MESH_HELLO_ACK'
       peerId: ParticipantId
       protocolVersion: typeof MESH_PROTOCOL_VERSION
       auth?: PeerAuthEnvelope
+      trustTier?: TrustTier
     }
   | { type: 'MESH_TASK'; task: Task }
   | { type: 'MESH_RESULT'; result: TaskResult }
@@ -169,6 +183,13 @@ export interface WebSocketHubLinkOptions {
    * interval, mirroring session.ts's agent-session discipline).
    */
   maxMissedPings?: number
+  /**
+   * GT-M6 — OPTIONAL advisory graded-trust tier this side DECLARES in its
+   * HELLO/ACK. It is a self-report the peer surfaces for the owner's context
+   * and NEVER auto-applies (声明 ≠ 信任). Omitted → no declaration. This never
+   * affects OUR side's gating; it is a courtesy disclosure for the peer.
+   */
+  declaredTrustTier?: TrustTier
 }
 
 class WebSocketHubLinkImpl implements HubLink {
@@ -181,6 +202,15 @@ class WebSocketHubLinkImpl implements HubLink {
   private readonly expectedPeerId?: ParticipantId
   /** R1 — peer auth scheme (presents + verifies). See option docs. */
   private readonly auth?: PeerAuthScheme
+  /** GT-M6 — the advisory tier THIS side declares in HELLO/ACK (or undefined). */
+  private readonly declaredTrustTier?: TrustTier
+  /**
+   * GT-M6 — the tier the PEER declared in its HELLO/ACK, captured for advisory
+   * display only. `null` until a valid declaration arrives (unknown values are
+   * ignored). NEVER consulted by auth / gating / routing — a self-report can
+   * never grant trust (声明 ≠ 信任). The owner adjudicates; this is context.
+   */
+  private _peerDeclaredTrustTier: TrustTier | null = null
   private readonly dispatchTimeoutMs: number
   private readonly pullTimeoutMs: number = DEFAULT_PULL_TIMEOUT_MS
 
@@ -224,6 +254,8 @@ class WebSocketHubLinkImpl implements HubLink {
     // R1 — the auth scheme self-validates at construction (e.g.
     // `bearerAuth` rejects an empty token), so the link just stores it.
     this.auth = opts.auth
+    // GT-M6 — advisory tier this side declares; never gates anything locally.
+    this.declaredTrustTier = opts.declaredTrustTier
     this.dispatchTimeoutMs = opts.dispatchTimeoutMs ?? DEFAULT_DISPATCH_TIMEOUT_MS
     this.rpcTimeoutMs = opts.rpcTimeoutMs ?? DEFAULT_RPC_TIMEOUT_MS
     this.keepaliveIntervalMs = opts.keepaliveIntervalMs ?? DEFAULT_KEEPALIVE_INTERVAL_MS
@@ -265,6 +297,17 @@ class WebSocketHubLinkImpl implements HubLink {
     return this._lastSeenAt
   }
 
+  /**
+   * GT-M6 — the graded-trust tier the peer DECLARED in its handshake, or `null`
+   * if it declared none (or an unrecognised value). ADVISORY ONLY: nothing in
+   * this link consults it; it is surfaced so a host/owner can see "the peer
+   * claims T3" as context. The effective trust of an edge is the owner's own
+   * `trust_tier` assignment, never this self-report (声明 ≠ 信任).
+   */
+  get peerDeclaredTrustTier(): TrustTier | null {
+    return this._peerDeclaredTrustTier
+  }
+
   /** @internal — used by `connectHubLink` / `acceptHubLinks`. */
   waitForHandshake(): Promise<void> {
     return this.handshakePromise
@@ -278,6 +321,8 @@ class WebSocketHubLinkImpl implements HubLink {
       peerId: this.selfId,
       protocolVersion: MESH_PROTOCOL_VERSION,
       ...(env ? { auth: env } : {}),
+      // GT-M6 — advisory tier declaration (omitted when unset). Never load-bearing.
+      ...(this.declaredTrustTier ? { trustTier: this.declaredTrustTier } : {}),
     })
   }
 
@@ -373,12 +418,20 @@ class WebSocketHubLinkImpl implements HubLink {
           }
           ackAuth = v.replyWith
         }
+        // GT-M6 — capture the peer's advisory tier declaration ONLY after auth
+        // passed (a rejected handshake never records it), and ONLY if it's a
+        // valid tier (unknown → ignored, stays null). This is advisory context,
+        // never a gate: we've already verified the token above; the declaration
+        // adds nothing to that verdict.
+        this._peerDeclaredTrustTier = isTrustTier(frame.trustTier) ? frame.trustTier : null
         this._peerId = frame.peerId
         this.sendFrame({
           type: 'MESH_HELLO_ACK',
           peerId: this.selfId,
           protocolVersion: MESH_PROTOCOL_VERSION,
           ...(ackAuth ? { auth: ackAuth } : {}),
+          // GT-M6 — echo our own advisory declaration on the ACK (symmetric).
+          ...(this.declaredTrustTier ? { trustTier: this.declaredTrustTier } : {}),
         })
         this._status = 'open'
         this.startKeepalive()
@@ -425,6 +478,9 @@ class WebSocketHubLinkImpl implements HubLink {
             return
           }
         }
+        // GT-M6 — capture the peer's advisory tier declaration from the ACK,
+        // same discipline as the HELLO path: after auth, valid-only, never a gate.
+        this._peerDeclaredTrustTier = isTrustTier(frame.trustTier) ? frame.trustTier : null
         this._peerId = frame.peerId
         this._status = 'open'
         this.startKeepalive()
@@ -946,6 +1002,15 @@ export interface AcceptHubLinksOptions {
   selfId: ParticipantId
   /** Called once per peer that completes the handshake successfully. */
   onLink: (link: HubLink) => void
+  /**
+   * GT-M6 — our own OPTIONAL, purely ADVISORY tier self-declaration to echo
+   * back on every inbound link's HELLO_ACK. Symmetric with
+   * `ConnectHubLinkOptions.declaredTrustTier` (the OUT side sends it on HELLO).
+   * It is context for the peer's owner, NEVER a credential and NEVER a gate —
+   * the receiver captures it into `link.peerDeclaredTrustTier` but never
+   * auto-applies it. Omit to send no declaration (byte-identical to today).
+   */
+  declaredTrustTier?: TrustTier
   handshakeTimeoutMs?: number
   /**
    * R1 — peer authentication scheme applied to every inbound link.
@@ -1052,6 +1117,7 @@ export function acceptHubLinks(opts: AcceptHubLinksOptions): () => void {
     const link = new WebSocketHubLinkImpl(ws, 'in', {
       selfId: opts.selfId,
       ...(opts.auth ? { auth: opts.auth } : {}),
+      ...(opts.declaredTrustTier ? { declaredTrustTier: opts.declaredTrustTier } : {}),
       ...(opts.keepaliveIntervalMs !== undefined
         ? { keepaliveIntervalMs: opts.keepaliveIntervalMs }
         : {}),

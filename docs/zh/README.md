@@ -72,6 +72,8 @@
 - [`PROD-HARDENING-RUNBOOK.md`](PROD-HARDENING-RUNBOOK.md) · [`PRE-LAUNCH-TEST-PLAN.md`](PRE-LAUNCH-TEST-PLAN.md) · [`REAL-WORLD-TESTING.md`](REAL-WORLD-TESTING.md) — 生产加固 / 上线前测试 / 真机测试
 - [`CLOUD-RESOURCE-FOOTPRINT.md`](CLOUD-RESOURCE-FOOTPRINT.md) — 云资源占用
 - [`FEDERATION.md`](FEDERATION.md) · [`FEDERATION-RUNBOOK.md`](FEDERATION-RUNBOOK.md) · [`HUB-MESH.md`](HUB-MESH.md) — 跨 hub 联邦（两机操作员）
+- [`MESH-PROTOCOL.md`](MESH-PROTOCOL.md) — **Hub-Mesh wire 规范（v1）**：hub↔hub 那条边在网线上的字节契约（`MESH_*` 帧 / 握手裁决序 / per-edge 认证 / 分级信任 advisory 声明）；写兼容 mesh peer 看这
+- [`GRADED-TRUST.md`](GRADED-TRUST.md) — **分级信任（trustTier T0-T3）**：owner 选的信任档 × 动作风险 → 审批摩擦；fail-closed 默认 + 声明≠信任铁律
 - [`THREAT-MODEL.md`](THREAT-MODEL.md) — **威胁模型（部署者/家庭视角）**：托付了什么 / 谁能看什么 / 防住什么 / 防不住什么 + 备份恢复演练
 - [`REPUTATION-ROUTING.md`](REPUTATION-ROUTING.md) · [`SECURITY.md`](SECURITY.md) — 信誉路由 / 安全（报告者视角 + 缓解清单）
 

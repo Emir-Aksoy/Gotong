@@ -6,6 +6,13 @@
 >
 > **写于** 2026-05-22
 > **状态** 草案 — 待评审后转为 MVP 实施计划
+>
+> ⚠️ **本文是「为什么」的设计动机,不是 wire 真相。** 这套设计落地后**在网线上
+> 实际跑的字节契约**已抽成公开 wire 规范 [`MESH-PROTOCOL.md`](MESH-PROTOCOL.md)
+> (GT-M6):`MESH_HELLO`/`MESH_TASK`/`MESH_RESULT`… 全部帧、握手裁决序、per-edge
+> 认证、以及分级信任 advisory 声明字段都在那里 normative 描述。要**实现**一个兼容
+> 的 mesh peer,读那篇;要理解**当初为什么这么设计**(feedback ledger、reputation
+> §3.5),读本篇。
 
 ---
 
