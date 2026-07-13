@@ -304,7 +304,8 @@ fail-closed(默认拒绝)/ 引荐(referral,建议初始档不赋信)。
 
 **参考**:
 - `docs/zh/FEDERATION-RUNBOOK.md` — §0 心智模型 + §4 授权表(§4 的 fail-closed 矛盾 GT-M2 修)
-- `docs/zh/HUB-MESH.md` — mesh 设计文档(reputation §3.5 与 trustTier 正交)+ GT-M6/M7 规范化对象
+- `docs/zh/MESH-PROTOCOL.md` — **Hub-Mesh wire 规范(v1)= GT-M6/M7 的落地对象**:§6 分级信任 advisory 声明 + §10 公网分级模型/协商语义(当前实现 vs 未来预留)
+- `docs/zh/HUB-MESH.md` — mesh **设计文档**(reputation §3.5 与 trustTier 正交;wire 真相看 MESH-PROTOCOL.md)
 - `docs/zh/NET-AGENT-NETWORK.md` — 两边界"不绕既有闸、发现 ≠ 信任"同源
 - `docs/zh/STD-STANDARDS-ALIGNMENT.md` — pinnedKid / 名片签名(身份确证轴,advisory 先例)
 - `docs/zh/IM-APPROVAL.md` — imApprovable 白名单哲学(GT 矩阵"确认重量"的直接先例)
