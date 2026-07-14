@@ -71,6 +71,7 @@ import { buildButlerLastSeenProbe } from './personal-butler-last-seen.js'
 import { buildButlerSourceProbe } from './personal-butler-source.js'
 import { buildButlerPendingProbe, type ButlerPendingSource } from './personal-butler-pending.js'
 import { buildButlerPeersToolset, type ButlerPeerSurface } from './personal-butler-peers.js'
+import { buildButlerLlmsToolset, type ButlerLlmSurface } from './personal-butler-llms.js'
 import {
   buildButlerOnboardingProbe,
   buildButlerOnboardingToolset,
@@ -117,6 +118,8 @@ export interface ButlerFactoryRefs {
   askRoster: ButlerAskRosterSource | undefined
   /** NET-M1 — sanitized mesh roster for the `list_peers` network eye. */
   peerRoster: ButlerPeerSurface | undefined
+  /** LSA-M1 — sanitized model chain for the `list_my_llms` self-awareness eye. */
+  llmRoster: ButlerLlmSurface | undefined
   /** A1 — the member's pending /me inbox, for the待办 reminder card (read-only). */
   pendingInbox: ButlerPendingSource | undefined
   /** WIZ-M4c — six-phase wizard compose service. */
@@ -319,6 +322,11 @@ export function buildButlerFactory(deps: ButlerFactoryDeps): ButlerFactory {
         const peersToolset = refs.peerRoster
           ? buildButlerPeersToolset({ peers: refs.peerRoster, logger: log })
           : undefined
+        // LSA-M1 — benign "你(阿同)自己能调哪些模型": sanitized candidate chain +
+        // live health. Read-only; drops out when the pool roster surface is absent.
+        const llmsToolset = refs.llmRoster
+          ? buildButlerLlmsToolset({ llms: refs.llmRoster, logger: log })
+          : undefined
         // NET-M2 — the governed "替我问对端 hub" doorway OUT. Same governed master
         // switch as every consequential butler verb; targets resolve against the
         // SAME roster as the eye above (no drift). The dispatch rides the mesh
@@ -406,6 +414,7 @@ export function buildButlerFactory(deps: ButlerFactoryDeps): ButlerFactory {
           ...(diagnoseToolset ? [diagnoseToolset] : []),
           ...(askAgentToolset ? [askAgentToolset] : []),
           ...(peersToolset ? [peersToolset] : []),
+          ...(llmsToolset ? [llmsToolset] : []),
           ...(planWizardToolset ? [planWizardToolset] : []),
           ...(consolidateToolset ? [consolidateToolset] : []),
           remindersToolset,

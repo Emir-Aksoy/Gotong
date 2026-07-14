@@ -299,6 +299,7 @@ import type {
 } from './personal-butler-diagnose.js'
 import type { ButlerAskRosterSource } from './personal-butler-ask-agent.js'
 import { buildButlerPeerSurface, type ButlerPeerSurface } from './personal-butler-peers.js'
+import { buildButlerLlmSurface, type ButlerLlmSurface } from './personal-butler-llms.js'
 import type { ButlerWizardSource } from './personal-butler-workflow-wizard.js'
 import { ReminderParticipant } from './reminder-participant.js'
 import type { LlmProvider } from '@gotong/llm'
@@ -1004,6 +1005,7 @@ async function main(): Promise<void> {
   // NET-M1 — the butler's benign network eye: sanitized mesh roster (no
   // endpoint/token/ACL detail). Ref assigned once the peer registry exists.
   let butlerPeerRosterRef: ButlerPeerSurface | undefined
+  let butlerLlmRosterRef: ButlerLlmSurface | undefined
   // WIZ-M4c — the butler's benign "帮我规划一个工作流" planner: the six-phase
   // wizard's compose (组装→缺口→校验闭环), proposal-only, persists nothing. The
   // save half hands off to the governed create_workflow with the wizard's YAML.
@@ -1087,6 +1089,7 @@ async function main(): Promise<void> {
       diagnoseAdapt: butlerDiagnoseAdaptRef,
       askRoster: butlerAskRosterRef,
       peerRoster: butlerPeerRosterRef,
+      llmRoster: butlerLlmRosterRef,
       wizard: butlerWizardRef,
       providerBuilder: butlerProviderBuilderRef,
       memoryView: butlerMemoryViewRef,
@@ -1135,18 +1138,18 @@ async function main(): Promise<void> {
   // source as the 6h sweep's `buildProvider`), read lazily at butler-build time.
   // Assigned unconditionally; the factory still gates on `butlerMaintenanceOn`.
   butlerProviderBuilderRef = () => localAgents.buildButlerProvider()
+  // LSA-M1 — 阿同自省自己的模型链(脱敏无 key):pool 配置候选链 ⊕ routingHealth 健康叠加。
+  butlerLlmRosterRef = buildButlerLlmSurface({ roster: () => localAgents.butlerLlmRoster(), health: () => routingHealth.snapshot() })
   // CARE-M4 — the 活体校验 rides the pool's spawn-time key-resolution chain
   // (agentId → provider/key/baseURL) + the read-only models-list GET.
   butlerOnboardingKeyCheckRef = buildOnboardingKeyCheck({
     resolveTarget: (agentId) => localAgents.resolveLlmProbeTarget(agentId),
   })
 
-  // BF-M8 — arm the butler memory-maintenance sweep. Borrows the pool's
-  // provider resolution + NA-M5 model override (both re-resolved each tick so
-  // a key/spec edit after boot is picked up) and walks the per-user namespaces
-  // under `<space>/butler/memory/user/*`, distilling captured episodic into
-  // curated profiles + STATUS.md. Off when the butler is off or
-  // `GOTONG_BUTLER_MAINTENANCE` opts out. First tick lands one interval in.
+  // BF-M8 — arm the butler memory-maintenance sweep. Borrows the pool's provider
+  // resolution + NA-M5 model override (re-resolved each tick so a post-boot edit is
+  // picked up), walks `<space>/butler/memory/user/*` distilling episodic → curated
+  // profiles + STATUS.md. Off when butler off / `GOTONG_BUTLER_MAINTENANCE` opts out.
   let butlerMaintenanceSweeper: ButlerMaintenanceSweeper | undefined
   if (butlerMaintenanceOn) {
     butlerMaintenanceSweeper = new ButlerMaintenanceSweeper({
@@ -1162,10 +1165,9 @@ async function main(): Promise<void> {
     butlerMaintenanceSweeper.start()
   }
 
-  // Growth-reports admin surface — only meaningful if the
-  // personal-growth team is loaded. The accessor closure
-  // re-resolves on every web call so admin/restart of the
-  // synthesist agent picks up cleanly.
+  // Growth-reports admin surface — only meaningful if the personal-growth team is
+  // loaded. The accessor closure re-resolves on every web call so admin/restart of
+  // the synthesist agent picks up cleanly.
   const growthReports = new GrowthReportsAdmin({
     artifactAccessor: () => {
       const ctx = localAgents.liveServicesFor('growth-synthesist')
@@ -1173,12 +1175,10 @@ async function main(): Promise<void> {
     },
   })
 
-  // Workflow runners. Optional — the loader silently no-ops when the
-  // directory doesn't exist, so users who aren't using workflows see no
-  // extra log output. Errors are reported per-file; one bad workflow
-  // never blocks host boot. The loader only parses; the controller adopts
-  // each definition through the versioning service, which registers the
-  // resolver-backed runner (Phase 15).
+  // Workflow runners. Optional — the loader silently no-ops when the directory
+  // doesn't exist (users not using workflows see no extra log). Errors are per-file;
+  // one bad workflow never blocks boot. The loader only parses; the controller adopts
+  // each definition through the versioning service, which registers the runner (Phase 15).
   const workflowsDir = env('GOTONG_WORKFLOWS_DIR', join(SPACE_DIR, 'workflows', 'definitions'))!
   const workflowReport = await loadWorkflows({ dir: workflowsDir })
   const wfMsg = formatLoadReport(workflowReport)

@@ -53,7 +53,7 @@
 
 ## 三、里程碑
 
-### LSA-M1 自省（本 track 起点，benchmark-first）
+### LSA-M1 自省（本 track 起点，benchmark-first）— ✅ 已落
 
 阿同 benign 只读工具 `list_my_llms`：回答「我阿同现在能调用哪些模型」。
 
@@ -69,6 +69,11 @@
   单测断言 = 有主+2备时准确列 3 行（provider 类型+model+role 对）、index=1 降级时那行标
   「配额」其余健康、**带 key 的 spec 渲染文本零 key 泄露**、单候选诚实说「就一个」。
 - **边界**：benign 无旋钮（同 list_peers/list_my_capabilities）、热路径零 LLM、内核零改动。
+- **已落**：`personal-butler-llms.ts`（镜像 `personal-butler-peers.ts`）+ pool `butlerLlmRoster()`
+  抽 `providerLabelBase`（`routingLabel` 逐字节等价重构）+ factory/main.ts 装配（压注释净零守
+  main.ts 3000/3000）；10 单测（渲染/健康三态/**脱敏红线结构性**/单候选诚实/agentId 过滤/空/
+  错误/未知工具），host 2087 全绿，四门 PASS（旋钮 114 零新增）。已知边界：健康按声明 `index`
+  叠加，某 fallback 构建失败被 router 跳过时后续健康标注可能贴邻行（罕见配置错误，非安全问题）。
 
 ### LSA-M2 web search 接入（②的前提）
 

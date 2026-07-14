@@ -1623,6 +1623,60 @@ export class LocalAgentPool implements ManagedAgentLifecycle {
   }
 
   /**
+   * LSA-M1 — the resident butler's OWN routing chain, projected member-safe for
+   * the `list_my_llms` self-awareness eye. Derives the candidate list from the
+   * butler-enabled row's `managed` spec (primary + `fallbacks`), each labeled with
+   * the SAME `providerLabelBase` the routing-health panel uses — provider type /
+   * host, NEVER the api key. Returns null when no butler-enabled managed row
+   * exists (the tool then honestly says it can't read its models). The agentId
+   * rides along so the caller can overlay RoutingHealthTracker health (keyed by
+   * the same id the router records under). Candidate `index` is the DECLARED
+   * position (0=primary, then fallbacks in order); a fallback that fails to BUILD
+   * (rare misconfig) is skipped by the router, so a later degraded candidate could
+   * annotate the neighbouring row — acceptable for a self-awareness eye (never a
+   * safety issue, only which line shows the warning). Never throws — a corrupt
+   * agents.json → null, same posture as buildButlerProvider.
+   */
+  async butlerLlmRoster(): Promise<{
+    agentId: string
+    candidates: Array<{ index: number; role: 'primary' | 'fallback'; label: string; model: string | null }>
+  } | null> {
+    let rows: readonly AgentRecord[]
+    try {
+      rows = await this.space.agents()
+    } catch {
+      return null
+    }
+    const row = rows.find((r) => this.butlerEnabledFor(r))
+    if (!row?.managed) return null
+    const spec = row.managed
+    const candidates: Array<{
+      index: number
+      role: 'primary' | 'fallback'
+      label: string
+      model: string | null
+    }> = [{ index: 0, role: 'primary', label: providerLabelBase(spec), model: spec.model ?? null }]
+    spec.fallbacks?.forEach((fb, i) => {
+      // Mirror buildRoutedProvider's fallback spec shape: providerLabelBase reads
+      // only provider / providerLabel / baseURL, so a minimal spec suffices.
+      const fbSpec: ManagedAgentSpec = {
+        kind: spec.kind,
+        system: spec.system,
+        provider: fb.provider,
+        ...(fb.baseURL !== undefined ? { baseURL: fb.baseURL } : {}),
+        ...(fb.providerLabel !== undefined ? { providerLabel: fb.providerLabel } : {}),
+      }
+      candidates.push({
+        index: i + 1,
+        role: 'fallback',
+        label: providerLabelBase(fbSpec),
+        model: fb.model ?? null,
+      })
+    })
+    return { agentId: row.id, candidates }
+  }
+
+  /**
    * NA-M5 — the butler row's opt-in maintenance-model override. The 6h sweep
    * distills on the butler's own provider; this lets the spec pin a CHEAPER
    * model id for that background pass (same vendor / key / billing — only
@@ -2144,11 +2198,20 @@ function buildProvider(
  * back to the label → baseURL host → generic; append the model id when present.
  */
 function routingLabel(spec: ManagedAgentSpec): string {
-  const base =
-    spec.provider === 'openai-compatible'
-      ? spec.providerLabel?.trim() || (spec.baseURL ? safeHost(spec.baseURL) : 'openai-compatible')
-      : spec.providerLabel?.trim() || spec.provider
+  const base = providerLabelBase(spec)
   return spec.model ? `${base}:${spec.model}` : base
+}
+
+/**
+ * The provider-type/host part of a routing label, WITHOUT the model suffix.
+ * `openai-compatible` has no fixed vendor name, so fall back to the label →
+ * baseURL host → generic. This is the sanitized label LSA-M1's `list_my_llms`
+ * shows the member — it names the vendor/host, never the api key.
+ */
+function providerLabelBase(spec: ManagedAgentSpec): string {
+  return spec.provider === 'openai-compatible'
+    ? spec.providerLabel?.trim() || (spec.baseURL ? safeHost(spec.baseURL) : 'openai-compatible')
+    : spec.providerLabel?.trim() || spec.provider
 }
 
 function safeHost(url: string): string {
