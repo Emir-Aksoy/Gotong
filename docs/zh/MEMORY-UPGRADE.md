@@ -490,12 +490,55 @@ host **2069** / personal-memory **410** 全绿,四门 PASS(main.ts 3000/3000,旋
 不破)。真语义 embedder 的独立演示见 [`examples/butler-vector-recall`](../../examples/butler-vector-recall)
 (`embeddingRetriever` + chroma-mcp 两条真 embedder 路径)。
 
-### M-EMB2 / M-EMB3 —— 计划(逐个补,每步先立尺子)
+### M-GRAPH —— 图模式接线:联想 link 从「建了没接线」到全链路活(opt-in)✅
+
+M-EMB1 之后本要做 **M-EMB2**(把 `fusedRetriever` 泛化成可插 N 路加权信号的融合核)。开工前先实测一
+把:**它是投机泛化**——没有第三个**打分**信号在等这条缝(图模式是**召回池扩展**、不是打分臂;时新 /
+重要性早已是排序里的因子),照「build-but-don't-wire」纪律**不接不需要的缝**。转而实测揪出**真缺口=图
+模式**:问「妈妈住哪」→ A「我妈妈是玛丽」被查询命中、答案 B「玛丽在槟城买了房子」与查询零词重叠,
+**keyword 和 embedder 都够不到 B**(它俩各把每条事实**孤立**地对查询打分),只有顺着 A↔B 的联想边走一跳
+才够得到。用户拍板**做图模式**。
+
+侦察发现图件**全建好了、只差接线**(`links.ts` 的 `buildLinkGraph`/`expandByLinks` + `link-pass.ts` 的
+`linkReviewer` 写侧缝 + `personal-butler-writers.ts` 的 patchMeta link writer + `toolset.ts` 的 `expandK`/
+`linkLookup` 读侧扩展 —— 教科书级 build-but-don't-wire),M-GRAPH 就是把三段接上:
+
+- **写侧**:6h 维护 `buildButlerMaintenanceReviewer` 的 `composeReviewers` 末尾组进 `linkReviewer`(**排最后**
+  才连上本 tick 刚抽出的原子事实),writer 走既有 patchMeta 缝。**opt-in 且防御**:handle 无 patchMeta 就跳过
+  (绝不因接线 bug 拖垮同 tick 已跑完的蒸馏),`diffLinkUpdates` 只写增长过的 link(收敛后零写)。
+- **读侧**:`FileBackedInvertedIndex` 加 `lookupByIds`(复用已 fresh 的全店索引按 id 取邻居,零额外 IO、无
+  `list` 500 上限),graph 模式开时工厂把它作 `memoryLinkLookup` 传进 `MemoryToolset` —— recall 顺 link 扩一跳。
+- **旋钮**:`GOTONG_BUTLER_MEMORY_LINKS`(112→113,opt-in,默认关)。**一个旋钮管两侧**:开=维护写 link + 召回
+  扩一跳;关=一条 link 不写、recall 不扩,**逐字节不变**。且冻结块 `frozenShowLinks` 是**独立** opt(默认关),
+  故即使写了 link,**冻结块也字节不变**(link 只在按需 recall 面起效,不动缓存前缀)。
+
+**诚实的尺子刻度**(实测,非散文):端到端 proof `graph-recall.test.ts` 4 例——① 真 `linkReviewer` 从零发现
+A↔B(shared 玛丽,linked:2)、距扰项零链接;② **读侧缺口**:融合召回(keyword + 本地 embedder,即 M-EMB1
+生产默认)返回 A 但**够不到 B**;③ **读侧解出**:写了 link 后**同一查询**顺 `↪` 扩出 B(带真地址「槟城」);
+④ **关时字节不变**:link 在但无 `linkLookup` ⇒ recall 不扩。这些**实体桥接多跳用例刻意不进主 gate**
+(`RECALL_CASES`)——它们对无扩展的生产默认本就失败,进 gate 会拉低召回地板;单独 proof 隔离证明,与 M-EMB1
+`semantic-lift` 同款纪律。
+
+**四条边界**:① 热路径零 LLM(选边 / 扩展全是纯函数 jaccard + 一跳查表,写 link 在 6h 后台);② opt-in 未配
+字节不变(冻结块尤其);③ 数据不离盒(link 是本地 meta,不外呼);④ 内核零改动(`links.ts`/`link-pass.ts` 是
+personal-memory 叶子既有件,host 只加装配缝 + `lookupByIds`)。
+
+**验收**:personal-memory `graph-recall.test.ts` 4 例 + host `butler-recall-index` lookupByIds 3 例 + host
+`butler-maintenance-links.test.ts` 2 例(links:true 写 A↔B / 默认零写)全绿;personal-memory **414** / host
+**2074** 全绿,四门 PASS(main.ts 3000/3000,旋钮 **113**,kernel-deps 不破 —— `lookupByIds` 是能力非旋钮)。
+
+### M-EMB2(N 路融合泛化)—— 超越/不做
+
+实测判定为**投机泛化**:没有第三个**打分**信号在等这条缝,图模式走**池扩展**(M-GRAPH 已按池扩展形状接线,
+非打分臂),照纪律不预造。若将来真出现第三个内容感知打分信号(如密集向量 + 稀疏 + 图分三路加权),再按当时
+形状重启,不预造。
+
+### M-EMB3 —— 激活休眠模式(逐个补,每步先立尺子)
 
 | 里程碑 | 交付 | 验收门 | 状态 |
 |---|---|---|---|
-| **M-EMB2** | `fusedRetriever` 从硬编码 2 臂(keyword+semantic)泛化成**可插 N 路加权信号**的融合核,为「图分 / 时新 / 重要性当模式插进来」铺缝 | 重构后 `memory-recall-bench` 基线一分不掉(78.6%/0.738 稳)、默认两臂逐字节等价 | 计划 |
-| **M-EMB3** | 逐个**激活休眠模式**(`links.ts` 图 / 程序记忆):每个模式**先补一条它独有能解的 benchmark 失败用例**,再接线——**写不出失败用例=不接** | 每激活一个模式,尺子上多一格它专属的、之前红的刻度变绿 | 计划 |
+| **M-GRAPH** | 激活 `links.ts` 联想图(见上) | `graph-recall` 实体桥接 0→1 + 关时字节不变 | ✅ 完 |
+| **M-EMB3-next** | 逐个**激活剩余休眠模式**(程序记忆自动化 / dreaming umbrella…):每个模式**先补一条它独有能解的 benchmark 失败用例**,再接线——**写不出失败用例=不接** | 每激活一个模式,尺子上多一格它专属的、之前红的刻度变绿 | 计划 |
 
 **显式推迟**(尺子没显缺口前不预造):HippoRAG Personalized PageRank 多跳、Zep 双时态 KG、独立
 情节缓冲、多模态记忆——这些是更远的前沿,等 benchmark 真读出它们能填的缺口再上,不预造。

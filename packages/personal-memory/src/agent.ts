@@ -45,7 +45,7 @@ import { PersonalMemoryError } from './errors.js'
 import type { MemoryRetriever } from './retriever.js'
 import { MemorySession } from './session.js'
 import type { TierConfig } from './tiers.js'
-import { MemoryToolset } from './toolset.js'
+import { MemoryToolset, type MemoryLinkLookup } from './toolset.js'
 
 export interface MemoryAugmentedAgentOptions extends LlmAgentOptions {
   /**
@@ -61,6 +61,16 @@ export interface MemoryAugmentedAgentOptions extends LlmAgentOptions {
    * pluggable; the frozen block stays the byte-stable curated profile.
    */
   memoryRetriever?: MemoryRetriever
+  /**
+   * Opt-in (E-M3, wired by M-GRAPH): after a `recall`, expand ONE hop along the
+   * matched entries' `meta.links` and append the linked entries — this lookup
+   * resolves those link-target ids to entries. Omit → no expansion (default,
+   * byte-identical). Expansion rides the on-demand `recall` path ONLY; the
+   * byte-stable frozen block is untouched.
+   */
+  memoryLinkLookup?: MemoryLinkLookup
+  /** Max one-hop neighbors appended per recall when {@link memoryLinkLookup} is set. */
+  memoryExpandK?: number
   /** Kinds that seed the frozen block. Default `['semantic']`. */
   frozenMemoryKinds?: readonly MemoryKind[]
   /** Max entries pulled for the frozen block. Default 100. */
@@ -144,6 +154,8 @@ export class MemoryAugmentedAgent extends LlmAgent {
         ? { writableKinds: opts.writableMemoryKinds }
         : {}),
       ...(opts.memoryRetriever !== undefined ? { retriever: opts.memoryRetriever } : {}),
+      ...(opts.memoryLinkLookup !== undefined ? { linkLookup: opts.memoryLinkLookup } : {}),
+      ...(opts.memoryExpandK !== undefined ? { expandK: opts.memoryExpandK } : {}),
     })
 
     // Compose memory tools with any caller toolset. Memory tools FIRST so

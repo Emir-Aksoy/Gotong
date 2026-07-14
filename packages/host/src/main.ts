@@ -958,6 +958,10 @@ async function main(): Promise<void> {
   // M-EMB1 — opt-in real embedder for 阿同 recall (unset ⇒ local default, byte-identical).
   const butlerEmbedder = butlerEmbedderFromEnv()
   if (butlerEmbedder) log.info(butlerEmbedder.disclosure, { dataLeavesBox: butlerEmbedder.dataLeavesBox })
+  // M-GRAPH — opt-in graph mode (GOTONG_BUTLER_MEMORY_LINKS): 6h sweep writes meta.links + recall expands one hop. Off ⇒ byte-identical.
+  const butlerMemoryLinksOn =
+    butlerDefaultOn &&
+    ['1', 'true', 'on', 'yes'].includes((process.env.GOTONG_BUTLER_MEMORY_LINKS ?? '').trim().toLowerCase())
   // BF-M7 — governed set (create/edit/delete a member's own agent + edit their workflow),
   // each APPROVAL-GATED to /me. Executors are the SAME HostMeAgentService /
   // MeWorkflowEditService the /me steward uses (butler can't exceed hand-RBAC + WFEDIT
@@ -1038,11 +1042,8 @@ async function main(): Promise<void> {
   const butlerMemoryGitOn =
     butlerMaintenanceOn &&
     ['1', 'true', 'on', 'yes'].includes((process.env.GOTONG_BUTLER_MEMORY_GIT ?? '').trim().toLowerCase())
-  // S3-M2 — the proactive daily-brief sweep: per member, on a ~15min poll, send a
-  // short morning brief IF they opted in (via `set_daily_brief`). ON whenever the
-  // butler is on; opt out with GOTONG_BUTLER_PROACTIVE ∈ {0,false,off,no}. The FEATURE
-  // is still DEFAULT-OFF per member — the sweep does nothing until a member writes a
-  // `proactive.json`. Cadence via GOTONG_BUTLER_PROACTIVE_MS (clamped [5min, 1h]).
+  // S3-M2 — proactive daily-brief sweep (per member, ~15min poll; opt out GOTONG_BUTLER_PROACTIVE,
+  // cadence GOTONG_BUTLER_PROACTIVE_MS [5min,1h]). DEFAULT-OFF until they `set_daily_brief`.
   const butlerProactiveEnv = (process.env.GOTONG_BUTLER_PROACTIVE ?? '').trim().toLowerCase()
   const butlerProactiveOn =
     butlerDefaultOn && !['0', 'false', 'off', 'no'].includes(butlerProactiveEnv)
@@ -1050,11 +1051,8 @@ async function main(): Promise<void> {
     60 * 60 * 1000,
     Math.max(5 * 60 * 1000, Number(process.env.GOTONG_BUTLER_PROACTIVE_MS) || BUTLER_PROACTIVE_INTERVAL_MS),
   )
-  // BE-M5 — proactively tell a member when a run THEY started finishes. Like the
-  // daily brief it rides a per-user poll (the `ButlerRunBroadcastSweeper` below) and
-  // the FEATURE is DEFAULT-OFF per member (nothing fires until they `set_run_broadcast`
-  // on). ON whenever the butler is on; opt out with GOTONG_BUTLER_RUN_BROADCAST ∈
-  // {0,false,off,no}. Cadence via GOTONG_BUTLER_RUN_BROADCAST_MS (clamped [1min, 1h]).
+  // BE-M5 — proactively tell a member when a run THEY started finishes (per-user poll,
+  // ButlerRunBroadcastSweeper below; opt out GOTONG_BUTLER_RUN_BROADCAST, cadence _MS [1min,1h]). DEFAULT-OFF until `set_run_broadcast`.
   const butlerRunBroadcastEnv = (process.env.GOTONG_BUTLER_RUN_BROADCAST ?? '').trim().toLowerCase()
   const butlerRunBroadcastOn =
     butlerDefaultOn && !['0', 'false', 'off', 'no'].includes(butlerRunBroadcastEnv)
@@ -1077,6 +1075,7 @@ async function main(): Promise<void> {
     proactiveOn: butlerProactiveOn,
     runBroadcastOn: butlerRunBroadcastOn,
     embedder: butlerEmbedder?.embed,
+    memoryLinks: butlerMemoryLinksOn,
     refs: () => ({
       governedAgents: butlerGovernedAgentsRef,
       workflowEditor: butlerGovernedWorkflowEditorRef,
@@ -1158,6 +1157,7 @@ async function main(): Promise<void> {
       logger: log,
       intervalMs: butlerMaintenanceMs,
       gitSnapshot: butlerMemoryGitOn,
+      links: butlerMemoryLinksOn,
     })
     butlerMaintenanceSweeper.start()
   }

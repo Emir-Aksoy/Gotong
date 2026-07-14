@@ -74,6 +74,7 @@ import { drainStream, type LlmProvider } from '@gotong/llm'
 import {
   atomicFactsReviewer,
   composeReviewers,
+  linkReviewer,
   tieredReviewer,
   type MemoryReviewer,
   type MemorySummarizer,
@@ -82,6 +83,7 @@ import {
 import type { MemoryHandle } from '@gotong/services-sdk'
 
 import { snapshotMemoryTree, type GitRunner } from './butler-memory-git.js'
+import { butlerMemoryWriters } from './personal-butler-writers.js'
 import { openButlerMemory } from './personal-butler-memory.js'
 import {
   openButlerStatusFile,
@@ -144,6 +146,32 @@ export interface ButlerMaintenanceReviewerOptions {
    *  consolidation reclaims what it can). Omit = {@link DEFAULT_BUTLER_MEMORY_BUDGET_BYTES}
    *  (audit P2 — a member's memory must always be bounded, never grow unbounded). */
   budgetBytes?: number
+  /**
+   * M-GRAPH — opt-in (GOTONG_BUTLER_MEMORY_LINKS): after distillation, run the
+   * associative link pass, patching grown `meta.links` in place so `recall` can
+   * expand one hop. Off (default) ⇒ the link reviewer is never composed ⇒ no links
+   * are ever written (byte-identical; the frozen block stays a stable prefix).
+   */
+  links?: boolean
+}
+
+/**
+ * M-GRAPH — the write half of graph mode as a composable reviewer. On each
+ * maintenance tick it builds the symmetric associative-link closure over the
+ * member's ad-hoc semantic facts and patches the grown `meta.links` in place (via
+ * the patchMeta-backed {@link butlerMemoryWriters} link writer). Idempotent and
+ * cheap on a converged store — `diffLinkUpdates` emits only entries whose link set
+ * grew, so a settled memory writes nothing. Defensive: a handle without `patchMeta`
+ * (a mis-wire) SKIPS rather than aborting the distillation that already ran this
+ * same tick, and `linkReviewer` is itself best-effort (a write fault never breaks
+ * the tick).
+ */
+function butlerLinkMaintenanceReviewer(): MemoryReviewer {
+  return async (ctx) => {
+    if (!ctx.memory.patchMeta) return {}
+    const writers = butlerMemoryWriters(ctx.memory)
+    return linkReviewer({ write: writers.linkWriter })(ctx)
+  }
 }
 
 /**
@@ -175,6 +203,9 @@ export function buildButlerMaintenanceReviewer(
         budgetBytes: opts.budgetBytes ?? DEFAULT_BUTLER_MEMORY_BUDGET_BYTES,
       }),
       atomicFactsReviewer({ summarize: opts.summarize }),
+      // M-GRAPH — link LAST so it links the atomic facts THIS tick just extracted.
+      // Opt-in; off ⇒ not composed ⇒ no links written (frozen block byte-stable).
+      ...(opts.links ? [butlerLinkMaintenanceReviewer()] : []),
     ),
   })
 }
@@ -193,6 +224,8 @@ export interface RunButlerMaintenanceOnceOptions {
   budgetBytes?: number
   /** Recent episodic count handed to the review context. Default {@link DEFAULT_RECALL_K}. */
   recallK?: number
+  /** M-GRAPH — opt-in: also run the associative link pass this tick (default off). */
+  links?: boolean
 }
 
 /**
@@ -224,6 +257,7 @@ export async function runButlerMaintenanceOnce(
     statusFile,
     ...(opts.tierConfig ? { tierConfig: opts.tierConfig } : {}),
     ...(opts.budgetBytes !== undefined ? { budgetBytes: opts.budgetBytes } : {}),
+    ...(opts.links ? { links: true } : {}),
   })
   const episodic = await memory.recall({ kinds: ['episodic'], k: opts.recallK ?? DEFAULT_RECALL_K })
   const out = await reviewer({ memory, episodic, now: now() })
@@ -268,6 +302,12 @@ export interface ButlerMaintenanceSweeperOptions {
   gitSnapshot?: boolean
   /** Injectable git runner for the snapshot (tests). Default = real `git`. */
   git?: GitRunner
+  /**
+   * M-GRAPH — opt-in (GOTONG_BUTLER_MEMORY_LINKS): each tick also runs the
+   * associative link pass so `recall` can expand one hop. Off by default; when off
+   * no links are ever written (byte-identical, frozen block stays a stable prefix).
+   */
+  links?: boolean
 }
 
 /**
@@ -294,6 +334,7 @@ export class ButlerMaintenanceSweeper {
   private readonly recallK: number
   private readonly gitSnapshot: boolean
   private readonly git?: GitRunner
+  private readonly links: boolean
 
   private timer?: ReturnType<typeof setInterval>
   private running = false
@@ -312,6 +353,7 @@ export class ButlerMaintenanceSweeper {
     this.recallK = opts.recallK ?? DEFAULT_RECALL_K
     this.gitSnapshot = opts.gitSnapshot ?? false
     this.git = opts.git
+    this.links = opts.links ?? false
   }
 
   /** Start the interval. `.unref()` so a pending tick never keeps the process alive. */
@@ -413,6 +455,7 @@ export class ButlerMaintenanceSweeper {
       ...(this.tierConfig ? { tierConfig: this.tierConfig } : {}),
       ...(this.budgetBytes !== undefined ? { budgetBytes: this.budgetBytes } : {}),
       recallK: this.recallK,
+      ...(this.links ? { links: true } : {}),
     })
     // MU-M5 — snapshot the member's memory dir after distillation (opt-in,
     // best-effort: snapshotMemoryTree never throws). Whatever's on disk NOW is

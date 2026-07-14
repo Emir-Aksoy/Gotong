@@ -9,8 +9,9 @@
 # 作用域 = 生产源码 (packages/<pkg>/src 下的 .ts)。测试脚手架里的 GOTONG_* 不算旋钮，
 # 不登记。每项一行的「是什么 / 默认」说明是 GUARD-M2 惯例文档的活儿，不在本表。
 #
-# 当前登记数: 109  (其中 GOTONG_BOOTSTRAP 是 app.html 注入占位符——非旋钮, 见该行注释;
-#                  MU-M5 新增 GOTONG_BUTLER_MEMORY_GIT 记忆树 git 快照 opt-in, 106→107)
+# 当前登记数: 113  (其中 GOTONG_BOOTSTRAP 是 app.html 注入占位符——非旋钮, 见该行注释;
+#                  M-EMB1 新增 3 个 GOTONG_BUTLER_EMBEDDER_* 真语义 embedder opt-in, 109→112;
+#                  M-GRAPH 新增 GOTONG_BUTLER_MEMORY_LINKS 联想图模式 opt-in, 112→113)
 # 重新播种 (审慎变更后):  node scripts/env-registry-gate.mjs --list > scripts/gotong-env-registry.txt
 #
 # ── 按名称排序 ──
@@ -45,6 +46,7 @@ GOTONG_BUTLER_GOVERNED
 GOTONG_BUTLER_MAINTENANCE
 GOTONG_BUTLER_MAINTENANCE_MS
 GOTONG_BUTLER_MEMORY_GIT        # MU-M5 opt-in: 6h 维护里对每成员记忆树做 git 快照 (best-effort)
+GOTONG_BUTLER_MEMORY_LINKS      # M-GRAPH opt-in: 6h 维护写 meta.links 联想图 + 阿同 recall 扩一跳; off=字节不变
 GOTONG_BUTLER_PROACTIVE
 GOTONG_BUTLER_PROACTIVE_MS
 GOTONG_BUTLER_RUN_BROADCAST

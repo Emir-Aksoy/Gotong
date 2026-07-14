@@ -150,6 +150,13 @@ export interface ButlerFactoryDeps {
    */
   embedder?: Embedder
   /**
+   * M-GRAPH — opt-in associative graph mode (GOTONG_BUTLER_MEMORY_LINKS). When on,
+   * each per-user butler's `recall` expands ONE hop along `meta.links` (the 6h
+   * maintenance sweep writes those links). Off ⇒ no linkLookup wired ⇒ recall never
+   * expands (byte-identical). The frozen block is untouched either way.
+   */
+  memoryLinks?: boolean
+  /**
    * CARE-M4 — 开箱陪跑. When present, every per-user butler gets (a) the
    * zero-LLM context probe that injects the 现状卡 while key gaps exist and
    * `onboarding-state.json` isn't done, and (b) the benign
@@ -432,6 +439,12 @@ export function buildButlerFactory(deps: ButlerFactoryDeps): ButlerFactory {
           ...rest,
           memory,
           memoryRetriever: recallIndex.retriever({ activeOnly: true }),
+          // M-GRAPH — graph mode on ⇒ recall expands one hop along links the 6h
+          // sweep wrote (by-id lookup over the whole-store recall index). Off ⇒
+          // omitted ⇒ MemoryToolset.expand() no-ops (byte-identical recall).
+          ...(deps.memoryLinks
+            ? { memoryLinkLookup: (ids: readonly string[]) => recallIndex.lookupByIds(ids) }
+            : {}),
           // Keep BOTH kinds in the frozen block even though BF-M8 now runs
           // consolidation (episodic→semantic) in the background: the curated
           // `semantic` profile gives durable long-term facts, but a member's

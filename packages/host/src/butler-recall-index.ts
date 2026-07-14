@@ -164,6 +164,23 @@ export class FileBackedInvertedIndex {
   }
 
   /**
+   * M-GRAPH — resolve entries by id for one-hop recall link expansion. Ensures the
+   * index is fresh, then returns the full entries the {@link InvertedIndex} already
+   * holds by id — whole-store coverage with no extra jsonl read and no `list` 500
+   * cap. Unknown ids are skipped. This is the {@link MemoryLinkLookup} the butler
+   * wires when graph mode is on; with it off, recall never calls this (byte-unchanged).
+   */
+  async lookupByIds(ids: readonly string[]): Promise<MemoryEntry[]> {
+    await this.ensureFresh()
+    const out: MemoryEntry[] = []
+    for (const id of ids) {
+      const e = this.index.get(id)
+      if (e) out.push(e)
+    }
+    return out
+  }
+
+  /**
    * Drop the in-memory index (for the `/me` forget-all path). The persisted cache
    * is left for the next `ensureFresh` to refresh from the now-empty jsonl — at
    * which point the watermark has drifted, so it rebuilds empty and re-persists.

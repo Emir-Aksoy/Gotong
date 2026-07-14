@@ -143,6 +143,33 @@ describe('FileBackedInvertedIndex — freshness contract (fake io)', () => {
   })
 })
 
+describe('FileBackedInvertedIndex — lookupByIds (M-GRAPH link expansion)', () => {
+  it('resolves the requested ids to their full entries (in request order), skipping unknowns', async () => {
+    const f = fakeIo([entry('A', '我妈妈是玛丽', 300), entry('B', '玛丽在槟城买了房子', 200)])
+    const idx = new FileBackedInvertedIndex(f.io)
+    const got = await idx.lookupByIds(['B', 'A', 'nope'])
+    expect(got.map((e) => e.id)).toEqual(['B', 'A']) // request order preserved, unknown dropped
+    expect(got[0]!.text).toBe('玛丽在槟城买了房子') // full entry (text/meta), not just the id
+  })
+
+  it('ensures freshness first, so a link target written after warm-start is found', async () => {
+    const f = fakeIo([entry('A', '我妈妈是玛丽', 300)])
+    const idx = new FileBackedInvertedIndex(f.io)
+    await idx.lookupByIds(['A']) // builds the index
+    f.store.push(entry('B', '玛丽在槟城买了房子', 200))
+    f.bump() // a write drifts the watermark
+    const got = await idx.lookupByIds(['B'])
+    expect(got.map((e) => e.id)).toEqual(['B']) // rebuilt on drift, so the new target resolves
+  })
+
+  it('returns [] when nothing matches (never throws)', async () => {
+    const f = fakeIo([entry('A', '我妈妈是玛丽', 300)])
+    const idx = new FileBackedInvertedIndex(f.io)
+    expect(await idx.lookupByIds(['x', 'y'])).toEqual([])
+    expect(await idx.lookupByIds([])).toEqual([])
+  })
+})
+
 describe('openButlerRecallIndex — real filesystem, end to end', () => {
   let tmp: string
   beforeEach(() => { tmp = mkdtempSync(join(tmpdir(), 'butler-recall-')) })
