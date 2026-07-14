@@ -117,6 +117,23 @@ export const CURATED_LLM_PROVIDERS: readonly ButlerLlmProviderOption[] = [
     envHint: 'CEREBRAS_API_KEY',
   },
   {
+    id: 'gemini',
+    name: 'Google Gemini',
+    tier: 'free-quota',
+    baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai/',
+    whatFor: 'Google 自家 Gemini(Flash / Flash-Lite 等),上下文超长,走 OpenAI 兼容层直接用',
+    costTruth:
+      '免费档慷慨(Flash-Lite 约每天 1000 次、免信用卡),具体额度以 Google AI Studio 实时为准;' +
+      '注意:免费档的输入 / 输出可能被 Google 用于改进产品(在意隐私就别拿它跑私密内容)',
+    signupUrl: 'https://aistudio.google.com/apikey',
+    signupSteps: [
+      '用 Google 账号登录 aistudio.google.com',
+      '打开 aistudio.google.com/apikey 点「Create API key」',
+      '复制 key(免信用卡即可用免费档)',
+    ],
+    envHint: 'GEMINI_API_KEY',
+  },
+  {
     id: 'together',
     name: 'Together AI',
     tier: 'trial',

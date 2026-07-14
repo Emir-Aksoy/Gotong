@@ -19,7 +19,7 @@ import {
 } from '../src/personal-butler-llm-catalog.js'
 
 // Pinning ids makes "someone quietly added/removed a provider" a test diff.
-const EXPECTED_IDS = ['openrouter', 'groq', 'cerebras', 'together', 'deepseek']
+const EXPECTED_IDS = ['openrouter', 'groq', 'cerebras', 'gemini', 'together', 'deepseek']
 
 // Pin every base URL — a member pastes these into an agent config, so a wrong one
 // silently breaks their setup. Verified against official docs 2026-07-14.
@@ -27,6 +27,7 @@ const EXPECTED_BASE_URLS: Record<string, string> = {
   openrouter: 'https://openrouter.ai/api/v1',
   groq: 'https://api.groq.com/openai/v1',
   cerebras: 'https://api.cerebras.ai/v1',
+  gemini: 'https://generativelanguage.googleapis.com/v1beta/openai/',
   together: 'https://api.together.ai/v1',
   deepseek: 'https://api.deepseek.com',
 }

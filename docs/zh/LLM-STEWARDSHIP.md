@@ -108,11 +108,14 @@ key**；你注册、拿自己的 key、录进 vault（复用现成连接器/OAut
 目录是**代码内静态常量**（同 builtin-mcp-connectors 策展），不是让 LLM 上网搜——避免把不可信
 内容当凭证来源。
 
-- **五家 provider（内容全核实，非凭记忆）**：2026-07-14 用 WebFetch 逐一核官方文档的 OpenAI 兼容
-  base URL / key 页 / 免费额度真相——成员会照着 base URL 去配 agent，写错就是害人，所以宁可少列
-  也要核准。谱系齐：免费额度（OpenRouter `:free` 限 50 次/天、Groq RPM/TPM 限流、Cerebras 100 万
-  token/天）+ 试用额度（Together 新号额度）+ 低价（DeepSeek 便宜但非免费）。Google Gemini 因文档
-  URL 连报错**显式推迟**（URL 稳了再加）。
+- **六家 provider（内容全核实，非凭记忆）**：2026-07-14 逐一核官方文档的 OpenAI 兼容 base URL /
+  key 页 / 免费额度真相——成员会照着 base URL 去配 agent，写错就是害人，所以宁可少列也要核准。谱系齐：
+  免费额度（OpenRouter `:free` 限 50 次/天、Groq RPM/TPM 限流、Cerebras 100 万 token/天、**Gemini
+  Flash-Lite ~1000 次/天免信用卡**）+ 试用额度（Together 新号额度）+ 低价（DeepSeek 便宜但非免费）。
+  **Gemini 于 2026-07-14 补入（第 6 家）**：M3 首发时它因官方 `docs/openai` URL WebFetch 连报错被显式
+  推迟，本次改走 WebSearch 交叉核准 base URL `https://generativelanguage.googleapis.com/v1beta/openai/`
+  + 免费额度后补上；`costTruth` 如实写明**免费档输入/输出可能被 Google 用于改进产品**（隐私真相，非营销）
+  + 额度以 AI Studio 实时为准。（那个 `docs/openai` URL 已在项目 CLAUDE.md §4.1 列为禁止 WebFetch。）
 - **角色分对（③④ 重设计的落点）**：工具**只渲染建议**——`ButlerLlmProviderOption` 结构上**没有 key
   字段**，注册/拿 key/填 key 全是人做。渲染的卡**每次都印两条红线**：① 我不替你注册、绝不去网上「捡」
   别人的 key（那种多半泄露/违规）；② 我对 key 只读不写（配好后能看「用哪个 provider、健不健康」=
