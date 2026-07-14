@@ -1037,13 +1037,13 @@ async function main(): Promise<void> {
     24 * 60 * 60 * 1000,
     Math.max(60_000, Number(process.env.GOTONG_BUTLER_MAINTENANCE_MS) || BUTLER_MAINTENANCE_INTERVAL_MS),
   )
-  // MU-M5 — opt-in per-member git snapshot in the 6h sweep (GOTONG_BUTLER_MEMORY_GIT
-  // ∈ {1,true,on,yes}; off by default, best-effort, byte-unchanged when unset).
+  // MU-M5 — opt-in per-member git snapshot in the 6h sweep (GOTONG_BUTLER_MEMORY_GIT; off, best-effort, byte-unchanged when unset).
   const butlerMemoryGitOn =
     butlerMaintenanceOn &&
     ['1', 'true', 'on', 'yes'].includes((process.env.GOTONG_BUTLER_MEMORY_GIT ?? '').trim().toLowerCase())
-  // S3-M2 — proactive daily-brief sweep (per member, ~15min poll; opt out GOTONG_BUTLER_PROACTIVE,
-  // cadence GOTONG_BUTLER_PROACTIVE_MS [5min,1h]). DEFAULT-OFF until they `set_daily_brief`.
+  // M-RECON — opt-in (GOTONG_BUTLER_MEMORY_RECONCILE): the 6h sweep retires stale/contradictory ad-hoc facts via reversible bitemporal close. Off ⇒ byte-unchanged.
+  const butlerMemoryReconcileOn = butlerMaintenanceOn && ['1', 'true', 'on', 'yes'].includes((process.env.GOTONG_BUTLER_MEMORY_RECONCILE ?? '').trim().toLowerCase())
+  // S3-M2 — proactive daily-brief sweep (opt out GOTONG_BUTLER_PROACTIVE, cadence _MS [5min,1h]); DEFAULT-OFF until `set_daily_brief`.
   const butlerProactiveEnv = (process.env.GOTONG_BUTLER_PROACTIVE ?? '').trim().toLowerCase()
   const butlerProactiveOn =
     butlerDefaultOn && !['0', 'false', 'off', 'no'].includes(butlerProactiveEnv)
@@ -1051,8 +1051,7 @@ async function main(): Promise<void> {
     60 * 60 * 1000,
     Math.max(5 * 60 * 1000, Number(process.env.GOTONG_BUTLER_PROACTIVE_MS) || BUTLER_PROACTIVE_INTERVAL_MS),
   )
-  // BE-M5 — proactively tell a member when a run THEY started finishes (per-user poll,
-  // ButlerRunBroadcastSweeper below; opt out GOTONG_BUTLER_RUN_BROADCAST, cadence _MS [1min,1h]). DEFAULT-OFF until `set_run_broadcast`.
+  // BE-M5 — tell a member when a run THEY started finishes (opt out GOTONG_BUTLER_RUN_BROADCAST, cadence _MS [1min,1h]); DEFAULT-OFF until `set_run_broadcast`.
   const butlerRunBroadcastEnv = (process.env.GOTONG_BUTLER_RUN_BROADCAST ?? '').trim().toLowerCase()
   const butlerRunBroadcastOn =
     butlerDefaultOn && !['0', 'false', 'off', 'no'].includes(butlerRunBroadcastEnv)
@@ -1158,6 +1157,7 @@ async function main(): Promise<void> {
       intervalMs: butlerMaintenanceMs,
       gitSnapshot: butlerMemoryGitOn,
       links: butlerMemoryLinksOn,
+      reconcile: butlerMemoryReconcileOn,
     })
     butlerMaintenanceSweeper.start()
   }

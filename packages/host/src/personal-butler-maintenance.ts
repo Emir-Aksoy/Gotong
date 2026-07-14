@@ -74,7 +74,12 @@ import { drainStream, type LlmProvider } from '@gotong/llm'
 import {
   atomicFactsReviewer,
   composeReviewers,
+  isActive,
+  isClusterProfile,
+  isDigest,
+  isProfile,
   linkReviewer,
+  reconcileReviewer,
   tieredReviewer,
   type MemoryReviewer,
   type MemorySummarizer,
@@ -153,6 +158,14 @@ export interface ButlerMaintenanceReviewerOptions {
    * are ever written (byte-identical; the frozen block stays a stable prefix).
    */
   links?: boolean
+  /**
+   * M-RECON — opt-in (GOTONG_BUTLER_MEMORY_RECONCILE): after distillation, run a
+   * write-time reconciliation pass that retires stale / contradictory ad-hoc facts
+   * by CLOSING their validity interval (bitemporal — reversible, never a true delete),
+   * so the read path (already `activeOnly`) surfaces only the current truth. Off
+   * (default) ⇒ not composed ⇒ no fact is ever retired (byte-identical).
+   */
+  reconcile?: boolean
 }
 
 /**
@@ -171,6 +184,37 @@ function butlerLinkMaintenanceReviewer(): MemoryReviewer {
     if (!ctx.memory.patchMeta) return {}
     const writers = butlerMemoryWriters(ctx.memory)
     return linkReviewer({ write: writers.linkWriter })(ctx)
+  }
+}
+
+/**
+ * M-RECON — the write half of reconciliation as a composable reviewer. Each tick,
+ * once the member's ad-hoc semantic set is large enough, it asks the butler's own
+ * model for the MINIMAL edits that keep the stored facts current + non-redundant,
+ * and applies them in BITEMPORAL mode: a superseded fact is CLOSED (its `validTo`
+ * stamped in place via the patchMeta-backed {@link butlerMemoryWriters} close
+ * writer), NEVER forgotten — reversible history, and the read path (which already
+ * filters `activeOnly`) simply stops surfacing it. Fail-soft end to end: a bad /
+ * empty model response yields zero ops, and a handle without `patchMeta` (a mis-wire)
+ * SKIPS rather than aborting the distillation that already ran this same tick.
+ */
+function butlerReconcileMaintenanceReviewer(summarize: MemorySummarizer): MemoryReviewer {
+  return async (ctx) => {
+    if (!ctx.memory.patchMeta) return {}
+    const writers = butlerMemoryWriters(ctx.memory)
+    return reconcileReviewer({
+      summarize,
+      bitemporal: true,
+      closeEntry: writers.closeEntry,
+      // Reconcile only the ACTIVE ad-hoc facts. The default eligibility already skips
+      // digests/profiles (owned by the tiered pass); we ALSO drop already-closed facts
+      // so a retired fact is never re-litigated — the model is shown live truth only
+      // (the reconcile prompt carries no validity, so a closed sibling would otherwise
+      // read as live and risk re-closing the CURRENT fact). This also converges: once
+      // the active set is contradiction-free the pass goes idle and spends no call.
+      existingFilter: (e) =>
+        isActive(e, ctx.now) && !isDigest(e) && !isClusterProfile(e) && !isProfile(e),
+    })(ctx)
   }
 }
 
@@ -203,6 +247,11 @@ export function buildButlerMaintenanceReviewer(
         budgetBytes: opts.budgetBytes ?? DEFAULT_BUTLER_MEMORY_BUDGET_BYTES,
       }),
       atomicFactsReviewer({ summarize: opts.summarize }),
+      // M-RECON — reconcile AFTER extraction (so its dedup sees the fresh atomic facts
+      // too) and BEFORE link (so link associates the surviving current facts, never a
+      // soon-to-be-closed one). Opt-in third 6h model call; off ⇒ not composed ⇒ no
+      // fact is ever retired.
+      ...(opts.reconcile ? [butlerReconcileMaintenanceReviewer(opts.summarize)] : []),
       // M-GRAPH — link LAST so it links the atomic facts THIS tick just extracted.
       // Opt-in; off ⇒ not composed ⇒ no links written (frozen block byte-stable).
       ...(opts.links ? [butlerLinkMaintenanceReviewer()] : []),
@@ -226,6 +275,8 @@ export interface RunButlerMaintenanceOnceOptions {
   recallK?: number
   /** M-GRAPH — opt-in: also run the associative link pass this tick (default off). */
   links?: boolean
+  /** M-RECON — opt-in: also reconcile stale/contradictory ad-hoc facts this tick (default off). */
+  reconcile?: boolean
 }
 
 /**
@@ -258,6 +309,7 @@ export async function runButlerMaintenanceOnce(
     ...(opts.tierConfig ? { tierConfig: opts.tierConfig } : {}),
     ...(opts.budgetBytes !== undefined ? { budgetBytes: opts.budgetBytes } : {}),
     ...(opts.links ? { links: true } : {}),
+    ...(opts.reconcile ? { reconcile: true } : {}),
   })
   const episodic = await memory.recall({ kinds: ['episodic'], k: opts.recallK ?? DEFAULT_RECALL_K })
   const out = await reviewer({ memory, episodic, now: now() })
@@ -308,6 +360,12 @@ export interface ButlerMaintenanceSweeperOptions {
    * no links are ever written (byte-identical, frozen block stays a stable prefix).
    */
   links?: boolean
+  /**
+   * M-RECON — opt-in (GOTONG_BUTLER_MEMORY_RECONCILE): each tick also reconciles the
+   * member's ad-hoc semantic facts, closing stale / contradictory ones (bitemporal,
+   * reversible). Off by default; when off no fact is ever retired (byte-identical).
+   */
+  reconcile?: boolean
 }
 
 /**
@@ -335,6 +393,7 @@ export class ButlerMaintenanceSweeper {
   private readonly gitSnapshot: boolean
   private readonly git?: GitRunner
   private readonly links: boolean
+  private readonly reconcile: boolean
 
   private timer?: ReturnType<typeof setInterval>
   private running = false
@@ -354,6 +413,7 @@ export class ButlerMaintenanceSweeper {
     this.gitSnapshot = opts.gitSnapshot ?? false
     this.git = opts.git
     this.links = opts.links ?? false
+    this.reconcile = opts.reconcile ?? false
   }
 
   /** Start the interval. `.unref()` so a pending tick never keeps the process alive. */
@@ -456,6 +516,7 @@ export class ButlerMaintenanceSweeper {
       ...(this.budgetBytes !== undefined ? { budgetBytes: this.budgetBytes } : {}),
       recallK: this.recallK,
       ...(this.links ? { links: true } : {}),
+      ...(this.reconcile ? { reconcile: true } : {}),
     })
     // MU-M5 — snapshot the member's memory dir after distillation (opt-in,
     // best-effort: snapshotMemoryTree never throws). Whatever's on disk NOW is

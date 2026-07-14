@@ -527,6 +527,46 @@ personal-memory 叶子既有件,host 只加装配缝 + `lookupByIds`)。
 `butler-maintenance-links.test.ts` 2 例(links:true 写 A↔B / 默认零写)全绿;personal-memory **414** / host
 **2074** 全绿,四门 PASS(main.ts 3000/3000,旋钮 **113**,kernel-deps 不破 —— `lookupByIds` 是能力非旋钮)。
 
+### M-RECON —— 陈旧/矛盾校正接线:reconcile 从「建了没接线」到全链路活(opt-in)✅
+
+M-GRAPH 之后按 benchmark-first 纪律勘察下一个休眠件。三个候选里:**dreaming**(查询多样性提升/剪枝)本质是
+**按使用度排序**,对 recall@k 检索尺子偏弱;**skills**(程序自创/umbrella)缺口偏软且需程序起草器;**reconcile**
+(写时校正,Mem0 式 ADD/UPDATE/DELETE)**最锋利**——它解的是长任务管家每天撞的**陈旧/矛盾**精度缺口:两条
+矛盾事实(「我住在吉隆坡」+「我住在槟城」)经 `remember` 盲追加会**双双 active**,问「我住哪」两城并存污染,
+**任何检索器都修不了**(keyword / embedder 各把每条事实孤立对查询打分,陈旧的那条匹配得一样好)。唯一的解=
+写时校正:检测矛盾、**关闭**被取代事实的有效区间,读侧(本就 `activeOnly`)自然不再返回它。
+
+侦察发现 reconcile **全建好了、只差接线**,而且比 M-GRAPH 还干净——**读侧零改**:三个检索器(`retriever`/
+`inverted-index`/`fusion-retriever`)+ 冻结块都已 `page.filter(e => isActive(e, now))`,而阿同生产召回走的正是
+`recallIndex.retriever({ activeOnly: true })`;`personal-butler-writers.ts` 早备好 `closeEntry`(文件注释白纸黑字
+「reconcile retiring an old fact after closing it」);`reconcile.ts` 的 `bitemporal` 模式 + 整套单测也在。**只差写侧装配**:
+
+- **写侧**:6h 维护 `composeReviewers` 里 `atomicFactsReviewer` 后、`linkReviewer` 前组进 `reconcileReviewer`
+  (排抽取后=dedup 能看到本 tick 新抽的原子事实,排 link 前=link 只关联**存活的当前事实**)。姿态钉死
+  `bitemporal: true` + `closeEntry` 走既有 patchMeta 缝——被取代事实**关区间(盖 validTo)非硬删**,可逆历史留盘上,
+  与 `skills.ts` 明确选的「可逆 close 胜过 Hermes 的破坏性 archive」同源。**收敛护栏**:接线层传 `existingFilter`
+  只喂 reconcile **活跃**的 ad-hoc 事实——已关的绝不重新审判(reconcile prompt 不带 validity,若把已关的当活兄弟
+  喂进去,模型某个 tick 可能误关掉当前那条、两条都关=住址从 active 消失);这也让 pass 收敛(活跃集无矛盾即 idle
+  零调用)。**防御 + 失败软化**:handle 无 patchMeta 就跳过(不拖垮已跑完的蒸馏),模型抽风=零操作。
+- **读侧**:**零改**——`activeOnly` 已在生产召回恒开,关掉的事实自动掉出。这也是 M-GRAPH 教训的应用,且更省
+  (M-GRAPH 要接读+写两侧,reconcile 只差写侧)。
+- **旋钮**:`GOTONG_BUTLER_MEMORY_RECONCILE`(113→114,opt-in,默认关,gate 在 `butlerMaintenanceOn`——纯写侧不进
+  工厂)。开=维护校正 + 关闭陈旧;关=一条不关,**逐字节不变**。
+
+**诚实的尺子刻度**(实测,非散文):端到端 proof `reconcile-recall.test.ts` 3 例——① **读侧缺口**:两条住址都
+active 时,融合召回「我住哪」返回**吉隆坡 + 槟城并存**(陈旧污染);② **写侧**:`reconcile`(bitemporal)**关闭**旧
+事实而非 forget(validTo 盖上、仍在盘上、`new` 不动);③ **读侧解出**:校正后**同一查询**只返回槟城。写侧 host proof
+`butler-maintenance-reconcile.test.ts` 3 例过真 tmp 命名空间跑 `runButlerMaintenanceOnce`:开=关旧存新(可逆)/
+**收敛**=第二 tick 不重审已关事实(validTo 不前漂、当前事实永不误关)/ 默认关=零关闭字节不变。陈旧多跳用例同样
+**刻意不进主 gate**(与 M-GRAPH 同款理由,单独 proof 隔离)。
+
+**四条边界**:① 热路径零 LLM(校正在 6h 后台,关区间 / 选活跃是纯函数);② opt-in 未配字节不变;③ 数据不离盒
+(validTo 是本地 meta);④ 内核零改动(`reconcile.ts`/`bitemporal.ts` 是 personal-memory 叶子既有件,host 只加装配缝,
+`reconcile.ts` 一行没动 —— 活跃过滤走接线层 `existingFilter` 非改叶子默认)。
+
+**验收**:personal-memory `reconcile-recall.test.ts` 3 例 + host `butler-maintenance-reconcile.test.ts` 3 例全绿;
+personal-memory **417** / host **2077** 全绿,四门 PASS(main.ts 3000/3000,旋钮 **114**,kernel-deps 不破)。
+
 ### M-EMB2(N 路融合泛化)—— 超越/不做
 
 实测判定为**投机泛化**:没有第三个**打分**信号在等这条缝,图模式走**池扩展**(M-GRAPH 已按池扩展形状接线,
@@ -538,6 +578,7 @@ personal-memory 叶子既有件,host 只加装配缝 + `lookupByIds`)。
 | 里程碑 | 交付 | 验收门 | 状态 |
 |---|---|---|---|
 | **M-GRAPH** | 激活 `links.ts` 联想图(见上) | `graph-recall` 实体桥接 0→1 + 关时字节不变 | ✅ 完 |
+| **M-RECON** | 激活 `reconcile.ts` 写时校正(见上):陈旧/矛盾事实 bitemporal 可逆关闭 | `reconcile-recall` 陈旧污染 0→1 + 收敛护栏 + 关时字节不变 | ✅ 完 |
 | **M-EMB3-next** | 逐个**激活剩余休眠模式**(程序记忆自动化 / dreaming umbrella…):每个模式**先补一条它独有能解的 benchmark 失败用例**,再接线——**写不出失败用例=不接** | 每激活一个模式,尺子上多一格它专属的、之前红的刻度变绿 | 计划 |
 
 **显式推迟**(尺子没显缺口前不预造):HippoRAG Personalized PageRank 多跳、Zep 双时态 KG、独立
