@@ -725,6 +725,7 @@ BE track（BE-M1→M6）已补齐：管家的观察面（三只读）+ 诊断闭
 
 - **GitHub 已公开 + push 已解冻 (repo 2026-06-28 转 PUBLIC)**: 仓库 `Emir-Aksoy/Gotong` 已公开, push 解冻。（2026-07-04 用户授权后已完成 GitHub 仓库改名 `Emir-Aksoy/Gotong` + 推送, 旧 URL/旧克隆自动 redirect。）推送纪律: **只推 `main`**, fast-forward only, **绝不强推**; 推前 `git fetch` 校验 `git merge-base --is-ancestor origin/main main`。远端有 dependabot 分支 + PR, 不动它们。Actions 仍仓库级禁用 (公开后重新启用免费)。具体哪次该不该 push 仍按用户指令, 不擅自 push。
 - **不要动备份**: `~/Backups/AipeHub/` 是历史快照, 只读
+- **别再 WebFetch `https://ai.google.dev/gemini-api/docs/openai`(2026-07-14 用户指令)**: 这个 Gemini 官方文档 URL 用 WebFetch **每次都报错**(LSA-M3/M4 期间已复现多次),别再尝试抓它、也别让它进任何调用计划。要核 Gemini 官方事实(OpenAI 兼容 base URL / 免费额度 / key 页 / 环境变量名)改走 `WebSearch`,或抓别的稳定页(如 `https://ai.google.dev/gemini-api/docs/rate-limits`)。
 - **临时/测试产物清理阈值 (2026-06-19 用户指令)**: agent 自己产生的临时 / scratch / 测试文件 (如 `/tmp/gotong-e2e-*` 测试空间、`/tmp/gotong-*.log`、临时 host 数据目录) 占用 **≤ 10 GB 时不必清理**, 超过阈值才清。清理前先 `du -sh` 核实大小。注: harness 会拦截破坏性 `rm -rf` 大范围通配 + 前台 `sleep`, 真要清就 `rm` 具体目录、逐项删, 别用 `rm -rf` 通配。
 - **不需要向前兼容**: 还没上线, 大胆改 schema / API。删旧代码比加 deprecation shim 优先
 - **代码尽量简化, 节点尽量轻量**: 每个 PR 一个小目标, 别一次塞 5 个 feature
