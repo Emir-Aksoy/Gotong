@@ -34,13 +34,22 @@ const EXPECTED_IDS = [
   'todoist-tasks',
   'mem0-memory',
   'elasticsearch',
+  'tavily-web-search',
+  'brave-web-search',
   'filesystem',
 ]
 
 // MU-M4: the data-leaves-box disclosure set. Pinning it makes "someone flipped a
 // connector's off-box status" a visible diff — and enforces the honest-coverage
 // rule (every cloud-SaaS connector carries the flag; local ones don't).
-const DATA_LEAVES_BOX_IDS = ['notion-notes', 'todoist-tasks', 'mem0-memory']
+// LSA-M2: web-search connectors ship the flag too — the query itself goes off-box.
+const DATA_LEAVES_BOX_IDS = [
+  'notion-notes',
+  'todoist-tasks',
+  'mem0-memory',
+  'tavily-web-search',
+  'brave-web-search',
+]
 
 /**
  * Every place a credential can live in a spec, transport-agnostic: `env` values
@@ -166,5 +175,42 @@ describe('built-in MCP connector directory (MCD-M1)', () => {
     expect(spec?.url).toBe('https://mcp.mem0.ai/mcp')
     // The credential rides an Authorization header as a ${ENV} ref, never plaintext.
     expect(spec?.headers?.Authorization).toBe('Bearer ${MEM0_API_KEY}')
+  })
+
+  // —— LSA-M2: the general web-search connectors (fills the reserved 'web' slot) ——
+  it('ships a web-search category with Tavily (hosted-HTTP+Bearer) and Brave (stdio)', () => {
+    const web = BUILTIN_MCP_CONNECTORS.filter((c) => c.category === 'web')
+    expect(web.map((c) => c.id).sort()).toEqual(['brave-web-search', 'tavily-web-search'])
+    // Both send the query off-box → both must carry the disclosure flag + a caveat.
+    for (const c of web) {
+      expect(c.dataLeavesBox, `${c.id} dataLeavesBox`).toBe(true)
+      expect(c.caveat, `${c.id} caveat`).toBeTruthy()
+    }
+  })
+
+  it('Tavily rides hosted-HTTP + Bearer with the key NEVER in the URL query', () => {
+    const tavily = BUILTIN_MCP_CONNECTORS.find((c) => c.id === 'tavily-web-search')
+    expect(tavily?.category).toBe('web')
+    expect(tavily?.needsEnv).toContain('TAVILY_API_KEY')
+    const spec = tavily?.spec as { transport?: string; url?: string; headers?: Record<string, string> }
+    expect(spec?.transport).toBe('http')
+    expect(spec?.url).toBe('https://mcp.tavily.com/mcp/')
+    expect(spec?.headers?.Authorization).toBe('Bearer ${TAVILY_API_KEY}')
+    // Privacy red line: the secret rides the header, NEVER the URL — no ${...} and
+    // no ?tavilyApiKey= smuggled into the query string (even though Tavily allows it).
+    expect(spec?.url?.includes('${'), 'Tavily url must not embed a placeholder').toBe(false)
+    expect(spec?.url?.toLowerCase().includes('apikey'), 'Tavily url must not carry a key param').toBe(false)
+  })
+
+  it('Brave rides local stdio with a static ${ENV} key and an explicit PATH', () => {
+    const brave = BUILTIN_MCP_CONNECTORS.find((c) => c.id === 'brave-web-search')
+    expect(brave?.category).toBe('web')
+    expect(brave?.needsEnv).toContain('BRAVE_API_KEY')
+    const spec = brave?.spec as { command?: string; args?: string[]; env?: Record<string, string> }
+    expect(spec?.command).toBe('npx')
+    expect(spec?.args).toContain('@brave/brave-search-mcp-server')
+    expect(spec?.env?.BRAVE_API_KEY).toBe('${BRAVE_API_KEY}')
+    // stdio children inherit only the listed env — PATH must be passed through so npx resolves.
+    expect(spec?.env?.PATH).toBe('${PATH}')
   })
 })

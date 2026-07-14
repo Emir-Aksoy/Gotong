@@ -72,6 +72,8 @@
 | `todoist-tasks` | Todoist 任务 | `tasks` | 连你的 Todoist:查看 / 新建 / 完成任务(Doist 官方 server)⚠️数据离盒 | `TODOIST_API_KEY` |
 | `mem0-memory` | Mem0 记忆云 | `memory` | 把 AI 长期记忆托管到 Mem0 云:存事实 + 语义召回(官方托管 MCP,Bearer 头)⚠️数据离盒 | `MEM0_API_KEY` |
 | `elasticsearch` | Elasticsearch 搜索索引 | `search` | 查 ES 索引:列索引 / 看 mapping / query DSL | `ES_URL` `ES_API_KEY` |
+| `tavily-web-search` | Tavily 联网搜索 | `web` | 给 AI 接通用互联网搜索(专为 LLM 优化,返回干净正文):搜网页 / 抽正文 / 爬站(官方托管 remote,Bearer 头)⚠️数据离盒 | `TAVILY_API_KEY` |
+| `brave-web-search` | Brave 联网搜索 | `web` | 给 AI 接 Brave 搜索引擎(独立索引 / 注重隐私):网页 / 新闻 / 本地 / 图片(官方 stdio)⚠️数据离盒 | `BRAVE_API_KEY` |
 | `filesystem` | 本地文件系统 | `files` | 读写指定沙箱目录的文件(官方参考实现) | — |
 
 > **「接入现实生活」track(C)**:`notion-notes` / `todoist-tasks` 是把目录伸向日常
@@ -88,6 +90,16 @@
 > 不破:**全走 MCP 框架不存第二份**(搬走 `.gotong/` 无残留)、**凭证只 `${MEM0_API_KEY}`
 > 占位进 header**(密钥不入库)、**接入≠授权**(挂上工具能读写云记忆,真同步私密内容仍过
 > 管家 governed 闸)。见 [MEMORY-UPGRADE.md](MEMORY-UPGRADE.md)。
+
+> **「管家 LLM 自省与自治」track(LSA-M2):通用 web search 落 `web` 分类**。之前目录只有
+> `mcp-registry-search`(搜 MCP 注册站)、`obsidian`/`chroma`(搜本地),**没有一个搜互联网** ——
+> `web` 分类一直预留空着。LSA-M2 补两条**厂商官方**通用搜索:`tavily-web-search`(Tavily 官方
+> **托管远程 HTTP + Bearer**,专为 LLM 优化返回干净正文)+ `brave-web-search`(Brave 官方 **stdio**,
+> 独立索引注重隐私)。三边界同 C/MU:**全走 MCP 不存数据**、**凭证 `${NAME}` 占位**、**接入≠授权**
+> (搜索是 benign 读,但「把搜到的东西拿去对外发」仍过管家 governed 闸)。两条都标 `dataLeavesBox`
+> —— 搜索词 + key 都发往第三方云。**隐私红线钉进防腐测试**:Tavily 的 key 只走 `Authorization`
+> 头,**绝不进 URL query**(即便官方也支持 `?tavilyApiKey=`,我们不走 —— 敏感值永不放查询串)。
+> 接上后管家的 `list_my_capabilities` 自省清单里就真有 websearch 了。见 [LLM-STEWARDSHIP.md](LLM-STEWARDSHIP.md)。
 
 分类单一真相源 = `MCP_CONNECTOR_CATEGORIES`(`discovery` / `rag` / `notes` /
 `tasks` / `memory` / `search` / `files` / `web`)。防腐测试钉死:目录顺序固定、id / 展示名 / `spec.name`

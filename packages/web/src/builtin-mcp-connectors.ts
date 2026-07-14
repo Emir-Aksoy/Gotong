@@ -255,6 +255,64 @@ export const BUILTIN_MCP_CONNECTORS: BuiltinMcpConnector[] = [
     },
   },
 
+  // —— web:Tavily 联网搜索(官方托管 remote,专为 AI 优化)——
+  {
+    id: 'tavily-web-search',
+    name: 'Tavily 联网搜索',
+    category: 'web',
+    whatFor:
+      '给 AI 接通用互联网搜索(专为 LLM 优化,返回干净正文而非一堆链接):实时搜网页、' +
+      '抽取正文、爬站。工具以 tavily__ 前缀挂载(tavily-search / tavily-extract 等)。' +
+      '前置 —— 在 app.tavily.com 注册拿 API key(有每月免费额度)。',
+    homepage: 'https://docs.tavily.com/documentation/mcp',
+    needsEnv: ['TAVILY_API_KEY'],
+    // 云 API:搜索词 + key 都发往 Tavily 云做检索,数据离开本机(诚实披露)。
+    dataLeavesBox: true,
+    caveat:
+      '⚠️ 你的搜索词会发给 Tavily 云做检索(离开本机)。接入≠授权 —— 挂上只是让管家「能」' +
+      '联网搜,把搜到的东西拿去对外发仍是管家的 governed 动作,得你点头。',
+    sourceRef: 'https://github.com/tavily-ai/tavily-mcp(Tavily 官方)',
+    // 官方托管远程 MCP:Streamable HTTP + Bearer。key 走 ${ENV} 占位放 Authorization 头,
+    // **绝不进 URL query**(隐私红线:敏感值永不放查询串,即便官方也支持 ?tavilyApiKey=)。
+    // 与 mem0 同「托管+令牌」形状(现代连接器大势)。
+    spec: {
+      name: 'tavily',
+      transport: 'http',
+      url: 'https://mcp.tavily.com/mcp/',
+      headers: {
+        Authorization: 'Bearer ${TAVILY_API_KEY}',
+      },
+    },
+  },
+
+  // —— web:Brave 联网搜索(官方 stdio,独立索引 / 注重隐私)——
+  {
+    id: 'brave-web-search',
+    name: 'Brave 联网搜索',
+    category: 'web',
+    whatFor:
+      '给 AI 接 Brave 搜索引擎(独立索引、注重隐私):网页 / 新闻 / 本地 / 图片搜索。' +
+      '工具以 brave__ 前缀挂载(brave_web_search / brave_news_search 等)。' +
+      '前置 —— 在 brave.com/search/api 注册拿 API key(有免费档)。',
+    homepage: 'https://github.com/brave/brave-search-mcp-server',
+    needsEnv: ['BRAVE_API_KEY'],
+    // 云 API:搜索词发往 Brave Search API(离开本机)。
+    dataLeavesBox: true,
+    caveat:
+      '⚠️ 你的搜索词会发给 Brave Search API(离开本机)。接入≠授权 —— 挂上只是让管家「能」联网搜。',
+    sourceRef: 'https://github.com/brave/brave-search-mcp-server(Brave 官方)',
+    // 本地 stdio 走静态 API key;env 一设子进程只继承列出的 key,故显式带 PATH。
+    spec: {
+      name: 'brave',
+      command: 'npx',
+      args: ['-y', '@brave/brave-search-mcp-server', '--transport', 'stdio'],
+      env: {
+        BRAVE_API_KEY: '${BRAVE_API_KEY}',
+        PATH: '${PATH}',
+      },
+    },
+  },
+
   // —— files:本地文件系统(宽能力,带警示)——
   {
     id: 'filesystem',

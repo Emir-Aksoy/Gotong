@@ -75,11 +75,29 @@
   错误/未知工具），host 2087 全绿，四门 PASS（旋钮 114 零新增）。已知边界：健康按声明 `index`
   叠加，某 fallback 构建失败被 router 跳过时后续健康标注可能贴邻行（罕见配置错误，非安全问题）。
 
-### LSA-M2 web search 接入（②的前提）
+### LSA-M2 web search 接入（②的前提）— ✅ 已落
 
 给阿同接一个**通用 web search** MCP 连接器（Tavily / Brave Search，opt-in 走既有连接器目录
 `builtin-mcp-connectors.ts`）。凭证走 `${NAME}` 占位 + vault，接入≠授权（搜索是 benign 读，
 但「拿搜索结果去对外发」仍过 governed 闸）。接上后 M1 的自省清单里就真有 websearch 了。
+
+- **两条厂商官方连接器**填补预留但一直空着的 `web` 分类：`tavily-web-search`（Tavily 官方
+  **托管远程 HTTP + Bearer**，`https://mcp.tavily.com/mcp/`，专为 LLM 优化返回干净正文而非
+  一堆链接，工具 `tavily__tavily-search` 等）+ `brave-web-search`（Brave 官方 **stdio**
+  `npx @brave/brave-search-mcp-server`，独立索引注重隐私，工具 `brave__brave_web_search` 等）。
+- **传输形状按厂商真相走**（2026-07-14 WebFetch 核官方 repo，非凭记忆）：Tavily 有官方托管
+  remote → 走 mem0 同款 http+Bearer 头；Brave 无 remote 端点 → 走 todoist 同款 stdio+`${PATH}`。
+- **隐私红线（结构性钉进防腐测试）**：Tavily 的 key **只走 `Authorization` 头，绝不进 URL
+  query**——即便官方也支持 `?tavilyApiKey=`，我们不走（安全铁律「敏感值永不放查询串」）；
+  测试断言 URL 里既无 `${` 占位也无 `apikey` 参数。
+- **两条都标 `dataLeavesBox: true` + caveat**：搜索词 + key 都发往第三方云，面板无条件印
+  「数据离开本机」。**接入≠授权**：搜索是 benign 读，但「拿搜到的东西去对外发」仍过 governed 闸。
+- **已落**：`builtin-mcp-connectors.ts` 加两条 spec（category `web`）+ 防腐测试扩到 23 例
+  （`EXPECTED_IDS`/`DATA_LEAVES_BOX_IDS` 各 +2 + 3 条针对性断言：web 分类集/Tavily http+Bearer
+  key 不进 query/Brave stdio+PATH）+ 目录文档 `MCP-CONNECTOR-DIRECTORY.md` 加表行与说明块；
+  web 1375 全绿，tsc 0，四门 PASS（**旋钮仍 114 零新增**——连接器是常量 catalog 非 env 旋钮；
+  main.ts 未触碰 3000/3000）。**opt-in**：不装即字节不变；装了要人在 host 环境填 `TAVILY_API_KEY`
+  / `BRAVE_API_KEY`（框架只存 `${NAME}` 占位，密钥不入库）。
 
 ### LSA-M3 免费 provider 发现 + 引导录入（③的合法替代）
 
