@@ -457,6 +457,12 @@ importers:
         specifier: workspace:*
         version: link:../../packages/services-sdk
 
+  examples/model-ensemble:
+    dependencies:
+      '@gotong/llm':
+        specifier: workspace:*
+        version: link:../../packages/llm
+
   examples/model-routing:
     dependencies:
       '@gotong/host':

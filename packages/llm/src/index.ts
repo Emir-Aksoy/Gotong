@@ -89,3 +89,14 @@ export {
   type WatchdogOptions,
   type TransientRetryOptions,
 } from './resilience.js'
+// LSA-M4 — 并行多模型 + 综合(RoutingProvider 兄弟:routing 顺序选一个,ensemble 并行用全部)
+export {
+  EnsembleProvider,
+  EnsembleExhaustedError,
+  sumUsage,
+  type EnsembleMember,
+  type EnsembleStrategy,
+  type EnsembleProviderOptions,
+  type EnsembleEvent,
+  type EnsembleLogger,
+} from './ensemble-provider.js'

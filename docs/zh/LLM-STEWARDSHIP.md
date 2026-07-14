@@ -125,15 +125,47 @@ key**；你注册、拿自己的 key、录进 vault（复用现成连接器/OAut
   钉**[成员照着操作、写错即害人]+ 每条完整性 + https/env 名形状 + **渲染必含两条红线**[承重安全断言]+
   工具行为/未知工具拒绝），host 2095 全绿，四门 PASS（旋钮仍 114 零新增，main.ts 3000/3000 未触碰）。
 
-### LSA-M4 多 LLM 并行综合（⑤）
+### LSA-M4 多 LLM 并行综合（⑤，本 track 封顶）— ✅ 已落（纯核 + capstone；配置面显式推迟）
 
-opt-in `EnsembleProvider`（`packages/llm`，RoutingProvider 兄弟）：并行 fan-out 到 N 个候选，
-按策略综合——择优 / 投票 / 让一个模型 synthesize N 份草稿。
-- **成本 ×N + opt-in + 披露**：默认关；开了每轮多花 N 倍（+ 综合若用模型再 +1）。
-- **热路径**：这是 agent 层选择（阿同带工具的轮次可选走 ensemble），不违反「框架 hub 零 LLM」。
-- **失败用例**：构造 N 个 stub provider 给不同答案 + 一个综合器，断言 ensemble 输出综合了
-  多份而非单份；与 RoutingProvider（顺序 failover）的区别用测试钉死（ensemble 并行、routing
-  顺序）。
+opt-in `EnsembleProvider`（`packages/llm`，RoutingProvider 兄弟）：并行 fan-out 到 N 个成员，
+收齐 N 份草稿后按策略综合成一份——这是用户诉求⑤「同时用多个 llm 再综合」。两者都实现
+`LlmProvider`，对上游（LlmAgent）完全透明，区别只在内部：**routing 顺序选一个，ensemble
+并行用全部**。
+
+- **两种综合策略**：`concat`（确定性拼接 N 份草稿，零额外 LLM 调用，可测免费）/ `synthesize`
+  （让一个综合器模型把 N 份草稿折成一份最终答案，+1 次调用，内置中文综合指令可覆盖）。
+- **tool_use 不可综合（正确性红线）**：「综合」只对纯文本答案成立。若领头成员想调工具
+  （`stopReason==='tool_use'`），两个不同工具调用没法「取平均」——ensemble 把它的 response
+  **原样透传**（passthrough），绝不综合。故工具循环里选工具的轮次退化为「跟第一个成员走」，
+  只有最终纯文本答案那轮才真 fan-out + 综合。
+- **诚实成本记账**：`sumUsage` 把 N 份成员 usage（+ 综合器那次）加总，成本 ×N 一分不藏（面板
+  用量列如实显示）。
+- **韧性**：部分成员失败被丢弃，存活成员照常综合（`member_failed` 事件如实记 errorKind）；
+  全失败抛 `EnsembleExhaustedError`；综合器空产出 fail-soft 退回 concat，绝不让综合失败连累整轮；
+  主动 abort 一路抛出不当「成员失败」吞掉。**并发安全**：`synthesize` 返回 `{text,usage}` 而非存
+  实例字段，同一 provider 实例并发 `stream()` 不互相串。
+- **四条边界**：① 热路径零 LLM 决策——开不开 ensemble 是装配层 opt-in 配置（像 routing 的
+  fallbacks），fan-out 本身确定性（永远发全部 N 个），没有模型在现场决定发给谁；② opt-in 字节
+  不变——不配 ensemble 根本不包这个 provider；③ 数据离盒 opt-in——同一 prompt 发 N 个厂商由装配者
+  亲手编排；④ 内核零改动——本类在 `packages/llm`（RoutingProvider 平级），成本/阈值全无 env 旋钮。
+- **失败用例（钉死两件事）**：① **并行 fan-out**——计数 provider 证明 ensemble 调了**全部** N 个成员
+  （routing 只调到第一个成功的）；② **真综合而非透传单份**——synthesize 下综合器**收到全部 N 份草稿
+  + 原问题**（recording provider 断言），concat 下 N 份都在输出里。外加 usage 聚合 ×N、部分失败存活、
+  全失败抛错、tool_use 透传、abort、`sumUsage` 三例。
+- **已落**：`packages/llm/src/ensemble-provider.ts`（`EnsembleProvider` + `EnsembleMember` /
+  `EnsembleStrategy` / `EnsembleEvent` 类型 + `EnsembleExhaustedError` + 导出 `sumUsage` 助手）+
+  index.ts 导出块；13 单测（concat 标签全在 / **并行计数 ×3** / synthesize 收全草稿 / usage ×N /
+  丢失败成员 / 全失败抛错 / tool_use 透传 / 综合器空 fail-soft / 预 abort / 需 ≥1 成员 / sumUsage×3）+
+  capstone `examples/model-ensemble`（真 `EnsembleProvider` 零重写，只 stub 几个成员，五幕自断言：
+  并行 fan-out+concat / synthesize 收全草稿 / usage 聚合 ×N / 部分失败存活 / tool_use 透传；三家成员
+  借 M3 目录里 OpenRouter/Groq/Cerebras；`pnpm demo:model-ensemble` exit 0）。验收：llm 245 全绿
+  （232→245）、demo exit 0、四门 PASS（**旋钮仍 114 零新增**——EnsembleProvider 是 provider 不是旋钮；
+  main.ts 3000/3000 未触碰）。
+- **显式推迟（本 M 只落纯核 + capstone，轻量封顶）**：`ManagedAgentSpec.ensemble` 配置字段 +
+  pool 装配缝（`buildRoutedProvider` 同款咽喉点把成员包成 EnsembleProvider）+ admin 面板编辑器 +
+  面板成本披露徽章——这是**独立配置里程碑**（镜像 MR track：M1 纯核 → M2 才是配置面 + providerFactory
+  接线）。纯核 + capstone 已把「并行综合能不能成、边界对不对」证死；配置面按需再起（要真让某个 agent 走
+  ensemble 时，加 additive 字段 + 一处 opt-in 装配缝即可，不预造）。
 
 ---
 

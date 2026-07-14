@@ -1,0 +1,14 @@
+{
+  "name": "@gotong/example-model-ensemble",
+  "version": "0.0.0",
+  "type": "module",
+  "private": true,
+  "description": "LSA-M4 capstone (LLM 自省与多模型自治 track 封顶) — 同时用多个 LLM,再综合成一份. The whole deterministic ensemble in one run, no network, no API key: the SAME question fans out in PARALLEL to N member models (unlike routing, which calls one) → the concat strategy labels every draft so you see all N → the synthesize strategy hands ALL N drafts to a synthesizer that folds them into one better answer → usage is summed honestly (cost ×N + synthesizer) → a failing member is dropped and the survivors carry on → a tool-picking turn is passed through verbatim (tool calls can't be averaged). Real @gotong/llm EnsembleProvider underneath; only the member providers are stubbed.",
+  "scripts": {
+    "start": "tsx src/demo.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@gotong/llm": "workspace:*"
+  }
+}
