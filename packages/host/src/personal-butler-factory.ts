@@ -72,6 +72,7 @@ import { buildButlerSourceProbe } from './personal-butler-source.js'
 import { buildButlerPendingProbe, type ButlerPendingSource } from './personal-butler-pending.js'
 import { buildButlerPeersToolset, type ButlerPeerSurface } from './personal-butler-peers.js'
 import { buildButlerLlmsToolset, type ButlerLlmSurface } from './personal-butler-llms.js'
+import { buildButlerLlmCatalogToolset } from './personal-butler-llm-catalog.js'
 import {
   buildButlerOnboardingProbe,
   buildButlerOnboardingToolset,
@@ -404,6 +405,12 @@ export function buildButlerFactory(deps: ButlerFactoryDeps): ButlerFactory {
         const capabilitiesToolset = buildButlerCapabilitiesToolset({
           toolNames: () => composedToolNames(),
         })
+        // LSA-M3 — benign "有没有(免费的)模型我可以加": a static curated shortlist of
+        // free/low-cost OpenAI-compatible providers (signup link + get-a-key steps +
+        // base URL + env var). Pure constant render, no surface/deps. The role split
+        // is the whole point — 阿同 suggests, the HUMAN registers + enters the key;
+        // credential WRITE stays owner+vault (the tool's own text carries the red lines).
+        const llmCatalogToolset = buildButlerLlmCatalogToolset()
         const benign = [
           ...(tools ? [tools] : []),
           // S1-M2 — the READ half of the row's MCP servers (search notes, list
@@ -421,6 +428,7 @@ export function buildButlerFactory(deps: ButlerFactoryDeps): ButlerFactory {
           taskNotebookToolset,
           languageToolset,
           capabilitiesToolset,
+          llmCatalogToolset,
           ...(dailyBriefToolset ? [dailyBriefToolset] : []),
           ...(runBroadcastToolset ? [runBroadcastToolset] : []),
           ...(profileToolset ? [profileToolset] : []),

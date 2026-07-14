@@ -99,14 +99,31 @@
   main.ts 未触碰 3000/3000）。**opt-in**：不装即字节不变；装了要人在 host 环境填 `TAVILY_API_KEY`
   / `BRAVE_API_KEY`（框架只存 `${NAME}` 占位，密钥不入库）。
 
-### LSA-M3 免费 provider 发现 + 引导录入（③的合法替代）
+### LSA-M3 免费 provider 发现 + 引导录入（③的合法替代）— ✅ 已落
 
 阿同 benign 只读工具 `discover_llm_providers`：渲染一张**静态策展目录**——可选免费/低价
-provider（OpenRouter 免费档、Groq、Together 试用、DeepSeek 低价…），每个含：能力、免费额度
-真相、**注册链接 + 三步指引**、录入到哪。产出「给你的建议卡」。**阿同绝不自己注册/抓取/写
+provider（OpenRouter 免费档、Groq、Cerebras、Together 试用、DeepSeek 低价），每个含：能力、免费额度
+真相、**注册链接 + 拿 key 三步 + base URL + 环境变量名**。产出「给你的建议卡」。**阿同绝不自己注册/抓取/写
 key**；你注册、拿自己的 key、录进 vault（复用现成连接器/OAuth 凭证流），之后阿同就能用。
 目录是**代码内静态常量**（同 builtin-mcp-connectors 策展），不是让 LLM 上网搜——避免把不可信
 内容当凭证来源。
+
+- **五家 provider（内容全核实，非凭记忆）**：2026-07-14 用 WebFetch 逐一核官方文档的 OpenAI 兼容
+  base URL / key 页 / 免费额度真相——成员会照着 base URL 去配 agent，写错就是害人，所以宁可少列
+  也要核准。谱系齐：免费额度（OpenRouter `:free` 限 50 次/天、Groq RPM/TPM 限流、Cerebras 100 万
+  token/天）+ 试用额度（Together 新号额度）+ 低价（DeepSeek 便宜但非免费）。Google Gemini 因文档
+  URL 连报错**显式推迟**（URL 稳了再加）。
+- **角色分对（③④ 重设计的落点）**：工具**只渲染建议**——`ButlerLlmProviderOption` 结构上**没有 key
+  字段**，注册/拿 key/填 key 全是人做。渲染的卡**每次都印两条红线**：① 我不替你注册、绝不去网上「捡」
+  别人的 key（那种多半泄露/违规）；② 我对 key 只读不写（配好后能看「用哪个 provider、健不健康」=
+  list_my_llms，但改/存 key 永远是你 + 金库的事）。工具描述里也钉了同样的铁律，防模型漂移成「我帮你注册」。
+- **最简缝**：benign always-on（同 `list_my_capabilities`——纯静态常量渲染，零 surface / 零 deps /
+  零 main.ts 改动 / 零新旋钮）。factory 无条件构建 + 进 benign 数组一行。它和 M1 天然咬合：M1
+  `list_my_llms` 说「只有 1 个模型没退路」→ 成员问「那能加啥」→ M3 `discover_llm_providers` 答。
+- **已落**：`personal-butler-llm-catalog.ts`（`CURATED_LLM_PROVIDERS` 常量 + `renderProviderCatalog`
+  + 工具）+ factory 装配（import + 无条件构建 + benign 一行）；防腐测试 8 例（**目录集 + base URL 逐条
+  钉**[成员照着操作、写错即害人]+ 每条完整性 + https/env 名形状 + **渲染必含两条红线**[承重安全断言]+
+  工具行为/未知工具拒绝），host 2095 全绿，四门 PASS（旋钮仍 114 零新增，main.ts 3000/3000 未触碰）。
 
 ### LSA-M4 多 LLM 并行综合（⑤）
 
