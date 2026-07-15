@@ -29,6 +29,7 @@ site/
 secrets/
 coverage/
 .turbo/
+/.worktrees/
 
 # Vitest JUnit reports — CI emits one per package when running with
 # `--reporter=junit --outputFile=junit.xml`; the workflow uploads them
