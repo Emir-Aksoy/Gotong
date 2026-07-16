@@ -73,6 +73,7 @@ import { buildButlerPendingProbe, type ButlerPendingSource } from './personal-bu
 import { buildButlerPeersToolset, type ButlerPeerSurface } from './personal-butler-peers.js'
 import { buildButlerLlmsToolset, type ButlerLlmSurface } from './personal-butler-llms.js'
 import { buildButlerLlmCatalogToolset } from './personal-butler-llm-catalog.js'
+import { buildButlerGuideToolset } from './personal-butler-guide.js'
 import {
   buildButlerOnboardingProbe,
   buildButlerOnboardingToolset,
@@ -417,6 +418,9 @@ export function buildButlerFactory(deps: ButlerFactoryDeps): ButlerFactory {
         // is the whole point — 阿同 suggests, the HUMAN registers + enters the key;
         // credential WRITE stays owner+vault (the tool's own text carries the red lines).
         const llmCatalogToolset = buildButlerLlmCatalogToolset()
+        // AFR-M4 — 随身向导+医生:一个 gotong_guide 工具按 topic 取策展知识卡
+        // (纯常量渲染零依赖);进目录长尾 —— 说明书型低频,正是长尾的第一租户。
+        const guideToolset = buildButlerGuideToolset()
         // AFR-M3 — 工具面两层化。benignFlat 保持今天的平铺全集(B1 能力清单的
         // 来源:两层化只改「schema 怎么呈现」,不改「能干什么」);上脸的 benign
         // 按 butler-tool-tiers.ts 名单把低频长尾折进 TwoTierToolset,经
@@ -441,6 +445,7 @@ export function buildButlerFactory(deps: ButlerFactoryDeps): ButlerFactory {
           languageToolset,
           capabilitiesToolset,
           llmCatalogToolset,
+          guideToolset,
           ...(dailyBriefToolset ? [dailyBriefToolset] : []),
           ...(runBroadcastToolset ? [runBroadcastToolset] : []),
           ...(profileToolset ? [profileToolset] : []),
@@ -452,6 +457,7 @@ export function buildButlerFactory(deps: ButlerFactoryDeps): ButlerFactory {
           ...(consolidateToolset ? [consolidateToolset] : []),
           languageToolset,
           llmCatalogToolset,
+          guideToolset,
           ...(dailyBriefToolset ? [dailyBriefToolset] : []),
           ...(runBroadcastToolset ? [runBroadcastToolset] : []),
           ...(profileToolset ? [profileToolset] : []),

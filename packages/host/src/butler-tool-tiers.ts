@@ -69,6 +69,8 @@ export const BUTLER_DIRECTORY_BENIGN = [
   'set_run_broadcast',
   // 隐私视图 — 偶发「你记得我什么」
   'show_my_memory',
+  // AFR-M4 随身向导+医生 — 说明书型按需知识卡,长尾的第一租户
+  'gotong_guide',
 ] as const
 
 export type ButlerFirstClassBenign = (typeof BUTLER_FIRST_CLASS_BENIGN)[number]

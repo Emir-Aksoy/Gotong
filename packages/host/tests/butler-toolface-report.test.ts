@@ -40,6 +40,7 @@ import { buildButlerDiagnoseToolset } from '../src/personal-butler-diagnose.js'
 import { buildButlerGovernedToolset } from '../src/personal-butler-governed.js'
 import { buildButlerLanguageToolset } from '../src/personal-butler-language.js'
 import { buildButlerLlmCatalogToolset } from '../src/personal-butler-llm-catalog.js'
+import { buildButlerGuideToolset } from '../src/personal-butler-guide.js'
 import { buildButlerLlmsToolset } from '../src/personal-butler-llms.js'
 import { buildButlerObserveToolset } from '../src/personal-butler-observe.js'
 import { buildButlerOnboardingToolset } from '../src/personal-butler-onboarding.js'
@@ -82,6 +83,7 @@ const MEASURED_BUILDERS: Record<string, string> = {
   language: 'buildButlerLanguageToolset',
   capabilities: 'buildButlerCapabilitiesToolset',
   'llm-catalog': 'buildButlerLlmCatalogToolset',
+  guide: 'buildButlerGuideToolset',
   'daily-brief': 'buildButlerDailyBriefToolset',
   'run-broadcast': 'buildButlerRunBroadcastToolset',
   profile: 'buildButlerProfileToolset',
@@ -176,6 +178,7 @@ function buildFullFace(): ToolFaceEntry[] {
       toolset: buildButlerCapabilitiesToolset({ toolNames: async () => [] }),
     },
     { module: 'llm-catalog', kind: 'benign', toolset: buildButlerLlmCatalogToolset() },
+    { module: 'guide', kind: 'benign', toolset: buildButlerGuideToolset() },
     {
       module: 'daily-brief',
       kind: 'benign',

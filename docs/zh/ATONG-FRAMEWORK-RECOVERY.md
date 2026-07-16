@@ -202,6 +202,29 @@
   (工作流 failed / 连接器挂 / LLM 断供 / peer 连不上)/ 框架概念图(agent·工作流·
   定时·连接器·联邦怎么组合)/ 接 IM 桥 / 策展一条联邦边。卡 = 手写常量随包出货。
   **门** = 防腐测试钉卡内命令与 env 名(镜像 LSA-M3 `EXPECTED_*`),命令对实仓核对。
+
+  **✅ M4 已落(2026-07-16)— `packages/host/src/personal-butler-guide.ts`**:一个
+  benign `gotong_guide(topic?)`,纯常量渲染零 surface 零依赖;无参/未知 topic=
+  目录页(id+标题+一句话,模型不取整卡也知道有什么;拼错不炸轮诚实退目录)。
+  **首批 9 张卡**(framework-map / backup / restore-drill / workflow-failed /
+  connector-down / llm-outage / peer-offline / im-bridge / federation-edge),
+  写前逐条核实仓:CLI 用法对 help 表(`gotong backup <space> <dir>
+  [--include-master-key]`、`restore <tgz> --space <dir>`、`peer-card <url>`、
+  `mint-peer-token --peer-id=…`)、IM 动词对 command-parser 的 case
+  (bind/inbox/approve/deny)、env 对注册表、工具名对分层名单;backup 卡只写
+  **今天的真话**(M6 分档落地后由 M6 更新卡,不预写未来命令)。每卡渲染尾固定
+  「知识≠授权」红线;卡内点名目录工具一律带「经 use_tool」提示。**工具自身进
+  目录长尾**(butler-tool-tiers.ts 登记 + factory longTail)——「第一个长尾租户」
+  兑现:单层脸涨到 36 工具 ~6,220tk,**两层脸仍 29 工具 ~4,769tk(-23%)**,新
+  说明书型工具的脸面成本 ≈ 只有 enum 一个词条。**防腐门**
+  `tests/butler-guide.test.ts` 7 例:pins 正向核(command 文件存在/env 已登记/
+  工具在已知集/动词是 parser case,且每条 pin 真出现在正文)+ **反向扫描**
+  (正文任何 `gotong <子命令>`/`GOTONG_*` 字样必须被 pin —— 未核准的命令根本
+  进不了卡)+ 每卡 ≤500 估 token(M1 同尺)+ 目录∪卡=全集 + 目录工具点名必带
+  use_tool 提示 + 工具面三态。排错记:导出常量初名 `GOTONG_GUIDE_TOOL` 撞
+  env-registry 门的 `GOTONG_*` 识别模式 → 改名 `BUTLER_GUIDE_TOOL`(教训:host
+  层常量别用 GOTONG_ 前缀,那是 env 旋钮的保留字形)。验收:guide 7 + tiers 5 +
+  toolface 6 全绿,host 2113 全绿,四门 PASS(旋钮 114 零新增)。
 - **M5 面包屑接线**:BE-M5 运行播报 / CARE 断供卡 / 腿 C 备份提醒的尾部**静态附
   topic 指针**(「想要修法,问我 ×× 就行」)—— 下一轮模型天然知道拉哪张卡;热路径
   仍零 LLM(拼静态串不是决策)。
