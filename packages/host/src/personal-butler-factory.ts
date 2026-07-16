@@ -79,6 +79,7 @@ import { buildButlerPeersToolset, type ButlerPeerSurface } from './personal-butl
 import { buildButlerLlmsToolset, type ButlerLlmSurface } from './personal-butler-llms.js'
 import { buildButlerLlmCatalogToolset } from './personal-butler-llm-catalog.js'
 import { buildButlerGuideToolset } from './personal-butler-guide.js'
+import { buildButlerHubSenseProbe, buildButlerHubHealthToolset } from './personal-butler-hub-sense.js'
 import {
   buildButlerOnboardingProbe,
   buildButlerOnboardingToolset,
@@ -366,6 +367,12 @@ export function buildButlerFactory(deps: ButlerFactoryDeps): ButlerFactory {
           deps.governedOn && deps.backupOps
             ? buildButlerBackupPackToolset({ userId, ops: deps.backupOps, logger: log })
             : undefined
+        // SEN-M1 — benign hub 体检:骑 onboarding 的惰性 adminHealth getter
+        // (与巡检/面板同一份投影,main.ts 零新接线);牌面判定复用
+        // derivePatrolCards 不另写判据。hub 级只读事实同 backup_status。
+        const hubHealthToolset = deps.onboarding
+          ? buildButlerHubHealthToolset({ health: deps.onboarding.health, logger: log })
+          : undefined
         // WIZ-M4c — benign "帮我规划一个工作流": wizard compose, proposal-only
         // (explanation + gap checklist + validated YAML), persists nothing. Saving
         // goes through the governed create_workflow above with the proposal's YAML.
@@ -461,6 +468,7 @@ export function buildButlerFactory(deps: ButlerFactoryDeps): ButlerFactory {
           ...(peersToolset ? [peersToolset] : []),
           ...(llmsToolset ? [llmsToolset] : []),
           ...(backupStatusToolset ? [backupStatusToolset] : []),
+          ...(hubHealthToolset ? [hubHealthToolset] : []),
           ...(planWizardToolset ? [planWizardToolset] : []),
           ...(consolidateToolset ? [consolidateToolset] : []),
           remindersToolset,
@@ -478,6 +486,7 @@ export function buildButlerFactory(deps: ButlerFactoryDeps): ButlerFactory {
           ...(diagnoseToolset ? [diagnoseToolset] : []),
           ...(llmsToolset ? [llmsToolset] : []),
           ...(backupStatusToolset ? [backupStatusToolset] : []),
+          ...(hubHealthToolset ? [hubHealthToolset] : []),
           ...(consolidateToolset ? [consolidateToolset] : []),
           languageToolset,
           llmCatalogToolset,
@@ -560,6 +569,13 @@ export function buildButlerFactory(deps: ButlerFactoryDeps): ButlerFactory {
             refs.pendingInbox
               ? buildButlerPendingProbe({ userId, pending: () => refs.pendingInbox, logger: log })
               : undefined,
+            // SEN-M1 — hub 红灯意识:纯读巡检落盘的牌面(dirname(memoryRoot)
+            // 推导 = <space>/butler/patrol-state.json,A2 presence 同款);无
+            // 文件/损坏/陈旧/空牌面 → null → prompt 字节不变。
+            buildButlerHubSenseProbe({
+              stateFile: join(dirname(memoryRoot), 'patrol-state.json'),
+              logger: log,
+            }),
             deps.onboarding
               ? buildButlerOnboardingProbe({
                   stateFile: deps.onboarding.stateFile,

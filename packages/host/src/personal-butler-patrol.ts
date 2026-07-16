@@ -176,7 +176,8 @@ function emptyState(): PatrolState {
   return { cards: {} }
 }
 
-async function loadPatrolState(file: string): Promise<PatrolState> {
+/** SEN-M1 hub-sense 探针复用同一份解析(判定/解析永不两份)——损坏当空。 */
+export async function loadPatrolState(file: string): Promise<PatrolState> {
   let raw: string
   try {
     raw = await readFile(file, 'utf8')

@@ -74,6 +74,9 @@ export const BUTLER_DIRECTORY_BENIGN = [
   // AFR-M7 恢复层只读 — 低频(「多久没备份了」);打包动作 pack_backup 是
   // governed,按规则全量留一等(它的描述不点名本工具,指路不指空成立)
   'backup_status',
+  // SEN-M1 hub 体检只读 — 低频按需自省(「hub 现在正常吗」);尾卡探针文案
+  // 刻意不点名它(指路指空原则),渲染里点名的 list_my_llms 同在目录内部
+  'hub_health',
 ] as const
 
 export type ButlerFirstClassBenign = (typeof BUTLER_FIRST_CLASS_BENIGN)[number]

@@ -37,6 +37,7 @@ import {
   buildButlerBackupPackToolset,
   buildButlerBackupStatusToolset,
 } from '../src/personal-butler-backup.js'
+import { buildButlerHubHealthToolset } from '../src/personal-butler-hub-sense.js'
 import { buildButlerCapabilitiesToolset } from '../src/personal-butler-capabilities.js'
 import { buildButlerConsolidateToolset } from '../src/personal-butler-consolidate.js'
 import { buildButlerDailyBriefToolset } from '../src/personal-butler-daily-brief.js'
@@ -97,6 +98,7 @@ const MEASURED_BUILDERS: Record<string, string> = {
   'ask-peer': 'buildButlerAskPeerToolset',
   'backup-status': 'buildButlerBackupStatusToolset',
   'backup-pack': 'buildButlerBackupPackToolset',
+  'hub-sense': 'buildButlerHubHealthToolset',
 }
 
 /**
@@ -240,6 +242,12 @@ function buildFullFace(): ToolFaceEntry[] {
       module: 'backup-pack',
       kind: 'governed',
       toolset: buildButlerBackupPackToolset({ userId: U, ops: stub() }),
+    },
+    // SEN-M1 hub 体检:benign 只读,与巡检/面板同源投影。
+    {
+      module: 'hub-sense',
+      kind: 'benign',
+      toolset: buildButlerHubHealthToolset({ health: () => undefined }),
     },
   ]
 }

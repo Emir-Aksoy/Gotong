@@ -182,4 +182,38 @@ AFR-M1 工具面基线报告若因新工具变化，按 tripwire 指引重跑登
 
 ## ✅ SEN-M1 hub 红灯感知（2026-07-16）
 
-见下方实现记录（落地时追加）。
+**落地形状**（新文件 `packages/host/src/personal-butler-hub-sense.ts`，探针+工具
+同文件，镜像 backup 的 status/pack 同居先例）：
+
+- **M1a 尾卡探针 `buildButlerHubSenseProbe`**：纯读
+  `<space>/butler/patrol-state.json`（factory 里 `dirname(memoryRoot)` 推导，
+  A2 presence 同款；牌面解析**复用 patrol 的 `loadPatrolState`**——只给它加了
+  `export` 一个词，解析/判定永不两份）。新鲜度门
+  `PATROL_STATE_FRESH_MS = 3 × BUTLER_PATROL_INTERVAL_MS`（30 分钟常量）：
+  mtime 落后于它 = 巡检不在班 → null（旧牌面不当现状，诚实的未知）。渲染：
+  红牌逐张 label、黄牌计数点前 2 带「等」、规则行钉「别把这卡说成用户说的话」;
+  **不点名任何目录工具**（防漂移断言钉进单测）。无文件/损坏/空牌面/陈旧
+  一律 null → prompt 字节不变。插位:A1 待办探针之后、onboarding 现状卡之前。
+- **M1b `hub_health` 工具**：`health` 面**骑 `deps.onboarding.health`**（main.ts
+  里 onboarding dep 无条件构造、getter 指向与巡检/面板同一个 `patrolHealthRef`）
+  ——**main.ts 零改动零新行**（2999/3000 预算原地不动）。`renderHubHealth`
+  纯投影：问题牌面走 `derivePatrolCards(snapshot)` 同源 fact;断供走面板
+  CARE-M7 **无阈值**姿态（工具要当下真相）,病名经 `outageHeadline` 安全翻译
+  （未知 kind 如实印原码不炸——面板 DTO 的 kind 是宽 string）;路由降级计数 +
+  指路 list_my_llms（同在目录层,互相点名合规）;可选字段（workflow/IM/断供/
+  routing）缺席 = 整行跳过（诚实未知,三态语义与面板一致）。惰性面未就绪/
+  snapshot 抛错 → 诚实话术 isError,绝不连累对话。
+- **登记三件套**：`BUTLER_DIRECTORY_BENIGN` 加 `hub_health`（低频按需自省,
+  带理由注释）+ tripwire `MEASURED_BUILDERS['hub-sense']` + `buildFullFace`
+  条目;AFR-M3 tiers 门（真工厂双向核对）与指路不指空结构性断言自动盖新工具。
+
+**验收**：新单测 17 例全绿（探针六态:无文件/损坏/空牌面/有牌/陈旧 vs 新鲜
+对照/黄牌 ≤2 无「等」;渲染六分支:全绿可选行全跳/红牌同源/缺 key/断供三态含
+未知病名/路由两态/IM+工作流行;工具四态:listTools/未就绪/抛错+warn/正常）;
+host 全套 **2151** 通过（tiers 门 + tripwire + factory 家族全绿）;host tsc
+零错;四门 PASS（kernel-deps 6 不变式/**旋钮 114 零新增**——新常量
+`PATROL_STATE_FRESH_MS` 非 env/行数预算 main.ts 2999/3000 **零触碰**）。
+
+**边界复核**：热路径零 LLM（探针纯读文件、工具纯投影）✓;无信号 = null =
+prompt 字节不变 ✓;披露 ⊆ 巡检既有推送面（零新披露）✓;知识 ≠ 授权（两张嘴
+全只读）✓;内核零改动、零新旋钮、零新存储（读的都是别人写的事实文件）✓。
