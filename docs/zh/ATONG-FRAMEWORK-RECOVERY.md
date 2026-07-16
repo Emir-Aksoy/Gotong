@@ -128,6 +128,19 @@
   每工具 schema 字节/估 token、按模块归类、governed/benign 标注、(可得则)从近期
   transcript 抽调用频次;产出报告脚本挂 pnpm,把基线数字钉进本文档。
   **门** = 脚本可跑 + 基线落档;零行为改动。**分层阈值由这里的数据定,M0 不预判。**
+
+  **✅ M1 已落(2026-07-15,`pnpm report:atong-toolface`)— 基线**:
+  **35 工具 / 21,134 字节 / ~6,038 token**(CJK 感知估算:CJK≈1 token/字、其余≈4 字/token;
+  MCP 连接器 `<server>__<tool>` 与 pool base 工具随部署变化按 0 计,装了只会更大 ——
+  正落 NA-M0「~34+ 工具 6–10K token」区间下沿)。kind 小计:**benign 24 工具 ~3,790tk /
+  governed 6 工具 ~1,197tk / memory 5 工具 ~1,051tk**。最重单工具:`set_daily_brief`
+  ~383tk、`edit_agent` ~274tk、`create_workflow` ~273tk、`plan_workflow` ~232tk;
+  最重模块:memory 5 工具 ~1,051tk(高频,必留一等)、task-notebook 4 工具 ~578tk。
+  纯核 `packages/host/src/butler-toolface-report.ts`(M3 防腐门复用件)+ 报告测试
+  `tests/butler-toolface-report.test.ts` 6 例含**防漂移 tripwire**:工厂 builder
+  callsite 集合 ≡ 报告度量集合(± 显式排除的 `buildButlerMcpToolsets`),往工厂新增
+  toolset 不登记进报告就红。transcript 调用频次:本地无有意义样本,如实跳过 ——
+  M2 分层先按「一次性配置类 vs 常用类」的工具性质切,生产机可跑同一脚本复核。
 - **M2 两层化纯核**(llm 层,ComposedToolset 兄弟):`list_tool_directory`(benign,
   渲染长尾目录:名字 + 一句话 + 紧凑参数说明)+ `use_tool(name, args)`(查表转发到
   真 toolset,**服务端按真 schema 校验**,校验失败的错误信息指回目录条目)。分层规则:
