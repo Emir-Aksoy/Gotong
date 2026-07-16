@@ -1,6 +1,6 @@
 # 阿同感知力 track（SEN）— 对自己与对所在 hub 的感知增强
 
-> Status: **M0 计划 + M1→M4 已落**（M1 hub 红灯感知 ✅ / M2 peers 信任投影 ✅ / M3 my_status 自检卡 ✅ / M4 list_schedules 定时投影 ✅）
+> Status: **M0 计划 + M1→M5 已落**（M1 hub 红灯感知 ✅ / M2 peers 信任投影 ✅ / M3 my_status 自检卡 ✅ / M4 list_schedules 定时投影 ✅ / M5 list_members 成员名单 ✅）
 > Last updated: 2026-07-16
 >
 > 用户诉求（2026-07-16 原话）：「怎么能增加 atong 的感知力，包括对自己和对它
@@ -334,3 +334,40 @@ main.ts 3000/3000 压注释净零）。
 **边界复核**：热路径零 LLM（admin list 纯投影再过滤）✓;不进尾卡=prompt
 字节不变 ✓;披露 ⊆ 既有面（成员自己的行,sweeper 本就以他的身份跑）✓;
 知识 ≠ 授权（只读,无成员写面）✓;内核零改动、零新旋钮、零新存储 ✓。
+
+## ✅ SEN-M5 list_members 成员/角色投影（2026-07-16，岔口 A 用户拍板）
+
+缺口 ④ 收口。**实现前先摆披露岔口**（M0 钉死的前置）：侦察证实 /me 零成员
+名单 API、家庭审批流「谁来批」是自由文本靠场外知识手打——岔口真实存在。三
+选项摆给用户，**拍板 A = 全员可见「名 + 角色 + id」**（家庭/小团队主场景里
+名单是信任圈内目录信息，list_peers 把 mesh 拓扑给全员看的同款姿态）。
+
+- **投影带 id 是必要的（侦察改设计）**：`newId()` 生成的随机 user id 才是
+  workflow `assignee` 真正要填的东西（human-inbox-participant 认 id 不认
+  名字）——只给显示名断点没解决。id 是标识符不是凭证（transcript/审计/
+  工作流 YAML 里本就成员可见），渲染尾行钉「填 id 那串,不是名字」。
+- **email 红线结构性**：identity `User` 行带 email（登录标识）;窄切片
+  `ButlerMemberSurfaceDeps.users` 类型只声明 `id/displayName`，join 只挑
+  声明的列——投影行没有 email 字段，渲染器想泄露也拿不到（哨兵 email 进
+  fixture 断 `not.toContain('@')` 钉死）。
+- **诚实姿态**：identity 今天没有成员禁用机制 = 不发明隐藏过滤（名单就是
+  全员）;membership 行缺失渲染「(角色未知)」绝不猜默认;未知 role 原码直
+  印;displayName null =「(未设名)」。角色排序 owner→admin→member→viewer
+  →未知，中文括注帮弱模型（owner(拥有者)）。
+- 装配：factory 走 **deps 窄鸭子**（backupOps 先例——identity 在 factory
+  构造前就绪,不占 refs 前向机制）;main.ts 在 `identityForBackup` 段搭车
+  +5 行传两个 getter（零新 import,类型在 factory deps 里声明）,压 S1-M1/
+  BE-M1 两段历史注释净零守 3000/3000;`membershipRole` 逐个单查
+  （getMembership 索引查,hub 名单小,N+1 是噪音——注释钉进模块头）;
+  identity 缺席 ⇒ 不装。注册三件套齐（tiers/MEASURED_BUILDERS/
+  buildFullFace + 防腐门 fixture 补 members deps）。
+
+**验收**：新单测 12 例全绿（email 结构性剔除+渲染无 @/角色排序含未知殿后/
+id 逐行+assignee 提示/三处诚实缺口/空与 throw 与未知工具/描述零目录工具点
+名）;host 全套 **2183** 全绿;tsc 零错;四门 PASS（旋钮 114 零新增,
+main.ts 3000/3000 压注释净零）。
+
+**边界复核**：热路径零 LLM（identity 两查纯拼接）✓;不进尾卡=prompt 字节
+不变 ✓;披露=岔口 A 用户显式拍板（唯一一次越过既有面的扩面,人点头后落地）
+✓;知识 ≠ 授权（只读名单,改角色仍走 admin 面板）✓;内核零改动、零新旋钮、
+零新存储 ✓。

@@ -38,6 +38,7 @@ import {
   buildButlerBackupStatusToolset,
 } from '../src/personal-butler-backup.js'
 import { buildButlerHubHealthToolset } from '../src/personal-butler-hub-sense.js'
+import { buildButlerMembersToolset } from '../src/personal-butler-members.js'
 import { buildButlerSchedulesToolset } from '../src/personal-butler-schedules.js'
 import { buildButlerSelfStatusToolset } from '../src/personal-butler-self-status.js'
 import { buildButlerCapabilitiesToolset } from '../src/personal-butler-capabilities.js'
@@ -103,6 +104,7 @@ const MEASURED_BUILDERS: Record<string, string> = {
   'hub-sense': 'buildButlerHubHealthToolset',
   'self-status': 'buildButlerSelfStatusToolset',
   schedules: 'buildButlerSchedulesToolset',
+  members: 'buildButlerMembersToolset',
 }
 
 /**
@@ -266,6 +268,14 @@ function buildFullFace(): ToolFaceEntry[] {
       toolset: buildButlerSchedulesToolset({
         userId: 'u',
         schedules: { listForUser: async () => [] },
+      }),
+    },
+    // SEN-M5 成员名单投影:benign 只读,岔口 A 全员见名+角色+id。
+    {
+      module: 'members',
+      kind: 'benign',
+      toolset: buildButlerMembersToolset({
+        members: { listForButler: async () => [] },
       }),
     },
   ]

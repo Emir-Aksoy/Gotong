@@ -83,6 +83,8 @@ export const BUTLER_DIRECTORY_BENIGN = [
   // SEN-M4 定时工作流成员向投影 — 低频(「每天早上自动跑什么」);渲染指路
   // admin 面板是人话不是工具名,描述零工具点名
   'list_schedules',
+  // SEN-M5 成员名单 — 低频(「hub 里有谁」「审批指派谁」);岔口 A 全员可见
+  'list_members',
 ] as const
 
 export type ButlerFirstClassBenign = (typeof BUTLER_FIRST_CLASS_BENIGN)[number]

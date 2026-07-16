@@ -98,6 +98,11 @@ import {
   type ButlerWizardSource,
 } from './personal-butler-workflow-wizard.js'
 import {
+  buildButlerMembersToolset,
+  buildButlerMemberSurface,
+  type ButlerMemberSurfaceDeps,
+} from './personal-butler-members.js'
+import {
   buildButlerSchedulesToolset,
   type ButlerScheduleSurface,
 } from './personal-butler-schedules.js'
@@ -200,10 +205,18 @@ export interface ButlerFactoryDeps {
    * 判定钉在 ops.privileged —— 服务端权威,绝不信模型自报。
    */
   backupOps?: ButlerBackupOps
+  /**
+   * SEN-M5 — 成员名单投影源(identity 窄切片,main.ts 传两个 getter;缺席 ⇒
+   * list_members 不装)。岔口 A(用户拍板):全员见「名+角色+id」;email 结构性
+   * 不进投影——切片类型根本没有 email 字段,surface join 只挑声明的列。
+   */
+  members?: ButlerMemberSurfaceDeps
 }
 
 export function buildButlerFactory(deps: ButlerFactoryDeps): ButlerFactory {
   const { hub, logger: log, memoryRoot } = deps
+  // SEN-M5 — 成员 roster 无 per-user 态,工厂级构造一次全员共享。
+  const membersSurface = deps.members ? buildButlerMemberSurface(deps.members) : undefined
   return (base, mcp) => {
     // S1-M2 — split the row's attached MCP (notes / calendar / …) into a benign
     // READ proxy (runs inline) and a governed WRITE toolset (parks for a /me
@@ -386,6 +399,11 @@ export function buildButlerFactory(deps: ButlerFactoryDeps): ButlerFactory {
         const schedulesToolset = refs.schedules
           ? buildButlerSchedulesToolset({ userId, schedules: refs.schedules, logger: log })
           : undefined
+        // SEN-M5 — benign "hub 里有谁": 名+角色+id 目录投影(岔口 A 全员可
+        // 见;assignee 断点靠 id 收口)。identity 未接 ⇒ 不装。
+        const membersToolset = membersSurface
+          ? buildButlerMembersToolset({ members: membersSurface, logger: log })
+          : undefined
         // SEN-M3 — benign 自我状态一卡:大脑链/断供/累计用量/记忆规模/任务数/
         // 备份六块既有投影拼成「我现在怎么样」(零新权威点)。碎片 dep 缺席
         // 该行「(未接)」逐行降级,工具本身无条件装(笔记本永远在)。
@@ -496,6 +514,7 @@ export function buildButlerFactory(deps: ButlerFactoryDeps): ButlerFactory {
           ...(backupStatusToolset ? [backupStatusToolset] : []),
           ...(hubHealthToolset ? [hubHealthToolset] : []),
           ...(schedulesToolset ? [schedulesToolset] : []),
+          ...(membersToolset ? [membersToolset] : []),
           selfStatusToolset,
           ...(planWizardToolset ? [planWizardToolset] : []),
           ...(consolidateToolset ? [consolidateToolset] : []),
@@ -516,6 +535,7 @@ export function buildButlerFactory(deps: ButlerFactoryDeps): ButlerFactory {
           ...(backupStatusToolset ? [backupStatusToolset] : []),
           ...(hubHealthToolset ? [hubHealthToolset] : []),
           ...(schedulesToolset ? [schedulesToolset] : []),
+          ...(membersToolset ? [membersToolset] : []),
           selfStatusToolset,
           ...(consolidateToolset ? [consolidateToolset] : []),
           languageToolset,

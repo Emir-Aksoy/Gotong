@@ -964,17 +964,12 @@ async function main(): Promise<void> {
   // draft-never-live. Ref assigned once that service exists (only when workflowAssist
   // is present). Absent ⇒ the `create_workflow` gate isn't composed at all.
   let butlerWorkflowCreateRef: ButlerWorkflowCreateSource | undefined
-  // S1-M1 — the benign "run my workflow" catalog. The published workflow catalog
-  // (`WorkflowController`) is built further down, so this is a forward-declared
-  // `let` read at butler-build time (same pattern as the governed refs, safe
-  // because a per-user butler is built lazily on that member's first task). Absent
-  // ⇒ the butler simply has no run-workflow tool.
+  // S1-M1 — benign "run my workflow" catalog; forward-declared `let` read at
+  // butler-build (controller built further down). Absent ⇒ no run-workflow tool.
   let butlerWorkflowsRef: ButlerWorkflowSurface | undefined
-  // BE-M1 — the butler's benign READ "eyes": recent runs / helper roster / own
-  // usage. Same controller + agent projection + ledger the /me panels read; runs
-  // & usage are scoped to the member server-side (no-leak). Forward-declared
-  // `let`s read at butler-build time (same lazy pattern), assigned once the
-  // workflow controller / agent projection / identity ledger exist further down.
+  // BE-M1 — benign READ "eyes" (runs / helpers / own usage), same projections
+  // the /me panels read, member-scoped server-side (no-leak). Lazy `let`s
+  // assigned once controller / agent projection / ledger exist further down.
   let butlerObserveRunsRef: ButlerRunSurface | undefined
   let butlerObserveAgentsRef: ButlerAgentSurface | undefined
   let butlerObserveUsageRef: ButlerUsageSurface | undefined
@@ -1100,6 +1095,11 @@ async function main(): Promise<void> {
       lang: config.defaultLang,
     },
     ...(butlerBackupOps ? { backupOps: butlerBackupOps } : {}),
+    // SEN-M5 — 成员名单投影源(岔口 A 全员见名+角色+id;email 结构性不进投影)。
+    ...(identityForBackup
+      ? { members: { users: () => identityForBackup.listUsers(),
+          membershipRole: (uid: string) => identityForBackup.getMembership(uid)?.role ?? null } }
+      : {}),
   })
 
   // MR-M3 — shared per-provider routing-health projection, fed by every routed

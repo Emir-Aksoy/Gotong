@@ -141,6 +141,7 @@ function buildButler(provider: LlmProvider, root: string, singleTier?: boolean) 
     },
     ...(singleTier === undefined ? {} : { singleTierToolFace: singleTier }),
     backupOps: fakeBackupOps,
+    members: { users: () => [], membershipRole: () => null },
   })
   return factory({
     id: 'atong' as ParticipantId,
