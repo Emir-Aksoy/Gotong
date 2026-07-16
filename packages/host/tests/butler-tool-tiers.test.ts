@@ -60,6 +60,7 @@ function fullRefs(): ButlerFactoryRefs {
     askRoster: stub(),
     peerRoster: stub(),
     llmRoster: stub(),
+    schedules: stub(),
     // 探针专用(不产工具);stub 空对象会在任务期被真调,置 undefined 免误炸。
     pendingInbox: undefined,
     wizard: stub(),

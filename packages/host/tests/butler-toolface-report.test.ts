@@ -38,6 +38,7 @@ import {
   buildButlerBackupStatusToolset,
 } from '../src/personal-butler-backup.js'
 import { buildButlerHubHealthToolset } from '../src/personal-butler-hub-sense.js'
+import { buildButlerSchedulesToolset } from '../src/personal-butler-schedules.js'
 import { buildButlerSelfStatusToolset } from '../src/personal-butler-self-status.js'
 import { buildButlerCapabilitiesToolset } from '../src/personal-butler-capabilities.js'
 import { buildButlerConsolidateToolset } from '../src/personal-butler-consolidate.js'
@@ -101,6 +102,7 @@ const MEASURED_BUILDERS: Record<string, string> = {
   'backup-pack': 'buildButlerBackupPackToolset',
   'hub-sense': 'buildButlerHubHealthToolset',
   'self-status': 'buildButlerSelfStatusToolset',
+  schedules: 'buildButlerSchedulesToolset',
 }
 
 /**
@@ -256,6 +258,15 @@ function buildFullFace(): ToolFaceEntry[] {
       module: 'self-status',
       kind: 'benign',
       toolset: buildButlerSelfStatusToolset({ userId: 'u', notebook }),
+    },
+    // SEN-M4 定时工作流成员向投影:benign 只读,admin list 同源。
+    {
+      module: 'schedules',
+      kind: 'benign',
+      toolset: buildButlerSchedulesToolset({
+        userId: 'u',
+        schedules: { listForUser: async () => [] },
+      }),
     },
   ]
 }

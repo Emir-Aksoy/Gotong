@@ -80,6 +80,9 @@ export const BUTLER_DIRECTORY_BENIGN = [
   // SEN-M3 自我状态一卡 — 低频按需自省(「你还好吗」);渲染里点名的
   // list_my_llms 同在目录内部(LSA-M1 先例,模式连续)
   'my_status',
+  // SEN-M4 定时工作流成员向投影 — 低频(「每天早上自动跑什么」);渲染指路
+  // admin 面板是人话不是工具名,描述零工具点名
+  'list_schedules',
 ] as const
 
 export type ButlerFirstClassBenign = (typeof BUTLER_FIRST_CLASS_BENIGN)[number]

@@ -301,6 +301,7 @@ import type {
 import type { ButlerAskRosterSource } from './personal-butler-ask-agent.js'
 import { buildButlerPeerSurface, type ButlerPeerSurface } from './personal-butler-peers.js'
 import { buildButlerLlmSurface, type ButlerLlmSurface } from './personal-butler-llms.js'
+import { buildButlerScheduleSurface, type ButlerScheduleSurface } from './personal-butler-schedules.js'
 import type { ButlerWizardSource } from './personal-butler-workflow-wizard.js'
 import { ReminderParticipant } from './reminder-participant.js'
 import type { LlmProvider } from '@gotong/llm'
@@ -984,19 +985,16 @@ async function main(): Promise<void> {
   // panel). Refs assigned once the member-agent lister + adaptation service exist.
   let butlerDiagnoseOwnedRef: ButlerOwnedAgentSource | undefined
   let butlerDiagnoseAdaptRef: ButlerAdaptationSource | undefined
-  // BE-M4 — the butler's benign "问我自己的助手" switchboard: one-shot dispatch to
-  // an agent THIS member owns (no-leak via listOwned), awaiting the reply. Ref
-  // assigned once the member-agent lister exists. Absent ⇒ the tool isn't offered.
+  // BE-M4 — benign "问我自己的助手" one-shot dispatch (no-leak via listOwned); ref absent ⇒ tool off.
   let butlerAskRosterRef: ButlerAskRosterSource | undefined
   // NET-M1 — the butler's benign network eye: sanitized mesh roster (no
   // endpoint/token/ACL detail). Ref assigned once the peer registry exists.
   let butlerPeerRosterRef: ButlerPeerSurface | undefined
   let butlerLlmRosterRef: ButlerLlmSurface | undefined
-  // WIZ-M4c — the butler's benign "帮我规划一个工作流" planner: the six-phase
-  // wizard's compose (组装→缺口→校验闭环), proposal-only, persists nothing. The
-  // save half hands off to the governed create_workflow with the wizard's YAML.
-  // Ref assigned once the wizard service exists (needs workflowAssist). Absent ⇒
-  // the tool isn't offered — same degradation as the /me wizard routes' 503.
+  let butlerSchedulesRef: ButlerScheduleSurface | undefined // SEN-M4 定时投影(admin list 同源)
+  // WIZ-M4c — benign 建流向导 compose (组装→缺口→校验闭环), proposal-only; save
+  // hands off to governed create_workflow. Ref needs workflowAssist; absent ⇒
+  // tool off (same degradation as the /me wizard routes' 503).
   let butlerWizardRef: ButlerWizardSource | undefined
   // S2-M2 — the benign "整理一下记忆" tool resolves the distillation provider
   // (the butler's own model) through the agent pool, which is built further down.
@@ -1086,6 +1084,7 @@ async function main(): Promise<void> {
       askRoster: butlerAskRosterRef,
       peerRoster: butlerPeerRosterRef,
       llmRoster: butlerLlmRosterRef,
+      schedules: butlerSchedulesRef,
       wizard: butlerWizardRef,
       providerBuilder: butlerProviderBuilderRef,
       memoryView: butlerMemoryViewRef,
@@ -1909,6 +1908,10 @@ async function main(): Promise<void> {
   const workflowScheduleSweeper = new WorkflowScheduleSweeper(
     { spaceDir: space.root, workflows: workflowController, hub, logger: log })
   workflowScheduleSweeper.start()
+  // LIFE-L1-M3 admin CRUD surface, shared: web routes + SEN-M4 阿同成员向投影同一实例。
+  const workflowSchedules = createWorkflowScheduleAdminSurface(
+    { spaceDir: space.root, sweeper: workflowScheduleSweeper, logger: log })
+  butlerSchedulesRef = buildButlerScheduleSurface({ admin: workflowSchedules })
 
   // Phase 18 C-M4 + Route B P1-M11b — outbound A2A agents. Each stored entry
   // (identity `a2a_outbound_agents`) becomes a local Participant, so a normal
@@ -2559,9 +2562,7 @@ async function main(): Promise<void> {
     // config + owner config-write). No destructive routes; ops-core's chokepoint
     // refuses cold-start / restore / rotate-master-key (CLI-only by physics).
     settingOps,
-    // LIFE-L1-M3 — schedule CRUD + manual 试跑; dispatch stays on the sweeper.
-    workflowSchedules: createWorkflowScheduleAdminSurface(
-      { spaceDir: space.root, sweeper: workflowScheduleSweeper, logger: log }),
+    workflowSchedules, // LIFE-L1-M3 CRUD + 试跑(构造在 sweeper 旁); dispatch stays on the sweeper.
     reconcileHeartbeats,
     mcpRegistry,
     mcpFederation,

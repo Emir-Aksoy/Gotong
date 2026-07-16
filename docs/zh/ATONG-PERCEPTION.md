@@ -1,6 +1,6 @@
 # 阿同感知力 track（SEN）— 对自己与对所在 hub 的感知增强
 
-> Status: **M0 计划 + M1、M2、M3 已落**（M1 hub 红灯感知 ✅ / M2 peers 信任投影 ✅ / M3 my_status 自检卡 ✅）
+> Status: **M0 计划 + M1→M4 已落**（M1 hub 红灯感知 ✅ / M2 peers 信任投影 ✅ / M3 my_status 自检卡 ✅ / M4 list_schedules 定时投影 ✅）
 > Last updated: 2026-07-16
 >
 > 用户诉求（2026-07-16 原话）：「怎么能增加 atong 的感知力，包括对自己和对它
@@ -293,3 +293,44 @@ host 全套 **2165** 全绿;tsc 零错;平铺基线 40 工具 ~6767tk（my_statu
 **边界复核**：热路径零 LLM（纯投影拼接）✓;不进尾卡=prompt 字节不变 ✓;
 披露 ⊆ 既有面（六块全是别处已交付投影的再组合,记忆只出计数）✓;知识 ≠
 授权（只读自检）✓;内核零改动、零新旋钮、零新存储 ✓。
+
+## ✅ SEN-M4 list_schedules 定时工作流成员向投影（2026-07-16）
+
+缺口 ② 收口：schedules 只有 admin CRUD 面，成员问阿同「每天早上自动跑什么」
+只能得到即兴编造。落地 = 新 `personal-butler-schedules.ts`（目录层 benign
+`list_schedules`）+ main.ts 共享一个 admin surface 实例。
+
+- **披露面零岔口（M0 预判的「成员向」被侦察坐实）**：`WorkflowScheduleDef.
+  userId` 本就是「这条 run 归属谁」——sweeper 按它走成员闸派发（schedule
+  永远做不了该成员自己点 run 做不到的事），所以**成员看自己名下的行 = 零新
+  披露**。surface 按 `userId` 精确过滤;坏行 userId 恢复不出来（admin
+  invalidView 兜 ''）= 不归任何成员视图，坏行的家在 admin 面板。
+- **同源纪律（判定/解析永不两份）**：不自读 `workflow-schedules.json`——
+  包装 `WorkflowScheduleAdminService.list()`（normalize + 事实 join 全复
+  用），main.ts 把原本 serveWeb options 里内联构造的 surface 提前到 sweeper
+  旁构造一次，web 路由与阿同投影**同一实例**。窄鸭子只声明 `list`，upsert/
+  remove/fire 结构性不进阿同侧。
+- **最小投影**：行只带 workflowId/cadence/enabled/valid/lastFiredMark；
+  `inputs`（工作流入参）、schedule id、userId 结构性不进投影（list_peers
+  红线姿态）;cadence 防御拷贝。
+- **渲染诚实**：cadence 按真实字段人话化（`每天 07:00(UTC+8)` / `每周一
+  09:00(UTC)` / `每 90 分钟`，半小时时区如实 `UTC+5:30`）;lastFiredMark
+  按真实编码渲染——daily/weekly 的 mark **就是**成员本地日历日期直印，
+  interval 的 mark 是 epoch-ms 折 UTC 分钟，解析不动如实说「(记录无法解
+  析)」绝不印假日期;valid:false 行「配置有误,这条没在跑」绝不猜节奏;成员
+  无写面 = 文案指「请管理员在面板配置」，永不指工具名。
+- 装配：main.ts 净 +5 行（import/let ref/refs 条目/共享构造/web options
+  收 1 行）靠压 BE-M4、WIZ-M4c 两段历史注释净零，预算 3000/3000 顶格守住;
+  factory `refs.schedules` 缺席（sweeper 没起）⇒ 不装;注册三件套齐，
+  AFR-M3 名单双向核对门在 fixture 补 stub 前如期变红（名单 13 脸上 12），
+  门活着。
+
+**验收**：新单测 11 例全绿（成员过滤+坏行归属/最小投影 `'inputs' in row`
+=false+渲染无他人行无入参值/cadence 防御拷贝/三种节奏+半小时时区/mark 三
+态+假日期防御/停用与坏行/空与尾行指面板/throw 与未知工具/描述零工具点
+名）;host 全套 **2176** 全绿;tsc 零错;四门 PASS（旋钮 114 零新增,
+main.ts 3000/3000 压注释净零）。
+
+**边界复核**：热路径零 LLM（admin list 纯投影再过滤）✓;不进尾卡=prompt
+字节不变 ✓;披露 ⊆ 既有面（成员自己的行,sweeper 本就以他的身份跑）✓;
+知识 ≠ 授权（只读,无成员写面）✓;内核零改动、零新旋钮、零新存储 ✓。
