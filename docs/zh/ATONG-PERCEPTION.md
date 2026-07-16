@@ -1,6 +1,6 @@
 # 阿同感知力 track（SEN）— 对自己与对所在 hub 的感知增强
 
-> Status: **M0 计划 + M1 已落**（M1 hub 红灯感知 ✅）
+> Status: **M0 计划 + M1、M2 已落**（M1 hub 红灯感知 ✅ / M2 peers 信任投影 ✅）
 > Last updated: 2026-07-16
 >
 > 用户诉求（2026-07-16 原话）：「怎么能增加 atong 的感知力，包括对自己和对它
@@ -217,3 +217,31 @@ host 全套 **2151** 通过（tiers 门 + tripwire + factory 家族全绿）;hos
 **边界复核**：热路径零 LLM（探针纯读文件、工具纯投影）✓;无信号 = null =
 prompt 字节不变 ✓;披露 ⊆ 巡检既有推送面（零新披露）✓;知识 ≠ 授权（两张嘴
 全只读）✓;内核零改动、零新旋钮、零新存储（读的都是别人写的事实文件）✓。
+
+---
+
+## ✅ SEN-M2 peers 投影补信任分档（2026-07-16）
+
+**旧账**：`ButlerPeerRow`（NET-M1 时代）只有 peerId/label/connected/liveness/
+outboundCaps——GT 的 trustTier 与 STD-M2b 的 pinnedKid 落库在它之后，投影
+从没补。阿同知道「认识谁」，不知道「多信任」。
+
+**落地**（全在 `personal-butler-peers.ts`，additive）：
+
+- `ButlerPeerRow` 增 `trustTier: string | null`（null = owner 未分级）与
+  `pinned: boolean`——**pinnedKid 在 join 时折成布尔**，43 字符指纹结构性
+  不进投影（endpoint/token 红线的延伸：最小投影，成员要的是「锚没锚」）。
+- `ButlerPeerSurfaceDeps.rows` 鸭子切片加两字段;identity `listPeers()` 行
+  本就带它们（读侧已钳:未知 trust_tier 值 → null），结构类型直接满足——
+  **main.ts 零改动**。
+- 渲染行尾插 `tierLine`：`信任档 T2·已锚定签名公钥` / `信任档 T3` /
+  null → `信任档未分级(按 T1 对待)`——**GT 真语义**（null 回落地板 T1
+  绝不发明档位;PIN 是事实后缀不是档位——GT-M4「PIN 证身份证不了档」）。
+- `ask_peer`（NET-M2）读同一 surface 但只认 outboundCaps 路由——新字段
+  additive 对它零影响（出网授权仍由 caps 白名单裁决,信任档只是转述）。
+
+**验收**：butler-peers 测试 8 例（+2:渲染三态 T2·锚定/未分级回落/T3 无
+后缀;**脱敏结构性**——投影行 `'pinnedKid' in row === false`、43 字符指纹
+样例绝不出现在渲染文本）;两处手写 row 的 ask-peer 测试工厂补新字段;host
+全套 **2152** 全绿;tsc 零错;四门 PASS（旋钮 114 零新增,main.ts 2999/3000
+零触碰）。

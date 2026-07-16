@@ -34,6 +34,8 @@ const row = (peerId: string, outboundCaps: string[] | null, label: string | null
   connected: true,
   lastSeenAt: null,
   outboundCaps,
+  trustTier: null,
+  pinned: false,
 })
 
 const surfaceOf = (rows: ButlerPeerRow[]): ButlerPeerSurface => ({ listForButler: async () => rows })

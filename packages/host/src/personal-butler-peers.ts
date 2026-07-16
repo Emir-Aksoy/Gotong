@@ -44,6 +44,14 @@ export interface ButlerPeerRow {
   lastSeenAt: number | null
   /** Outbound posture: null = 未策展 / [] = 锁死 / list = 白名单(即广告). */
   outboundCaps: string[] | null
+  /** SEN-M2/GT — owner 打的信任档;null = 未分级(消费侧按地板 T1 对待)。 */
+  trustTier: string | null
+  /**
+   * SEN-M2/STD-M2b — owner 是否已锚定对端签名公钥。**布尔化**:成员要的是
+   * 「锚没锚」,43 字符指纹进聊天没用还占行——指纹本身结构性不进投影
+   * (与 endpoint/token 同一条红线的延伸:最小投影)。
+   */
+  pinned: boolean
 }
 
 /** The roster the toolset (and NET-M2's target check) reads. */
@@ -69,6 +77,10 @@ export interface ButlerPeerSurfaceDeps {
     enabled: boolean
     revocationState: string
     outboundCaps: string[] | null
+    /** GT-M3 identity 投影(读侧已钳:未知值 = null)。 */
+    trustTier: string | null
+    /** STD-M2b PIN 指纹;join 时折成布尔,原值不进投影。 */
+    pinnedKid: string | null
   }>
 }
 
@@ -93,6 +105,8 @@ export function buildButlerPeerSurface(deps: ButlerPeerSurfaceDeps): ButlerPeerS
           // Copy defensively — the projection must never alias a mutable
           // identity row (and never carry fields beyond the declared shape).
           outboundCaps: row.outboundCaps ? [...row.outboundCaps] : null,
+          trustTier: row.trustTier ?? null,
+          pinned: row.pinnedKid != null,
         })
       }
       return out
@@ -132,10 +146,20 @@ class ButlerPeersToolset implements LlmAgentToolset {
     const lines = rows.map((r) => {
       const name = r.label ? `${r.peerId}(${r.label})` : r.peerId
       const state = r.connected ? '在线' : '离线'
-      return `- ${name} — ${state};${capsLine(r.outboundCaps)}`
+      return `- ${name} — ${state};${tierLine(r.trustTier, r.pinned)};${capsLine(r.outboundCaps)}`
     })
     return text(`互联的 hub(${rows.length} 个):\n${lines.join('\n')}`)
   }
+}
+
+/**
+ * SEN-M2 — render the owner-chosen trust grade with GT's real semantics:
+ * null = un-graded → the floor T1 applies (never invent a grade), and the
+ * owner PIN is a fact suffix, not a grade (GT-M4: PIN 证身份,证不了档位).
+ */
+function tierLine(tier: string | null, pinned: boolean): string {
+  const t = tier === null ? '信任档未分级(按 T1 对待)' : `信任档 ${tier}`
+  return pinned ? `${t}·已锚定签名公钥` : t
 }
 
 /** Render the outbound posture with its real semantics — never invent a fourth state. */

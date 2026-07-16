@@ -36,9 +36,9 @@ describe('NET-M1 — list_peers(管家网络眼睛)', () => {
   it('renders online/offline + the three outbound postures with real semantics', async () => {
     const toolset = buildButlerPeersToolset({
       peers: surfaceOf([
-        { peerId: 'hub-dad', label: '爸爸的 hub', connected: true, lastSeenAt: 1, outboundCaps: null },
-        { peerId: 'hub-office', label: null, connected: false, lastSeenAt: null, outboundCaps: ['research', 'translate'] },
-        { peerId: 'hub-locked', label: '封存', connected: true, lastSeenAt: 2, outboundCaps: [] },
+        { peerId: 'hub-dad', label: '爸爸的 hub', connected: true, lastSeenAt: 1, outboundCaps: null, trustTier: 'T2', pinned: true },
+        { peerId: 'hub-office', label: null, connected: false, lastSeenAt: null, outboundCaps: ['research', 'translate'], trustTier: null, pinned: false },
+        { peerId: 'hub-locked', label: '封存', connected: true, lastSeenAt: 2, outboundCaps: [], trustTier: 'T3', pinned: false },
       ]),
     })
 
@@ -50,6 +50,10 @@ describe('NET-M1 — list_peers(管家网络眼睛)', () => {
     expect(out).toContain('hub-office — 离线')
     expect(out).toContain('可请求能力:research、translate') // 白名单如实列出
     expect(out).toContain('出站已锁死')                     // [] → lockdown
+    // SEN-M2 — trust grade renders GT's real semantics per edge.
+    expect(out).toContain('信任档 T2·已锚定签名公钥')       // graded + owner PIN fact
+    expect(out).toContain('信任档未分级(按 T1 对待)')       // null → floor, never invented
+    expect(out).toContain('信任档 T3')                      // graded, no PIN suffix
   })
 
   it('sanitize: sneaky endpoint/token fields on a row never reach the text', async () => {
@@ -62,6 +66,8 @@ describe('NET-M1 — list_peers(管家网络眼睛)', () => {
         connected: true,
         lastSeenAt: null,
         outboundCaps: null,
+        trustTier: null,
+        pinned: false,
         endpointUrl: 'wss://secret-internal:7443',
         token: 'peer-token-abc123',
       } as unknown as ButlerPeerRow,
@@ -99,19 +105,40 @@ describe('NET-M1 — buildButlerPeerSurface(host 侧拼接)', () => {
     { peerRowId: 'r3', peerId: 'hub-revoked', label: null, connected: false, lastSeenAt: null },
     { peerRowId: 'r4', peerId: 'hub-disabled', label: null, connected: false, lastSeenAt: null },
   ]
+  const KID = 'x'.repeat(43) // RFC 7638 thumbprint shape (43 base64url chars)
   const rows = [
-    { id: 'r1', enabled: true, revocationState: 'active', outboundCaps: ['chat'] },
-    { id: 'r2', enabled: true, revocationState: 'active', outboundCaps: null },
-    { id: 'r3', enabled: true, revocationState: 'revoked', outboundCaps: null },
-    { id: 'r4', enabled: false, revocationState: 'active', outboundCaps: null },
+    { id: 'r1', enabled: true, revocationState: 'active', outboundCaps: ['chat'], trustTier: 'T2', pinnedKid: KID },
+    { id: 'r2', enabled: true, revocationState: 'active', outboundCaps: null, trustTier: null, pinnedKid: null },
+    { id: 'r3', enabled: true, revocationState: 'revoked', outboundCaps: null, trustTier: null, pinnedKid: null },
+    { id: 'r4', enabled: false, revocationState: 'active', outboundCaps: null, trustTier: null, pinnedKid: null },
   ]
 
   it('joins live state with trust rows; drops revoked + disabled edges', async () => {
     const roster = await buildButlerPeerSurface({ status: () => status, rows: () => rows }).listForButler()
 
     expect(roster.map((r) => r.peerId)).toEqual(['hub-a', 'hub-b'])
-    expect(roster[0]).toEqual({ peerId: 'hub-a', label: 'A', connected: true, lastSeenAt: 111, outboundCaps: ['chat'] })
+    expect(roster[0]).toEqual({
+      peerId: 'hub-a',
+      label: 'A',
+      connected: true,
+      lastSeenAt: 111,
+      outboundCaps: ['chat'],
+      trustTier: 'T2',
+      pinned: true,
+    })
     expect(roster[1]!.outboundCaps).toBeNull()
+    expect(roster[1]!.trustTier).toBeNull() // un-graded passes through as null (floor semantics live in the renderer)
+  })
+
+  it('SEN-M2 sanitize: pinnedKid folds to a boolean — the thumbprint never enters the projection or the text', async () => {
+    const roster = await buildButlerPeerSurface({ status: () => status, rows: () => rows }).listForButler()
+    expect(roster[0]!.pinned).toBe(true)
+    expect(roster[1]!.pinned).toBe(false)
+    // Structural red line: the projection row has no pinnedKid field at all.
+    expect('pinnedKid' in roster[0]!).toBe(false)
+    const out = textOf(await buildButlerPeersToolset({ peers: surfaceOf(roster) }).callTool('list_peers', {}))
+    expect(out).toContain('已锚定签名公钥')
+    expect(out).not.toContain(KID)
   })
 
   it('copies outboundCaps defensively — mutating the projection never touches the row', async () => {

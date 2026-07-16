@@ -200,6 +200,8 @@ describe('NET-M2 e2e — ask_peer 真双 hub 全环', () => {
       connected: true,
       lastSeenAt: null,
       outboundCaps: opts.outboundCaps ? [...opts.outboundCaps] : null,
+      trustTier: null,
+      pinned: false,
     }
   }
 
