@@ -60,6 +60,16 @@ export {
   ComposedToolNameCollisionError,
   type ComposedToolCollision,
 } from './composed-toolset.js'
+// AFR-M2 — 工具面两层化(ComposedToolset 兄弟):BENIGN 长尾折进目录,
+// 每轮只付 list_tool_directory + use_tool 两个一等 schema;governed 永不进长尾
+export {
+  TwoTierToolset,
+  TwoTierToolNameCollisionError,
+  LIST_TOOL_DIRECTORY,
+  USE_TOOL,
+  type TwoTierToolCollision,
+  type TwoTierToolsetOptions,
+} from './two-tier-toolset.js'
 // CARE-M1 — provider 错误分类(纯函数,host 失败翻译表的地基)
 export {
   classifyLlmError,

@@ -148,6 +148,23 @@
   多一跳(先查目录/直接 use_tool),低频天然摊薄。
   **门** = 单测:目录 ∪ 一等 = 今天全集(无静默丢)/ governed 全在一等 / 转发结果与
   直调逐字节一致 / 不启用两层化 = 字节不变。
+
+  **✅ M2 已落(2026-07-15)— `packages/llm/src/two-tier-toolset.ts`**:`TwoTierToolset
+  implements LlmAgentToolset`,构造项 `benignLongTail`(名字即红线:governed 永不进
+  长尾,llm 层类型上挡不住,由 M3 装配处 + 防腐门钉死)。四个关键落法:①**快照静止**
+  (首次 listTools 时快照长尾,此后目录/`use_tool` enum/路由表全静止 —— 边界③缓存
+  前缀稳定;会动态长工具的 toolset 不适合进长尾,测试钉「事后长出的工具不可见」为
+  设计而非缺陷);②**转发逐字节一致**(`hit.owner.callTool` 结果对象同引用返回、
+  isError 原样、异常原样上抛,不包不改不 catch —— 边界②能力零阉割);③**礼貌校验
+  fail-open**(只校验认识的关键字 type/required/properties/enum/items,不认识的特性
+  一律放行 —— 绝不比一等暴露更严,参数权威永远是工具自身;校验失败回 isError 带该
+  工具紧凑参数签名,不转发);④**runForTask 全转发**(reduceRight 镜像 ComposedToolset,
+  依赖 per-task 作用域的长尾工具照常工作)+ 目录渲染 description **全文保留**(长尾
+  工具的「何时调用/红线」都在里面,截断=丢红线)。冲突大声抛 `TwoTierToolNameCollisionError`
+  (跨 child 重名 + 遮蔽保留名两路,保留名冲突以 childIndices 含 -1 标记)。
+  **门已过**:15 单测(enum=全集无静默丢 / 转发同引用+isError+异常三态 / 快照静止 /
+  冲突两路 / fail-open 放行 / runForTask 嵌套顺序 / 空长尾)+ llm 全套 260 绿 +
+  typecheck 干净;不启用=没人构造它,字节不变按构造成立。旋钮 114 零新增。
 - **M3 装配 + 防腐门**:factory 接线,按「零门槛默认发」法则(MU-M2 / NA-M1 先例)
   **默认启用**(行为不变、只有 schema 变少,无门槛;构造项保留一刀切回旧形态供测试,
   不是 env 旋钮);防腐门:每新增 butler 工具必须显式登记落一等或目录,漏登记就红
