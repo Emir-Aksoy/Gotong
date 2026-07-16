@@ -262,6 +262,35 @@
   - **搬家档**:全空间 + 主钥(= 现 `--include-master-key`),档案即凭证,警示照旧。
   **门** = cli 单测:三档内容清单钉死 / 身份档与关系档**绝不含**金库·主钥字节 /
   搬家档警示必现。
+  **✅ 已落(2026-07-16)**。`gotong backup` 加 `--tier=identity|relations`
+  (两种写法都收:`--tier=X` / `--tier X`);不带 --tier = 今天的全空间路径
+  **逐字节不变**(清单不写 tier 字段,旧档案形状不动)。核心姿态是**白名单
+  式过滤**:`isIdentityTierPath` 只放行三个 leaf 根文件(space.json /
+  agent-card-signing.key / agent-card.json),`shouldSkipForStaging(rel, imk,
+  tier)` 在 tier 存在时改走白名单 —— 新文件默认落保守侧,金库密文
+  (identity.sqlite / secrets.enc.json)、主钥两代、会话文件**结构性**进不来;
+  sqlite 快照阶梯在分档时整个不跑。`--tier` 与 `--include-master-key` 组合
+  当场拒(子集档的全部意义就是不含钥)。**relations 档**:`SELECT * FROM
+  peers` 经诚实阶梯读出(better-sqlite3 readonly → sqlite3 CLI `-json` →
+  **exit 3 响亮失败**,投影是这档的主要载荷,静默降成身份档就是说谎;peers
+  表不存在的极老库 = 真·零 peer 如实空投影),纯函数 `buildPeersProjection`
+  **挑列不是滤列**(白名单只取 peer_id/endpoint_url/label/enabled/
+  pinned_kid/trust_tier/outbound_caps_json 七列,vault_entry_id 连字段名都
+  不出现在投影里;坏 JSON 列 fail-soft 成 null),产出
+  `gotong-peers-projection.json` 落归档 leaf 根、进 sha256 清单。**诚实边界
+  印进档案本体**:投影自带 note「令牌在金库,恢复的是『认识谁』不是『连得
+  上』,重连需对端 re-mint」,不只印终端。没签名钥的空间照打包但响亮说明
+  「没有密码学身份」(不假装)。收尾提示按档分支:子集档不再复述全档的
+  「密文要另存主钥解」故事,并提醒**恢复进全新目录、别 --force 盖全空间**。
+  同刀兑现 M4 承诺:backup 向导卡补三档真话(令牌不随档红线进卡),过
+  ≤500 token + 反向扫描门。**防腐门** `packages/cli/tests/backup-tiers.test.ts`
+  10 例:两档内容清单 `toEqual` 钉死(恰好 N 个文件,一个不多)/ 解出的
+  **每个文件逐一扫五个哨兵串**(主钥两代/金库密文/vault 指针/会话 sid)/
+  投影字段与 fail-soft / 阶梯两级 + 全挂 exit 3 不留半截归档 / 组合与非法
+  档位拒 / 子集档 restore 进全新目录清单闭环 / 纯核直测(shouldSkip 缺省
+  语义不变 + 老库缺列 + parseManifest tier 校验)。验收:cli 279(269→+10)
+  全绿,host 向导门 18 例全绿,typecheck 干净,四门 PASS(**--tier 是 CLI
+  参数不是 env 旋钮,114 零新增**;main.ts 3000/3000 零触碰)。
 - **M7 阿同层**:benign `backup_status`(只读:上次备份时间 / 之后新增 peer·agent 数 /
   陈旧度)+ **真打包走 governed park**(产出凭证类档案 = 人点头才执行);陈旧提醒
   sweeper(镜像 TN-M2 形状:常量节律、只写自己的 fact 文件、送达才记标记),文案带

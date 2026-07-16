@@ -21,7 +21,8 @@ Commands:
   wechat-login                Mint a WeChat iLink bot token by QR scan (prints env lines)
   setting [subcommand]        Deterministic ops console (status/check/cold-start/restore/…)
   provision <pack.yaml>       Install a template pack + schedules + acceptance in one go
-  backup <space> <dir>        Archive a workspace to .tar.gz (manifest + sha256, WAL-safe)
+  backup <space> <dir>        Archive a workspace to .tar.gz (manifest + sha256, WAL-safe;
+                              --tier=identity|relations for key-only / +peers subsets)
   restore <tgz> --space <dir> Verify a backup's manifest, then restore it
   migrate <scan|apply> <dir>  Find / fix legacy (AipeHub-era) identifiers
   update                      Update this install in place (git ff-only / npm / portable)
