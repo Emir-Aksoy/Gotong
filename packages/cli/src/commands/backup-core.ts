@@ -208,6 +208,11 @@ export function isBackupOutputPath(rel: string): boolean {
 export function shouldSkipForStaging(rel: string, includeMasterKey: boolean, tier?: BackupTier): boolean {
   if (tier !== undefined) return !isIdentityTierPath(rel)
   if (isBackupOutputPath(rel)) return true
+  // 「上次备份」事实与 backups/ 同罪:它是备份机器自己的台账,不是空间状态。
+  // 首次备份靠「先归档后写」天然不进档,这里挡的是**下一次**备份把上一轮的
+  // 事实带走——恢复进新家的空间该如实说「这个家还没打过备份」,让陈旧提醒
+  // 照常触发,而不是抱着旧家的台账装新鲜。
+  if (rel === LAST_BACKUP_FACT_NAME) return true
   if (isSessionPath(rel)) return true
   if (!includeMasterKey && isMasterKeyPath(rel)) return true
   if (isIdentitySqlitePath(rel)) return true

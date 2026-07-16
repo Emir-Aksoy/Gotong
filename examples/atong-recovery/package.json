@@ -1,0 +1,15 @@
+{
+  "name": "@gotong/example-atong-recovery",
+  "version": "0.0.0",
+  "type": "module",
+  "private": true,
+  "description": "AFR capstone (阿同框架及恢复能力 track, 腿 C) — 零中央节点的分档恢复全链路,一个确定性脚本跑完:真 ES256 签名钥 + 真 @gotong/identity 金库(peers 令牌真加密)造一个 hub 的家 → 真 gotong backup 打三档(身份/身份+关系/搬家) → 真 gotong restore 恢复进三个全新目录 → 硬断言:身份档 kid 逐字节复算不变(「我还是我」)且解出的每个字节都扫不到主钥/令牌(子集档结构性无密);关系档 peers 投影行还在(endpoint/pinned_kid/trust_tier)且诚实边界 note 印在档案本体里(令牌在金库,恢复的是「认识谁」不是「连得上」);搬家档在新家用恢复出来的主钥真开金库、真解出 peer 令牌明文(boot 级证明)。No network, no API key, no LLM.",
+  "scripts": {
+    "start": "tsx src/demo.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@gotong/cli": "workspace:*",
+    "@gotong/identity": "workspace:*"
+  }
+}

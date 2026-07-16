@@ -49,6 +49,7 @@ pnpm demo                          # = hello-collab（官方第一步，见 QUIC
 | [`reallife-oauth`](../../examples/reallife-oauth) | 用 Google 登录接日历：授权 URL → 换码进 vault（明文不落盘）→ `${OAUTH_ACCESS_TOKEN}` 注入 MCP 头 → 到期自动刷，同一条缝永远新鲜 | 零（假令牌端点） |
 | [`model-routing`](../../examples/model-routing) | MR capstone：主 provider 首-token-前挂 → `RoutingProvider` **顺序** failover 到备用，连续失败熔断快速跳过，健康投影上面板黄条，主自愈探针弹回；真 provider 只 stub 两个 | 零（无网络无 key） |
 | [`model-ensemble`](../../examples/model-ensemble) | LSA capstone：同一问题 **并行** fan-out 到 N 个模型（routing 只调一个）→ 综合器收全 N 份草稿折成一份 → 成本诚实 ×N → 挂一个照跑 → 要调工具就透传；真 `EnsembleProvider` 只 stub 几个成员 | 零（无网络无 key） |
+| [`atong-recovery`](../../examples/atong-recovery) | AFR capstone：三档备份（身份/身份+关系/搬家）→ 新目录真恢复 → kid 逐字节复算不变、peers 投影还在（令牌不随行）、搬家档用恢复出的主钥真开金库；真 `backup()`/`restore()`/真金库加密 | 零（无网络无 key） |
 
 ## ③ 接真东西（需 key / 本地 MCP server / 跨进程）
 

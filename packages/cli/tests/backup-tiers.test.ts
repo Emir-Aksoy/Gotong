@@ -341,6 +341,14 @@ describe('AFR-M7 — 上次备份事实 + backups/ 排除', () => {
     const idr = await runBackup(space, ['--tier=identity'])
     expect(idr.code).toBe(0)
     expect(parseLastBackupFact(readFileSync(factFile, 'utf8'))?.tier).toBe('identity')
+    // M8 capstone 抓的回归:事实已在盘上时,**下一次**全量备份也不许把它带走
+    // (staging 排除,不只靠「先归档后写」)——恢复进新家该如实「还没打过备份」。
+    const full2 = await runBackup(space, [])
+    expect(full2.code).toBe(0)
+    const second = await extractAll(full2.tgz)
+    expect(second.members.some((m) => m.endsWith('runtime/last-backup.json'))).toBe(false)
+    const manifest2 = parseManifest(second.contents.get(MANIFEST_NAME)!)
+    expect(manifest2?.files.some((f) => f.path === 'runtime/last-backup.json')).toBe(false)
   })
 
   it('backups/(阿同打包落盘目录)永不进归档——档案不套档案', async () => {

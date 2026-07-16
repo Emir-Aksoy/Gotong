@@ -34,6 +34,7 @@
     "demo:memory-upgrade": "pnpm --filter @gotong/example-memory-upgrade start",
     "demo:model-routing": "pnpm --filter @gotong/example-model-routing start",
     "demo:model-ensemble": "pnpm --filter @gotong/example-model-ensemble start",
+    "demo:atong-recovery": "pnpm --filter @gotong/example-atong-recovery start",
     "demo:coding-agent-bridge": "pnpm --filter @gotong/example-coding-agent-bridge start",
     "demo:acp-coding-bridge": "pnpm --filter @gotong/example-acp-coding-bridge start",
     "demo:personal-coding-hub": "pnpm --filter @gotong/example-personal-coding-hub start",

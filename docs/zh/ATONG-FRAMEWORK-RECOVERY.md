@@ -1,4 +1,4 @@
-# 阿同框架及恢复能力提升 track(AFR)— M0 计划
+# 阿同框架及恢复能力提升 track(AFR)— 全完(M0 计划 → M8 capstone)
 
 > 缘起:用户 2026-07-15 拍板三件事 ——
 >
@@ -14,8 +14,9 @@
 > 增加一个备份功能,可以便捷地将所有关系一并打包并交给用户(档位可调整,可选哪些
 > 信息打包),有需要的时候用户用它恢复就行了。」
 >
-> 本文是 M0:**纯计划,零代码**。track 名从用户原话:**阿同框架及恢复能力提升**,
-> 代号 **AFR**。Last updated: 2026-07-15。
+> 本文起于 M0 纯计划;**M1→M8 已全部落地**(各里程碑的 ✅ 收口块就地追加在
+> 对应计划条目下)。track 名从用户原话:**阿同框架及恢复能力提升**,代号 **AFR**。
+> Last updated: 2026-07-16。
 
 ---
 
@@ -333,6 +334,29 @@
 - **M8 capstone `examples/atong-recovery`** + 收口:确定性、零 LLM 零 key ——
   打包三档 → 新空间恢复 → 断言 kid 不变 / peers 行还在 / 身份档不含密 / 搬家档全量
   开机;`pnpm demo:atong-recovery` exit 0。+ 文档收口 + CLAUDE.md 账本 + 四门。
+  **✅ 已落(2026-07-16)**。四幕 15 断言,底下全是真件零重写:布景用真
+  node:crypto ES256 钥对(kid=RFC 7638 指纹,STD-M1 同算法)+ 真
+  `openIdentityStore` 金库(两个 peer 令牌真信封加密,hub-b 挂真指纹
+  pinnedKid+T2)造一个 hub 的家;打包走真 cli `backup()`、恢复走真
+  `restore()`(sha256 清单校验后原子落位,注入 `resolveHost:()=>null` 跳过
+  post-restore check 保 demo 无 host 依赖)。**幕1 身份档**:恢复目录恰好三件、
+  从恢复出的钥字节**独立复算**指纹 === 原 kid(「我还是我」)、每个文件的原始
+  字节扫 4 个哨兵串(主钥 raw/hex + 两令牌明文)全空——结构性无密不是恰好没带。
+  **幕2 关系档**:投影两行俱在(hub-b 的 endpoint/pinned_kid/trust_tier 全还原)、
+  诚实边界 note 印在档案本体(含 mint-peer-token 指路)、全文无令牌明文无
+  vault 指针字段。**幕3 搬家档**:全空间俱在,`loadOrCreateMasterKey` 读回的
+  主钥逐字节一致,用它在新家真开金库——listPeers 两行 + `getPeerToken` 解出
+  两令牌明文 round-trip,boot 级证明非「文件都在」。**幕4**:三次打包每次刷新
+  M7 事实,最后一档如实 tier=full + includesMasterKey=true。**capstone 抓到
+  M7 真缺口并已修**:幕3「档案不含关于自己的事实」变红——首次备份靠「先归档
+  后写」天然不进档,但**第二次**全量备份会把上一轮的事实文件带进档案,恢复进
+  新家会抱着旧家台账装新鲜、压掉本该触发的「新家该打一份」提醒;修法=事实
+  文件与 backups/ 同罪,`shouldSkipForStaging` 全模式排除,cli 防回归钉进
+  backup-tiers(事实在盘时二次全量的 members+manifest 都不含它)。cli
+  index 补导出 restore/RestoreDeps/PEERS_PROJECTION_NAME(capstone 与投影
+  文件名同源不复刻)。验收:demo exit 0,cli 282 / host 2134 全绿,
+  `docs/zh/EXAMPLES.md` ② 区挂行,四门 PASS(旋钮 114 零新增,main.ts
+  2999/3000 零触碰)。
 
 ---
 

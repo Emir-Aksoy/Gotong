@@ -73,6 +73,15 @@ importers:
         specifier: workspace:*
         version: link:../../packages/llm
 
+  examples/atong-recovery:
+    dependencies:
+      '@gotong/cli':
+        specifier: workspace:*
+        version: link:../../packages/cli
+      '@gotong/identity':
+        specifier: workspace:*
+        version: link:../../packages/identity
+
   examples/battle-monk-training:
     dependencies:
       '@gotong/core':
