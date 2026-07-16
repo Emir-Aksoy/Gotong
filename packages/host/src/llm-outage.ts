@@ -17,6 +17,7 @@ import { dirname } from 'node:path'
 import type { LlmErrorKind } from '@gotong/llm'
 
 import { translateLlmFailureKind, type FailureLang } from './failure-translator.js'
+import { guideBreadcrumb } from './personal-butler-guide.js'
 
 /** 落盘形状:kind + 起点 + 已播标记。文件不存在 = 一切正常。 */
 export interface LlmOutageSnapshot {
@@ -115,12 +116,13 @@ export class LlmOutageTracker {
   }
 }
 
-/** 断供播报(零 LLM,文案来自 CARE-M1 翻译表)。 */
+/** 断供播报(零 LLM,文案来自 CARE-M1 翻译表)。AFR-M5 尾附向导卡面包屑 ——
+ *  诚实标「到时/恢复后」:断供期我自己也拉不了卡(卡是工具,工具要大脑调)。 */
 export function llmOutageAnnouncement(kind: LlmErrorKind, lang: FailureLang): string {
   const t = translateLlmFailureKind(kind, lang)
   return lang === 'zh'
-    ? `⚠️ 管家大脑暂时不可用:${t.headline}\n${t.fix}\n期间命令(/help /agents /workflow)照常可用;恢复了我会说一声。`
-    : `⚠️ The butler's brain is temporarily unavailable: ${t.headline}\n${t.fix}\nCommands (/help /agents /workflow) still work; I'll ping you when it recovers.`
+    ? `⚠️ 管家大脑暂时不可用:${t.headline}\n${t.fix}\n期间命令(/help /agents /workflow)照常可用;恢复了我会说一声。${guideBreadcrumb('llm-outage', '到时想看完整修法')}`
+    : `⚠️ The butler's brain is temporarily unavailable: ${t.headline}\n${t.fix}\nCommands (/help /agents /workflow) still work; I'll ping you when it recovers. Once I'm back, ask me what to do about an LLM outage and I'll walk you through the playbook.`
 }
 
 /** 恢复播报(零 LLM)。 */

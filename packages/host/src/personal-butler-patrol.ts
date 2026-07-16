@@ -43,6 +43,7 @@ import type { Logger } from '@gotong/core'
 import type { AdminHealthSurface, HealthSnapshot } from './admin-health.js'
 import { translateLlmFailureKind } from './failure-translator.js'
 import { readOutageSnapshotFile, type LlmOutageSnapshot } from './llm-outage.js'
+import { guideBreadcrumb } from './personal-butler-guide.js'
 import { readButlerRunBroadcastConfig } from './personal-butler-run-broadcast.js'
 
 /** 默认巡检节奏 — 10 分钟。本轮不加旋钮:要更密/更疏等真实需求出现。 */
@@ -153,7 +154,7 @@ export function outageEscalationCard(
     id: OUTAGE_CARD_ID,
     severity: 'red',
     label: '管家大脑持续断供',
-    fact: `管家大脑已经断供约 ${mins} 分钟(${t.headline})——不是临时抖动了,查查 provider 状态 / key / 额度。命令面(/help /agents /workflow)仍照常。`,
+    fact: `管家大脑已经断供约 ${mins} 分钟(${t.headline})——不是临时抖动了,查查 provider 状态 / key / 额度。命令面(/help /agents /workflow)仍照常。${guideBreadcrumb('llm-outage', '恢复后想看完整修法')}`,
   }
 }
 

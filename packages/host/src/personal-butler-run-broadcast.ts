@@ -46,6 +46,7 @@ import type { Logger } from '@gotong/core'
 import type { LlmAgentToolset, LlmToolCallResult, LlmToolDefinition } from '@gotong/llm'
 import { ownerDir } from '@gotong/service-memory-file'
 
+import { guideBreadcrumb } from './personal-butler-guide.js'
 import type { ButlerRunSurface, ButlerRunView } from './personal-butler-observe.js'
 
 /** Default poll cadence — 5 min. Tighter than the 15-min morning brief because
@@ -161,7 +162,8 @@ export function runBroadcastMessage(r: ButlerRunView): string {
   const ref = ` [run: ${r.runId}]`
   if (r.status === 'failed') {
     const why = r.error ? `,原因:${r.error}` : ''
-    return `你发起的工作流${wf}跑失败了${why}。想让我帮你看看哪一步出的问题吗?${ref}`
+    // AFR-M5 面包屑:失败才附(done/cancelled 没有「修法」可指)。
+    return `你发起的工作流${wf}跑失败了${why}。想让我帮你看看哪一步出的问题吗?(${guideBreadcrumb('workflow-failed', '想看常见修法')})${ref}`
   }
   if (r.status === 'cancelled' || r.status === 'canceled') {
     return `你发起的工作流${wf}被取消了(没有跑完)。${ref}`

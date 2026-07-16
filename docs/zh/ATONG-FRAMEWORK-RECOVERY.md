@@ -229,6 +229,27 @@
   topic 指针**(「想要修法,问我 ×× 就行」)—— 下一轮模型天然知道拉哪张卡;热路径
   仍零 LLM(拼静态串不是决策)。
   **门** = 相关单测 + 播报文案含指针断言。
+  **✅ 已落(2026-07-16)**。核心是把「指针不指空」做成**结构性**:
+  `personal-butler-guide.ts` 新纯函数 `guideBreadcrumb(topic, lead?)`,topic 是
+  **编译期字面量联合** `ButlerGuideTopic`(卡常量数组改 `as const satisfies` 派生,
+  宽类型导出不动既有消费者)—— 卡改名/删卡,三个引用处 tsc 当场红,不靠人记得。
+  面包屑机制想清楚了才接:播报走 IM 直推**不经对话轮**,模型下一轮看不到自己
+  "说过"什么;真正的锚是**成员照抄问句**——问句(=卡标题)出现在成员自己的
+  消息里,模型对目录即拉对卡。所以指针必须是自然问话,**绝不甩生工具名**
+  (gotong_guide/use_tool 是模型的事,不是成员的话)。三处接线:①BE-M5
+  `runBroadcastMessage` **仅失败分支**附 workflow-failed 指针(done/cancelled
+  没有修法可指,不附——面包屑不是口头禅);②CARE-M2 `llmOutageAnnouncement`
+  zh 尾附 llm-outage 指针且**诚实标「到时」**(断供期大脑拉不了卡——卡是工具,
+  工具要大脑调,不许假装能答),en 附自然英语同义指路;③CARE-M6
+  `outageEscalationCard` fact 尾附同卡指针标「恢复后」。恢复播报不附(没有
+  修法可指)。腿 C 备份提醒的第三出口待 M7 sweeper 落地时用同一助手指
+  backup 卡(机制本刀已就位)。**防腐门** `tests/butler-breadcrumbs.test.ts`
+  4 例:问句=真实卡标题(从卡常量现查,查不到就地失败)/失败分支带指针而
+  done/cancelled 不带/断供 zh 含「到时」en 含同义句、恢复播报不带/升级卡
+  fact 含「恢复后」+指针;并断言面包屑文本永不含 gotong_guide/use_tool。
+  既有三模块测试全是 toContain,尾部追加零破坏。验收:5 文件 63 例全绿,
+  host 2117 全绿,typecheck 干净,四门 PASS(旋钮 114 零新增,main.ts
+  3000/3000 零触碰——三出口全在既有模块内,无新装配)。
 
 ### 腿 C — 恢复兜底(零中央节点)
 

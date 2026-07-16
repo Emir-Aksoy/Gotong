@@ -42,7 +42,7 @@ export interface ButlerGuideCard {
   }
 }
 
-export const BUTLER_GUIDE_CARDS: readonly ButlerGuideCard[] = [
+const CARDS = [
   {
     id: 'framework-map',
     title: '框架一张图:这些东西怎么组合',
@@ -174,7 +174,13 @@ export const BUTLER_GUIDE_CARDS: readonly ButlerGuideCard[] = [
     ].join('\n'),
     pins: { commands: ['peer-card', 'mint-peer-token'], tools: ['list_peers', 'ask_peer'] },
   },
-]
+] as const satisfies readonly ButlerGuideCard[]
+
+/** 全部知识卡(宽类型导出;字面量 id 联合见 {@link ButlerGuideTopic})。 */
+export const BUTLER_GUIDE_CARDS: readonly ButlerGuideCard[] = CARDS
+
+/** 卡 id 的编译期字面量联合:跨模块引用(面包屑等)卡改名/删卡当场红。 */
+export type ButlerGuideTopic = (typeof CARDS)[number]['id']
 
 /** 目录页:全部卡的 id + 一句话(模型不取整卡也知道有什么)。 */
 export function renderGuideDirectory(): string {
@@ -192,6 +198,19 @@ export function renderGuideCard(topic: string): string {
   const card = BUTLER_GUIDE_CARDS.find((c) => c.id === topic)
   if (!card) return `没有叫「${topic}」的卡。\n${renderGuideDirectory()}`
   return `【${card.title}】\n${card.body}\n${CARD_FOOTER}`
+}
+
+/**
+ * AFR-M5 面包屑:零 LLM 播报(BE-M5 运行播报 / CARE 断供卡 / 腿 C 备份提醒)
+ * 尾部的静态 topic 指针。播报走 IM 直推、不经对话轮,面包屑的机制是**让成员
+ * 照抄问句**:问句(=卡标题)出现在成员下一条消息里,模型对目录即拉对卡 ——
+ * 所以指针必须是成员会照抄的自然问话,绝不甩生工具名(gotong_guide/use_tool
+ * 是模型的事,不是成员的话)。topic 是编译期字面量联合,卡改名/删卡时引用处
+ * 当场红,面包屑结构性不指空。拼静态串不是决策,热路径仍零 LLM(AFR 边界①)。
+ */
+export function guideBreadcrumb(topic: ButlerGuideTopic, lead = '想看修法'): string {
+  const card = BUTLER_GUIDE_CARDS.find((c) => c.id === topic)
+  return `${lead},问我「${card?.title ?? topic}」就行。`
 }
 
 export const BUTLER_GUIDE_TOOL: LlmToolDefinition = {
