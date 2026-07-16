@@ -26,7 +26,7 @@
 import { dirname, join } from 'node:path'
 
 import type { Hub, Logger } from '@gotong/core'
-import type { LlmProvider } from '@gotong/llm'
+import { TwoTierToolset, type LlmProvider } from '@gotong/llm'
 import type { Embedder } from '@gotong/personal-memory'
 import {
   PersonalButlerAgent,
@@ -174,6 +174,12 @@ export interface ButlerFactoryDeps {
     keyCheck: () => ButlerOnboardingKeyCheck | undefined
     lang: FailureLang
   }
+  /**
+   * AFR-M3 — 一刀切回单层旧形态(全部 benign 直接上脸,不折目录)。默认 undefined
+   * = 两层化开(零门槛默认发:能力一件不减,只有 schema 变少)。这是构造项不是
+   * env 旋钮 —— 只供测试对照与万一的回退;main.ts 不设它。
+   */
+  singleTierToolFace?: boolean
 }
 
 export function buildButlerFactory(deps: ButlerFactoryDeps): ButlerFactory {
@@ -411,7 +417,13 @@ export function buildButlerFactory(deps: ButlerFactoryDeps): ButlerFactory {
         // is the whole point — 阿同 suggests, the HUMAN registers + enters the key;
         // credential WRITE stays owner+vault (the tool's own text carries the red lines).
         const llmCatalogToolset = buildButlerLlmCatalogToolset()
-        const benign = [
+        // AFR-M3 — 工具面两层化。benignFlat 保持今天的平铺全集(B1 能力清单的
+        // 来源:两层化只改「schema 怎么呈现」,不改「能干什么」);上脸的 benign
+        // 按 butler-tool-tiers.ts 名单把低频长尾折进 TwoTierToolset,经
+        // list_tool_directory / use_tool 按需取用。动态 toolset(pool base /
+        // MCP read)与被一等描述点名的工具永远留一等(名单文件逐条记了理由);
+        // governed / memory 不碰 —— 风险面必须保留一等 schema。
+        const benignFlat = [
           ...(tools ? [tools] : []),
           // S1-M2 — the READ half of the row's MCP servers (search notes, list
           // events, …) runs inline; the WRITE half goes into `governed` below.
@@ -434,6 +446,24 @@ export function buildButlerFactory(deps: ButlerFactoryDeps): ButlerFactory {
           ...(profileToolset ? [profileToolset] : []),
           ...(onboardingToolset ? [onboardingToolset] : []),
         ]
+        const longTail = [
+          ...(diagnoseToolset ? [diagnoseToolset] : []),
+          ...(llmsToolset ? [llmsToolset] : []),
+          ...(consolidateToolset ? [consolidateToolset] : []),
+          languageToolset,
+          llmCatalogToolset,
+          ...(dailyBriefToolset ? [dailyBriefToolset] : []),
+          ...(runBroadcastToolset ? [runBroadcastToolset] : []),
+          ...(profileToolset ? [profileToolset] : []),
+        ]
+        const longTailSet = new Set(longTail)
+        const benign =
+          deps.singleTierToolFace === true || longTail.length === 0
+            ? benignFlat
+            : [
+                ...benignFlat.filter((t) => !longTailSet.has(t)),
+                new TwoTierToolset({ benignLongTail: longTail }),
+              ]
         // Self-contained gates: the steward action set (BF-M7) + the governed
         // create_workflow (BE-M3) + the MCP write half (S1-M2). Tool names are
         // disjoint (steward verbs vs `create_workflow` vs `<server>__<tool>`), and
@@ -447,8 +477,11 @@ export function buildButlerFactory(deps: ButlerFactoryDeps): ButlerFactory {
         // B1 — now that both sets exist, point the capability getter at their
         // live tool names (includes MCP `<server>__<tool>` so connectors show up).
         // `listTools` may be async on some toolsets, so resolve them all.
+        // AFR-M3:能力清单从 benignFlat(拆层前的平铺全集)派生 —— 成员问的是
+        // 「能干什么」不是「schema 面长什么样」;目录里的每个名字仍真实可调
+        // (经 use_tool),清单与单层时代同一份,漏报虚报都不可能。
         composedToolNames = async () => {
-          const lists = await Promise.all([...benign, ...governed].map((ts) => ts.listTools()))
+          const lists = await Promise.all([...benignFlat, ...governed].map((ts) => ts.listTools()))
           return lists.flat().map((t) => t.name)
         }
 

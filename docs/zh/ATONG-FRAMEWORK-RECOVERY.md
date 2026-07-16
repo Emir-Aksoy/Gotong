@@ -171,6 +171,29 @@
   (镜像 env-registry 门形状)。
   **门** = host 全绿 + 每轮 schema token 前后对比数字(目标幅度由 M1 基线定)。
 
+  **✅ M3 已落(2026-07-15)— 数字:单层 35 工具 ~6,038tk → 两层 29 工具
+  ~4,765tk,省 ~1,273tk(-21%);benign 面 3,790→~2,517tk(-34%)**(M1 同一把尺,
+  单层数与基线逐字吻合=交叉验证)。**名单契约** `packages/host/src/butler-tool-tiers.ts`:
+  一等 benign 16(高频核心 + 三类钉一等理由逐条记档:①每轮/每天在用[任务笔记本 4 件、
+  set_reminder、观察三读、派活、跑流];②**被一等工具描述或探针卡点名**——`list_peers`
+  ←ask_peer 描述 4 处、`plan_workflow`←create_workflow 描述、onboarding 两工具←开箱
+  陪跑卡正文,模型会照名直调,不在脸上=指路指空;③发现门面 list_my_capabilities 不藏
+  在发现背后)+ 目录 benign 8(diagnose_my_agents / list_my_llms / discover_llm_providers /
+  consolidate_my_memory / set_reply_language / set_daily_brief / set_run_broadcast /
+  show_my_memory —— 一次性配置/低频自省/按需诊断)。**工厂接线**:`benignFlat` 保持
+  平铺全集(B1 能力清单的来源 —— 目录化只改 schema 呈现,不改「能干什么」),脸按
+  名单折长尾进 TwoTierToolset;动态 toolset(pool base / MCP read)永远一等(边界③);
+  `singleTierToolFace` 构造项=一刀切回旧形态(测试对照/回退用,**不是 env 旋钮**,
+  main.ts 不设)。**防腐门** `tests/butler-tool-tiers.test.ts` 5 例全走**真工厂**:
+  ①两层脸=一等名单+两把门,目录名单零上脸,governed 6+memory 5 全一等;②登记门=
+  单层脸 benign 名字集合 ≡ 名单两表之并(双向,新增工具漏登记就红)+ 目录渲染真含
+  全部 8 名;③**指路不指空**结构门=留在脸上的每个工具 schema 序列化不得点名任何
+  目录工具(两把门除外)——将来谁把「先用 set_daily_brief」写进一等描述,门当场红;
+  ④能力不减端到端=目录里的 set_reply_language 经 use_tool 真执行真落盘 + B1 能力
+  清单两层/单层**逐字节一致**(B1 是策展话术目录,等价断言比找原始名更强);⑤token
+  账本打印前后对比。验收:host 2106 全绿(TN 接线/B1/M1 tripwire 零涟漪)+ typecheck
+  干净 + 四门 PASS(旋钮 114 零新增,main.ts 3000/3000 零触碰)。
+
 ### 腿 B — 随身向导+医生
 
 - **M4 `gotong_guide(topic)` + 首批知识卡**:**一个** benign 工具(不是 N 个 ——
