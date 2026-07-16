@@ -126,8 +126,11 @@ function fmtTime(ms: number): string {
   return new Date(ms).toISOString().slice(0, 16).replace('T', ' ')
 }
 
-/** Integer micro-USD → "$0.0000" (4 dp keeps sub-cent LLM costs visible). */
-function fmtCost(micros: number): string {
+/**
+ * Integer micro-USD → "$0.0000" (4 dp keeps sub-cent LLM costs visible).
+ * Exported for SEN-M3 my_status — one cost formatter, never two.
+ */
+export function fmtCost(micros: number): string {
   return `$${(micros / 1_000_000).toFixed(4)}`
 }
 

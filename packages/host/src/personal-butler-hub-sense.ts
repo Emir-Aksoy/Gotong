@@ -116,8 +116,11 @@ const HEALTH_TOOL: LlmToolDefinition = {
   inputSchema: { type: 'object', properties: {}, additionalProperties: false },
 }
 
-/** 病名安全翻译:未知 kind 如实印原码,绝不因面板 DTO 的宽 string 类型炸渲染。 */
-function outageHeadline(kind: string, lang: FailureLang): string {
+/**
+ * 病名安全翻译:未知 kind 如实印原码,绝不因面板 DTO 的宽 string 类型炸渲染。
+ * 导出给 SEN-M3 my_status 复用——断供病名翻译永不两份。
+ */
+export function outageHeadline(kind: string, lang: FailureLang): string {
   try {
     return translateLlmFailureKind(kind as LlmErrorKind, lang).headline
   } catch {

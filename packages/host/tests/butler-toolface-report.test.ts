@@ -38,6 +38,7 @@ import {
   buildButlerBackupStatusToolset,
 } from '../src/personal-butler-backup.js'
 import { buildButlerHubHealthToolset } from '../src/personal-butler-hub-sense.js'
+import { buildButlerSelfStatusToolset } from '../src/personal-butler-self-status.js'
 import { buildButlerCapabilitiesToolset } from '../src/personal-butler-capabilities.js'
 import { buildButlerConsolidateToolset } from '../src/personal-butler-consolidate.js'
 import { buildButlerDailyBriefToolset } from '../src/personal-butler-daily-brief.js'
@@ -99,6 +100,7 @@ const MEASURED_BUILDERS: Record<string, string> = {
   'backup-status': 'buildButlerBackupStatusToolset',
   'backup-pack': 'buildButlerBackupPackToolset',
   'hub-sense': 'buildButlerHubHealthToolset',
+  'self-status': 'buildButlerSelfStatusToolset',
 }
 
 /**
@@ -248,6 +250,12 @@ function buildFullFace(): ToolFaceEntry[] {
       module: 'hub-sense',
       kind: 'benign',
       toolset: buildButlerHubHealthToolset({ health: () => undefined }),
+    },
+    // SEN-M3 自我状态一卡:benign 只读,六块既有投影的再组合。
+    {
+      module: 'self-status',
+      kind: 'benign',
+      toolset: buildButlerSelfStatusToolset({ userId: 'u', notebook }),
     },
   ]
 }

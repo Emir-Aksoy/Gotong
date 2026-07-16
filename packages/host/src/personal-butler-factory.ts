@@ -80,6 +80,7 @@ import { buildButlerLlmsToolset, type ButlerLlmSurface } from './personal-butler
 import { buildButlerLlmCatalogToolset } from './personal-butler-llm-catalog.js'
 import { buildButlerGuideToolset } from './personal-butler-guide.js'
 import { buildButlerHubSenseProbe, buildButlerHubHealthToolset } from './personal-butler-hub-sense.js'
+import { buildButlerSelfStatusToolset } from './personal-butler-self-status.js'
 import {
   buildButlerOnboardingProbe,
   buildButlerOnboardingToolset,
@@ -373,6 +374,19 @@ export function buildButlerFactory(deps: ButlerFactoryDeps): ButlerFactory {
         const hubHealthToolset = deps.onboarding
           ? buildButlerHubHealthToolset({ health: deps.onboarding.health, logger: log })
           : undefined
+        // SEN-M3 — benign 自我状态一卡:大脑链/断供/累计用量/记忆规模/任务数/
+        // 备份六块既有投影拼成「我现在怎么样」(零新权威点)。碎片 dep 缺席
+        // 该行「(未接)」逐行降级,工具本身无条件装(笔记本永远在)。
+        const selfStatusToolset = buildButlerSelfStatusToolset({
+          userId,
+          ...(refs.llmRoster ? { llms: refs.llmRoster } : {}),
+          ...(deps.onboarding ? { health: deps.onboarding.health } : {}),
+          ...(refs.observeUsage ? { usage: refs.observeUsage } : {}),
+          ...(refs.memoryView ? { memory: refs.memoryView } : {}),
+          notebook: taskNotebook,
+          ...(deps.backupOps ? { backup: deps.backupOps } : {}),
+          logger: log,
+        })
         // WIZ-M4c — benign "帮我规划一个工作流": wizard compose, proposal-only
         // (explanation + gap checklist + validated YAML), persists nothing. Saving
         // goes through the governed create_workflow above with the proposal's YAML.
@@ -469,6 +483,7 @@ export function buildButlerFactory(deps: ButlerFactoryDeps): ButlerFactory {
           ...(llmsToolset ? [llmsToolset] : []),
           ...(backupStatusToolset ? [backupStatusToolset] : []),
           ...(hubHealthToolset ? [hubHealthToolset] : []),
+          selfStatusToolset,
           ...(planWizardToolset ? [planWizardToolset] : []),
           ...(consolidateToolset ? [consolidateToolset] : []),
           remindersToolset,
@@ -487,6 +502,7 @@ export function buildButlerFactory(deps: ButlerFactoryDeps): ButlerFactory {
           ...(llmsToolset ? [llmsToolset] : []),
           ...(backupStatusToolset ? [backupStatusToolset] : []),
           ...(hubHealthToolset ? [hubHealthToolset] : []),
+          selfStatusToolset,
           ...(consolidateToolset ? [consolidateToolset] : []),
           languageToolset,
           llmCatalogToolset,

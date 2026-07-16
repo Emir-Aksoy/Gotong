@@ -125,7 +125,8 @@ const STATUS_TOOL: LlmToolDefinition = {
 /** 备份陈旧阈值:14 天没备份(或从未)才算陈旧——status 提示与提醒共用。 */
 export const BACKUP_STALE_AFTER_MS = 14 * DAY_MS
 
-function tierLabel(tier: LastBackupFact['tier']): string {
+/** 档位中文名。导出给 SEN-M3 my_status 复用——档位翻译永不两份。 */
+export function tierLabel(tier: LastBackupFact['tier']): string {
   if (tier === 'identity') return '身份档'
   if (tier === 'relations') return '身份+关系档'
   return '全空间档'
