@@ -60,6 +60,7 @@ import {
 } from './personal-butler-diagnose.js'
 import { buildButlerGovernedToolset } from './personal-butler-governed.js'
 import { buildButlerMcpToolsets } from './personal-butler-mcp.js'
+import { classifyButlerMcpTool } from './butler-web-search.js'
 import { openButlerMemory } from './personal-butler-memory.js'
 import {
   buildButlerObserveToolset,
@@ -228,6 +229,10 @@ export function buildButlerFactory(deps: ButlerFactoryDeps): ButlerFactory {
       ? buildButlerMcpToolsets({
           tools: mcp.tools,
           callTool: (name, args) => mcp.toolset.callTool(name, args),
+          // WSE — 官方搜索 server(tavily/brave)没标 readOnlyHint、名字又不含
+          // read 动词,默认分级会把每次搜索都 park;这层加 server 级只读知识
+          // (显式 annotations 声明的 write 仍尊重,见 classifyButlerMcpTool)。
+          classifyTool: classifyButlerMcpTool,
         })
       : undefined
     return createButlerRouter({

@@ -50,7 +50,7 @@ import type {
 } from '@gotong/llm'
 
 /** The double-underscore namespacing `McpToolset` uses (`<server>__<tool>`). */
-const NAME_SEP = '__'
+export const NAME_SEP = '__'
 
 /**
  * A resolved, namespaced MCP tool as returned by `McpToolset.listTools()`. Only

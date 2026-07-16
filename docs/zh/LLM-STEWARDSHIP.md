@@ -7,6 +7,9 @@
 > 缘起：用户 2026-07-14「我希望 atong 能用一个 skill 主动看自己有哪些 llm key 可以调用
 > 以及 websearch 工具可以调用，而且学会自己去找各种免费的 api key 比如 openrouter 的
 > 之类的。它得学会自己管理这些而且可以同时使用多个 llm，再根据结果综合一下使用」。
+>
+> Status: **M1→M5 全落**（M5 = WSE web 搜索 key 即用,2026-07-16 补刀:分级修正 +
+> env 快路,「设 TAVILY/BRAVE_API_KEY ⇒ 阿同自己就能搜」）。
 
 ---
 
@@ -171,6 +174,50 @@ opt-in `EnsembleProvider`（`packages/llm`，RoutingProvider 兄弟）：并行 
   ensemble 时，加 additive 字段 + 一处 opt-in 装配缝即可，不预造）。
 
 ---
+
+### LSA-M5 web 搜索 key 即用（WSE，②的收口）— ✅ 已落（2026-07-16）
+
+用户回头问「工具包里有没有 web-search?没有就整合成一类能力,**给它加上 key 自己就能
+使用那种**」。侦察发现 M2 接了目录之后,「阿同自己就能搜」其实还剩**两道断点**,本刀
+一次收口（新模块 `packages/host/src/butler-web-search.ts` + factory/pool/main.ts 三缝）:
+
+- **断点 1:分级 —— 这才是真阻断点**。2026-07-16 对两家官方 server 源码逐字核过
+  （`gh api` 拉 tavily-ai/tavily-mcp 与 brave/brave-search-mcp-server）:**都没标
+  `readOnlyHint`**（Tavily 工具定义零 annotations;Brave 只有 title+openWorldHint）,
+  工具名（`tavily_search`/`brave_web_search`）又不以 read 动词开头 → 按
+  `defaultMcpToolClass` 的 fail-safe **全落 governed = 每搜一次 park 一次等审批**。
+  修法 = `classifyButlerMcpTool`:server 级只读知识兜底（这两台 server 的工具面全是
+  「读外部世界」,不存在「写用户数据」的对象）。优先级钉死:**server 显式 annotations >
+  read 动词启发 > 搜索 server 名单 > fail-safe write**——未来官方真加了
+  `destructiveHint` 的工具照 govern,名单只接「毫无信号」的兜底段。这半刀同时修好
+  面板路径（手动装 + 挂管家的部署也不再每搜必批）。
+- **断点 2:装配 —— 目录路径要面板两步**（装连接器 + 编辑管家行 `useMcpServers`）。
+  补 env 快路:`TAVILY_API_KEY` / `BRAVE_API_KEY` 在 host 环境里 ⇒
+  `detectButlerWebSearchSpecs` 取**目录同一条 spec**（原样引用零复刻,key 只以
+  `${NAME}` 占位存在,明文结构性进不来）⇒ pool 新构造项 `butlerBonusMcpSpecs`
+  只对**管家行**在 spawn 时并入（`mergeButlerBonusMcpSpecs` **同名让位**——成员/
+  管理员自己配的 server 永远赢,bonus 只补缺）。挂上后搜索工具走 S1-M2 的 MCP read
+  半边直接进 benign 面,B1 能力清单按 `<server>__` 前缀自动长出来。
+- **env 名为什么不带 GOTONG_ 前缀**:探测名被目录 spec 的占位钉死——spec 里写的是
+  `${TAVILY_API_KEY}`,`envSecretSource` 按这个名查 process.env,探测名 ≠ 占位名的话
+  挂上也展不开;且这俩是 Tavily/Brave 生态惯例凭证名,与目录 `needsEnv`、面板提示
+  一致,**一份 key 两条路径通用**（`MEM0_API_KEY` 先例:连接器凭证,非 GOTONG_* 行为
+  旋钮,env-registry 不涉及）。
+- **授权论证（为什么设 key 即挂管家）**:面板路径装连接器时 key 进 vault,env 里根本
+  不需要有——env 出现 `TAVILY_API_KEY` 的唯一动机就是「让这台 hub 的 AI 能搜」,
+  放 key 本身就是最粗粒度 opt-in;要精细控制（只给某台 agent 不给管家）走面板 vault
+  路径,两路互不干扰。数据边界照旧:搜索词离盒是目录 `dataLeavesBox: true` 早已披露的
+  既定事实;**接入≠授权**——拿搜到的东西对外发仍是 governed 动作。没设 key = `[]` =
+  全链路字节不变。
+- **顺手抓到的真缺口**:`@gotong/web` 的 **dist 陈旧**——LSA-M2 的两条连接器只在
+  src,web 包一直没重 build,而 host 是第一个消费这个常量的包（M2 防腐测试在 web 包内
+  直跑 src 所以一直绿）。已重 build;新增的「目录同源」防腐测试从 host 侧 import
+  `BUILTIN_MCP_CONNECTORS` 断言两条目形状,**兼任 dist 新鲜度哨兵**（dist 再陈旧它就红）。
+
+**验收**:新单测 16 例（目录同源 2/detect 5[含 key 明文防腐 + query 串红线]/classify
+3[含显式 write 赢名单]/merge 3/pool 注入 3[butler 行挂上·非 butler 行零注入·同名恰一份,
+死命令 spec 零网络零真凭证]）;host 全套 2183→**2199** 全绿;tsc 零错;四门 PASS
+（**旋钮 114 零新增**,main.ts 3000/3000 压注释净零）。
 
 ## 四、显式不做
 

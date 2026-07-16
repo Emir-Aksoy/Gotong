@@ -302,6 +302,7 @@ import type { ButlerAskRosterSource } from './personal-butler-ask-agent.js'
 import { buildButlerPeerSurface, type ButlerPeerSurface } from './personal-butler-peers.js'
 import { buildButlerLlmSurface, type ButlerLlmSurface } from './personal-butler-llms.js'
 import { buildButlerScheduleSurface, type ButlerScheduleSurface } from './personal-butler-schedules.js'
+import { detectButlerWebSearchSpecs } from './butler-web-search.js'
 import type { ButlerWizardSource } from './personal-butler-workflow-wizard.js'
 import { ReminderParticipant } from './reminder-participant.js'
 import type { LlmProvider } from '@gotong/llm'
@@ -1108,23 +1109,22 @@ async function main(): Promise<void> {
   const localAgents = new LocalAgentPool({
     butlerFactory,
     butlerDefaultOn,
+    // WSE — TAVILY/BRAVE_API_KEY 在环境里 ⇒ 管家自动挂官方搜索(read 工具面),同名让位。
+    butlerBonusMcpSpecs: detectButlerWebSearchSpecs(process.env),
     hub,
     space,
     services,
     orgApiPool,
     pricingTable,
     routingHealth,
-    // Audit P1 — managed agents resolve `artifact_ref` / `file_ref` blocks
-    // against the same shared uploads handle the upload routes write to.
+    // Audit P1 — managed agents resolve artifact/file refs via the shared uploads handle.
     ...(uploadsRef
       ? { artifactResolver: (artifactId: string) => uploadsRef.get(artifactId) }
       : {}),
-    // Phase 6 #2 — with identity, the pool wires an onAuthFailure hook: a 401
-    // from a vault-keyed agent revokes that entry + audits + flushes the OrgApiPool
-    // cache. C-M2-M4a — `${OAUTH_ACCESS_TOKEN}` → live connector token, inert w/o.
+    // Phase 6 #2 — onAuthFailure: vault-keyed 401 revokes + audits + flushes OrgApiPool.
+    // C-M2-M4a — `${OAUTH_ACCESS_TOKEN}` → live connector token, inert w/o.
     ...(identity ? { identity, mcpSecretSource: makeOAuthSecretSource(identity) } : {}),
-    // #2-M3 — cross-hub MCP refs (`useMcpServers: ['<peer>:<server>']`) resolve the
-    // peer link lazily through the registry (peerRegistryRef forward `let` below);
+    // #2-M3 — cross-hub MCP refs resolve the peer link lazily (forward `let` below);
     // reading at call time lets RemoteMcpToolset's offline path handle it.
     peerLinkResolver: (peerId) => peerRegistryRef?.linkForHub(peerId) ?? null,
   })

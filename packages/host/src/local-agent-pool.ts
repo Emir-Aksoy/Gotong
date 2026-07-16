@@ -58,6 +58,7 @@ import {
 } from './mcp-config.js'
 import type { ServerSecretSource } from './oauth-secret-source.js'
 import { buildButlerMcpToolsets } from './personal-butler-mcp.js'
+import { mergeButlerBonusMcpSpecs } from './butler-web-search.js'
 import { RemoteMcpToolset, parseRemoteMcpRef } from './mcp-proxy.js'
 import {
   resolveOwner,
@@ -405,6 +406,8 @@ export class LocalAgentPool implements ManagedAgentLifecycle {
    * Only consulted when `butlerFactory` is present.
    */
   private readonly butlerDefaultOn: boolean
+  /** WSE — host-detected web-search specs, mounted on butler rows only (see opts doc). */
+  private readonly butlerBonusMcpSpecs: readonly McpServerSpec[]
   /**
    * C-M2-M4a — per-server oauth-backed secret source (see
    * {@link makeOAuthSecretSource}). When present, an MCP server's
@@ -497,6 +500,13 @@ export class LocalAgentPool implements ManagedAgentLifecycle {
      * from `process.env` only (byte-for-byte today's behaviour).
      */
     mcpSecretSource?: ServerSecretSource
+    /**
+     * WSE — extra MCP server specs mounted on BUTLER rows only (host-detected
+     * web search: `TAVILY_API_KEY`/`BRAVE_API_KEY` present ⇒ the catalog spec).
+     * A same-name server from the row's own config wins — bonus only fills
+     * gaps. Omit / empty ⇒ byte-for-byte today's behaviour.
+     */
+    butlerBonusMcpSpecs?: readonly McpServerSpec[]
   }) {
     this.hub = opts.hub
     this.space = opts.space
@@ -511,6 +521,7 @@ export class LocalAgentPool implements ManagedAgentLifecycle {
     this.routingHealth = opts.routingHealth
     this.butlerFactory = opts.butlerFactory
     this.butlerDefaultOn = opts.butlerDefaultOn ?? false
+    this.butlerBonusMcpSpecs = opts.butlerBonusMcpSpecs ?? []
     // Built once: the gate is a stateless closure over `identity`,
     // shared by every managed LlmAgent. Settings (metric/period) are
     // hardcoded here in B2.2.2; C2 will surface them in admin UI.
@@ -851,7 +862,11 @@ export class LocalAgentPool implements ManagedAgentLifecycle {
     // A failed-to-spawn server still leaves its peers usable — see
     // McpToolset's "one server crashed, others stay live" contract.
     let mcpToolset: McpToolset | undefined
-    const mcpSpecs = await this.resolveAgentMcpSpecs(record.id, record.managed)
+    let mcpSpecs = await this.resolveAgentMcpSpecs(record.id, record.managed)
+    // WSE — butler rows also mount the host-detected web-search servers; a
+    // same-name server from the row's own config wins (user intent first).
+    if (this.butlerEnabledFor(record))
+      mcpSpecs = mergeButlerBonusMcpSpecs(mcpSpecs, this.butlerBonusMcpSpecs)
     if (mcpSpecs.length > 0) {
       mcpToolset = buildToolset(record.id, mcpSpecs, (name) => this.secretSourceFor(name))
       try {
