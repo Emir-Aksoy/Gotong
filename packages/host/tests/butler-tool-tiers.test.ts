@@ -114,6 +114,14 @@ const task = (id: string, userId: string, payload: string): Task => ({
   createdAt: 1,
 })
 
+// AFR-M7 — 恢复层 ops 假件:listTools 全静态,面测试只看名字不真打包。
+const fakeBackupOps = {
+  lastBackup: () => null,
+  newPeersSince: () => 0,
+  privileged: () => true,
+  pack: async () => ({ code: 0, lines: [] }),
+}
+
 function buildButler(provider: LlmProvider, root: string, singleTier?: boolean) {
   const factory = buildButlerFactory({
     hub: stub<Hub>({ dispatch: async () => ({ kind: 'ok' }) }),
@@ -131,6 +139,7 @@ function buildButler(provider: LlmProvider, root: string, singleTier?: boolean) 
       lang: 'zh',
     },
     ...(singleTier === undefined ? {} : { singleTierToolFace: singleTier }),
+    backupOps: fakeBackupOps,
   })
   return factory({
     id: 'atong' as ParticipantId,
@@ -147,6 +156,7 @@ const GOVERNED_TOOLS = [
   'edit_workflow',
   'create_workflow',
   'ask_peer',
+  'pack_backup',
 ] as const
 const MEMORY_TOOLS = ['remember', 'remember_procedure', 'refine_procedure', 'recall', 'forget'] as const
 

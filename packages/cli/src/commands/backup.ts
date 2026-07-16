@@ -44,6 +44,8 @@ import { promisify } from 'node:util'
 import * as tar from 'tar'
 
 import {
+  LAST_BACKUP_FACT_FORMAT,
+  LAST_BACKUP_FACT_NAME,
   MANIFEST_NAME,
   MANIFEST_FORMAT,
   PEERS_PROJECTION_NAME,
@@ -52,6 +54,7 @@ import {
   shouldSkipForStaging,
   type BackupManifest,
   type BackupTier,
+  type LastBackupFact,
   type ManifestFile,
 } from './backup-core.js'
 
@@ -349,6 +352,24 @@ export async function backup(args: readonly string[], deps: BackupDeps = {}): Pr
     const size = statSync(outFile).size
     const human = size >= 1024 * 1024 ? `${(size / 1024 / 1024).toFixed(1)}M` : `${Math.max(1, Math.round(size / 1024))}K`
     out(`✓ backup written: ${outFile} (${human}, ${files.length} files)`)
+
+    // AFR-M7 — 落「上次备份」事实(阿同 backup_status 的数据源;谁跑的备份都
+    // 算数)。写在归档**之后**——本次档案不含关于自己的事实;fail-soft:记
+    // 不上只警告,绝不把已成功的备份改判失败。
+    try {
+      const fact: LastBackupFact = {
+        format: LAST_BACKUP_FACT_FORMAT,
+        at: now().getTime(),
+        tier: tier ?? 'full',
+        includesMasterKey: includeMasterKey,
+        archive: basename(outFile),
+      }
+      const factAbs = join(spaceAbs, ...LAST_BACKUP_FACT_NAME.split('/'))
+      mkdirSync(join(spaceAbs, 'runtime'), { recursive: true })
+      writeFileSync(factAbs, `${JSON.stringify(fact, null, 2)}\n`, 'utf8')
+    } catch (e) {
+      err(`⚠ could not record the last-backup fact: ${e instanceof Error ? e.message : String(e)}`)
+    }
     out('')
     if (tier) {
       out(`Subset archive (tier: ${tier}) — NO vault, NO master keys, NO member data.`)

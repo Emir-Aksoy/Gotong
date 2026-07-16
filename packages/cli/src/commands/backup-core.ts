@@ -115,6 +115,46 @@ export function buildPeersProjection(rows: readonly unknown[], createdAt: string
   return { format: PEERS_PROJECTION_FORMAT, createdAt, note: PEERS_PROJECTION_NOTE, peers }
 }
 
+// ─── AFR-M7 上次备份事实 ─────────────────────────────────────────────────────
+
+/** 备份成功后落在 space 下的事实文件(阿同 backup_status 的数据源)。 */
+export const LAST_BACKUP_FACT_NAME = 'runtime/last-backup.json'
+
+export const LAST_BACKUP_FACT_FORMAT = 'gotong.last-backup/v1'
+
+/**
+ * 「上次备份」事实:全部非密(时间/档位/档案 basename)。谁跑的备份都写它
+ * ——命令行打的档也让阿同如实报。写在归档**之后**:档案不含关于自己的事实。
+ */
+export interface LastBackupFact {
+  format: typeof LAST_BACKUP_FACT_FORMAT
+  /** epoch ms。 */
+  at: number
+  /** 子集档位;'full' = 全空间(含搬家档,含不含主钥看 includesMasterKey)。 */
+  tier: BackupTier | 'full'
+  includesMasterKey: boolean
+  /** 档案文件名(basename,不带目录)。 */
+  archive: string
+}
+
+/** 解析 + 形状校验;认不出返回 null(从未备份 / 手改坏 → 诚实「无记录」)。 */
+export function parseLastBackupFact(raw: string): LastBackupFact | null {
+  let v: unknown
+  try {
+    v = JSON.parse(raw)
+  } catch {
+    return null
+  }
+  if (!v || typeof v !== 'object') return null
+  const f = v as Record<string, unknown>
+  if (f.format !== LAST_BACKUP_FACT_FORMAT) return null
+  if (typeof f.at !== 'number' || !Number.isFinite(f.at)) return null
+  if (f.tier !== 'identity' && f.tier !== 'relations' && f.tier !== 'full') return null
+  if (typeof f.includesMasterKey !== 'boolean') return null
+  if (typeof f.archive !== 'string' || f.archive.length === 0) return null
+  return f as unknown as LastBackupFact
+}
+
 export interface ManifestFile {
   /** leaf 相对路径,POSIX 分隔符(如 `runtime/config.json`)。 */
   path: string
@@ -152,6 +192,14 @@ export function isIdentitySqlitePath(rel: string): boolean {
 }
 
 /**
+ * AFR-M7 — `<space>/backups/` 是阿同 pack_backup 的落盘目录:永远不进归档。
+ * 档案套档案会随每次备份滚雪球,而且旧档案本身不是「当前空间状态」。
+ */
+export function isBackupOutputPath(rel: string): boolean {
+  return rel === 'backups' || rel.startsWith('backups/')
+}
+
+/**
  * 正常收集阶段该不该跳过这个文件。sqlite 家族的「跳过」不等于「不进
  * 归档」——快照阶梯会以一致性拷贝的形式把它放回去(**分档时例外**:
  * 子集档绝不含 sqlite,快照阶梯整个不跑,金库密文字节结构性进不来)。
@@ -159,6 +207,7 @@ export function isIdentitySqlitePath(rel: string): boolean {
  */
 export function shouldSkipForStaging(rel: string, includeMasterKey: boolean, tier?: BackupTier): boolean {
   if (tier !== undefined) return !isIdentityTierPath(rel)
+  if (isBackupOutputPath(rel)) return true
   if (isSessionPath(rel)) return true
   if (!includeMasterKey && isMasterKeyPath(rel)) return true
   if (isIdentitySqlitePath(rel)) return true

@@ -296,6 +296,40 @@
   sweeper(镜像 TN-M2 形状:常量节律、只写自己的 fact 文件、送达才记标记),文案带
   M5 面包屑指向「备份怎么选档」卡。
   **门** = 单测:批准前零打包 / sweeper 冷却往返(注入时钟)/ 提醒文案含面包屑。
+  **✅ 已落(2026-07-16)**。地基是「上次备份」**事实文件**:cli `backup()` 成功
+  路径在归档落盘**之后**写 `<space>/runtime/last-backup.json`
+  (`gotong.last-backup/v1`:at / tier / includesMasterKey / archive 名;先归档
+  后写=档案永不含关于自己的事实;写失败 warn 不改 exit 0)。谁打的都刷新——
+  CLI 手打与阿同代打共用同一事实,`backup_status` 不管来源如实报。同刀把
+  `backups/`(pack 的产出目录)加进 `shouldSkipForStaging` 全模式排除:
+  **档案不套档案**。host 直接 import cli 真 `backup()`(workspace 依赖早在,
+  cli 无 host 静态依赖不成环;零 shell-out 零复刻)。**benign `backup_status`**
+  (进目录层)只读渲染:无记录如实说+面包屑;有记录报日期/天数/档位/档案名,
+  含主钥必印「档案即凭证」、身份档注明「本就不含互联关系」、陈旧(14d)建议
+  再打+面包屑;「之后新增」**只数 peer**(行有 createdAt),agent spec 没有
+  创建时间——**宁可不报也不造基线**。**governed `pack_backup`**(一等)只收
+  子集档(identity|relations;全量/搬家档仍走命令行——含主钥的档案不该由
+  聊天窗产出),**owner/admin 两端闸**:classify 在 park **前**服务端查
+  `ops.privileged`(镜像 im-bridge membershipRole),不够格当场 refuse——
+  绝不浪费一次审批、绝不进收件箱;execute 批准后**再查一遍**(park→批准
+  窗口内降权,批准救不回资格)。成功话术指路 backups/ 目录+「记得下载一份
+  自己收好,用户自持才是恢复兜底」。**陈旧提醒 sweeper** 镜像 TN-M2:6h 常量
+  节律、纯时间戳分诊零 LLM(14d 陈旧线+每人 14d 冷却;**从没备份过=首 tick
+  即 due**,之后靠冷却限频),同意面=巡检先例「开了播报才收」**再叠 privileged
+  过滤**(收提醒的人必须是能动手的人),只写自己的事实文件
+  `backup-nudges.json`、**送达才记标记**(投递失败下 tick 重试)。文案带自然
+  请求短语「打一份身份档备份」+ M5 面包屑指 backup 卡,推送正文永不出现
+  原始工具名。分层登记:backup_status 入 `BUTLER_DIRECTORY_BENIGN`(pack_backup
+  是 governed 恒一等,其描述不点名目录工具——指路不指空双向核过);B1 能力
+  目录+guide backup 卡各补一行。**防腐门**:cli `backup-tiers` +3(事实写入/
+  --tier 刷新/manifest 不含事实文件/backups/ 排除/坏 JSON fail-soft),host 新
+  `butler-backup.test.ts` 17 例——分诊往返(注入时钟)/文案含面包屑不含工具名/
+  status 渲染四态/ops 权限与 fail-soft/**classify 阶段零 pack 调用**+降权两端
+  拒/**e2e park→批准→真 cli backup 落 backups/ 真档案**(批准前断言目录不存在
+  +零事实文件)/sweeper 双过滤·冷却·投递失败重试;AFR-M1 tripwire 如期变红后
+  登记 backup-status/backup-pack 两 builder 进度量注册表。验收:cli 282
+  (279→+3)/host 2134 全绿,typecheck 干净,四门 PASS(**旋钮 114 零新增**——
+  ops 接不接就是开关;main.ts 2999/3000,+15 行接线靠压三段注释腾出)。
 - **M8 capstone `examples/atong-recovery`** + 收口:确定性、零 LLM 零 key ——
   打包三档 → 新空间恢复 → 断言 kid 不变 / peers 行还在 / 身份档不含密 / 搬家档全量
   开机;`pnpm demo:atong-recovery` exit 0。+ 文档收口 + CLAUDE.md 账本 + 四门。

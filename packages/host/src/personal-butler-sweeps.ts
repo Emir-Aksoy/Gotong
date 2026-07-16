@@ -23,6 +23,7 @@ import type { Logger } from '@gotong/core'
 import type { LlmAgentToolset } from '@gotong/llm'
 
 import type { AdminHealthSurface } from './admin-health.js'
+import { ButlerBackupNudgeSweeper, type ButlerBackupOps } from './personal-butler-backup.js'
 import type { ButlerRunSurface } from './personal-butler-observe.js'
 import { ButlerPatrolSweeper } from './personal-butler-patrol.js'
 import {
@@ -70,6 +71,9 @@ export interface ButlerSweepsOptions {
    * sites / tests stay byte-identical.
    */
   taskNudge?: { on: boolean; intervalMs?: number }
+  /** AFR-M7 — 备份陈旧提醒(镜像 TN-M2;同意面同巡检=开了播报才收,再叠
+   *  owner/admin 过滤——只提醒能按下打包的人)。缺省 ⇒ 不构造。 */
+  backupNudge?: { on: boolean; ops: Pick<ButlerBackupOps, 'lastBackup' | 'newPeersSince' | 'privileged'>; intervalMs?: number }
 }
 
 export interface ButlerSweepsHandle {
@@ -115,6 +119,17 @@ export function armButlerSweeps(opts: ButlerSweepsOptions): ButlerSweepsHandle {
     })
     taskNudge.start()
   }
+  let backupNudge: ButlerBackupNudgeSweeper | undefined
+  if (opts.backupNudge?.on) {
+    backupNudge = new ButlerBackupNudgeSweeper({
+      rootDir: opts.memoryRoot,
+      ops: opts.backupNudge.ops,
+      push: opts.push,
+      logger: opts.logger,
+      ...(opts.backupNudge.intervalMs !== undefined ? { intervalMs: opts.backupNudge.intervalMs } : {}),
+    })
+    backupNudge.start()
+  }
   let patrol: ButlerPatrolSweeper | undefined
   if (opts.patrol?.on) {
     patrol = new ButlerPatrolSweeper({
@@ -133,6 +148,7 @@ export function armButlerSweeps(opts: ButlerSweepsOptions): ButlerSweepsHandle {
       proactive?.stop()
       runBroadcast?.stop()
       taskNudge?.stop()
+      backupNudge?.stop()
       patrol?.stop()
     },
   }

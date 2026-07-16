@@ -71,6 +71,9 @@ export const BUTLER_DIRECTORY_BENIGN = [
   'show_my_memory',
   // AFR-M4 随身向导+医生 — 说明书型按需知识卡,长尾的第一租户
   'gotong_guide',
+  // AFR-M7 恢复层只读 — 低频(「多久没备份了」);打包动作 pack_backup 是
+  // governed,按规则全量留一等(它的描述不点名本工具,指路不指空成立)
+  'backup_status',
 ] as const
 
 export type ButlerFirstClassBenign = (typeof BUTLER_FIRST_CLASS_BENIGN)[number]

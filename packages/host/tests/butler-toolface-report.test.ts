@@ -33,6 +33,10 @@ import {
 } from '../src/butler-toolface-report.js'
 import { buildButlerAskAgentToolset } from '../src/personal-butler-ask-agent.js'
 import { buildButlerAskPeerToolset } from '../src/personal-butler-ask-peer.js'
+import {
+  buildButlerBackupPackToolset,
+  buildButlerBackupStatusToolset,
+} from '../src/personal-butler-backup.js'
 import { buildButlerCapabilitiesToolset } from '../src/personal-butler-capabilities.js'
 import { buildButlerConsolidateToolset } from '../src/personal-butler-consolidate.js'
 import { buildButlerDailyBriefToolset } from '../src/personal-butler-daily-brief.js'
@@ -91,6 +95,8 @@ const MEASURED_BUILDERS: Record<string, string> = {
   steward: 'buildButlerGovernedToolset',
   'workflow-create': 'buildButlerWorkflowCreateToolset',
   'ask-peer': 'buildButlerAskPeerToolset',
+  'backup-status': 'buildButlerBackupStatusToolset',
+  'backup-pack': 'buildButlerBackupPackToolset',
 }
 
 /**
@@ -223,6 +229,17 @@ function buildFullFace(): ToolFaceEntry[] {
       module: 'ask-peer',
       kind: 'governed',
       toolset: buildButlerAskPeerToolset({ userId: U, peers: stub(), hub: stub(), logger: stub() }),
+    },
+    // AFR-M7 恢复层:status 是 benign 只读,pack 是 governed(身份档含签名钥)。
+    {
+      module: 'backup-status',
+      kind: 'benign',
+      toolset: buildButlerBackupStatusToolset({ ops: stub() }),
+    },
+    {
+      module: 'backup-pack',
+      kind: 'governed',
+      toolset: buildButlerBackupPackToolset({ userId: U, ops: stub() }),
     },
   ]
 }

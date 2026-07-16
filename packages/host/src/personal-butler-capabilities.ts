@@ -64,6 +64,7 @@ const CATALOG: readonly CapabilityEntry[] = [
   { signals: ['edit_workflow'], line: '- 改我的工作流(改动前要你确认)' },
   { signals: ['list_peers'], line: '- 看看互联了哪些 hub / 组织' },
   { signals: ['ask_peer'], line: '- 替我问对端 hub 一件事(发出前要你点头)' },
+  { signals: ['backup_status'], line: '- 看这台 hub 的备份状态;打包一份备份档案(打包前要你批准)' },
   { signals: ['set_daily_brief'], line: '- 每天早上跟你说声早 + 简报' },
   { signals: ['set_run_broadcast'], line: '- 工作流跑完主动告诉你' },
   { signals: ['consolidate_my_memory'], line: '- 整理一下记忆' },

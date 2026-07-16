@@ -45,6 +45,11 @@ import type { FailureLang } from './failure-translator.js'
 import type { ButlerFactory } from './local-agent-pool.js'
 import type { StewardAgentDirectory, StewardWorkflowEditor } from './hub-steward-service.js'
 import { buildButlerAskAgentToolset, type ButlerAskRosterSource } from './personal-butler-ask-agent.js'
+import {
+  buildButlerBackupPackToolset,
+  buildButlerBackupStatusToolset,
+  type ButlerBackupOps,
+} from './personal-butler-backup.js'
 import { buildButlerCapabilitiesToolset } from './personal-butler-capabilities.js'
 import { buildButlerConsolidateToolset } from './personal-butler-consolidate.js'
 import { buildButlerDailyBriefToolset } from './personal-butler-daily-brief.js'
@@ -181,6 +186,12 @@ export interface ButlerFactoryDeps {
    * env 旋钮 —— 只供测试对照与万一的回退;main.ts 不设它。
    */
   singleTierToolFace?: boolean
+  /**
+   * AFR-M7 — 恢复层 ops(identity 在时 main.ts 构造;缺席 ⇒ backup_status /
+   * pack_backup 都不装)。打包是凭证级动作(身份档含 hub 签名钥),owner/admin
+   * 判定钉在 ops.privileged —— 服务端权威,绝不信模型自报。
+   */
+  backupOps?: ButlerBackupOps
 }
 
 export function buildButlerFactory(deps: ButlerFactoryDeps): ButlerFactory {
@@ -344,6 +355,17 @@ export function buildButlerFactory(deps: ButlerFactoryDeps): ButlerFactory {
           deps.governedOn && refs.peerRoster
             ? buildButlerAskPeerToolset({ userId, peers: refs.peerRoster, hub, logger: log })
             : undefined
+        // AFR-M7 — 恢复层两件:benign backup_status(读上次备份事实 + 新增
+        // 关系数;org-level 只读同 list_peers,全员可读)+ governed pack_backup
+        // (身份档含 hub 签名钥 = 凭证级,owner/admin 之外 classify 直接拒,
+        // 批准后才真打包,档案落 <space>/backups/)。identity 未接 ⇒ 都不装。
+        const backupStatusToolset = deps.backupOps
+          ? buildButlerBackupStatusToolset({ ops: deps.backupOps, logger: log })
+          : undefined
+        const backupPackGov =
+          deps.governedOn && deps.backupOps
+            ? buildButlerBackupPackToolset({ userId, ops: deps.backupOps, logger: log })
+            : undefined
         // WIZ-M4c — benign "帮我规划一个工作流": wizard compose, proposal-only
         // (explanation + gap checklist + validated YAML), persists nothing. Saving
         // goes through the governed create_workflow above with the proposal's YAML.
@@ -438,6 +460,7 @@ export function buildButlerFactory(deps: ButlerFactoryDeps): ButlerFactory {
           ...(askAgentToolset ? [askAgentToolset] : []),
           ...(peersToolset ? [peersToolset] : []),
           ...(llmsToolset ? [llmsToolset] : []),
+          ...(backupStatusToolset ? [backupStatusToolset] : []),
           ...(planWizardToolset ? [planWizardToolset] : []),
           ...(consolidateToolset ? [consolidateToolset] : []),
           remindersToolset,
@@ -454,6 +477,7 @@ export function buildButlerFactory(deps: ButlerFactoryDeps): ButlerFactory {
         const longTail = [
           ...(diagnoseToolset ? [diagnoseToolset] : []),
           ...(llmsToolset ? [llmsToolset] : []),
+          ...(backupStatusToolset ? [backupStatusToolset] : []),
           ...(consolidateToolset ? [consolidateToolset] : []),
           languageToolset,
           llmCatalogToolset,
@@ -478,6 +502,7 @@ export function buildButlerFactory(deps: ButlerFactoryDeps): ButlerFactory {
           ...(steward ? [steward] : []),
           ...(workflowCreateGov ? [workflowCreateGov] : []),
           ...(askPeerGov ? [askPeerGov] : []),
+          ...(backupPackGov ? [backupPackGov] : []),
           ...(mcpSplit?.writeGoverned ? [mcpSplit.writeGoverned] : []),
         ]
         // B1 — now that both sets exist, point the capability getter at their

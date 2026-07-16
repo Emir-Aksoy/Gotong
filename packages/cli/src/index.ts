@@ -8,3 +8,12 @@
 
 export { runCli } from './main.js'
 export { provision, type ProvisionDeps } from './commands/provision.js'
+// AFR-M7 — 阿同恢复层直接调 CLI 的 backup()(host 本就依赖本包;同一份打包
+// 代码,不 shell-out 不复制),并读 backup 成功后落的「上次备份」事实。
+export { backup, type BackupDeps } from './commands/backup.js'
+export {
+  LAST_BACKUP_FACT_FORMAT,
+  LAST_BACKUP_FACT_NAME,
+  parseLastBackupFact,
+  type LastBackupFact,
+} from './commands/backup-core.js'

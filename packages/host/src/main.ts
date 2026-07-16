@@ -253,6 +253,7 @@ import { HostButlerMemoryService } from './butler-memory-service.js'
 // per-user `ButlerRouter` (one memory namespace per member) so the IM channel's
 // many bound users each get a butler that remembers ONLY them across sessions.
 // Assembly lives in personal-butler-factory.ts; main.ts only wires refs.
+import { buildButlerBackupOps } from './personal-butler-backup.js'
 import { buildButlerFactory } from './personal-butler-factory.js'
 import { butlerEmbedderFromEnv } from './butler-embedder.js'
 import {
@@ -415,19 +416,12 @@ async function main(): Promise<void> {
     }
   }
 
-  // v4 identity layer. Opens (or creates) `<space>/identity.sqlite` and
-  // bootstraps an `owner` user with NO credentials.
-  //
-  // A2.2 — bootstrap no longer migrates the v3 admin token; the v4
-  // surface is the documented login path. The first operator gets a
-  // password via the (C1) setup wizard, OR via the `gotong-host
-  // mint-admin-token` subcommand as an emergency fallback.
-  //
-  // Bootstrap is idempotent: on every subsequent boot it returns
-  // `bootstrapped: false` and never mutates. The legacy v3 admin URL
-  // (`/admin?token=...`) is printed at the bottom of this boot and
-  // remains valid for host-level admin routes (agents/secrets/
-  // workflows), but `/api/admin/identity/*` no longer accepts it.
+  // v4 identity layer. Opens (or creates) `<space>/identity.sqlite`, bootstraps
+  // an `owner` user with NO credentials (A2.2: the first operator gets a
+  // password via the C1 setup wizard, or `gotong-host mint-admin-token` as the
+  // emergency fallback). Idempotent: subsequent boots return `bootstrapped:
+  // false` and never mutate. The legacy v3 `/admin?token=...` (printed at boot
+  // bottom) stays valid for host-level admin routes, not `/api/admin/identity/*`.
   let identity: IdentityStore | undefined
   let orgApiPool: OrgApiPool | undefined
   try {
@@ -646,13 +640,10 @@ async function main(): Promise<void> {
   // after createWorkflowController) so the workflow controller's off-hub
   // capability view can also enumerate live external A2A agents lazily.
   let a2aOutboundRef: A2aOutboundManager | undefined
-  // Phase 11 M2 — when an agent throws SuspendTaskError the scheduler
-  // calls this notifier to persist the parked task. Wired only when
-  // identity opened successfully (rare boot-time failures fall back
-  // to non-durable suspend; agents still get the 'suspended' result
-  // shape but won't survive a process restart). `hubId` is a fixed
-  // sentinel for now — multi-hub-per-process is on the roadmap but
-  // not a current shape; the row is keyed by task_id alone.
+  // Phase 11 M2 — SuspendTaskError → this notifier persists the parked task.
+  // Wired only when identity opened (otherwise non-durable suspend: agents
+  // still get the 'suspended' result shape but parks don't survive a process
+  // restart). `hubId` is a fixed sentinel; the row is keyed by task_id alone.
   // Route B P0-M2 (M3b) — boot-time transcript retention. MUST run before
   // `new Hub({space})`: the Hub's FileStorage caches its high-water seq at
   // construction (M3a), so the checkpoint that archiving writes has to be on
@@ -937,22 +928,17 @@ async function main(): Promise<void> {
   }
   const uploadsRef = uploads
 
-  // BF-M4 — the resident butler fold-in. A `chat`-capable managed LLM row is
-  // spawned as a per-user `ButlerRouter` instead of a plain `LlmAgent`: it
-  // registers under the SAME id (admin / lifecycle / restart / test-connection
-  // unchanged) but routes by `task.origin.userId` to a butler with that member's
-  // OWN memory namespace. This is what makes the IM bot REMEMBER each member
-  // across sessions — the headline reason for the fold-in.
-  //
-  // ON by default (`GOTONG_BUTLER` ∈ {0,false,off,no} turns it OFF; a per-agent
-  // `managed.butler: false` opts a single row out). It gains cross-session memory +
-  // the benign tools the row already had (run inline), plus — when the member
-  // services exist — the BF-M7 governed action set (create / edit / delete the
-  // member's own agent + edit their own workflow), each APPROVAL-GATED to the
-  // member's /me inbox (`GOTONG_BUTLER_GOVERNED` off ⇒ back to pure-memory). Memory
-  // lives under the SAME `<space>/butler/memory` subtree the /me privacy view reads
-  // (below), so "what the butler remembers" and "what a member can erase" are one
-  // and the same bytes.
+  // BF-M4 — the resident butler fold-in. A `chat`-capable managed LLM row
+  // spawns as a per-user `ButlerRouter` instead of a plain `LlmAgent`: SAME id
+  // (admin / lifecycle / restart / test-connection unchanged) but routed by
+  // `task.origin.userId` to a butler with that member's OWN memory namespace —
+  // what makes the IM bot REMEMBER each member across sessions. ON by default
+  // (`GOTONG_BUTLER` ∈ {0,false,off,no} turns it OFF; per-agent
+  // `managed.butler: false` opts a row out). Gains cross-session memory + the
+  // row's benign tools (inline), plus the BF-M7 governed action set when the
+  // member services exist — each APPROVAL-GATED to /me (`GOTONG_BUTLER_GOVERNED`
+  // off ⇒ pure-memory). Memory lives under the SAME `<space>/butler/memory`
+  // subtree the /me privacy view reads — one and the same bytes.
   const butlerMemoryRoot = join(space.root, 'butler', 'memory')
   const butlerEnv = (process.env.GOTONG_BUTLER ?? '').trim().toLowerCase()
   const butlerDefaultOn = !['0', 'false', 'off', 'no'].includes(butlerEnv)
@@ -1064,6 +1050,16 @@ async function main(): Promise<void> {
   // CARE-M4 — 活体校验 closure, bound after the pool starts (below); the
   // onboarding toolset reads it lazily so an early butler answers honestly.
   let butlerOnboardingKeyCheckRef: ButlerOnboardingKeyCheck | undefined
+  // AFR-M7 — 阿同恢复层 ops(status/pack/提醒共用):打包是凭证级动作(身份档
+  // 含 hub 签名钥),owner/admin 判定钉在 ops 里服务端权威;identity 缺席 = 不装。
+  const identityForBackup = identity
+  const butlerBackupOps = identityForBackup
+    ? buildButlerBackupOps({
+        spaceRoot: space.root,
+        membershipRole: (uid) => identityForBackup.getMembership(uid)?.role,
+        peerCreatedTimes: () => identityForBackup.listPeers().map((p) => p.createdAt),
+      })
+    : undefined
   // Per-user butler assembly lives in personal-butler-factory.ts (fourth
   // GUARD line-budget extraction). The getter bag reads the forward-declared
   // refs at butler-build time — the same late-binding the inline closure had.
@@ -1104,6 +1100,7 @@ async function main(): Promise<void> {
       keyCheck: () => butlerOnboardingKeyCheckRef,
       lang: config.defaultLang,
     },
+    ...(butlerBackupOps ? { backupOps: butlerBackupOps } : {}),
   })
 
   // MR-M3 — shared per-provider routing-health projection, fed by every routed
@@ -1903,6 +1900,8 @@ async function main(): Promise<void> {
     },
     // TN-M2 — 卡壳任务提醒骑管家总开关;零 LLM 纯时间戳分诊,节律常量零新旋钮。
     taskNudge: { on: butlerDefaultOn },
+    // AFR-M7 — 备份陈旧提醒(同意面镜像巡检=开了播报的 owner/admin 才收)。
+    ...(butlerBackupOps ? { backupNudge: { on: butlerDefaultOn, ops: butlerBackupOps } } : {}),
   })
   let patrolHealthRef: AdminHealthSurface | undefined
 

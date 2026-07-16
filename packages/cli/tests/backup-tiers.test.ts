@@ -23,7 +23,7 @@ import {
   writeFileSync,
 } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 
 import Database from 'better-sqlite3'
 import * as tar from 'tar'
@@ -33,6 +33,7 @@ import {
   MANIFEST_NAME,
   PEERS_PROJECTION_NAME,
   buildPeersProjection,
+  parseLastBackupFact,
   parseManifest,
   shouldSkipForStaging,
   type PeersProjection,
@@ -319,5 +320,54 @@ describe('AFR-M6 — 纯核直测', () => {
     expect(parseManifest(JSON.stringify({ ...base, tier: 'identity' }))?.tier).toBe('identity')
     expect(parseManifest(JSON.stringify({ ...base, tier: 'relations' }))?.tier).toBe('relations')
     expect(parseManifest(JSON.stringify({ ...base, tier: 'everything' }))).toBe(null)
+  })
+})
+
+describe('AFR-M7 — 上次备份事实 + backups/ 排除', () => {
+  it('成功后落事实(tier 如实);本次档案不含关于自己的事实', async () => {
+    const space = join(root, 'space')
+    makeSpace(space)
+    const full = await runBackup(space, [])
+    expect(full.code).toBe(0)
+    const factFile = join(space, 'runtime', 'last-backup.json')
+    const fact1 = parseLastBackupFact(readFileSync(factFile, 'utf8'))
+    expect(fact1).toMatchObject({ tier: 'full', includesMasterKey: false })
+    expect(fact1?.archive).toBe(basename(full.tgz))
+    // 事实写在归档之后:本次档案的清单里没有 runtime/last-backup.json
+    const { contents } = await extractAll(full.tgz)
+    const manifest = parseManifest(contents.get(MANIFEST_NAME)!)
+    expect(manifest?.files.some((f) => f.path === 'runtime/last-backup.json')).toBe(false)
+    // 再打一份身份档 → 事实翻新为 identity
+    const idr = await runBackup(space, ['--tier=identity'])
+    expect(idr.code).toBe(0)
+    expect(parseLastBackupFact(readFileSync(factFile, 'utf8'))?.tier).toBe('identity')
+  })
+
+  it('backups/(阿同打包落盘目录)永不进归档——档案不套档案', async () => {
+    const space = join(root, 'space')
+    makeSpace(space)
+    mkdirSync(join(space, 'backups'), { recursive: true })
+    writeFileSync(join(space, 'backups', 'old.tar.gz'), 'OLD-ARCHIVE-BYTES', 'utf8')
+    const { code, tgz } = await runBackup(space, [])
+    expect(code).toBe(0)
+    const { members, contents } = await extractAll(tgz)
+    expect(members.some((m) => m.includes('backups/'))).toBe(false)
+    const manifest = parseManifest(contents.get(MANIFEST_NAME)!)
+    expect(manifest?.files.some((f) => f.path.startsWith('backups/'))).toBe(false)
+  })
+
+  it('失败路径不落事实(坏 tier 早退);parseLastBackupFact 坏输入 fail-soft', async () => {
+    const space = join(root, 'space')
+    makeSpace(space)
+    const bad = await runBackup(space, ['--tier=everything'])
+    expect(bad.code).toBe(1)
+    expect(existsSync(join(space, 'runtime', 'last-backup.json'))).toBe(false)
+    expect(parseLastBackupFact('not-json')).toBe(null)
+    expect(parseLastBackupFact(JSON.stringify({ format: 'gotong.last-backup/v1', at: 'x' }))).toBe(null)
+    expect(
+      parseLastBackupFact(
+        JSON.stringify({ format: 'gotong.last-backup/v1', at: 5, tier: 'full', includesMasterKey: false, archive: 'a.tar.gz' }),
+      ),
+    ).toMatchObject({ at: 5, tier: 'full' })
   })
 })
