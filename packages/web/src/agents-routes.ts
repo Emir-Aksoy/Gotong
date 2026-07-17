@@ -371,19 +371,36 @@ interface AdaptApplyProposal {
   endpointLabel?: unknown
 }
 
+/** RES-M3 — an enactable proposal turned into a PUT-shaped edit, plus what it shed. */
+interface AdaptedEdit {
+  /** The body `applyAgentEdit` validates — full-fidelity echo of the current spec. */
+  body: Record<string, unknown>
+  /**
+   * MR-M6 — the primary's exclusive env-name credential, dropped because the
+   * adapt repointed the primary at a different vendor/endpoint (name only —
+   * a key value never travels through this layer). Surfaced in the response
+   * so the shed is never silent.
+   */
+  droppedApiKeyEnv?: string
+}
+
 /**
  * RES-M3 — turn an APPLICABLE proposal + the target agent's current record into
  * a PUT-shaped edit body (the exact contract `applyAgentEdit` validates). We
- * rebuild the agent's own fields and override ONLY the provider bits, so an
- * adaptation is a constrained edit that preserves system prompt / capabilities /
- * MCP wiring / heartbeat. Returns null for anything that can't be cleanly enacted
- * (advisory kinds, a non-native switch target, a non-managed agent) so the route
- * fails closed — nothing is ever half-applied.
+ * rebuild EVERY spec field the PUT contract knows and override ONLY the provider
+ * bits, so an adaptation is a constrained edit that preserves system prompt /
+ * capabilities / MCP wiring / heartbeat / MR-M2 fallbacks / NA-M5 maintenance
+ * model — `validateAgentBody` treats an absent field as "unset" and upsertAgent
+ * replaces the managed spec wholesale, so anything NOT echoed here would be
+ * silently wiped. Each adapt branch then explicitly deletes what its semantics
+ * shed (and the shed is reported, never silent). Returns null for anything that
+ * can't be cleanly enacted (advisory kinds, a non-native switch target, a
+ * non-managed agent) so the route fails closed — nothing is ever half-applied.
  */
 function adaptEditBodyFromProposal(
   existing: AgentRecord,
   p: AdaptApplyProposal,
-): Record<string, unknown> | null {
+): AdaptedEdit | null {
   const m = existing.managed
   if (!m || m.kind !== 'llm') return null // only managed LLM agents can be adapted
   const body: Record<string, unknown> = {
@@ -399,16 +416,40 @@ function adaptEditBodyFromProposal(
   if (m.useMcpServers) body.useMcpServers = m.useMcpServers
   if (m.heartbeat) body.heartbeat = m.heartbeat
   if (typeof m.butler === 'boolean') body.butler = m.butler
+  if (typeof m.baseURL === 'string' && m.baseURL) body.baseURL = m.baseURL
+  if (typeof m.providerLabel === 'string' && m.providerLabel) body.providerLabel = m.providerLabel
+  // MR-M2 — the fallback chain survives a primary rewire: each candidate carries
+  // its OWN provider/baseURL/apiKeyEnv, none of which the adapt touches.
+  if (m.fallbacks) body.fallbacks = m.fallbacks
+  if (typeof m.apiKeyEnv === 'string' && m.apiKeyEnv) body.apiKeyEnv = m.apiKeyEnv
+  // NA-M5 — the maintenance-model choice is a budget knob, orthogonal to which
+  // primary serves live traffic; a stale model id after a rewire fails loudly at
+  // the next maintenance tick and is a one-field follow-up edit (same posture as
+  // `model` above), unlike a silent wipe.
+  if (typeof m.maintenanceModel === 'string' && m.maintenanceModel) body.maintenanceModel = m.maintenanceModel
+
+  // MR-M6 — apiKeyEnv is EXCLUSIVE: the pool reads ONLY that env var, never
+  // falling through to stored keys. Both enactable kinds repoint the primary at
+  // a different vendor/endpoint, so the echoed env name — the OLD primary's
+  // credential — must be shed: kept, it would spend the wrong vendor's wallet or
+  // shadow a key the new primary could actually resolve.
+  const shedApiKeyEnv = (): AdaptedEdit => {
+    if (typeof body.apiKeyEnv !== 'string' || !body.apiKeyEnv) return { body }
+    const droppedApiKeyEnv = body.apiKeyEnv
+    delete body.apiKeyEnv
+    return { body, droppedApiKeyEnv }
+  }
 
   if (p.kind === 'use_local_endpoint') {
     if (typeof p.suggestedBaseURL !== 'string' || !p.suggestedBaseURL) return null
     body.provider = 'openai-compatible'
     body.baseURL = p.suggestedBaseURL
     if (typeof p.endpointLabel === 'string' && p.endpointLabel) body.providerLabel = p.endpointLabel
+    else delete body.providerLabel // an echoed label would describe the OLD endpoint
     // A local model server (e.g. Ollama) ignores the key, but openai-compatible
     // validation requires a non-empty per-agent key — set a harmless placeholder.
     body.apiKey = 'local'
-    return body
+    return shedApiKeyEnv()
   }
   if (p.kind === 'switch_provider') {
     // Only native literals are one-click applicable (RES-M2 sets `applicable`
@@ -417,7 +458,7 @@ function adaptEditBodyFromProposal(
     body.provider = p.toProvider
     delete body.baseURL // shed any compat-only fields carried from the old provider
     delete body.providerLabel
-    return body
+    return shedApiKeyEnv()
   }
   return null // advisory kinds (set_env_key / wire_mcp_server) are not enactable
 }
@@ -587,20 +628,31 @@ export async function handleAgentsRoute(
       sendJson(res, { ok: false, error: `unknown agent '${agentId}'` }, 404)
       return true
     }
-    const editBody = adaptEditBodyFromProposal(existing, p)
-    if (!editBody) {
+    const adapted = adaptEditBodyFromProposal(existing, p)
+    if (!adapted) {
       // Defense in depth: a proposal that survived the applicable gate but can't
       // be cleanly turned into an edit (advisory kind, non-native switch target,
       // non-managed agent) is rejected — never half-applied.
       sendJson(res, { ok: false, error: '该提议无法自动应用（不受支持的类型或目标）', code: 'not_applicable' }, 400)
       return true
     }
-    const outcome = await applyAgentEdit(agentId, editBody, 'adapt')
+    const outcome = await applyAgentEdit(agentId, adapted.body, 'adapt')
     if (!outcome.ok) {
       sendJson(res, { ok: false, error: outcome.error }, outcome.status)
       return true
     }
-    sendJson(res, { ok: true, applied: { kind: p.kind, agentId }, agent: publicAgent(outcome.record, ctx.hub) })
+    sendJson(res, {
+      ok: true,
+      applied: {
+        kind: p.kind,
+        agentId,
+        // MR-M6 — the primary's exclusive env credential doesn't carry across a
+        // rewire (wrong vendor's wallet); report the shed name so the operator
+        // knows to point the new primary at its own key if needed.
+        ...(adapted.droppedApiKeyEnv ? { droppedApiKeyEnv: adapted.droppedApiKeyEnv } : {}),
+      },
+      agent: publicAgent(outcome.record, ctx.hub),
+    })
     return true
   }
 
