@@ -383,6 +383,7 @@ interface AdaptApplyProposal {
 function adaptEditBodyFromProposal(
   existing: AgentRecord,
   p: AdaptApplyProposal,
+  hasStoredKey: boolean,
 ): Record<string, unknown> | null {
   const m = existing.managed
   if (!m || m.kind !== 'llm') return null // only managed LLM agents can be adapted
@@ -406,8 +407,12 @@ function adaptEditBodyFromProposal(
     body.baseURL = p.suggestedBaseURL
     if (typeof p.endpointLabel === 'string' && p.endpointLabel) body.providerLabel = p.endpointLabel
     // A local model server (e.g. Ollama) ignores the key, but openai-compatible
-    // validation requires a non-empty per-agent key — set a harmless placeholder.
-    body.apiKey = 'local'
+    // validation requires a non-empty per-agent key. Write the harmless
+    // placeholder ONLY when no stored key exists: an agent's real stored key
+    // (possibly its only copy) must never be clobbered by 'local' — it still
+    // satisfies validation, the local server ignores it, and it's intact if the
+    // operator ever switches back.
+    if (!hasStoredKey) body.apiKey = 'local'
     return body
   }
   if (p.kind === 'switch_provider') {
@@ -587,7 +592,11 @@ export async function handleAgentsRoute(
       sendJson(res, { ok: false, error: `unknown agent '${agentId}'` }, 404)
       return true
     }
-    const editBody = adaptEditBodyFromProposal(existing, p)
+    // Existence only (the value never crosses this layer) — an existing
+    // per-agent key must survive the apply, never be clobbered by the
+    // use_local_endpoint placeholder.
+    const hasStoredKey = (await ctx.space.getAgentApiKey(agentId).catch(() => null)) !== null
+    const editBody = adaptEditBodyFromProposal(existing, p, hasStoredKey)
     if (!editBody) {
       // Defense in depth: a proposal that survived the applicable gate but can't
       // be cleanly turned into an edit (advisory kind, non-native switch target,
@@ -600,7 +609,14 @@ export async function handleAgentsRoute(
       sendJson(res, { ok: false, error: outcome.error }, outcome.status)
       return true
     }
-    sendJson(res, { ok: true, applied: { kind: p.kind, agentId }, agent: publicAgent(outcome.record, ctx.hub) })
+    // Surface that the stored key was deliberately preserved (not replaced by
+    // the placeholder) so the operator knows it's still there to switch back to.
+    const keptStoredApiKey = p.kind === 'use_local_endpoint' && hasStoredKey
+    sendJson(res, {
+      ok: true,
+      applied: { kind: p.kind, agentId, ...(keptStoredApiKey ? { keptStoredApiKey: true } : {}) },
+      agent: publicAgent(outcome.record, ctx.hub),
+    })
     return true
   }
 

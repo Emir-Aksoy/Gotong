@@ -2454,6 +2454,10 @@ async function main(): Promise<void> {
   // with what the resource panel shows.
   const resourceAdaptation = createResourceAdaptationService({
     inventory: () => resourceInventory.inventory(),
+    // Per-agent key probe (same chain spawn uses) — the inventory only sees
+    // provider-LEVEL env/vault keys, so without this a compat agent whose key
+    // is per-agent by design would read as keyless and draw rewrite proposals.
+    resolvesKey: (id, provider) => localAgents.hasResolvableLlmKey(id, provider),
   })
   // BE-M2 — the SAME zero-LLM RES-M2 engine the admin 资源适配 panel uses now also
   // backs the resident butler's benign "体检" tool (read-only; enactable fixes go

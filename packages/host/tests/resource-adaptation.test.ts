@@ -219,6 +219,29 @@ describe('proposeAdaptations (RES-M2)', () => {
     expect(byKind(props, 'wire_mcp_server')).toHaveLength(0)
   })
 
+  it('an agent whose OWN key chain resolves (hasResolvableKey:true) draws NO proposals', () => {
+    // The inventory sees no deepseek key and Ollama is up — but the agent has a
+    // per-agent stored key (invisible at provider level). Keyed → no proposals.
+    const props = proposeAdaptations({
+      inventory: inv(),
+      agents: [{ id: 'mentor', provider: 'deepseek', hasResolvableKey: true }],
+    })
+    expect(props).toEqual([])
+  })
+
+  it('hasResolvableKey:false behaves exactly like omitting it — proposals still emitted', () => {
+    const withFalse = proposeAdaptations({
+      inventory: inv(),
+      agents: [{ id: 'mentor', provider: 'deepseek', hasResolvableKey: false }],
+    })
+    const without = proposeAdaptations({
+      inventory: inv(),
+      agents: [{ id: 'mentor', provider: 'deepseek' }],
+    })
+    expect(JSON.stringify(withFalse)).toBe(JSON.stringify(without))
+    expect(withFalse.length).toBeGreaterThan(0)
+  })
+
   it('is deterministic — same inputs produce byte-identical output twice', () => {
     const input = {
       inventory: inv(),
@@ -265,6 +288,50 @@ describe('proposeAdaptations (RES-M2)', () => {
         kbSlots: [{ name: 'kb', useMcpServer: 'chroma' }],
       })
       expect(byKind(props, 'wire_mcp_server')).toHaveLength(1)
+    })
+
+    // The per-agent key probe: the inventory only knows provider-LEVEL env/vault
+    // keys, so an openai-compatible agent's key (per-agent by design) is
+    // invisible to it. With the probe wired, a healthy compat agent with a
+    // stored key must draw ZERO proposals — this is the RES-M2 blind-spot fix.
+    it('probe says the agent resolves a key → no proposals, and only inventory-keyless agents are probed', async () => {
+      const probed: string[] = []
+      const svc = createResourceAdaptationService({
+        async inventory() { return inv() },
+        async resolvesKey(agentId) {
+          probed.push(agentId)
+          return true // e.g. a per-agent stored DeepSeek key
+        },
+      })
+      const props = await svc.propose({
+        agents: [
+          { id: 'compat', provider: 'openai-compatible' }, // inventory-keyless → probed
+          { id: 'writer', provider: 'anthropic' }, // provider key in inventory → not probed
+          { id: 'demo', provider: 'mock' }, // mock never needs a key → not probed
+        ],
+      })
+      expect(props).toEqual([])
+      expect(probed).toEqual(['compat'])
+    })
+
+    it('probe says NO key → proposals still emitted (true keyless agents keep their help)', async () => {
+      const svc = createResourceAdaptationService({
+        async inventory() { return inv() },
+        async resolvesKey() { return false },
+      })
+      const props = await svc.propose({ agents: [{ id: 'mentor', provider: 'deepseek' }] })
+      expect(byKind(props, 'use_local_endpoint')).toHaveLength(1)
+      expect(byKind(props, 'switch_provider')).toHaveLength(1)
+      expect(byKind(props, 'set_env_key')).toHaveLength(1)
+    })
+
+    it('probe fault fails OPEN (reads as keyed) — a rewrite proposal never rests on bad data', async () => {
+      const svc = createResourceAdaptationService({
+        async inventory() { return inv() },
+        async resolvesKey() { throw new Error('vault locked') },
+      })
+      const props = await svc.propose({ agents: [{ id: 'mentor', provider: 'deepseek' }] })
+      expect(props).toEqual([])
     })
   })
 })

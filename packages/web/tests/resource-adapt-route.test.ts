@@ -132,6 +132,11 @@ describe('RES-M3 adapt route: applicable proposals mutate the agent row', () => 
       detail: 'd',
     })
     expect(res.status).toBe(200)
+    // No stored key existed → the harmless 'local' placeholder is written (it
+    // satisfies the compat per-agent-key rule; a local server ignores it) and
+    // the response carries no keptStoredApiKey marker.
+    expect((await res.json()).applied).toEqual({ kind: 'use_local_endpoint', agentId: 'writer' })
+    expect(await b.space.getAgentApiKey('writer')).toBe('local')
     const m = await managedOf(b, 'writer')
     expect(m?.provider).toBe('openai-compatible')
     expect(m?.baseURL).toBe('http://127.0.0.1:11434/v1')
@@ -139,6 +144,43 @@ describe('RES-M3 adapt route: applicable proposals mutate the agent row', () => 
     // The existing model is preserved (operator retargets to a local model as a
     // follow-up edit — the adapt only rewires the endpoint).
     expect(m?.model).toBe('claude-sonnet-5')
+  })
+
+  it('use_local_endpoint NEVER clobbers an existing stored per-agent key with the placeholder', async () => {
+    // A healthy compat agent whose real key lives in per-agent storage (the only
+    // place a compat key can live). Applying use_local_endpoint must rewire the
+    // endpoint but leave the stored key byte-identical — overwriting it with
+    // 'local' would be unrecoverable — and report that it was kept.
+    await createAgent(b, {
+      id: 'mentor',
+      provider: 'openai-compatible',
+      baseURL: 'https://api.deepseek.example/v1',
+      system: 'you mentor',
+      capabilities: ['chat'],
+    })
+    await b.space.setAgentApiKey('mentor', 'sk-real-deepseek-key')
+    const res = await adapt(b, {
+      kind: 'use_local_endpoint',
+      id: 'adapt:use_local_endpoint:mentor:Ollama',
+      agentId: 'mentor',
+      fromProvider: 'openai-compatible',
+      endpointLabel: 'Ollama',
+      suggestedBaseURL: 'http://127.0.0.1:11434/v1',
+      applicable: true,
+      title: 't',
+      detail: 'd',
+    })
+    expect(res.status).toBe(200)
+    expect((await res.json()).applied).toEqual({
+      kind: 'use_local_endpoint',
+      agentId: 'mentor',
+      keptStoredApiKey: true,
+    })
+    // The rewire landed…
+    const m = await managedOf(b, 'mentor')
+    expect(m?.baseURL).toBe('http://127.0.0.1:11434/v1')
+    // …and the real key survived — NOT overwritten by 'local'.
+    expect(await b.space.getAgentApiKey('mentor')).toBe('sk-real-deepseek-key')
   })
 })
 
