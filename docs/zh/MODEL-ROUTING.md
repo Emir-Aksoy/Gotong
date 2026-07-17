@@ -66,9 +66,11 @@
 
 ### 3.1 为什么是「确定性」而非「内容感知智能路由」
 
-市场上的「智能路由」(Hermes 的 Pareto Code Router / 按任务类型分 8 个模型槽)本质要
-先**判断这条消息是什么类型**才能选模型 —— 那需要一次 LLM 分类,**落在热路径 = 违反
-边界 1**。所以 Gotong 版做**确定性路由**:
+市场上的「内容感知智能路由」(OpenRouter 的 Pareto Code Router;2026-07-17 更正——
+早先误记为「Hermes 的 Pareto Router / 8 个槽」,实际 Hermes 只把 `extra_body` 原样转发给
+OpenRouter,它自家机制是 ~13 个**按任务类型静态分配**的 Auxiliary Models 槽,那不需要
+现场分类)本质要先**判断这条消息是什么类型**才能选模型 —— 那需要一次 LLM 分类,
+**落在热路径 = 违反边界 1**。所以 Gotong 版做**确定性路由**:
 
 > 有序候选链 + 熔断器 + 健康感知跳过(熔断开着的候选直接绕过)。「智能」体现在**策略**
 > (链序、熔断态、探活),不体现在「用大模型现场决定」。
@@ -199,7 +201,7 @@ admin 本就能配 MCP `${NAME}` 占位,不是新威胁面。
 
 | 系统 | 做法 | 我们取 / 舍 |
 |---|---|---|
-| **Hermes**(Nous) | 主推理模型 + 8 个按任务类型分的模型槽(各独立 provider/model/凭证);Pareto Router 自动选达标最便宜;降级链 `主→任务专属 fallback→备用 provider→内建发现`;限流/过载/认证失败中途换 backup 不丢会话;本地打头、失败升级到云端续跑 | **取**:有序降级链、失败换 backup、本地→云端升级(靠候选排序,确定性)。**舍**:按任务类型的槽 + Pareto 自动选(需内容分类 = 热路径 LLM,违反边界 1) |
+| **Hermes**(Nous) | 主推理模型 + **~13 个 Auxiliary Models 槽**(compression/title/vision/approval…,各独立 provider/model/凭证,**按任务类型静态分配**;2026-07-17 更正:早先误记为「8 槽 + Hermes 的 Pareto Router」——Pareto Code Router 实为 **OpenRouter** 的内容感知路由,Hermes 仅把 `extra_body` 透传给它);三层降级 credential pools → `fallback_providers` → per-aux `fallback_chain`,限流/过载/认证失败中途换 backup 不丢会话 | **取**:有序降级链、失败换 backup、静态任务槽(NA-M5 `maintenanceModel` 即同型物)。**舍**:内容感知自动选路(OpenRouter Pareto 那类,需内容分类 = 热路径 LLM,违反边界 1)。注:Hermes 的静态槽本身**不**撞边界 1,当初否掉的对象搞错了 |
 | **OpenClaw** | 内建**熔断器**:`failure_window` 内失败达 `failure_threshold` → 全转 fallback 持续 `recovery_timeout`;健康探针 probe `healthUrl`(或 `baseUrl + /models`);每 agent 显式 fallback 链;`models status --probe --all` 逐模型真实探活**仍是未完成的 open issue** | **取**:熔断三态 + 阈值/窗口/cooldown、每 agent 显式候选链。**leapfrog**:`models status --probe --all` 那条逐模型真实探活 = **MR-M5 手动测试路由**(它走真生成路径,证得了 `GET /models` 证不了的限流/配额/模型不存在),我们做完了它没做完的 |
 | **2026 通行** | 三态熔断 Closed/Open/Half-Open;~60s 监测窗;多层降级 `主→更便宜→语义缓存→503`;软失败(格式错/幻觉/schema 不符)也纳入 fallback 判定 | **取**:三态熔断、监测窗。**暂舍**:语义缓存层、软失败内容校验(超出 provider-neutral 降级的范围,按需再议) |
 

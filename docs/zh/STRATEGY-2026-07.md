@@ -24,11 +24,16 @@
 | **企业 agent 平台** | Microsoft（Copilot Studio + Agent 365 + Entra Agent ID GA）、Google Gemini Enterprise（Agentspace 已并入）、AWS AgentCore（Policy/Harness 2026 GA）、Salesforce Agentforce、ServiceNow、OpenAI Frontier（2026-02 新入局，HP/Intuit/Oracle 首批） | 采用真实：Agentforce+Data 360 ARR 近 $1.4B（+114%）、29,000+ 客户；Entra Agent ID 2026-04 GA | 全是**租户墙内花园**——SaaS、单组织；人类=管理员/审批 UI，不是协议内对等参与者 |
 | **开源开发框架** | LangGraph/LangChain 1.0、CrewAI（47.8k★）、MS Agent Framework 1.0 GA（AutoGen+SK 合并）、AgentScope 2.0、OpenAI Agents SDK、n8n（SAP 战投后 $5.2B 估值）、Dify（148k★、$30M Pre-A） | HITL 审批已成框架标配（EU AI Act 2026-08-02 第 14 条强制人类监督在推动） | 全是**库不是网络**——人是 interrupt 回调；无常驻多人多 agent 协作底座 |
 | **「agent 互联网」** | A2A（LF，150+ 组织）、AGNTCY（65+ 公司）、MIT NANDA（研究）、Coral、Fetch.ai/Olas/Virtuals（币圈）、Moltbook（纯 agent 社交，被 Meta 收购，注册数严重掺水） | 标准层真实收敛；网络层要么研究、要么代币经济（人=持币者非协作者） | 做的是「电话簿和电话线」，**不是节点本身** |
-| **个人主权 hub** | OpenClaw（**382k★**，GitHub 史上最快登顶；基金会接管但治理文件至 4 月中未公布）、Hermes Agent（Nous，~200k★、9 万技能） | 品类爆发，「自托管管家」完成用户教育 | **明文单用户设计**——多用户 RBAC 是开放 issue（openclaw#8081）；无联邦、无成员治理 |
+| **个人主权 hub** | OpenClaw（**383k★**〔07-17 实查 383,223〕，GitHub 史上最快登顶；基金会接管但治理文件至 4 月中未公布）、Hermes Agent（Nous，**216k★**〔07-17 实查 216,213；旧记「~200k★、9 万技能」中技能数未获官方证实〕） | 品类爆发，「自托管管家」完成用户教育 | **明文单用户设计**——多用户 RBAC 诉求 openclaw#8081（28👍）已于 **2026-05-01 关闭未实现**（官方 security doc 维持「一人一 gateway」单用户信任模型）；无联邦、无成员治理 |
 
 联邦胚胎仅两个：**MindRoom**（agent 原生活在 Matrix 联邦房间、人机混居——理念最接近本项目，
 但 1 个开发者、约 100 试用者、无审批闸无能力策展、未用 MCP/A2A）；**crosscast**（NATS mesh
 跨组织 agent 通信，0★ 概念验证）。
+
+> **2026-07-17 增补**：Manus（通用个人 agent 商业头部）已于 2025-12-29 被 **Meta 收购**
+> （成交 >$20 亿，CNBC；收购前 8 个月年化收入破 $1 亿）——商业侧头部整合进大厂，
+> 开源自托管侧「量级上仅 OpenClaw/Hermes 两家」（第三名 Khoj 35.8k★ 差一个数量级）
+> 的格局进一步固化。
 
 ### 1.2 中国生态：同一个空位，另一套结构
 
@@ -74,8 +79,9 @@
    的桥才是）。
 4. **显式排程赢了黑箱推送**——**ChatGPT Pulse（主动推送晨报）2026 年中被砍**，迁到 Scheduled
    Tasks。本项目「零 LLM 定时工作流 + 成员闸派发」路线被 OpenAI 亲手背书。
-5. **模型降级链**是开源侧标配（OpenClaw fallbacks + 冷却探针、Hermes fallback_providers +
-   Pareto Router）——MR track（2026-07-09 收口）与之对齐且熔断 + 手动逐候选探针更完整；
+5. **模型降级链**是开源侧标配（OpenClaw fallbacks + 冷却探针、Hermes credential pools +
+   fallback_providers 三层降级〔07-17 更正：Pareto Router 属 OpenRouter，非 Hermes〕）——
+   MR track（2026-07-09 收口）与之对齐且熔断 + 手动逐候选探针更完整；
    Hermes 硬拒 <64K 上下文模型，本项目反向面向弱模型稳定性设计（任务笔记本 + 复述）。
 
 ### 2.2 逐项核实后仍然稀缺的差异
@@ -83,7 +89,7 @@
 | 差异点 | 市场现状【证实】 | 判定 |
 |---|---|---|
 | **服务端权威审批闸 + 可落盘恢复的停靠任务**（park→/me→批准续跑，重启幸存、可换人批） | 云厂=会话内弹窗（Claude 跨端送达是最近似形态，仍是活会话提示）；OpenClaw=per-exec 拦截 + main 会话默认全权 + 官方 YOLO 模式 | **稀缺，成立** |
-| **多成员治理**（成员身份/角色/各自审批收件箱/RBAC） | OpenClaw 官方立场「为恰好一个用户设计」（RBAC=开放 issue #8081）；Hermes 单操作者；Alexa+ 只有消费级声纹档案 | **稀缺，成立** |
+| **多成员治理**（成员身份/角色/各自审批收件箱/RBAC） | OpenClaw 官方立场「为恰好一个用户设计」（RBAC 诉求 #8081 已于 2026-05-01 **关闭未实现**——比「开放 issue」更强的稀缺信号）；Hermes 单操作者；Alexa+ 只有消费级声纹档案 | **稀缺，成立** |
 | **确定性零 LLM 主动调度** | OpenClaw heartbeat **每跳都是 LLM 轮**（文档自承 token 成本）；唯 Home Assistant 本地意图引擎同思想（仅限家居命令） | **稀缺，成立** |
 | **管家出网过治理闸**（ask_peer 跨 hub + 成员/owner 双闸） | 无人做——单人管家没有「代表我跟别的组织打交道」的概念 | **独有** |
 | file-first 状态 | ⚠️ **记忆文件已不再独有**（OpenClaw 就是纯 Markdown 无隐藏状态） | **诚实收窄**：差异点=「**整 hub 可搬**」（含多成员记录/审计/凭证 vault），非记忆文件本身 |
