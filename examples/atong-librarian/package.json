@@ -1,0 +1,20 @@
+{
+  "name": "@gotong/example-atong-librarian",
+  "version": "0.0.0",
+  "type": "module",
+  "private": true,
+  "description": "LIB capstone (阿同图书馆员 track) — 知识自治全链路,一个确定性脚本跑完:真 knowledgeLibrarianReviewer 把进货区(真 MemoryFileHandle)的主题事实上架进 knowledge/ 文件(bitemporal 关闭+promotedTo 出处,条目还在盘上=可逆) → 真树长到 100+ 文件而 INDEX 保持策展层级 → 硬断言:真 buildButlerKnowledgeIndexCard 渲染的常驻索引卡在树长 25× 后逐字节不变(M1 尺 estimateTokens 量的),胖索引病态也被 ≤500tk 顶封住(响亮 N/M 标记) → 归档不真删(archive/ 前缀照读,INDEX 不可归档) → 真 PersonalButlerAgent 从知识文件里读到「待办:发预算表」照样 park 等审批(知识≠授权)。No network, no API key, no LLM.",
+  "scripts": {
+    "start": "tsx src/index.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@gotong/core": "workspace:*",
+    "@gotong/host": "workspace:*",
+    "@gotong/llm": "workspace:*",
+    "@gotong/personal-butler": "workspace:*",
+    "@gotong/personal-memory": "workspace:*",
+    "@gotong/service-memory-file": "workspace:*",
+    "@gotong/services-sdk": "workspace:*"
+  }
+}

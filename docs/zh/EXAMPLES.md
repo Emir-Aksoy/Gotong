@@ -50,6 +50,7 @@ pnpm demo                          # = hello-collab（官方第一步，见 QUIC
 | [`model-routing`](../../examples/model-routing) | MR capstone：主 provider 首-token-前挂 → `RoutingProvider` **顺序** failover 到备用，连续失败熔断快速跳过，健康投影上面板黄条，主自愈探针弹回；真 provider 只 stub 两个 | 零（无网络无 key） |
 | [`model-ensemble`](../../examples/model-ensemble) | LSA capstone：同一问题 **并行** fan-out 到 N 个模型（routing 只调一个）→ 综合器收全 N 份草稿折成一份 → 成本诚实 ×N → 挂一个照跑 → 要调工具就透传；真 `EnsembleProvider` 只 stub 几个成员 | 零（无网络无 key） |
 | [`atong-recovery`](../../examples/atong-recovery) | AFR capstone：三档备份（身份/身份+关系/搬家）→ 新目录真恢复 → kid 逐字节复算不变、peers 投影还在（令牌不随行）、搬家档用恢复出的主钥真开金库；真 `backup()`/`restore()`/真金库加密 | 零（无网络无 key） |
+| [`atong-librarian`](../../examples/atong-librarian) | LIB capstone：知识自治四幕——真图书馆员把进货区主题事实上架进 knowledge/（文件先落盘才双时态下架，可逆带出处，第二 tick 零模型调用）→ 树长 25× 常驻索引卡**逐字节不变**（M1 尺量的，胖索引被 ≤500tk 顶封死）→ 归档不真删 → 真管家靠索引卡导航读出待办，对外发送照样 park（知识≠授权） | 零（无网络无 key） |
 
 ## ③ 接真东西（需 key / 本地 MCP server / 跨进程）
 

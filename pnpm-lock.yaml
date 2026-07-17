@@ -73,6 +73,30 @@ importers:
         specifier: workspace:*
         version: link:../../packages/llm
 
+  examples/atong-librarian:
+    dependencies:
+      '@gotong/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      '@gotong/host':
+        specifier: workspace:*
+        version: link:../../packages/host
+      '@gotong/llm':
+        specifier: workspace:*
+        version: link:../../packages/llm
+      '@gotong/personal-butler':
+        specifier: workspace:*
+        version: link:../../packages/personal-butler
+      '@gotong/personal-memory':
+        specifier: workspace:*
+        version: link:../../packages/personal-memory
+      '@gotong/service-memory-file':
+        specifier: workspace:*
+        version: link:../../packages/service-memory-file
+      '@gotong/services-sdk':
+        specifier: workspace:*
+        version: link:../../packages/services-sdk
+
   examples/atong-recovery:
     dependencies:
       '@gotong/cli':

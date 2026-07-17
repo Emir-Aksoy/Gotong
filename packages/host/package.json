@@ -41,6 +41,14 @@
     "./routing-health": {
       "types": "./dist/routing-health.d.ts",
       "import": "./dist/routing-health.js"
+    },
+    "./butler-knowledge-index": {
+      "types": "./dist/butler-knowledge-index.d.ts",
+      "import": "./dist/butler-knowledge-index.js"
+    },
+    "./butler-toolface-report": {
+      "types": "./dist/butler-toolface-report.d.ts",
+      "import": "./dist/butler-toolface-report.js"
     }
   },
   "files": [
