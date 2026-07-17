@@ -32,7 +32,9 @@ import {
   PersonalButlerAgent,
   buildButlerClockProbe,
   composeContextProbes,
+  createKnowledgeLibraryToolset,
   createTaskNotebookToolset,
+  openKnowledgeLibrary,
   openTaskNotebook,
 } from '@gotong/personal-butler'
 import { ownerDir } from '@gotong/service-memory-file'
@@ -277,6 +279,17 @@ export function buildButlerFactory(deps: ButlerFactoryDeps): ButlerFactory {
           logger: log,
         })
         const taskNotebookToolset = createTaskNotebookToolset(taskNotebook)
+        // LIB-M2 — the member's knowledge library (上架区): a `knowledge/` tree
+        // under the SAME ownerDir. Benign by the notebook's argument (organizing
+        // your own files touches nobody else); actions READ from a knowledge
+        // file still hit their own governed gates. Low-frequency filing → the
+        // AFR directory tier below, not the per-turn face.
+        const knowledgeToolset = createKnowledgeLibraryToolset(
+          openKnowledgeLibrary({
+            dir: join(ownerDir(memoryRoot, { kind: 'user', id: userId }), 'knowledge'),
+            logger: log,
+          }),
+        )
         // A2 — per-user 上次见面 timestamp for the 时段问候/间隔 card. Lives in a
         // `presence/` sibling of the memory tree (NOT under it) so the opt-in
         // memory git snapshot (MU-M5) isn't churned by a per-turn write.
@@ -525,6 +538,7 @@ export function buildButlerFactory(deps: ButlerFactoryDeps): ButlerFactory {
           ...(consolidateToolset ? [consolidateToolset] : []),
           remindersToolset,
           taskNotebookToolset,
+          knowledgeToolset,
           languageToolset,
           capabilitiesToolset,
           llmCatalogToolset,
@@ -542,6 +556,7 @@ export function buildButlerFactory(deps: ButlerFactoryDeps): ButlerFactory {
           ...(schedulesToolset ? [schedulesToolset] : []),
           ...(membersToolset ? [membersToolset] : []),
           selfStatusToolset,
+          knowledgeToolset,
           ...(consolidateToolset ? [consolidateToolset] : []),
           languageToolset,
           llmCatalogToolset,

@@ -66,3 +66,17 @@ export {
   type ButlerContextProbe,
   type TaskNotebookLogger,
 } from './task-notebook.js'
+
+export {
+  openKnowledgeLibrary,
+  createKnowledgeLibraryToolset,
+  validateKnowledgePath,
+  KNOWLEDGE_LIBRARY_LIMITS,
+  KNOWLEDGE_ARCHIVE_DIR,
+  KNOWLEDGE_INDEX_FILE,
+  type KnowledgeLibrary,
+  type KnowledgeFileInfo,
+  type KnowledgeListing,
+  type OpenKnowledgeLibraryOptions,
+  type KnowledgeLibraryLimits,
+} from './knowledge-library.js'

@@ -16,6 +16,12 @@ export type ButlerErrorCode =
   | 'task_note_invalid'
   /** Task notebook (TN-M1): an explicit cap refused the op (no silent caps). */
   | 'task_note_limit'
+  /** Knowledge library (LIB-M2): bad path / bad content / wrong area. */
+  | 'knowledge_invalid'
+  /** Knowledge library (LIB-M2): the referenced file doesn't exist. */
+  | 'knowledge_not_found'
+  /** Knowledge library (LIB-M2): an explicit cap refused the op (no silent caps). */
+  | 'knowledge_limit'
 
 export class ButlerError extends Error {
   readonly code: ButlerErrorCode

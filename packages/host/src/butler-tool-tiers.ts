@@ -85,6 +85,13 @@ export const BUTLER_DIRECTORY_BENIGN = [
   'list_schedules',
   // SEN-M5 成员名单 — 低频(「hub 里有谁」「审批指派谁」);岔口 A 全员可见
   'list_members',
+  // LIB-M2 知识库 4 件 — 整理自著知识文件是偶发动作非每轮动词;四件互相
+  // 点名 + 点名 INDEX.md 全在目录内部(list_my_llms 对同款,模式连续)。
+  // M3 的索引注入卡按「指路不指空」只说人话,不点这些名字。
+  'list_knowledge_files',
+  'read_knowledge_file',
+  'write_knowledge_file',
+  'archive_knowledge_file',
 ] as const
 
 export type ButlerFirstClassBenign = (typeof BUTLER_FIRST_CLASS_BENIGN)[number]

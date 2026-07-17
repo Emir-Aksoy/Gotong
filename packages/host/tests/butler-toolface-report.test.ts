@@ -23,7 +23,12 @@ import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
 import { MemoryToolset } from '@gotong/personal-memory'
-import { createTaskNotebookToolset, openTaskNotebook } from '@gotong/personal-butler'
+import {
+  createKnowledgeLibraryToolset,
+  createTaskNotebookToolset,
+  openKnowledgeLibrary,
+  openTaskNotebook,
+} from '@gotong/personal-butler'
 
 import {
   estimateTokens,
@@ -88,6 +93,7 @@ const MEASURED_BUILDERS: Record<string, string> = {
   consolidate: 'buildButlerConsolidateToolset',
   reminders: 'buildButlerRemindersToolset',
   'task-notebook': 'createTaskNotebookToolset',
+  knowledge: 'createKnowledgeLibraryToolset',
   language: 'buildButlerLanguageToolset',
   capabilities: 'buildButlerCapabilitiesToolset',
   'llm-catalog': 'buildButlerLlmCatalogToolset',
@@ -181,6 +187,11 @@ function buildFullFace(): ToolFaceEntry[] {
       toolset: buildButlerRemindersToolset({ userId: U, hub: stub(), logger: stub() }),
     },
     { module: 'task-notebook', kind: 'benign', toolset: createTaskNotebookToolset(notebook) },
+    {
+      module: 'knowledge',
+      kind: 'benign',
+      toolset: createKnowledgeLibraryToolset(openKnowledgeLibrary({ dir: join(tmp, 'knowledge') })),
+    },
     {
       module: 'language',
       kind: 'benign',
@@ -336,9 +347,11 @@ describe('AFR-M1 baseline — the real butler tool face', () => {
     )
     // Callsites only (the lookahead skips import lists, which have no paren).
     const found = new Set(
-      [...src.matchAll(/\b(buildButler[A-Za-z]+Toolsets?|createTaskNotebookToolset)\b(?=\()/g)].map(
-        (m) => m[1],
-      ),
+      [
+        ...src.matchAll(
+          /\b(buildButler[A-Za-z]+Toolsets?|createTaskNotebookToolset|createKnowledgeLibraryToolset)\b(?=\()/g,
+        ),
+      ].map((m) => m[1]),
     )
     const measured = new Set(Object.values(MEASURED_BUILDERS))
     for (const name of found) {
