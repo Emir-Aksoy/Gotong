@@ -169,7 +169,11 @@ export function proposeAdaptations(input: ProposeAdaptationsInput): AdaptationPr
     // A per-agent key the provider-level inventory can't see (stored key /
     // apiKeyEnv / owner vault) — the caller probed it; keyed → no proposal.
     if (agent.hasResolvableKey === true) continue
-    if (hasKey(agent.provider)) continue
+    // An explicit probe verdict OVERRIDES the provider-level view: MR-M6
+    // apiKeyEnv is exclusive, so an agent bound to a missing env var is
+    // keyless even when its provider has a workspace key. Only an unprobed
+    // agent falls back to the inventory row.
+    if (agent.hasResolvableKey === undefined && hasKey(agent.provider)) continue
 
     // Option A — point it at a running local model server (one per reachable one).
     for (const ep of reachable) {
@@ -284,10 +288,12 @@ export function createResourceAdaptationService(
       if (probe) {
         enriched = await Promise.all(
           agents.map(async (a) => {
-            // Probe only agents the inventory reads as keyless — the engine
-            // skips everything else anyway, so the probe couldn't change it.
+            // Probe every non-mock agent: the per-agent chain (apiKeyEnv is
+            // EXCLUSIVE per MR-M6) can be keyless even when the provider-level
+            // inventory shows a workspace key, so an inventory hit must not
+            // suppress the probe. Probe failure stays fail-open (treated as
+            // keyed) — a rewrite proposal is never built on broken data.
             if (a.provider === 'mock' || a.hasResolvableKey !== undefined) return a
-            if (providerHasInventoryKey(inventory, a.provider)) return a
             const hasResolvableKey = await probe(a.id, a.provider).catch(() => true)
             return { ...a, hasResolvableKey }
           }),

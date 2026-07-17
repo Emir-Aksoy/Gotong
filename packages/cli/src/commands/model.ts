@@ -53,18 +53,41 @@ export interface ModelFlags {
   url: string
   token: string
   agent?: string
+  insecure?: boolean
 }
 
 const DEFAULT_URL = 'http://127.0.0.1:3000'
+
+/**
+ * True when the URL is plaintext http to a non-loopback host — the admin token
+ * AND the pasted API key would cross the network unencrypted. (An unparseable
+ * URL returns false; fetch fails loudly on it later anyway.)
+ */
+function isPlaintextNonLoopback(raw: string): boolean {
+  let u: URL
+  try {
+    u = new URL(raw)
+  } catch {
+    return false
+  }
+  if (u.protocol !== 'http:') return false
+  const h = u.hostname
+  return !(h === 'localhost' || h === '[::1]' || h === '::1' || h.startsWith('127.'))
+}
 
 /** Parse argv. Returns flags, `'help'`, or a usage-error string (exit 2). */
 export function parseModelArgs(argv: readonly string[]): ModelFlags | string | 'help' {
   let url = DEFAULT_URL
   let token: string | undefined
   let agent: string | undefined
+  let insecure = false
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i]!
     if (a === '--help' || a === '-h') return 'help'
+    if (a === '--insecure') {
+      insecure = true
+      continue
+    }
     if (a === '--url' || a === '--token' || a === '--agent') {
       const v = argv[++i]
       if (v === undefined || v.startsWith('--')) return `${a} 需要一个值`
@@ -73,10 +96,16 @@ export function parseModelArgs(argv: readonly string[]): ModelFlags | string | '
       else agent = v
       continue
     }
-    return `不认识的旗标:${a}(支持 --url --token --agent)`
+    return `不认识的旗标:${a}(支持 --url --token --agent --insecure)`
   }
   if (!token) return '缺 --token <admin token>(与 gotong provision 同一种令牌)'
-  return { url: url.replace(/\/+$/, ''), token, ...(agent ? { agent } : {}) }
+  const cleaned = url.replace(/\/+$/, '')
+  // Credential discipline: this command sends the admin token AND a pasted API
+  // key in headers — plaintext http off-box would expose both on the wire.
+  if (!insecure && isPlaintextNonLoopback(cleaned)) {
+    return `--url 是明文 http 且不在本机回环(${cleaned}):admin 令牌与 API key 会明文走网。改用 https;确是自己内网、自担风险则加 --insecure`
+  }
+  return { url: cleaned, token, ...(agent ? { agent } : {}), ...(insecure ? { insecure: true } : {}) }
 }
 
 // ── injectable IO ───────────────────────────────────────────────────────────
@@ -367,6 +396,15 @@ export async function runModelSelector(flags: ModelFlags, deps: ModelDeps): Prom
     return 1
   }
   const exported = (expRes.json.agent ?? {}) as Record<string, unknown>
+  // The PUT contract rebuilds the spec as kind:'llm' unconditionally — editing
+  // any other kind through this command would silently DEMOTE it. Refuse.
+  if (typeof exported.kind === 'string' && exported.kind !== 'llm') {
+    io.write(
+      `✗ '${agentId}' 是 kind=${exported.kind} 的特殊 agent,编辑接口会把它降级成普通 llm。\n` +
+        '  这类 agent 请走 导出 → 手改 manifest → 重新导入。\n',
+    )
+    return 1
+  }
   if (hasInlineMcpServers(exported)) {
     io.write(
       `✗ '${agentId}' 带内联 mcpServers 配置,而编辑接口无法原样带回它(会静默丢失)。\n` +
@@ -444,7 +482,7 @@ export async function runModelSelector(flags: ModelFlags, deps: ModelDeps): Prom
   if (pick !== 0) {
     for (;;) {
       const k = await io.readSecret(
-        `API key(输入不回显${sameEndpointAsCurrent ? ',回车=沿用已存 key' : provider === 'openai-compatible' ? '' : ',回车=用 workspace 默认 key'}): `,
+        `API key(输入不回显${sameEndpointAsCurrent ? ',回车=沿用已存 key' : provider === 'openai-compatible' ? '' : ',回车=不带新 key'}): `,
       )
       if (k === null) throw new Cancelled()
       const key = k.trim()
@@ -453,8 +491,40 @@ export async function runModelSelector(flags: ModelFlags, deps: ModelDeps): Prom
         break
       }
       if (sameEndpointAsCurrent) break // keep stored key
-      if (provider !== 'openai-compatible') break // native may ride the workspace default; the hub validates
+      if (provider !== 'openai-compatible') {
+        // Endpoint changed + no new key: the pool PREFERS a stored per-agent
+        // key over the workspace default, so if this agent stored the OLD
+        // vendor's key it will be sent to the new provider and 401. Only
+        // proceed on an explicit yes — never imply "workspace key will be
+        // used" when a stored key would shadow it.
+        io.write(
+          '⚠ 没输新 key:若该 agent 之前存过 per-agent key(可能是旧厂商的),hub 会优先用它打新 provider(会 401);没存过才落到 workspace 默认 key。\n',
+        )
+        const go = await readLine(io, '确定不带新 key 继续?(y=继续 / 其他=回去贴 key): ')
+        if (go.toLowerCase() === 'y') break
+        continue
+      }
       io.write('openai-compatible 需要 per-agent key(workspace 默认 key 不适用),请粘贴\n')
+    }
+  }
+
+  // MR-M6 — a fallback candidate WITHOUT its own apiKeyEnv resolves through the
+  // SAME single per-agent key slot a new primary key writes to: saving would
+  // hand the new vendor's key to that candidate and destroy the key it relied
+  // on (unrecoverable). Warn before spending the probe, act only on a yes.
+  if (apiKey !== undefined) {
+    const fallbacks = Array.isArray(exported.fallbacks)
+      ? (exported.fallbacks as Array<Record<string, unknown>>)
+      : []
+    const sharedSlot = fallbacks.filter((f) => typeof f?.apiKeyEnv !== 'string' || !f.apiKeyEnv).length
+    if (sharedSlot > 0) {
+      io.write(
+        `⚠ 备用链里有 ${sharedSlot} 条候选没配自己的 apiKeyEnv,它们与主 key 共用同一个存储槽:\n` +
+          '  写入新 key 会覆盖那个槽 — 候选若靠的是另一家的 key,会被顶掉且不可恢复。\n' +
+          '  想彻底分离两把 key:先在面板给候选配 apiKeyEnv(env 凭证)再来。\n',
+      )
+      const go = await readLine(io, '仍要写入新 key?(y=继续 / 其他=放弃): ')
+      if (go.toLowerCase() !== 'y') throw new Cancelled()
     }
   }
 
@@ -555,7 +625,8 @@ export async function runModelSelector(flags: ModelFlags, deps: ModelDeps): Prom
   if (droppedApiKeyEnv) {
     io.write(
       `  注意:已解除 apiKeyEnv=${droppedApiKeyEnv} 绑定(排他语义下留着它会压住这次的改动);` +
-        '新 key 已入金库。还想走 env 凭证就在面板重新设。\n',
+        `${apiKey !== undefined ? '新 key 已入金库' : '这次没写新 key,hub 将按「已存 key → workspace 默认」顺序解析'}。` +
+        '还想走 env 凭证就在面板重新设。\n',
     )
   }
   if (fallbackCount > 0) {
@@ -571,9 +642,10 @@ const HELP = `gotong model [--url <hub>] [--token <admin>] [--agent <id>]
 官方 + 自定义 OpenAI 兼容端点 → 贴 key(不回显)→ 现场拉模型列表 → hub 真探针
 → 保存(既有备用链等配置原样保留)。
 
-  --url    hub 地址(默认 ${DEFAULT_URL})
-  --token  admin 令牌(必填,与 gotong provision 同款)
-  --agent  直接指定 agent id(不指定则列出来选)
+  --url       hub 地址(默认 ${DEFAULT_URL};非本机回环的明文 http 会被拒 — 令牌与 key 不走明文)
+  --token     admin 令牌(必填,与 gotong provision 同款)
+  --agent     直接指定 agent id(不指定则列出来选)
+  --insecure  放行非回环的明文 http(仅限自己内网,自担风险)
 
 注册账号、拿 key 永远是你自己来 — 本命令只引导与校验,不代办、不上网捡 key。
 `

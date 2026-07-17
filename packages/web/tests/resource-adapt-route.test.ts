@@ -150,11 +150,14 @@ describe('RES-M3 adapt route: applicable proposals mutate the agent row', () => 
     expect(m?.model).toBe('claude-sonnet-5')
   })
 
-  it('use_local_endpoint NEVER clobbers an existing stored per-agent key with the placeholder', async () => {
+  it('a stored per-agent key REFUSES the apply — stale keyless premise, key and spec both untouched', async () => {
     // A healthy compat agent whose real key lives in per-agent storage (the only
-    // place a compat key can live). Applying use_local_endpoint must rewire the
-    // endpoint but leave the stored key byte-identical — overwriting it with
-    // 'local' would be unrecoverable — and report that it was kept.
+    // place a compat key can live). Every enactable proposal rests on "this
+    // agent is keyless" (RES-M2 + the resolvesKey probe only propose for those),
+    // so a stored key existing by apply time means the card is stale: the route
+    // must refuse (NET-M2 re-resolve posture) rather than enact against it —
+    // enacting would either clobber the key with 'local' or hand it to the new
+    // endpoint.
     await createAgent(b, {
       id: 'mentor',
       provider: 'openai-compatible',
@@ -174,17 +177,46 @@ describe('RES-M3 adapt route: applicable proposals mutate the agent row', () => 
       title: 't',
       detail: 'd',
     })
-    expect(res.status).toBe(200)
-    expect((await res.json()).applied).toEqual({
-      kind: 'use_local_endpoint',
-      agentId: 'mentor',
-      keptStoredApiKey: true,
-    })
-    // The rewire landed…
+    expect(res.status).toBe(409)
+    expect((await res.json()).code).toBe('key_state_changed')
+    // Nothing was enacted: endpoint unchanged…
     const m = await managedOf(b, 'mentor')
-    expect(m?.baseURL).toBe('http://127.0.0.1:11434/v1')
-    // …and the real key survived — NOT overwritten by 'local'.
+    expect(m?.provider).toBe('openai-compatible')
+    expect(m?.baseURL).toBe('https://api.deepseek.example/v1')
+    // …and the real key survived byte-identical.
     expect(await b.space.getAgentApiKey('mentor')).toBe('sk-real-deepseek-key')
+  })
+
+  it('inline mcpServers refuse one-click adapt — the PUT contract cannot echo them, so applying would silently wipe the wiring', async () => {
+    await createAgent(b, {
+      id: 'wired',
+      provider: 'anthropic',
+      system: 'you use tools',
+      capabilities: ['chat'],
+    })
+    // Inline `mcpServers` only arrives via manifest import (the HTTP POST/PUT
+    // contract doesn't carry the field) — seed it directly on the real Space.
+    const rec = (await b.space.agents()).find((a) => a.id === 'wired')!
+    await b.space.upsertAgent({
+      id: 'wired',
+      allowedCapabilities: rec.allowedCapabilities,
+      managed: { ...rec.managed!, mcpServers: [{ name: 'files', command: 'mcp-files' }] },
+    })
+    const res = await adapt(b, {
+      kind: 'switch_provider',
+      id: 'adapt:switch_provider:wired:openai',
+      agentId: 'wired',
+      fromProvider: 'anthropic',
+      toProvider: 'openai',
+      applicable: true,
+      title: 't',
+      detail: 'd',
+    })
+    expect(res.status).toBe(400)
+    expect((await res.json()).code).toBe('not_applicable')
+    const m = await managedOf(b, 'wired')
+    expect(m?.provider).toBe('anthropic')
+    expect(m?.mcpServers).toHaveLength(1)
   })
 })
 

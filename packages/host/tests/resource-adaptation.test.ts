@@ -294,7 +294,7 @@ describe('proposeAdaptations (RES-M2)', () => {
     // keys, so an openai-compatible agent's key (per-agent by design) is
     // invisible to it. With the probe wired, a healthy compat agent with a
     // stored key must draw ZERO proposals — this is the RES-M2 blind-spot fix.
-    it('probe says the agent resolves a key → no proposals, and only inventory-keyless agents are probed', async () => {
+    it('probe says the agent resolves a key → no proposals; EVERY non-mock agent is probed (a provider-level key must not suppress the probe)', async () => {
       const probed: string[] = []
       const svc = createResourceAdaptationService({
         async inventory() { return inv() },
@@ -306,12 +306,28 @@ describe('proposeAdaptations (RES-M2)', () => {
       const props = await svc.propose({
         agents: [
           { id: 'compat', provider: 'openai-compatible' }, // inventory-keyless → probed
-          { id: 'writer', provider: 'anthropic' }, // provider key in inventory → not probed
+          { id: 'writer', provider: 'anthropic' }, // provider key in inventory → STILL probed (apiKeyEnv is exclusive)
           { id: 'demo', provider: 'mock' }, // mock never needs a key → not probed
         ],
       })
       expect(props).toEqual([])
-      expect(probed).toEqual(['compat'])
+      expect(probed).toEqual(['compat', 'writer'])
+    })
+
+    it('probe verdict false OVERRIDES a provider-level key — MR-M6 exclusive apiKeyEnv can be keyless while the workspace has one', async () => {
+      const svc = createResourceAdaptationService({
+        async inventory() { return inv() },
+        async resolvesKey() { return false }, // e.g. apiKeyEnv points at a missing env var
+      })
+      const props = await svc.propose({ agents: [{ id: 'writer', provider: 'anthropic' }] })
+      expect(props.length).toBeGreaterThan(0)
+      // Unprobed control: the same agent with no probe wired falls back to the
+      // inventory row (anthropic has a key there) and draws no proposal.
+      const unprobed = proposeAdaptations({
+        inventory: inv(),
+        agents: [{ id: 'writer', provider: 'anthropic' }],
+      })
+      expect(unprobed).toEqual([])
     })
 
     it('probe says NO key → proposals still emitted (true keyless agents keep their help)', async () => {

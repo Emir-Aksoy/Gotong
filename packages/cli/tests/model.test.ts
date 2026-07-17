@@ -85,14 +85,19 @@ function exportedAtong(extra: Record<string, unknown> = {}): Record<string, unkn
     baseURL: 'https://old.example/v1',
     model: 'old-model',
     displayName: '阿同',
-    fallbacks: [{ provider: 'openai-compatible', baseURL: 'https://mimo.example/v1', model: 'm2' }],
+    fallbacks: [
+      { provider: 'openai-compatible', baseURL: 'https://mimo.example/v1', model: 'm2', apiKeyEnv: 'MIMO_KEY' },
+    ],
     maintenanceModel: 'cheap-1',
     heartbeat: { enabled: true, intervalMs: 60_000 },
     ...extra,
   }
 }
 
-const BASE_FLAGS = ['--url', 'http://hub:3000', '--token', 'tok-admin', '--agent', 'atong']
+// `http://hub:3000` is non-loopback plaintext — BASE_FLAGS rides --insecure so
+// the scripted e2e runs exercise the explicit opt-out (the refusal itself is
+// pinned in its own test below).
+const BASE_FLAGS = ['--url', 'http://hub:3000', '--token', 'tok-admin', '--agent', 'atong', '--insecure']
 
 function hubHandler(opts: {
   exported?: Record<string, unknown>
@@ -130,8 +135,8 @@ function hubHandler(opts: {
 
 describe('parseModelArgs', () => {
   it('parses the full flag set and strips trailing slashes off --url', () => {
-    expect(parseModelArgs(['--url', 'http://h:3000///', '--token', 't', '--agent', 'a'])).toEqual({
-      url: 'http://h:3000',
+    expect(parseModelArgs(['--url', 'http://127.0.0.1:3000///', '--token', 't', '--agent', 'a'])).toEqual({
+      url: 'http://127.0.0.1:3000',
       token: 't',
       agent: 'a',
     })
@@ -436,3 +441,66 @@ describe('gotong model (scripted end-to-end)', () => {
 function fakeFetchRoute(opts: Parameters<typeof hubHandler>[0]): Handler {
   return hubHandler(opts)
 }
+
+describe('gotong model — codex-review hardening', () => {
+  it('refuses plaintext http to a non-loopback hub unless --insecure (token+key never cross the wire in the clear)', () => {
+    const refused = parseModelArgs(['--url', 'http://hub.example:3000', '--token', 't'])
+    expect(typeof refused).toBe('string')
+    expect(String(refused)).toContain('--insecure')
+    expect(parseModelArgs(['--url', 'http://hub.example:3000', '--token', 't', '--insecure'])).toMatchObject({
+      url: 'http://hub.example:3000',
+      insecure: true,
+    })
+    // loopback http and any https stay allowed without the flag
+    expect(parseModelArgs(['--url', 'http://127.0.0.1:9999', '--token', 't'])).toMatchObject({
+      url: 'http://127.0.0.1:9999',
+    })
+    expect(parseModelArgs(['--url', 'https://hub.example', '--token', 't'])).toMatchObject({
+      url: 'https://hub.example',
+    })
+  })
+
+  it('refuses a non-llm kind before any write — the PUT contract rebuilds kind:llm and would demote it', async () => {
+    const { impl, calls } = fakeFetch(
+      fakeFetchRoute({ exported: exportedAtong({ kind: 'personal-growth' }) }),
+    )
+    const { io, writes } = fakeIo([])
+    const code = await model(BASE_FLAGS, { io, fetchImpl: impl })
+    expect(code).toBe(1)
+    expect(writes.join('')).toContain('降级')
+    expect(calls.some((c) => c.method === 'PUT')).toBe(false)
+  })
+
+  it('a native switch with NO new key demands explicit confirmation — a stored key would shadow the workspace default', async () => {
+    const { impl, calls } = fakeFetch(fakeFetchRoute({}))
+    // provider 8 = OpenAI 官方; empty secret → warning + confirm; y → continue;
+    // empty model line keeps the current model. No probe (no key in hand).
+    const { io, writes } = fakeIo(['8', 'y', ''], [''])
+    const code = await model(BASE_FLAGS, { io, fetchImpl: impl })
+    expect(code).toBe(0)
+    expect(writes.join('')).toContain('优先用它打新 provider')
+    const put = calls.find((c) => c.method === 'PUT')!
+    expect(put.body!.apiKey).toBeUndefined()
+    expect(put.body!.provider).toBe('openai')
+    expect(put.body!.fallbacks).toEqual(exportedAtong().fallbacks) // echo still intact
+    expect(calls.some((c) => c.url.endsWith('/test-llm-key'))).toBe(false)
+  })
+
+  it('a fallback WITHOUT its own apiKeyEnv shares the primary key slot — a new key warns, refusal writes nothing', async () => {
+    const { impl, calls } = fakeFetch(
+      fakeFetchRoute({
+        exported: exportedAtong({
+          fallbacks: [{ provider: 'openai-compatible', baseURL: 'https://mimo.example/v1', model: 'm2' }],
+        }),
+      }),
+    )
+    // provider 8 = OpenAI; paste a new key → shared-slot warning; empty answer → abort.
+    const { io, writes } = fakeIo(['8', ''], ['sk-new-primary'])
+    const code = await model(BASE_FLAGS, { io, fetchImpl: impl })
+    expect(code).toBe(1)
+    const out = writes.join('')
+    expect(out).toContain('共用同一个存储槽')
+    expect(out).not.toContain('sk-new-primary') // the key never hits the terminal
+    expect(calls.some((c) => c.method === 'PUT')).toBe(false)
+  })
+})
