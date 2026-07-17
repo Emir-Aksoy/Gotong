@@ -78,7 +78,7 @@ build-site: 11 templates → site/ (index.html + templates.json), 2 on the leade
 - 边引用的是目标模板的 **slug**(它的公开把手,见下),所以 fork 一个模板时,
   在你的 `provenance.derivedFrom` 里写上**上游的 slug** 就完成了署名传承。
 
-随框架附带的两条真实引用边(也写在 `CLAUDE.md` 里):
+随框架附带的两条真实引用边:
 
 ```yaml
 # examples/codex-deepseek-hub/template/codex-deepseek-hub.template.yaml

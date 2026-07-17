@@ -67,6 +67,16 @@ docs/zh/V4-PHASE19-PLAN.md
 docs/zh/V5-ROADMAP.md
 docs/zh/V6-ROUTE-B-PLAN.md
 
+# Agent onboarding briefs + session work logs. These tell an LLM how to work on
+# this repo; they are not project documentation and carry no meaning for someone
+# reading the source. The project's own record lives in README.md, docs/, and
+# docs/zh/PROGRESS-LEDGER.md. Kept on disk for local agent sessions, never
+# tracked (untracked 2026-07-17; the history remains reachable in git log).
+CLAUDE.md
+AGENTS.md
+codex_work_log
+docs/superpowers/
+
 # 凭证类文件永不入库(2026-07-05 事故:npm 恢复码被 git add -A 扫进过本地 commit)
 npm_recovery_codes.txt
 *recovery_codes*

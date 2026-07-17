@@ -64,7 +64,7 @@ build-site: 11 templates → site/ (index.html + templates.json), 2 on the leade
 - ランキング = **入次数** = 「何個のテンプレートが私から派生しているか」。
 - エッジはターゲットテンプレートの**スラッグ**（パブリックハンドル、下記参照）を参照するため、テンプレートをフォークするときに `provenance.derivedFrom` に**上流のスラッグ**を書けば帰属の系譜が完成します。
 
-フレームワークに同梱されている 2 つの本物の引用エッジ（`CLAUDE.md` にも記録されています）:
+フレームワークに同梱されている 2 つの本物の引用エッジ:
 
 ```yaml
 # examples/codex-deepseek-hub/template/codex-deepseek-hub.template.yaml

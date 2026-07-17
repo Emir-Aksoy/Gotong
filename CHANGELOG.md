@@ -6,7 +6,7 @@ The npm scope is `@gotong/*`; the PyPI package is `gotong`. The wire protocol ha
 
 ## 3.2.0 — 2026-06-08 — Federation, identity, and the member workbench
 
-The first tagged release since 3.1.0. It folds in months of work spanning three generations of internal planning — v4 Phases 1–19, v5 Streams 0–H2/H2-OUT, and the v6 "Route B" hardening pass. This entry captures the headline themes; the milestone-by-milestone record lives in [`CLAUDE.md`](CLAUDE.md) and the per-phase finals under [`docs/zh/`](docs/zh/) (`V4-PHASE*`, `V5-*-FINAL`, `FEDERATION-RUNBOOK`).
+The first tagged release since 3.1.0. It folds in months of work spanning three generations of internal planning — v4 Phases 1–19, v5 Streams 0–H2/H2-OUT, and the v6 "Route B" hardening pass. This entry captures the headline themes; the milestone-by-milestone record lives in [`docs/zh/PROGRESS-LEDGER.md`](docs/zh/PROGRESS-LEDGER.md) and the per-phase finals under [`docs/zh/`](docs/zh/) (`V4-PHASE*`, `V5-*-FINAL`, `FEDERATION-RUNBOOK`).
 
 Distribution stays **Docker + source-only**; a JS registry (JSR), PyPI, and public binary downloads are gated on the repo going public (see [`.github/RELEASE-CHECKLIST.md`](.github/RELEASE-CHECKLIST.md)). **No backward-compatibility guarantees** across this release — the project is pre-1.0 internally and changed schemas freely; pin a commit if you need stability.
 

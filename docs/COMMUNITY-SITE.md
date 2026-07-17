@@ -64,7 +64,7 @@ The leaderboard reads the additive provenance field `template.provenance.derived
 - Ranking = **in-degree** = "how many templates derive from me."
 - An edge references the target template's **slug** (its public handle, see below), so when you fork a template, writing the **upstream's slug** in your `provenance.derivedFrom` completes the attribution lineage.
 
-The two real citation edges shipped with the framework (also written in `CLAUDE.md`):
+The two real citation edges shipped with the framework:
 
 ```yaml
 # examples/codex-deepseek-hub/template/codex-deepseek-hub.template.yaml
