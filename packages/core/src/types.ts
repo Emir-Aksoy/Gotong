@@ -14,6 +14,8 @@ export type {
   ParticipantKind,
   Message,
   DispatchStrategy,
+  ActorRole,
+  TaskActorContext,
   TaskOrigin,
   AncestryNode,
   Task,

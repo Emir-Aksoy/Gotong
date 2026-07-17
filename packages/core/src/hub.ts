@@ -1,6 +1,8 @@
 import { randomUUID } from 'node:crypto'
 import { join } from 'node:path'
 
+import { assertTaskActorContext } from '@gotong/protocol'
+
 import { MessageBus } from './bus.js'
 import {
   FeedbackLedger,
@@ -38,6 +40,7 @@ import type {
   ParticipantId,
   PendingApplication,
   Task,
+  TaskActorContext,
   TaskId,
   TaskResult,
 } from './types.js'
@@ -876,6 +879,8 @@ export class Hub {
 
   async dispatch(opts: {
     from: ParticipantId
+    /** Trusted identity envelope supplied by an authenticated host surface. */
+    actor?: TaskActorContext
     strategy: DispatchStrategy
     payload: unknown
     title?: string
@@ -939,6 +944,7 @@ export class Hub {
      */
     dataClasses?: readonly string[]
   }): Promise<TaskResult> {
+    const actor = opts.actor ? assertTaskActorContext(opts.actor) : undefined
     // Phase 10 M2 gate. Evaluated BEFORE id allocation so the task id
     // sequence isn't burned by rejected attempts — but we still write
     // a transcript pair (task + failed result) under a synthetic id
@@ -949,6 +955,7 @@ export class Hub {
     const task: Task = {
       id: this.idGen(),
       from: opts.from,
+      ...(actor ? { actor } : {}),
       strategy: opts.strategy,
       payload: opts.payload,
       title: opts.title,

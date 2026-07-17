@@ -7,6 +7,8 @@
  * imports keep working — the move is invisible to in-tree consumers.
  */
 
+import type { TaskActorContext } from './actor-context.js'
+
 export type ParticipantId = string
 export type ChannelId = string
 export type TaskId = string
@@ -103,6 +105,8 @@ export interface AncestryNode {
 export interface Task {
   id: TaskId
   from: ParticipantId
+  /** Trusted, Hub-validated actor identity used for authorization decisions. */
+  actor?: TaskActorContext
   /**
    * FED-M2 — federated origin claim. Present when the task crossed a
    * peer-hub boundary; absent for local-only tasks. See `TaskOrigin`.

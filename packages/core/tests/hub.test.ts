@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { Hub } from '../src/hub.js'
 import { AgentParticipant } from '../src/participants/agent.js'
 import { HumanParticipant } from '../src/participants/human.js'
-import type { Task, TranscriptEntry } from '../src/types.js'
+import type { Task, TaskActorContext, TranscriptEntry } from '../src/types.js'
 
 const flush = () => new Promise<void>((r) => setImmediate(r))
 
@@ -17,6 +17,52 @@ class EchoAgent extends AgentParticipant {
 }
 
 describe('Hub (end-to-end)', () => {
+  it('persists a trusted actor context on the task transcript entry', async () => {
+    const hub = Hub.inMemory()
+    await hub.start()
+    hub.register(new EchoAgent('writer', ['draft']))
+    const actor: TaskActorContext = {
+      kind: 'local_user',
+      principal: { kind: 'user', id: 'user-1' },
+      orgId: 'org-1',
+      userId: 'user-1',
+      role: 'member',
+    }
+
+    await hub.dispatch({
+      from: 'user-1',
+      actor,
+      strategy: { kind: 'capability', capabilities: ['draft'] },
+      payload: { topic: 'trusted context' },
+    })
+
+    expect(hub.tasks()).toHaveLength(1)
+    expect(hub.tasks()[0]?.task.actor).toEqual(actor)
+    await hub.stop()
+  })
+
+  it('rejects a malformed actor before allocating or persisting a task', async () => {
+    const hub = Hub.inMemory()
+    await hub.start()
+
+    await expect(
+      hub.dispatch({
+        from: 'user-1',
+        actor: {
+          kind: 'local_user',
+          principal: { kind: 'user', id: 'user-1' },
+          orgId: 'org-1',
+          userId: 'user-1',
+          role: 'root',
+        } as unknown as TaskActorContext,
+        strategy: { kind: 'explicit', to: 'writer' },
+        payload: {},
+      }),
+    ).rejects.toThrow('invalid task actor context')
+    expect(hub.tasks()).toHaveLength(0)
+    await hub.stop()
+  })
+
   it('capability dispatch reaches the right agent; transcript has task then task_result', async () => {
     const hub = Hub.inMemory()
     await hub.start()
