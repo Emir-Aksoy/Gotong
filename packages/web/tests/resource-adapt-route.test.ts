@@ -11,6 +11,10 @@
  *   - an APPLICABLE use_local_endpoint apply rewires the agent to the local URL
  *   - an ADVISORY proposal (applicable:false) is REJECTED and the agent is left
  *     byte-identical — the "never silent, never half-applied" guarantee
+ *   - MR-M2 `fallbacks` and NA-M5 `maintenanceModel` SURVIVE both applies — the
+ *     rebuilt edit body must echo the whole spec, or upsert wipes them silently
+ *   - MR-M6 `apiKeyEnv` (exclusive semantics, old primary's vendor) is shed on
+ *     a rewire and REPORTED via `applied.droppedApiKeyEnv` — dropped, not silent
  *   - a proposal for an unknown agent → 404; a missing proposal → 400
  *   - no admin token → 401 (the apply is admin-gated like every write)
  *
@@ -139,6 +143,102 @@ describe('RES-M3 adapt route: applicable proposals mutate the agent row', () => 
     // The existing model is preserved (operator retargets to a local model as a
     // follow-up edit — the adapt only rewires the endpoint).
     expect(m?.model).toBe('claude-sonnet-5')
+  })
+})
+
+describe('RES-M3 adapt route: MR-M2/M6/NA-M5 spec fields survive the constrained edit', () => {
+  let b: Boot
+  beforeEach(async () => { b = await boot() })
+  afterEach(async () => { await teardown(b) })
+
+  // The regression this pins: the rebuilt PUT body once echoed only a subset of
+  // the spec, and since validateAgentBody treats an absent field as "unset" and
+  // upsertAgent replaces the managed spec wholesale, applying ANY proposal
+  // silently wiped fallbacks / apiKeyEnv / maintenanceModel.
+  const FALLBACKS = [
+    { provider: 'openai', model: 'gpt-4.1-mini', apiKeyEnv: 'OPENAI_BACKUP_KEY' },
+    { provider: 'openai-compatible', baseURL: 'http://fallback.test/v1', providerLabel: 'DeepSeek' },
+  ]
+
+  it('use_local_endpoint keeps fallbacks + maintenanceModel; sheds and REPORTS the primary apiKeyEnv', async () => {
+    await createAgent(b, {
+      id: 'router',
+      provider: 'anthropic',
+      system: 'you route',
+      capabilities: ['chat'],
+      apiKeyEnv: 'OLD_ANTHROPIC_KEY',
+      maintenanceModel: 'claude-haiku-4-5',
+      fallbacks: FALLBACKS,
+    })
+    const res = await adapt(b, {
+      kind: 'use_local_endpoint',
+      id: 'adapt:use_local_endpoint:router:Ollama',
+      agentId: 'router',
+      fromProvider: 'anthropic',
+      endpointLabel: 'Ollama',
+      suggestedBaseURL: 'http://127.0.0.1:11434/v1',
+      applicable: true,
+      title: 't',
+      detail: 'd',
+    })
+    expect(res.status).toBe(200)
+    const body = await res.json()
+    // The shed exclusive env credential is reported (name only), never silent.
+    expect(body.applied).toEqual({
+      kind: 'use_local_endpoint',
+      agentId: 'router',
+      droppedApiKeyEnv: 'OLD_ANTHROPIC_KEY',
+    })
+    const m = await managedOf(b, 'router')
+    expect(m?.provider).toBe('openai-compatible')
+    expect(m?.baseURL).toBe('http://127.0.0.1:11434/v1')
+    // The whole chain survives byte-for-byte, INCLUDING per-candidate apiKeyEnv —
+    // each candidate's credential belongs to that candidate, not the primary.
+    expect(m?.fallbacks).toEqual(FALLBACKS)
+    expect(m?.maintenanceModel).toBe('claude-haiku-4-5')
+    // The primary's exclusive env name pointed at the OLD vendor — it must not
+    // ride along onto the local endpoint (the placeholder per-agent key serves it).
+    expect(m?.apiKeyEnv).toBeUndefined()
+  })
+
+  it('switch_provider keeps fallbacks + maintenanceModel while shedding compat fields + apiKeyEnv', async () => {
+    await createAgent(b, {
+      id: 'hopper',
+      provider: 'openai-compatible',
+      baseURL: 'http://old.test/v1',
+      providerLabel: 'OldCompat',
+      apiKeyEnv: 'OLD_COMPAT_KEY',
+      system: 'you hop',
+      capabilities: ['chat'],
+      maintenanceModel: 'claude-haiku-4-5',
+      fallbacks: FALLBACKS,
+    })
+    const res = await adapt(b, {
+      kind: 'switch_provider',
+      id: 'adapt:switch_provider:hopper:anthropic',
+      agentId: 'hopper',
+      fromProvider: 'openai-compatible',
+      toProvider: 'anthropic',
+      keySource: 'env',
+      applicable: true,
+      title: 't',
+      detail: 'd',
+    })
+    expect(res.status).toBe(200)
+    const body = await res.json()
+    expect(body.applied).toEqual({
+      kind: 'switch_provider',
+      agentId: 'hopper',
+      droppedApiKeyEnv: 'OLD_COMPAT_KEY',
+    })
+    const m = await managedOf(b, 'hopper')
+    expect(m?.provider).toBe('anthropic')
+    // Compat-only fields shed with the old provider; routing/budget knobs stay.
+    expect(m?.baseURL).toBeUndefined()
+    expect(m?.providerLabel).toBeUndefined()
+    expect(m?.apiKeyEnv).toBeUndefined()
+    expect(m?.fallbacks).toEqual(FALLBACKS)
+    expect(m?.maintenanceModel).toBe('claude-haiku-4-5')
   })
 })
 
