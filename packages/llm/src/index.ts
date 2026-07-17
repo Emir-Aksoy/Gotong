@@ -110,3 +110,10 @@ export {
   type EnsembleEvent,
   type EnsembleLogger,
 } from './ensemble-provider.js'
+// LSA-M6 — 策展 provider 目录(数据常量):host 管家工具与 cli `gotong model` 共用一份
+export {
+  CURATED_LLM_PROVIDERS,
+  llmProviderTierZh,
+  type LlmProviderTier,
+  type ButlerLlmProviderOption,
+} from './provider-catalog.js'

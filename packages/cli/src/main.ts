@@ -36,6 +36,7 @@ import { peerCard } from './commands/peer-card.js'
 import { wechatLogin } from './commands/wechat-login.js'
 import { setting } from './commands/setting.js'
 import { provision } from './commands/provision.js'
+import { model } from './commands/model.js'
 import { update } from './commands/update.js'
 import { backup } from './commands/backup.js'
 import { restore } from './commands/restore.js'
@@ -98,6 +99,8 @@ export async function runCli(argv: readonly string[] = process.argv.slice(2)): P
         return await setting(rest)
       case 'provision':
         return await provision(rest)
+      case 'model':
+        return await model(rest)
       case 'update':
         return await update(rest)
       case 'backup':

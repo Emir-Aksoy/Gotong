@@ -219,6 +219,56 @@ opt-in `EnsembleProvider`（`packages/llm`，RoutingProvider 兄弟）：并行 
 死命令 spec 零网络零真凭证]）;host 全套 2183→**2199** 全绿;tsc 零错;四门 PASS
 （**旋钮 114 零新增**,main.ts 3000/3000 压注释净零）。
 
+---
+
+### LSA-M6 `gotong model` 交互式模型选择器 — ✅ 已落（2026-07-17）
+
+竞品对比（2026-07-17）坐实的「便捷配置」缺口:Hermes 有 `setup --portal` 一次 OAuth
+拿 300 模型,我们**不能抄**（背后是托管 Nous Portal = 中央节点,撞北极星）;能抄的合法
+一半是「一条命令走完选厂商→贴 key→挑模型→验证→生效」。用户拍板「gotong model 选择器
+可以做」。**M3 静态目录第一次从「建议卡」变成「可执行的路」**——同一份数据,管家嘴里是
+发现建议,CLI 里是向导选项。
+
+- **写回岔口的裁决(侦察自动解决,没上会)**:走 **admin HTTP API**(`provision` 同款
+  `--url`+`--token` Bearer,CLI 不碰磁盘状态)。离线直改 agents.json 被否——写 key 需要
+  vault master-key 解析面,而 CLI 对 vault 刻意无状态(`wechat-login` 当年拒写 vault 的
+  同一立场);且 PUT 后 `lifecycle.start` 立即生效,离线路径还得让用户手动重启。
+- **一条会话的完整流**:选 agent(`GET /agents` 只列托管行;`--agent` 直指)→ 选 provider
+  (**M3 六家策展目录** + Anthropic/OpenAI 官方 + 自定义 OpenAI 兼容;目录项现场印
+  costTruth/注册页/三步引导——**红线原样**:注册拿 key 永远人来)→ 贴 key(**muted 输入
+  不回显**)→ **现场拉模型列表**(所选端点官方 `GET /models`,活的真相不会烂;拉不到退手动)
+  → **hub 真探针**(白拿既有 `POST /api/admin/test-llm-key`,走真 `buildProvider` 链发
+  1-token 最小请求;失败给病名 + 重选模型/重贴 key/放弃三选)→ 保存(PUT,立即重启生效)。
+- **capture-echo 是承重墙**:PUT 是整 spec 替换,body 从 `GET /:id/export` manifest 起底
+  **全字段 echo**(fallbacks/apiKeyEnv/maintenanceModel/heartbeat/useMcpServers/system…
+  一个不丢)——manifest 渲染端 MR-M2/M6/NA-M5 都各自补过 echo,消费端照单全收。**内联
+  `mcpServers` 例外响亮拒**:`validateAgentBody` 结构性不认它,PUT 必丢,故带内联 MCP 的
+  agent 当场拒 + 指路 manifest 导入(顺手在 RES-M3 adapt-apply 发现同型潜在 bug——它重建
+  body 时漏 echo fallbacks 三件,已开独立修复票)。
+- **apiKeyEnv 排他语义的对齐(MR-M6 一致性)**:贴了新 key、或换了端点,都**解除**既有
+  `apiKeyEnv` 绑定并明说——留着它,排他语义下 spawn 只认 env 名指的旧钱包,新 key 进了
+  金库也永远轮不上(或拿旧厂商的 key 打新端点撒谎 401)。只换模型(选 0)才保留绑定。
+- **凭证纪律**:key 走 muted 读入,只发两处——hub(探针 + 保存进 per-agent vault)与所选
+  厂商**官方** `/models` 端点的 auth 头;永不打印、永不进 URL query、永不当命令行参数。
+  测试逐字断言终端输出不含 key。
+- **目录常量下移 `@gotong/llm`**(唯一跨包动作):cli 不能依赖 host(host→cli 的
+  `backup()` 边早已存在,反向成环),数据搬进轻包 `provider-catalog.ts`,host 的
+  `personal-butler-llm-catalog.ts` 原地 import + re-export——**既有消费者与防腐测试
+  import 路径零变动**(AFR-M2 把 TwoTierToolset 放 llm 的同款先例);cli 新增 `@gotong/llm`
+  依赖(其传递面只有 core+services-sdk,轻)。
+- **显式不做**:创建 agent(`向导/画廊/面板`已盖,本命令只配既有托管行)、anthropic 之外
+  的非 OpenAI-wire 自定义端点、fallbacks 链的增删(面板结构化表单已盖;本命令原样保留)、
+  已存 key 的取回(**key 不出 hub**——沿用已存 key 时模型列表退手动、探针跳过并指路面板
+  「测试连接/测试路由」,这是安全性质不是缺口)。
+
+**验收**:cli 新单测 19 例(`parseModelArgs` 3 / `buildPutBody` 4[全字段 echo·native 甩
+compat 字段·**apiKeyEnv 三态**·model 置空] / 守卫 2 / `listRemoteModels` 3[尾斜杠拼接·
+anthropic 双头·三类失败折 null] / 脚本化端到端 7[快乐路径全 echo 断言·探针失败放弃零 PUT·
+重贴 key 二探·选 0 保 apiKeyEnv·空 key 沿用跳探针·内联 MCP 拒·401]),cli 全套 282→**301**
+全绿;llm 260 全绿(数据模块零行为);host 全套 **2223** 全绿 + 目录防腐 8 例原样过(re-export
+零涟漪);真 bin `gotong help model` 冒烟过;四门 PASS(**旋钮 115 零新增**——`--token` 是
+参数不是旋钮;main.ts/server.ts 零触碰;kernel-deps 门认可 cli→llm 新边)。
+
 ## 四、显式不做
 
 - **阿同自主注册账号 / 抓取网上的 key**（撞 prohibited action + 不可信来源）。

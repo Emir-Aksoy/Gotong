@@ -21,6 +21,7 @@ Commands:
   wechat-login                Mint a WeChat iLink bot token by QR scan (prints env lines)
   setting [subcommand]        Deterministic ops console (status/check/cold-start/restore/…)
   provision <pack.yaml>       Install a template pack + schedules + acceptance in one go
+  model                       Interactive provider/model/key selector for a managed agent
   backup <space> <dir>        Archive a workspace to .tar.gz (manifest + sha256, WAL-safe;
                               --tier=identity|relations for key-only / +peers subsets)
   restore <tgz> --space <dir> Verify a backup's manifest, then restore it
@@ -402,6 +403,33 @@ Examples:
     --url http://127.0.0.1:3000 --token "$GOTONG_ADMIN_TOKEN"
   gotong provision pack.yaml --url http://hub:3000 --token t --user u-alice
   gotong provision pack.yaml --url http://hub:3000 --token t --skip-acceptance
+`,
+  model: `gotong model [--url <hub>] [--token <admin-token>] [--agent <id>]
+
+交互式给一个托管 agent 选 provider / 模型 / key(LSA-M6)。一条终端会话走完:
+选 agent → 选 provider(策展目录 OpenRouter/Groq/Cerebras/Gemini/Together/
+DeepSeek + Anthropic/OpenAI 官方 + 自定义 OpenAI 兼容端点)→ 贴 key(输入不
+回显)→ 现场拉该端点的模型列表挑一个 → hub 用这把 key 真发一次最小请求探活
+→ 保存(agent 立即按新配置重启)。
+
+全走 hub 的 admin HTTP API(与 gotong provision 同款 Bearer token),CLI 不碰
+磁盘状态;key 只发给 hub 与所选厂商官方端点,永不打印、永不进 URL。既有备用
+链(fallbacks)、维护模型等配置原样保留;设过 apiKeyEnv 的 agent 在换端点或
+贴新 key 时会解除该绑定并明说(排他语义下留着它会压住这次改动)。
+
+注册账号、拿 key 永远是你自己来 — 本命令只引导与校验,不代办、不上网捡 key。
+
+Options:
+  --url <url>      hub 的 admin HTTP 地址(默认 http://127.0.0.1:3000)
+  --token <token>  admin bearer token(必填)
+  --agent <id>     直接指定要配的 agent(不指定则列出来选)
+  --help / -h      Show this message
+
+Exit codes: 0 已保存 / 1 失败或中途取消 / 2 用法错误。
+
+Examples:
+  gotong model --token "$GOTONG_ADMIN_TOKEN"
+  gotong model --url http://hub:3000 --token t --agent atong
 `,
   backup: `gotong backup <space-dir> <backup-dir> [--include-master-key]
 

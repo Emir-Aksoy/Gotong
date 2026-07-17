@@ -817,6 +817,9 @@ importers:
       '@gotong/im-wechat':
         specifier: workspace:*
         version: link:../im-wechat
+      '@gotong/llm':
+        specifier: workspace:*
+        version: link:../llm
       '@gotong/protocol':
         specifier: workspace:*
         version: link:../protocol
