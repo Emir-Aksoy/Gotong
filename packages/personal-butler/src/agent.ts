@@ -89,6 +89,23 @@ export interface PersonalButlerAgentOptions
    * mid-approval could inject a card the parked plan never saw.
    */
   contextProbe?: (task: Task) => Promise<string | null>
+  /**
+   * LIB-M3 — optional per-turn STABLE-segment card (the knowledge-library
+   * INDEX card rides this). Unlike `contextProbe` (per-turn ADVICE on the
+   * volatile tail), this is STATE: its text changes only when the underlying
+   * state changes, so it belongs in `req.system` where the prompt cache
+   * amortizes it — unchanged state ⇒ identical bytes ⇒ cache hit; an edit
+   * breaks the cache exactly once, then re-hits ("重算≠变更").
+   *
+   * Refreshed on BOTH fresh tasks and resume. The frozen block sets the
+   * precedent: a park→approve→resume after a restart recomposes it from
+   * CURRENT memory — state context reflects now, while advice context
+   * (`contextProbe`) deliberately does not survive into a resume.
+   *
+   * `null` ⇒ nothing appended ⇒ byte-identical prompt. A throw degrades to
+   * null (advisor discipline, same as `contextProbe`).
+   */
+  stableContext?: () => Promise<string | null>
 }
 
 export class PersonalButlerAgent extends MemoryAugmentedAgent {
@@ -102,6 +119,10 @@ export class PersonalButlerAgent extends MemoryAugmentedAgent {
   private readonly contextProbe: ((task: Task) => Promise<string | null>) | undefined
   /** The current turn's probe result; null between turns / on resume. */
   private turnContext: string | null = null
+  /** LIB-M3 — stable-segment card provider (see the option's doc). */
+  private readonly stableContext: (() => Promise<string | null>) | undefined
+  /** The current stable card; refreshed per task AND per resume (state, not advice). */
+  private stableCard: string | null = null
 
   constructor(opts: PersonalButlerAgentOptions) {
     const benignList = opts.benign
@@ -142,6 +163,17 @@ export class PersonalButlerAgent extends MemoryAugmentedAgent {
     })
     this.governedGates = governedList
     this.contextProbe = opts.contextProbe
+    this.stableContext = opts.stableContext
+  }
+
+  /** LIB-M3 — refresh the stable card; a sick provider degrades to null. */
+  private async refreshStableCard(): Promise<void> {
+    if (!this.stableContext) return
+    try {
+      this.stableCard = await this.stableContext()
+    } catch {
+      this.stableCard = null
+    }
   }
 
   /**
@@ -159,13 +191,17 @@ export class PersonalButlerAgent extends MemoryAugmentedAgent {
         this.turnContext = null
       }
     }
+    await this.refreshStableCard()
     return super.handleTask(task)
   }
 
   /** No fresh probe on resume (see the option's doc); clear any stale stash so
-   *  a previous turn's card can never leak into a resumed conversation. */
+   *  a previous turn's card can never leak into a resumed conversation. The
+   *  STABLE card is the opposite: it re-reads (state reflects now — the frozen
+   *  block after a restart behaves the same way). */
   protected override async handleResume(task: Task, state: unknown): Promise<unknown> {
     this.turnContext = null
+    await this.refreshStableCard()
     return super.handleResume(task, state)
   }
 
@@ -184,6 +220,13 @@ export class PersonalButlerAgent extends MemoryAugmentedAgent {
    */
   protected override buildRequest(task: Task): LlmRequest {
     const req = super.buildRequest(task)
+    // LIB-M3 — the stable card joins `req.system` (frozen block, persona, then
+    // this): same cached segment, so an unchanged INDEX costs 0.1× reads and an
+    // edit breaks the cache exactly once. Appended BEFORE the volatile check so
+    // the volatile separator decision sees the final stable text.
+    if (this.stableCard) {
+      req.system = req.system ? `${req.system}\n\n${this.stableCard}` : this.stableCard
+    }
     if (this.turnContext) {
       req.systemVolatile = req.system ? `\n\n${this.turnContext}` : this.turnContext
     }

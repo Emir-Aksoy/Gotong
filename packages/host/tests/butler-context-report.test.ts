@@ -23,6 +23,7 @@ import type { Task } from '@gotong/core'
 import {
   buildButlerClockProbe,
   composeContextProbes,
+  openKnowledgeLibrary,
   openTaskNotebook,
   type ButlerContextProbe,
 } from '@gotong/personal-butler'
@@ -32,12 +33,17 @@ import type { MemoryEntry } from '@gotong/services-sdk'
 import type { AdminHealthSurface, HealthSnapshot } from '../src/admin-health.js'
 import {
   INLINE_PROBE_MARKERS,
+  STABLE_CARD_REGISTRY,
   VOLATILE_PROBE_REGISTRY,
   measureContextFace,
   renderContextReport,
   type ContextCardEntry,
   type ContextReport,
 } from '../src/butler-context-report.js'
+import {
+  KNOWLEDGE_INDEX_CARD_BUDGET_TOKENS,
+  buildButlerKnowledgeIndexCard,
+} from '../src/butler-knowledge-index.js'
 import { buildButlerHubSenseProbe } from '../src/personal-butler-hub-sense.js'
 import { buildButlerLanguageProbe, writeReplyLanguage } from '../src/personal-butler-language.js'
 import { buildButlerLastSeenProbe, writeLastSeen } from '../src/personal-butler-last-seen.js'
@@ -139,6 +145,8 @@ let volatileFull: Record<string, string> // 卡名 → 满态真点火文本
 let clockText: string
 let frozenEmpty: string
 let frozenFull: string
+let indexSample: string // LIB-M3 索引卡样本(真 builder 真库)
+let indexTruncated: string // LIB-M3 索引卡截断顶(胖索引 → ≤500tk)
 let report: ContextReport
 let emptyProbes: ButlerContextProbe[] // 空态探针组(compose 胶水断言用)
 
@@ -249,10 +257,39 @@ beforeAll(async () => {
   frozenEmpty = renderClusteredFrozenBlock([], FROZEN_OPTS)
   frozenFull = renderClusteredFrozenBlock(fullMemoryEntries(), FROZEN_OPTS)
 
+  // LIB-M3 索引卡:真 builder 走真库(空库=null 在专门的门测试里防腐,这里
+  // 量样本态与截断顶——「常驻段字节不随知识总量长」的两个刻度)。
+  const kbSample = openKnowledgeLibrary({ dir: join(dir, 'full', 'knowledge') })
+  await kbSample.write(
+    'INDEX.md',
+    [
+      '# 我的知识',
+      '- user/家人.md — 家人档案(妈妈在怡保,弟弟在新加坡)',
+      '- user/偏好.md — 饮食与作息偏好',
+      '- projects/装修.md — 老家厨房翻新(预算/工头/节点)',
+      '- projects/hub-运维.md — 家庭 hub 的排查笔记',
+      '- people/陈师傅.md — 装修工头联系与交接',
+      '- archive/ — 完结项目的历史档案',
+    ].join('\n'),
+  )
+  indexSample = (await buildButlerKnowledgeIndexCard({ library: kbSample })())!
+
+  const kbFat = openKnowledgeLibrary({ dir: join(dir, 'fat', 'knowledge') })
+  await kbFat.write(
+    'INDEX.md',
+    Array.from(
+      { length: 120 },
+      (_, i) => `- projects/装修-${String(i).padStart(3, '0')}.md — 老家厨房翻新的预算票据与交接记录`,
+    ).join('\n'),
+  )
+  indexTruncated = (await buildButlerKnowledgeIndexCard({ library: kbFat })())!
+
   const entries: ContextCardEntry[] = [
     { segment: 'stable', card: 'persona', state: '样本', text: PERSONA_SAMPLE },
     { segment: 'stable', card: 'frozen-block', state: '空记忆', text: frozenEmpty },
     { segment: 'stable', card: 'frozen-block', state: '预算饱和', text: frozenFull },
+    { segment: 'stable', card: 'knowledge-index', state: '样本(7 行)', text: indexSample },
+    { segment: 'stable', card: 'knowledge-index', state: '截断顶(120 行)', text: indexTruncated },
     ...Object.entries(volatileFull).map(([card, text]): ContextCardEntry => {
       return { segment: 'volatile', card, state: card === 'clock' ? '恒在' : '满态', text }
     }),
@@ -297,12 +334,23 @@ describe('LIB-M1 上下文段级基线', () => {
     expect(frozenEmpty).toContain('_(no memories yet)_')
   })
 
-  it('度量:行数=3 stable + 8 volatile,段小计与行和一致', () => {
-    expect(report.rows.length).toBe(11)
+  it('LIB-M3 索引卡:样本真点火,截断顶 ≤500tk(常驻段不随知识总量长)', () => {
+    expect(indexSample).toContain('【知识库索引】')
+    expect(indexSample).toContain('user/家人.md')
+    expect(indexSample).not.toContain('超出注入预算')
+    const truncatedRow = report.rows.find(
+      (r) => r.card === 'knowledge-index' && r.state.includes('截断'),
+    )!
+    expect(truncatedRow.estTokens).toBeLessThanOrEqual(KNOWLEDGE_INDEX_CARD_BUDGET_TOKENS)
+    expect(indexTruncated).toContain('只显示前')
+  })
+
+  it('度量:行数=5 stable + 8 volatile,段小计与行和一致', () => {
+    expect(report.rows.length).toBe(13)
     const vol = report.segments.find((s) => s.segment === 'volatile')!
     const sta = report.segments.find((s) => s.segment === 'stable')!
     expect(vol.cards).toBe(8)
-    expect(sta.cards).toBe(3)
+    expect(sta.cards).toBe(5)
     const sum = (rows: readonly { estTokens: number }[]) => rows.reduce((a, r) => a + r.estTokens, 0)
     expect(vol.estTokens).toBe(sum(report.rows.filter((r) => r.segment === 'volatile')))
     expect(sta.estTokens).toBe(sum(report.rows.filter((r) => r.segment === 'stable')))
@@ -322,6 +370,10 @@ describe('LIB-M1 上下文段级基线', () => {
     }
     // 注入点只有一个:第二个 composeContextProbes 调用点意味着有第二张嘴,报告会漏。
     expect(src.match(/composeContextProbes\(/g)?.length ?? 0).toBe(1)
+    // LIB-M3 stable 段同款纪律:Card builder 调用点 ≡ 注册表,注入点唯一。
+    const cardCalls = new Set([...src.matchAll(/\b(buildButler\w+Card)\s*\(/g)].map((m) => m[1]!))
+    expect(cardCalls).toEqual(new Set(Object.values(STABLE_CARD_REGISTRY)))
+    expect(src.match(/stableContext:/g)?.length ?? 0).toBe(1)
   })
 
   it('报告:打印段级基线(pnpm report:atong-context 的输出)', () => {
@@ -329,11 +381,13 @@ describe('LIB-M1 上下文段级基线', () => {
     const vol = report.segments.find((s) => s.segment === 'volatile')!
     const personaRow = report.rows.find((r) => r.card === 'persona')!
     const frozenRows = report.rows.filter((r) => r.card === 'frozen-block')
+    const indexRows = report.rows.filter((r) => r.card === 'knowledge-index')
     const rendered = renderContextReport(report, [
       '---- 场景 ----',
       `每轮必付底价(volatile 仅时钟): ~${clockRow.estTokens} tokens`,
       `volatile 满配(八探针齐发): ~${vol.estTokens} tokens`,
       `stable 段(人设样本+冻结块): 空记忆 ~${personaRow.estTokens + frozenRows[0]!.estTokens} → 预算饱和 ~${personaRow.estTokens + frozenRows[1]!.estTokens} tokens`,
+      `stable 增量(LIB-M3 索引卡): 样本 ~${indexRows[0]!.estTokens} → 截断顶 ~${indexRows[1]!.estTokens} tokens(预算 ${KNOWLEDGE_INDEX_CARD_BUDGET_TOKENS})`,
     ])
     expect(rendered).toContain('合计')
     expect(rendered).toContain('每轮必付底价')

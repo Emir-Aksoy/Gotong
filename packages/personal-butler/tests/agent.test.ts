@@ -169,6 +169,96 @@ describe('PersonalButlerAgent — current-time awareness (clock probe → system
   })
 })
 
+describe('PersonalButlerAgent — LIB-M3 stable card (stableContext → req.system tail)', () => {
+  it('appends the card to the STABLE segment; volatile advice stays separate', async () => {
+    const FIXED = 1_751_985_240_000 // 2025-07-08 22:34 Asia/Kuala_Lumpur
+    const provider = new ScriptProvider([textTurn('ok')])
+    const agent = new PersonalButlerAgent({
+      id: 'butler',
+      provider,
+      memory: emptyMemory(),
+      system: 'base',
+      captureTurns: false,
+      contextProbe: buildButlerClockProbe({ now: () => FIXED, timeZone: 'Asia/Kuala_Lumpur' }),
+      stableContext: async () => '【知识库索引】\n- user/家人.md — 家人档案',
+    })
+
+    await agent.onTask(task('a', '你知道什么'))
+    const req = provider.requests[0]!
+    // State rides `system` (the cached segment), at the very tail: frozen
+    // block leads, persona follows, the card closes the stable slice.
+    expect(req.system!.startsWith('<!-- gotong:memory:begin -->')).toBe(true)
+    expect(req.system!.endsWith('base\n\n【知识库索引】\n- user/家人.md — 家人档案')).toBe(true)
+    // Advice (the clock) still rides `systemVolatile`, never the stable slice.
+    expect(req.systemVolatile).toContain('【当前时间】')
+    expect(req.systemVolatile).not.toContain('知识库索引')
+  })
+
+  it('null / throw ⇒ req.system byte-identical to a butler without the option', async () => {
+    const mk = (stableContext?: () => Promise<string | null>) => {
+      const provider = new ScriptProvider([textTurn('ok')])
+      const agent = new PersonalButlerAgent({
+        id: 'butler',
+        provider,
+        memory: emptyMemory(),
+        system: 'base',
+        captureTurns: false,
+        ...(stableContext ? { stableContext } : {}),
+      })
+      return { provider, agent }
+    }
+    const bare = mk()
+    await bare.agent.onTask(task('a', 'hi'))
+    const nulled = mk(async () => null)
+    await nulled.agent.onTask(task('a', 'hi'))
+    const sick = mk(async () => {
+      throw new Error('boom')
+    })
+    await sick.agent.onTask(task('a', 'hi'))
+
+    expect(nulled.provider.requests[0]!.system).toBe(bare.provider.requests[0]!.system)
+    expect(sick.provider.requests[0]!.system).toBe(bare.provider.requests[0]!.system)
+    expect(sick.provider.requests[0]!.systemVolatile).toBeUndefined()
+  })
+
+  it('resume re-reads the card (state semantics — unlike the probe, which stays silent)', async () => {
+    let card = '【知识库索引】v1'
+    const exec: string[] = []
+    const provider = new ScriptProvider([
+      toolTurn({ id: 't1', name: 'delete_agent', input: { handle: 'mailer' } }),
+      textTurn('done'),
+    ])
+    const agent = new PersonalButlerAgent({
+      id: 'butler',
+      provider,
+      memory: emptyMemory(),
+      system: 'base',
+      captureTurns: false,
+      governed: governedToolset(exec, async () => ({ decision: 'approve', reason: 'destructive' })),
+      stableContext: async () => card,
+    })
+    const t = task('a', 'delete mailer')
+    let state: unknown
+    try {
+      await agent.onTask(t)
+      throw new Error('expected a park')
+    } catch (e) {
+      if (!(e instanceof SuspendTaskError)) throw e
+      state = e.state
+    }
+    expect(provider.requests[0]!.system).toContain('v1')
+
+    // 批准等待期间索引被重组(比如另一场对话里阿同整理了书架)——resume 的
+    // 请求必须带当前状态,镜像冻结块重启后按当前记忆重组的先例。
+    card = '【知识库索引】v2'
+    const res = await agent.onResume(t, { ...(state as object), answer: { approved: true } })
+    okText(res)
+    const resumeReq = provider.requests.at(-1)!
+    expect(resumeReq.system).toContain('v2')
+    expect(resumeReq.system).not.toContain('v1')
+  })
+})
+
 describe('PersonalButlerAgent — governed tool parks for approval', () => {
   it('throws SuspendTaskError with a never-resume park + pending approval context', async () => {
     const exec: string[] = []

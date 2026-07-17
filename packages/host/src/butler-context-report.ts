@@ -87,6 +87,16 @@ export const INLINE_PROBE_MARKERS: Readonly<Record<string, RegExp>> = {
   'notebook-digest': /taskNotebook\.digest\(\)/,
 }
 
+/**
+ * 稳定段卡注册表(LIB-M3):factory 里 `buildButler*Card(` 形态的 stable 段
+ * 注入源 ↔ 报告卡名。tripwire 正则扫 factory 源码的调用点与本表值集合比对,
+ * 且 `stableContext:` 注入点全文件只准出现一次(volatile 侧
+ * `composeContextProbes` 同款纪律)——加稳定段卡不登记就红。
+ */
+export const STABLE_CARD_REGISTRY: Readonly<Record<string, string>> = {
+  'knowledge-index': 'buildButlerKnowledgeIndexCard',
+}
+
 const encoder = new TextEncoder()
 
 /** 度量一组上下文卡(纯函数,入参顺序即行序)。 */

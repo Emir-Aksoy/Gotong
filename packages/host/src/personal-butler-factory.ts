@@ -46,6 +46,7 @@ import { openButlerRecallIndex } from './butler-recall-index.js'
 import type { FailureLang } from './failure-translator.js'
 import type { ButlerFactory } from './local-agent-pool.js'
 import type { StewardAgentDirectory, StewardWorkflowEditor } from './hub-steward-service.js'
+import { buildButlerKnowledgeIndexCard } from './butler-knowledge-index.js'
 import { buildButlerAskAgentToolset, type ButlerAskRosterSource } from './personal-butler-ask-agent.js'
 import {
   buildButlerBackupPackToolset,
@@ -283,13 +284,13 @@ export function buildButlerFactory(deps: ButlerFactoryDeps): ButlerFactory {
         // under the SAME ownerDir. Benign by the notebook's argument (organizing
         // your own files touches nobody else); actions READ from a knowledge
         // file still hit their own governed gates. Low-frequency filing → the
-        // AFR directory tier below, not the per-turn face.
-        const knowledgeToolset = createKnowledgeLibraryToolset(
-          openKnowledgeLibrary({
-            dir: join(ownerDir(memoryRoot, { kind: 'user', id: userId }), 'knowledge'),
-            logger: log,
-          }),
-        )
+        // AFR directory tier below, not the per-turn face. The handle also
+        // feeds the LIB-M3 INDEX card (stableContext) below.
+        const knowledgeLibrary = openKnowledgeLibrary({
+          dir: join(ownerDir(memoryRoot, { kind: 'user', id: userId }), 'knowledge'),
+          logger: log,
+        })
+        const knowledgeToolset = createKnowledgeLibraryToolset(knowledgeLibrary)
         // A2 — per-user 上次见面 timestamp for the 时段问候/间隔 card. Lives in a
         // `presence/` sibling of the memory tree (NOT under it) so the opt-in
         // memory git snapshot (MU-M5) isn't churned by a per-turn write.
@@ -655,6 +656,10 @@ export function buildButlerFactory(deps: ButlerFactoryDeps): ButlerFactory {
               : undefined,
             () => taskNotebook.digest(),
           ),
+          // LIB-M3 — the INDEX card rides the STABLE segment (fork 1a): state,
+          // not advice, so it refreshes on resume too and caches at 0.1× while
+          // unchanged. No INDEX.md ⇒ null ⇒ byte-identical prompt.
+          stableContext: buildButlerKnowledgeIndexCard({ library: knowledgeLibrary, logger: log }),
         })
       },
     })
