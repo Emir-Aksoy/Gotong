@@ -80,3 +80,18 @@ export {
   type OpenKnowledgeLibraryOptions,
   type KnowledgeLibraryLimits,
 } from './knowledge-library.js'
+
+export {
+  knowledgeLibrarianReviewer,
+  parseLibrarianPlan,
+  isPromoted,
+  META_PROMOTED_TO,
+  LIBRARIAN_RECALL_WINDOW,
+  DEFAULT_LIBRARIAN_TRIGGER_FACTS,
+  DEFAULT_LIBRARIAN_MAX_BATCH,
+  DEFAULT_LIBRARIAN_SYSTEM,
+  type KnowledgeLibrarianOptions,
+  type KnowledgeShelver,
+  type LibrarianPlan,
+  type LibrarianPromotion,
+} from './knowledge-librarian.js'

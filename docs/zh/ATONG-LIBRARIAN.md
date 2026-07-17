@@ -1,6 +1,6 @@
 # 阿同图书馆员（LIB track）— 知识文件自治：侦察与计划
 
-> **Status: M3 索引卡已落（2026-07-17）— INDEX.md 注入稳定缓存段，≤500tk 门 + 字节不变防腐齐；下一刀 M4 图书馆员（opt-in 旋钮 114→115）**
+> **Status: M4 图书馆员已落（2026-07-17）— librarian reviewer 进 6h 维护链，opt-in `GOTONG_BUTLER_MEMORY_LIBRARIAN`（114→115，本 track 唯一新旋钮）；下一刀 capstone `examples/atong-librarian`**
 >
 > 用户定方向（2026-07-17 原话大意）：「阿同进一步进化的方向在于自主管理自己的
 > 大量知识文件，它需要自己编排层级，不要浪费上下文，同时又能管理好知识——
@@ -413,3 +413,50 @@ tripwire 扩展（factory `buildButler*Card(` 调用点 ≡ 注册表值集合,
 **验收**：personal-butler 84 全绿（+3：稳定段落位/null·throw 字节不变/
 resume 重读状态语义）/ host 2215 全绿（+10：门 9 + 报告 1）/ tsc 零错 /
 四门 PASS（旋钮 **114 零新增**,main.ts 3000/3000 零触碰）。
+
+### M4 图书馆员 ✅（2026-07-17）
+
+**交付**：纯核 `packages/personal-butler/src/knowledge-librarian.ts`
+（`knowledgeLibrarianReviewer` + `parseLibrarianPlan` + `META_PROMOTED_TO`）
++ host 组合 `personal-butler-maintenance.ts`（第五个自门控 reviewer 进
+`buildButlerMaintenanceReviewer`,M-RECON 同款姿态）+ main.ts 旋钮
+`GOTONG_BUTLER_MEMORY_LIBRARIAN`（岔口 3a 裁决 opt-in,**114→115,本 track
+唯一新旋钮**,已登记注册表）。开了它,6h 维护每 tick 把进货区**主题类**
+ad-hoc 事实「上架」进 knowledge/ 文件并重写 INDEX.md——每轮必付的冻结块
+变小,知识搬进按需付费的书架,M3 索引卡负责导航。
+
+**一次模型调用的合同（reconcile.ts 逐条对齐的纪律）**：
+
+- **自门控零浪费**：可上架候选（活跃 ad-hoc、无 `promotedTo`）< 12 → `{}`
+  零 LLM 零盘写;上架即关区间,候选集单调收敛（host 测试第二 tick 实证
+  零调用、盘上字节不漂移）。`maxBatch=40` 是**步频不是丢弃**——余量下个
+  6h tick 接着来（no silent caps）。
+- **写前退后（write-before-shelve）**：正文先落文件,写成了才动记忆——
+  崩溃留重影（文件+记忆双在）,永不留失踪。下架 = host 把 CLOSE（validTo）
+  与出处（promotedTo）折进**一次** patchMeta:没有「关了却不知去向」的
+  中间态,可逆（清 validTo 即回,`GOTONG_BUTLER_MEMORY_GIT` 是再上一层
+  undo 网,**生产开图书馆员强烈建议同开**）。
+- **fail-soft 全家**：模型坏 JSON/throw → 零操作;库层响亮拒（穿越路径/
+  超顶）→ 只跳那条,**它的事实绝不下架**;幻觉 factIds 关不掉任何东西
+  （只认递进批的 byId 查表）;纯幻觉 promotion 连文件都不写。
+- **INDEX 兜底**：模型整篇重写优先,但**动过的文件不管谁写都必须指得到**
+  （机械补指针「图书馆员整理上架」）;零上架 → INDEX 一个字节不动
+  （幻觉索引不落盘）。
+- **组合位序**：reconcile 之后（上架去重后的现行真相,不搬快要被合并的
+  草稿）、link 之前（联想图只连**留在记忆里**的,刚上架的边会悬空）。
+- **双写者硬化**：M4 起知识树有两个写者（成员轮常驻句柄 + 6h 临时句柄）,
+  M2 的 tmp 名唯一化（时戳+序号后缀）保证并发整篇写永远「后 rename 整篇
+  赢」,不可能同 tmp 交错字节;维护侧库句柄用与 factory 同一条
+  `ownerDir(root,{user,id})/knowledge` 派生,一棵树两个面。
+
+**显式推迟（等信号,不预造）**：defrag 整文件重组（爆炸半径=整篇重写,等
+真实使用信号再定节律与守门）/ prune archive（与 M2「归档不真删」立场
+冲突,需要 retention/consent 岔口用户拍板）/ SKILL.md 写端（BF-M8 起
+生产侧一直显式推迟,不借道复活）/ index-only 重写（索引变更锚定真上架,
+防幻觉;索引失联已有机械兜底盖住）。
+
+**验收**：personal-butler 98 全绿（+14：门槛/收敛过滤/主路径/重复引用/
+坏 JSON·throw/穿越拒/幻觉 id/shelve throw/INDEX 三兜底/步频/宽容解析×2）
+/ host 2218 全绿（+3：真链上架+可逆+出处/二 tick 收敛/未开字节不变）/
+tsc 零错 / 三门 PASS（**旋钮 115 全登记**,main.ts 3000/3000——knob 2 行
++构造 1 行,压 CARE-M4/BF-M8 注释 3 行净零）。

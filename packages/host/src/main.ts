@@ -1025,6 +1025,8 @@ async function main(): Promise<void> {
     ['1', 'true', 'on', 'yes'].includes((process.env.GOTONG_BUTLER_MEMORY_GIT ?? '').trim().toLowerCase())
   // M-RECON — opt-in (GOTONG_BUTLER_MEMORY_RECONCILE): the 6h sweep retires stale/contradictory ad-hoc facts via reversible bitemporal close. Off ⇒ byte-unchanged.
   const butlerMemoryReconcileOn = butlerMaintenanceOn && ['1', 'true', 'on', 'yes'].includes((process.env.GOTONG_BUTLER_MEMORY_RECONCILE ?? '').trim().toLowerCase())
+  // LIB-M4 — opt-in (GOTONG_BUTLER_MEMORY_LIBRARIAN): the 6h sweep shelves topical ad-hoc facts into knowledge/ + rewrites INDEX.md. Off ⇒ byte-unchanged.
+  const butlerMemoryLibrarianOn = butlerMaintenanceOn && ['1', 'true', 'on', 'yes'].includes((process.env.GOTONG_BUTLER_MEMORY_LIBRARIAN ?? '').trim().toLowerCase())
   // S3-M2 — proactive daily-brief sweep (opt out GOTONG_BUTLER_PROACTIVE, cadence _MS [5min,1h]); DEFAULT-OFF until `set_daily_brief`.
   const butlerProactiveEnv = (process.env.GOTONG_BUTLER_PROACTIVE ?? '').trim().toLowerCase()
   const butlerProactiveOn =
@@ -1136,16 +1138,13 @@ async function main(): Promise<void> {
   butlerProviderBuilderRef = () => localAgents.buildButlerProvider()
   // LSA-M1 — 阿同自省自己的模型链(脱敏无 key):pool 配置候选链 ⊕ routingHealth 健康叠加。
   butlerLlmRosterRef = buildButlerLlmSurface({ roster: () => localAgents.butlerLlmRoster(), health: () => routingHealth.snapshot() })
-  // CARE-M4 — the 活体校验 rides the pool's spawn-time key-resolution chain
-  // (agentId → provider/key/baseURL) + the read-only models-list GET.
+  // CARE-M4 — 活体校验 rides the pool's key-resolution chain + read-only models GET.
   butlerOnboardingKeyCheckRef = buildOnboardingKeyCheck({
     resolveTarget: (agentId) => localAgents.resolveLlmProbeTarget(agentId),
   })
 
-  // BF-M8 — arm the butler memory-maintenance sweep. Borrows the pool's provider
-  // resolution + NA-M5 model override (re-resolved each tick so a post-boot edit is
-  // picked up), walks `<space>/butler/memory/user/*` distilling episodic → curated
-  // profiles + STATUS.md. Off when butler off / `GOTONG_BUTLER_MAINTENANCE` opts out.
+  // BF-M8 — butler memory-maintenance sweep: pool provider + NA-M5 model override
+  // (both per-tick), walks user/* distilling episodic → profiles + STATUS.md.
   let butlerMaintenanceSweeper: ButlerMaintenanceSweeper | undefined
   if (butlerMaintenanceOn) {
     butlerMaintenanceSweeper = new ButlerMaintenanceSweeper({
@@ -1157,6 +1156,7 @@ async function main(): Promise<void> {
       gitSnapshot: butlerMemoryGitOn,
       links: butlerMemoryLinksOn,
       reconcile: butlerMemoryReconcileOn,
+      librarian: butlerMemoryLibrarianOn,
     })
     butlerMaintenanceSweeper.start()
   }

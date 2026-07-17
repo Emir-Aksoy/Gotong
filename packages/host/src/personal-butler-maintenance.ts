@@ -73,6 +73,7 @@ import type { Logger } from '@gotong/core'
 import { drainStream, type LlmProvider } from '@gotong/llm'
 import {
   atomicFactsReviewer,
+  closedMeta,
   composeReviewers,
   isActive,
   isClusterProfile,
@@ -85,6 +86,13 @@ import {
   type MemorySummarizer,
   type TierConfig,
 } from '@gotong/personal-memory'
+import {
+  knowledgeLibrarianReviewer,
+  META_PROMOTED_TO,
+  openKnowledgeLibrary,
+  type KnowledgeLibrary,
+} from '@gotong/personal-butler'
+import { ownerDir } from '@gotong/service-memory-file'
 import type { MemoryHandle } from '@gotong/services-sdk'
 
 import { snapshotMemoryTree, type GitRunner } from './butler-memory-git.js'
@@ -166,6 +174,15 @@ export interface ButlerMaintenanceReviewerOptions {
    * (default) ⇒ not composed ⇒ no fact is ever retired (byte-identical).
    */
   reconcile?: boolean
+  /**
+   * LIB-M4 — opt-in (GOTONG_BUTLER_MEMORY_LIBRARIAN): the member's knowledge library
+   * handle. Present ⇒ compose the librarian pass, which SHELVES topical ad-hoc facts
+   * into `knowledge/` files (append + INDEX.md rewrite) and retires each shelved fact
+   * bitemporally with a `promotedTo` provenance stamp — reversible, and the file is
+   * written BEFORE the fact is closed (crash ⇒ duplicate, never a gap). Absent
+   * (default) ⇒ not composed ⇒ knowledge/ is never written by maintenance.
+   */
+  librarian?: KnowledgeLibrary
 }
 
 /**
@@ -219,6 +236,35 @@ function butlerReconcileMaintenanceReviewer(summarize: MemorySummarizer): Memory
 }
 
 /**
+ * LIB-M4 — the shelving half of the librarian as a composable reviewer. Each tick,
+ * once the member's UNSHELVED active ad-hoc set is large enough, one model call
+ * decides which topical facts move into `knowledge/` files; the pure core writes each
+ * file FIRST, and only then retires the shelved fact via ONE patchMeta that both
+ * closes the interval (`validTo`) and stamps where it went (`promotedTo`) — no
+ * half-state where a fact is retired but untraceable. Fail-soft end to end (bad model
+ * JSON / a refused path / a failed patch each skip only their own item), and a handle
+ * without `patchMeta` SKIPS rather than aborting the distillation this same tick.
+ */
+function butlerKnowledgeLibrarianMaintenanceReviewer(
+  summarize: MemorySummarizer,
+  library: KnowledgeLibrary,
+): MemoryReviewer {
+  return async (ctx) => {
+    const raw = ctx.memory.patchMeta
+    if (!raw) return {}
+    const patchMeta = raw.bind(ctx.memory)
+    return knowledgeLibrarianReviewer({
+      library,
+      summarize,
+      shelve: (entry, path, validTo) =>
+        patchMeta(entry.id, { ...closedMeta(undefined, validTo), [META_PROMOTED_TO]: path }).then(
+          () => undefined,
+        ),
+    })(ctx)
+  }
+}
+
+/**
  * Build the per-user maintenance reviewer: `tieredReviewer` (蒸馏) wrapped by
  * `statusProjectingReviewer` (④写状态). One tick consolidates episodic into the
  * curated profile and records what it did to STATUS.md, which `/me`'s "上次维护"
@@ -252,6 +298,13 @@ export function buildButlerMaintenanceReviewer(
       // soon-to-be-closed one). Opt-in third 6h model call; off ⇒ not composed ⇒ no
       // fact is ever retired.
       ...(opts.reconcile ? [butlerReconcileMaintenanceReviewer(opts.summarize)] : []),
+      // LIB-M4 — librarian AFTER reconcile (shelve the deduped current truth, never a
+      // soon-to-be-merged duplicate) and BEFORE link (link associates what STAYS in
+      // every-turn memory; a just-shelved fact's fresh edges would dangle). Opt-in;
+      // off ⇒ not composed ⇒ no fact is ever shelved, knowledge/ never written here.
+      ...(opts.librarian
+        ? [butlerKnowledgeLibrarianMaintenanceReviewer(opts.summarize, opts.librarian)]
+        : []),
       // M-GRAPH — link LAST so it links the atomic facts THIS tick just extracted.
       // Opt-in; off ⇒ not composed ⇒ no links written (frozen block byte-stable).
       ...(opts.links ? [butlerLinkMaintenanceReviewer()] : []),
@@ -277,6 +330,8 @@ export interface RunButlerMaintenanceOnceOptions {
   links?: boolean
   /** M-RECON — opt-in: also reconcile stale/contradictory ad-hoc facts this tick (default off). */
   reconcile?: boolean
+  /** LIB-M4 — opt-in: also shelve topical ad-hoc facts into `knowledge/` this tick (default off). */
+  librarian?: boolean
 }
 
 /**
@@ -310,6 +365,18 @@ export async function runButlerMaintenanceOnce(
     ...(opts.budgetBytes !== undefined ? { budgetBytes: opts.budgetBytes } : {}),
     ...(opts.links ? { links: true } : {}),
     ...(opts.reconcile ? { reconcile: true } : {}),
+    // LIB-M4 — the librarian's library handle is opened on the SAME per-user dir the
+    // butler factory hands the agent's toolset (`ownerDir(root,{user,id})/knowledge`),
+    // so the 6h pass and the conversational tools shelve into one tree. Fresh handle
+    // per tick, mirroring how this function opens memory + STATUS.
+    ...(opts.librarian
+      ? {
+          librarian: openKnowledgeLibrary({
+            dir: join(ownerDir(opts.rootDir, { kind: 'user', id: opts.userId }), 'knowledge'),
+            logger: opts.logger,
+          }),
+        }
+      : {}),
   })
   const episodic = await memory.recall({ kinds: ['episodic'], k: opts.recallK ?? DEFAULT_RECALL_K })
   const out = await reviewer({ memory, episodic, now: now() })
@@ -366,6 +433,13 @@ export interface ButlerMaintenanceSweeperOptions {
    * reversible). Off by default; when off no fact is ever retired (byte-identical).
    */
   reconcile?: boolean
+  /**
+   * LIB-M4 — opt-in (GOTONG_BUTLER_MEMORY_LIBRARIAN): each tick also shelves topical
+   * ad-hoc facts into the member's `knowledge/` files and rewrites INDEX.md (the M3
+   * card then navigates to them). Off by default; when off no fact is ever shelved
+   * and maintenance never writes `knowledge/` (byte-identical).
+   */
+  librarian?: boolean
 }
 
 /**
@@ -394,6 +468,7 @@ export class ButlerMaintenanceSweeper {
   private readonly git?: GitRunner
   private readonly links: boolean
   private readonly reconcile: boolean
+  private readonly librarian: boolean
 
   private timer?: ReturnType<typeof setInterval>
   private running = false
@@ -414,6 +489,7 @@ export class ButlerMaintenanceSweeper {
     this.git = opts.git
     this.links = opts.links ?? false
     this.reconcile = opts.reconcile ?? false
+    this.librarian = opts.librarian ?? false
   }
 
   /** Start the interval. `.unref()` so a pending tick never keeps the process alive. */
@@ -517,6 +593,7 @@ export class ButlerMaintenanceSweeper {
       recallK: this.recallK,
       ...(this.links ? { links: true } : {}),
       ...(this.reconcile ? { reconcile: true } : {}),
+      ...(this.librarian ? { librarian: true } : {}),
     })
     // MU-M5 — snapshot the member's memory dir after distillation (opt-in,
     // best-effort: snapshotMemoryTree never throws). Whatever's on disk NOW is
