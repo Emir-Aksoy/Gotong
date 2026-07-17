@@ -400,6 +400,7 @@ interface AdaptedEdit {
 function adaptEditBodyFromProposal(
   existing: AgentRecord,
   p: AdaptApplyProposal,
+  hasStoredKey: boolean,
 ): AdaptedEdit | null {
   const m = existing.managed
   if (!m || m.kind !== 'llm') return null // only managed LLM agents can be adapted
@@ -447,8 +448,12 @@ function adaptEditBodyFromProposal(
     if (typeof p.endpointLabel === 'string' && p.endpointLabel) body.providerLabel = p.endpointLabel
     else delete body.providerLabel // an echoed label would describe the OLD endpoint
     // A local model server (e.g. Ollama) ignores the key, but openai-compatible
-    // validation requires a non-empty per-agent key — set a harmless placeholder.
-    body.apiKey = 'local'
+    // validation requires a non-empty per-agent key. Write the harmless
+    // placeholder ONLY when no stored key exists: an agent's real stored key
+    // (possibly its only copy) must never be clobbered by 'local' — it still
+    // satisfies validation, the local server ignores it, and it's intact if the
+    // operator ever switches back.
+    if (!hasStoredKey) body.apiKey = 'local'
     return shedApiKeyEnv()
   }
   if (p.kind === 'switch_provider') {
@@ -628,7 +633,11 @@ export async function handleAgentsRoute(
       sendJson(res, { ok: false, error: `unknown agent '${agentId}'` }, 404)
       return true
     }
-    const adapted = adaptEditBodyFromProposal(existing, p)
+    // Existence only (the value never crosses this layer) — an existing
+    // per-agent key must survive the apply, never be clobbered by the
+    // use_local_endpoint placeholder.
+    const hasStoredKey = (await ctx.space.getAgentApiKey(agentId).catch(() => null)) !== null
+    const adapted = adaptEditBodyFromProposal(existing, p, hasStoredKey)
     if (!adapted) {
       // Defense in depth: a proposal that survived the applicable gate but can't
       // be cleanly turned into an edit (advisory kind, non-native switch target,
@@ -641,6 +650,9 @@ export async function handleAgentsRoute(
       sendJson(res, { ok: false, error: outcome.error }, outcome.status)
       return true
     }
+    // Surface that the stored key was deliberately preserved (not replaced by
+    // the placeholder) so the operator knows it's still there to switch back to.
+    const keptStoredApiKey = p.kind === 'use_local_endpoint' && hasStoredKey
     sendJson(res, {
       ok: true,
       applied: {
@@ -650,6 +662,7 @@ export async function handleAgentsRoute(
         // rewire (wrong vendor's wallet); report the shed name so the operator
         // knows to point the new primary at its own key if needed.
         ...(adapted.droppedApiKeyEnv ? { droppedApiKeyEnv: adapted.droppedApiKeyEnv } : {}),
+        ...(keptStoredApiKey ? { keptStoredApiKey: true } : {}),
       },
       agent: publicAgent(outcome.record, ctx.hub),
     })

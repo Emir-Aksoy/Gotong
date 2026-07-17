@@ -2437,23 +2437,23 @@ async function main(): Promise<void> {
   patrolHealthRef = adminHealth
 
   // RES-M1 — read-only resource inventory for the "resource adaptation" panel.
-  // Deterministic + zero-LLM: env/vault EXISTENCE (never key values), a bounded
+  // Deterministic + zero-LLM: env/vault EXISTENCE (never key values), bounded
   // localhost model-server probe, PATH existsSync for CLI agents, installed MCP.
-  // `listVaultProviders` reuses the pool's non-decrypting provider list (absent
-  // w/o orgApiPool → vault side reports "none").
+  // `listVaultProviders` reuses the pool's non-decrypting provider list.
   const resourceInventory = createResourceInventoryService({
     env: process.env,
     ...(orgApiPool ? { listVaultProviders: () => orgApiPool!.listProviders() } : {}),
     listMcpServers: () => space.mcpServers(),
   })
 
-  // RES-M2 — adaptation proposal engine over the RES-M1 inventory. Pure: it
-  // turns "agent X has no key + Ollama is up" into a proposal to rewire X to the
-  // local endpoint, but enacts NOTHING — RES-M3 apply does, on explicit human
-  // approval. Reuses the same live inventory surface so proposals never disagree
-  // with what the resource panel shows.
+  // RES-M2 — proposal engine over the RES-M1 inventory. Pure: turns "no key +
+  // Ollama up" into a rewire proposal but enacts NOTHING (RES-M3 apply does,
+  // on explicit human approval); same live inventory surface as the panel.
   const resourceAdaptation = createResourceAdaptationService({
     inventory: () => resourceInventory.inventory(),
+    // Per-agent key probe (spawn's own chain) — inventory only sees provider-
+    // level keys; a compat agent (per-agent key by design) would read keyless.
+    resolvesKey: (id, provider) => localAgents.hasResolvableLlmKey(id, provider),
   })
   // BE-M2 — the SAME zero-LLM RES-M2 engine the admin 资源适配 panel uses now also
   // backs the resident butler's benign "体检" tool (read-only; enactable fixes go

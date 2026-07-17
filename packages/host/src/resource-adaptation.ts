@@ -39,6 +39,16 @@ const NATIVE_MANAGED_PROVIDERS = new Set(['anthropic', 'openai'])
 export interface AdaptAgentLike {
   id: string
   provider: string
+  /**
+   * Optional — true when THIS agent's own key chain already resolves (per-agent
+   * stored key / apiKeyEnv / owner vault …). The inventory only knows
+   * provider-LEVEL existence (env / vault), which an openai-compatible agent's
+   * key never shows up in (it can ONLY be per-agent) — without this bit a
+   * healthy compat agent with a stored key reads as keyless and draws rewrite
+   * proposals. Callers that can't probe omit it (undefined = fall back to the
+   * inventory-level judgment); the service fills it via its injected probe.
+   */
+  hasResolvableKey?: boolean
 }
 
 /** A template KB slot that wasn't auto-wired (name + optional referenced server). */
@@ -117,6 +127,12 @@ export type AdaptationProposal =
   | AdaptSetEnvKey
   | AdaptWireMcpServer
 
+/** Provider-LEVEL key existence per the inventory (env / vault booleans only). */
+function providerHasInventoryKey(inventory: ResourceInventory, provider: string): boolean {
+  const r = inventory.llmKeys.find((k) => k.provider === provider)
+  return !!r && (r.envSet || r.vaultConfigured)
+}
+
 /** Derive an OpenAI-compatible base URL from a probed endpoint URL (origin + /v1). */
 function suggestedBaseUrl(probeUrl: string): string {
   try {
@@ -138,10 +154,7 @@ export function proposeAdaptations(input: ProposeAdaptationsInput): AdaptationPr
 
   // provider → its key-availability row (existence booleans only, no values).
   const keyRow = new Map(inventory.llmKeys.map((r) => [r.provider, r]))
-  const hasKey = (provider: string): boolean => {
-    const r = keyRow.get(provider)
-    return !!r && (r.envSet || r.vaultConfigured)
-  }
+  const hasKey = (provider: string): boolean => providerHasInventoryKey(inventory, provider)
   // providers that DO have a key, alphabetical (llmKeys is already sorted).
   const providersWithKey = inventory.llmKeys.filter((r) => r.envSet || r.vaultConfigured)
   // reachable local endpoints, stable order by label.
@@ -153,6 +166,9 @@ export function proposeAdaptations(input: ProposeAdaptationsInput): AdaptationPr
   for (const agent of agents) {
     // `mock` needs no key; a provider that already resolves is fine — no proposal.
     if (agent.provider === 'mock') continue
+    // A per-agent key the provider-level inventory can't see (stored key /
+    // apiKeyEnv / owner vault) — the caller probed it; keyed → no proposal.
+    if (agent.hasResolvableKey === true) continue
     if (hasKey(agent.provider)) continue
 
     // Option A — point it at a running local model server (one per reachable one).
@@ -231,6 +247,15 @@ export function proposeAdaptations(input: ProposeAdaptationsInput): AdaptationPr
 /** Reuse the RES-M1 inventory surface to feed the pure engine. */
 export interface ResourceAdaptationDeps {
   inventory(): Promise<ResourceInventory>
+  /**
+   * Optional per-agent key probe — `LocalAgentPool.hasResolvableLlmKey` fits
+   * (the same duck-typed probe the web `LlmKeyProbe` rides). It answers with
+   * the SAME resolution chain spawn uses, so proposals can never disagree with
+   * whether the agent actually starts. Fail-open by contract: a probe fault
+   * reads as "has a key" — a rewrite proposal must never rest on bad data.
+   * Absent → inventory-level judgment only (previous behavior).
+   */
+  resolvesKey?(agentId: string, provider: string): Promise<boolean>
 }
 
 /** The duck-typed surface injected into `serveWeb`. */
@@ -243,7 +268,10 @@ export interface ResourceAdaptationSurface {
 
 /**
  * Build the adaptation service: fetch a fresh inventory, then run the pure
- * engine over the caller-supplied agents/KB slots. No side effects.
+ * engine over the caller-supplied agents/KB slots. No side effects. When a
+ * per-agent key probe is wired, agents the inventory reads as keyless are
+ * probed first (concurrently) so a per-agent stored key / apiKeyEnv suppresses
+ * proposals the same way a provider-level key does.
  */
 export function createResourceAdaptationService(
   deps: ResourceAdaptationDeps,
@@ -251,7 +279,21 @@ export function createResourceAdaptationService(
   return {
     async propose({ agents, kbSlots }) {
       const inventory = await deps.inventory()
-      return proposeAdaptations({ inventory, agents, ...(kbSlots ? { kbSlots } : {}) })
+      const probe = deps.resolvesKey
+      let enriched: readonly AdaptAgentLike[] = agents
+      if (probe) {
+        enriched = await Promise.all(
+          agents.map(async (a) => {
+            // Probe only agents the inventory reads as keyless — the engine
+            // skips everything else anyway, so the probe couldn't change it.
+            if (a.provider === 'mock' || a.hasResolvableKey !== undefined) return a
+            if (providerHasInventoryKey(inventory, a.provider)) return a
+            const hasResolvableKey = await probe(a.id, a.provider).catch(() => true)
+            return { ...a, hasResolvableKey }
+          }),
+        )
+      }
+      return proposeAdaptations({ inventory, agents: enriched, ...(kbSlots ? { kbSlots } : {}) })
     },
   }
 }
