@@ -241,4 +241,203 @@ describe('LocalAgentPool — buildRoutedProvider (MR-M2 model routing)', () => {
     const pool = makePool()
     expect(await pool.probeRoutingCandidates('does-not-exist')).toEqual([])
   })
+
+  // ————————————————————————————————————————————————————————————————————
+  // MR-M6 — per-candidate env-name credentials (`apiKeyEnv`). The MR-M2 chain
+  // hands ONE per-agent key to every candidate; two openai-compatible vendors
+  // with different keys therefore couldn't share a chain. `apiKeyEnv` points a
+  // spec / candidate at its OWN env var — and it is exclusive: a named-but-
+  // missing variable must mean "no key", never a silent fall-through to a
+  // different vendor's stored key.
+  // ————————————————————————————————————————————————————————————————————
+  describe('MR-M6 — apiKeyEnv per-candidate credentials', () => {
+    // Captures (model, apiKey) per factory call; throws for an
+    // openai-compatible spec without a key — the REAL factory's contract,
+    // which is exactly what turns "missing env var" into a skipped fallback.
+    let factoryCalls: Array<{ model?: string; key?: string }>
+    function makeKeyAwarePool(): LocalAgentPool {
+      factoryCalls = []
+      const orgApiPool = new OrgApiPool({ identity })
+      return new LocalAgentPool({
+        hub,
+        space,
+        services,
+        identity,
+        orgApiPool,
+        providerFactory: (spec, apiKey): LlmProvider => {
+          factoryCalls.push({ model: spec.model, ...(apiKey ? { key: apiKey } : {}) })
+          if (spec.provider === 'openai-compatible' && !apiKey) {
+            throw new Error(`${spec.model ?? spec.provider}: openai-compatible needs a key`)
+          }
+          return new MockLlmProvider({
+            chunks: [
+              { type: 'text', text: `served:${spec.model}` },
+              { type: 'end', stopReason: 'end_turn' },
+            ],
+          })
+        },
+      })
+    }
+
+    const ENV_FB = 'MRM6_TEST_FB_KEY'
+    const ENV_PRIMARY = 'MRM6_TEST_PRIMARY_KEY'
+    afterEach(() => {
+      delete process.env[ENV_FB]
+      delete process.env[ENV_PRIMARY]
+    })
+
+    it('a fallback with apiKeyEnv gets ITS OWN key while the primary keeps the per-agent key', async () => {
+      process.env[ENV_FB] = 'longcat-key'
+      await space.upsertAgent({
+        id: 'two-vendors',
+        allowedCapabilities: ['echo'],
+        createdAt: new Date().toISOString(),
+        managed: {
+          kind: 'llm',
+          provider: 'openai-compatible',
+          system: 'hi',
+          model: 'primary-model',
+          baseURL: 'https://primary.test/v1',
+          fallbacks: [
+            {
+              provider: 'openai-compatible',
+              model: 'backup-model',
+              baseURL: 'https://backup.test/v1',
+              apiKeyEnv: ENV_FB,
+            },
+          ],
+        },
+      } satisfies AgentRecord)
+      await space.setAgentApiKey('two-vendors', 'mimo-key')
+      const pool = makeKeyAwarePool()
+      await pool.start()
+
+      const res = await dispatchEcho()
+      expect(res.kind).toBe('ok')
+      expect((res.output as { text?: string }).text).toBe('served:primary-model')
+      // Primary built with the stored per-agent key; the fallback with its env
+      // key — two vendors, two credentials, one chain.
+      expect(factoryCalls).toEqual([
+        { model: 'primary-model', key: 'mimo-key' },
+        { model: 'backup-model', key: 'longcat-key' },
+      ])
+    })
+
+    it('apiKeyEnv naming a MISSING variable skips that fallback — never borrows the per-agent key', async () => {
+      await space.upsertAgent({
+        id: 'dead-fb',
+        allowedCapabilities: ['echo'],
+        createdAt: new Date().toISOString(),
+        managed: {
+          kind: 'llm',
+          provider: 'openai-compatible',
+          system: 'hi',
+          model: 'primary-model',
+          baseURL: 'https://primary.test/v1',
+          fallbacks: [
+            {
+              provider: 'openai-compatible',
+              model: 'backup-model',
+              baseURL: 'https://backup.test/v1',
+              apiKeyEnv: ENV_FB, // deliberately unset
+            },
+          ],
+        },
+      } satisfies AgentRecord)
+      await space.setAgentApiKey('dead-fb', 'mimo-key')
+      const pool = makeKeyAwarePool()
+      await pool.start()
+
+      const res = await dispatchEcho()
+      expect(res.kind).toBe('ok') // primary serves; the dead fallback never sinks the agent
+      // The fallback build was attempted WITHOUT a key (exclusive env-name
+      // semantics) and threw → skipped. Had it borrowed 'mimo-key', a real
+      // deployment would Bearer the wrong vendor and 401 at failover time.
+      expect(factoryCalls).toEqual([
+        { model: 'primary-model', key: 'mimo-key' },
+        { model: 'backup-model' },
+      ])
+    })
+
+    it('a PRIMARY apiKeyEnv is exclusive: env value wins over a stored per-agent key', async () => {
+      process.env[ENV_PRIMARY] = 'env-key'
+      await space.upsertAgent({
+        id: 'env-primary',
+        allowedCapabilities: ['echo'],
+        createdAt: new Date().toISOString(),
+        managed: {
+          kind: 'llm',
+          provider: 'openai-compatible',
+          system: 'hi',
+          model: 'primary-model',
+          baseURL: 'https://primary.test/v1',
+          apiKeyEnv: ENV_PRIMARY,
+        },
+      } satisfies AgentRecord)
+      await space.setAgentApiKey('env-primary', 'stored-key')
+      const pool = makeKeyAwarePool()
+      await pool.start()
+
+      const res = await dispatchEcho()
+      expect(res.kind).toBe('ok')
+      expect(factoryCalls).toEqual([{ model: 'primary-model', key: 'env-key' }])
+    })
+
+    it('MR-M5 probe honors apiKeyEnv per candidate (tests the key the router would use)', async () => {
+      process.env[ENV_FB] = 'longcat-key'
+      await space.upsertAgent({
+        id: 'probe-env',
+        allowedCapabilities: ['echo'],
+        createdAt: new Date().toISOString(),
+        managed: {
+          kind: 'llm',
+          provider: 'openai-compatible',
+          system: 'hi',
+          model: 'primary-model',
+          baseURL: 'https://primary.test/v1',
+          fallbacks: [
+            {
+              provider: 'openai-compatible',
+              model: 'backup-model',
+              baseURL: 'https://backup.test/v1',
+              apiKeyEnv: ENV_FB,
+            },
+          ],
+        },
+      } satisfies AgentRecord)
+      await space.setAgentApiKey('probe-env', 'mimo-key')
+      const pool = makeKeyAwarePool()
+
+      const probes = await pool.probeRoutingCandidates('probe-env')
+      expect(probes).toHaveLength(2)
+      expect(probes[0]).toMatchObject({ index: 0, ok: true })
+      expect(probes[1]).toMatchObject({ index: 1, ok: true, model: 'backup-model' })
+      expect(factoryCalls).toEqual([
+        { model: 'primary-model', key: 'mimo-key' },
+        { model: 'backup-model', key: 'longcat-key' },
+      ])
+    })
+
+    it('CARE liveness target resolves the apiKeyEnv key (probes the ACTIVE brain, not a stale slot)', async () => {
+      process.env[ENV_PRIMARY] = 'env-key'
+      await space.upsertAgent({
+        id: 'care-env',
+        allowedCapabilities: ['echo'],
+        createdAt: new Date().toISOString(),
+        managed: {
+          kind: 'llm',
+          provider: 'openai-compatible',
+          system: 'hi',
+          model: 'primary-model',
+          baseURL: 'https://primary.test/v1',
+          apiKeyEnv: ENV_PRIMARY,
+        },
+      } satisfies AgentRecord)
+      await space.setAgentApiKey('care-env', 'stale-stored-key')
+      const pool = makeKeyAwarePool()
+
+      const target = await pool.resolveLlmProbeTarget('care-env')
+      expect(target).toMatchObject({ status: 'ok', apiKey: 'env-key', baseURL: 'https://primary.test/v1' })
+    })
+  })
 })

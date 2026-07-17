@@ -149,6 +149,37 @@ web 零 host 运行时依赖)→ 面板「测试路由」按钮(**只在配了 f
 host 侧 `resolveApiKey` 解析**,绕开「测试连接」按钮「必须手打 key」的限制 —— 这正是它能
 测**已保存 agent 的备用链**的原因。
 
+### 3.4 per-candidate env 凭证(M6):补 MR-M2 显式推迟的「候选链共享一把 key」盲区
+
+**MR-M2 当时的已知边界**:整条候选链(主 + 全部 fallbacks)共享**同一把 per-agent key**
+(`space.ts` fallbacks 注释原话「候选沿用该 agent 的 provider 凭证解析链……需要 per-candidate
+凭证时再扩」)。同厂商换模型(anthropic 主 + anthropic 备)没问题;但**两个不同厂商的
+openai-compatible**(比如 LongCat 主 + MiMo 备,各自的 key)结构性配不出来 —— per-agent key
+只有一格,org pool 又按 provider 字符串一 tag 一行,`openai-compatible` 撞名。M6 就是那句
+「再扩」。
+
+**设计:`apiKeyEnv` = env 变量名,不是 key 本身**。`ManagedAgentSpec` 与 `FallbackCandidate`
+各加可选 `apiKeyEnv?: string`(存 NAME 如 `LONGCAT_API_KEY`;key 值只活在部署环境
+`gotong.env`,与 MCP `${NAME}` 占位、TAVILY/MEM0 同一凭证纪律 —— **配置文件里永不出现明文
+key**,manifest 校验器按标识符形状拒掉「长得像 key」的值,粘错当场 400 而不是落盘)。
+
+**排他语义(不回落)**:设了 `apiKeyEnv` ⇒ key **只**从 `process.env[名字]` 取;变量缺失 / 空
+= 无 key —— 主 spawn 响亮失败、候选被跳过(warn),**绝不静默回落**到存量 per-agent/org 链。
+理由:那条链里存的可能是**另一家厂商的 key**(正是 M6 要解的场景),静默借用会拿 MiMo 的 key
+打 LongCat 的端点,得到一个**撒谎的 401**(病因看起来是「key 无效」,真相是「借错了钱包」)。
+不设 = 走既有解析链,逐字节不变(opt-in 法则)。
+
+**同源探针**:`probeRoutingCandidates`(M5 测试路由)与 `resolveLlmProbeTarget`(CARE 断供
+探活)都穿过同一个 `apiKeyEnv` —— 探针必须测**路由真会用的那把 key**,否则「测试路由」按钮
+在测另一个钱包,CARE 会拿旧 key 打新端点每轮误报。一处口径:`resolveApiKey(agentId, provider,
+apiKeyEnv?)` 咽喉收口,七个调用点(spawn / 路由候选 / 两探针 / 管家 provider / key 有无判定)
+全走它。
+
+**面板生存**:admin 表单没有 apiKeyEnv 编辑器(按需再起),但 PUT 是整体替换 —— 镜像
+maintenanceModel 的 capture-echo 先例(`_editingApiKeyEnv` 捕获回显),fallback 级的随
+`_editingFallbacks` 整数组回显免费生存。**admin-only**:成员 me-routes 结构性没有这个面;
+admin 本就能配 MCP `${NAME}` 占位,不是新威胁面。
+
 ## 四、里程碑
 
 | 里程碑 | 内容 | 交付门 | 状态 |
@@ -161,7 +192,8 @@ host 侧 `resolveApiKey` 解析**,绕开「测试连接」按钮「必须手打 
 | **MR-M5a** | 共享探针核:抽 `probeProvider`(already-constructed provider 探一次)出 `llm-key-test.ts`,`testLlmKey` delegate 给它(逐字节等价,既有测试守重构);pool `probeRoutingCandidates(agentId)` 逐候选走真 spawn 链(`resolveApiKey → providerFactory → probeProvider`),mock 短路 ok 不调 factory、**刻意不喂熔断器** | host llm-key-test 31 + pool routing 单测全绿 | ✅ `cb43413` |
 | **MR-M5b** | web `POST /api/admin/agents/:id/probe-routing`(**admin 门控** + viewer-scoped,镜像 `:id/export`):鸭子 `RoutingProbeSurface` 注入(镜像 `llmKeyProbe`,web 零 host dep);opt-in 无 surface → 503、未知 → 404、外接 agent → 400、否则 200 `{agentId,candidates}`;`main.ts` 接 `routingProbe: localAgents` | web agents-route 19(+4 新)+ host tsc 全绿 | ✅ `8019254` |
 | **MR-M5c** | 面板「测试路由」按钮(**仅配了 fallbacks 的行显示**)+ 逐候选内联渲染:复用 `describeKeyTest`(与 key-test 按钮同一套人话)+ Primary/Fallback N 标签 + `N of M candidates OK` 汇总(zh+en i18n);`textContent`-only 无转义 | web 1338 全绿;真浏览器(mock host 零 key)3/3 绿 · 无 fallback 无按钮 · 死端点 1/2 红 round-trip | ✅ `e0aaa0f` |
-| **MR-M5d** | 文档 M5 节(被动 vs 主动健康三层对照)+ CLAUDE.md 账本 + 四门收口 | 四门 PASS | ✅ 本 commit |
+| **MR-M5d** | 文档 M5 节(被动 vs 主动健康三层对照)+ CLAUDE.md 账本 + 四门收口 | 四门 PASS | ✅ `b5d4d96` 前后 |
+| **MR-M6** | per-candidate env 凭证(§3.4):`ManagedAgentSpec.apiKeyEnv` + `FallbackCandidate.apiKeyEnv`(env **名**非 key 值);`resolveApiKey` 咽喉排他语义(设了只认 env,缺失=无 key 响亮失败,绝不借存量链);七调用点含 M5 探针 / CARE 探活同源;manifest/agents-routes 校验(标识符形状拒 key 样值)+ admin 表单 capture-echo 生存;**首个真实用例 = 生产 LongCat 主(env key)+ MiMo 兜底(存量 per-agent key 零迁移)** | host routing 11(+5:双厂商 key 分离 / 死候选跳过不借 key / 主 env 排他 / 探针同源 / CARE 目标 env key)+ web manifest 107(+7)/agents-route 28(+5)全绿;未设 = 字节不变;四门 PASS 旋钮 115 零新增 | ✅ 本 commit |
 
 ## 五、市场对照(先查市面 · 2026-07)
 

@@ -633,6 +633,119 @@ agent: { id: w, capabilities: [x], provider: mock, system: hi, ${bad} }
   })
 })
 
+// MR-M6 — `apiKeyEnv:` names an env VAR whose value is the credential for that
+// spec / candidate. The manifest carries the NAME only, never the key itself —
+// the validator's shape rule (identifier chars) is what makes pasting a real
+// key here fail loudly instead of being committed to disk.
+describe('parseManifest — apiKeyEnv: (MR-M6 per-candidate env credentials)', () => {
+  it('parses and trims apiKeyEnv on the primary and on a fallback candidate', () => {
+    const yaml = `
+schema: gotong.agent/v1
+agent:
+  id: w
+  capabilities: [x]
+  provider: openai-compatible
+  baseURL: https://api.longcat.chat/openai/v1
+  system: hi
+  apiKeyEnv: '  LONGCAT_API_KEY  '
+  fallbacks:
+    - provider: openai-compatible
+      baseURL: https://token-plan-cn.xiaomimimo.com/v1
+      model: mimo-v2.5-pro
+      apiKeyEnv: MIMO_API_KEY
+`
+    const m = parseManifest(yaml)
+    expect(m.agents[0]!.managed.apiKeyEnv).toBe('LONGCAT_API_KEY')
+    expect(m.agents[0]!.managed.fallbacks![0]!.apiKeyEnv).toBe('MIMO_API_KEY')
+  })
+
+  it('an agent without apiKeyEnv parses cleanly and reports undefined at both levels', () => {
+    const yaml = `
+schema: gotong.agent/v1
+agent:
+  id: w
+  capabilities: [x]
+  provider: mock
+  system: hi
+  fallbacks:
+    - provider: openai
+`
+    const m = parseManifest(yaml)
+    expect(m.agents[0]!.managed.apiKeyEnv).toBeUndefined()
+    expect(m.agents[0]!.managed.fallbacks![0]!.apiKeyEnv).toBeUndefined()
+  })
+
+  it('rejects a key-shaped value (not an identifier) — the manifest must never hold the key itself', () => {
+    for (const bad of ['sk-longcat-abc123', 'has space', '9STARTS_WITH_DIGIT']) {
+      const yaml = `
+schema: gotong.agent/v1
+agent: { id: w, capabilities: [x], provider: mock, system: hi, apiKeyEnv: '${bad}' }
+`
+      expect(() => parseManifest(yaml)).toThrow(/apiKeyEnv must be an env var NAME/)
+    }
+  })
+
+  it('rejects an empty or non-string apiKeyEnv', () => {
+    for (const bad of ["apiKeyEnv: ''", 'apiKeyEnv: 42']) {
+      const yaml = `
+schema: gotong.agent/v1
+agent: { id: w, capabilities: [x], provider: mock, system: hi, ${bad} }
+`
+      expect(() => parseManifest(yaml)).toThrow(/apiKeyEnv must be a non-empty string/)
+    }
+  })
+
+  it('rejects a bad apiKeyEnv on a fallback candidate with the indexed path', () => {
+    const yaml = `
+schema: gotong.agent/v1
+agent:
+  id: w
+  capabilities: [x]
+  provider: mock
+  system: hi
+  fallbacks:
+    - provider: openai
+      apiKeyEnv: 'sk-not-a-name'
+`
+    expect(() => parseManifest(yaml)).toThrow(/fallbacks\[0\]\.apiKeyEnv must be an env var NAME/)
+  })
+
+  it('renderAgentManifest round-trips apiKeyEnv at both levels', () => {
+    const rec = {
+      id: 'router',
+      allowedCapabilities: ['x'],
+      managed: {
+        kind: 'llm' as const,
+        provider: 'openai-compatible' as const,
+        baseURL: 'https://api.longcat.chat/openai/v1',
+        system: 'be brief',
+        apiKeyEnv: 'LONGCAT_API_KEY',
+        fallbacks: [
+          {
+            provider: 'openai-compatible' as const,
+            baseURL: 'https://token-plan-cn.xiaomimimo.com/v1',
+            model: 'mimo-v2.5-pro',
+            apiKeyEnv: 'MIMO_API_KEY',
+          },
+        ],
+      },
+    }
+    const rendered = renderAgentManifest(rec)
+    const parsed = parseManifest(JSON.stringify(rendered))
+    expect(parsed.agents[0]!.managed.apiKeyEnv).toBe('LONGCAT_API_KEY')
+    expect(parsed.agents[0]!.managed.fallbacks).toEqual(rec.managed.fallbacks)
+  })
+
+  it('renderAgentManifest omits apiKeyEnv entirely when not declared', () => {
+    const rendered = renderAgentManifest({
+      id: 'plain',
+      allowedCapabilities: ['x'],
+      managed: { kind: 'llm', provider: 'mock', system: 'hi' },
+    })
+    expect((rendered.agent as Record<string, unknown>).apiKeyEnv).toBeUndefined()
+  })
+})
+
 // v0.3+ — agent manifests can declare third-party MCP servers under
 // `mcpServers:`. The parser validates shape (name regex, type
 // constraints) at import time; the actual spawn happens later in

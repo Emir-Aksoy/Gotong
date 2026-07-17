@@ -1055,8 +1055,9 @@ export interface AgentRecord {
  * 它的 API key 走和主 provider **完全相同**的解析链(per-agent → workspace →
  * org pool → owner vault → env),按本候选的 `provider` 解析;key 绝不进本文件。
  *
- * 已知边界(MR-M2 显式推迟):两个不同的 `openai-compatible` vendor 若都只靠
- * per-agent key,会共用同一把 —— 需要 per-candidate 凭证时再扩。
+ * MR-M6 —— 上面那条链有个已知盲区(MR-M2 当时显式推迟):两个不同的
+ * `openai-compatible` vendor 都走 per-agent key 时会共用同一把。`apiKeyEnv`
+ * 就是那个「再扩」:给本候选点名一个 **env 变量名**,key 只从它取。
  */
 export interface FallbackCandidate {
   provider: 'anthropic' | 'openai' | 'openai-compatible' | 'mock'
@@ -1066,6 +1067,13 @@ export interface FallbackCandidate {
   baseURL?: string
   /** 可选的可读标签,呈现在路由事件 / 健康面。 */
   providerLabel?: string
+  /**
+   * MR-M6 —— 可选的 **env 变量名**(不是 key 本身;值永不进本文件)。设了,
+   * 本候选的 key **只**从 `process.env[apiKeyEnv]` 取:变量缺失 = 无 key =
+   * 本候选被跳过(warn),绝不静默回落到 per-agent/org 链拿一把错 vendor 的
+   * key。未设 = 既有解析链,逐字节不变。
+   */
+  apiKeyEnv?: string
 }
 
 /**
@@ -1139,6 +1147,17 @@ export interface ManagedAgentSpec {
    * omitted. Ignored for other provider strings.
    */
   providerLabel?: string
+  /**
+   * MR-M6 — optional **env var NAME** the primary's API key comes from
+   * (the value itself never lives in this file — same discipline as the
+   * provider doc above). Set ⇒ the key is read from
+   * `process.env[apiKeyEnv]` ONLY: a missing/empty variable means "no
+   * key" and spawn fails loudly (today's rule), never a silent fall-back
+   * to the stored per-agent/org chain — that chain may hold a DIFFERENT
+   * vendor's key (see {@link FallbackCandidate.apiKeyEnv}). Unset ⇒ the
+   * existing resolution chain, byte-identical.
+   */
+  apiKeyEnv?: string
   /**
    * MR-M2 — 可选的**有序降级候选**。给了(≥1)host 就把主 provider + 这些候选
    * 包进一个确定性 RoutingProvider:主 provider 在**吐出第一个 token 之前**失败

@@ -268,6 +268,98 @@ describe('agents-route: maintenanceModel (NA-M5 maintenance model override)', ()
   })
 })
 
+describe('agents-route: apiKeyEnv (MR-M6 per-candidate env credentials)', () => {
+  let b: Boot
+  beforeEach(async () => { b = await boot() })
+  afterEach(async () => { await teardown(b) })
+
+  it('POST persists apiKeyEnv on the primary and on a fallback; GET echoes both', async () => {
+    const chain = [
+      {
+        provider: 'openai-compatible',
+        baseURL: 'https://token-plan-cn.xiaomimimo.com/v1',
+        model: 'mimo-v2.5-pro',
+        apiKeyEnv: 'MIMO_API_KEY',
+      },
+    ]
+    const res = await fetch(`${b.baseUrl}/api/admin/agents`, {
+      method: 'POST',
+      headers: auth(b.token),
+      body: JSON.stringify({ ...base, id: 'env-keyed', apiKeyEnv: 'LONGCAT_API_KEY', fallbacks: chain }),
+    })
+    expect(res.status).toBe(200)
+    const body = await res.json()
+    expect(body.agent.managed.apiKeyEnv).toBe('LONGCAT_API_KEY')
+    expect(body.agent.managed.fallbacks).toEqual(chain)
+    const rec = (await b.space.agents()).find((a) => a.id === 'env-keyed')
+    expect(rec?.managed.apiKeyEnv).toBe('LONGCAT_API_KEY')
+    expect(rec?.managed.fallbacks).toEqual(chain)
+    // GET list exposes it (publicAgent returns the whole managed spec).
+    const list = await fetch(`${b.baseUrl}/api/admin/agents`, { headers: auth(b.token) })
+    const { agents } = await list.json()
+    expect(agents.find((a: { id: string }) => a.id === 'env-keyed').managed.apiKeyEnv).toBe('LONGCAT_API_KEY')
+  })
+
+  it('omitting apiKeyEnv leaves it undefined (opt-in byte-stable)', async () => {
+    const res = await fetch(`${b.baseUrl}/api/admin/agents`, {
+      method: 'POST',
+      headers: auth(b.token),
+      body: JSON.stringify({ ...base, id: 'no-env' }),
+    })
+    expect(res.status).toBe(200)
+    expect((await b.space.agents()).find((a) => a.id === 'no-env')?.managed.apiKeyEnv).toBeUndefined()
+  })
+
+  it('a key-shaped apiKeyEnv → 400, nothing persisted (never the key itself)', async () => {
+    for (const bad of ['sk-longcat-abc123', 'has space', '', 42]) {
+      const res = await fetch(`${b.baseUrl}/api/admin/agents`, {
+        method: 'POST',
+        headers: auth(b.token),
+        body: JSON.stringify({ ...base, id: 'bad-env', apiKeyEnv: bad }),
+      })
+      expect(res.status).toBe(400)
+    }
+    expect((await b.space.agents()).some((a) => a.id === 'bad-env')).toBe(false)
+  })
+
+  it('a bad apiKeyEnv inside fallbacks → 400, nothing persisted', async () => {
+    const res = await fetch(`${b.baseUrl}/api/admin/agents`, {
+      method: 'POST',
+      headers: auth(b.token),
+      body: JSON.stringify({
+        ...base,
+        id: 'bad-fb-env',
+        fallbacks: [{ provider: 'openai', apiKeyEnv: 'sk-not-a-name' }],
+      }),
+    })
+    expect(res.status).toBe(400)
+    expect((await b.space.agents()).some((a) => a.id === 'bad-fb-env')).toBe(false)
+  })
+
+  it('PUT echoing the value keeps it; omitting it drops it (wholesale replace)', async () => {
+    await fetch(`${b.baseUrl}/api/admin/agents`, {
+      method: 'POST',
+      headers: auth(b.token),
+      body: JSON.stringify({ ...base, id: 'env-edit', apiKeyEnv: 'LONGCAT_API_KEY' }),
+    })
+    const keep = await fetch(`${b.baseUrl}/api/admin/agents/env-edit`, {
+      method: 'PUT',
+      headers: auth(b.token),
+      body: JSON.stringify({ ...base, id: 'env-edit', apiKeyEnv: 'LONGCAT_API_KEY' }),
+    })
+    expect(keep.status).toBe(200)
+    expect((await b.space.agents()).find((a) => a.id === 'env-edit')?.managed.apiKeyEnv).toBe('LONGCAT_API_KEY')
+    // Omission drops — the admin form's capture-echo (managed-agents.js) defends this.
+    const drop = await fetch(`${b.baseUrl}/api/admin/agents/env-edit`, {
+      method: 'PUT',
+      headers: auth(b.token),
+      body: JSON.stringify({ ...base, id: 'env-edit' }),
+    })
+    expect(drop.status).toBe(200)
+    expect((await b.space.agents()).find((a) => a.id === 'env-edit')?.managed.apiKeyEnv).toBeUndefined()
+  })
+})
+
 describe('agents-route: probe-routing (MR-M5)', () => {
   // This route needs an injected `routingProbe` surface, so it boots its own
   // server per case (the shared `boot()` wires none). Pins the web-layer

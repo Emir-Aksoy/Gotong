@@ -380,6 +380,11 @@ export function createManagedAgents({ ma, openBundleImportModal }) {
     ma._editingMaintenanceModel = (mode === 'edit' && typeof agent?.managed?.maintenanceModel === 'string')
       ? agent.managed.maintenanceModel
       : null
+    // MR-M6 — same capture/echo for the primary's env-name credential pointer
+    // (fallback-level apiKeyEnv already survives via the whole-array echo above).
+    ma._editingApiKeyEnv = (mode === 'edit' && typeof agent?.managed?.apiKeyEnv === 'string')
+      ? agent.managed.apiKeyEnv
+      : null
     // ease-of-use ②TC — always open on the form, never a stale quick-chat
     // panel left over from a prior create (closeAgentForm also resets, but be
     // defensive so the entry point is self-sufficient).
@@ -598,6 +603,12 @@ export function createManagedAgents({ ma, openBundleImportModal }) {
     // `managed` wholesale, so omitting it here would silently drop the opt-in.
     if (typeof ma._editingMaintenanceModel === 'string' && ma._editingMaintenanceModel) {
       body.maintenanceModel = ma._editingMaintenanceModel
+    }
+    // MR-M6 — echo the captured primary env-name credential pointer; dropping
+    // it on a panel edit would silently flip the agent back to the stored-key
+    // chain (possibly a different vendor's key).
+    if (typeof ma._editingApiKeyEnv === 'string' && ma._editingApiKeyEnv) {
+      body.apiKeyEnv = ma._editingApiKeyEnv
     }
     // v5 D-M4 — heartbeat. Checked → persist { enabled, intervalMs (from the
     // minutes input), checklist? }. Unchecked → omit so a PUT (which replaces

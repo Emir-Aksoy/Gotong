@@ -436,6 +436,10 @@ function validateAgent(a: Record<string, unknown>, path: string): ParsedAgent {
   if (a.fallbacks !== undefined) {
     managed.fallbacks = validateFallbacksArray(a.fallbacks, `${path}.fallbacks`)
   }
+  // Optional `apiKeyEnv:` — MR-M6 env-name credential for the PRIMARY.
+  if (a.apiKeyEnv !== undefined) {
+    managed.apiKeyEnv = validateApiKeyEnv(a.apiKeyEnv, `${path}.apiKeyEnv`)
+  }
   // Optional `maintenanceModel:` — NA-M5 opt-in cheaper model for the butler's
   // 6h memory-maintenance pass. Host-side seam reads it per tick.
   if (a.maintenanceModel !== undefined) {
@@ -710,6 +714,26 @@ export function validateMaintenanceModel(raw: unknown, path: string): string {
 }
 
 /**
+ * Validate an optional `apiKeyEnv:` (MR-M6 — per-spec / per-candidate env var
+ * NAME the API key is read from; the key VALUE never travels through this
+ * layer). Shape-gated so a pasted key can't masquerade as a name: env-var
+ * identifier charset only, hard length cap. Shared by the manifest importer
+ * and the admin POST/PUT path — one validator, no drift.
+ */
+export function validateApiKeyEnv(raw: unknown, path: string): string {
+  if (typeof raw !== 'string' || raw.trim().length === 0) {
+    throw new ManifestError(`${path} must be a non-empty string when present`)
+  }
+  const name = raw.trim()
+  if (name.length > 128 || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) {
+    throw new ManifestError(
+      `${path} must be an env var NAME (letters/digits/underscore, ≤128 chars) — never the key itself`,
+    )
+  }
+  return name
+}
+
+/**
  * Validate an optional `fallbacks:` array (MR-M2 — deterministic model
  * routing / failover). Shape-only, plugin-agnostic; the RoutingProvider
  * that consumes these is wired at spawn time in `LocalAgentPool`.
@@ -776,6 +800,11 @@ export function validateFallbacksArray(raw: unknown, path: string): FallbackCand
         throw new ManifestError(`${ep}.providerLabel must be a non-empty string when present`)
       }
       cand.providerLabel = e.providerLabel
+    }
+    if (e.apiKeyEnv !== undefined) {
+      // MR-M6 — per-candidate env-name credential (two openai-compatible
+      // vendors no longer have to share the per-agent key).
+      cand.apiKeyEnv = validateApiKeyEnv(e.apiKeyEnv, `${ep}.apiKeyEnv`)
     }
     out.push(cand)
   }
@@ -886,8 +915,14 @@ export function renderAgentManifest(rec: {
       if (fb.model !== undefined) out.model = fb.model
       if (fb.baseURL !== undefined) out.baseURL = fb.baseURL
       if (fb.providerLabel !== undefined) out.providerLabel = fb.providerLabel
+      if (fb.apiKeyEnv !== undefined) out.apiKeyEnv = fb.apiKeyEnv
       return out
     })
+  }
+  if (rec.managed.apiKeyEnv) {
+    // MR-M6 — echo so export → re-import preserves the env-name credential
+    // pointer (a NAME, never a key — safe to round-trip through yaml).
+    agent.apiKeyEnv = rec.managed.apiKeyEnv
   }
   if (rec.managed.maintenanceModel) {
     // NA-M5 — echo so export → re-import preserves the maintenance override.

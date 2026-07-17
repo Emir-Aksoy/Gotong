@@ -844,7 +844,7 @@ export class LocalAgentPool implements ManagedAgentLifecycle {
     // doesn't actually have.
     const { ctx, owner } = await this.attachServicesIfDeclared(record)
 
-    const resolution = await this.resolveApiKey(record.id, record.managed.provider)
+    const resolution = await this.resolveApiKey(record.id, record.managed.provider, record.managed.apiKeyEnv)
     const apiKey = resolution?.apiKey
     // MR-M2 — routes through RoutingProvider when the row declares `fallbacks`;
     // otherwise byte-identical to `providerFactory(record.managed, apiKey, …)`.
@@ -1365,8 +1365,18 @@ export class LocalAgentPool implements ManagedAgentLifecycle {
   private async resolveApiKey(
     agentId: ParticipantId,
     provider: ManagedAgentSpec['provider'],
+    apiKeyEnv?: string,
   ): Promise<LlmApiKeyResolution | undefined> {
     if (provider === 'mock') return undefined
+    // MR-M6 — an explicit env NAME is exclusive: the spec author pointed at
+    // one variable, so a missing value must surface as "no key" (loud at
+    // spawn, skip for a fallback), never a silent fall-through to the stored
+    // chain — that chain may hold a DIFFERENT vendor's key and the resulting
+    // 401 would lie about its cause.
+    if (apiKeyEnv) {
+      const v = process.env[apiKeyEnv]?.trim()
+      return v ? { apiKey: v, source: { kind: 'env' } } : undefined
+    }
     const perAgent = await this.space.getAgentApiKey(agentId).catch(() => null)
     // openai-compatible: skip workspace + env sources outright (vendor
     // ambiguity), but org-pool may still hold a vendor-specific row.
@@ -1438,7 +1448,7 @@ export class LocalAgentPool implements ManagedAgentLifecycle {
     for (const fb of spec.fallbacks) {
       let key: string | undefined
       try {
-        key = (await this.resolveApiKey(agentId, fb.provider))?.apiKey
+        key = (await this.resolveApiKey(agentId, fb.provider, fb.apiKeyEnv))?.apiKey
       } catch {
         key = undefined // a key source threw (vault locked, …) → treat as no key
       }
@@ -1530,6 +1540,9 @@ export class LocalAgentPool implements ManagedAgentLifecycle {
         ...(fb.model !== undefined ? { model: fb.model } : {}),
         ...(fb.baseURL !== undefined ? { baseURL: fb.baseURL } : {}),
         ...(fb.providerLabel !== undefined ? { providerLabel: fb.providerLabel } : {}),
+        // MR-M6 — the probe must test the SAME key the router would use, or
+        // the "测试路由" button lies about a per-candidate-env chain.
+        ...(fb.apiKeyEnv !== undefined ? { apiKeyEnv: fb.apiKeyEnv } : {}),
       }
       probes.push(await this.probeOneCandidate(agentId, fbSpec, i + 1, routingLabel(fbSpec)))
     }
@@ -1550,7 +1563,7 @@ export class LocalAgentPool implements ManagedAgentLifecycle {
     }
     let key: string | undefined
     try {
-      key = (await this.resolveApiKey(agentId, spec.provider))?.apiKey
+      key = (await this.resolveApiKey(agentId, spec.provider, spec.apiKeyEnv))?.apiKey
     } catch {
       key = undefined // a key source threw (vault locked, …) → treat as no key
     }
@@ -1585,9 +1598,13 @@ export class LocalAgentPool implements ManagedAgentLifecycle {
   async hasResolvableLlmKey(agentId: ParticipantId, provider: string): Promise<boolean> {
     if (provider === 'mock') return true
     try {
+      // MR-M6 — honor the row's declared env NAME, else this advisory would
+      // nag about a key the spawn chain resolves fine (or vice versa).
+      const rows = await this.space.agents().catch(() => null)
+      const apiKeyEnv = rows?.find((r) => r.id === agentId)?.managed?.apiKeyEnv
       // `provider` arrives as a plain string from the web LlmKeyProbe; the
       // resolution chain only understands the known union, so narrow here.
-      return !!(await this.resolveApiKey(agentId, provider as ManagedAgentSpec['provider']))
+      return !!(await this.resolveApiKey(agentId, provider as ManagedAgentSpec['provider'], apiKeyEnv))
     } catch {
       return true
     }
@@ -1620,7 +1637,7 @@ export class LocalAgentPool implements ManagedAgentLifecycle {
     if (!row?.managed) return null
     let resolution: LlmApiKeyResolution | undefined
     try {
-      resolution = await this.resolveApiKey(row.id, row.managed.provider)
+      resolution = await this.resolveApiKey(row.id, row.managed.provider, row.managed.apiKeyEnv)
     } catch {
       return null // a key source threw (e.g. vault locked) — skip this tick
     }
@@ -1778,7 +1795,10 @@ export class LocalAgentPool implements ManagedAgentLifecycle {
     if (provider === 'mock') return { status: 'mock', agentId: row.id }
     let resolution: LlmApiKeyResolution | undefined
     try {
-      resolution = await this.resolveApiKey(row.id, provider)
+      // MR-M6 — the liveness check must test the key the ACTIVE brain uses;
+      // ignoring a declared env NAME would probe a different vendor's key
+      // against this baseURL and cry wolf every sweep.
+      resolution = await this.resolveApiKey(row.id, provider, row.managed.apiKeyEnv)
     } catch {
       resolution = undefined
     }

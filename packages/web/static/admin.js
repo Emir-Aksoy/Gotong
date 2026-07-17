@@ -1026,6 +1026,7 @@
       });
       ma._editingFallbacks = mode === "edit" && Array.isArray(agent?.managed?.fallbacks) ? agent.managed.fallbacks : null;
       ma._editingMaintenanceModel = mode === "edit" && typeof agent?.managed?.maintenanceModel === "string" ? agent.managed.maintenanceModel : null;
+      ma._editingApiKeyEnv = mode === "edit" && typeof agent?.managed?.apiKeyEnv === "string" ? agent.managed.apiKeyEnv : null;
       if (dom.maForm) dom.maForm.hidden = false;
       if (dom.maQuickchat) dom.maQuickchat.hidden = true;
       ma._quickChatAgentId = null;
@@ -1194,6 +1195,9 @@
       }
       if (typeof ma._editingMaintenanceModel === "string" && ma._editingMaintenanceModel) {
         body.maintenanceModel = ma._editingMaintenanceModel;
+      }
+      if (typeof ma._editingApiKeyEnv === "string" && ma._editingApiKeyEnv) {
+        body.apiKeyEnv = ma._editingApiKeyEnv;
       }
       if (dom.maHeartbeatEnabled?.checked) {
         const minutes = Math.max(1, Math.round(Number(dom.maHeartbeatInterval?.value.trim()) || 30));
