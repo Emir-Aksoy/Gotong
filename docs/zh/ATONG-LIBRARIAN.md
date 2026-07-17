@@ -1,0 +1,289 @@
+# 阿同图书馆员（LIB track）— 知识文件自治：侦察与计划
+
+> **Status: M0 计划（2026-07-17）— 侦察已完，里程碑等用户拍板**
+>
+> 用户定方向（2026-07-17 原话大意）：「阿同进一步进化的方向在于自主管理自己的
+> 大量知识文件，它需要自己编排层级，不要浪费上下文，同时又能管理好知识——
+> 包括我的状态、它的状态、它在做的事情、它手上的工具、它的知识。」
+>
+> 本文是 LIB track 的 M0：两路源码侦察（file:line 举证）+ 生产形状一手核实 +
+> 市面对标 → 五域盘点 → 真缺口 → 设计 → 边界 → 里程碑阶梯 → 岔口。
+> 实现里程碑在用户拍板岔口后开工。
+
+---
+
+## 一、一句话答案
+
+五域里四域已有器官（探针尾卡 + `my_status` + 任务笔记本 + 两层工具面），
+**真缺口集中在第五域「它的知识」**：阿同今天对自己的记忆只有**条目级**
+自主权（`remember`/`forget` 五工具），**文件级为零**——不能创建知识文档、
+不能编排层级、不能维护自己的索引。市面前沿（Letta 2026 的 MemFS/Context
+Repositories + memory defragmentation）恰好收敛到「agent 自管文件树 +
+维护期碎片整理」这个形状，而我们的地基（file-first、per-member ownerDir、
+git 快照、6h 维护窗、两层工具面、≤500tk 策展卡先例）**全部已在**。
+LIB track = 给阿同补上「图书馆员」器官：自著知识文件 + 自维护索引卡 +
+维护期自主整理，全程守住治理边界（知识 ≠ 授权、热路径零 LLM、缓存前缀稳定）。
+
+---
+
+## 二、侦察记录（2026-07-17，两路子代理 + 生产一手 + 市面）
+
+### 2.1 生产形状（真机 ssh 核实）
+
+生产阿同（腾讯云，单成员）的记忆树今天只有 **4 个文件 / 64K / 单层深度**
+（`<space>/butler/memory/user/<userId>/` 下）。「大量知识文件」还没发生——
+**这是坏消息也是好消息**：坏在 track 的动机不是「抢救溢出」，好在**现在正是
+定层级规则的最佳时机**（文件少，层级怎么定都不疼；等几百个文件再定就要带
+迁移了）。本 track 的定位是**为规模化提前建器官**，不是救火。
+
+### 2.2 记忆/知识存储侧（侦察路 A，均有 file:line）
+
+磁盘布局（每成员命名空间 `<rootDir>/user/<userId>/`，`ownerDir` +
+`assertSafeOwnerId` 挡穿越，`service-memory-file/src/paths.ts:44-47`）：
+
+```
+<space>/butler/
+├─ memory/user/<userId>/
+│  ├─ episodic.jsonl            ← 轮末自动捕获（capture.ts:55-63，上限 2000 字）
+│  ├─ semantic.jsonl            ← 单文件多态：临时事实/分级 digest/簇画像/原子事实/
+│  │                              技能 procedure/umbrella/links 图/双时态,全靠 meta 分型
+│  ├─ tasks.json                ← 任务笔记本（TN，「在做的事」域）
+│  ├─ recall-index.json         ← 倒排索引持久缓存
+│  ├─ STATUS.md                 ← 6h 维护状态快照（投影，可重建）
+│  ├─ DREAMS.md / SKILL.md      ← 复盘日记/技能索引投影——写端只在 example！
+│  └─ .git/                     ← opt-in 快照仓（GOTONG_BUTLER_MEMORY_GIT）
+├─ presence/user/<userId>/…     ← 刻意放记忆树外：每轮写不 churn git 快照
+├─ prefs/user/<userId>/…        ←（factory.ts:281-286 同理）
+└─ patrol-state.json            ← hub 巡检牌面
+```
+
+关键一手事实：
+
+1. **写者矩阵清晰、单点扩展缝已备**：生产 6h 维护链
+   `buildButlerMaintenanceReviewer`（`personal-butler-maintenance.ts:228-260`）
+   只组 tiered → atomicFacts → [opt]reconcile → [opt]links 四个 reviewer，
+   `composeReviewers` 逐个 best-effort。**要加后台「图书馆员」pass，往这条链
+   加一个自门控 reviewer 即可，内核零改动。**
+2. **条目级自主权满格、文件级为零**：`MemoryToolset` 五工具
+   `remember`/`remember_procedure`/`refine_procedure`/`recall`/`forget`
+   （`toolset.ts:121-125`）是一等公民；grep 全工具清单**没有任何**
+   读/写/移动/重组**文件**的工具——STATUS/SKILL/DREAMS/recall-index 这些
+   派生文件没有任何 agent 工具能碰。
+3. **「agent 自著文档」管道半通**：SKILL.md 投影机制 + /me 隐私视图读取端
+   已在生产（`butler-memory-service.ts:164-175`），但
+   `skillFileReviewer`/`dreamingReviewer`/`procedureAuthoringReviewer` 的写端
+   **只在 `examples/personal-butler` 里实跑过**（`maintenance.ts:41-46` 模块头
+   明说故意缺席）。→ 新 track 不发明范式，接通半截管道。
+4. **新文件工具的安全边界有现成模板**：任务笔记本的缝
+   （host 侧 `ownerDir` 定位 + 断言安全 → 叶子模块只收绝对路径、纯
+   fs + tmp+rename + 坏文件隔离改名 + 上限响亮拒绝，
+   `factory.ts:275-278` / `task-notebook.ts:96-99,163-176`）照抄即可。
+5. **上限/防护全套先例**：预算兜底 `enforceBudget` 8MiB/成员 keep-value 驱逐
+   （`maintenance.ts:102-114`）；笔记本各字段显式上限**响亮拒绝不静默截断**；
+   git 快照每成员独立仓、仅变更才 commit、best-effort 永不抛
+   （`butler-memory-git.ts:109-150`）。
+
+### 2.3 每轮上下文构成侧（侦察路 B，均有 file:line）
+
+system 三层拼装（NA-M3 已把稳定/易变分家）：
+
+```
+on-wire system = [冻结记忆块][persona 人设]      ← req.system,稳定段,挂 cache_control
+               + [探针尾卡×8]                    ← req.systemVolatile,永不挂缓存标
+```
+
+- 冻结块前置缝 `personal-memory/agent.ts:270-277`；探针尾缝
+  `personal-butler/agent.ts:185-191`；anthropic 缓存断点
+  `llm-anthropic/provider.ts:404-431`（稳定切片挂标，volatile 尾作不挂标第二块）。
+- **冻结块每条消息重召回**（`frozenRefreshPerTask:true`，`factory.ts:605`）但
+  渲染字节稳定（`frozen-block.ts:9-24` 纯序契约）——记忆没变 ⇒ 字节不变 ⇒
+  缓存照常命中。**「重算 ≠ 变更」是缓存经济学的关键。**
+- 探针 8 张（`factory.ts:619-642` 聚合）：时钟（永不 null）/A2 时段间隔/A3 语言
+  /A4 渠道/A1 待批/SEN-M1 hub 红灯/开箱陪跑/任务笔记本 digest；
+  **全 null ⇒ systemVolatile 不设 ⇒ 字节不变**（既有先例，新常驻卡必须沿用）。
+- **工具面**：AFR 两层化后一等 30 工具 ≈4,947tk（16 benign + 7 governed +
+  5 memory + 2 门；文档 prose 最新钉的是 M4 时 29 工具 ~4,769tk，M7 加
+  `pack_backup` 后的 30/4947 未回写文档，本文顺手采信账本测试现值）+
+  目录层 14 工具按需取。
+- **度量缺口坐实**：仓库里**没有任何「每轮 prompt 段级 token 构成」度量**——
+  两件既有度量件都只量工具 schema；NA track 显式推迟过此项
+  （`NA-NATIVE-ADAPTATION.md:240`「每轮输入 token 构成打点面板」）。
+  好消息：`estimateTokens` 尺（`butler-toolface-report.ts:68-81`）是纯函数，
+  喂 persona/冻结块/探针段即得构成——**零成本可造，M1 接手无冲突**。
+- **知识按需取的成熟模板**：`gotong_guide` 9 张策展卡（AFR-M4）——单工具 +
+  目录页 + **每卡 ≤500tk 承重门**（`butler-guide.test.ts:57`，与 M1 同尺）+
+  「知识≠授权」红线页脚。新 track 的「阿同自己的知识按需取」镜像它。
+- **IM 路径没有多轮上下文窗**：每条 IM 消息是独立任务（`im-bridge.ts:442-444`
+  不带 history），跨消息连续性全靠冻结块重召回——**阿同的「常驻自我」本来就
+  活在 system 段里**，这正是索引卡该去的地方。
+
+### 2.4 市面对标（2026-07-17 WebSearch）
+
+- **Letta（前 MemGPT）2026 已把这条路走通**：MemFS/Context Repositories 把
+  agent 记忆投影成 **git 版本化 markdown 文件树**，agent 靠工具**自己编辑
+  自己的记忆**；2026 新出 **memory defragmentation**——先备份记忆文件系统，
+  再派子代理重组文件（拆大文件、并重复项、整理成 **15–25 个聚焦文件**的
+  干净层级）。（letta.com/blog/context-repositories、docs.letta.com）
+- 我们与 Letta 的差异化不在文件机制（我们 file-first + git 快照早就有），在
+  **治理边界**：知识 ≠ 授权（读到「该发邮件」仍要过 governed 闸）、热路径
+  零 LLM（整理只在阿同自己的轮或 6h 窗）、缓存前缀稳定（Letta 不背 Anthropic
+  缓存经济账）、per-member ownerDir 隔离（家庭 hub 多成员天然分库）。
+- MU-M0（2026-07-08）的市面扫描结论「骨架已赌对：file-first + 双时态 +
+  睡眠期整理 = 前沿收敛方向」在本轮复核后**继续成立且被 Letta 加强**。
+
+---
+
+## 三、五域盘点：四域有器官，一域是真缺口
+
+| 用户五域 | 今天的器官（file:line） | 缺口判定 |
+|---|---|---|
+| **我的状态**（用户） | 记忆树自动捕获+原子事实+冻结块 top-100（`session.ts:91,103`）；presence/prefs sibling；A1 待批卡 | 器官在，但「哪些事实值得常驻」由 importance 排序说了算，阿同无策展权 → **并入知识域解** |
+| **它的状态**（阿同） | SEN-M3 `my_status` 六块一卡（按需）+ STATUS.md 6h 快照 | ✅ 已覆盖 |
+| **在做的事** | TN 任务笔记本 tasks.json + digest 复述卡（≤5 行） | ✅ 已覆盖 |
+| **手上工具** | AFR 两层工具面（30 一等 + 14 目录）+ 度量 + tripwire | ✅ 已覆盖 |
+| **它的知识** | semantic.jsonl 条目（事实/技能/digest）+ SKILL.md（写端 example-only）+ gotong_guide（框架静态卡） | ❌ **真缺口**：无文件级自主权、无自编排层级、无自维护索引 |
+
+真缺口六条（全部有 §二 的源码举证）：
+
+1. 文件级自主权为零（条目工具五个，文件工具零个）。
+2. 层级是代码定的（importance 排序 + 簇 digest），不是阿同编排的。
+3. 「自著文档」管道半通（SKILL.md 写端 example-only，生产没接）。
+4. 每轮 prompt 段级度量不存在（NA 显式推迟，无人接手）。
+5. 常驻知识的唯一通道（冻结块）不受阿同策展（top-100 importance，
+   阿同不能说「这 5 条必须常驻、那 20 条归档到文件按需读」）。
+6. 知识规模化后没有「先看目录再深读」的分层读法（recall 是扁平检索；
+   gotong_guide 有目录形状但只装框架静态卡）。
+
+---
+
+## 四、设计：图书馆双层模型
+
+核心比喻：**semantic.jsonl 是进货区，`knowledge/` 是上架区，阿同是图书馆员。**
+
+```
+对话轮（热路径,阿同自己的 LLM 轮）
+  │ 自动捕获 → episodic.jsonl（不变,MU 既有）
+  │ 6h 蒸馏 → semantic.jsonl 条目（不变,MU 既有:tiered/atomic/recon/links）
+  │
+  │ 【新】阿同轮内文件工具（benign,ownerDir 内）:
+  │    list / read / write / archive 知识文件 + 维护 INDEX.md
+  ▼
+<rootDir>/user/<userId>/knowledge/
+  ├─ INDEX.md                    ← 阿同自著的总索引（一行一指针,硬顶 ≤500tk）
+  ├─ user/…​.md  self/…​.md  …    ← 层级由阿同自己编排,框架不预设目录学
+  └─ archive/…                   ← 归档区（不真删,维护期 prune,git 兜底）
+
+6h 维护窗（既有 LLM 窗口,maintenanceModel 可用低价模型）
+  【新】librarian reviewer（opt-in）:
+    promote（jsonl 成熟条目上架成文件）/ defrag（拆大并重,Letta 同型）/
+    重写 INDEX.md / 顺手接通 SKILL.md 生产写端 / prune archive
+```
+
+四个设计要点：
+
+1. **索引卡 = 阿同的「知道自己知道什么」**。INDEX.md 由阿同自著自维护
+   （框架只给缝：读文件→注入 prompt + 硬顶承重门；内容一个字不生成——
+   框架生成的目录已有 STATUS/SKILL 投影，**自著才是本 track 的主旨**）。
+   注入位置见岔口 1；无文件 = null = 字节不变（探针先例）。
+2. **文件工具镜像任务笔记本边界**：host 用 `ownerDir` 定位 + 断言安全，
+   叶子纯 fs + tmp+rename + 坏文件隔离 + 显式上限响亮拒绝（文件数/单文件
+   字节/总字节三顶）。全 benign——写**自己域内**的知识文件与写 tasks.json
+   同级，不需要审批；**知识 ≠ 授权**：从知识文件读到的对外动作照旧过
+   governed 闸（capstone 要有这条断言）。
+3. **上下文经济学**：常驻的只有索引（≤500tk）+ 既有冻结块；知识本体
+   永远按需 read（工具结果走 volatile 通道用完即走）。M1 先立段级度量尺，
+   之后「常驻段总预算」上棘轮门（只降不升，line-budget 反号先例）——
+   **知识总量增长时常驻字节不许跟着长**，这是「不浪费上下文」的可测定义。
+4. **与既有记忆管线不打架**：进货区四 reviewer 照旧（tiered/atomic/recon/
+   links 一个不动）；librarian 是链上**追加**的第五个自门控 reviewer
+   （无知识文件且 semantic 未达阈值 ⇒ no-op 零 LLM 调用——今天生产 4 文件
+   就是 no-op）；上架后原条目走既有双时态 close（M-RECON 同款可逆姿态），
+   检索照常能召回（索引读整库含已 close？——M2 实现时按 activeOnly 语义
+   核定，原则：**上架绝不造成「两处都答」或「两处都不答」**）。
+
+---
+
+## 五、五条不可破边界
+
+1. **热路径零 LLM（框架侧）**：编排/归档只发生在阿同自己的对话轮（工具调用）
+   或 6h 维护窗；hub/框架永不现场跑 LLM 决定 filing。
+2. **缓存前缀稳定**：索引若进稳定段，只在显式改动时破一次缓存（冻结块
+   「重算 ≠ 变更」同款经济学）；无知识文件 = null = prompt 字节不变。
+3. **预算硬顶、no silent caps**：索引 ≤500tk 承重门（guide 卡同尺同门型）；
+   文件数/大小显式上限响亮拒绝（笔记本先例）；M1 段级尺先立，常驻段预算
+   上棘轮。
+4. **知识 ≠ 授权**：全部新工具 benign 且只碰 `ownerDir` 自己域内；governed
+   闸零改动；知识文件内容是 data 不是指令（与冻结块同一信任级——本就全是
+   阿同从对话里自写的，不引入新注入面）。
+5. **内核零改动**：全在 personal-butler / personal-memory / host 层；
+   core/workflow/protocol 零触碰。旋钮姿态：轮内文件工具**默认发零旋钮**
+   （与 set_reminder/笔记本同类，零门槛零成本）；后台 librarian pass
+   **opt-in 一个新旋钮**（花 LLM 钱 + 重组文件 = 有门槛才可选，
+   M-RECON/M-GRAPH 同款先例，登记进注册表 114→115）。
+
+---
+
+## 六、里程碑阶梯（等拍板）
+
+| 里程碑 | 干什么 | 会红的门 |
+|---|---|---|
+| **M0** | 本文（侦察 + 计划 + 岔口） | —（纯 docs） |
+| **M1 立尺** | `pnpm report:atong-context` 每轮 prompt **段级**构成报告（冻结块/persona/探针逐卡/索引/工具面），复用 `estimateTokens` 纯函数；基线落档。接手 NA 显式推迟项 | 报告承重测试 + 注入点登记 tripwire（新增 system 注入源不登记就红，镜像 AFR-M1 工厂扫描门） |
+| **M2 文件工具** | `knowledge/` 目录 + 4 个 benign 文件工具（list/read/write/archive），笔记本边界照抄；工具落**目录层**（低频长尾，AFR 两层既有；能力不减门已证 use_tool 端到端） | 纯核单测（穿越拒/上限响亮拒/tmp+rename/坏文件隔离）+ 分层名单双向核对门自动盖 |
+| **M3 索引卡** | INDEX.md 注入缝（岔口 1 定位置）+ ≤500tk 承重门 + 无文件字节不变防腐 + 工具描述内嵌 filing 纪律（描述指路先例） | 索引承重门（guide 同型）+ 字节不变防腐测试 |
+| **M4 图书馆员** | librarian reviewer 进维护链（`maintenance.ts:228-260` 单点）：promote/defrag/重写索引/接通 SKILL.md 生产写端/prune archive；自门控阈值；opt-in 旋钮；**强烈建议同时开 `GOTONG_BUTLER_MEMORY_GIT`**（重组的 undo 网） | reviewer 单测（no-op 门槛/上架双时态可逆/投影重建）+ 未开旋钮字节不变 |
+| **capstone** | `examples/atong-librarian` 确定性 demo：百文件知识树 + 小索引，失忆 agent 每轮只靠索引导航深读答题；四断言：①索引导航答对 ②常驻段字节不随知识总量长（M1 尺量）③归档不丢 ④**知识文件里「读到」的对外动作仍 park**（知识≠授权活证） | `pnpm demo:atong-librarian` exit 0 |
+
+M5 以后按需：/me 知识页只读视图（骑 butler-memory-service 既有隐私视图形状）、
+索引进 IM `/help` 面包屑——不预造。
+
+---
+
+## 七、岔口（请用户拍板）
+
+**岔口 1：索引卡常驻在哪一段？**
+
+| 选项 | 代价 | 收益 |
+|---|---|---|
+| **(a) 稳定缓存段**（persona 之后，冻结块同段）— **推荐** | 阿同改索引那一轮破一次缓存（之后重新命中，0.1× 读价） | 每轮都「知道自己知道什么」，且缓存摊薄后近乎免费；「重算≠变更」既有经济学直接适用 |
+| (b) volatile 探针尾 | 永不进缓存，每轮全价付 ~500tk | 实现最简（骑 composeContextProbes 缝） |
+| (c) 纯按需（目录层工具） | 零常驻成本 | 但阿同「不知道自己知道」，索引名存实亡——与 track 主旨相悖 |
+
+**岔口 2：知识库与既有记忆树的关系？**
+
+| 选项 | 判定 |
+|---|---|
+| **(b) 双层：jsonl 进货区（自动）+ knowledge/ 上架区（策展），维护期 promote** — **推荐** | 与四个既有 reviewer 零打架，各自权威；Letta 单库模型的活我们用双时态 close 承接，可逆 |
+| (a) 单库：阿同直接重组 semantic.jsonl 条目 | 撞既有 reviewer 管线假设（tiered 按簇、budget 按字节都预设条目形状），风险大收益小 |
+| (c) 文件树全盘替换 jsonl | 破坏性重写 MU 全 track，不推荐不展开 |
+
+**岔口 3：后台 librarian pass 的开关姿态？**
+
+| 选项 | 判定 |
+|---|---|
+| **(a) opt-in 新旋钮（114→115，登记）** — **推荐** | 花 LLM 钱 + 自动重组文件 = 有门槛才可选（用户既定法则；M-RECON/M-GRAPH 同款）；轮内文件工具仍默认发 |
+| (b) 默认发（骑 6h 链自门控） | 阈值门控下今天生产是 no-op，但「后台自动改我文件」默认开违反最小惊讶 |
+
+---
+
+## 八、显式不做（钉进文档防漂移）
+
+1. **跨成员/跨 hub 知识共享**——per-member `ownerDir` 隔离是承重墙（家庭
+   hub 的隐私底线），知识库永远每成员一座。
+2. **外部向量库/云知识库当主存**——file-first 北极星；外部记忆已有 MU-M4
+   Mem0 opt-in 侧面，不升主。
+3. **框架热路径 LLM 自动归档**——边界①；「智能」在阿同的轮里和维护窗里。
+4. **开放阿同改写 gotong_guide 框架卡**——框架知识是代码出货的策展物
+   （防漂移防注入），阿同的知识与框架的知识**分库**：guide 卡讲框架，
+   knowledge/ 讲这个家。
+5. **重写既有记忆管线**——MU 四 reviewer 一个不动，librarian 只追加。
+6. **INDEX.md 由框架代笔**——投影类文件（STATUS/SKILL）已有先例，代笔的
+   目录不缺；**自著**才是「自己编排层级」的字面落点，框架只给缝和顶。
+
+---
+
+## 九、验收纪律（沿用全仓惯例）
+
+每刀：包测试全绿 + host tsc 零错 + `pnpm check:guards` 四门 PASS（旋钮
+预算见岔口 3 裁决；main.ts ≤3000 靠压注释净零）+ 新 builder 过 AFR 注册
+三件套（分层名单/tripwire/防腐门）+ 文档 ✅ 块 + commit 显式列文件。
