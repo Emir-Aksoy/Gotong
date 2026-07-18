@@ -256,6 +256,7 @@ import { HostButlerMemoryService } from './butler-memory-service.js'
 import { buildButlerBackupOps } from './personal-butler-backup.js'
 import { buildButlerFactory } from './personal-butler-factory.js'
 import { butlerEmbedderFromEnv } from './butler-embedder.js'
+import { butlerVoiceFromEnv } from './butler-voice.js'
 import {
   buildOnboardingKeyCheck,
   type ButlerOnboardingKeyCheck,
@@ -947,15 +948,15 @@ async function main(): Promise<void> {
   // M-EMB1 — opt-in real embedder for 阿同 recall (unset ⇒ local default, byte-identical).
   const butlerEmbedder = butlerEmbedderFromEnv()
   if (butlerEmbedder) log.info(butlerEmbedder.disclosure, { dataLeavesBox: butlerEmbedder.dataLeavesBox })
+  // VOICE-M3 — opt-in TTS 语音回复(GOTONG_BUTLER_VOICE_URL/_KEY/_MODEL/_VOICE 全设才开;未配 ⇒ 字节不变)。
+  const butlerVoice = butlerVoiceFromEnv()
+  if (butlerVoice) log.info(butlerVoice.disclosure, { dataLeavesBox: butlerVoice.dataLeavesBox })
   // M-GRAPH — opt-in graph mode (GOTONG_BUTLER_MEMORY_LINKS): 6h sweep writes meta.links + recall expands one hop. Off ⇒ byte-identical.
   const butlerMemoryLinksOn =
     butlerDefaultOn &&
     ['1', 'true', 'on', 'yes'].includes((process.env.GOTONG_BUTLER_MEMORY_LINKS ?? '').trim().toLowerCase())
-  // BF-M7 — governed set (create/edit/delete a member's own agent + edit their workflow),
-  // each APPROVAL-GATED to /me. Executors are the SAME HostMeAgentService /
-  // MeWorkflowEditService the /me steward uses (butler can't exceed hand-RBAC + WFEDIT
-  // cross-hub lock). Forward-declared `let`s read lazily at butler-build; absent refs
-  // (no identity / no workflowAssist) ⇒ pure-memory.
+  // BF-M7 — governed set(建/改/删自己的 agent+改工作流),逐项 park 到 /me;执行器=
+  // /me steward 同一 HostMeAgentService/MeWorkflowEditService(闸不越面);refs lazy 读,缺 ⇒ 纯记忆。
   const butlerGovernedEnv = (process.env.GOTONG_BUTLER_GOVERNED ?? '').trim().toLowerCase()
   const butlerGovernedOn = !['0', 'false', 'off', 'no'].includes(butlerGovernedEnv)
   let butlerGovernedAgentsRef: StewardAgentDirectory | undefined
@@ -1056,9 +1057,8 @@ async function main(): Promise<void> {
         peerCreatedTimes: () => identityForBackup.listPeers().map((p) => p.createdAt),
       })
     : undefined
-  // Per-user butler assembly lives in personal-butler-factory.ts (fourth
-  // GUARD line-budget extraction). The getter bag reads the forward-declared
-  // refs at butler-build time — the same late-binding the inline closure had.
+  // Per-user butler assembly lives in personal-butler-factory.ts (GUARD
+  // extraction); refs() reads the forward-declared refs at butler-build time.
   const butlerFactory: ButlerFactory = buildButlerFactory({
     hub,
     logger: log,
@@ -1087,6 +1087,7 @@ async function main(): Promise<void> {
       providerBuilder: butlerProviderBuilderRef,
       memoryView: butlerMemoryViewRef,
       pendingInbox: butlerPendingInboxRef,
+      memberPush: butlerPushRef, // DUO-M2 escalate result push-back (lazy IM ref)
     }),
     // CARE-M4 — 开箱陪跑: zero-LLM 现状卡 injection at the free-chat entry +
     // the read-only key 活体校验. Health rides the SAME lazy adminHealth ref
@@ -2498,8 +2499,7 @@ async function main(): Promise<void> {
     ...(identity ? { audit: identity } : {}),
   })
 
-  // setting-ops M5 — IM bridges start HERE (deferred) so the IM `/setting`
-  // console reuses the SAME live `adminHealth` as web;装配块外迁 im-bridge-wiring.ts。
+  // setting-ops M5 — IM bridges start HERE (deferred): IM `/setting` 复用与 web 同一个 live adminHealth;装配块外迁 im-bridge-wiring.ts。
   if (identity) {
     imBridges = await armImBridgeWiring({
       hub,
@@ -2508,12 +2508,12 @@ async function main(): Promise<void> {
       spaceRoot: space.root,
       health: adminHealth,
       defaultLang: config.defaultLang,
+      // VOICE-M3 — opt-in 语音回复;未配 undefined = 发送逐字节不变。
+      ...(butlerVoice ? { voice: butlerVoice } : {}),
       // IMA-M2 — /inbox /approve /deny:读走 InboxStore、写走 HostInboxService(既有权威)。
       ...(inboxStore && inboxService ? { approvals: { store: inboxStore, inbox: inboxService } } : {}),
-      // CARE-M5 — 主动恢复探活的探针,复用 onboarding key check 的只读活体
-      // (models-list GET,零 token)解析链;lazy 读 ref(此刻已赋值,但 lazy
-      // 也兜住未就绪 = 视作没通,无害)。status==='ok' 才算大脑真的回来了
-      // (mock/no_key/no_agent/fail 都不是真 provider 恢复)。
+      // CARE-M5 — 恢复探活骑 onboarding key check 只读活体链(models-list GET),
+      // lazy 读 ref 兜未就绪;status==='ok' 才算真恢复(mock/no_key/fail 都不算)。
       probeLiveness: async () => {
         const keyCheck = butlerOnboardingKeyCheckRef
         if (!keyCheck) return false

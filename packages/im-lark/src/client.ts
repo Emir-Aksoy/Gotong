@@ -26,6 +26,7 @@
 import type {
   LarkAccessTokenResponse,
   LarkApiErrorBody,
+  LarkUploadFileResponse,
 } from './types.js'
 
 export interface LarkClientOptions {
@@ -104,6 +105,16 @@ export interface LarkCallOptions {
   noAuth?: boolean
 }
 
+/** Input for the multipart `im/v1/files` upload (VOICE-M2). */
+export interface LarkUploadFileInput {
+  /** Lark file type — voice clips MUST be `'opus'` (the platform refuses to play anything else). */
+  fileType: 'opus' | 'mp4' | 'pdf' | 'doc' | 'xls' | 'ppt' | 'stream'
+  fileName: string
+  /** Clip duration in milliseconds — becomes the voice bubble's label. */
+  durationMs?: number
+  bytes: Buffer | Uint8Array
+}
+
 export interface LarkClient {
   /**
    * Call an Open Platform endpoint. `path` should start with
@@ -119,6 +130,12 @@ export interface LarkClient {
     path: string,
     options?: LarkCallOptions,
   ): Promise<T>
+  /**
+   * Upload a file (`POST /open-apis/im/v1/files`, multipart) and resolve
+   * with the `file_key` for a subsequent message send. Same error
+   * unification as `call`. Needs the `im:resource` permission.
+   */
+  uploadFile(input: LarkUploadFileInput): Promise<string>
   /**
    * Drop the cached tenant_access_token so the next call re-fetches.
    * Bridge invokes this on token-expired errors mid-stream.
@@ -272,6 +289,60 @@ export function createLarkClient(opts: LarkClientOptions): LarkClient {
         })
       }
       return parsed as T
+    },
+
+    async uploadFile(input: LarkUploadFileInput): Promise<string> {
+      const path = '/open-apis/im/v1/files'
+      const url = `${baseUrl}${path}`
+      const token = await getToken()
+      const form = new FormData()
+      form.append('file_type', input.fileType)
+      form.append('file_name', input.fileName)
+      if (input.durationMs !== undefined) {
+        form.append('duration', String(Math.max(0, Math.round(input.durationMs))))
+      }
+      // Copy into a plain Uint8Array so Blob never aliases a live Buffer pool slice.
+      form.append('file', new Blob([Uint8Array.from(input.bytes)]), input.fileName)
+      const ctrl = new AbortController()
+      const timer = setTimeout(() => ctrl.abort(), defaultTimeoutMs)
+      let res: Response
+      try {
+        // NO content-type header — fetch derives the multipart boundary itself.
+        res = await fetchImpl(url, {
+          method: 'POST',
+          headers: { authorization: `Bearer ${token}` },
+          body: form,
+          signal: ctrl.signal,
+        })
+      } finally {
+        clearTimeout(timer)
+      }
+      let parsed: LarkUploadFileResponse | null = null
+      try {
+        parsed = (await res.json()) as LarkUploadFileResponse
+      } catch {
+        // Body wasn't JSON.
+      }
+      if (!res.ok || (parsed && parsed.code !== 0)) {
+        throw new LarkApiError({
+          method: 'POST',
+          path,
+          status: res.status,
+          code: parsed?.code ?? null,
+          msg: parsed?.msg ?? null,
+        })
+      }
+      const fileKey = parsed?.data?.file_key
+      if (typeof fileKey !== 'string' || fileKey.length === 0) {
+        throw new LarkApiError({
+          method: 'POST',
+          path,
+          status: res.status,
+          code: parsed?.code ?? null,
+          msg: 'upload succeeded but response carried no file_key',
+        })
+      }
+      return fileKey
     },
 
     invalidateToken(): void {

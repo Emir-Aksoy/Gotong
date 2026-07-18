@@ -10,12 +10,14 @@ export {
   type LarkLongConnection,
   defaultLarkConnectionFactory,
 } from './bridge.js'
+export { opusDurationMs } from './audio.js'
 export {
   createLarkClient,
   LarkApiError,
   type LarkCallOptions,
   type LarkClient,
   type LarkClientOptions,
+  type LarkUploadFileInput,
 } from './client.js'
 export {
   larkContentToText,
@@ -44,5 +46,6 @@ export type {
   LarkSendMessageResponse,
   LarkStickerContent,
   LarkTextContent,
+  LarkUploadFileResponse,
   LarkUserIds,
 } from './types.js'

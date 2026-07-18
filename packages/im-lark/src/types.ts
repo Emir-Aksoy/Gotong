@@ -181,6 +181,17 @@ export interface LarkSendMessageResponse {
 }
 
 // ---------------------------------------------------------------------------
+// Outbound file upload (POST /open-apis/im/v1/files) — VOICE-M2
+// ---------------------------------------------------------------------------
+
+/** Response of the multipart file upload; `file_key` feeds `msg_type` sends. */
+export interface LarkUploadFileResponse {
+  code: number
+  msg: string
+  data?: { file_key?: string }
+}
+
+// ---------------------------------------------------------------------------
 // Standard error envelope
 // ---------------------------------------------------------------------------
 

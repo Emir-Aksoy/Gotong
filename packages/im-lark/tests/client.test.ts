@@ -257,4 +257,68 @@ describe('createLarkClient', () => {
     })
     await expect(c.call('POST', '/open-apis/im/v1/messages', { body: {} })).rejects.toThrow()
   })
+
+  // -------- uploadFile (VOICE-M2, multipart im/v1/files) --------
+
+  it('uploadFile POSTs multipart with file_type/file_name/duration + Bearer, returns file_key', async () => {
+    const fetchImpl = mockFetch([
+      okToken(),
+      { status: 200, body: { code: 0, msg: 'ok', data: { file_key: 'fk_voice_1' } } },
+    ])
+    const c = createLarkClient({ appId: 'cli_x', appSecret: 's', fetchImpl })
+    const bytes = Buffer.from('opus-bytes')
+    const fileKey = await c.uploadFile({
+      fileType: 'opus',
+      fileName: 'voice.opus',
+      durationMs: 3210.6,
+      bytes,
+    })
+    expect(fileKey).toBe('fk_voice_1')
+    const [url, init] = fetchImpl.calls[1]!
+    expect(url).toContain('/open-apis/im/v1/files')
+    expect((init.headers as Record<string, string>).authorization).toBe('Bearer tok_abc')
+    // The body is a real FormData with the Lark field names; the boundary
+    // header is left to fetch (NO manual content-type).
+    const form = init.body as FormData
+    expect(form.get('file_type')).toBe('opus')
+    expect(form.get('file_name')).toBe('voice.opus')
+    expect(form.get('duration')).toBe('3211') // rounded to whole ms
+    const file = form.get('file') as Blob
+    expect(file).toBeInstanceOf(Blob)
+    expect(file.size).toBe(bytes.length)
+    expect((init.headers as Record<string, string>)['content-type']).toBeUndefined()
+  })
+
+  it('uploadFile omits duration when not given', async () => {
+    const fetchImpl = mockFetch([
+      okToken(),
+      { status: 200, body: { code: 0, msg: 'ok', data: { file_key: 'fk' } } },
+    ])
+    const c = createLarkClient({ appId: 'cli_x', appSecret: 's', fetchImpl })
+    await c.uploadFile({ fileType: 'stream', fileName: 'a.bin', bytes: Buffer.from('x') })
+    const form = fetchImpl.calls[1]![1].body as FormData
+    expect(form.get('duration')).toBeNull()
+  })
+
+  it('uploadFile unifies code != 0 into LarkApiError', async () => {
+    const fetchImpl = mockFetch([
+      okToken(),
+      { status: 200, body: { code: 234001, msg: 'no im:resource permission' } },
+    ])
+    const c = createLarkClient({ appId: 'cli_x', appSecret: 's', fetchImpl })
+    await expect(
+      c.uploadFile({ fileType: 'opus', fileName: 'v.opus', bytes: Buffer.from('x') }),
+    ).rejects.toThrow(LarkApiError)
+  })
+
+  it('uploadFile treats a success body with no file_key as a loud error', async () => {
+    const fetchImpl = mockFetch([
+      okToken(),
+      { status: 200, body: { code: 0, msg: 'ok', data: {} } },
+    ])
+    const c = createLarkClient({ appId: 'cli_x', appSecret: 's', fetchImpl })
+    await expect(
+      c.uploadFile({ fileType: 'opus', fileName: 'v.opus', bytes: Buffer.from('x') }),
+    ).rejects.toThrow(/no file_key/)
+  })
 })

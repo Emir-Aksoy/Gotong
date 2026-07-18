@@ -55,6 +55,23 @@ export interface ImBridgeWiringDeps {
    * 其余分支字节不变。风险裁决在写入方与 resolve 权威点,这里只是装配。
    */
   approvals?: ImApprovalServiceOptions
+  /**
+   * VOICE-M3 — opt-in TTS 语音回复(main.ts 构造 `butlerVoiceFromEnv()`)。
+   * 给了它,自由文本的 OK 回复附带 opus 语音条(飞书腿播放,其余桥退文本);
+   * 缺省 → 发送逐字节不变。
+   */
+  voice?: ImBridgeVoiceSynth
+}
+
+/** 窄鸭子:只要 synthesize 一面(butler-voice 的 ButlerVoice 天然满足)。 */
+export interface ImBridgeVoiceSynth {
+  synthesize(
+    text: string,
+  ): Promise<
+    | { kind: 'clip'; bytes: Buffer }
+    | { kind: 'skipped'; reason: string }
+    | { kind: 'failed'; reason: string }
+  >
 }
 
 /** 装配并启动 IM 桥(语义=当年 main.ts 内联块 + CARE-M2 断供接线)。 */
@@ -81,6 +98,8 @@ export async function armImBridgeWiring(deps: ImBridgeWiringDeps): Promise<ImBri
     reachableDir: join(deps.spaceRoot, 'butler', 'reachable'),
     // IMA-M2 — /inbox /approve /deny 的审批面(有 inbox 才有)。
     ...(deps.approvals ? { approvals: new ImApprovalService(deps.approvals) } : {}),
+    // VOICE-M3 — opt-in 语音回复;未配 undefined = 发送逐字节不变。
+    ...(deps.voice ? { voice: deps.voice } : {}),
     // CARE-M8 — 投递失败入盘、成员可达时重投的每成员 outbox。给了它,
     // reachable push 的失败不再只是一行日志(短暂失联的成员不漏播报/提醒)。
     outboxDir: join(deps.spaceRoot, 'butler', 'outbox'),

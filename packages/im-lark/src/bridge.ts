@@ -36,7 +36,9 @@
  *     are only delivered to an HTTPS callback. Plain-text chat — the
  *     bridge's whole job — is fully covered. A hub that needs card
  *     buttons would run a webhook side-channel; out of scope here.
- *   - Outbound attachments / images. `sendMessage` with attachments
+ *   - Outbound attachments other than ONE opus voice clip. An `audio`
+ *     attachment carrying ogg/opus bytes is uploaded (`im/v1/files`)
+ *     and sent as `msg_type: 'audio'` (VOICE-M2); anything else
  *     surfaces via `onError` and sends text only — same decision as
  *     Telegram / Matrix.
  *   - Card / interactive messages on the reply side. Bot replies use
@@ -62,6 +64,7 @@ import type {
   ImUser,
 } from '@gotong/im-adapter'
 
+import { opusDurationMs } from './audio.js'
 import {
   createLarkClient,
   type LarkClient,
@@ -247,12 +250,20 @@ export class LarkBridge implements ImBridge {
     text: string,
     options?: { attachments?: ImAttachment[]; chatId?: string },
   ): Promise<void> {
-    if (options?.attachments && options.attachments.length > 0) {
+    const attachments = options?.attachments ?? []
+    // VOICE-M2: ONE audio attachment with bytes = a voice rendering of
+    // `text`. Upload + send it as a voice bubble INSTEAD of the text
+    // (sending both would duplicate the same content). Any failure on
+    // the voice leg falls back to the text path — voice is an
+    // enhancement, never a dependency.
+    const voice = attachments.find((a) => a.kind === 'audio' && a.bytes && a.bytes.length > 0)
+    const unsupported = attachments.filter((a) => a !== voice)
+    if (unsupported.length > 0) {
       // Mirror the Telegram / Matrix decision: don't silently drop;
       // surface via onError so operators know. Text still goes out.
       this.onError(
         new Error(
-          'LarkBridge.sendMessage: outbound attachments not yet supported; sending text only',
+          'LarkBridge.sendMessage: only one opus voice attachment is supported; sending text only',
         ),
       )
     }
@@ -265,6 +276,39 @@ export class LarkBridge implements ImBridge {
       )
     }
     const receiveIdType = pickLarkReceiveIdType(receiveId)
+    if (voice) {
+      try {
+        const durationMs = opusDurationMs(voice.bytes!)
+        if (durationMs === null) {
+          throw new Error('audio attachment is not an ogg/opus clip — Lark voice plays only opus')
+        }
+        const fileKey = await this.client.uploadFile({
+          fileType: 'opus',
+          fileName: voice.filename ?? 'voice.opus',
+          durationMs,
+          bytes: voice.bytes!,
+        })
+        await this.client.call<LarkSendMessageResponse>(
+          'POST',
+          '/open-apis/im/v1/messages',
+          {
+            query: { receive_id_type: receiveIdType },
+            body: {
+              receive_id: receiveId,
+              msg_type: 'audio',
+              content: JSON.stringify({ file_key: fileKey }),
+            },
+          },
+        )
+        return
+      } catch (err) {
+        this.onError(
+          new Error(
+            `LarkBridge.sendMessage: voice leg failed, falling back to text — ${err instanceof Error ? err.message : String(err)}`,
+          ),
+        )
+      }
+    }
     await this.client.call<LarkSendMessageResponse>(
       'POST',
       '/open-apis/im/v1/messages',

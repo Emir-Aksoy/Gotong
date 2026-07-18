@@ -40,6 +40,7 @@ import { IdentityError, type IdentityStore } from '@gotong/identity'
 import {
   parseImCommand,
   type ClaimResult,
+  type ImAttachment,
   type ImBindingResolver,
   type ImBridge,
   type ImMessage,
@@ -54,6 +55,7 @@ import { WebSocket as NodeWebSocket } from 'ws'
 
 import { ButlerOutbox } from './butler-outbox.js'
 import { ButlerReachableRegistry, type ButlerPushResult } from './butler-reachable.js'
+import type { ButlerVoice } from './butler-voice.js'
 import { translateLlmFailureKind, type FailureLang, type LlmFailureTranslation } from './failure-translator.js'
 import {
   LlmOutageTracker,
@@ -232,6 +234,8 @@ export interface HostImConfig {
    * 由 tracker 的状态文件承担,重启不重播)。absent → 所有分支字节不变。
    */
   llmOutage?: HostImLlmOutageConfig
+  /** VOICE-M3 — 见 StartImBridgesOptions.voice。absent → 发送逐字节不变。 */
+  voice?: Pick<ButlerVoice, 'synthesize'>
 }
 
 /** CARE-M2 — 断供滤镜的注入面(host 装配;测试给 tmp 文件 + spy)。 */
@@ -452,7 +456,10 @@ export async function handleImMessage(
       if (config.llmOutage && (await handleLlmOutageOnFreeText(bridge, msg, config, config.llmOutage, result))) {
         return
       }
-      await reply(bridge, msg, summariseResult(result, config.approvals !== undefined))
+      const summary = summariseResult(result, config.approvals !== undefined)
+      // VOICE-M3 — only the assistant's OK reply speaks; failure / suspend
+      // telemetry carries commands (/inbox 短码) that must stay copyable text.
+      await reply(bridge, msg, summary, result.kind === 'ok' ? await voiceClipFor(config, summary) : undefined)
       return
     }
 
@@ -765,6 +772,17 @@ export interface StartImBridgesOptions {
    */
   setting?: HostImSettingConfig
   /**
+   * VOICE-M3 — opt-in TTS voice replies (`butlerVoiceFromEnv`, all four of
+   * `GOTONG_BUTLER_VOICE_URL`/`_KEY`/`_MODEL`/`_VOICE` set). When present, the free-text OK reply is ALSO
+   * synthesized to an opus clip and attached — the Lark bridge plays it as a
+   * voice bubble; bridges without an audio leg refuse the attachment and send
+   * text (their existing posture). Command output / failure telemetry stays
+   * text-only ON PURPOSE: short codes (`/approve <id>`) must remain copyable,
+   * and a voice bubble REPLACES text on the platform leg. Absent →
+   * byte-identical sends.
+   */
+  voice?: Pick<ButlerVoice, 'synthesize'>
+  /**
    * F1 — where to persist reachable routes (`<space>/butler/reachable`). When set,
    * `startImBridges` builds a {@link ButlerReachableRegistry}, rehydrates it, and
    * populates it on every bound member's inbound message; the returned handle
@@ -1048,6 +1066,7 @@ export async function startImBridges(
     ...(opts.approvals ? { approvals: opts.approvals } : {}),
     log: opts.log,
     ...(opts.setting ? { setting: opts.setting } : {}),
+    ...(opts.voice ? { voice: opts.voice } : {}),
     ...(llmOutage ? { llmOutage } : {}),
     ...(reachable
       ? {
@@ -1234,9 +1253,40 @@ function makeFromId(platform: string, platformUserId: string): string {
   return `im:${platform}:${platformUserId}`
 }
 
-async function reply(bridge: ImBridge, msg: ImMessage, text: string): Promise<void> {
+async function reply(
+  bridge: ImBridge,
+  msg: ImMessage,
+  text: string,
+  attachments?: ImAttachment[],
+): Promise<void> {
   const to: ImUser = msg.from
-  await bridge.sendMessage(to, text, { chatId: msg.chatId })
+  await bridge.sendMessage(to, text, {
+    chatId: msg.chatId,
+    ...(attachments && attachments.length > 0 ? { attachments } : {}),
+  })
+}
+
+/**
+ * VOICE-M3 — best-effort voice clip for a conversational reply. `undefined`
+ * (no voice configured / content skipped / synthesis failed) means the text
+ * goes out alone — voice never eats, delays into failure, or replaces a reply
+ * the member is owed. Infra failures warn; by-design skips stay quiet.
+ */
+async function voiceClipFor(config: HostImConfig, text: string): Promise<ImAttachment[] | undefined> {
+  if (!config.voice) return undefined
+  try {
+    const r = await config.voice.synthesize(text)
+    if (r.kind === 'clip') {
+      return [{ kind: 'audio', bytes: r.bytes, mime: 'audio/opus', filename: 'voice.opus' }]
+    }
+    if (r.kind === 'failed') {
+      config.log.warn('im voice: synthesis failed, sending text only', { reason: r.reason })
+    }
+    return undefined
+  } catch (err) {
+    config.log.warn('im voice: synthesis threw, sending text only', { err: String(err) })
+    return undefined
+  }
 }
 
 /**

@@ -57,7 +57,14 @@ const silentLogger: Logger = {
 
 class FakeBridge implements ImBridge {
   readonly platform = 'telegram'
-  readonly outbound: Array<{ to: ImUser; text: string; chatId?: string }> = []
+  readonly outbound: Array<{
+    to: ImUser
+    text: string
+    chatId?: string
+    /** VOICE-M3 — the RAW options object, so tests can assert the
+     * `attachments` key is structurally absent (byte-identical contract). */
+    options?: { attachments?: ImAttachment[]; chatId?: string }
+  }> = []
   private listener: ((msg: ImMessage) => void | Promise<void>) | null = null
   started = false
 
@@ -72,7 +79,7 @@ class FakeBridge implements ImBridge {
     text: string,
     options?: { attachments?: ImAttachment[]; chatId?: string },
   ): Promise<void> {
-    this.outbound.push({ to, text, chatId: options?.chatId })
+    this.outbound.push({ to, text, chatId: options?.chatId, options })
   }
   onMessage(listener: (msg: ImMessage) => void | Promise<void>): () => void {
     this.listener = listener
@@ -422,7 +429,157 @@ describe('IMA-M2 — IM approval verbs', () => {
   })
 })
 
-function last(bridge: FakeBridge): { to: ImUser; text: string; chatId?: string } {
+// ---------------------------------------------------------------------------
+// VOICE-M3 — TTS voice replies. Scope is deliberately narrow: ONLY the
+// conversational OK reply speaks. Command output and failure/suspend
+// telemetry carry copyable short codes (/approve <id>) that a voice bubble
+// would destroy, so they stay text — and with no voice configured the
+// sendMessage options must be structurally identical to before (no
+// `attachments` key at all).
+// ---------------------------------------------------------------------------
+
+describe('VOICE-M3 — voice on the conversational OK reply only', () => {
+  let hub: Hub
+  let identity: IdentityStore
+  let bridge: FakeBridge
+  let config: HostImConfig
+  let synthCalls: string[]
+  let warns: Array<{ msg: string; data?: unknown }>
+
+  const CLIP = Buffer.from('fake-opus-bytes')
+
+  beforeEach(async () => {
+    hub = Hub.inMemory()
+    await hub.start()
+    hub.register(new ChatEchoAgent())
+    seenTasks.length = 0
+    identity = openIdentityStore({ dbPath: ':memory:' })
+    const alice = identity.createUser({ email: 'alice@example.com', displayName: 'Alice' })
+    const code = identity.issueImBindingCode({ userId: alice.id }).code
+    bridge = new FakeBridge()
+    await bridge.start()
+    synthCalls = []
+    warns = []
+    config = {
+      hub,
+      resolver: makeIdentityImBindingResolver(identity),
+      freeTextCapability: 'chat',
+      onUnbind: async () => ({ removed: false }),
+      log: {
+        ...silentLogger,
+        warn(msg: string, data?: unknown) {
+          warns.push({ msg, data })
+        },
+      },
+      voice: {
+        synthesize: async (text: string) => {
+          synthCalls.push(text)
+          return { kind: 'clip' as const, bytes: CLIP }
+        },
+      },
+    }
+    bridge.onMessage((m) => handleImMessage(bridge, m, config))
+    await bridge.inject(imMsg(`/bind ${code}`))
+  })
+
+  afterEach(async () => {
+    await bridge.stop()
+    await hub.stop()
+    identity.close()
+  })
+
+  it('attaches an opus clip to the OK reply — text unchanged, synth fed the exact reply text', async () => {
+    await bridge.inject(imMsg('hi'))
+    const out = last(bridge)
+    expect(out.text).toBe('echo: hi')
+    expect(synthCalls).toEqual(['echo: hi'])
+    expect(out.options?.attachments).toEqual([
+      { kind: 'audio', bytes: CLIP, mime: 'audio/opus', filename: 'voice.opus' },
+    ])
+  })
+
+  it('with no voice configured the options carry NO attachments key (byte-identical)', async () => {
+    delete config.voice
+    await bridge.inject(imMsg('hi'))
+    const out = last(bridge)
+    expect(out.text).toBe('echo: hi')
+    expect('attachments' in (out.options ?? {})).toBe(false)
+  })
+
+  it('synthesis "failed" → warn once, text goes out alone; "skipped" stays quiet', async () => {
+    config.voice = { synthesize: async () => ({ kind: 'failed', reason: 'TTS HTTP 500' }) }
+    await bridge.inject(imMsg('hi'))
+    expect(last(bridge).text).toBe('echo: hi')
+    expect('attachments' in (last(bridge).options ?? {})).toBe(false)
+    expect(warns.some((w) => w.msg.includes('synthesis failed'))).toBe(true)
+
+    warns.length = 0
+    config.voice = { synthesize: async () => ({ kind: 'skipped', reason: 'code block' }) }
+    await bridge.inject(imMsg('hi again'))
+    expect(last(bridge).text).toBe('echo: hi again')
+    expect(warns).toHaveLength(0)
+  })
+
+  it('a synth that THROWS never eats the reply', async () => {
+    config.voice = {
+      synthesize: async () => {
+        throw new Error('ffmpeg exploded')
+      },
+    }
+    await bridge.inject(imMsg('hi'))
+    expect(last(bridge).text).toBe('echo: hi')
+    expect('attachments' in (last(bridge).options ?? {})).toBe(false)
+    expect(warns.some((w) => w.msg.includes('synthesis threw'))).toBe(true)
+  })
+
+  it('failure and suspend telemetry stay text-only — synth is never called', async () => {
+    // failed: an agent that throws → the ⚠️ failure line must stay copyable.
+    class BoomAgent extends AgentParticipant {
+      constructor() {
+        super({ id: 'boom', capabilities: ['boomchat'] })
+      }
+      protected async handleTask(): Promise<unknown> {
+        throw new Error('provider on fire')
+      }
+    }
+    hub.register(new BoomAgent())
+    config.freeTextCapability = 'boomchat'
+    await bridge.inject(imMsg('hi'))
+    expect(last(bridge).text).toContain('Task failed')
+    expect(synthCalls).toHaveLength(0)
+    expect('attachments' in (last(bridge).options ?? {})).toBe(false)
+
+    // suspended: the park notice points at /me — also text-only.
+    const { SuspendTaskError } = await import('@gotong/core')
+    class ParkAgent extends AgentParticipant {
+      constructor() {
+        super({ id: 'parker2', capabilities: ['parkchat'] })
+      }
+      protected async handleTask(): Promise<unknown> {
+        throw new SuspendTaskError({ resumeAt: 9_999_999_999_000, state: {} })
+      }
+    }
+    hub.register(new ParkAgent())
+    config.freeTextCapability = 'parkchat'
+    await bridge.inject(imMsg('hi'))
+    expect(synthCalls).toHaveLength(0)
+    expect('attachments' in (last(bridge).options ?? {})).toBe(false)
+  })
+
+  it('command output stays text-only even with voice configured', async () => {
+    await bridge.inject(imMsg('/help'))
+    expect(last(bridge).text).toContain('Gotong IM bridge')
+    expect(synthCalls).toHaveLength(0)
+    expect('attachments' in (last(bridge).options ?? {})).toBe(false)
+  })
+})
+
+function last(bridge: FakeBridge): {
+  to: ImUser
+  text: string
+  chatId?: string
+  options?: { attachments?: ImAttachment[]; chatId?: string }
+} {
   const out = bridge.outbound.at(-1)
   if (!out) throw new Error('no outbound message was sent')
   return out

@@ -34,6 +34,16 @@ class FakeLarkClient implements LarkClient {
     options?: LarkCallOptions
   }> = []
 
+  uploads: Array<{
+    fileType: string
+    fileName: string
+    durationMs?: number
+    byteLength: number
+  }> = []
+
+  /** Set to make uploadFile reject (voice-leg fallback tests). */
+  uploadError: Error | null = null
+
   async call<T>(
     method: 'GET' | 'POST' | 'PUT' | 'DELETE',
     path: string,
@@ -41,6 +51,22 @@ class FakeLarkClient implements LarkClient {
   ): Promise<T> {
     this.calls.push({ method, path, options })
     return { code: 0, msg: 'ok' } as unknown as T
+  }
+
+  async uploadFile(input: {
+    fileType: string
+    fileName: string
+    durationMs?: number
+    bytes: Buffer | Uint8Array
+  }): Promise<string> {
+    if (this.uploadError) throw this.uploadError
+    this.uploads.push({
+      fileType: input.fileType,
+      fileName: input.fileName,
+      ...(input.durationMs !== undefined ? { durationMs: input.durationMs } : {}),
+      byteLength: input.bytes.length,
+    })
+    return 'file_key_test'
   }
 
   invalidateToken(): void {
@@ -333,7 +359,7 @@ describe('LarkBridge', () => {
     expect(body.receive_id).toBe(SENDER_OPEN_ID)
   })
 
-  it('sendMessage signals via onError on outbound attachments, still sends text', async () => {
+  it('sendMessage signals via onError on unsupported attachments, still sends text', async () => {
     const client = new FakeLarkClient()
     const errors: unknown[] = []
     const conn = fakeConnection()
@@ -347,8 +373,100 @@ describe('LarkBridge', () => {
       },
     )
     expect(errors).toHaveLength(1)
-    expect(String(errors[0])).toMatch(/outbound attachments not yet supported/)
+    expect(String(errors[0])).toMatch(/only one opus voice attachment/)
     expect(client.calls).toHaveLength(1)
+    expect((client.calls[0]!.options?.body as { msg_type: string }).msg_type).toBe('text')
+  })
+
+  // -------- sendMessage voice leg (VOICE-M2) --------
+
+  /** Minimal ogg page: OggS(4) ver(1) type(1) granule(8 LE) + padding. */
+  function oggOpusBytes(granule: bigint): Buffer {
+    const b = Buffer.alloc(32)
+    b.write('OggS', 0, 'ascii')
+    b.writeBigInt64LE(granule, 6)
+    return b
+  }
+
+  it('an opus voice attachment uploads then sends msg_type audio INSTEAD of text', async () => {
+    const client = new FakeLarkClient()
+    const errors: unknown[] = []
+    const conn = fakeConnection()
+    bridge = makeBridge({ factory: conn.factory, client, onError: (e) => errors.push(e) })
+    await bridge.sendMessage(
+      { platform: 'lark', platformUserId: SENDER_OPEN_ID },
+      '好的,我这就去办。',
+      {
+        chatId: CHAT_ID,
+        // 144000 samples at the 48kHz opus clock = exactly 3000ms.
+        attachments: [{ kind: 'audio', bytes: oggOpusBytes(144_000n), mime: 'audio/opus' }],
+      },
+    )
+    expect(errors).toHaveLength(0)
+    expect(client.uploads).toHaveLength(1)
+    expect(client.uploads[0]).toEqual({
+      fileType: 'opus',
+      fileName: 'voice.opus',
+      durationMs: 3000,
+      byteLength: 32,
+    })
+    // Exactly ONE message went out, and it's the voice bubble (no duplicate text).
+    expect(client.calls).toHaveLength(1)
+    const body = client.calls[0]!.options?.body as { receive_id: string; msg_type: string; content: string }
+    expect(body.msg_type).toBe('audio')
+    expect(body.receive_id).toBe(CHAT_ID)
+    expect(JSON.parse(body.content)).toEqual({ file_key: 'file_key_test' })
+  })
+
+  it('a failed upload falls back to the text message (voice never eats a reply)', async () => {
+    const client = new FakeLarkClient()
+    client.uploadError = new Error('im:resource permission missing')
+    const errors: unknown[] = []
+    const conn = fakeConnection()
+    bridge = makeBridge({ factory: conn.factory, client, onError: (e) => errors.push(e) })
+    await bridge.sendMessage(
+      { platform: 'lark', platformUserId: SENDER_OPEN_ID },
+      'fallback text',
+      { chatId: CHAT_ID, attachments: [{ kind: 'audio', bytes: oggOpusBytes(48_000n) }] },
+    )
+    expect(errors).toHaveLength(1)
+    expect(String(errors[0])).toMatch(/voice leg failed, falling back to text/)
+    expect(client.calls).toHaveLength(1)
+    const body = client.calls[0]!.options?.body as { msg_type: string; content: string }
+    expect(body.msg_type).toBe('text')
+    expect(JSON.parse(body.content)).toEqual({ text: 'fallback text' })
+  })
+
+  it('non-ogg audio bytes are refused honestly (no upload) and text goes out', async () => {
+    const client = new FakeLarkClient()
+    const errors: unknown[] = []
+    const conn = fakeConnection()
+    bridge = makeBridge({ factory: conn.factory, client, onError: (e) => errors.push(e) })
+    await bridge.sendMessage(
+      { platform: 'lark', platformUserId: SENDER_OPEN_ID },
+      'still text',
+      { chatId: CHAT_ID, attachments: [{ kind: 'audio', bytes: Buffer.from('mp3-not-opus') }] },
+    )
+    expect(client.uploads).toHaveLength(0)
+    expect(errors).toHaveLength(1)
+    expect(String(errors[0])).toMatch(/not an ogg\/opus clip/)
+    expect((client.calls[0]!.options?.body as { msg_type: string }).msg_type).toBe('text')
+  })
+
+  it('an audio attachment WITHOUT bytes counts as unsupported (url-only cannot upload)', async () => {
+    const client = new FakeLarkClient()
+    const errors: unknown[] = []
+    const conn = fakeConnection()
+    bridge = makeBridge({ factory: conn.factory, client, onError: (e) => errors.push(e) })
+    await bridge.sendMessage(
+      { platform: 'lark', platformUserId: SENDER_OPEN_ID },
+      'txt',
+      { chatId: CHAT_ID, attachments: [{ kind: 'audio', url: 'lark-audio:fk' }] },
+    )
+    expect(client.uploads).toHaveLength(0)
+    expect(errors).toHaveLength(1)
+    expect(String(errors[0])).toMatch(/only one opus voice attachment/)
+    expect((client.calls[0]!.options?.body as { msg_type: string }).msg_type).toBe('text')
   })
 
   it('sendMessage throws when neither chatId nor platformUserId is provided', async () => {
