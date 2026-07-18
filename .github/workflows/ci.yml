@@ -357,7 +357,11 @@ jobs:
           for i in $(seq 1 20); do
             if curl -fsS http://127.0.0.1:13000/healthz >/dev/null 2>&1; then
               echo "✓ /healthz responded after $((i * 2))s"
-              docker logs gotong-ci 2>&1 | head -40
+              # `|| true`: `head` closes the pipe at 40 lines and `docker logs`
+              # takes SIGPIPE (exit 141) — under the step's `bash -e` +
+              # pipefail that killed the job AFTER a successful healthcheck
+              # (first public CI runs) before `rc=0` could land.
+              docker logs gotong-ci 2>&1 | head -40 || true
               rc=0
               break
             fi
