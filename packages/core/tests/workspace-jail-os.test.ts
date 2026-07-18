@@ -71,7 +71,14 @@ describe('buildBwrapArgs', () => {
 })
 
 describe('wrapWithFsJail', () => {
-  it('wraps a command under sandbox-exec with a profile carrying the roots + essentials', () => {
+  // Three cases below bake POSIX absolute paths into their golden strings, and
+  // wrapWithFsJail resolves roots with the host OS's path rules — on win32
+  // `/work` comes out as `D:\work`, so the literals can never match. The jail
+  // kinds themselves never run on Windows (detectFsJail → 'none' there), and
+  // the pure-builder describes above cover the profile/args logic on every OS.
+  const posixOnly = it.skipIf(process.platform === 'win32')
+
+  posixOnly('wraps a command under sandbox-exec with a profile carrying the roots + essentials', () => {
     const w = wrapWithFsJail({
       command: 'codex',
       args: ['exec', '--sandbox', 'workspace-write'],
@@ -102,7 +109,7 @@ describe('wrapWithFsJail', () => {
     expect(w.args.slice(-2)).toEqual(['claude-code', '--print'])
   })
 
-  it('resolves relative roots against cwd before binding', () => {
+  posixOnly('resolves relative roots against cwd before binding', () => {
     const w = wrapWithFsJail({
       command: 'tool',
       args: [],
@@ -113,7 +120,7 @@ describe('wrapWithFsJail', () => {
     expect(w.args.join(' ')).toContain('--bind /home/me/proj /home/me/proj')
   })
 
-  it('folds extraWritableRoots into the writable set', () => {
+  posixOnly('folds extraWritableRoots into the writable set', () => {
     const w = wrapWithFsJail({
       command: 'tool',
       args: [],

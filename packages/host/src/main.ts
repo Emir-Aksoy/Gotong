@@ -2745,112 +2745,8 @@ async function main(): Promise<void> {
   // Don't let the grace timer keep the event loop alive past a graceful stop.
   resumeKickoffTimer.unref?.()
 
-  // Boot banner — intentionally plain stdout, NOT a log line. The
-  // "First-run admin URL" appears once in a host's lifetime and must
-  // stand out visually; folding it into the structured log stream
-  // would bury it. Operational events below go through the logger.
-  //
-  // v3.4 (H20): the admin URL itself is NOT printed — it goes to
-  // `<space>/runtime/admin-link.txt` (0o600). The banner only tells
-  // the operator where to read it. This keeps the plaintext token
-  // out of journalctl / docker logs / pm2 logs — log shippers that
-  // capture stdout no longer see secret material.
-  console.log(`\n=== Gotong host ready ===`)
-  console.log(`Space     : ${SPACE_DIR}`)
-  console.log(`Web       : ${web.url}`)
-  console.log(`WebSocket : ${ws.url}`)
-  console.log(`Gating    : ${config.gating}`)
-  console.log(`CookieSec : ${config.cookieSecure ? 'on (HTTPS expected)' : 'off (HTTP / dev)'}`)
-  // VALID-M3 — definitions at a glance: how many workflow files / agent rows
-  // loaded, and a flag if any were skipped (details are in the warning banner
-  // printed earlier in this boot).
-  console.log(
-    `Defns     : ${defns.workflows.ok} workflow(s)${defns.workflows.bad ? `, ${defns.workflows.bad} BAD` : ''}` +
-      ` · ${defns.agents.ok} agent(s)${defns.agents.bad ? `, ${defns.agents.bad} BAD` : ''}` +
-      `${defns.errors > 0 ? '  ⚠ see definition warnings above' : ''}`,
-  )
-  console.log(
-    `HostCheck : ${
-      allowedHosts
-        ? allowedHosts.join(', ')
-        : isLoopbackHost(config.host)
-          ? 'disabled (loopback only is safe)'
-          : 'DISABLED while network-exposed — GOTONG_ALLOW_INSECURE set (see boot warnings)'
-    }`,
-  )
-  // PRO-M2 — deployment profile lens (presentation only). GOTONG_PROFILE=hub|
-  // federation reorders/annotates the entry surface toward within-hub vs
-  // cross-hub work; it enables/disables NO code path. Unset → nothing printed
-  // here (byte-identical to before). A set-but-unknown value is surfaced as a
-  // likely typo and then ignored (still the byte-identical default).
-  const profile = resolveProfileEnv(process.env.GOTONG_PROFILE)
-  if (profile.unrecognized) {
-    log.warn('GOTONG_PROFILE not recognized — ignoring (expected hub|federation)', {
-      value: profile.unrecognized,
-    })
-    console.warn(
-      `  ⚠ GOTONG_PROFILE="${profile.unrecognized}" 无法识别,已忽略 (可选 hub|federation) / unrecognized, ignored.`,
-    )
-  }
-  for (const line of profileBannerLines(profile)) console.log(line)
-
-  // Friendly first-run nicety (presentation only): point a fresh local user
-  // at the loopback setup wizard and optionally open their browser. Never
-  // auto-opens when network-exposed (see shouldOpenBrowser). GOTONG_OPEN_BROWSER
-  // controls it: auto (default, first run only) / always / never.
-  const openMode = parseOpenBrowserEnv(process.env.GOTONG_OPEN_BROWSER)
-  const loopbackHost = isLoopbackHost(config.host)
-  const maybeOpenBrowser = (targetUrl: string, firstRun: boolean): void => {
-    if (!shouldOpenBrowser(openMode, { loopback: loopbackHost, firstRun })) return
-    const opened = openUrl(targetUrl, {
-      onError: (err) => log.debug('browser auto-open failed', { err }),
-    })
-    console.log(
-      opened
-        ? `  (已自动打开浏览器 / browser opened — GOTONG_OPEN_BROWSER=0 关闭)`
-        : `  (自动打开浏览器失败,请手动打开上面的地址)`,
-    )
-  }
-
-  if (adminToken) {
-    const linkPath = join(SPACE_DIR, 'runtime', 'admin-link.txt')
-    const adminUrl = `${web.url}/admin?token=${adminToken}`
-    try {
-      await writeAdminLinkFile(linkPath, adminUrl)
-      // The friendly path in: the setup wizard at the web root needs no
-      // token (loopback bootstrap). Show it prominently and open it.
-      console.log(firstRunSetupBanner(web.url))
-      maybeOpenBrowser(web.url, true)
-      // The admin-token URL is the backup / network-exposed path; keep it
-      // in the 0o600 file (never stdout), just tell the operator where.
-      console.log(`\n备用 admin token URL 已写入 (读后即焚) / backup admin link saved:`)
-      console.log(`  ${linkPath}`)
-      console.log(`  mode 0o600 — only the user running this host can read it.\n`)
-    } catch (err) {
-      // Falling back to stdout here would re-leak the token. Better
-      // to fail loud: the operator can re-run `mint-admin-token` once
-      // the underlying fs problem is fixed.
-      log.fatal('failed to write admin link file', {
-        path: linkPath,
-        err,
-      })
-      console.error(
-        `\nFATAL: could not write ${linkPath}.\n` +
-          `       The first-run admin token is no longer recoverable from\n` +
-          `       this run; re-init by removing the workspace and starting\n` +
-          `       over, or use \`gotong-host mint-admin-token\` to create\n` +
-          `       a fresh admin against the existing workspace once the\n` +
-          `       underlying error is fixed.\n`,
-      )
-      process.exit(2)
-    }
-  } else {
-    console.log(`Admin     : ${web.url}/admin    (existing cookie or token)\n`)
-    // Only opens when GOTONG_OPEN_BROWSER=always (firstRun=false → 'auto' is a
-    // no-op), so restarts don't spam the browser.
-    maybeOpenBrowser(`${web.url}/admin`, false)
-  }
-
+  // Armed BEFORE the ready banner: "ready" promises graceful shutdown, and a
+  // SIGTERM racing the banner (the admin-link await yields) must find these.
   let shuttingDown = false
   const shutdown = async (sig: string) => {
     if (shuttingDown) return
@@ -2925,6 +2821,110 @@ async function main(): Promise<void> {
   }
   process.on('SIGINT', () => { void shutdown('SIGINT') })
   process.on('SIGTERM', () => { void shutdown('SIGTERM') })
+
+  // Boot banner — intentionally plain stdout, NOT a log line. The
+  // "First-run admin URL" appears once in a host's lifetime and must
+  // stand out visually; folding it into the structured log stream
+  // would bury it. Operational events below go through the logger.
+  //
+  // v3.4 (H20): the admin URL itself is NOT printed — it goes to
+  // `<space>/runtime/admin-link.txt` (0o600). The banner only tells
+  // the operator where to read it. This keeps the plaintext token
+  // out of journalctl / docker logs / pm2 logs — log shippers that
+  // capture stdout no longer see secret material.
+  console.log(`\n=== Gotong host ready ===`)
+  console.log(`Space     : ${SPACE_DIR}`)
+  console.log(`Web       : ${web.url}`)
+  console.log(`WebSocket : ${ws.url}`)
+  console.log(`Gating    : ${config.gating}`)
+  console.log(`CookieSec : ${config.cookieSecure ? 'on (HTTPS expected)' : 'off (HTTP / dev)'}`)
+  // VALID-M3 — definitions at a glance: how many workflow files / agent rows
+  // loaded, and a flag if any were skipped (details are in the warning banner
+  // printed earlier in this boot).
+  console.log(
+    `Defns     : ${defns.workflows.ok} workflow(s)${defns.workflows.bad ? `, ${defns.workflows.bad} BAD` : ''}` +
+      ` · ${defns.agents.ok} agent(s)${defns.agents.bad ? `, ${defns.agents.bad} BAD` : ''}` +
+      `${defns.errors > 0 ? '  ⚠ see definition warnings above' : ''}`,
+  )
+  console.log(
+    `HostCheck : ${
+      allowedHosts
+        ? allowedHosts.join(', ')
+        : isLoopbackHost(config.host)
+          ? 'disabled (loopback only is safe)'
+          : 'DISABLED while network-exposed — GOTONG_ALLOW_INSECURE set (see boot warnings)'
+    }`,
+  )
+  // PRO-M2 — deployment profile lens (presentation only): reorders/annotates
+  // the entry surface, enables NO code path. Unset → nothing printed (byte-
+  // identical); a set-but-unknown value → warned as a likely typo, ignored.
+  const profile = resolveProfileEnv(process.env.GOTONG_PROFILE)
+  if (profile.unrecognized) {
+    log.warn('GOTONG_PROFILE not recognized — ignoring (expected hub|federation)', {
+      value: profile.unrecognized,
+    })
+    console.warn(
+      `  ⚠ GOTONG_PROFILE="${profile.unrecognized}" 无法识别,已忽略 (可选 hub|federation) / unrecognized, ignored.`,
+    )
+  }
+  for (const line of profileBannerLines(profile)) console.log(line)
+
+  // Friendly first-run nicety (presentation only): point a fresh local user
+  // at the loopback setup wizard and optionally open their browser. Never
+  // auto-opens when network-exposed (see shouldOpenBrowser). GOTONG_OPEN_BROWSER
+  // controls it: auto (default, first run only) / always / never.
+  const openMode = parseOpenBrowserEnv(process.env.GOTONG_OPEN_BROWSER)
+  const loopbackHost = isLoopbackHost(config.host)
+  const maybeOpenBrowser = (targetUrl: string, firstRun: boolean): void => {
+    if (!shouldOpenBrowser(openMode, { loopback: loopbackHost, firstRun })) return
+    const opened = openUrl(targetUrl, {
+      onError: (err) => log.debug('browser auto-open failed', { err }),
+    })
+    console.log(
+      opened
+        ? `  (已自动打开浏览器 / browser opened — GOTONG_OPEN_BROWSER=0 关闭)`
+        : `  (自动打开浏览器失败,请手动打开上面的地址)`,
+    )
+  }
+
+  if (adminToken) {
+    const linkPath = join(SPACE_DIR, 'runtime', 'admin-link.txt')
+    const adminUrl = `${web.url}/admin?token=${adminToken}`
+    try {
+      await writeAdminLinkFile(linkPath, adminUrl)
+      // The friendly path in: the setup wizard at the web root needs no
+      // token (loopback bootstrap). Show it prominently and open it.
+      console.log(firstRunSetupBanner(web.url))
+      maybeOpenBrowser(web.url, true)
+      // The admin-token URL is the backup / network-exposed path; keep it
+      // in the 0o600 file (never stdout), just tell the operator where.
+      console.log(`\n备用 admin token URL 已写入 (读后即焚) / backup admin link saved:`)
+      console.log(`  ${linkPath}`)
+      console.log(`  mode 0o600 — only the user running this host can read it.\n`)
+    } catch (err) {
+      // Falling back to stdout here would re-leak the token. Better
+      // to fail loud: the operator can re-run `mint-admin-token` once
+      // the underlying fs problem is fixed.
+      log.fatal('failed to write admin link file', {
+        path: linkPath,
+        err,
+      })
+      console.error(
+        `\nFATAL: could not write ${linkPath}.\n` +
+          `       The first-run admin token is no longer recoverable from\n` +
+          `       this run; re-init by removing the workspace and starting\n` +
+          `       over, or use \`gotong-host mint-admin-token\` to create\n` +
+          `       a fresh admin against the existing workspace once the\n` +
+          `       underlying error is fixed.\n`,
+      )
+      process.exit(2)
+    }
+  } else {
+    console.log(`Admin     : ${web.url}/admin    (existing cookie or token)\n`)
+    // Only opens when GOTONG_OPEN_BROWSER=always (firstRun=false → 'auto' is a
+    // no-op), so restarts don't spam the browser.
+    maybeOpenBrowser(`${web.url}/admin`, false)
+  }
 
   // Never resolve — the listeners keep us alive.
   await new Promise<never>(() => { /* never */ })
