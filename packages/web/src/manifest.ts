@@ -450,6 +450,10 @@ function validateAgent(a: Record<string, unknown>, path: string): ParsedAgent {
   if (a.escalateTo !== undefined) {
     managed.escalateTo = validateEscalateTo(a.escalateTo, `${path}.escalateTo`)
   }
+  // Optional `thinking:` — DUO-M4a reasoning switch (closed enum).
+  if (a.thinking !== undefined) {
+    managed.thinking = validateThinking(a.thinking, `${path}.thinking`)
+  }
   const out: ParsedAgent = { id: a.id, capabilities, managed }
   if (typeof a.displayName === 'string') out.displayName = a.displayName
   return out
@@ -733,6 +737,17 @@ export function validateEscalateTo(raw: unknown, path: string): string {
 }
 
 /**
+ * Validate an optional `thinking:` (DUO-M4a — reasoning switch the host
+ * translates into the vendor's request body for `openai-compatible` agents;
+ * LongCat-2.0 shape `thinking:{type}`). Closed enum so a typo fails at
+ * import time, not as a silent no-op on the wire.
+ */
+export function validateThinking(raw: unknown, path: string): 'enabled' | 'disabled' {
+  if (raw === 'enabled' || raw === 'disabled') return raw
+  throw new ManifestError(`${path} must be 'enabled' or 'disabled' when present`)
+}
+
+/**
  * Validate an optional `apiKeyEnv:` (MR-M6 — per-spec / per-candidate env var
  * NAME the API key is read from; the key VALUE never travels through this
  * layer). Shape-gated so a pasted key can't masquerade as a name: env-var
@@ -950,6 +965,10 @@ export function renderAgentManifest(rec: {
   if (rec.managed.escalateTo) {
     // DUO-M1 — echo so export → re-import preserves the escalate target.
     agent.escalateTo = rec.managed.escalateTo
+  }
+  if (rec.managed.thinking) {
+    // DUO-M4a — echo so export → re-import preserves the reasoning switch.
+    agent.thinking = rec.managed.thinking
   }
   if (rec.displayName) agent.displayName = rec.displayName
   return {

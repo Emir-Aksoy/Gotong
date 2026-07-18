@@ -2239,6 +2239,9 @@ function buildProvider(
         // shape, not the newer `max_completion_tokens` OpenAI reasoning
         // models require. Default to legacy here.
         maxTokensField: 'max_tokens',
+        // DUO-M4a — opt-in reasoning switch (LongCat-2.0 official shape).
+        // Unset spec.thinking ⇒ no extra field, vendor default, byte-identical.
+        ...(spec.thinking ? { extraBody: { thinking: { type: spec.thinking } } } : {}),
       })
     }
     default: {

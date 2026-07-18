@@ -333,6 +333,71 @@ describe('agents-route: escalateTo (DUO-M1 escalate target)', () => {
   })
 })
 
+describe('agents-route: thinking (DUO-M4a reasoning switch)', () => {
+  let b: Boot
+  beforeEach(async () => { b = await boot() })
+  afterEach(async () => { await teardown(b) })
+
+  it('POST persists thinking; GET exposes it via managed', async () => {
+    const res = await fetch(`${b.baseUrl}/api/admin/agents`, {
+      method: 'POST',
+      headers: auth(b.token),
+      body: JSON.stringify({ ...base, id: 'reception', thinking: 'disabled' }),
+    })
+    expect(res.status).toBe(200)
+    const body = await res.json()
+    expect(body.agent.managed.thinking).toBe('disabled')
+    const list = await fetch(`${b.baseUrl}/api/admin/agents`, { headers: auth(b.token) })
+    const agents = (await list.json()).agents as Array<{ id: string; managed?: { thinking?: string } }>
+    expect(agents.find((a) => a.id === 'reception')?.managed?.thinking).toBe('disabled')
+  })
+
+  it('omitting thinking leaves it undefined (vendor default, byte-stable)', async () => {
+    const res = await fetch(`${b.baseUrl}/api/admin/agents`, {
+      method: 'POST',
+      headers: auth(b.token),
+      body: JSON.stringify({ ...base, id: 'no-think' }),
+    })
+    expect(res.status).toBe(200)
+    expect((await b.space.agents()).find((a) => a.id === 'no-think')?.managed.thinking).toBeUndefined()
+  })
+
+  it('a value outside the closed enum → 400, nothing persisted', async () => {
+    for (const bad of ['off', true, 42, '']) {
+      const res = await fetch(`${b.baseUrl}/api/admin/agents`, {
+        method: 'POST',
+        headers: auth(b.token),
+        body: JSON.stringify({ ...base, id: 'bad-think', thinking: bad }),
+      })
+      expect(res.status).toBe(400)
+    }
+    expect((await b.space.agents()).some((a) => a.id === 'bad-think')).toBe(false)
+  })
+
+  it('PUT echoing the value keeps it; omitting it drops it (wholesale replace)', async () => {
+    await fetch(`${b.baseUrl}/api/admin/agents`, {
+      method: 'POST',
+      headers: auth(b.token),
+      body: JSON.stringify({ ...base, id: 'think-edit', thinking: 'disabled' }),
+    })
+    const keep = await fetch(`${b.baseUrl}/api/admin/agents/think-edit`, {
+      method: 'PUT',
+      headers: auth(b.token),
+      body: JSON.stringify({ ...base, id: 'think-edit', thinking: 'disabled' }),
+    })
+    expect(keep.status).toBe(200)
+    expect((await b.space.agents()).find((a) => a.id === 'think-edit')?.managed.thinking).toBe('disabled')
+    // Omission drops — the admin form's capture-echo (managed-agents.js) defends this.
+    const drop = await fetch(`${b.baseUrl}/api/admin/agents/think-edit`, {
+      method: 'PUT',
+      headers: auth(b.token),
+      body: JSON.stringify({ ...base, id: 'think-edit' }),
+    })
+    expect(drop.status).toBe(200)
+    expect((await b.space.agents()).find((a) => a.id === 'think-edit')?.managed.thinking).toBeUndefined()
+  })
+})
+
 describe('agents-route: apiKeyEnv (MR-M6 per-candidate env credentials)', () => {
   let b: Boot
   beforeEach(async () => { b = await boot() })

@@ -351,6 +351,72 @@ describe('OpenAIProvider — openai-compatible extensions', () => {
     const inner = (provider as unknown as { client: { baseURL: string } }).client
     expect(inner.baseURL).toBe('https://api.deepseek.com/v1')
   })
+
+  // DUO-M4a — `extraBody` lets openai-compatible callers attach vendor
+  // extension fields (LongCat-2.0's `thinking: { type }` is the first
+  // consumer). Contract under test: extra keys ride along verbatim, but
+  // the provider's own fields always win — extraBody can ADD, never lie.
+  it('merges extraBody keys into the outgoing request body (thinking switch rides along)', async () => {
+    const { client, create } = makeFakeClient(async () => ({
+      choices: [{ message: { content: 'ok' }, finish_reason: 'stop' }],
+    }))
+    const provider = new OpenAIProvider({
+      client: client as any,
+      extraBody: { thinking: { type: 'disabled' } },
+    })
+
+    await drainStream(provider.stream({
+      messages: [{ role: 'user', content: 'hi' }],
+      model: 'LongCat-2.0',
+    }))
+
+    const body = create.mock.calls[0]![0] as Record<string, unknown>
+    expect(body.thinking).toEqual({ type: 'disabled' })
+    expect(body.model).toBe('LongCat-2.0')
+  })
+
+  it('extraBody can never override standard fields — model/messages/stream always win', async () => {
+    const { client, create } = makeFakeClient(async () => ({
+      choices: [{ message: { content: 'ok' }, finish_reason: 'stop' }],
+    }))
+    const provider = new OpenAIProvider({
+      client: client as any,
+      extraBody: {
+        model: 'evil-model',
+        messages: [{ role: 'user', content: 'injected' }],
+        stream: false,
+        thinking: { type: 'enabled' },
+      },
+    })
+
+    await drainStream(provider.stream({
+      messages: [{ role: 'user', content: 'real question' }],
+      model: 'real-model',
+    }))
+
+    const body = create.mock.calls[0]![0] as Record<string, unknown>
+    // The spread order `{...extraBody, ...standard}` plus the post-build
+    // stream flags means every collision resolves to the provider's value.
+    expect(body.model).toBe('real-model')
+    expect(body.messages).toEqual([{ role: 'user', content: 'real question' }])
+    expect(body.stream).toBe(true)
+    // Non-colliding extension keys still ride along.
+    expect(body.thinking).toEqual({ type: 'enabled' })
+  })
+
+  it('omitting extraBody leaves the body free of extension keys (byte-identical default)', async () => {
+    const { client, create } = makeFakeClient(async () => ({
+      choices: [{ message: { content: 'ok' }, finish_reason: 'stop' }],
+    }))
+    const provider = new OpenAIProvider({ client: client as any })
+
+    await drainStream(provider.stream({
+      messages: [{ role: 'user', content: 'hi' }],
+    }))
+
+    const body = create.mock.calls[0]![0] as Record<string, unknown>
+    expect('thinking' in body).toBe(false)
+  })
 })
 
 // v0.3 added tool-use plumbing. These tests exercise the request +

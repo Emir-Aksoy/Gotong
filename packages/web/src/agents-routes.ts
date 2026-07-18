@@ -44,6 +44,7 @@ import {
   validateFallbacksArray,
   validateMaintenanceModel,
   validateEscalateTo,
+  validateThinking,
   validateApiKeyEnv,
   type ParsedAgent,
 } from './manifest.js'
@@ -324,6 +325,10 @@ function validateAgentBody(body: Record<string, unknown>): ParsedAgent {
   if (body.escalateTo !== undefined) {
     managed.escalateTo = validateEscalateTo(body.escalateTo, 'escalateTo')
   }
+  // DUO-M4a — optional reasoning switch (closed enum; host translates on spawn).
+  if (body.thinking !== undefined) {
+    managed.thinking = validateThinking(body.thinking, 'thinking')
+  }
   if (body.uses !== undefined) {
     managed.uses = validateUsesArray(body.uses, 'uses')
   }
@@ -439,6 +444,10 @@ function adaptEditBodyFromProposal(
   // DUO-M1 — the escalate target names a SIBLING agent, untouched by a primary
   // rewire of THIS agent; echo it so adapt-apply can't silently shed the wiring.
   if (typeof m.escalateTo === 'string' && m.escalateTo) body.escalateTo = m.escalateTo
+  // DUO-M4a — the reasoning switch is the owner's latency/cost stance, orthogonal
+  // to which endpoint serves; endpoints that don't know the field ignore it (or
+  // fail loudly — a one-field follow-up edit), unlike a silent wipe.
+  if (m.thinking) body.thinking = m.thinking
 
   // MR-M6 — apiKeyEnv is EXCLUSIVE: the pool reads ONLY that env var, never
   // falling through to stored keys. Both enactable kinds repoint the primary at

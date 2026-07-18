@@ -389,6 +389,10 @@ export function createManagedAgents({ ma, openBundleImportModal }) {
     ma._editingEscalateTo = (mode === 'edit' && typeof agent?.managed?.escalateTo === 'string')
       ? agent.managed.escalateTo
       : null
+    // DUO-M4a — same capture/echo for the reasoning switch.
+    ma._editingThinking = (mode === 'edit' && typeof agent?.managed?.thinking === 'string')
+      ? agent.managed.thinking
+      : null
     // ease-of-use ②TC — always open on the form, never a stale quick-chat
     // panel left over from a prior create (closeAgentForm also resets, but be
     // defensive so the entry point is self-sufficient).
@@ -618,6 +622,11 @@ export function createManagedAgents({ ma, openBundleImportModal }) {
     // manifest / gotong model). Omitting it would silently unregister the tool.
     if (typeof ma._editingEscalateTo === 'string' && ma._editingEscalateTo) {
       body.escalateTo = ma._editingEscalateTo
+    }
+    // DUO-M4a — echo the captured reasoning switch (no form widget; authored
+    // via manifest). Omitting it would silently flip the vendor default back on.
+    if (typeof ma._editingThinking === 'string' && ma._editingThinking) {
+      body.thinking = ma._editingThinking
     }
     // v5 D-M4 — heartbeat. Checked → persist { enabled, intervalMs (from the
     // minutes input), checklist? }. Unchecked → omit so a PUT (which replaces

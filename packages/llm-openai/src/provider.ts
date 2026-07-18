@@ -73,6 +73,16 @@ export interface OpenAIProviderOptions {
    */
   maxTokensField?: 'max_completion_tokens' | 'max_tokens'
   /**
+   * DUO-M4a — vendor-specific EXTRA request-body fields, merged into every
+   * outgoing chat-completions payload. Standard fields always win: the merge
+   * is `{...extraBody, ...standard}`, so this can never override `model`,
+   * `messages`, `stream`, tools, or the token cap — it only adds keys the
+   * neutral `LlmRequest` has no slot for (e.g. LongCat's
+   * `thinking: {type:'disabled'}`). Constructor-time constant, not
+   * per-request: the host derives it from the agent spec.
+   */
+  extraBody?: Record<string, unknown>
+  /**
    * Phase 9 — resolver for `artifact_ref` sources on multimodal blocks.
    * See AnthropicProviderOptions.artifactResolver for full semantics
    * — the type is shared so host wiring is identical across providers.
@@ -123,11 +133,13 @@ export class OpenAIProvider implements LlmProvider {
   private readonly maxTokensField: 'max_completion_tokens' | 'max_tokens'
   private readonly artifactResolver?: LlmArtifactResolver
   private readonly maxInlineBytes: number
+  private readonly extraBody?: Record<string, unknown>
 
   constructor(opts: OpenAIProviderOptions = {}) {
     this.name = opts.name ?? 'openai'
     this.defaultModel = opts.defaultModel ?? 'gpt-4o-mini'
     this.maxTokensField = opts.maxTokensField ?? 'max_completion_tokens'
+    this.extraBody = opts.extraBody
     this.artifactResolver = opts.artifactResolver
     this.maxInlineBytes = opts.maxInlineBytes ?? DEFAULT_MULTIMODAL_INLINE_BYTE_CAP
     if (opts.client) {
@@ -360,7 +372,11 @@ export class OpenAIProvider implements LlmProvider {
       const out = await translateMessage(m, ctx)
       messages.push(...out)
     }
+    // DUO-M4a — extra vendor fields spread FIRST so the standard fields
+    // below always win (extraBody can add e.g. `thinking`, never lie about
+    // model/messages/caps).
     const body: Record<string, unknown> = {
+      ...this.extraBody,
       model,
       messages,
     }

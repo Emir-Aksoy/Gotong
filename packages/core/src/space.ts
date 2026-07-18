@@ -1184,6 +1184,14 @@ export interface ManagedAgentSpec {
    */
   escalateTo?: string
   /**
+   * DUO-M4a — 可选的深推理开关。目前只对 `provider: 'openai-compatible'` 生效:
+   * host 构造 provider 时在请求体附 `thinking: { type: <此值> }`(LongCat-2.0
+   * 官方形状;思考型端点普遍认它)。`'disabled'` = 接待/轻量档,响应不出
+   * reasoning 段,更快更省;`'enabled'` = 显式要深推理。缺省 = 不附任何字段,
+   * 厂商默认行为,逐字节不变。Hub 不解释本字段;只有 host 的 provider 装配读它。
+   */
+  thinking?: 'enabled' | 'disabled'
+  /**
    * Hub Services this agent uses (v2.2 — see docs/services-rfc.md §6).
    * Empty / absent means the agent has no service handles at runtime;
    * its ctx is `EMPTY_SERVICE_CTX`. Two rules enforced at yaml parse:

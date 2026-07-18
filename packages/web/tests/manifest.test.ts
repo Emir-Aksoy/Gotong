@@ -698,6 +698,68 @@ agent: { id: w, capabilities: [x], provider: mock, system: hi, ${bad} }
   })
 })
 
+// DUO-M4a — `thinking:` is the reasoning-depth switch (LongCat-2.0 official
+// `thinking:{type}` body shape, attached by the host only for
+// openai-compatible specs). Closed enum: a typo must fail at import time,
+// not silently ship a body the vendor ignores.
+describe('parseManifest — thinking: (DUO-M4a reasoning switch)', () => {
+  it('parses both allowed values', () => {
+    for (const v of ['enabled', 'disabled'] as const) {
+      const yaml = `
+schema: gotong.agent/v1
+agent: { id: w, capabilities: [x], provider: openai-compatible, baseURL: 'https://api.longcat.chat/openai/v1', system: hi, thinking: ${v} }
+`
+      const m = parseManifest(yaml)
+      expect(m.agents[0]!.managed.thinking).toBe(v)
+    }
+  })
+
+  it('an agent without thinking parses cleanly and reports undefined', () => {
+    const yaml = `
+schema: gotong.agent/v1
+agent: { id: w, capabilities: [x], provider: mock, system: hi }
+`
+    const m = parseManifest(yaml)
+    expect(m.agents[0]!.managed.thinking).toBeUndefined()
+  })
+
+  it('rejects values outside the closed enum', () => {
+    for (const bad of ["thinking: 'off'", 'thinking: true', 'thinking: 42']) {
+      const yaml = `
+schema: gotong.agent/v1
+agent: { id: w, capabilities: [x], provider: mock, system: hi, ${bad} }
+`
+      expect(() => parseManifest(yaml)).toThrow(/thinking must be 'enabled' or 'disabled'/)
+    }
+  })
+
+  it('renderAgentManifest round-trips thinking', () => {
+    const rec = {
+      id: 'reception',
+      allowedCapabilities: ['x'],
+      managed: {
+        kind: 'llm' as const,
+        provider: 'openai-compatible' as const,
+        baseURL: 'https://api.longcat.chat/openai/v1',
+        system: 'be brief',
+        thinking: 'disabled' as const,
+      },
+    }
+    const rendered = renderAgentManifest(rec)
+    const parsed = parseManifest(JSON.stringify(rendered))
+    expect(parsed.agents[0]!.managed.thinking).toBe('disabled')
+  })
+
+  it('renderAgentManifest omits thinking entirely when not declared', () => {
+    const rendered = renderAgentManifest({
+      id: 'plain',
+      allowedCapabilities: ['x'],
+      managed: { kind: 'llm', provider: 'mock', system: 'hi' },
+    })
+    expect((rendered.agent as Record<string, unknown>).thinking).toBeUndefined()
+  })
+})
+
 // MR-M6 — `apiKeyEnv:` names an env VAR whose value is the credential for that
 // spec / candidate. The manifest carries the NAME only, never the key itself —
 // the validator's shape rule (identifier chars) is what makes pasting a real
