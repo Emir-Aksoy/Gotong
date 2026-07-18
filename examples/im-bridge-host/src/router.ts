@@ -309,6 +309,22 @@ export async function handleImMessage(
       return
     }
 
+    case 'inbox':
+    case 'approve':
+    case 'deny': {
+      // The approval loop (/inbox, /approve, /deny) is a production-host
+      // feature: it needs the host-side inbox service + audit chain that
+      // this minimal example doesn't stand up. Reply honestly instead of
+      // letting the command fall into the free-text path, which would
+      // hand a governance verb to an LLM.
+      await reply(
+        bridge,
+        msg,
+        'Approvals aren\'t wired in this example router. The full Gotong host binds /inbox, /approve and /deny to your member inbox — use the web UI (My page → pending items) or run the production host.',
+      )
+      return
+    }
+
     default: {
       // Exhaustiveness — switch covers all ImCommand kinds we care
       // about; an unknown one means parseImCommand changed shape.
