@@ -385,6 +385,10 @@ export function createManagedAgents({ ma, openBundleImportModal }) {
     ma._editingApiKeyEnv = (mode === 'edit' && typeof agent?.managed?.apiKeyEnv === 'string')
       ? agent.managed.apiKeyEnv
       : null
+    // DUO-M1 — same capture/echo for the escalate-tool target agent id.
+    ma._editingEscalateTo = (mode === 'edit' && typeof agent?.managed?.escalateTo === 'string')
+      ? agent.managed.escalateTo
+      : null
     // ease-of-use ②TC — always open on the form, never a stale quick-chat
     // panel left over from a prior create (closeAgentForm also resets, but be
     // defensive so the entry point is self-sufficient).
@@ -609,6 +613,11 @@ export function createManagedAgents({ ma, openBundleImportModal }) {
     // chain (possibly a different vendor's key).
     if (typeof ma._editingApiKeyEnv === 'string' && ma._editingApiKeyEnv) {
       body.apiKeyEnv = ma._editingApiKeyEnv
+    }
+    // DUO-M1 — echo the captured escalate target (no form widget; authored via
+    // manifest / gotong model). Omitting it would silently unregister the tool.
+    if (typeof ma._editingEscalateTo === 'string' && ma._editingEscalateTo) {
+      body.escalateTo = ma._editingEscalateTo
     }
     // v5 D-M4 — heartbeat. Checked → persist { enabled, intervalMs (from the
     // minutes input), checklist? }. Unchecked → omit so a PUT (which replaces

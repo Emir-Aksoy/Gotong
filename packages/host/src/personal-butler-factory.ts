@@ -48,6 +48,7 @@ import type { ButlerFactory } from './local-agent-pool.js'
 import type { StewardAgentDirectory, StewardWorkflowEditor } from './hub-steward-service.js'
 import { buildButlerKnowledgeIndexCard } from './butler-knowledge-index.js'
 import { buildButlerAskAgentToolset, type ButlerAskRosterSource } from './personal-butler-ask-agent.js'
+import { buildButlerEscalateToolset, type ButlerEscalatePush } from './personal-butler-escalate.js'
 import {
   buildButlerBackupPackToolset,
   buildButlerBackupStatusToolset,
@@ -138,6 +139,12 @@ export interface ButlerFactoryRefs {
   diagnoseAdapt: ButlerAdaptationSource | undefined
   /** BE-M4 — owned-agent roster for `ask_my_agent`. */
   askRoster: ButlerAskRosterSource | undefined
+  /**
+   * DUO-M2 — best-effort member push for the escalate result (IM bridges'
+   * `pushToMember`, lazy in main.ts). Absent = web-only: results stay in
+   * transcript / /me; the escalate tool still works, delivery is just passive.
+   */
+  memberPush: ButlerEscalatePush | undefined
   /** NET-M1 — sanitized mesh roster for the `list_peers` network eye. */
   peerRoster: ButlerPeerSurface | undefined
   /** LSA-M1 — sanitized model chain for the `list_my_llms` self-awareness eye. */
@@ -221,7 +228,7 @@ export function buildButlerFactory(deps: ButlerFactoryDeps): ButlerFactory {
   const { hub, logger: log, memoryRoot } = deps
   // SEN-M5 — 成员 roster 无 per-user 态,工厂级构造一次全员共享。
   const membersSurface = deps.members ? buildButlerMemberSurface(deps.members) : undefined
-  return (base, mcp) => {
+  return (base, mcp, extras) => {
     // S1-M2 — split the row's attached MCP (notes / calendar / …) into a benign
     // READ proxy (runs inline) and a governed WRITE toolset (parks for a /me
     // approval). Partitioned ONCE per agent (the toolset is per-agent, not
@@ -375,6 +382,22 @@ export function buildButlerFactory(deps: ButlerFactoryDeps): ButlerFactory {
         const askAgentToolset = refs.askRoster
           ? buildButlerAskAgentToolset({ userId, roster: refs.askRoster, hub, logger: log })
           : undefined
+        // DUO-M2 — benign fire-and-forget escalate to the owner-configured
+        // expert (`spec.escalateTo`, via extras). Needs the SAME owned-agent
+        // roster as ask_my_agent (call-time no-leak gate); the push handle is
+        // best-effort (absent = web-only, results land in transcript / /me).
+        // Unset escalateTo ⇒ the toolset is never built ⇒ byte-identical face.
+        const escalateToolset =
+          extras?.escalateTo && refs.askRoster
+            ? buildButlerEscalateToolset({
+                userId,
+                escalateTo: extras.escalateTo,
+                roster: refs.askRoster,
+                hub,
+                ...(refs.memberPush ? { push: refs.memberPush } : {}),
+                logger: log,
+              })
+            : undefined
         // NET-M1 — benign "看看互联了哪些 hub": org-level mesh roster, sanitized
         // (no endpoint/token/ACL detail). Read-only; the outbound ACTION arrives
         // in NET-M2 as a governed gate resolving targets against this same surface.
@@ -528,6 +551,7 @@ export function buildButlerFactory(deps: ButlerFactoryDeps): ButlerFactory {
           ...(observeToolset ? [observeToolset] : []),
           ...(diagnoseToolset ? [diagnoseToolset] : []),
           ...(askAgentToolset ? [askAgentToolset] : []),
+          ...(escalateToolset ? [escalateToolset] : []),
           ...(peersToolset ? [peersToolset] : []),
           ...(llmsToolset ? [llmsToolset] : []),
           ...(backupStatusToolset ? [backupStatusToolset] : []),

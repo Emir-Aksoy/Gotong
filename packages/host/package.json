@@ -49,6 +49,10 @@
     "./butler-toolface-report": {
       "types": "./dist/butler-toolface-report.d.ts",
       "import": "./dist/butler-toolface-report.js"
+    },
+    "./butler-escalate": {
+      "types": "./dist/personal-butler-escalate.d.ts",
+      "import": "./dist/personal-butler-escalate.js"
     }
   },
   "files": [

@@ -47,6 +47,7 @@ const EMPTY_REFS: ButlerFactoryRefs = {
   diagnoseOwned: undefined,
   diagnoseAdapt: undefined,
   askRoster: undefined,
+  memberPush: undefined,
   peerRoster: undefined,
   wizard: undefined,
   providerBuilder: undefined,

@@ -58,6 +58,7 @@ function fullRefs(): ButlerFactoryRefs {
     diagnoseOwned: stub(),
     diagnoseAdapt: stub(),
     askRoster: stub(),
+    memberPush: undefined, // push 是投递增强非注册条件 — 面测试无需它
     peerRoster: stub(),
     llmRoster: stub(),
     schedules: stub(),
@@ -143,12 +144,17 @@ function buildButler(provider: LlmProvider, root: string, singleTier?: boolean) 
     backupOps: fakeBackupOps,
     members: { users: () => [], membershipRole: () => null },
   })
-  return factory({
-    id: 'atong' as ParticipantId,
-    provider,
-    capabilities: ['chat'],
-    system: '你是这位成员的管家。',
-  })
+  return factory(
+    {
+      id: 'atong' as ParticipantId,
+      provider,
+      capabilities: ['chat'],
+      system: '你是这位成员的管家。',
+    },
+    undefined,
+    // DUO-M2 — 全开姿态:配了 escalateTo 才有 escalate_to_expert,最大脸必须配。
+    { escalateTo: 'expert-x' },
+  )
 }
 
 const GOVERNED_TOOLS = [

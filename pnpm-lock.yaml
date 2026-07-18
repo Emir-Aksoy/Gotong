@@ -73,6 +73,12 @@ importers:
         specifier: workspace:*
         version: link:../../packages/llm
 
+  examples/atong-dual-brain:
+    dependencies:
+      '@gotong/host':
+        specifier: workspace:*
+        version: link:../../packages/host
+
   examples/atong-librarian:
     dependencies:
       '@gotong/core':

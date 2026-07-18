@@ -219,7 +219,22 @@ export interface ButlerMcpHandoff {
   tools: NamespacedTool[]
 }
 
-export type ButlerFactory = (base: LlmAgentOptions, mcp?: ButlerMcpHandoff) => Participant
+/**
+ * DUO-M2 — per-row spec extras the factory can't read from `base` (an
+ * LlmAgentOptions carries no ManagedAgentSpec fields). Spawn-time snapshot:
+ * a panel edit restarts the row (applyAgentEdit → lifecycle.start), so the
+ * value is never staler than the running spec. Absent/empty escalateTo =
+ * the escalate tool is never registered (byte-identical face).
+ */
+export interface ButlerRowExtras {
+  escalateTo?: string
+}
+
+export type ButlerFactory = (
+  base: LlmAgentOptions,
+  mcp?: ButlerMcpHandoff,
+  extras?: ButlerRowExtras,
+) => Participant
 
 /**
  * `LocalAgentPool` is **not** a separate component — it is a small piece
@@ -1210,7 +1225,13 @@ export class LocalAgentPool implements ManagedAgentLifecycle {
           })
         }
       }
-      agent = this.butlerFactory!(butlerBase, mcpHandoff)
+      // DUO-M2 — hand the row's escalate target through (spawn-time snapshot;
+      // edits restart the row, so this can't go stale). Unset = no extras.
+      agent = this.butlerFactory!(
+        butlerBase,
+        mcpHandoff,
+        record.managed.escalateTo ? { escalateTo: record.managed.escalateTo } : undefined,
+      )
     } else {
       switch (record.managed.kind) {
         case 'personal-growth':

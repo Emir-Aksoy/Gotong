@@ -633,6 +633,71 @@ agent: { id: w, capabilities: [x], provider: mock, system: hi, ${bad} }
   })
 })
 
+// DUO-M1 — agent manifests can declare an `escalateTo:` target so the butler's
+// escalate tool hands heavy work to a sibling agent. Shape-only at config time
+// (the target may be defined later in the same import); ownership is enforced
+// at call time against the live roster. Absent = the tool isn't registered,
+// byte-identical to today.
+describe('parseManifest — escalateTo: (DUO-M1 escalate target)', () => {
+  it('parses and trims an escalateTo string', () => {
+    const yaml = `
+schema: gotong.agent/v1
+agent:
+  id: w
+  capabilities: [x]
+  provider: anthropic
+  system: hi
+  escalateTo: '  expert-agent  '
+`
+    const m = parseManifest(yaml)
+    expect(m.agents[0]!.managed.escalateTo).toBe('expert-agent')
+  })
+
+  it('an agent without escalateTo parses cleanly and reports undefined', () => {
+    const yaml = `
+schema: gotong.agent/v1
+agent: { id: w, capabilities: [x], provider: mock, system: hi }
+`
+    const m = parseManifest(yaml)
+    expect(m.agents[0]!.managed.escalateTo).toBeUndefined()
+  })
+
+  it('rejects an empty or non-string escalateTo', () => {
+    for (const bad of ["escalateTo: ''", 'escalateTo: 42']) {
+      const yaml = `
+schema: gotong.agent/v1
+agent: { id: w, capabilities: [x], provider: mock, system: hi, ${bad} }
+`
+      expect(() => parseManifest(yaml)).toThrow(/escalateTo must be a non-empty string/)
+    }
+  })
+
+  it('renderAgentManifest round-trips escalateTo', () => {
+    const rec = {
+      id: 'reception',
+      allowedCapabilities: ['x'],
+      managed: {
+        kind: 'llm' as const,
+        provider: 'anthropic' as const,
+        system: 'be brief',
+        escalateTo: 'expert-agent',
+      },
+    }
+    const rendered = renderAgentManifest(rec)
+    const parsed = parseManifest(JSON.stringify(rendered))
+    expect(parsed.agents[0]!.managed.escalateTo).toBe('expert-agent')
+  })
+
+  it('renderAgentManifest omits escalateTo entirely when not declared', () => {
+    const rendered = renderAgentManifest({
+      id: 'plain',
+      allowedCapabilities: ['x'],
+      managed: { kind: 'llm', provider: 'mock', system: 'hi' },
+    })
+    expect((rendered.agent as Record<string, unknown>).escalateTo).toBeUndefined()
+  })
+})
+
 // MR-M6 — `apiKeyEnv:` names an env VAR whose value is the credential for that
 // spec / candidate. The manifest carries the NAME only, never the key itself —
 // the validator's shape rule (identifier chars) is what makes pasting a real

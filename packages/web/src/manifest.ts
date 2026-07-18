@@ -445,6 +445,11 @@ function validateAgent(a: Record<string, unknown>, path: string): ParsedAgent {
   if (a.maintenanceModel !== undefined) {
     managed.maintenanceModel = validateMaintenanceModel(a.maintenanceModel, `${path}.maintenanceModel`)
   }
+  // Optional `escalateTo:` — DUO-M1 escalate-tool target. Shape-only here;
+  // ownership/existence is enforced at call time against the live roster.
+  if (a.escalateTo !== undefined) {
+    managed.escalateTo = validateEscalateTo(a.escalateTo, `${path}.escalateTo`)
+  }
   const out: ParsedAgent = { id: a.id, capabilities, managed }
   if (typeof a.displayName === 'string') out.displayName = a.displayName
   return out
@@ -714,6 +719,20 @@ export function validateMaintenanceModel(raw: unknown, path: string): string {
 }
 
 /**
+ * Validate an optional `escalateTo:` (DUO-M1 — agent id the butler's escalate
+ * tool hands heavy work to). Shape-only: a non-empty string when present.
+ * Existence is deliberately NOT checked here — manifest import order means the
+ * target agent may be defined later in the same file (or not yet); the host
+ * re-checks ownership against the live roster at call time, fail-closed.
+ */
+export function validateEscalateTo(raw: unknown, path: string): string {
+  if (typeof raw !== 'string' || raw.trim().length === 0) {
+    throw new ManifestError(`${path} must be a non-empty string when present`)
+  }
+  return raw.trim()
+}
+
+/**
  * Validate an optional `apiKeyEnv:` (MR-M6 — per-spec / per-candidate env var
  * NAME the API key is read from; the key VALUE never travels through this
  * layer). Shape-gated so a pasted key can't masquerade as a name: env-var
@@ -927,6 +946,10 @@ export function renderAgentManifest(rec: {
   if (rec.managed.maintenanceModel) {
     // NA-M5 — echo so export → re-import preserves the maintenance override.
     agent.maintenanceModel = rec.managed.maintenanceModel
+  }
+  if (rec.managed.escalateTo) {
+    // DUO-M1 — echo so export → re-import preserves the escalate target.
+    agent.escalateTo = rec.managed.escalateTo
   }
   if (rec.displayName) agent.displayName = rec.displayName
   return {

@@ -1175,6 +1175,15 @@ export interface ManagedAgentSpec {
    */
   maintenanceModel?: string
   /**
+   * DUO-M1 — 可选的转派目标 agent id。设了,host 才给这个管家注册 escalate
+   * 工具:轻量接待模型自己决定「重活」时,把任务 fire-and-forget 转派给此
+   * 目标(explicit dispatch,仅限同 owner 名下,call-time 校验 fail-closed),
+   * 结果异步回推同一聊天窗。目标由 owner 配置,模型只有「转/不转」一个决定。
+   * 缺省 = escalate 工具根本不注册,工具面/行为逐字节不变。Hub 不解释本字段;
+   * 只有 host 的 butler factory 读它(opt-in)。详见 `docs/zh/ATONG-DUAL-BRAIN.md`。
+   */
+  escalateTo?: string
+  /**
    * Hub Services this agent uses (v2.2 — see docs/services-rfc.md §6).
    * Empty / absent means the agent has no service handles at runtime;
    * its ctx is `EMPTY_SERVICE_CTX`. Two rules enforced at yaml parse:

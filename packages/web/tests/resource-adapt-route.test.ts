@@ -242,6 +242,7 @@ describe('RES-M3 adapt route: MR-M2/M6/NA-M5 spec fields survive the constrained
       capabilities: ['chat'],
       apiKeyEnv: 'OLD_ANTHROPIC_KEY',
       maintenanceModel: 'claude-haiku-4-5',
+      escalateTo: 'expert-agent',
       fallbacks: FALLBACKS,
     })
     const res = await adapt(b, {
@@ -270,6 +271,9 @@ describe('RES-M3 adapt route: MR-M2/M6/NA-M5 spec fields survive the constrained
     // each candidate's credential belongs to that candidate, not the primary.
     expect(m?.fallbacks).toEqual(FALLBACKS)
     expect(m?.maintenanceModel).toBe('claude-haiku-4-5')
+    // DUO-M1 — the escalate target names a SIBLING agent; a primary rewire of
+    // THIS agent must not silently unregister the escalate wiring.
+    expect(m?.escalateTo).toBe('expert-agent')
     // The primary's exclusive env name pointed at the OLD vendor — it must not
     // ride along onto the local endpoint (the placeholder per-agent key serves it).
     expect(m?.apiKeyEnv).toBeUndefined()
@@ -285,6 +289,7 @@ describe('RES-M3 adapt route: MR-M2/M6/NA-M5 spec fields survive the constrained
       system: 'you hop',
       capabilities: ['chat'],
       maintenanceModel: 'claude-haiku-4-5',
+      escalateTo: 'expert-agent',
       fallbacks: FALLBACKS,
     })
     const res = await adapt(b, {
@@ -313,6 +318,7 @@ describe('RES-M3 adapt route: MR-M2/M6/NA-M5 spec fields survive the constrained
     expect(m?.apiKeyEnv).toBeUndefined()
     expect(m?.fallbacks).toEqual(FALLBACKS)
     expect(m?.maintenanceModel).toBe('claude-haiku-4-5')
+    expect(m?.escalateTo).toBe('expert-agent')
   })
 })
 

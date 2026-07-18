@@ -268,6 +268,71 @@ describe('agents-route: maintenanceModel (NA-M5 maintenance model override)', ()
   })
 })
 
+describe('agents-route: escalateTo (DUO-M1 escalate target)', () => {
+  let b: Boot
+  beforeEach(async () => { b = await boot() })
+  afterEach(async () => { await teardown(b) })
+
+  it('POST persists a trimmed escalateTo; GET exposes it via managed', async () => {
+    const res = await fetch(`${b.baseUrl}/api/admin/agents`, {
+      method: 'POST',
+      headers: auth(b.token),
+      body: JSON.stringify({ ...base, id: 'reception', escalateTo: '  expert-agent  ' }),
+    })
+    expect(res.status).toBe(200)
+    const body = await res.json()
+    expect(body.agent.managed.escalateTo).toBe('expert-agent')
+    const list = await fetch(`${b.baseUrl}/api/admin/agents`, { headers: auth(b.token) })
+    const agents = (await list.json()).agents as Array<{ id: string; managed?: { escalateTo?: string } }>
+    expect(agents.find((a) => a.id === 'reception')?.managed?.escalateTo).toBe('expert-agent')
+  })
+
+  it('omitting escalateTo leaves it undefined (opt-in byte-stable)', async () => {
+    const res = await fetch(`${b.baseUrl}/api/admin/agents`, {
+      method: 'POST',
+      headers: auth(b.token),
+      body: JSON.stringify({ ...base, id: 'no-esc' }),
+    })
+    expect(res.status).toBe(200)
+    expect((await b.space.agents()).find((a) => a.id === 'no-esc')?.managed.escalateTo).toBeUndefined()
+  })
+
+  it('an empty or non-string escalateTo → 400, nothing persisted', async () => {
+    for (const bad of ['', '   ', 42]) {
+      const res = await fetch(`${b.baseUrl}/api/admin/agents`, {
+        method: 'POST',
+        headers: auth(b.token),
+        body: JSON.stringify({ ...base, id: 'bad-esc', escalateTo: bad }),
+      })
+      expect(res.status).toBe(400)
+    }
+    expect((await b.space.agents()).some((a) => a.id === 'bad-esc')).toBe(false)
+  })
+
+  it('PUT echoing the value keeps it; omitting it drops it (wholesale replace)', async () => {
+    await fetch(`${b.baseUrl}/api/admin/agents`, {
+      method: 'POST',
+      headers: auth(b.token),
+      body: JSON.stringify({ ...base, id: 'esc-edit', escalateTo: 'expert-agent' }),
+    })
+    const keep = await fetch(`${b.baseUrl}/api/admin/agents/esc-edit`, {
+      method: 'PUT',
+      headers: auth(b.token),
+      body: JSON.stringify({ ...base, id: 'esc-edit', escalateTo: 'expert-agent' }),
+    })
+    expect(keep.status).toBe(200)
+    expect((await b.space.agents()).find((a) => a.id === 'esc-edit')?.managed.escalateTo).toBe('expert-agent')
+    // Omission drops — the admin form's capture-echo (managed-agents.js) defends this.
+    const drop = await fetch(`${b.baseUrl}/api/admin/agents/esc-edit`, {
+      method: 'PUT',
+      headers: auth(b.token),
+      body: JSON.stringify({ ...base, id: 'esc-edit' }),
+    })
+    expect(drop.status).toBe(200)
+    expect((await b.space.agents()).find((a) => a.id === 'esc-edit')?.managed.escalateTo).toBeUndefined()
+  })
+})
+
 describe('agents-route: apiKeyEnv (MR-M6 per-candidate env credentials)', () => {
   let b: Boot
   beforeEach(async () => { b = await boot() })

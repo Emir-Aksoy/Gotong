@@ -36,6 +36,9 @@ export const BUTLER_FIRST_CLASS_BENIGN = [
   'my_usage',
   // 派活自己的 agent — 核心日常动词
   'ask_my_agent',
+  // DUO-M2 双脑转派 — 接待模型的核心日常动词(重活就转,persona 推荐文案
+  // 会点名它;进目录=轻量模型两跳才找到,弱模型最需要它在脸上)
+  'escalate_to_expert',
   // 被 ask_peer 描述点名(理由②)
   'list_peers',
   // 被 create_workflow 描述点名(理由②);建流主流程的前半步

@@ -43,6 +43,7 @@ import {
   validateHeartbeatSpec,
   validateFallbacksArray,
   validateMaintenanceModel,
+  validateEscalateTo,
   validateApiKeyEnv,
   type ParsedAgent,
 } from './manifest.js'
@@ -319,6 +320,10 @@ function validateAgentBody(body: Record<string, unknown>): ParsedAgent {
   if (body.maintenanceModel !== undefined) {
     managed.maintenanceModel = validateMaintenanceModel(body.maintenanceModel, 'maintenanceModel')
   }
+  // DUO-M1 — optional escalate-tool target (shape-only; roster-checked at call time).
+  if (body.escalateTo !== undefined) {
+    managed.escalateTo = validateEscalateTo(body.escalateTo, 'escalateTo')
+  }
   if (body.uses !== undefined) {
     managed.uses = validateUsesArray(body.uses, 'uses')
   }
@@ -431,6 +436,9 @@ function adaptEditBodyFromProposal(
   // the next maintenance tick and is a one-field follow-up edit (same posture as
   // `model` above), unlike a silent wipe.
   if (typeof m.maintenanceModel === 'string' && m.maintenanceModel) body.maintenanceModel = m.maintenanceModel
+  // DUO-M1 — the escalate target names a SIBLING agent, untouched by a primary
+  // rewire of THIS agent; echo it so adapt-apply can't silently shed the wiring.
+  if (typeof m.escalateTo === 'string' && m.escalateTo) body.escalateTo = m.escalateTo
 
   // MR-M6 — apiKeyEnv is EXCLUSIVE: the pool reads ONLY that env var, never
   // falling through to stored keys. Both enactable kinds repoint the primary at

@@ -1,0 +1,14 @@
+{
+  "name": "@gotong/example-atong-dual-brain",
+  "version": "0.0.0",
+  "type": "module",
+  "private": true,
+  "description": "DUO-M3 capstone — the dual-brain shape: a light reception model answers small talk itself and hands heavy work to the owner-configured expert agent via the REAL escalate toolset (fire-and-forget explicit dispatch). Four acts assert the receipt returns BEFORE the expert finishes, the result pushes back to the same member, a foreign target refuses with zero dispatch (fail-closed), and a dispatch failure pushes an honest apology. Deterministic, no network, no API key, no LLM.",
+  "scripts": {
+    "start": "tsx src/demo.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@gotong/host": "workspace:*"
+  }
+}

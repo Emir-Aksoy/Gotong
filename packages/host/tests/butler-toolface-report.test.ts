@@ -37,6 +37,7 @@ import {
   type ToolFaceEntry,
 } from '../src/butler-toolface-report.js'
 import { buildButlerAskAgentToolset } from '../src/personal-butler-ask-agent.js'
+import { buildButlerEscalateToolset } from '../src/personal-butler-escalate.js'
 import { buildButlerAskPeerToolset } from '../src/personal-butler-ask-peer.js'
 import {
   buildButlerBackupPackToolset,
@@ -87,6 +88,7 @@ const MEASURED_BUILDERS: Record<string, string> = {
   observe: 'buildButlerObserveToolset',
   diagnose: 'buildButlerDiagnoseToolset',
   'ask-agent': 'buildButlerAskAgentToolset',
+  escalate: 'buildButlerEscalateToolset',
   peers: 'buildButlerPeersToolset',
   llms: 'buildButlerLlmsToolset',
   wizard: 'buildButlerWorkflowWizardToolset',
@@ -163,6 +165,17 @@ function buildFullFace(): ToolFaceEntry[] {
       module: 'ask-agent',
       kind: 'benign',
       toolset: buildButlerAskAgentToolset({ userId: U, roster: stub(), hub: stub(), logger: stub() }),
+    },
+    {
+      module: 'escalate',
+      kind: 'benign',
+      toolset: buildButlerEscalateToolset({
+        userId: U,
+        escalateTo: 'expert-x',
+        roster: stub(),
+        hub: stub(),
+        logger: stub(),
+      }),
     },
     { module: 'peers', kind: 'benign', toolset: buildButlerPeersToolset({ peers: stub(), logger: stub() }) },
     { module: 'llms', kind: 'benign', toolset: buildButlerLlmsToolset({ llms: stub(), logger: stub() }) },
