@@ -55,11 +55,11 @@ async function main(): Promise<void> {
       hub: { dispatch: async () => ({ kind: 'ok' }) as never },
       logger: silentLog,
     })
-    const tools = ts.listTools()
+    const tools = await ts.listTools()
     assert(tools.length === 1 && tools[0]!.name === 'escalate_to_expert', '工具面只有 escalate_to_expert 一件')
     const props = (tools[0]!.inputSchema as { properties: Record<string, unknown> }).properties
     assert(Object.keys(props).join(',') === 'task_summary', 'schema 只收 task_summary — 没有 target 参数')
-    assert(tools[0]!.description.includes('先用一两句话回复成员'), '「先回执再转派」纪律钉在工具描述里')
+    assert(tools[0]!.description?.includes('先用一两句话回复成员') === true, '「先回执再转派」纪律钉在工具描述里')
   }
 
   // ── 幕2 回执先于结果 ───────────────────────────────────────────────────────
