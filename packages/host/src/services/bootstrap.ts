@@ -79,14 +79,24 @@ async function hostAnchoredImport(pkg: string): Promise<unknown> {
   // which is what gives us access to the host's `node_modules/@gotong/`
   // tree. Honours `exports.import` so pure-ESM plugin packages work.
   //
-  // Test runners (vite-node / vitest) don't implement
-  // `import.meta.resolve`. In that environment we fall back to a bare
-  // `import(pkg)` and let the bundler's resolver handle it — vite-node
-  // doesn't enforce the pnpm-isolated `node_modules` walk Node does at
-  // runtime, so plugin packages anywhere in the workspace are visible.
+  // Test runners can't take this path: vite-node (vitest ≤3) leaves
+  // `import.meta.resolve` undefined, and vitest 4's module runner defines
+  // it as a stub that THROWS on call — so absence and a throwing resolve
+  // are both treated as "no resolver" and fall back to a bare
+  // `import(pkg)`, letting the bundler's resolver handle it (it doesn't
+  // enforce the pnpm-isolated `node_modules` walk Node does at runtime,
+  // so plugin packages anywhere in the workspace are visible). The catch
+  // is scoped to `resolve()` alone: a package that resolves but fails to
+  // LOAD must surface its real error, not a masked second attempt.
   const meta = import.meta as { resolve?: (s: string) => string }
   if (typeof meta.resolve === 'function') {
-    return import(meta.resolve(pkg))
+    let resolved: string | undefined
+    try {
+      resolved = meta.resolve(pkg)
+    } catch {
+      // fall through to the bare import
+    }
+    if (resolved !== undefined) return import(resolved)
   }
   return import(/* @vite-ignore */ pkg)
 }
