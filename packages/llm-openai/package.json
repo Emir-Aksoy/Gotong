@@ -36,10 +36,10 @@
     "@gotong/llm": "workspace:*"
   },
   "peerDependencies": {
-    "openai": "^6.38.0"
+    "openai": "^6.48.0"
   },
   "devDependencies": {
-    "openai": "^6.38.0",
+    "openai": "^6.48.0",
     "vitest": "^3.2.4"
   }
 }

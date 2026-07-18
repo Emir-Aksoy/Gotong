@@ -13,9 +13,9 @@
     "@gotong/llm": "workspace:*",
     "@gotong/llm-anthropic": "workspace:*",
     "@gotong/mcp-client": "workspace:*",
-    "@anthropic-ai/sdk": "^0.96.0"
+    "@anthropic-ai/sdk": "^0.112.3"
   },
   "devDependencies": {
-    "tsx": "^4.7.0"
+    "tsx": "^4.23.1"
   }
 }

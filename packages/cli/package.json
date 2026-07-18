@@ -45,8 +45,8 @@
     "@gotong/protocol": "workspace:*",
     "@gotong/workflow": "workspace:*",
     "qrcode-terminal": "^0.12.0",
-    "tar": "^7.4.3",
-    "ws": "^8.20.1"
+    "tar": "^7.5.20",
+    "ws": "^8.21.1"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.0",
@@ -54,6 +54,6 @@
     "vitest": "^3.2.4"
   },
   "optionalDependencies": {
-    "better-sqlite3": "^12.10.0"
+    "better-sqlite3": "^12.11.1"
   }
 }
