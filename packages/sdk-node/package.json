@@ -36,7 +36,7 @@
     "@gotong/core": "workspace:*",
     "@gotong/protocol": "workspace:*",
     "@gotong/services-sdk": "workspace:*",
-    "ws": "^8.20.1"
+    "ws": "^8.21.1"
   },
   "devDependencies": {
     "@gotong/transport-ws": "workspace:*",
