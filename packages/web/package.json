@@ -48,6 +48,6 @@
     "@gotong/identity": "workspace:*",
     "@gotong/workflow": "workspace:*",
     "esbuild": "^0.28.1",
-    "vitest": "^3.2.4"
+    "vitest": "^4.1.10"
   }
 }
