@@ -132,20 +132,58 @@
   「坏钥当场拒」同姿态),装配路径配不出克隆腿。butler-voice 20→26 单测
   (mimo wire 逐字节体断言/无 audio.data 四变体 failed 零 ffmpeg/内容闸先于
   网络/HTTP 500 fail-soft/非 mimo 模型照走老 wire/克隆模型双路径拒)。
-- **M4 生产真机(需用户 key,当前唯一未落)** —— 服务器 ffmpeg **已装**(6.1.1,
-  2026-07-17);剩:飞书后台开 `im:resource`(用户自办)、gotong.env 加四值
-  (备份先行;`GOTONG_BUTLER_VOICE_URL=https://api.xiaomimimo.com/v1` +
-  `_MODEL=mimo-v2.5-tts` + `_VOICE=茉莉` + `_KEY=<小米 key>`),真机
-  round-trip:发消息→收到语音条→关掉开关→回文本。**开放疑问(配置时现场探)**:
-  用户手上的小米 key 若是 token-plan 域(`token-plan-cn.xiaomimimo.com`)签发,
-  对 `api.xiaomimimo.com` 的 TTS 面是否通用,配置时真探针一发定论。M4 前
-  M1-M3b 全程不依赖 key,已全绿。
+- **M4 生产部署 ✅(2026-07-18 落地)** —— 服务器 ffmpeg 已装(6.1.1);gotong.env
+  四值落盘(备份先行)。**开放疑问当场定论**:api 域探针 401、`token-plan-cn`
+  域探针 200 —— 用户的小米 key 是 token-plan 域签发,TTS/ASR 面**都在
+  `https://token-plan-cn.xiaomimimo.com/v1`**,生产 URL 用它(api 域文档值对
+  该 key 不通)。真机 round-trip 由用户飞书验证;`im:resource` 权限用户已开
+  (盖上传面;下载面走既有 `im:message`)。
+
+### ASR 入站腿(语音收听,2026-07-18 全落)
+
+M0 计划里「入站语音下载+转写」的独立票,同日三刀收口——阿同从「会说」补上「会听」:
+
+- **侦察真相(2026-07-18 活探针,两条都改设计)**:①MiMo **没有** `/audio/transcriptions`
+  standard wire(探针 404);ASR 同 TTS 一样走 **chat wire**——`POST <base>/chat/completions`,
+  待转写音频以 `{type:'input_audio', input_audio:{data:<base64>, format:'wav'}}` 进
+  **user** 消息,转写文本回 `choices[0].message.content`(探针自举:先拿 TTS 合成已知句
+  再喂 ASR,逐字回显即证)。②服务器亲口报 `input_audio.format must be one of: wav, mp3.
+  Got: ogg` —— 飞书语音条是 opus/ogg,**ffmpeg opus→wav 转码腿是承重件**
+  (`-ac 1 -ar 16000 -acodec pcm_s16le -f wav`)。③飞书下载端点
+  `GET /im/v1/messages/:message_id/resources/:file_key?type=file`(语音消息按 file 下载,
+  披着既有 `im:message` 读权限;**message_id+file_key 必须成对**——所以转写只能在桥层做,
+  事件里 message_id 在手;附件 URI `lark-audio:<file_key>` 单独不够)。
+- **M1 host 纯核 `butler-hearing.ts` ✅** —— 镜像 butler-voice 全形状:`isMimoAsrWire`
+  (`mimo-*asr*` 选 chat wire,其余走 standard `/audio/transcriptions` multipart)+
+  `toWavSpeech`(RIFF 嗅探直通,否则 ffmpeg 转码;ENOENT→诚实「未装 ffmpeg」)+
+  `asrTranscribe`(key 只进 Authorization 头,测试逐字断言 URL/body 零 key)+
+  `buildButlerHearing().transcribe` **永不抛**三态合同(`text`/`skipped` 空音频·超
+  8MB·空转写=静音/`failed` 基建)+ `butlerHearingFromEnv`(**复用 VOICE_URL/_KEY** +
+  新 `GOTONG_BUTLER_ASR_MODEL`,三者全设才开耳——嘴耳各自独立 opt-in)。27 单测。
+- **M2 im-lark 腿 ✅** —— `LarkClient.downloadResource(messageId, fileKey, 'file')`
+  (Bearer 头、URL-encode 敌意 id、32MB 防御顶、非 ok 解析错误体抛 LarkApiError)+
+  `LarkBridgeOptions.transcriber?: (bytes) => Promise<string|null>` 窄鸭子(桥保持
+  host-free):语音消息(text 空+audio 附件)在**派发前**下载→转写→转写文本**替换**
+  `msg.text` 走同一文字管道;null/下载失败/转写器抛 → 诚实标记
+  `VOICE_TRANSCRIBE_FAILED='(语音消息,转写失败)'` + onError,**绝不静默丢消息**;
+  未注入 transcriber = 入站逐字节不变(语音消息保持空文本,阿同继续听不见——opt-in)。
+  attachment 原样保留(转写是加法不是替换证据)。im-lark 73→82。
+- **M3 装配 ✅** —— main.ts `butlerHearingFromEnv()` + disclosure 启动日志(报模型/
+  主机+数据离盒,永不报 key)→ `im-bridge-wiring` 窄鸭子 `ImBridgeHearing` 透传 →
+  `startImBridges.hearing` → lark 构造点 `foldHearingTranscriber` 三态折叠
+  (`text`→转写文本/`skipped` 设计内**静音** null/`failed` warn+null,桥拿 null 换
+  诚实标记);旋钮登记 **119→120**(`GOTONG_BUTLER_ASR_MODEL`,本腿唯一新旋钮);
+  防腐三例(fold 三态映射;字节不变半边由 im-lark 桥测试[无 transcriber 零下载]与
+  butler-hearing 测试[env 任缺=undefined]合盖)。host 2302 全绿,四门 PASS
+  (main.ts 3000/3000 压注释净零)。
+- **边界重申**:转写≠授权——语音转出的文字走与打字**完全相同**的治理管道(对外动作
+  照 park);语音字节只发往 ASR 端点(disclosure 直说),转写文本落 transcript 与打字
+  同待遇;`GOTONG_BUTLER_ASR_MODEL` 未设 = 全链路字节不变。
 
 ## 六、显式不做(本 track)
 
-- 其他五桥的语音出站(契约已留 `ImAttachment` 缝,谁需要谁接);
-- 飞书**入站**语音的下载+转写(入站音频现在只到 `lark-audio:<file_key>` URI,
-  下载端点未实现 —— 独立票,与微信服务端转写不同,飞书要自己请 STT);
+- 其他五桥的语音出站(契约已留 `ImAttachment` 缝,谁需要谁接)与**入站转写**
+  (transcriber 鸭子只接了飞书腿;微信 iLink 有服务端转写不需要,其余桥等真实信号);
 - 语音/文本的智能选择(「什么时候用语音回」v1 走简单规则:开了就短回复出语音,
   超阈值出文本;更细的策略等真实使用信号);
 - butler-reachable push 腿的语音(M3 收窄推迟——push 常含短码/指路命令,语音条

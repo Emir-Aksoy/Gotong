@@ -53,6 +53,7 @@ import { SlackBridge, type WebSocketCtor as SlackWebSocketCtor } from '@gotong/i
 import { WechatBridge } from '@gotong/im-wechat'
 import { WebSocket as NodeWebSocket } from 'ws'
 
+import type { ButlerHearing } from './butler-hearing.js'
 import { ButlerOutbox } from './butler-outbox.js'
 import { ButlerReachableRegistry, type ButlerPushResult } from './butler-reachable.js'
 import type { ButlerVoice } from './butler-voice.js'
@@ -713,6 +714,7 @@ function buildVaultablePlatformBridge(
   platform: ImVaultPlatform,
   creds: ResolvedImCreds,
   log: ImLogger,
+  hearing?: Pick<ButlerHearing, 'transcribe'>,
 ): ImBridge {
   if (platform === 'telegram') {
     return new TelegramBridge({
@@ -730,8 +732,30 @@ function buildVaultablePlatformBridge(
   return new LarkBridge({
     appId: creds.fields.appId!,
     appSecret: creds.fields.appSecret!,
+    // ASR-M3 — absent hearing = no transcriber key at all (inbound byte-identical).
+    ...(hearing ? { transcriber: foldHearingTranscriber(hearing, log) } : {}),
     onError: (err) => log.warn('lark bridge error', { err: String(err) }),
   })
+}
+
+/**
+ * ASR-M3 — fold the three-state {@link ButlerHearing} result into the Lark
+ * bridge's `string | null` transcriber contract: `text` → transcript,
+ * `skipped` (silence / oversize — in-design) → quiet null, `failed` (infra)
+ * → warn + null. The bridge substitutes its honest marker for null;
+ * `transcribe()` itself never throws. Exported for the anti-corrosion test —
+ * production reaches it only through the Lark construction above.
+ */
+export function foldHearingTranscriber(
+  hearing: Pick<ButlerHearing, 'transcribe'>,
+  log: ImLogger,
+): (bytes: Uint8Array) => Promise<string | null> {
+  return async (bytes) => {
+    const r = await hearing.transcribe(Buffer.from(bytes))
+    if (r.kind === 'text') return r.text
+    if (r.kind === 'failed') log.warn('im hearing: transcription failed', { reason: r.reason })
+    return null
+  }
 }
 
 export type ImHotStartResult =
@@ -782,6 +806,16 @@ export interface StartImBridgesOptions {
    * byte-identical sends.
    */
   voice?: Pick<ButlerVoice, 'synthesize'>
+  /**
+   * ASR-M3 — opt-in voice-note hearing (`butlerHearingFromEnv`, shared
+   * `GOTONG_BUTLER_VOICE_URL`/`_KEY` + `GOTONG_BUTLER_ASR_MODEL` all set).
+   * Lark voice notes are downloaded and transcribed BEFORE dispatch so the
+   * butler reads what was said; `skipped`/`failed` fold to null → the bridge
+   * substitutes its honest marker text. Transcription ≠ authorization: the
+   * transcript walks the same governed pipeline as typed text. Absent →
+   * inbound handling byte-identical (voice notes arrive with empty text).
+   */
+  hearing?: Pick<ButlerHearing, 'transcribe'>
   /**
    * F1 — where to persist reachable routes (`<space>/butler/reachable`). When set,
    * `startImBridges` builds a {@link ButlerReachableRegistry}, rehydrates it, and
@@ -907,7 +941,7 @@ export async function startImBridges(
   const makeVaultable = (platform: ImVaultPlatform, creds: ResolvedImCreds): ImBridge =>
     opts.makeBridge
       ? opts.makeBridge(platform, creds)
-      : buildVaultablePlatformBridge(platform, creds, opts.log)
+      : buildVaultablePlatformBridge(platform, creds, opts.log, opts.hearing)
 
   const telegram = resolveImCreds('telegram', opts.identity, opts.log)
   if (telegram) {

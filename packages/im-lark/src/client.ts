@@ -137,11 +137,27 @@ export interface LarkClient {
    */
   uploadFile(input: LarkUploadFileInput): Promise<string>
   /**
+   * Download a resource carried by a message — voice-note / file / image
+   * bytes (`GET /open-apis/im/v1/messages/:message_id/resources/:file_key`).
+   * `type` is Lark's coarse split: `image` for image resources, `file` for
+   * everything else INCLUDING voice notes. Resolves with the raw bytes;
+   * throws `LarkApiError` on non-2xx (Lark returns a JSON error body then).
+   * Covered by the same `im:message` read permission that delivers events.
+   */
+  downloadResource(messageId: string, fileKey: string, type: 'file' | 'image'): Promise<Uint8Array>
+  /**
    * Drop the cached tenant_access_token so the next call re-fetches.
    * Bridge invokes this on token-expired errors mid-stream.
    */
   invalidateToken(): void
 }
+
+/**
+ * Defensive cap for one resource download. Lark allows up to 100MB, but the
+ * bridge only fetches voice notes (~100KB of opus for a 60s note); anything
+ * near this cap is not a voice note and an honest refusal beats buffering it.
+ */
+const MAX_RESOURCE_BYTES = 32 * 1024 * 1024
 
 export function createLarkClient(opts: LarkClientOptions): LarkClient {
   if (typeof opts?.appId !== 'string' || opts.appId.length === 0) {
@@ -343,6 +359,52 @@ export function createLarkClient(opts: LarkClientOptions): LarkClient {
         })
       }
       return fileKey
+    },
+
+    async downloadResource(messageId: string, fileKey: string, type: 'file' | 'image'): Promise<Uint8Array> {
+      const path = `/open-apis/im/v1/messages/${encodeURIComponent(messageId)}/resources/${encodeURIComponent(fileKey)}`
+      const url = `${baseUrl}${path}?type=${type}`
+      const token = await getToken()
+      const ctrl = new AbortController()
+      const timer = setTimeout(() => ctrl.abort(), defaultTimeoutMs)
+      let res: Response
+      try {
+        res = await fetchImpl(url, {
+          method: 'GET',
+          headers: { authorization: `Bearer ${token}` },
+          signal: ctrl.signal,
+        })
+      } finally {
+        clearTimeout(timer)
+      }
+      if (!res.ok) {
+        // Errors come back as the usual JSON envelope; the success path is a
+        // raw binary stream, so only parse JSON on failure.
+        let parsed: LarkApiErrorBody | null = null
+        try {
+          parsed = (await res.json()) as LarkApiErrorBody
+        } catch {
+          // Body wasn't JSON.
+        }
+        throw new LarkApiError({
+          method: 'GET',
+          path,
+          status: res.status,
+          code: parsed?.code ?? null,
+          msg: parsed?.msg ?? null,
+        })
+      }
+      const bytes = new Uint8Array(await res.arrayBuffer())
+      if (bytes.length > MAX_RESOURCE_BYTES) {
+        throw new LarkApiError({
+          method: 'GET',
+          path,
+          status: res.status,
+          code: null,
+          msg: `resource exceeds the ${MAX_RESOURCE_BYTES / 1024 / 1024}MB download cap`,
+        })
+      }
+      return bytes
     },
 
     invalidateToken(): void {

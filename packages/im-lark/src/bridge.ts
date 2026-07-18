@@ -70,7 +70,7 @@ import {
   type LarkClient,
   type LarkClientOptions,
 } from './client.js'
-import { larkToImMessage, pickLarkReceiveIdType } from './message.js'
+import { larkToImMessage, parseLarkUri, pickLarkReceiveIdType } from './message.js'
 import type {
   LarkMessageReceiveEvent,
   LarkSendMessageResponse,
@@ -181,12 +181,31 @@ export interface LarkBridgeOptions {
    * handling; this is the diagnostic surface. Defaults to a no-op.
    */
   onError?: (err: unknown) => void
+  /**
+   * ASR-M2 — opt-in inbound voice transcription. When set, a voice-note
+   * message (empty text + one audio attachment) has its bytes downloaded
+   * (`downloadResource`, covered by the bot's existing `im:message` read
+   * permission) and fed here; a string replaces the message text so the
+   * note flows through the NORMAL text pipeline (commands, butler, park —
+   * transcription ≠ authorization). `null` = could not transcribe → the
+   * text becomes an honest "(语音消息,转写失败)" marker instead of silence.
+   * Unset = today's byte-identical behavior (empty text, opaque URI).
+   */
+  transcriber?: (bytes: Uint8Array) => Promise<string | null>
 }
 
 type Listener = (msg: ImMessage) => void | Promise<void>
 
 /** Bounded dedup cache size for message_id. ~512 ≈ a few minutes of busy traffic. */
 const DELIVERED_CACHE_MAX = 512
+
+/**
+ * ASR-M2 — what a voice note's text becomes when transcription was configured
+ * but could not produce a transcript. A fixed marker, not silence: the butler
+ * can honestly tell the member "你发了条语音但我没听清" instead of treating
+ * the message as empty. Exported so the host wiring / tests assert exactly it.
+ */
+export const VOICE_TRANSCRIBE_FAILED = '(语音消息,转写失败)'
 
 export class LarkBridge implements ImBridge {
   readonly platform = 'lark'
@@ -197,6 +216,7 @@ export class LarkBridge implements ImBridge {
   private readonly stripBotMentions: boolean
   private readonly connectionFactory: LarkConnectionFactory
   private readonly onError: (err: unknown) => void
+  private readonly transcriber?: (bytes: Uint8Array) => Promise<string | null>
 
   private running = false
   private listeners: Listener[] = []
@@ -223,6 +243,7 @@ export class LarkBridge implements ImBridge {
     this.stripBotMentions = opts.stripBotMentions ?? true
     this.connectionFactory = opts.connectionFactory ?? defaultLarkConnectionFactory
     this.onError = opts.onError ?? (() => {})
+    this.transcriber = opts.transcriber
   }
 
   async start(): Promise<void> {
@@ -348,10 +369,44 @@ export class LarkBridge implements ImBridge {
     const messageId = event?.message?.message_id
     if (!this.recordDelivered(messageId)) return
     const imMsg = larkToImMessage(event, { stripBotMentions: this.stripBotMentions })
-    if (imMsg) await this.deliver(imMsg)
+    if (!imMsg) return
+    await this.transcribeVoiceNote(imMsg, messageId)
+    await this.deliver(imMsg)
   }
 
   // --- internal -------------------------------------------------
+
+  /**
+   * ASR-M2 — fill a voice note's empty text with its transcript, in place.
+   *
+   * Fires only when ALL of: a transcriber is configured, the message text is
+   * empty (voice notes carry no transcript by spec), exactly the audio
+   * attachment is present, and the event carried a real message_id (the
+   * download endpoint needs message_id + file_key as a PAIR). Unset
+   * transcriber = byte-identical passthrough.
+   *
+   * Failure is honest, never silent: download/transcribe problems set the
+   * fixed "(语音消息,转写失败)" marker — the butler sees WHAT happened
+   * instead of an empty message pretending nothing was said — and the error
+   * surfaces via onError for diagnostics. The attachment stays either way
+   * (the transcript is a rendering, not the recording).
+   */
+  private async transcribeVoiceNote(msg: ImMessage, messageId: unknown): Promise<void> {
+    if (!this.transcriber) return
+    if (msg.text.length > 0) return
+    if (typeof messageId !== 'string' || messageId.length === 0) return
+    const audio = (msg.attachments ?? []).find((a) => a.kind === 'audio')
+    const parsed = parseLarkUri(audio?.url)
+    if (!parsed || parsed.kind !== 'audio') return
+    try {
+      const bytes = await this.client.downloadResource(messageId, parsed.key, 'file')
+      const text = await this.transcriber(bytes)
+      msg.text = text ?? VOICE_TRANSCRIBE_FAILED
+    } catch (err) {
+      this.onError(err)
+      msg.text = VOICE_TRANSCRIBE_FAILED
+    }
+  }
 
   private recordDelivered(messageId: unknown): boolean {
     if (typeof messageId !== 'string' || messageId.length === 0) return true

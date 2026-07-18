@@ -9,6 +9,7 @@ export {
   type LarkConnectionFactoryParams,
   type LarkLongConnection,
   defaultLarkConnectionFactory,
+  VOICE_TRANSCRIBE_FAILED,
 } from './bridge.js'
 export { opusDurationMs } from './audio.js'
 export {

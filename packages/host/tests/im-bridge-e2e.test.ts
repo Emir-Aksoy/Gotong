@@ -37,6 +37,7 @@ import type {
 
 import {
   handleImMessage,
+  foldHearingTranscriber,
   makeIdentityImBindingResolver,
   startImBridges,
   type HostImConfig,
@@ -571,6 +572,56 @@ describe('VOICE-M3 — voice on the conversational OK reply only', () => {
     expect(last(bridge).text).toContain('Gotong IM bridge')
     expect(synthCalls).toHaveLength(0)
     expect('attachments' in (last(bridge).options ?? {})).toBe(false)
+  })
+})
+
+// ASR-M3 — the hearing→transcriber fold that buildVaultablePlatformBridge
+// hands the Lark bridge. Three-state mapping is the whole contract: text →
+// transcript string, skipped (in-design: silence/oversize) → QUIET null,
+// failed (infra) → warn + null. The absent-hearing side (no transcriber key
+// at all ⇒ inbound byte-identical) is covered by im-lark's bridge tests;
+// the unset-env side (no ButlerHearing at all) by butler-hearing tests.
+describe('ASR-M3 — foldHearingTranscriber', () => {
+  function warnCollector(): { warns: Array<{ msg: string; data?: unknown }>; log: Logger } {
+    const warns: Array<{ msg: string; data?: unknown }> = []
+    return {
+      warns,
+      log: { ...silentLogger, warn: (msg: string, data?: unknown) => void warns.push({ msg, data }) },
+    }
+  }
+
+  it('text result becomes the transcript string (bytes pass through intact)', async () => {
+    const { warns, log } = warnCollector()
+    const seen: Buffer[] = []
+    const fold = foldHearingTranscriber(
+      { transcribe: async (bytes) => (seen.push(bytes), { kind: 'text', text: '明天提醒我交电费' }) },
+      log,
+    )
+    await expect(fold(new Uint8Array([79, 103, 103, 83]))).resolves.toBe('明天提醒我交电费')
+    expect(Array.from(seen[0]!)).toEqual([79, 103, 103, 83])
+    expect(warns).toHaveLength(0)
+  })
+
+  it('skipped (silence / oversize — in-design) folds to null with ZERO warns', async () => {
+    const { warns, log } = warnCollector()
+    const fold = foldHearingTranscriber(
+      { transcribe: async () => ({ kind: 'skipped', reason: '转写结果为空(可能是静音)' }) },
+      log,
+    )
+    await expect(fold(new Uint8Array([1]))).resolves.toBeNull()
+    expect(warns).toHaveLength(0)
+  })
+
+  it('failed (infra) folds to null AND warns with the reason', async () => {
+    const { warns, log } = warnCollector()
+    const fold = foldHearingTranscriber(
+      { transcribe: async () => ({ kind: 'failed', reason: '未装 ffmpeg — 语音转写需要它转码 wav' }) },
+      log,
+    )
+    await expect(fold(new Uint8Array([1]))).resolves.toBeNull()
+    expect(warns).toHaveLength(1)
+    expect(warns[0]!.msg).toContain('transcription failed')
+    expect(warns[0]!.data).toMatchObject({ reason: '未装 ffmpeg — 语音转写需要它转码 wav' })
   })
 })
 

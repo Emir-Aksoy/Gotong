@@ -322,3 +322,63 @@ describe('createLarkClient', () => {
     ).rejects.toThrow(/no file_key/)
   })
 })
+
+/**
+ * ASR-M2 — downloadResource: message resource bytes (voice notes).
+ * The success path is a RAW BINARY stream (not the JSON envelope), errors
+ * come back as the usual JSON body; both paths verified, plus the token
+ * header and the message_id+file_key pairing in the URL.
+ */
+describe('downloadResource', () => {
+  const VOICE = new Uint8Array([0x4f, 0x67, 0x67, 0x53, 9, 9]) // 'OggS'…
+
+  function binaryFetch(): typeof fetch & { calls: Array<[string, RequestInit]> } {
+    const calls: Array<[string, RequestInit]> = []
+    const fn = vi.fn(async (url: string, init?: RequestInit) => {
+      calls.push([url, init ?? {}])
+      if (url.includes('/auth/v3/')) {
+        return new Response(
+          JSON.stringify({ code: 0, msg: 'ok', tenant_access_token: 'tok_abc', expire: 7200 }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        )
+      }
+      return new Response(VOICE, { status: 200, headers: { 'content-type': 'audio/opus' } })
+    }) as unknown as typeof fetch & { calls: Array<[string, RequestInit]> }
+    ;(fn as unknown as { calls: typeof calls }).calls = calls
+    return fn
+  }
+
+  it('GETs messages/:id/resources/:key?type=file with the Bearer token and returns the raw bytes', async () => {
+    const fetchImpl = binaryFetch()
+    const c = createLarkClient({ appId: 'cli_x', appSecret: 's', fetchImpl })
+    const bytes = await c.downloadResource('om_voice1', 'fk_1', 'file')
+    expect([...bytes]).toEqual([...VOICE])
+    const [url, init] = fetchImpl.calls[1]!
+    expect(url).toBe(
+      'https://open.feishu.cn/open-apis/im/v1/messages/om_voice1/resources/fk_1?type=file',
+    )
+    expect(init.method).toBe('GET')
+    expect((init.headers as Record<string, string>).authorization).toBe('Bearer tok_abc')
+  })
+
+  it('URL-encodes hostile ids so they cannot break the path', async () => {
+    const fetchImpl = binaryFetch()
+    const c = createLarkClient({ appId: 'cli_x', appSecret: 's', fetchImpl })
+    await c.downloadResource('om/../x', 'fk?a=1', 'file')
+    const [url] = fetchImpl.calls[1]!
+    expect(url).toContain('/messages/om%2F..%2Fx/resources/fk%3Fa%3D1?type=file')
+  })
+
+  it('throws LarkApiError with the parsed JSON envelope on non-2xx', async () => {
+    const fetchImpl = mockFetch([
+      okToken(),
+      { status: 404, body: { code: 232001, msg: 'resource not found' } },
+    ])
+    const c = createLarkClient({ appId: 'cli_x', appSecret: 's', fetchImpl })
+    await expect(c.downloadResource('om_gone', 'fk_gone', 'file')).rejects.toMatchObject({
+      name: 'LarkApiError',
+      status: 404,
+      code: 232001,
+    })
+  })
+})

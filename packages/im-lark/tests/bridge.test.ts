@@ -18,6 +18,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 
 import {
   LarkBridge,
+  VOICE_TRANSCRIBE_FAILED,
   type LarkConnectionFactory,
   type LarkConnectionFactoryParams,
 } from '../src/bridge.js'
@@ -44,6 +45,14 @@ class FakeLarkClient implements LarkClient {
   /** Set to make uploadFile reject (voice-leg fallback tests). */
   uploadError: Error | null = null
 
+  downloads: Array<{ messageId: string; fileKey: string; type: string }> = []
+
+  /** Bytes downloadResource resolves with (ASR-M2 voice-note tests). */
+  downloadBytes: Uint8Array = new Uint8Array([1, 2, 3])
+
+  /** Set to make downloadResource reject. */
+  downloadError: Error | null = null
+
   async call<T>(
     method: 'GET' | 'POST' | 'PUT' | 'DELETE',
     path: string,
@@ -67,6 +76,12 @@ class FakeLarkClient implements LarkClient {
       byteLength: input.bytes.length,
     })
     return 'file_key_test'
+  }
+
+  async downloadResource(messageId: string, fileKey: string, type: 'file' | 'image'): Promise<Uint8Array> {
+    if (this.downloadError) throw this.downloadError
+    this.downloads.push({ messageId, fileKey, type })
+    return this.downloadBytes
   }
 
   invalidateToken(): void {
@@ -149,6 +164,7 @@ function makeBridge(opts: {
   client?: LarkClient
   onError?: (e: unknown) => void
   stripBotMentions?: boolean
+  transcriber?: (bytes: Uint8Array) => Promise<string | null>
 }): LarkBridge {
   return new LarkBridge({
     appId: 'cli_x',
@@ -157,6 +173,7 @@ function makeBridge(opts: {
     connectionFactory: opts.factory,
     onError: opts.onError,
     stripBotMentions: opts.stripBotMentions,
+    transcriber: opts.transcriber,
   })
 }
 
@@ -479,5 +496,133 @@ describe('LarkBridge', () => {
         'no target',
       ),
     ).rejects.toThrow(/receive_id/)
+  })
+})
+
+/**
+ * ASR-M2 — inbound voice-note transcription (docs/zh/ATONG-VOICE.md).
+ *
+ * What must hold:
+ *  ① opt-in: no transcriber ⇒ byte-identical passthrough (empty text, no
+ *    download, opaque lark-audio: URI untouched).
+ *  ② the transcript replaces the text and flows down the NORMAL listener
+ *    path; the audio attachment stays (transcript is a rendering, not the
+ *    recording).
+ *  ③ failure is honest, never silent: download / transcribe problems set
+ *    the fixed "(语音消息,转写失败)" marker and surface via onError.
+ *  ④ the download pairs message_id + file_key exactly (Lark's resource
+ *    endpoint needs BOTH) with type='file' (voice notes are files).
+ */
+describe('LarkBridge ASR-M2 — voice-note transcription', () => {
+  const AUDIO_EVENT = (messageId = 'om_voice1') =>
+    buildEvent({
+      messageId,
+      message: {
+        message_type: 'audio',
+        content: JSON.stringify({ file_key: 'fk_voice1', duration: 1500 }),
+      },
+    })
+
+  async function run(opts: {
+    client?: FakeLarkClient
+    transcriber?: (bytes: Uint8Array) => Promise<string | null>
+    onError?: (e: unknown) => void
+    event?: LarkMessageReceiveEvent
+  }): Promise<{ messages: ImMessage[]; client: FakeLarkClient }> {
+    const client = opts.client ?? new FakeLarkClient()
+    const conn = fakeConnection()
+    const bridge = makeBridge({
+      factory: conn.factory,
+      client,
+      transcriber: opts.transcriber,
+      onError: opts.onError,
+    })
+    const messages: ImMessage[] = []
+    bridge.onMessage((m) => {
+      messages.push(m)
+    })
+    await bridge.start()
+    await conn.emit(opts.event ?? AUDIO_EVENT())
+    await bridge.stop()
+    return { messages, client }
+  }
+
+  it('② downloads the note, transcribes it, and delivers the transcript as text', async () => {
+    const seen: Uint8Array[] = []
+    const { messages, client } = await run({
+      transcriber: async (bytes) => {
+        seen.push(bytes)
+        return '明天上午十点提醒我开会'
+      },
+    })
+    expect(messages).toHaveLength(1)
+    expect(messages[0].text).toBe('明天上午十点提醒我开会')
+    // ④ message_id + file_key as a PAIR, type='file' (voice notes are files).
+    expect(client.downloads).toEqual([{ messageId: 'om_voice1', fileKey: 'fk_voice1', type: 'file' }])
+    // The transcriber saw exactly the downloaded bytes.
+    expect(seen).toHaveLength(1)
+    expect(seen[0]).toBe(client.downloadBytes)
+    // ② the attachment survives — transcript is a rendering, not the recording.
+    expect(messages[0].attachments?.[0]?.kind).toBe('audio')
+    expect(messages[0].attachments?.[0]?.url).toBe('lark-audio:fk_voice1')
+  })
+
+  it('① no transcriber ⇒ byte-identical passthrough: empty text, zero downloads', async () => {
+    const { messages, client } = await run({})
+    expect(messages).toHaveLength(1)
+    expect(messages[0].text).toBe('')
+    expect(client.downloads).toHaveLength(0)
+  })
+
+  it('③ transcriber returning null ⇒ honest failure marker, message still delivered', async () => {
+    const { messages } = await run({ transcriber: async () => null })
+    expect(messages).toHaveLength(1)
+    expect(messages[0].text).toBe(VOICE_TRANSCRIBE_FAILED)
+  })
+
+  it('③ download failure ⇒ marker + onError, never a dropped message', async () => {
+    const client = new FakeLarkClient()
+    client.downloadError = new Error('resource gone')
+    const errors: unknown[] = []
+    const { messages } = await run({
+      client,
+      transcriber: async () => 'should not be reached',
+      onError: (e) => {
+        errors.push(e)
+      },
+    })
+    expect(messages).toHaveLength(1)
+    expect(messages[0].text).toBe(VOICE_TRANSCRIBE_FAILED)
+    expect(errors).toHaveLength(1)
+  })
+
+  it('③ transcriber throwing ⇒ marker + onError (fail-soft, listener still runs)', async () => {
+    const errors: unknown[] = []
+    const { messages } = await run({
+      transcriber: async () => {
+        throw new Error('ASR down')
+      },
+      onError: (e) => {
+        errors.push(e)
+      },
+    })
+    expect(messages).toHaveLength(1)
+    expect(messages[0].text).toBe(VOICE_TRANSCRIBE_FAILED)
+    expect(errors).toHaveLength(1)
+  })
+
+  it('text messages never touch the transcriber (text is non-empty)', async () => {
+    let called = 0
+    const { messages, client } = await run({
+      transcriber: async () => {
+        called += 1
+        return 'nope'
+      },
+      event: buildEvent({ messageId: 'om_text1' }),
+    })
+    expect(messages).toHaveLength(1)
+    expect(messages[0].text).toBe('hello bot')
+    expect(called).toBe(0)
+    expect(client.downloads).toHaveLength(0)
   })
 })
