@@ -36,6 +36,23 @@
   温暖闺蜜。系统音色是平台官方合成音色,非真人克隆;
 - 备选厂商:阿里云 CosyVoice / 火山引擎(MiniMax 试听不满意再核)。
 
+**TTS 厂商变更 = 小米 MiMo(M3b,2026-07-17 用户拍板「tts 用小米的 mimo」)**:
+- 官方文档站是 SPA 抓不到正文,wire 形状按仓库既定手法从两个真实客户端源码
+  交叉核准(`gh api` 逐字读 jarodise/MimoTTS 的 `api_client.py`+`config.py`,
+  对照 yanzaiyun43/mimo-tts-web 的 `index.html`):
+  - **不是 `/audio/speech`** —— 是 **OpenAI chat wire**:`POST
+    <base>/chat/completions`,base = `https://api.xiaomimimo.com/v1`;
+  - body = `{model, messages: [{role:'user', content: <风格指令,可空>},
+    {role:'assistant', content: <要朗读的文本>}], audio: {format:'wav'|'pcm16',
+    voice: <音色 id>}}` —— **要读的文本放 assistant 消息**是这个 wire 最反直觉
+    的一点,两源一致;
+  - 响应 = JSON,音频在 `choices[0].message.audio.data`(base64),24 kHz 输出;
+    无 mp3 档,wav 即可(ffmpeg 对 stdin 自动嗅探格式,转码腿零改动);
+  - 模型:`mimo-v2.5-tts`(预置系统音色)/`-voicedesign`(文字描述设计音色)/
+    `-voiceclone`(参考音频克隆——**红线拒绝**,构造层当场抛错);
+  - 音色选定 **`茉莉` = 温柔知性的成熟女声**(官方预置系统音色,音色 id 就是
+    中文名字符串,正中用户「温柔知性女声」诉求)。
+
 ## 三、仓库侦察(2026-07-17,file:line 一手核实)
 
 - **`ImAttachment{kind:'audio', bytes}` 契约已存在**(`im-adapter/src/types.ts:63-69`)
@@ -104,9 +121,25 @@
   没了,故它们刻意保持纯文本;M0 计划的第二汇聚点(butler-reachable push 腿)同理
   **推迟**——push 内容多为提醒/播报类,常含短码与指路命令,等真实使用信号再定
   「哪些 push 适合朗读」的白名单,不预造。
-- **M4 生产真机(需用户 key,当前唯一未落)** —— 服务器装 ffmpeg、飞书后台开
-  `im:resource`、gotong.env 加四值(备份先行),真机 round-trip:发消息→收到
-  语音条→关掉开关→回文本。M4 前 M1-M3 全程不依赖 key,已全绿。
+- **M3b 小米 MiMo chat wire 变体 ✅(2026-07-17 落地)** —— `ttsSpeech` 双 wire:
+  `isMimoTtsWire(model)`(`mimo-*tts*` 形状)命中时改走 `POST <base>/chat/completions`
+  (文本进 assistant 消息、`audio:{format:'wav', voice}`、响应取
+  `choices[0].message.audio.data` base64 解码),否则照走 `/audio/speech` 老 wire
+  ——**零新旋钮**,同四旋钮 URL+MODEL 决定 wire;user 消息风格槽固定空串(人设是
+  音色 id 的事,不是旋钮)。缺/空 `audio.data` 响亮抛 → synthesize 折 `failed`;
+  解码后字节走同一 ffmpeg 腿(wav 自动嗅探)与 30MB 顶。**红线结构性落地**:
+  `buildButlerVoice` 对 `voiceclone` 模型族构造时当场拒(民法典 1023,签名钥
+  「坏钥当场拒」同姿态),装配路径配不出克隆腿。butler-voice 20→26 单测
+  (mimo wire 逐字节体断言/无 audio.data 四变体 failed 零 ffmpeg/内容闸先于
+  网络/HTTP 500 fail-soft/非 mimo 模型照走老 wire/克隆模型双路径拒)。
+- **M4 生产真机(需用户 key,当前唯一未落)** —— 服务器 ffmpeg **已装**(6.1.1,
+  2026-07-17);剩:飞书后台开 `im:resource`(用户自办)、gotong.env 加四值
+  (备份先行;`GOTONG_BUTLER_VOICE_URL=https://api.xiaomimimo.com/v1` +
+  `_MODEL=mimo-v2.5-tts` + `_VOICE=茉莉` + `_KEY=<小米 key>`),真机
+  round-trip:发消息→收到语音条→关掉开关→回文本。**开放疑问(配置时现场探)**:
+  用户手上的小米 key 若是 token-plan 域(`token-plan-cn.xiaomimimo.com`)签发,
+  对 `api.xiaomimimo.com` 的 TTS 面是否通用,配置时真探针一发定论。M4 前
+  M1-M3b 全程不依赖 key,已全绿。
 
 ## 六、显式不做(本 track)
 

@@ -7,7 +7,11 @@
  *   reply text → prepareSpeechText (strip markdown; refuse unspeakable)
  *              → length gate (VOICE_MAX_CHARS — voice bubbles are for SHORT replies)
  *              → POST <base>/audio/speech  (OpenAI-compatible TTS wire, mp3 out)
+ *                OR — VOICE-M3b, detected from the model name — Xiaomi MiMo's
+ *                chat-wire TTS: POST <base>/chat/completions, audio back as
+ *                base64 wav inside choices[0].message.audio.data
  *              → ffmpeg -i pipe:0 -acodec libopus -ac 1 -ar 16000 -f ogg pipe:1
+ *                (ffmpeg sniffs mp3 vs wav on stdin — one transcode leg serves both)
  *              → ogg/opus bytes (Lark's upload accepts ONLY file_type=opus)
  *
  * Boundaries held here (the track's, see the doc):
@@ -156,8 +160,19 @@ export async function toOpusVoice(input: Buffer, runner: FfmpegRunner = spawnFfm
   return res.stdout
 }
 
+/**
+ * VOICE-M3b — Xiaomi MiMo's TTS speaks an OpenAI CHAT wire, not `/audio/speech`:
+ * the text to speak rides in an ASSISTANT message and the audio comes back as
+ * base64 inside the JSON response. Detected from the model name (`mimo-*tts*`)
+ * so the SAME four knobs cover both vendors — URL+MODEL decide the wire, no
+ * fifth knob. (Wire shape cross-verified from official client sources 2026-07-17.)
+ */
+export function isMimoTtsWire(model: string): boolean {
+  return /^mimo-/i.test(model) && /tts/i.test(model)
+}
+
 export interface ButlerVoiceConfig {
-  /** OpenAI-compatible base, e.g. `https://api.minimax.io/v1`. */
+  /** OpenAI-compatible base, e.g. `https://api.minimax.io/v1` or `https://api.xiaomimimo.com/v1`. */
   baseUrl: string
   /** Bearer key (TTS vendors require one; '' sends no auth header for local servers). */
   apiKey: string
@@ -174,11 +189,33 @@ export interface ButlerVoiceConfig {
 }
 
 /**
- * One `/audio/speech` call → raw mp3 bytes. Throws on HTTP / timeout / empty
- * body; the key travels ONLY in the Authorization header (never URL, never argv).
+ * One TTS call → raw audio bytes (mp3 on the `/audio/speech` wire, wav on the
+ * MiMo chat wire — ffmpeg sniffs either on stdin). Throws on HTTP / timeout /
+ * empty body; the key travels ONLY in the Authorization header (never URL,
+ * never argv).
  */
 export async function ttsSpeech(config: ButlerVoiceConfig, text: string): Promise<Buffer> {
-  const url = `${config.baseUrl.replace(/\/+$/, '')}/audio/speech`
+  const base = config.baseUrl.replace(/\/+$/, '')
+  const mimo = isMimoTtsWire(config.model)
+  const url = mimo ? `${base}/chat/completions` : `${base}/audio/speech`
+  // MiMo wire: the USER message carries an optional style instruction (empty =
+  // the system voice's own default persona — persona is the voice id's job, not
+  // a knob); the text to SPEAK rides in the ASSISTANT message.
+  const body = mimo
+    ? {
+        model: config.model,
+        messages: [
+          { role: 'user', content: '' },
+          { role: 'assistant', content: text },
+        ],
+        audio: { format: 'wav', voice: config.voice },
+      }
+    : {
+        model: config.model,
+        input: text,
+        voice: config.voice,
+        response_format: 'mp3',
+      }
   const doFetch = config.fetchImpl ?? fetch
   const ac = new AbortController()
   const timer = setTimeout(() => ac.abort(), config.timeoutMs ?? DEFAULT_TTS_TIMEOUT_MS)
@@ -189,16 +226,23 @@ export async function ttsSpeech(config: ButlerVoiceConfig, text: string): Promis
         'content-type': 'application/json',
         ...(config.apiKey ? { authorization: `Bearer ${config.apiKey}` } : {}),
       },
-      body: JSON.stringify({
-        model: config.model,
-        input: text,
-        voice: config.voice,
-        response_format: 'mp3',
-      }),
+      body: JSON.stringify(body),
       signal: ac.signal,
     })
     if (!res.ok) throw new Error(`TTS HTTP ${res.status}`)
-    const bytes = Buffer.from(await res.arrayBuffer())
+    let bytes: Buffer
+    if (mimo) {
+      const json = (await res.json()) as {
+        choices?: Array<{ message?: { audio?: { data?: unknown } } }>
+      }
+      const b64 = json?.choices?.[0]?.message?.audio?.data
+      if (typeof b64 !== 'string' || b64.length === 0) {
+        throw new Error('TTS returned no audio data (mimo wire)')
+      }
+      bytes = Buffer.from(b64, 'base64')
+    } else {
+      bytes = Buffer.from(await res.arrayBuffer())
+    }
     if (bytes.length === 0) throw new Error('TTS returned no audio bytes')
     if (bytes.length > MAX_AUDIO_BYTES) throw new Error('TTS audio exceeded the 30MB cap')
     return bytes
@@ -231,6 +275,14 @@ export interface ButlerVoice {
 
 /** Build a {@link ButlerVoice} from explicit config (tests / direct callers). */
 export function buildButlerVoice(config: ButlerVoiceConfig): ButlerVoice {
+  // 红线(track 边界·民法典 1023 声音权): 真人克隆音色永不接。MiMo 的
+  // `-voiceclone` 模型族是「用参考音频克隆一个声音」的入口 — 配置层结构性
+  // 拒绝(签名钥「坏钥当场拒」同姿态),装配路径永远配不出克隆腿。
+  if (/voiceclone/i.test(config.model)) {
+    throw new Error(
+      `TTS 模型 '${config.model}' 是声音克隆模型 — 语音腿只接厂商官方系统音色(民法典 1023 声音权),请改用预置音色模型(如 mimo-v2.5-tts)`,
+    )
+  }
   const local = isLocalEmbedderUrl(config.baseUrl)
   let host = config.baseUrl
   try {

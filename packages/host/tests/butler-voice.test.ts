@@ -226,3 +226,125 @@ describe('VOICE-M1 toOpusVoice — 转码合同', () => {
     await expect(toOpusVoice(MP3, empty)).rejects.toThrow(/no audio bytes/)
   })
 })
+
+/**
+ * VOICE-M3b — the Xiaomi MiMo chat-wire variant. Same four knobs; the model
+ * name (`mimo-*tts*`) selects the wire. What must hold:
+ *  - the wire is POST <base>/chat/completions with the SPEAK text in an
+ *    ASSISTANT message and `audio: {format, voice}` — never /audio/speech;
+ *  - audio comes back base64 in choices[0].message.audio.data and feeds the
+ *    SAME ffmpeg leg (wav sniffed on stdin);
+ *  - all M1 contracts carry over: key only in the Authorization header,
+ *    fail-soft, content gates fire BEFORE any network call;
+ *  - the `-voiceclone` model family is refused at construction (红线: 民法典
+ *    1023 声音权 — vendor system voices only).
+ */
+describe('VOICE-M3b synthesize — 小米 MiMo chat wire', () => {
+  const WAV = Buffer.from('RIFF-wav-bytes-from-mimo')
+
+  function mimoConfig(over: Partial<ButlerVoiceConfig> = {}): ButlerVoiceConfig {
+    return config({
+      baseUrl: 'https://api.xiaomimimo.com/v1',
+      model: 'mimo-v2.5-tts',
+      voice: '茉莉',
+      ...over,
+    })
+  }
+
+  function mimoOkFetch(calls: Array<{ url: string; init: RequestInit }>): typeof fetch {
+    return (async (url: unknown, init?: unknown) => {
+      calls.push({ url: String(url), init: (init ?? {}) as RequestInit })
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          choices: [{ message: { audio: { data: WAV.toString('base64') } } }],
+        }),
+      }
+    }) as unknown as typeof fetch
+  }
+
+  it('happy path: chat/completions wire, text in the ASSISTANT message, base64 wav → opus clip', async () => {
+    const fetches: Array<{ url: string; init: RequestInit }> = []
+    const runs: Array<{ args: readonly string[]; input: Buffer }> = []
+    const v = buildButlerVoice(mimoConfig({ fetchImpl: mimoOkFetch(fetches), ffmpeg: okRunner(runs) }))
+
+    const r = await v.synthesize('**好的**,我这就去办。')
+    expect(r.kind).toBe('clip')
+    expect((r as { bytes: Buffer }).bytes.equals(OPUS)).toBe(true)
+
+    // The wire: chat/completions, NOT /audio/speech.
+    expect(fetches).toHaveLength(1)
+    expect(fetches[0]!.url).toBe('https://api.xiaomimimo.com/v1/chat/completions')
+    const body = JSON.parse(String(fetches[0]!.init.body)) as Record<string, unknown>
+    expect(body).toEqual({
+      model: 'mimo-v2.5-tts',
+      // user = optional style slot (empty ⇒ the system voice's own persona);
+      // the text to SPEAK rides in the assistant message, markdown-stripped.
+      messages: [
+        { role: 'user', content: '' },
+        { role: 'assistant', content: '好的,我这就去办。' },
+      ],
+      audio: { format: 'wav', voice: '茉莉' },
+    })
+    const headers = fetches[0]!.init.headers as Record<string, string>
+    expect(headers.authorization).toBe('Bearer sk-secret-voice-key')
+    expect(fetches[0]!.url).not.toContain('sk-secret')
+
+    // The DECODED wav (not the base64 string) feeds the same ffmpeg leg.
+    expect(runs).toHaveLength(1)
+    expect(runs[0]!.input.equals(WAV)).toBe(true)
+  })
+
+  it('missing / empty audio.data in the response → failed, ffmpeg never invoked', async () => {
+    for (const payload of [
+      {},
+      { choices: [] },
+      { choices: [{ message: {} }] },
+      { choices: [{ message: { audio: { data: '' } } }] },
+    ]) {
+      const runs: Array<{ args: readonly string[]; input: Buffer }> = []
+      const noAudio = (async () => ({ ok: true, status: 200, json: async () => payload })) as unknown as typeof fetch
+      const v = buildButlerVoice(mimoConfig({ fetchImpl: noAudio, ffmpeg: okRunner(runs) }))
+      const r = await v.synthesize('短消息')
+      expect(r.kind).toBe('failed')
+      expect((r as { reason: string }).reason).toContain('no audio data')
+      expect(runs).toHaveLength(0)
+    }
+  })
+
+  it('content gates fire before the wire: code-fence / over-length reply → zero mimo calls', async () => {
+    const fetches: Array<{ url: string; init: RequestInit }> = []
+    const v = buildButlerVoice(mimoConfig({ fetchImpl: mimoOkFetch(fetches) }))
+    expect((await v.synthesize('```js\nx()\n```')).kind).toBe('skipped')
+    expect((await v.synthesize('长'.repeat(VOICE_MAX_CHARS + 1))).kind).toBe('skipped')
+    expect(fetches).toHaveLength(0)
+  })
+
+  it('HTTP 500 on the mimo wire → failed with the status (fail-soft carries over)', async () => {
+    const failFetch = (async () => ({ ok: false, status: 500, json: async () => ({}) })) as unknown as typeof fetch
+    const v = buildButlerVoice(mimoConfig({ fetchImpl: failFetch }))
+    const r = await v.synthesize('短消息')
+    expect(r.kind).toBe('failed')
+    expect((r as { reason: string }).reason).toContain('500')
+  })
+
+  it('非 mimo 模型名照走 /audio/speech 老 wire(探测只认 mimo-*tts* 形状)', async () => {
+    const fetches: Array<{ url: string; init: RequestInit }> = []
+    const v = buildButlerVoice(config({ fetchImpl: okFetch(fetches), ffmpeg: okRunner([]) }))
+    await v.synthesize('短消息')
+    expect(fetches[0]!.url).toBe('https://tts.example.com/v1/audio/speech')
+  })
+
+  it('红线: voiceclone 模型在构造时当场拒(真人克隆音色永不接)', () => {
+    expect(() => buildButlerVoice(mimoConfig({ model: 'mimo-v2.5-tts-voiceclone' }))).toThrow(/声音克隆|1023/)
+    expect(
+      butlerVoiceFromEnv.bind(undefined, {
+        GOTONG_BUTLER_VOICE_URL: 'https://api.xiaomimimo.com/v1',
+        GOTONG_BUTLER_VOICE_KEY: 'sk-k',
+        GOTONG_BUTLER_VOICE_MODEL: 'mimo-v2.5-tts-voiceclone',
+        GOTONG_BUTLER_VOICE_VOICE: '茉莉',
+      }),
+    ).toThrow(/声音克隆|1023/)
+  })
+})

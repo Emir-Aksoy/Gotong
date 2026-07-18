@@ -59,7 +59,7 @@ GOTONG_BUTLER_RUN_BROADCAST_MS
 GOTONG_BUTLER_EMBEDDER_URL      # M-EMB1 opt-in: OpenAI 兼容 /v1/embeddings 端点(本地 Ollama/远程 API);配了才启用真语义召回
 GOTONG_BUTLER_EMBEDDER_MODEL    # M-EMB1 opt-in: embeddings 模型名(如 nomic-embed-text / text-embedding-3-small)
 GOTONG_BUTLER_EMBEDDER_KEY      # M-EMB1 opt-in: 远程 API 的 Bearer key(本地端点免);远程=数据离盒
-GOTONG_BUTLER_VOICE_URL         # VOICE-M3 opt-in: OpenAI 兼容 /audio/speech TTS 端点;四旋钮全设才开,任缺=字节不变
+GOTONG_BUTLER_VOICE_URL         # VOICE-M3 opt-in: TTS 端点 base(/audio/speech wire;模型名 mimo-*tts* 时走小米 chat wire);四旋钮全设才开,任缺=字节不变
 GOTONG_BUTLER_VOICE_KEY         # VOICE-M3 opt-in: TTS 端点的 Bearer key;只进 Authorization 头,永不进 URL/argv
 GOTONG_BUTLER_VOICE_MODEL       # VOICE-M3 opt-in: TTS 模型名(wire 必填参数,无静默默认)
 GOTONG_BUTLER_VOICE_VOICE       # VOICE-M3 opt-in: 厂商官方系统音色 id(永不接真人克隆音色——民法典 1023 声音权)
