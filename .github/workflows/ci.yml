@@ -1,20 +1,18 @@
 # CI — build, typecheck, and test the TypeScript workspace + Python SDK.
 #
 # Triggers:
+#   - push to main + pull_request — the repo went public (2026-06-28),
+#     Actions minutes are free on public repos, and dependabot/external
+#     PRs need automated verification, so the private-era "manual +
+#     weekly only" posture (which existed purely to conserve paid
+#     minutes) is retired per its own sunset note.
 #   - manual (`workflow_dispatch`) — run the full matrix on demand
-#   - weekly cron (Tue 14:05 UTC) — a scheduled cross-platform sweep
+#   - weekly cron (Tue 14:05 UTC) — a scheduled sweep that still
+#     catches runner-image/toolchain drift during quiet weeks
 #
-# Why not on every push/PR: this is a solo, pre-release, PRIVATE repo,
-# so per-push CI mostly re-runs what `pnpm -r test` already covers
-# locally — while the macOS (10x) / Windows (2x) matrix burns the
-# account's Actions-minute allotment fast. Day-to-day verification is
-# local; the weekly + on-demand full matrix keeps the cross-platform
-# safety net (Windows/macOS bugs the dev Mac can't reproduce) without
-# the per-push minute drain. Re-add push/pull_request triggers before
-# opening the repo to external contributors.
-#
-# Concurrency (below) still de-dupes overlapping runs; with the PR
-# trigger gone its cancel-in-progress conditional simply never fires.
+# Concurrency (below) de-dupes overlapping runs; PR runs cancel a
+# superseded in-flight run for the same ref, push/cron runs are left
+# to finish so main always gets a complete verdict.
 #
 # Supply-chain hardening (v3.3):
 #   - All third-party actions are pinned to a 40-char commit SHA, with
@@ -34,6 +32,10 @@
 name: CI
 
 on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
   workflow_dispatch:
   schedule:
     # Weekly full-matrix sweep — Tuesdays 14:05 UTC, offset from the
@@ -51,6 +53,42 @@ permissions:
   contents: read
 
 jobs:
+  # ---------------------------------------------------------------------------
+  # Guards — the repo's anti-bloat guard gates (docs/zh/CONVENTIONS.md).
+  #
+  # `pnpm check:guards` chains kernel-deps-gate (dependency direction:
+  # protocol stays zero-dep, web never imports host, the kernel never
+  # imports the assembly layer), env-registry-gate (every GOTONG_* knob
+  # must be registered in scripts/gotong-env-registry.txt), and
+  # line-budget-gate (assembly-layer files only ever shrink). These are
+  # regressions the test suite structurally can't see — a new dependency
+  # edge or an unregistered knob breaks no test — so they get their own
+  # fast job instead of hiding at the tail of a 20-minute matrix leg.
+  # ---------------------------------------------------------------------------
+  guards:
+    name: Guards · dep direction + env registry + line budget
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          egress-policy: audit
+
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Setup workspace
+        # The gate scripts themselves are plain-node over the source
+        # tree, but we still install so `pnpm check:guards` stays the
+        # single source of truth for what "the guards" are — if the
+        # root script grows a fourth gate, CI picks it up with zero
+        # workflow edits.
+        uses: ./.github/actions/setup-workspace
+
+      - name: Run guard gates
+        run: pnpm check:guards
+
   # ---------------------------------------------------------------------------
   # Node — typecheck + test the entire pnpm workspace.
   #
@@ -73,9 +111,10 @@ jobs:
     # The slowest leg (Windows × node 22) hit the old 12min budget on
     # 2026-06-12: every package was green and host was still mid-suite
     # (929 tests, many real-socket e2e) when the job was cut at exactly
-    # 12:00. 20min fits the grown suite cold-cache while still killing
-    # a genuine hang long before the runner default (360min).
-    timeout-minutes: 20
+    # 12:00. The host suite has since grown to 2300+ tests (2026-07),
+    # so the 20min ceiling that replaced it is re-raised to 30 — still
+    # killing a genuine hang long before the runner default (360min).
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -356,7 +395,7 @@ jobs:
   ci-passed:
     name: CI passed
     if: always()
-    needs: [node, test-report, python, docker]
+    needs: [guards, node, test-report, python, docker]
     runs-on: ubuntu-latest
     timeout-minutes: 1
     steps:
@@ -368,7 +407,7 @@ jobs:
         run: |
           set -u
           fail=0
-          for job in node python docker; do
+          for job in guards node python docker; do
             result_var="result_${job}"
             case "${!result_var}" in
               success) echo "✓ $job: success" ;;
@@ -378,6 +417,7 @@ jobs:
           done
           exit "$fail"
         env:
+          result_guards: ${{ needs.guards.result }}
           result_node: ${{ needs.node.result }}
           result_python: ${{ needs.python.result }}
           result_docker: ${{ needs.docker.result }}
