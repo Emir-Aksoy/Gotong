@@ -13,6 +13,13 @@
 处理输入,获得一个即时的回复(主要是表示收到、打招呼、告诉准备怎么处理之类的)和
 后续处理方式(包括使用高级的模型甚至多步工作流)。」形态三选一摆出后拍板 **A**。
 
+**后续拍板(2026-07-17 同日,改 M4 形状)**:「前置模型也选择使用目前的 longcat,
+看下能不能降低推理深度」——接待模型弃 DeepSeek 改用现有 LongCat-2.0 + 官方
+`thinking:{type:'disabled'}` 降推理(→ M4a);且确认语义诉求「简单聊天直接回复
+不调主力,较复杂才先回执再转派」**正是形态 A 已实现的语义**(接待模型不调
+escalate 工具 = 纯接待即答,零主力调用;调了 = 回执先行+完成回推),无需架构改动,
+只差生产 persona/配置。
+
 **与边界①(热路径零 LLM)的关系,先钉死**:MODEL-ORCHESTRATION-STRATEGY.md 否掉的
 是「**框架**在选路时现场用 LLM 判断消息类型」;本 track 的分诊决策者是**轻量模型
 自己**(它是参与者,在治理 tool-loop 里决定要不要调 escalate 工具)——决策权在参与
@@ -114,9 +121,24 @@
   时专家仍在跑,完成后恰好一条推送回同一成员)/幕3 fail-closed(外人 target
   响亮拒+零派发)/幕4 诚实失败(派发炸了回推失败话术);
   `pnpm demo:atong-dual-brain` exit 0;接待 persona 推荐文案见下节。
-- **M4 生产部署(需用户 DeepSeek key)**:建/改生产 agent 编排(阿同→Flash 接待
-  + expert agent 承 LongCat 配置),`gotong model` 配 Flash,persona 更新,
-  真机 round-trip。**部署取舍如实告知**:换接待模型影响所有走该 agent 的活
+- **M4a spec.thinking 推理开关 ✅(2026-07-17 落地,`d8edfc1`)** ——
+  用户新拍板改了 M4 的形状:**接待模型不再用 DeepSeek,就用现有 LongCat-2.0,
+  降推理深度**。LongCat 官方形状 = 请求体 `thinking:{type:'enabled'|'disabled'}`
+  二值开关(无档位;默认 enabled,生产响应带 reasoning_content 可证)。落成
+  additive 配置缝:core `ManagedAgentSpec.thinking?: 'enabled'|'disabled'`
+  (缺省=不附字段=厂商默认,逐字节不变)→ llm-openai 通用
+  `OpenAIProviderOptions.extraBody`(`{...extraBody, ...standard}` 展开在前,
+  扩展键只能添、永远盖不掉 model/messages/stream)→ host pool 只在
+  `openai-compatible` 构造时翻译 `spec.thinking → extraBody:{thinking:{type}}`
+  → web 全家 echo(validateThinking 闭集校验响亮拒 typo + manifest 双向 +
+  agents-routes capture/adapt-echo + 面板 `_editingThinking`;CLI `{...exported}`
+  展开天然带上零改动)。llm-openai +3 / web manifest +5 / agents-route +4 /
+  resource-adapt 扩 2,四门 PASS(thinking 是 spec 字段非旋钮,119 零新增)。
+- **M4 生产部署(需用户 LongCat 编排落地)**:生产编排 = 阿同(接待)保持
+  LongCat-2.0 + `thinking:'disabled'`,新建兄弟专家 agent 同 LongCat +
+  thinking 默认/enabled,`escalateTo` 指专家,两行共用 `apiKeyEnv:
+  LONGCAT_API_KEY`(**不再需要 DeepSeek key**);persona 贴下节文案,真机
+  round-trip。**部署取舍如实告知**:接待降推理影响所有走该 agent 的活
   (含晨报/工作流步)——重要定时活可改派专家 agent,M4 时按生产实况定。
 
 ## 六、接待 persona 推荐文案(M4 部署时贴进 spec.system 尾部)
