@@ -37,6 +37,6 @@
     "@larksuiteoapi/node-sdk": "^1.71.1"
   },
   "devDependencies": {
-    "vitest": "^3.2.4"
+    "vitest": "^4.1.10"
   }
 }
