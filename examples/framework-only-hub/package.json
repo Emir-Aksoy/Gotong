@@ -1,0 +1,14 @@
+{
+  "name": "@gotong/example-framework-only-hub",
+  "version": "0.0.0",
+  "type": "module",
+  "private": true,
+  "description": "Install only @gotong/core, bring your own agent, zero Atong — the framework layer stands on its own.",
+  "scripts": {
+    "start": "tsx src/index.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@gotong/core": "workspace:*"
+  }
+}

@@ -14,6 +14,7 @@
 - [`../../QUICKSTART.md`](../../QUICKSTART.md) — **do-this → see-that 上手漏斗**（零 key 先跑 `pnpm demo`）
 - [`OVERVIEW.md`](OVERVIEW.md) — 5 分钟读懂这是什么、为什么这么设计
 - [`HANDS-ON-HUBS.md`](HANDS-ON-HUBS.md) — 五个开箱即抄的 hub 对照
+- [`INSTALL-MODES.md`](INSTALL-MODES.md) — **三种装法**（只装框架自带 agent / 只要管家阿同 / 两样一起；对到宪章三层 + 各自命令与旋钮 + `framework-only-hub` 示例）
 - [`FAMILY-HUB.md`](FAMILY-HUB.md) — **家庭 hub 一页纸**（一家人的 AI 管家：家人不同权限 / 凭证互不可见 / 对外动作有人批 + 开箱 15 分钟验收标准）
 - [`SOLO-COMPANY-HUB.md`](SOLO-COMPANY-HUB.md) — **一人公司 hub 一页纸**（一个人顶一个团队：三个专业分身 + AI 起草你签发 + DeepSeek 性价比甜区 + 向上兼容小团队）
 - [`PRO-FIRM-HUB.md`](PRO-FIRM-HUB.md) — **专业服务公司 hub 一页纸**（企业级向上兼容案例：多人分角色 + 三分身接力 + 企业库/知识库全走只读 MCP + 负责人跨角色签发；一人公司做大了的下一步）

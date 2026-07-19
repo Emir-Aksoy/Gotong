@@ -348,6 +348,12 @@ importers:
         specifier: workspace:*
         version: link:../../packages/web
 
+  examples/framework-only-hub:
+    dependencies:
+      '@gotong/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+
   examples/graded-trust:
     dependencies:
       '@gotong/core':

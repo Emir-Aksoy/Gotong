@@ -34,6 +34,7 @@ pnpm demo                          # = hello-collab（官方第一步，见 QUIC
 
 | 例子 | 一句话 | 前置 |
 |---|---|---|
+| [`framework-only-hub`](../../examples/framework-only-hub) | **只装 `@gotong/core`，自带 agent，零 Atong**：能力派发 + 人在环，自校验证明花名册里没有管家（见 [`INSTALL-MODES.md`](INSTALL-MODES.md)） | 零 |
 | [`persist-and-resume`](../../examples/persist-and-resume) | FileStorage 持久：一个进程写 transcript，另一个进程接着 seq 续跑 | 零 |
 | [`long-running-agent`](../../examples/long-running-agent) | agent 任务中途挂起，resume sweep 稍后唤醒，靠持久工作记忆续跑 | 零 |
 | [`heartbeat-agent`](../../examples/heartbeat-agent) | agent 按节拍自唤醒跑 checklist，没事就闭嘴（HEARTBEAT_OK 抑制） | 零 |

@@ -13,6 +13,7 @@
     "build": "pnpm -r build",
     "typecheck": "pnpm -r typecheck",
     "demo": "pnpm --filter @gotong/example-hello-collab start",
+    "demo:framework-only": "pnpm --filter @gotong/example-framework-only-hub start",
     "demo:web": "pnpm --filter @gotong/example-web-demo start",
     "demo:broadcast": "pnpm --filter @gotong/example-broadcast-claim start",
     "demo:persist:fresh": "pnpm --filter @gotong/example-persist-and-resume start fresh",
