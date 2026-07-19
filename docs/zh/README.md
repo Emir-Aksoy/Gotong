@@ -16,6 +16,7 @@
 - [`HANDS-ON-HUBS.md`](HANDS-ON-HUBS.md) — 五个开箱即抄的 hub 对照
 - [`FAMILY-HUB.md`](FAMILY-HUB.md) — **家庭 hub 一页纸**（一家人的 AI 管家：家人不同权限 / 凭证互不可见 / 对外动作有人批 + 开箱 15 分钟验收标准）
 - [`SOLO-COMPANY-HUB.md`](SOLO-COMPANY-HUB.md) — **一人公司 hub 一页纸**（一个人顶一个团队：三个专业分身 + AI 起草你签发 + DeepSeek 性价比甜区 + 向上兼容小团队）
+- [`PRO-FIRM-HUB.md`](PRO-FIRM-HUB.md) — **专业服务公司 hub 一页纸**（企业级向上兼容案例：多人分角色 + 三分身接力 + 企业库/知识库全走只读 MCP + 负责人跨角色签发；一人公司做大了的下一步）
 - [`EXAMPLES.md`](EXAMPLES.md) — **50 个 demo 的分级索引**（先跑哪个 → 深到哪；绝大多数零前置）
 - [`LEARN.md`](LEARN.md) — 社区精选视频 / 教程
 

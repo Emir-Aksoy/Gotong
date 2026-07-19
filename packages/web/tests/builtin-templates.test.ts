@@ -33,6 +33,7 @@ const EXPECTED_IDS = [
   'personal-research-hub',
   'morning-brief-hub',
   'solo-company-hub',
+  'pro-firm-hub',
   'battle-monk-training',
   'smart-home-hub',
   'family-hub',

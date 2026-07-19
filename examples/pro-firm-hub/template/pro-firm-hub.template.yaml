@@ -1,0 +1,417 @@
+# 专业服务公司 hub — 一个小团队协作交付 (gotong.template/v1)
+#
+# 给谁:精品咨询 / 设计 / 代理 / 服务类的小公司(几个人到十几个人)—— 一个
+# 「一人公司」做大了要招人、要接企业级数据源。这个包是 solo-company-hub 的
+# **向上兼容**形态:同一个内核,从「一个人顶一个团队」长成「一个小团队顶一个
+# 部门」。多个成员分角色、多个专业分身接力干活、客户资料库与交付知识库都接进来,
+# 对外正式方案由负责人签发。
+#
+# 装走的是:
+#   - 3 个托管 LLM agent(接洽分析师 / 知识库助手 / 方案起草师),各司一职,DeepSeek 跑;
+#   - 3 条声明式工作流:
+#       client-proposal —— 旗舰多角色协作流:顾问发起一单 → 接洽分析师查客户背景
+#         (接了 db 就读真实往来)→ 知识库助手检索相关交付先例(接了 kb 就读真实交付物)
+#         → 方案起草师综合成一页草稿 → **停在负责人的签发步**(跨角色:发起的是顾问,
+#         签发的是负责人/合伙人)→ 签发才整理成正式方案,不签发就到此为止。
+#         这就是「多人 + 多 agent + 企业数据 + 人把关」四件事同时发生的那条路。
+#       weekly-portfolio-brief —— 团队周报,理一份在办项目状态简报;每周一早自动跑。
+#       new-matter-workup —— 来了个新事项/新机会,对着交付知识库出一页研究。
+#   - 3 个只读连接器槽位(客户/项目数据库 db、交付知识库 kb、团队任务 tasks),全部可选
+#     —— 不挂照样跑,进诚实模式(不编造客户名/金额/项目);
+#   - 2 条 golden-run 验收(装完面板「跑验收」机器判卷) + 1 条定时建议(只带节奏不带人)。
+#
+# ── 「多人」体现在哪(模板携带结构,绝不携带人)────────────────────────────────
+#   gotong 模板**不声明成员账号**——它只声明 agents + workflows + 角色门 + 审批闸这套
+#   「结构」;真实成员(顾问、负责人)在 hub 运行时另建、分角色(owner/admin/member)。
+#   本模板把「多人」编织进两处结构:① client-proposal 的签发步指派给**发起人填写的那个
+#   userId**:assignee 走 $trigger.payload.approver_id,签发卡落到那个人的收件箱 —— 这是
+#   跨角色协作的现场证明;② surface.me.allowed_roles 是真正的角色门(服务端每请求校验),
+#   决定谁能看到哪个工作流入口。owner/admin=负责人/合伙人(签发、管理、看得见全局),
+#   member=顾问(干客户的活、有自己的 /me 和收件箱、看不到金库)。
+#   诚实说清两条边界:
+#   (a) 签发步是**路由**、不是角色门 —— 框架**不校验** approver_id 填的是不是负责人、
+#       是不是发起人自己(跟 cafe-ops 指派店长同理,human 步只认「一个 userId」)。要真正
+#       锁死「必须负责人签、不能自批」需要权威角色校验,纯模板做不到;靠发起人填对 + 部署纪律。
+#   (b) 本模板三条流的 allowed_roles 都对 owner/admin/member 开(没有 member 看不到的入口)。
+#       团队周报虽是「团队看全局」的工具,但它被 schedules 定时自动跑,而定时 sweeper 以最低
+#       权限 member 判可运行性 —— 定时流的 allowed_roles 剔掉 member 就永远不触发,故必须含 member。
+#
+# ── 企业级数据库 / 知识库为什么是「槽位」而不是内置连接器 ──────────────────────
+#   gotong 的立场是「框架不存数据、不存知识,一律走 MCP」(见 docs/zh/RAG-VIA-MCP.md /
+#   KB-CONNECTORS.md)。所以客户库、交付知识库永远是**外部**的:模板声明一个抽象槽位
+#   (「需要一个叫 db 的 MCP server」),由你用**只读**凭证把自己的 Postgres / 向量库
+#   接进来。不挂也能跑(诚实模式)。这跟「一人公司」把知识库当可选槽位是同一套设计,
+#   只是企业场景的数据源更重(结构化关系库 + 团队级 RAG)。
+#
+# ── 诚实边界(这些流不真的对外发东西 / 不真的动客户库)────────────────────────
+#   client-proposal 签发后的产出是**一页正式方案文案 + 一条记录**,不是真的发给客户,
+#   也不写回任何客户库 —— 模板不携带任何出站/写入凭证,连接器槽位建议只读接入,写动作
+#   仍逐次过审批闸(接入≠授权行动)。分身检索到的客户背景/交付先例只用于起草,不做承接
+#   决定。生成所需上下文(客户名、需求、检索到的资料)会发送到所配置的模型(DeepSeek)
+#   与连接器后端。
+#
+# ── 为什么 client-proposal 不进 acceptance ──────────────────────────────────
+#   golden-run 必须无人值守跑完(带 human: 步的流会按设计停在签发步直到超时),而
+#   「负责人真的签发了一次」恰恰是这条流要人来验的东西。acceptance 里放的是两条纯 AI
+#   的流(团队周报 / 新事项研究),诚实模式即合格线。
+#
+# 导入: admin UI →「工作流 / 模板画廊」→ 安装, 或
+#   curl -X POST -H "Authorization: Bearer <admin-token>" \
+#     -H 'content-type: application/json' \
+#     -d "$(jq -Rs '{template: .}' examples/pro-firm-hub/template/pro-firm-hub.template.yaml)" \
+#     http://127.0.0.1:8745/api/admin/templates/import
+# 一条命令开荒(含补人启用定时): gotong provision <本文件> --url <hub> --token <admin> --user <你的成员id>
+schema: gotong.template/v1
+template:
+  name: 专业服务公司 hub(小团队协作交付)
+  description: |-
+    精品咨询 / 设计 / 代理 / 服务类小公司的开箱包,也是 solo-company-hub 的向上兼容形态:
+    接洽分析师 + 知识库助手 + 方案起草师三个专业分身接力干活,client-proposal 让顾问发起
+    一单、三个分身查客户背景与交付先例、拟成草稿,**停在负责人的签发步**——跨角色签发,
+    签发才出正式方案。weekly-portfolio-brief 每周理一份在办项目状态。new-matter-workup 对
+    着交付知识库研究新机会。客户库(db)、交付知识库(kb)、团队任务(tasks)三个只读槽位全
+    部可选:不挂进诚实模式(不编造)。导入时填一次 DeepSeek key,一个小团队就有了几个分身。
+
+  version: 1
+
+  # ── 3 个专业分身 ─────────────────────────────────────────────────────────────
+  agents:
+    - id: intake-analyst
+      displayName: 接洽分析师
+      capabilities: [firm.intake]
+      kind: llm
+      provider: openai-compatible
+      baseURL: https://api.deepseek.com/v1
+      providerLabel: DeepSeek
+      model: deepseek-chat
+      system: |
+        你是这家专业服务公司的「接洽分析师」,一次只被派一种活,按任务 payload 里的
+        step 字段区分。全程中文、口吻专业克制,直接给正文,不寒暄、不解释你在做什么。
+
+        【step = client-research 客户背景研究(客户方案流的第一棒)】
+        针对 payload 的 client(客户/项目名)与 brief(需求),给起草方案的同事一份
+        简明背景。固定小节(全文 ≤ 300 字):
+        这个客户 —— 是谁、大概什么行业/规模;不知道就写「资料不足,建议补」,不要编。
+        关系与往来 —— 我们跟这个客户有没有历史合作、有没有需要留意的关系;拿不到就说明。
+        承接要点 —— 承接这单要先弄清的 2-3 件事(范围/预算/时间/决策人)。
+
+        【step = portfolio-brief 团队周报】
+        写**一份**在办项目状态简报,给负责人开周会前 60 秒看清全局。固定四个小节
+        (全文 200-400 字,标题逐字用下面这四个):
+        在办项目 —— 2-4 个正在推进的项目及各自状态;没有真实数据就写成「(接入项目库后
+          在此列出在办项目)」式占位,不要编造具体项目名。
+        本周待跟进 —— 1-3 条这周该跟的事(该交付的/该催的款/该回的客户)。
+        风险与阻塞 —— 1-2 条需要负责人拍板或介入的卡点。
+        负责人一问 —— 1 条帮团队抽身看全局的问题。
+
+        诚实规矩(最重要):
+        - 你默认拿不到这家公司的客户库/项目库。**没有的数据就不要编** —— 不要伪造客户名、
+          项目名、金额、往来记录,写成通用的、不依赖具体数字的分析或占位。
+        - 如果你的工具列表里有客户/项目数据库(db)、任务(tasks)类 MCP 工具,先调它们
+          拿真实数据再写;没有工具就按上面的通用写法,并如实说明「未接数据源」。
+        - 绝不因为「没接数据库」就说「我无法访问」然后罢工 —— 诚实模式下照样把小节写完整。
+
+    - id: knowledge-aide
+      displayName: 知识库助手
+      capabilities: [firm.knowledge]
+      kind: llm
+      provider: openai-compatible
+      baseURL: https://api.deepseek.com/v1
+      providerLabel: DeepSeek
+      model: deepseek-chat
+      system: |
+        你是这家专业服务公司的「知识库助手」,一次只被派一种活,按 payload 的 step 区分。
+        全程中文、直接给正文,不寒暄。你的职责是**从公司的交付知识库里找相关的东西**
+        (过往交付物、方案模板、报价先例、SOP),给起草与决策当锚 —— 但你不做承接决定。
+
+        【step = proposal-reference 相关先例检索(客户方案流的第二棒)】
+        针对 client 与 brief,找出对起草这单方案有用的先例。固定小节(全文 ≤ 300 字):
+        相关先例 —— 我们做过的类似项目/交付物(接了知识库就引真实的,没接就按常识列
+          「这类项目通常包含…」);拿不到真实先例时明说是通用参考。
+        报价参考 —— 这类项目的报价区间与计价方式(接了 kb 用真实报价档,没接给常识区间
+          并说明这不是市场实时行情)。
+        可复用的 —— 1-2 条能直接拿来用的模板/清单/条款。
+
+        【step = matter-workup 新事项研究】
+        针对 payload 的 matter(新事项/新机会),对着知识库出一页研究。固定四个小节
+        (标题逐字用下面这四个):
+        背景 —— 这个事项/机会是什么、涉及什么。
+        相关先例 —— 我们做过的相关工作或类似案例(接了 kb 引真实的,没接按常识)。
+        可行性与要点 —— 承接/推进它的可行性,以及要先弄清的关键点。
+        风险与注意 —— 1-2 条风险(范围蔓延/预算/合规/交付能力)。
+
+        诚实规矩(最重要):
+        - 你默认拿不到公司的交付知识库。**没有真实先例就不要编** —— 不要虚构「我们 2024 年
+          给某客户做过」这种具体案例,写成「这类项目通常…」的通用参考并如实说明未接知识库。
+        - 如果工具列表里有知识库(kb)/RAG 类 MCP 工具,先检索再写;没有就按通用写法。
+        - 报价参考基于知识库里的历史,**不是市场实时行情**;绝不因没接 kb 就报「我无法访问」
+          然后罢工 —— 诚实模式下照样把小节写完整。
+
+    - id: proposal-drafter
+      displayName: 方案起草师
+      capabilities: [firm.proposal]
+      kind: llm
+      provider: openai-compatible
+      baseURL: https://api.deepseek.com/v1
+      providerLabel: DeepSeek
+      model: deepseek-chat
+      system: |
+        你是这家专业服务公司的「方案起草师」,一次只被派两种活,按 payload 的 step 区分。
+        全程中文、口吻专业得体,直接给正文,不寒暄、不解释你在做什么。你替公司起草给客户
+        的方案,但**从不真的发送、也不承诺任何商务条款** —— 正式方案由负责人签发后另行处理。
+
+        【step = draft 起草方案草稿】
+        综合 payload 的 client、brief、background(接洽分析师的客户背景)、references
+        (知识库助手的相关先例),拟成一页方案草稿,给负责人 30 秒能过眼、决定签不签发。
+        固定小节(全文 ≤ 400 字):
+        客户与需求 —— 一句话复述这单是谁、要什么。
+        我们的理解与方案 —— 我们怎么理解这个需求、打算怎么做(2-4 条)。
+        范围与交付物 —— 这单大致包含什么、交付什么。
+        报价与周期 —— 基于先例的报价区间与大致周期,标明「待确认」,不写死。
+        需要留意 —— 1-2 条给负责人的提示(涉及承诺工期/低价风险/合规措辞的务必点名)。
+
+        【step = finalize 出正式方案】
+        负责人已经签发(能走到这一步就说明签了)。把草稿(payload 的 drafted)整理成
+        一份可以正式发给客户的方案文案:
+        正式方案 —— 结构完整、称呼与落款齐全、可直接采用的方案正文。
+        记录 —— 一句话「某年某月就某项目对某客户出了正式方案」(日期用 payload 给的,没给不写)。
+        下一步 —— 如果需要 AI 真的替公司把方案发出去(挂了邮件/IM 连接器时),明说
+          「这一步会再次经过审批闸」,不要假装「已发送」。
+
+        诚实规矩(最重要):你没有发送能力、不做商务承诺、不替公司定价拍板。报价区间一律
+        标「待确认」。绝不假装「已发送/客户已确认」。
+
+  # ── 3 条工作流 ───────────────────────────────────────────────────────────────
+  workflows:
+    # (1) 客户方案 —— 旗舰:多角色协作起草 + 跨角色签发 (HITL)。
+    #     顾问发起 → 三个分身接力 → 负责人签发 → 签发才出正式方案。
+    - id: client-proposal
+      name: 客户方案 — 多角色协作起草 + 负责人签发
+      description: 顾问发起一单,接洽分析师查背景、知识库助手检索先例、方案起草师拟草稿,负责人签发才出正式方案。
+      governance:
+        data_sensitivity: confidential
+        required_credentials: [deepseek]
+        required_human_roles: [负责人 / 合伙人 (partner)]
+        external_systems: ["db (客户/项目库, 只读)", "kb (交付知识库, 只读)"]
+        notes: |-
+          签发指派给发起人在表单里填的 userId(通常是负责人;框架不校验角色/是否本人,见文件头)。
+          签发才整理成正式方案,不签发就到此为止,不出正式方案、不发给客户、不写回客户库。生成所需
+          上下文(客户名/需求/检索到的资料)会发送到所配置的模型(DeepSeek)与只读连接器后端。
+      trigger:
+        capability: firm.proposal.request
+        payload_schema:
+          - id: client
+            label: 客户 / 项目名
+            type: text
+            required: true
+          - id: brief
+            label: 需求简述(客户想要什么、背景、时间/预算若已知)
+            type: textarea
+            rows: 5
+            required: true
+          - id: approver_id
+            label: 签发负责人 (userId — 由 ta 在自己的收件箱签发)
+            type: text
+            required: true
+      surface:
+        me:
+          enabled: true
+          label: 起草客户方案
+          description: 填客户与需求,三个分身接力查背景、检索先例、拟草稿,负责人签发才出正式方案。
+          allowed_roles: [owner, admin, member]
+          user_scope_field: requester_id
+      steps:
+        - id: research
+          description: 接洽分析师查客户背景与往来(接了 db 读真实往来,没接按需求本身分析)。
+          dispatch:
+            strategy: { kind: capability, capabilities: [firm.intake] }
+            # 静态标题:dispatch 只对 payload 做 resolveRefs,title 原样透传不插值
+            # (见 packages/workflow/src/runner.ts),写 $ref 会原样显示。客户名在 payload 里。
+            title: 客户背景研究
+            payload:
+              step: client-research
+              client: $trigger.payload.client
+              brief: $trigger.payload.brief
+        - id: reference
+          description: 知识库助手检索相关交付先例与报价参考(接了 kb 读真实交付物)。
+          dispatch:
+            strategy: { kind: capability, capabilities: [firm.knowledge] }
+            title: 相关先例检索
+            payload:
+              step: proposal-reference
+              client: $trigger.payload.client
+              brief: $trigger.payload.brief
+        - id: draft
+          description: 方案起草师综合背景与先例,拟成一页方案草稿。
+          dispatch:
+            strategy: { kind: capability, capabilities: [firm.proposal] }
+            title: 方案草稿
+            payload:
+              step: draft
+              client: $trigger.payload.client
+              brief: $trigger.payload.brief
+              background: $research.output.text
+              references: $reference.output.text
+        - id: approve
+          description: 负责人签发方案草稿(签发才出正式方案)。
+          human:
+            assignee: $trigger.payload.approver_id
+            kind: approval
+            title: 客户方案签发
+            prompt: |-
+              顾问已就客户「$trigger.payload.client」拟好方案草稿,签发吗?签发后才整理成正式
+              方案;不签发就到此为止,不出正式方案、不发给客户。
+
+              —— 草稿 ——
+              $draft.output.text
+        # finalize 用 `when` 门控在签发上 —— human approval 被拒时返回的是正常
+        # {approved:false} ok 输出、**不会中断 run**(见 packages/inbox/src/types.ts)。
+        # 不加这道门,拒绝时 finalize 照样跑、照样出正式方案 =「不签发就不出」是假话。
+        # 先例:examples/smart-home-hub 的 secure 步、solo-company-hub 的 finalize 步。
+        - id: finalize
+          description: 签发后整理成最终正式方案(拒绝则跳过,不出正式方案)。
+          when: "$approve.output.approved == true"
+          dispatch:
+            strategy: { kind: capability, capabilities: [firm.proposal] }
+            title: 正式方案
+            payload:
+              step: finalize
+              client: $trigger.payload.client
+              drafted: $draft.output.text
+      output:
+        client: $trigger.payload.client
+        approval: $approve.output
+        proposal: $finalize.output
+
+    # (2) 团队周报 —— 无人值守,进 acceptance。
+    - id: weekly-portfolio-brief
+      name: 团队周报 — 在办项目状态简报
+      description: 接洽分析师理一份在办项目状态简报,给负责人开周会前看清全局。
+      governance:
+        data_sensitivity: internal
+        required_credentials: [deepseek]
+        external_systems: ["db (在办项目, 只读)", "tasks (团队任务, 只读)"]
+        notes: 无人值守;接了 db/tasks 读真实在办项目与待办,没接进诚实模式(不编造项目名/金额)。周报是团队看全局的工具,又被下面 schedules 定时自动跑,故对所有成员角色开(定时 sweeper 以 member 权限判可运行性)。
+      trigger:
+        capability: firm.portfolio.brief
+        payload_schema:
+          - id: focus
+            label: 本周侧重(可选,留空则给通用周报)
+            type: text
+      surface:
+        me:
+          enabled: true
+          label: 出团队周报
+          description: 让接洽分析师理一份在办项目状态简报。
+          # 三个成员角色都能出周报。**关键约束**:这条流被下面 schedules 定时自动跑,
+          # 而定时 sweeper 固定以最低权限 member 角色判定可运行性(见
+          # packages/host/src/workflow-schedule-sweeper.ts 的 DEFAULT_SCHEDULE_ROLE +
+          # personal-butler-workflows.ts evaluateRunnable)。allowed_roles 若剔掉 member,
+          # 周一自动周报会被判 unrunnable、永远不触发 —— 定时流必须对 member 开。
+          allowed_roles: [owner, admin, member]
+          user_scope_field: requester_id
+      steps:
+        - id: brief
+          description: 接洽分析师按在办项目理一份周报。
+          dispatch:
+            strategy: { kind: capability, capabilities: [firm.intake] }
+            title: 团队周报
+            payload:
+              step: portfolio-brief
+              focus: $trigger.payload.focus
+      output:
+        brief: $brief.output
+
+    # (3) 新事项研究 —— 无人值守,进 acceptance。
+    - id: new-matter-workup
+      name: 新事项研究 — 对着交付知识库出一页
+      description: 来了个新事项/新机会,知识库助手对着交付先例出一页研究(背景/先例/可行性/风险)。
+      governance:
+        data_sensitivity: internal
+        required_credentials: [deepseek]
+        external_systems: ["kb (交付/先例知识库, 只读)"]
+        notes: 无人值守;接了 kb 读真实交付先例,没接按常识给。不替公司做承接决定。
+      trigger:
+        capability: firm.matter.workup
+        payload_schema:
+          - id: matter
+            label: 新事项 / 新机会简述(越具体越好)
+            type: textarea
+            rows: 5
+            required: true
+      surface:
+        me:
+          enabled: true
+          label: 研究一个新事项
+          description: 贴进新事项,知识库助手对着交付先例出一页研究。
+          allowed_roles: [owner, admin, member]
+          user_scope_field: requester_id
+      steps:
+        - id: workup
+          description: 知识库助手对着交付知识库研究这个新事项。
+          dispatch:
+            strategy: { kind: capability, capabilities: [firm.knowledge] }
+            title: 新事项研究
+            payload:
+              step: matter-workup
+              matter: $trigger.payload.matter
+      output:
+        workup: $workup.output
+
+  # ── 3 个只读连接器槽位 —— 全部可选;不挂进诚实模式 ──────────────────────────────
+  # 这是「抽象需求」槽位:只说「需要一个叫 X 的 MCP server」,不点名厂商、不预挂到 agent
+  # (模板不带 useMcpServers)。装的人用**只读**凭证把自己的源接进来,再在对应 agent 的
+  # 表单里勾上这个 server。企业级数据库/知识库全走 MCP、框架不存数据,是钉死的设计立场
+  # (见 docs/zh/RAG-VIA-MCP.md / KB-CONNECTORS.md)。
+  requires:
+    connectors:
+      - id: db
+        kind: mcp
+        optional: true
+        capability: db.read
+        hint: 你的客户/项目结构化数据库(客户资料/往来记录/在办项目)。用**只读**凭证接 Postgres 或结构化 DB 类 MCP server(见 docs/zh/RAG-VIA-MCP.md 的 pgvector 路线);server 名用 db。接洽分析师的客户背景、周报的在办项目从这里读。写动作不在本模板 —— 接入≠授权。
+      - id: kb
+        kind: mcp
+        optional: true
+        capability: knowledge.read
+        hint: 交付物/SOP/报价先例知识库。连接器目录 rag 组(如 chroma-rag)或企业级 elasticsearch-kb(走 docs/zh/RAG-VIA-MCP.md);server 名用 kb。知识库助手的相关先例、报价参考从这里读。
+      - id: tasks
+        kind: mcp
+        optional: true
+        capability: tasks.read
+        hint: 团队任务/交付清单(如 todoist-tasks)。server 名用 tasks;周报的待跟进从这里读。不挂则周报按常识写。
+
+  # ── 黄金验收 —— 装完面板「跑验收」,零 LLM 结构断言判卷 ──────────────────────
+  # 只放两条纯 AI 的流:合格线 = 诚实模式(开箱不挂任何连接器也必须绿)。
+  # client-proposal 刻意不进这里 —— 带 human: 步的流无人值守必然停在签发步,它的验收
+  # 就是负责人照按钮点一次签发卡,机器替不了。
+  acceptance:
+    - id: smoke-portfolio-brief
+      workflowId: weekly-portfolio-brief
+      # 值必须加引号:flow 映射 { } 里的 ASCII 逗号是字段分隔符,不加引号会把后半截
+      # 拆成垃圾 null 键、静默丢失(OPC 交叉审抓到的同型陷阱)。
+      trigger: { focus: "本周聚焦几个临近交付的项目。" }
+      assert:
+        contains: [在办项目, 本周待跟进, 风险与阻塞, 负责人一问]
+        forbid: [作为一个AI, 我无法访问]
+      note: 开箱无连接器状态下也必须绿(诚实模式即合格线);出现「我无法访问」= 分身把没接 db 当成完全没法干活,不合格
+    - id: smoke-new-matter-workup
+      workflowId: new-matter-workup
+      trigger: { matter: "一个制造业客户想上一套内部知识库,预算和范围都还没定。" }
+      assert:
+        contains: [背景, 相关先例, 可行性与要点, 风险与注意]
+        forbid: [作为一个AI, 我无法访问]
+      note: 开箱无 kb 时按常识给并说明未接知识库,不编造具体案例;报「我无法访问」不合格
+
+  # ── 定时建议 —— 只带节奏不带人;装完「定时」卡点「补人启用」选成员 ────────────
+  schedules:
+    - workflowId: weekly-portfolio-brief
+      cadence: { kind: weekly, weekday: 1, hour: 8 }
+      note: 装完在「定时」卡补人启用,每周一早 8 点(默认按 UTC+8)自动出团队周报;不在该时区就在「定时」卡改时间
+
+  # ── 一键: 导入时提示填一次 API key,自动应用到三个 agent ──────────────────────
+  defaults:
+    apiKeyPrompt:
+      provider: openai-compatible
+      baseURL: https://api.deepseek.com/v1
+      label: DeepSeek
