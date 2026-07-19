@@ -156,6 +156,8 @@ template:
             title: 家庭事项审批
         - id: carry-out
           description: 批准后,家庭帮手把申请变成一页可执行方案 + 家庭记录。
+          # 承重门:只有家长批准(approved==true)才跑;拒绝则本步 skip,plan 为空 = 不做。
+          when: "$approve.output.approved == true"
           dispatch:
             strategy: { kind: capability, capabilities: [family.assist] }
             title: 出执行方案

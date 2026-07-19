@@ -6,6 +6,10 @@
  * exactly the load-bearing shape of that story:
  *   - the `human:` approval step desugars to gotong.human/v1 and its assignee
  *     rides the trigger payload (the requester picks WHICH parent approves);
+ *   - carry-out is GATED on the approval (`when: $approve.output.approved ==
+ *     true`) — a REJECTED approval returns a normal {approved:false} ok output,
+ *     NOT a halt, so without the gate carry-out would still emit the plan and
+ *     break the "批准才出方案,拒绝就不做" promise;
  *   - the brief workflow is the unattended golden-run case (the approval flow
  *     deliberately is NOT — it suspends on the human step by design);
  *   - all three life-connector slots stay optional (honest mode is the
@@ -81,6 +85,24 @@ describe('examples/family-hub/template (FAM-M1)', () => {
     const brief = byId.get('family-brief')!
     expect(brief.trigger.capability).toBe('family.brief.request')
     expect(brief.surface?.me?.userScopeField).toBe('reader_id')
+  })
+
+  it('GATES carry-out on the approval — a rejected approval produces no plan', () => {
+    const t = parseTemplate(templateText)
+    const demo = parseWorkflow(t.workflows.find((w) => w.id === 'family-approval-demo')!.yaml)
+
+    const steps = new Map(demo.steps.map((s) => [s.id, s]))
+    expect([...steps.keys()]).toEqual(['prepare', 'approve', 'carry-out'])
+
+    // THE load-bearing assertion: carry-out is gated on the approval decision.
+    // Without this `when`, a REJECTED approval (which returns {approved:false}
+    // as a normal ok output, NOT a halt) would still run carry-out and emit the
+    // execution plan — breaking the template's "批准才出方案,拒绝就不做" promise.
+    // On rejection the step is skipped, so `output.plan` (`$carry-out.output`)
+    // resolves to its undefined output = 「不做」. Mirrors solo-company-hub's
+    // finalize gate (packages/web/tests/solo-company-hub-template.test.ts).
+    const carryOut = steps.get('carry-out')! as { when?: string }
+    expect(carryOut.when).toBe('$approve.output.approved == true')
   })
 
   it('golden-run covers ONLY the unattended brief; the approval flow is human-verified by design', () => {
