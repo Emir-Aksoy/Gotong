@@ -1,0 +1,343 @@
+# 一人公司 hub — 一个人顶一个团队的 AI 开箱包 (gotong.template/v1)
+#
+# 给谁:独立开发者 / 自由职业者 / 独立顾问 / 一人工作室主理人 —— 公司只有你
+# 一个人,却要同时干接客、交付、开票、维护资料库、每天理优先级的活。这个包把
+# 「一个人 + 一个贴身管家 + 三个专业分身 + 你的知识库 + 你的现实工具」串成开箱
+# 即用的形态,让一个人跑出一个小团队的产能。
+#
+# 装走的是:
+#   - 3 个托管 LLM agent(客户沟通助手 / 经营简报员 / 研究助手),各司一职,DeepSeek 跑;
+#   - 3 条声明式工作流:
+#       client-outreach-approval —— 你想对外发点什么(给客户的邮件/报价/交付说明),
+#         客户沟通助手先把它拟成一页草稿(发给谁/目的/拟发内容/风险),**然后停在你
+#         自己的审批步**,你在 /me 收件箱过一眼、批了才出最终可发文案,不批就到此为止。
+#         这就是「对外动作自己把关」—— 一人公司老板既是发起人也是把关人,AI 起草、
+#         你签发。
+#       daily-ops-brief —— 每日经营简报,/me 一键跑;配好定时后每早自动跑。
+#       new-client-workup —— 来了个新单/新客户,把需求贴进去,研究助手查你的知识库
+#         出一页「这单该怎么接」(背景/要点/报价参考/风险)。
+#   - 4 个连接器槽位(知识库/日历/任务/客户资料,全部可选 —— 不挂照样跑,进诚实模式);
+#   - 2 条 golden-run 验收(装完面板「跑验收」机器判卷) + 1 条定时建议(只带节奏不带人)。
+#
+# ── 与管家的关系(谁演示什么)────────────────────────────────────────────────
+#   hub 自带的管家「阿同」本来就有 governed 闸:你在 IM 里随口让它对外发消息,它会
+#   自己停靠等你批。本模板的 client-outreach-approval 是**结构化**的那条路 —— 审批
+#   步写死在工作流里、把关人就是发起人自己(一人公司老板),适合「照按钮点出一张对外
+#   审批卡」;管家路径适合日常随口使唤。两条路走同一套 /me 收件箱。
+#
+# ── 诚实边界(这些流不真的对外发东西 / 不真的动钱)──────────────────────────
+#   client-outreach-approval 批准后的产出是**一页可发文案 + 一条记录**,不是真的把
+#   邮件发出去 —— 模板不携带任何出站凭证,也绝不预授权(接入≠授权行动)。要让 AI
+#   真的替你发邮件 / 发消息 / 开发票,给对应 agent 挂上连接器后,那些动作**仍逐次过
+#   审批闸**。研究助手的报价参考是基于你知识库里的历史,不是市场实时行情。
+#
+# ── 为什么 client-outreach-approval 不进 acceptance ──────────────────────────
+#   golden-run 必须无人值守跑完(带 human: 步的流会按设计停在审批步直到超时),而
+#   「你真的批了一次」恰恰是这条流要人来验的东西 —— 它的验收是你照按钮点一次审批卡。
+#   acceptance 里放的是两条纯 AI 的流(经营简报 / 新单研究),诚实模式即合格线。
+#
+# 导入: admin UI →「工作流 / 模板画廊」→ 安装, 或
+#   curl -X POST -H "Authorization: Bearer <admin-token>" \
+#     -H 'content-type: application/json' \
+#     -d "$(jq -Rs '{template: .}' examples/solo-company-hub/template/solo-company-hub.template.yaml)" \
+#     http://127.0.0.1:8745/api/admin/templates/import
+# 一条命令开荒(含补人启用定时): gotong provision <本文件> --url <hub> --token <admin> --user <你的成员id>
+schema: gotong.template/v1
+template:
+  name: 一人公司 hub(一个人顶一个团队)
+  description: |-
+    独立开发者 / 自由职业者 / 一人工作室的开箱包:客户沟通助手 + 经营简报员 + 研究助手
+    三个专业分身、三条工作流。client-outreach-approval 让你把「想对外发的东西」交给 AI
+    起草,停在你自己的审批步 —— 你签发才出最终文案,凭证只在你手里、对外动作你把关。
+    daily-ops-brief 每早自动帮你理清今日优先级与待跟进。new-client-workup 来了新单先查
+    你的知识库出一页「怎么接」。四个连接器槽位(知识库/日历/任务/客户资料)全部可选:不挂
+    照样跑,进诚实模式(不编造)。导入时填一次 DeepSeek key,一个人就有了一个小团队。
+
+  version: 1
+
+  # ── 3 个专业分身 ─────────────────────────────────────────────────────────────
+  agents:
+    - id: client-comms
+      displayName: 客户沟通助手
+      capabilities: [solo.comms]
+      kind: llm
+      provider: openai-compatible
+      baseURL: https://api.deepseek.com/v1
+      providerLabel: DeepSeek
+      model: deepseek-chat
+      system: |
+        你是这家一人公司的「客户沟通助手」,一次只被派两种活,按任务 payload 里的
+        step 字段区分。全程按老板要求的语言(默认中文)、口吻专业而得体,不寒暄、
+        不解释你在做什么。你替老板起草对外沟通,但**从不真的发送** —— 发送由老板
+        签发后另行执行。
+
+        【step = draft 起草对外沟通】把 request(老板想对外发的东西)拟成一页草稿,
+        给老板 30 秒能过眼、决定发不发。固定四个小节(全文 ≤ 300 字):
+        发给谁 —— 收件对象(客户名/角色);不知道就写「未指明,建议补上」,不要编。
+        目的 —— 一句话说清这次沟通要达成什么。
+        拟发内容 —— 可以直接发出去的正文草稿(称呼、正文、落款齐全)。
+        需要留意 —— 1-2 条风险(涉及报价/承诺工期/退款/法律措辞的,务必点名)。
+
+        【step = finalize 出最终文案】老板已经签发(能走到这一步就说明老板批了)。
+        把草稿整理成最终可发文案:
+        最终文案 —— 直接可复制发送的完整正文。
+        记录 —— 一句话「某年某月就某事对某客户发了沟通」(日期用 payload 给的,没给不写)。
+        下一步 —— 如果需要 AI 真的替老板把它发出去(挂了邮件/IM 连接器时),明说
+          「这一步会再次经过审批闸」,不要假装「已发送」。
+
+        诚实规矩(最重要):你没有发送能力、不会真的发邮件或消息、不能替老板做出
+        承诺。你的产出是文案文本;真实的发送由挂了连接器的 agent 逐次过审批闸执行。
+        绝不假装「已发送/已回复客户」。
+
+    - id: ops-brief-writer
+      displayName: 经营简报员
+      capabilities: [solo.brief.compose]
+      kind: llm
+      provider: openai-compatible
+      baseURL: https://api.deepseek.com/v1
+      providerLabel: DeepSeek
+      model: deepseek-chat
+      system: |
+        你是这家一人公司的经营简报员,每次被派到就写**一份**简短的中文经营简报,
+        直接给正文,不寒暄、不解释你在做什么。你面向的是一个人扛整摊子的老板,
+        帮 ta 在开工前 60 秒理清今天。
+
+        固定四个小节(全文 200-400 字,标题逐字用下面这四个):
+        今日优先级 —— 2-3 条今天最该推进的事(交付/接洽/自己的项目),按重要度排。
+        待跟进 —— 1-2 条需要今天跟进的客户或事项(报价没回复的/该催的款/该交的东西)。
+        现金流提醒 —— 1 条与钱有关的自查(该开的发票/该收的款/该付的订阅),
+          没有真实数据时写成通用自查,不要编造具体金额或客户名。
+        今日一问 —— 1 条帮老板抽身看全局的问题(如「这周有没有在做只有你能做的事」)。
+
+        诚实规矩(最重要):
+        - 你没有实时数据,也默认拿不到这家公司的日程/任务/账目。**没有的数据就不要
+          编** —— 不要伪造「今天的会议」或「某客户欠款 X 元」,写成常识性、不依赖
+          具体数字的自查建议。
+        - 如果你的工具列表里有日历 / 任务 / 客户资料 / 知识库类 MCP 工具,先调它们
+          拿真实数据,把「待跟进」「现金流提醒」换成真实条目;没有工具就按通用写法。
+        - focus 为空时,主题取「一个人高效推进这一天」。
+      # 要读真实日程/任务/账目,运行时在这里挂 MCP server(见下方 requires.connectors)。
+      # 模板不预挂 —— 接哪个源是你的运行时决定。
+
+    - id: research-aide
+      displayName: 研究助手
+      capabilities: [solo.research]
+      kind: llm
+      provider: openai-compatible
+      baseURL: https://api.deepseek.com/v1
+      providerLabel: DeepSeek
+      model: deepseek-chat
+      system: |
+        你是这家一人公司的研究助手。老板来了个新单/新客户/新项目,把需求丢给你,
+        你出一页「这单该怎么接」,帮老板 2 分钟做出「接不接、怎么报价」的判断。
+        全程中文、务实、不寒暄。
+
+        固定四个小节(全文 ≤ 400 字,标题逐字用下面这四个):
+        这单的背景 —— 复述需求要点 + 客户可能真正想要的(读出言外之意)。
+        关键要点 —— 2-3 条交付这单绕不过去的技术/范围/时间要点。
+        报价参考 —— 基于同类活的**区间与依据**,不是拍脑袋一个数;说清哪些变量会
+          推高或压低报价。没有历史依据时明说「缺同类参考,建议按工时估」,不要编价。
+        风险与注意 —— 1-2 条最该在报价前问清的坑(范围蔓延/付款方式/责任边界)。
+
+        诚实规矩(最重要):
+        - 如果工具列表里有知识库 / 客户资料类 MCP 工具,先查老板自己的历史项目和
+          报价档案,「报价参考」用**老板的真实历史**做锚;没有就基于常识给区间并说明。
+        - 你查到的是老板知识库里的历史,**不是市场实时行情**,措辞不要冒充「当前市价」。
+        - 你不替老板做接单决定,只把判断需要的信息摆全。
+
+  # ── 3 条声明式工作流 ─────────────────────────────────────────────────────────
+  workflows:
+    # 对外动作自己把关:发起 → AI 起草 → 你签发 → 才出最终文案。审批步是 Phase 16
+    # human: 真人节点 —— 挂起等你,拒绝即止,重启幸存。
+    - id: client-outreach-approval
+      name: 对外沟通(AI 起草·你签发)
+      description: 你想对外发点什么,客户沟通助手拟成一页草稿后停在你的审批步,你签发才出最终可发文案,不批就不发。
+      governance:
+        data_sensitivity: confidential
+        required_credentials: [deepseek]
+        required_human_roles: [公司主理人 (approver)]
+        notes: 产出是可发文案与记录,拒绝签发则不产出最终文案;真实发送不在本流内(挂连接器后逐次另过审批闸)。生成所需上下文会发送到所配置的模型后端(DeepSeek)。
+      trigger:
+        capability: solo.outreach.request
+        payload_schema:
+          - id: request
+            label: 想对外发什么?(收件人 + 想说的事)
+            type: textarea
+            rows: 4
+            required: true
+      surface:
+        me:
+          enabled: true
+          label: 起草一条对外沟通
+          description: 说清想对外发什么,AI 拟成草稿,你签发后给出最终可发文案。
+          allowed_roles: [owner, admin, member]
+          user_scope_field: requester_id
+      steps:
+        - id: draft
+          description: 客户沟通助手把请求拟成一页对外草稿(发给谁/目的/拟发内容/需要留意)。
+          dispatch:
+            strategy: { kind: capability, capabilities: [solo.comms] }
+            title: 起草对外沟通
+            payload:
+              step: draft
+              request: $trigger.payload.request
+              requester_id: $trigger.payload.requester_id
+        - id: approve
+          description: 你在 /me 收件箱过一眼草稿并签发(拒绝则工作流到此为止,不发)。
+          human:
+            # 一人公司=发起人即把关人:审批卡落到你自己的收件箱。requester_id 由
+            # /me 服务端强制为登录成员本人(见 surface.user_scope_field),不必手填 userId。
+            assignee: $trigger.payload.requester_id
+            kind: approval
+            prompt: |-
+              这条对外沟通的草稿已拟好,签发吗?签发后才会整理成最终可发文案;不签发就到此为止,不发。
+
+              —— 草稿 ——
+              $draft.output.text
+            title: 对外沟通签发
+        - id: finalize
+          description: 签发后,客户沟通助手把草稿整理成最终可发文案 + 一条记录。
+          # 承重门:只有签发(approved==true)才跑;拒绝则本步 skip,output.message 为空 = 不发。
+          when: "$approve.output.approved == true"
+          dispatch:
+            strategy: { kind: capability, capabilities: [solo.comms] }
+            title: 出最终文案
+            payload:
+              step: finalize
+              request: $trigger.payload.request
+              drafted: $draft.output.text
+      output:
+        # 审批决定始终有(approved:true/false);message 只有签发后才有,拒绝时为空。
+        approval: $approve.output
+        message: $finalize.output
+
+    # 每日经营简报:/me 一键跑;配好定时后每早自动跑,跑完管家播到 IM(BE-M5)。
+    - id: daily-ops-brief
+      name: 每日经营简报
+      description: 帮一人公司老板理清今日优先级/待跟进/现金流;配好定时后每早自动跑,跑完管家播到 IM。
+      governance:
+        data_sensitivity: internal
+        required_credentials: [deepseek]
+        notes: 数据主副本留在本地 .gotong/;生成简报所需上下文会发送到所配置的模型后端(DeepSeek),挂了 MCP 连接器时也会发到对应后端。
+      trigger:
+        capability: solo.brief.request
+        payload_schema:
+          - id: focus
+            label: 今天想重点关注什么?(留空则给通用简报)
+            type: text
+            required: false
+      surface:
+        me:
+          enabled: true
+          label: 来份今日经营简报
+          description: 立刻写一份今日经营简报;配好定时后每早自动送到 IM。
+          allowed_roles: [owner, admin, member]
+          user_scope_field: reader_id
+      steps:
+        - id: compose
+          description: 经营简报员写今日简报(有 MCP 工具就读真实数据,没有就按诚实模式)。
+          dispatch:
+            strategy: { kind: capability, capabilities: [solo.brief.compose] }
+            title: 写今日经营简报
+            payload:
+              focus: $trigger.payload.focus
+              reader_id: $trigger.payload.reader_id
+      output:
+        brief: $compose.output
+
+    # 新单研究:贴需求 → 研究助手查知识库(+可选联网)→ 一页「怎么接」。纯 AI,
+    # 挂了知识库/客户资料 MCP 就用真实历史做锚,没挂就诚实按常识给区间。
+    - id: new-client-workup
+      name: 新单研究(这单怎么接)
+      description: 来了新单/新客户,贴进需求,研究助手查你的知识库出一页「怎么接」(背景/要点/报价参考/风险)。
+      governance:
+        data_sensitivity: internal
+        required_credentials: [deepseek]
+        notes: 报价参考基于你知识库里的历史,不是市场实时行情;开箱无连接器时按常识给区间并说明。生成所需上下文会发送到所配置的模型/连接器后端。
+      trigger:
+        capability: solo.research.request
+        payload_schema:
+          - id: brief
+            label: 新单/新客户的需求(越具体越好)
+            type: textarea
+            rows: 4
+            required: true
+      surface:
+        me:
+          enabled: true
+          label: 研究一个新单
+          description: 贴进新单需求,研究助手出一页「这单怎么接」。
+          allowed_roles: [owner, admin, member]
+          user_scope_field: requester_id
+      steps:
+        - id: workup
+          description: 研究助手出「这单怎么接」(有知识库 MCP 就查真实历史做报价锚)。
+          dispatch:
+            strategy: { kind: capability, capabilities: [solo.research] }
+            title: 研究这单怎么接
+            payload:
+              brief: $trigger.payload.brief
+              requester_id: $trigger.payload.requester_id
+      output:
+        workup: $workup.output
+
+  # ── 连接器槽位 —— 全部可选,不挂照样跑(进诚实模式)──────────────────────────
+  # 槽位 id = 期望存在的 MCP server 名;选哪个后端是你的运行时决定,模板不点名厂商。
+  # 接入 ≠ 授权行动:挂上后 agent 能读(甚至写),但替你发消息/开票/花钱仍逐次过审批闸。
+  requires:
+    connectors:
+      - id: knowledge
+        kind: mcp
+        optional: true
+        capability: knowledge.read
+        hint: 你的资料库/过往项目/SOP/报价档案。连接器目录「笔记」组任选后端(如 notion-notes / obsidian),或接企业级知识库(elasticsearch-kb 走 RAG-VIA-MCP);server 名用 knowledge。研究助手的报价锚、简报的背景都从这里读
+      - id: calendar
+        kind: mcp
+        optional: true
+        capability: calendar.read
+        hint: 连接器目录「日历」组任选后端(如 Google 日历走「连接现实生活」OAuth);server 名用 calendar;不挂则简报不写日程
+      - id: tasks
+        kind: mcp
+        optional: true
+        capability: tasks.read
+        hint: 连接器目录「任务」组任选后端(如 todoist-tasks);server 名用 tasks;交付清单/待办从这里读进简报
+      - id: crm
+        kind: mcp
+        optional: true
+        capability: crm.read
+        hint: 你的客户资料/联系历史。接 CRM 或结构化数据库类 MCP server;server 名用 crm;客户背景、往来记录从这里读
+
+  # ── 黄金验收 —— 装完面板「跑验收」,零 LLM 结构断言判卷 ──────────────────────
+  # 只放两条纯 AI 的流:合格线 = 诚实模式(开箱不挂任何连接器也必须绿)。
+  # client-outreach-approval 刻意不进这里 —— 带 human: 步的流无人值守必然停在审批步,
+  # 它的验收就是你照按钮点一次签发卡,机器替不了。
+  acceptance:
+    - id: smoke-ops-brief
+      workflowId: daily-ops-brief
+      trigger: { focus: 一个人高效推进这一天 }
+      assert:
+        contains: [今日优先级, 待跟进, 现金流提醒, 今日一问]
+        forbid: [作为一个AI, 我无法访问]
+      note: 开箱无连接器状态下也必须绿(诚实模式即合格线)
+    - id: smoke-new-client-workup
+      workflowId: new-client-workup
+      # 值必须加引号:flow 映射 { } 里的 ASCII 逗号是字段分隔符,不加引号会被
+      # 拆成 brief + 两个垃圾 null 键,后半截需求静默丢失(Codex 交叉审抓到)。
+      trigger: { brief: "一个电商客户想做一个促销落地页,两周内上线,预算不明。" }
+      assert:
+        contains: [这单的背景, 关键要点, 报价参考, 风险与注意]
+        forbid: [作为一个AI, 我无法访问]
+      note: 开箱无知识库连接器时按常识给区间并说明,不编造具体市价
+
+  # ── 定时建议 —— 只带节奏不带人;装完「定时」卡点「补人启用」选成员 ────────────
+  schedules:
+    - workflowId: daily-ops-brief
+      cadence: { kind: daily, hour: 8 }
+      note: 装完在「定时」卡补人启用,每早 8 点(默认按 UTC+8)自动跑,开工前送到 IM;不在该时区就在「定时」卡改时间
+
+  # ── 一键: 导入时提示填一次 API key,自动应用到三个 agent ──────────────────────
+  defaults:
+    apiKeyPrompt:
+      provider: openai-compatible
+      baseURL: https://api.deepseek.com/v1
+      label: DeepSeek
