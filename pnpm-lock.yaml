@@ -119,6 +119,21 @@ importers:
         specifier: workspace:*
         version: link:../../packages/identity
 
+  examples/bar-ops:
+    dependencies:
+      '@gotong/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      '@gotong/inbox':
+        specifier: workspace:*
+        version: link:../../packages/inbox
+      '@gotong/workflow':
+        specifier: workspace:*
+        version: link:../../packages/workflow
+      yaml:
+        specifier: ^2.6.0
+        version: 2.9.0
+
   examples/battle-monk-training:
     dependencies:
       '@gotong/core':

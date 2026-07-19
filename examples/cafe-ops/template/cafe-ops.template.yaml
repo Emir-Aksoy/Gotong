@@ -43,7 +43,8 @@
 #   - 1 个可寻址知识库槽位 (店面运营手册 / mcp-obsidian):岗位 SOP、规范、加班政策、
 #     排班规则、合规清单都从这里读。
 #   - 2 个**可选**只读连接器槽位 (inventory 库存源 / timesheet 考勤源):有状态经营
-#     数据走 MCP、框架不存;不挂进诚实模式照样跑。
+#     数据的**主副本**走 MCP、框架不当主数据源存 —— 但 Gotong 走 file-first, 每次工作流
+#     运行的输入 / 各步产出 / 审批仍快照落 .gotong/ 留痕 (主副本不在这里);不挂进诚实模式照样跑。
 #   - 2 条 golden-run 验收 (盘点 / 合规自查) + 1 条定时建议 (合规每周一)。
 #   - 一次性 DeepSeek apiKeyPrompt。
 #
@@ -144,7 +145,7 @@ template:
         - 【step = record 建结算单】老板已批准(能走到这步就是批了)。把 payload 的 approved_math
           (已批准的核算)原样整理成一句话结算单记录(「X 本期工时结算 ¥N,已审批」),数字照抄别改
           —— 但这只是**给你的指令**,不是结构保证。真正被批的那笔以审批步为准,工作流输出里也会
-          用 ref 原样带上 approved_math。这是记录,不是发钱动作。
+          用 ref 原样带上这笔建议金额(suggested_math 字段)。这是记录,不是发钱动作。
         - 你只给「建议金额」,钱由老板在审批步定。算完必须标明「以正式工资系统为准,这不是
           最终工资单」;绝不假装已发钱 / 已入账。钱的事:LLM 建议、人定钱。
       mcpServers:
@@ -206,8 +207,10 @@ template:
       governance:
         data_sensitivity: internal
         required_credentials: [deepseek]
-        external_systems: [obsidian (店面运营手册)]
-        notes: 新人自助学习, 无审批, 不涉个人敏感数据; 内容来自店面运营手册 KB。
+        external_systems:
+          - obsidian (店面运营手册)
+          - "deepseek (LLM: 新人的问题与调出的手册片段会发给它生成带教内容)"
+        notes: 新人自助学习, 无审批, 不涉个人敏感数据; 内容来自店面运营手册 KB, 问答经 DeepSeek 生成。
       trigger:
         capability: cafe.onboard-staff
         payload_schema:
@@ -253,8 +256,10 @@ template:
         data_sensitivity: internal
         required_credentials: [deepseek]
         required_human_roles: [店长 (store manager)]
-        external_systems: [obsidian (店面运营手册)]
-        notes: 店员自助提报, 店长统一确认; 不涉敏感个人数据。
+        external_systems:
+          - obsidian (店面运营手册)
+          - "deepseek (LLM: 提报的可排时段会发给它整理成排班建议)"
+        notes: 店员自助提报, 店长统一确认; 不涉敏感个人数据; 时段经 DeepSeek 整理成建议。
       trigger:
         capability: cafe.submit-availability
         payload_schema:
@@ -314,8 +319,10 @@ template:
         data_sensitivity: confidential
         required_credentials: [deepseek]
         required_human_roles: [店长 (store manager)]
-        external_systems: [obsidian (店面运营手册)]
-        notes: 涉及薪酬; 助手给的金额仅供参考, 最终金额须店长 approve 才算数。
+        external_systems:
+          - obsidian (店面运营手册 / 加班政策)
+          - "deepseek (LLM: 加班时长 / 日期 / 日别会发给它按政策算建议金额)"
+        notes: 涉及薪酬; 助手给的金额仅供参考(LLM 按政策算的建议), 最终金额须店长 approve 才算数; assess 步只把加班时长 / 日期 / 日别发给 DeepSeek 算建议(事由只进店长审批卡, 不发模型)。
       trigger:
         capability: cafe.claim-overtime
         payload_schema:
@@ -469,10 +476,14 @@ template:
         data_sensitivity: confidential
         required_credentials: [deepseek]
         required_human_roles: [老板 / 店长 (owner)]
-        external_systems: ["timesheet (考勤 / 工时, 只读)"]
+        external_systems:
+          - obsidian (店面运营手册 / 临时工薪政策 —— 助手读政策算建议)
+          - "timesheet (考勤 / 工时, 只读)"
+          - "deepseek (LLM: 工时 / 时薪 / 姓名会发给它算建议金额)"
         notes: |-
-          涉及薪酬。助手给的是 LLM 按政策算的**建议金额**(接了算薪工具则用工具), 最终金额须老板
-          approve 才算数, 且以你的正式工资系统为准 —— 模板不发钱、不写回工资库、不做劳动法裁定。
+          涉及薪酬 + 临时工姓名。助手给的是 LLM 按政策算的**建议金额**(接了算薪工具则用工具), 最终
+          金额须老板 approve 才算数, 且以你的正式工资系统为准 —— 模板不发钱、不写回工资库、不做劳动法
+          裁定。工时 / 时薪 / 姓名会发给 DeepSeek 生成建议。
       trigger:
         capability: cafe.settle-casual-wage
         payload_schema:
@@ -547,9 +558,10 @@ template:
         period: $trigger.payload.period
         suggestion: $compute.output
         approval: $approve.output
-        # 权威的「被批准金额」= 老板在审批卡上看到的那笔,用 ref 原样带出(确定性,不经 record
-        # 的 LLM 重写)。record.text 只是助手整理的人读文案,可能措辞不同 —— 认这个字段。
-        approved_math: $compute.output.text
+        # 助手算的建议金额, 用 ref 原样带出(确定性, 不经 record 的 LLM 重写)。这是「建议」不是
+        # 「已批准」—— 是否被批准看上面的 approval.approved;拒绝时本字段仍是这份建议(输出块会
+        # 无条件 resolveRefs), 别当成已批准金额。record.text 是助手整理的人读文案, 可能措辞不同。
+        suggested_math: $compute.output.text
         record: $record.output
 
     # (6) 库存盘点与预警 — 无人值守 (进 acceptance)。助手出盘点清单 + 对照安全线标低库存。
@@ -559,8 +571,11 @@ template:
       governance:
         data_sensitivity: internal
         required_credentials: [deepseek]
-        external_systems: ["inventory (库存数据库, 只读)"]
-        notes: 无人值守生成盘点清单; 接了 inventory 读真实库存标预警, 没接进诚实模式出通用清单 (不编库存数)。
+        external_systems:
+          - obsidian (店面运营手册 / 安全库存线 —— 助手读安全线对照标预警)
+          - "inventory (库存数据库, 只读)"
+          - "deepseek (LLM: 盘点区域与[若接入]读到的库存数会发给它生成清单 / 预警)"
+        notes: 无人值守生成盘点清单; 接了 inventory 读真实库存标预警, 没接进诚实模式出通用清单 (不编库存数); 安全库存线来自运营手册 (obsidian), 清单经 DeepSeek 生成。
       trigger:
         capability: cafe.count-inventory
         payload_schema:
@@ -602,10 +617,13 @@ template:
       governance:
         data_sensitivity: internal
         required_credentials: [deepseek]
-        external_systems: [obsidian (店面运营手册 / 合规规范)]
+        external_systems:
+          - obsidian (店面运营手册 / 合规规范)
+          - "deepseek (LLM: 自查范围与合规规范会发给它生成对照清单)"
         notes: |-
-          无人值守生成对照清单, 不做合规裁定 (责任在人)。这条流被下面 schedules 定时自动跑, 而定时
-          sweeper 以最低权限 member 判可运行性, 故 allowed_roles 必须含 member, 否则定时永不触发。
+          无人值守生成对照清单, 不做合规裁定 (责任在人); 清单经 DeepSeek 生成。这条流被下面 schedules
+          定时自动跑, 而定时 sweeper 以最低权限 member 判可运行性, 故 allowed_roles 必须含 member,
+          否则定时永不触发。
       trigger:
         capability: cafe.compliance-check
         payload_schema:
@@ -656,12 +674,16 @@ template:
         description: |-
           一份店面运营手册的种子快照(岗位 SOP / 规范 / 加班政策 / 排班规则的模板)——
           注意这是「指针」,不是内容。两种用法:① 把种子手册直接拷进你的 Obsidian
-          vault;或 ② 打包托管,让这个 ref 指过去再显式拉取。框架永不经手你的手册内容。
+          vault;或 ② 打包托管,让这个 ref 指过去再显式拉取。准确边界:**模板文件不携带
+          手册内容、导入器也不复制它**,手册始终在你自己的 vault 里;运行时 agent 会按需经
+          MCP 读取其中的片段交给模型(按需读哪段是 agent 工具循环当场决定的;你决定的是 vault
+          里放什么、以及给不给它只读接入),不是「运行时永不经手」。
 
   # ── 只读连接器槽位 —— 全部可选;不挂进诚实模式 ────────────────────────────────
   # 「抽象需求」槽位:只声明「需要一个叫 X 的 MCP server」,不点名厂商、不预挂到 agent。
-  # 装的人用**只读**凭证把自己的源接进来。有状态经营数据(库存数 / 工时)全走 MCP、
-  # 框架不存 —— 搬走 .gotong/ 不会带走你的库存和考勤。
+  # 装的人用**只读**凭证把自己的源接进来。有状态经营数据(库存数 / 工时)的**主副本**
+  # 走 MCP、框架不当主数据源存 —— 但 Gotong 走 file-first, 仍会把每次工作流运行的输入 /
+  # 产出 / 审批快照落 .gotong/ 当审计留痕(主副本不在这里,搬走 .gotong/ 带走的是运行留痕)。
   requires:
     connectors:
       - id: inventory

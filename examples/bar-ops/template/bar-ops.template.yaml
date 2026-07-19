@@ -1,0 +1,678 @@
+# 酒吧运营 (bar / pub) — 可载入模板 (gotong.template/v1)
+#
+# 门店运营 track(STORE)的第二个样板 —— 奶茶店样板见 examples/cafe-ops,酒吧在这里。
+# 同一套内核机制(surface.me 自助 + human: 审批 + requires.connectors 只读槽位 +
+# schedules 定时 + acceptance 验收),换成酒吧真实要管的事。
+#
+# 酒吧跟奶茶店最大的不同 = **年龄核查 / 酒牌是法律高压线**:一次卖酒给未成年,
+# 罚的是酒牌(命根子)。所以这个样板的招牌流不是「加班费」,而是**年龄核查事件上报**
+# (bar-age-incident:调酒师/安保拒绝售酒给疑似未成年 → 值班经理复核 → 记一条正式拒售条目)。
+#
+#   1. 新员工岗位上手 (surface.me 成员自助, 无审批;岗位 = 调酒师 / 侍酒 / 安保 / 收银)
+#   2. 排班提报 + 领班确认 (human: HITL)
+#   3. 临时工深夜薪结算 + 老板审批 (human: HITL, "LLM 建议金额, 人定钱";深夜 / 周末倍率)
+#   4. 年龄核查事件上报 + 值班经理复核 (human: HITL —— 酒吧招牌合规流)
+#   5. 酒水盘点与预警 (无人值守, 进 acceptance)
+#   6. 酒牌 / 年龄 / 营业时间合规自查 (无人值守, 进 acceptance + 每周定时)
+#
+# ── 红线之一:工资的钱不由 LLM 拍板 ───────────────────────────────────────────
+#   跟 cafe-ops 同一条红线,诚实说清可载入模板里到底发生了什么:
+#   - 在**这个可载入模板**里,临时工深夜薪(3)的金额是 LLM(DeepSeek)按你店深夜 / 周末
+#     倍率政策算出的**建议数字** —— 是建议,不是权威算薪。模板一律标「以你的正式工资
+#     系统为准」,并把**每一笔都门控在人审批后**(record 步 when 门控:不批就不出结算单)。
+#   - 想要**更接近确定性的算薪**:给 bar-ops-assistant 挂一个算薪 MCP 让它**借工具算**能更准,
+#     但最终仍由 LLM 决定是否调用并产出文本 —— 那是「LLM 借工具给的建议」,不是 compute 绕开了
+#     LLM。要让确定性代码真正服务 compute,得加一个由确定性 participant 服务的算薪 capability
+#     (本模板没内置,也没有 payroll 槽位)。demo 的 examples/bar-ops/src/standins.ts 里
+#     lateNightWage = Math.round(h*baseHourly*multiplier*100)/100 是 TypeScript 的确定性算法,
+#     证明这条路能走通,但只在 demo 跑、不在本模板运行。
+#   - 结构性保证(模板真的做得到的):人审批定钱、**不自动发钱、不写回工资库、不做劳动法
+#     裁定**。模板不带任何支付 / 写工资库连接器。详见 docs/zh/STOREFRONT-OPS.md §三。
+#
+# ── 红线之二:年龄核查事件是「记录 + 复核」,不是「执法」也不是「验真年龄」──────────
+#   bar-age-incident 记的是一条**拒绝售酒记录**(员工按年龄核查流程实施了拒售,面对疑似
+#   未成年的顾客),值班经理复核后由 record 步写成一条**正式拒售条目**。要分清两层:
+#   **这次工作流的运行记录**(输入 / 各步产出 / 审批结果 落 .gotong,file-first)**每次运行都
+#   留**——拒绝的运行也留(record 步记为 skipped);record 步的 when 门控决定的只是**要不要
+#   在这次运行里写一条正式拒售条目**。模板**不带**对外合规系统的写连接器,要真写进某个合规库
+#   得自己接。它**不是**:① 上报工商 / 警方(记录 ≠ 举报;要不要上报是人另做的决定);② 核实
+#   顾客真实年龄(没有身份证数据库,拒不拒酒是现场人判断的,模板只记录);③ 裁定员工对错
+#   (员工已实施拒售,是否合规由经理据经过判断)。record 步 when 门控在复核上 —— 经理判定
+#   「这不算正式事件」(如误报)就不写正式条目(运行本身仍留审计痕迹),不硬塞。
+#
+# ── human: 审批步是「路由」,不是「角色门」────────────────────────────────────
+#   每条 human: 流的 manager_id / approver_id / reviewer_id 是**发起人在表单里手填的一个
+#   userId**,审批卡就路由到那个人的收件箱。框架**不校验**这个 userId 是不是领班 / 老板 /
+#   值班经理、是不是发起人自己(broker 只认「一个非空 assignee」)。要真正锁死「必须领班批、
+#   不能自批」需要权威角色校验 —— 纯模板做不到,靠发起人填对 + 部署纪律。填错 userId 则任务
+#   没人收、会一直挂着。
+#
+# 装走的是「能干活的骨架」:
+#   - 3 个托管 LLM agent (岗位培训师 / 运营助手 / 合规助手),覆盖六条流派发的全部
+#     capability;工作流里的 human: 步骤派到 gotong.human/v1 —— host 自带收件箱 broker。
+#   - 1 个可寻址知识库槽位 (酒吧运营手册 / mcp-obsidian):岗位 SOP、年龄核查与酒牌规范、
+#     深夜薪政策、排班规则、合规清单都从这里读。
+#   - 2 个**可选**只读连接器槽位 (inventory 酒水库存 / timesheet 考勤):有状态经营数据
+#     走 MCP、框架不存主副本;不挂进诚实模式照样跑。
+#   - 2 条 golden-run 验收 (盘点 / 合规自查) + 1 条定时建议 (合规每周一)。
+#   - 一次性 DeepSeek apiKeyPrompt。
+#
+# 知识**内容**不在这个文件里 (Stream B 决策 #4):模板只带「MCP 接线 + presetData
+# 指针」。运营手册由你自己的 Obsidian vault 提供 (example 的可跑 demo 用确定性 stand-in
+# 替代真 LLM + 真 KB)。
+#
+# 导入:admin UI →「Agents / 工作流」→ 导入,或
+#   curl -X POST -H "Authorization: Bearer <admin-token>" \
+#     -H 'content-type: application/json' \
+#     -d "$(jq -Rs '{template: .}' examples/bar-ops/template/bar-ops.template.yaml)" \
+#     http://127.0.0.1:8745/api/admin/templates/import
+schema: gotong.template/v1
+template:
+  name: 酒吧运营(bar / pub)
+  description: |-
+    一家酒吧真实要管的事一次装齐:新员工自助学本岗位(调酒 / 侍酒 / 安保 / 收银)操作与
+    规范,排班 / 临时工深夜薪走「成员提报 → 领班(或老板)审批」的正式流程,年龄核查事件
+    (拒绝售酒给疑似未成年)一键上报 + 值班经理复核后记一条正式拒售条目,酒水盘点预警与酒牌 / 年龄 / 营业
+    时间合规自查一键出清单。模板带 3 个托管 agent(岗位培训师 / 运营助手 / 合规助手)、
+    6 条声明式工作流、一个酒吧运营手册 KB 槽位 + 2 个可选只读连接器槽位(酒水库存 / 考勤),
+    以及一次性 DeepSeek key 提示。工资一律「LLM 建议、人定钱」,年龄事件只记录不执法,模板不
+    发钱、不写工资库、不上报官方(见 docs/zh/STOREFRONT-OPS.md)。导入即用,把你自己的运营
+    手册与数据源接进来就能落地。
+
+  version: 1
+
+  # ── 3 个 agent:岗位培训师 + 运营助手 + 合规助手 ──────────────────────────────
+  # 三个都挂同一个酒吧运营手册(mcp-obsidian)。host spawn 时各自拉起 mcp-obsidian
+  # 子进程,把工具(obsidian__search / obsidian__get_file_contents)暴露给该 agent 的
+  # tool-use 循环(server 名 = `obsidian` → 工具命名 obsidian__*,同 examples/obsidian-kb)。
+  agents:
+    # 岗位培训师:新员工选岗位 → 从运营手册调出该岗位 SOP + 规范, 边问边答。
+    - id: bar-onboarding-trainer
+      displayName: 岗位培训师
+      capabilities: [bar.train-position]
+      kind: llm
+      provider: openai-compatible
+      baseURL: https://api.deepseek.com/v1
+      providerLabel: DeepSeek
+      model: deepseek-chat
+      system: |
+        你是酒吧的岗位培训师,带新员工上手。语气专业、清楚、有耐心,只讲跟岗位相关的事。
+
+        每次接到新人的岗位上手请求:
+        1. 读手册:用 obsidian__search / obsidian__get_file_contents 从酒吧运营手册里调出
+           该岗位(调酒师 / 侍酒 / 安保 / 收银)的标准操作流程(SOP)与必学规范。
+        2. 带教:按「开档 → 营业中 → 收档」的顺序把操作讲一遍,重点标出容易出错和涉及
+           **年龄核查 / 拒绝售酒给未成年 / 酒牌合规 / 醉酒客处置 / 现金**的红线规范 —— 酒吧里
+           年龄核查是法律高压线,任何岗位见到疑似未成年都要会查证、会拒、会上报。
+        3. 答疑:如果新人带了问题,结合该岗位规范作答;手册没写的,如实说「问领班」,不编。
+        只教这个岗位该会的,不越界给别岗位指令。
+      mcpServers:
+        - name: obsidian
+          command: uvx
+          args: [mcp-obsidian]
+          env:
+            OBSIDIAN_API_KEY: ${OBSIDIAN_API_KEY}
+            OBSIDIAN_HOST: ${OBSIDIAN_HOST}
+            OBSIDIAN_PORT: ${OBSIDIAN_PORT}
+
+    # 运营助手:排班草案 + 临时工深夜薪核算(建议金额, 人定钱)。
+    - id: bar-ops-assistant
+      displayName: 运营助手
+      capabilities: [bar.shift-draft, bar.late-night-wage]
+      kind: llm
+      provider: openai-compatible
+      baseURL: https://api.deepseek.com/v1
+      providerLabel: DeepSeek
+      model: deepseek-chat
+      system: |
+        你是酒吧的运营助手,处理排班与临时工薪核算。语气简洁、就事论事、全程中文。
+
+        排班 (capability bar.shift-draft):
+        - 把成员提报的可排时段整理成一份排班草案(按档口 / 时段归并、标出冲突 / 空缺,
+          尤其标清深夜档与周末档的人手),供领班确认。
+        - 你只出草案,不直接发布;发布与否由领班在确认步骤里定。
+
+        临时工深夜薪结算 (capability bar.late-night-wage) —— 按 payload 的 step 区分两种活:
+        - 【step = compute 算建议】按提报的各班次工时与时薪(从店政策读,或用提报的时薪)算出
+          **建议金额**,**写清算式**(时薪 × 各班次工时 × 班次倍率;酒吧常见:日班 1×、深夜班
+          1.5×、周末 2×、法定节假日 3×,**以手册里你店实际政策为准**)。如果工具列表里有算薪
+          工具,优先用它(更精确、可审计);没有就自己按政策算 —— 那是 LLM 按政策算的建议数字,
+          不是权威工资单。看到可能的异常(工时偏高、时薪偏低、连上深夜班超时)就**提示需人工
+          核对当地劳动法规**,别自己下「违法 / 合法」的结论,也不擅自改数。
+        - 【step = record 建结算单】老板已批准(能走到这步就是批了)。把 payload 的 approved_math
+          (已批准的核算)原样整理成一句话结算单记录(「X 本期工时结算 ¥N,已审批」),数字照抄别改
+          —— 但这只是**给你的指令**,不是结构保证。真正被批的那笔以审批步为准,工作流输出里也会用
+          ref 原样带上这笔建议金额(suggested_math 字段)。这是记录,不是发钱动作。
+        - 你只给「建议金额」,钱由老板在审批步定。算完必须标明「以正式工资系统为准,这不是最终
+          工资单」;绝不假装已发钱 / 已入账。钱的事:LLM 建议、人定钱。
+      mcpServers:
+        - name: obsidian
+          command: uvx
+          args: [mcp-obsidian]
+          env:
+            OBSIDIAN_API_KEY: ${OBSIDIAN_API_KEY}
+            OBSIDIAN_HOST: ${OBSIDIAN_HOST}
+            OBSIDIAN_PORT: ${OBSIDIAN_PORT}
+
+    # 合规助手:酒水盘点预警、酒牌 / 年龄 / 营业时间合规自查、年龄核查事件复核。
+    - id: bar-compliance-aide
+      displayName: 合规助手
+      capabilities: [bar.liquor-inventory, bar.license-check, bar.age-incident-review]
+      kind: llm
+      provider: openai-compatible
+      baseURL: https://api.deepseek.com/v1
+      providerLabel: DeepSeek
+      model: deepseek-chat
+      system: |
+        你是酒吧的合规助手,处理酒水盘点预警、合规自查、年龄核查事件复核。语气简洁、就事
+        论事、全程中文。
+
+        酒水盘点与预警 (capability bar.liquor-inventory):
+        - 按要盘的类别(烈酒 / 葡萄酒 / 啤酒 / 软饮与配料 / 易耗品)出一张盘点清单,逐项列出该盘
+          什么、单位、怎么点。
+        - 如果你的工具列表里有库存数据库(inventory)类 MCP 工具,先读真实库存,对照安全库存线
+          **标出低于安全线、需要补货的项**(预警);没有工具就出通用盘点清单,并如实说明未接库存源。
+        - 你只出清单和预警,不改库存数、不自动下补货单。
+
+        合规自查 (capability bar.license-check):
+        - 按酒吧运营手册的合规规范,出一份自查清单,覆盖:**酒牌 / 售酒许可(是否在有效期、
+          悬挂展示)、年龄核查(查证 SOP、拒售记录、可疑证件处置)、营业时间(是否超时经营、
+          深夜噪音)**、食品与卫生、消防与安保、现金与会员信息。逐项给「查什么 + 合格标准」。
+        - 你出的是**对照清单和提醒**,不做合规裁定 —— 是否合格由负责人现场逐项确认,涉及法律
+          的以主管部门 / 酒牌条件为准。手册没覆盖的,提示「问老板 / 查最新法规」,不编。
+
+        年龄核查事件复核 (capability bar.age-incident-review) —— 按 payload 的 step 区分两种活:
+        - 【step = review 整理事件】把员工上报的拒售事件(时间 / 岗位 / 顾客情况 / 出示了什么
+          证件 / 采取了什么处置)整理成一张清晰的事件复核单给值班经理,**按上报文本**标出提及了
+          哪些手册要求的合规动作(查证、拒售、必要时报安保)—— 只是「文本里提到了」不代表「已核实」,
+          供经理据经过核实。你**不裁定**顾客到底几岁、也不裁定员工对错(员工已经拒了),只把事实
+          整理清楚供经理复核。
+        - 【step = record 写正式拒售条目】经理已复核确认(能走到这步就是确认了)。把这条**拒绝
+          售酒记录**整理成一句话正式条目(「时间 / 岗位 / 疑似未成年拒售,已复核」),供合规存档。
+          这是**内部记录**,不是上报工商 / 警方,也不核实真实年龄 —— 要不要上报是人另做的决定。
+        - 诚实规矩:没接库存源就别编具体库存数字;没有真实证照到期日就写「核对实际到期日」,不
+          虚构日期;年龄事件里顾客的样貌 / 证件细节按上报原样整理,不添油加醋。绝不因为「没接数据
+          源」就说「我无法访问」然后罢工 —— 诚实模式下照样把清单 / 复核单出完整。
+      mcpServers:
+        - name: obsidian
+          command: uvx
+          args: [mcp-obsidian]
+          env:
+            OBSIDIAN_API_KEY: ${OBSIDIAN_API_KEY}
+            OBSIDIAN_HOST: ${OBSIDIAN_HOST}
+            OBSIDIAN_PORT: ${OBSIDIAN_PORT}
+
+  # ── 6 条声明式工作流 ───────────────────────────────────────────────────────────
+  # 每条都是一个 gotong.workflow/v1 的内层 block;导入时 parseTemplate 逐条重新序列化成
+  # 完整 workflow yaml 交给 workflow runtime 校验 + 注册。surface.me 让成员在 /me 自助
+  # 发起(角色门 + 用户作用域由 /me 层强制);human: 步派到 gotong.human/v1 → host 收件箱
+  # broker 挂起任务,批了才恢复(Phase 14 + 16)。
+  workflows:
+    # (1) 新员工岗位上手 — 成员自助, 无审批。
+    - id: bar-staff-onboarding
+      name: 新员工岗位上手
+      description: 新人选岗位, 培训师按酒吧运营手册带他过一遍该岗位的操作与规范。
+      governance:
+        data_sensitivity: internal
+        required_credentials: [deepseek]
+        external_systems:
+          - obsidian (酒吧运营手册)
+          - "deepseek (LLM: 新人的问题与调出的手册片段会发给它生成带教内容)"
+        notes: 新人自助学习, 无审批, 不涉个人敏感数据; 内容来自酒吧运营手册 KB, 问答经 DeepSeek 生成。
+      trigger:
+        capability: bar.onboard-staff
+        payload_schema:
+          - id: position
+            label: 你的岗位
+            type: select
+            required: true
+            options:
+              - { value: bartender, label: 调酒师 (吧台) }
+              - { value: server, label: 侍酒 / 服务 (前场) }
+              - { value: security, label: 安保 / 门口 }
+              - { value: cashier, label: 收银 }
+          - id: question
+            label: 想先弄清的问题 (可选)
+            type: textarea
+            rows: 3
+      surface:
+        me:
+          enabled: true
+          label: 我的岗位上手
+          description: 选你的岗位, 培训师带你过一遍该岗位的操作与规范。
+          allowed_roles: [owner, admin, member]
+          user_scope_field: trainee_id
+      steps:
+        - id: train
+          description: 培训师按岗位调出 SOP + 规范, 回答新人问题。
+          dispatch:
+            strategy: { kind: capability, capabilities: [bar.train-position] }
+            # dispatch title 不做 $ref 插值(只有 payload 会 resolveRefs),所以用静态标题;
+            # 具体岗位在 payload.position 里传给培训师。
+            title: 新员工岗位上手带教
+            payload:
+              position: $trigger.payload.position
+              question: $trigger.payload.question
+      output:
+        position: $trigger.payload.position
+        walkthrough: $train.output
+
+    # (2) 排班 — 提报可排时段 + 领班确认 (HITL)。
+    - id: bar-shift-availability
+      name: 排班 — 提报可排时段 + 领班确认
+      description: 员工提报本周可排时段, 助手整理成排班建议, 领班统一确认。
+      governance:
+        data_sensitivity: internal
+        required_credentials: [deepseek]
+        required_human_roles: [领班 (shift lead)]
+        external_systems:
+          - obsidian (酒吧运营手册)
+          - "deepseek (LLM: 提报的可排时段会发给它整理成排班建议)"
+        notes: 员工自助提报, 领班统一确认; 不涉敏感个人数据; 时段经 DeepSeek 整理成建议。
+      trigger:
+        capability: bar.submit-availability
+        payload_schema:
+          - id: week
+            label: 排班周次
+            type: text
+            required: true
+          - id: availability
+            label: 可排时段 (每行一段, 如 "周五 20:00-次日02:00")
+            type: textarea
+            rows: 5
+            required: true
+          - id: manager_id
+            label: 确认领班 (userId)
+            type: text
+            required: true
+      surface:
+        me:
+          enabled: true
+          label: 我要提报排班
+          description: 提报你本周可排的时段, 领班统一确认。
+          allowed_roles: [owner, admin, member]
+          user_scope_field: staff_id
+      steps:
+        - id: draft
+          description: 助手把可排时段整理成排班建议。
+          dispatch:
+            strategy: { kind: capability, capabilities: [bar.shift-draft] }
+            title: 排班建议
+            payload:
+              week: $trigger.payload.week
+              availability: $trigger.payload.availability
+        - id: manager-confirm
+          description: 领班确认排班建议是否可发布。
+          human:
+            assignee: $trigger.payload.manager_id
+            kind: approval
+            title: 排班确认
+            # 审批卡内联助手整理好的排班草案(human 步的 prompt 会做 $ref 插值),
+            # 领班不用翻上一步就能看到要确认什么。staff_id 是 /me 盖进的提报人 userId
+            # (一串 id 不是名字),领班得知道这是谁报的。
+            prompt: |
+              提报人(userId)：$trigger.payload.staff_id
+              第 $trigger.payload.week 周排班建议如下，请确认是否可发布：
+
+              $draft.output.text
+      output:
+        week: $trigger.payload.week
+        draft: $draft.output
+        confirm: $manager-confirm.output
+
+    # (3) 临时工深夜薪结算 + 老板审批 (HITL) — "LLM 建议金额, 人定钱"。
+    #     深夜 / 周末倍率是酒吧薪资的特点;红线同 cafe-ops 的临时工薪流。
+    - id: bar-late-night-wage
+      name: 临时工深夜薪结算 + 老板审批
+      description: 录临时工本期各班次工时, 助手按深夜 / 周末倍率算建议金额, 老板审批后建结算单。
+      governance:
+        data_sensitivity: confidential
+        required_credentials: [deepseek]
+        required_human_roles: [老板 / 店东 (owner)]
+        external_systems:
+          - obsidian (酒吧运营手册 / 深夜薪政策 —— 助手读倍率政策算建议)
+          - "deepseek (LLM: 工时 / 时薪 / 姓名会发给它算建议金额)"
+        notes: |-
+          涉及薪酬 + 临时工姓名。助手给的金额仅供参考(是 LLM 按政策算的建议, 不是确定性算薪),
+          最终金额须老板 approve 才算数, record 步 when 门控在审批上(不批就不出结算单)。工时 /
+          时薪 / 姓名会发给 DeepSeek 生成建议 —— 敏感, 故标 confidential。
+      trigger:
+        capability: bar.settle-late-wage
+        payload_schema:
+          - id: worker_name
+            label: 临时工姓名 / 工号
+            type: text
+            required: true
+          - id: period
+            label: 结算周期 (如 "2026-06 第 1 周")
+            type: text
+            required: true
+          - id: shifts
+            label: 各班次工时 (每行一段, 如 "周五深夜 6h / 周六 5h")
+            type: textarea
+            rows: 4
+            required: true
+          - id: hourly_rate
+            label: 基础时薪 (¥/小时, 留空则助手按店政策取)
+            type: number
+          - id: approver_id
+            label: 审批老板 (userId)
+            type: text
+            required: true
+      surface:
+        me:
+          enabled: true
+          label: 结算临时工深夜薪
+          description: 录临时工本期各班次工时, 助手算建议金额, 老板审批。
+          # 算别人工资是管理动作, 只对 owner/admin 开; 临时工薪不定时, member 门不影响定时 sweeper。
+          allowed_roles: [owner, admin]
+          user_scope_field: settled_by
+      steps:
+        - id: compute
+          description: 助手按各班次工时与时薪(按政策深夜 / 周末倍率)算建议金额, 列算式, 标异常 (仅供参考)。
+          dispatch:
+            strategy: { kind: capability, capabilities: [bar.late-night-wage] }
+            title: 临时工深夜薪核算
+            payload:
+              step: compute
+              worker_name: $trigger.payload.worker_name
+              period: $trigger.payload.period
+              shifts: $trigger.payload.shifts
+              hourly_rate: $trigger.payload.hourly_rate
+        - id: approve
+          description: 老板复核建议金额, 决定是否批准结算。
+          human:
+            assignee: $trigger.payload.approver_id
+            kind: approval
+            title: 临时工深夜薪审批
+            prompt: |-
+              申请人(userId)：$trigger.payload.settled_by
+              「$trigger.payload.worker_name」$trigger.payload.period 的深夜工时结算, 批准吗?
+              金额以正式工资系统为准。
+
+              —— 建议核算 ——
+              $compute.output.text
+        # record 用 `when` 门控在审批上 —— human approval 被拒时返回正常 {approved:false} ok
+        # 输出、**不中断 run**(见 packages/inbox/src/types.ts)。不加这道门, 拒绝时照样出结算单
+        # =「不批就不出」是假话。先例: cafe-ops 的 cafe-casual-wage record。
+        - id: record
+          description: 批准后建档结算单 (拒绝则跳过, 不出结算单、不发钱、不写工资库)。
+          when: "$approve.output.approved == true"
+          dispatch:
+            strategy: { kind: capability, capabilities: [bar.late-night-wage] }
+            title: 结算单建档
+            payload:
+              step: record
+              worker_name: $trigger.payload.worker_name
+              period: $trigger.payload.period
+              approved_math: $compute.output.text
+      output:
+        worker_name: $trigger.payload.worker_name
+        period: $trigger.payload.period
+        suggestion: $compute.output
+        approval: $approve.output
+        # 助手算的建议金额, 用 ref 原样带出(确定性, 不经 record 的 LLM 重写)。这是「建议」不是
+        # 「已批准」—— 是否被批准看上面的 approval.approved;拒绝时本字段仍是这份建议(输出块会
+        # 无条件 resolveRefs), 别当成已批准金额。record.text 是助手整理的人读文案, 可能措辞不同。
+        suggested_math: $compute.output.text
+        record: $record.output
+
+    # (4) 年龄核查事件上报 + 值班经理复核 (HITL) — 酒吧招牌合规流。
+    #     记的是「拒绝售酒记录」(员工按流程实施了拒售), 经理复核后写成正式拒售条目。record 同样 when 门控。
+    - id: bar-age-incident
+      name: 年龄核查事件上报 + 值班经理复核
+      description: 员工上报拒绝售酒给疑似未成年的事件, 助手整理成复核单, 值班经理复核后写一条正式拒售条目。
+      governance:
+        data_sensitivity: confidential
+        required_credentials: [deepseek]
+        required_human_roles: [值班经理 (duty manager)]
+        external_systems:
+          - obsidian (酒吧运营手册 / 年龄核查规范)
+          - "deepseek (LLM: 事件里顾客样貌 / 证件 / 处置描述会发给它整理复核单)"
+        notes: |-
+          年龄核查事件含顾客样貌 / 证件等描述, 敏感故标 confidential(会发给 DeepSeek 整理)。
+          记录的是拒售事件(员工按流程实施了拒售), record 步 when 门控在经理复核上 —— 经理判定
+          非正式事件(如误报)就不写正式拒售条目(运行本身仍留审计痕迹)。这是内部合规记录, **不是**
+          上报工商 / 警方, 也不核实顾客真实年龄。
+      trigger:
+        capability: bar.report-age-incident
+        payload_schema:
+          - id: occurred_at
+            label: 事件时间 (如 "2026-06-06 23:40")
+            type: text
+            required: true
+          - id: station
+            label: 发生岗位
+            type: select
+            required: true
+            options:
+              - { value: bartender, label: 调酒师 (吧台) }
+              - { value: server, label: 侍酒 / 服务 }
+              - { value: security, label: 安保 / 门口 }
+              - { value: cashier, label: 收银 }
+          - id: detail
+            label: 经过 (顾客情况 / 出示了什么证件 / 你怎么处置的)
+            type: textarea
+            rows: 5
+            required: true
+          - id: reviewer_id
+            label: 复核值班经理 (userId)
+            type: text
+            required: true
+      surface:
+        me:
+          enabled: true
+          label: 上报年龄核查事件
+          description: 上报你拒绝售酒给疑似未成年的事件, 值班经理复核后记一条正式拒售条目。
+          allowed_roles: [owner, admin, member]
+          user_scope_field: reporter_id
+      steps:
+        - id: review
+          description: 助手把上报事件整理成复核单, 按上报文本标出提及了哪些合规动作 (待经理核实, 不裁定年龄 / 对错)。
+          dispatch:
+            strategy: { kind: capability, capabilities: [bar.age-incident-review] }
+            title: 年龄核查事件复核单
+            payload:
+              step: review
+              occurred_at: $trigger.payload.occurred_at
+              station: $trigger.payload.station
+              detail: $trigger.payload.detail
+        - id: approve
+          description: 值班经理复核事件, 决定是否写成一条正式拒售条目。
+          human:
+            assignee: $trigger.payload.reviewer_id
+            kind: approval
+            title: 年龄核查事件复核
+            prompt: |-
+              上报人(userId)：$trigger.payload.reporter_id
+              $trigger.payload.occurred_at 的年龄核查(拒售)事件, 确认写成一条正式拒售记录条目吗?
+              (确认 = 写一条正式拒售条目;不确认 = 判定非正式事件, 不写正式条目 —— 这次运行仍留审计痕迹。)
+
+              —— 事件复核单 ——
+              $review.output.text
+        # 同 wage 流: record when 门控在复核上, 经理不确认则不写正式条目(拒绝返回 {approved:false}
+        # 是正常 ok 输出、不中断 run, 见 packages/inbox/src/types.ts;这次运行本身仍作为审计留痕落盘)。
+        - id: record
+          description: 复核确认后写一条正式拒售条目 (不确认则跳过, 不写正式条目、不上报官方)。
+          when: "$approve.output.approved == true"
+          dispatch:
+            strategy: { kind: capability, capabilities: [bar.age-incident-review] }
+            title: 拒售记录建档
+            payload:
+              step: record
+              occurred_at: $trigger.payload.occurred_at
+              station: $trigger.payload.station
+              reviewed_summary: $review.output.text
+      output:
+        occurred_at: $trigger.payload.occurred_at
+        station: $trigger.payload.station
+        review: $review.output
+        approval: $approve.output
+        record: $record.output
+
+    # (5) 酒水盘点与预警 — 无人值守 (进 acceptance)。助手出盘点清单 + 对照安全线标低库存。
+    - id: bar-liquor-inventory
+      name: 酒水盘点与预警
+      description: 助手按类别出酒水盘点清单, 接了库存源则对照安全线标出需补货的低库存项。
+      governance:
+        data_sensitivity: internal
+        required_credentials: [deepseek]
+        external_systems:
+          - obsidian (酒吧运营手册 / 安全库存线 —— 助手读安全线对照标预警)
+          - "inventory (酒水库存数据库, 只读)"
+          - "deepseek (LLM: 盘点类别与[若接入]读到的库存数会发给它生成清单 / 预警)"
+        notes: 无人值守生成盘点清单; 接了 inventory 读真实库存标预警, 没接进诚实模式出通用清单 (不编库存数); 安全库存线来自运营手册 (obsidian), 清单经 DeepSeek 生成。
+      trigger:
+        capability: bar.count-liquor
+        payload_schema:
+          - id: category
+            label: 盘点类别
+            type: select
+            required: true
+            options:
+              - { value: spirits, label: 烈酒 (威士忌 / 金酒 / 龙舌兰等) }
+              - { value: wine_beer, label: 葡萄酒 / 啤酒 }
+              - { value: mixers, label: 软饮 / 配料 / 易耗品 }
+              - { value: all, label: 全店 }
+          - id: focus
+            label: 特别关注 (可选, 如 "临期精酿" 或 "周末备货")
+            type: text
+      surface:
+        me:
+          enabled: true
+          label: 盘点与酒水预警
+          description: 选类别, 助手出盘点清单并标出需补货的低库存项。
+          allowed_roles: [owner, admin, member]
+          user_scope_field: counted_by
+      steps:
+        - id: review
+          description: 助手出盘点清单 + 对照安全线标低库存预警。
+          dispatch:
+            strategy: { kind: capability, capabilities: [bar.liquor-inventory] }
+            title: 酒水盘点清单
+            payload:
+              category: $trigger.payload.category
+              focus: $trigger.payload.focus
+      output:
+        category: $trigger.payload.category
+        review: $review.output
+
+    # (6) 合规自查清单 — 无人值守 (进 acceptance + schedules 定时)。助手按 SOP 出自查清单。
+    - id: bar-compliance-check
+      name: 合规自查清单
+      description: 助手按酒吧合规规范出一份自查清单 (酒牌 / 年龄核查 / 营业时间 / 卫生 / 安保), 负责人照着查。
+      governance:
+        data_sensitivity: internal
+        required_credentials: [deepseek]
+        external_systems:
+          - obsidian (酒吧运营手册 / 合规规范)
+          - "deepseek (LLM: 自查范围与合规规范会发给它生成对照清单)"
+        notes: |-
+          无人值守生成对照清单, 不做合规裁定 (责任在人); 清单经 DeepSeek 生成。这条流被下面 schedules
+          定时自动跑, 而定时 sweeper 以最低权限 member 判可运行性, 故 allowed_roles 必须含 member,
+          否则定时永不触发。
+      trigger:
+        capability: bar.compliance-check
+        payload_schema:
+          - id: scope
+            label: 自查范围 (可选)
+            type: select
+            options:
+              - { value: preopen, label: 每日开档前 }
+              - { value: weekly, label: 每周 }
+              - { value: monthly, label: 月度 (含酒牌 / 证照到期核对) }
+      surface:
+        me:
+          enabled: true
+          label: 出合规自查清单
+          description: 助手按酒吧规范出一份合规自查清单, 照着逐项查。
+          allowed_roles: [owner, admin, member]
+          user_scope_field: requested_by
+      steps:
+        - id: checklist
+          description: 助手按合规规范出自查清单。
+          dispatch:
+            strategy: { kind: capability, capabilities: [bar.license-check] }
+            title: 合规自查清单
+            payload:
+              scope: $trigger.payload.scope
+      output:
+        scope: $trigger.payload.scope
+        checklist: $checklist.output
+
+  # ── 1 个可寻址知识库槽位:MCP 接线 + 预置数据「指针」(不是内容!)──────────────
+  # 槽位 name(`bar_ops_manual`)是 KB 的可寻址身份;背后的 mcpServer name(`obsidian`)是
+  # 传输。导入时只「上报」不「自动接线」(决策 #4)—— 由你把自己的酒吧运营手册接到这个槽位。
+  knowledgeBases:
+    - name: bar_ops_manual
+      description: 酒吧运营手册(岗位 SOP / 年龄核查与酒牌规范 / 深夜薪政策 / 排班规则,via mcp-obsidian)
+      mcpServer:
+        name: obsidian
+        command: uvx
+        args: [mcp-obsidian]
+        env:
+          OBSIDIAN_API_KEY: ${OBSIDIAN_API_KEY}
+          OBSIDIAN_HOST: ${OBSIDIAN_HOST}
+          OBSIDIAN_PORT: ${OBSIDIAN_PORT}
+      presetData:
+        kind: url
+        ref: https://example.com/bar-ops-manual-seed.tar.zst
+        description: |-
+          一份酒吧运营手册的种子快照(岗位 SOP / 年龄核查与酒牌规范 / 深夜薪政策 / 排班规则的
+          模板)—— 注意这是「指针」,不是内容。两种用法:① 把种子手册直接拷进你的 Obsidian
+          vault;或 ② 打包托管,让这个 ref 指过去再显式拉取。准确边界:**模板文件不携带手册
+          内容、导入器也不复制它**,手册始终在你自己的 vault 里;运行时 agent 会按需经 MCP 读取
+          其中的片段交给模型(按需读哪段是 agent 工具循环当场决定的;你决定的是 vault 里放什么、
+          以及给不给它只读接入),不是「运行时永不经手」。
+
+  # ── 只读连接器槽位 —— 全部可选;不挂进诚实模式 ────────────────────────────────
+  # 「抽象需求」槽位:只声明「需要一个叫 X 的 MCP server」,不点名厂商、不预挂到 agent。
+  # 装的人用**只读**凭证把自己的源接进来。有状态经营数据(酒水库存数 / 工时)的**主副本**
+  # 走 MCP、框架不当主数据源存 —— 但 Gotong 走 file-first, 仍会把每次工作流运行的输入 /
+  # 产出 / 审批快照落 .gotong/ 当审计留痕(主副本不在这里)。
+  requires:
+    connectors:
+      - id: inventory
+        kind: mcp
+        optional: true
+        capability: inventory.read
+        hint: 你的酒水库存数据库(烈酒 / 葡萄酒 / 啤酒 / 配料的当前数量与安全库存线)。用**只读**凭证接, server 名用 inventory, 接好后还要在「合规助手」agent 上挂这个 server 它才读得到。酒水盘点流的预警从这里读;不挂则出通用盘点清单、不编库存数。
+      - id: timesheet
+        kind: mcp
+        optional: true
+        capability: timesheet.read
+        hint: 你的考勤 / 工时源(临时工与正式工的打卡 / 深夜班工时)。用**只读**凭证接, server 名用 timesheet, 接好后还要在「运营助手」agent 上挂这个 server。挂上后运营助手能查它核对工时 —— 但深夜薪流目前仍以表单手录的 shifts 为准(想让它主动查考勤替代手录, 得在该 agent 的 system prompt 里加指令);不挂就纯手录。
+
+  # ── 黄金验收 —— 装完面板「跑验收」, 零 LLM 结构断言判卷 ──────────────────────
+  # 只放两条无人值守的流(盘点 / 合规自查);合格线 = 诚实模式(开箱不挂任何连接器也必须绿)。
+  # 带 human: 步的流(排班 / 深夜薪 / 年龄事件)刻意不进 —— 无人值守必然停在审批步,它们的
+  # 验收就是领班 / 老板 / 值班经理照按钮真批一次, 机器替不了。
+  acceptance:
+    - id: smoke-liquor-inventory
+      workflowId: bar-liquor-inventory
+      # 值加引号: flow 映射 { } 里的 ASCII 逗号是字段分隔符, 不加引号会静默截断。
+      trigger: { category: "all", focus: "临期精酿与周末备货" }
+      assert:
+        contains: [盘点, 清单]
+        forbid: [我无法访问, 无法生成]
+      note: 开箱无库存源也必须绿(诚实模式出通用盘点清单);报「我无法访问 / 无法生成」= 不合格。
+    - id: smoke-compliance-check
+      workflowId: bar-compliance-check
+      trigger: { scope: "weekly" }
+      assert:
+        contains: [酒牌, 营业时间]
+        forbid: [我无法访问, 无法生成]
+      note: 开箱按酒吧规范出通用合规自查清单(至少覆盖酒牌与营业时间);报「我无法访问 / 无法生成」= 不合格。
+
+  # ── 定时建议 —— 只带节奏不带人; 装完「定时」卡点「补人启用」选成员 ────────────
+  schedules:
+    - workflowId: bar-compliance-check
+      cadence: { kind: weekly, weekday: 1, hour: 16 }
+      note: 装完在「定时」卡补人启用, 每周一下午 4 点(默认按 UTC+8, 开档前)自动出合规自查清单;不在该时区就在「定时」卡改时间。
+
+  # ── 一键:导入时提示填一次 API key,自动应用到三个 agent ──────────────────────
+  defaults:
+    apiKeyPrompt:
+      provider: openai-compatible
+      baseURL: https://api.deepseek.com/v1
+      label: DeepSeek

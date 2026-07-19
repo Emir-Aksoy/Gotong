@@ -1,0 +1,54 @@
+# 新员工岗位上手 — 成员自助 (surface.me), 无审批。
+# 新人选岗位 → 培训师从酒吧运营手册调出该岗位 SOP + 规范, 边问边学。
+# 这是 "新员工上手就能学到对应岗位的操作、规范" 那条 (岗位 = 调酒 / 侍酒 / 安保 / 收银)。
+schema: gotong.workflow/v1
+workflow:
+  id: bar-staff-onboarding
+  name: 新员工岗位上手
+  description: 新人选岗位, 培训师按酒吧运营手册带他过一遍该岗位的操作与规范。
+  governance:
+    data_sensitivity: internal
+    required_credentials: [deepseek]
+    external_systems:
+      - obsidian (酒吧运营手册)
+      - "deepseek (LLM: 新人的问题与调出的手册片段会发给它生成带教内容)"
+    notes: 新人自助学习, 无审批, 不涉个人敏感数据; 内容来自酒吧运营手册 KB, 问答经 DeepSeek 生成。
+  trigger:
+    capability: bar.onboard-staff
+    payload_schema:
+      - id: position
+        label: 你的岗位
+        type: select
+        required: true
+        options:
+          - { value: bartender, label: 调酒师 (吧台) }
+          - { value: server, label: 侍酒 / 服务 (前场) }
+          - { value: security, label: 安保 / 门口 }
+          - { value: cashier, label: 收银 }
+      - id: question
+        label: 想先弄清的问题 (可选)
+        type: textarea
+        rows: 3
+  # surface.me 让这条工作流出现在成员的 /me 工作台; 角色门 + 用户作用域由
+  # /me 层在 dispatch 时强制 (payload[trainee_id]=本人 userId), 成员只能为自己发起。
+  surface:
+    me:
+      enabled: true
+      label: 我的岗位上手
+      description: 选你的岗位, 培训师带你过一遍该岗位的操作与规范。
+      allowed_roles: [owner, admin, member]
+      user_scope_field: trainee_id
+  steps:
+    - id: train
+      description: 培训师按岗位调出 SOP + 规范, 回答新人问题。
+      dispatch:
+        strategy: { kind: capability, capabilities: [bar.train-position] }
+        # dispatch title 不做 $ref 插值(只有 payload 会 resolveRefs), 用静态标题;
+        # 具体岗位在 payload.position 里传给培训师。同主模板。
+        title: 新员工岗位上手带教
+        payload:
+          position: $trigger.payload.position
+          question: $trigger.payload.question
+  output:
+    position: $trigger.payload.position
+    walkthrough: $train.output

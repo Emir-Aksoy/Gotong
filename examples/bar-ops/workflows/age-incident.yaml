@@ -1,0 +1,99 @@
+# 年龄核查事件上报 + 值班经理复核 (HITL) — 酒吧招牌合规流。
+# 员工上报拒售给疑似未成年的事件 → 助手整理成复核单 → 值班经理 human: 复核 →
+# record 步 when 门控: 确认才写一条正式拒售条目 (不确认则跳过, 不写正式条目、不上报官方)。
+# 记的是 "拒绝售酒记录" (员工按流程实施了拒售), 不裁定员工对错、不执法、不核实真实年龄。
+# 分两层: **每次运行都留运行记录** (输入 / 各步产出 / 审批 落 .gotong, 拒绝的运行 record 步
+# 记 skipped); 经理确认才在其中写一条**正式拒售条目**。模板不带对外合规系统的写连接器。
+schema: gotong.workflow/v1
+workflow:
+  id: bar-age-incident
+  name: 年龄核查事件上报 + 值班经理复核
+  description: 员工上报拒绝售酒给疑似未成年的事件, 助手整理成复核单, 值班经理复核后写一条正式拒售条目。
+  governance:
+    data_sensitivity: confidential
+    required_credentials: [deepseek]
+    required_human_roles: [值班经理 (duty manager)]
+    external_systems:
+      - obsidian (酒吧运营手册 / 年龄核查规范)
+      - "deepseek (LLM: 事件里顾客样貌 / 证件 / 处置描述会发给它整理复核单)"
+    notes: |-
+      年龄核查事件含顾客描述, 敏感故标 confidential。记录的是拒售事件 (员工按流程实施了拒售),
+      record 步 when 门控在复核上 —— 经理判定非正式事件 (如误报) 就不写正式拒售条目 (运行本身
+      仍留审计痕迹)。内部合规记录, 不是上报工商 / 警方, 也不核实顾客真实年龄。
+  trigger:
+    capability: bar.report-age-incident
+    payload_schema:
+      - id: occurred_at
+        label: 事件时间 (如 "2026-06-06 23:40")
+        type: text
+        required: true
+      - id: station
+        label: 发生岗位
+        type: select
+        required: true
+        options:
+          - { value: bartender, label: 调酒师 (吧台) }
+          - { value: server, label: 侍酒 / 服务 }
+          - { value: security, label: 安保 / 门口 }
+          - { value: cashier, label: 收银 }
+      - id: detail
+        label: 经过 (顾客情况 / 出示了什么证件 / 你怎么处置的)
+        type: textarea
+        rows: 5
+        required: true
+      - id: reviewer_id
+        label: 复核值班经理 (userId)
+        type: text
+        required: true
+  surface:
+    me:
+      enabled: true
+      label: 上报年龄核查事件
+      description: 上报你拒绝售酒给疑似未成年的事件, 值班经理复核后记一条正式拒售条目。
+      allowed_roles: [owner, admin, member]
+      user_scope_field: reporter_id
+  steps:
+    - id: review
+      description: 助手把上报事件整理成复核单, 按上报文本标出提及了哪些合规动作 (待经理核实, 不裁定年龄 / 对错)。
+      dispatch:
+        strategy: { kind: capability, capabilities: [bar.age-incident-review] }
+        title: 年龄核查事件复核单
+        payload:
+          step: review
+          occurred_at: $trigger.payload.occurred_at
+          station: $trigger.payload.station
+          detail: $trigger.payload.detail
+    # human: 糖 → 派到 gotong.human/v1 → HumanInboxParticipant 挂起任务,
+    # 落成值班经理 /me 收件箱里一条 approval, 经理复核了才恢复后续 (Phase 16)。
+    - id: approve
+      description: 值班经理复核事件, 决定是否写成一条正式拒售条目。
+      human:
+        assignee: $trigger.payload.reviewer_id
+        kind: approval
+        title: 年龄核查事件复核
+        prompt: |-
+          上报人(userId)：$trigger.payload.reporter_id
+          $trigger.payload.occurred_at 的年龄核查(拒售)事件, 确认写成一条正式拒售记录条目吗?
+          (确认 = 写一条正式拒售条目;不确认 = 判定非正式事件, 不写正式条目 —— 这次运行仍留审计痕迹。)
+
+          —— 事件复核单 ——
+          $review.output.text
+    # record 用 when 门控在复核上 —— 经理不确认 (返回 {approved:false}) 则跳过,
+    # 不写正式条目、不上报官方 (这次运行本身仍作为审计留痕落盘)。同 bar-late-night-wage 的 record when 门控。
+    - id: record
+      description: 复核确认后写一条正式拒售条目 (不确认则跳过, 不写正式条目)。
+      when: "$approve.output.approved == true"
+      dispatch:
+        strategy: { kind: capability, capabilities: [bar.age-incident-review] }
+        title: 拒售记录建档
+        payload:
+          step: record
+          occurred_at: $trigger.payload.occurred_at
+          station: $trigger.payload.station
+          reviewed_summary: $review.output.text
+  output:
+    occurred_at: $trigger.payload.occurred_at
+    station: $trigger.payload.station
+    review: $review.output
+    approval: $approve.output
+    record: $record.output

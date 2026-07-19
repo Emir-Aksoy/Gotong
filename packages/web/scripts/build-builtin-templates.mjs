@@ -49,6 +49,7 @@ const CURATED = [
   { id: 'smart-home-hub', file: 'examples/smart-home-hub/template/smart-home-hub.template.yaml' },
   { id: 'family-hub', file: 'examples/family-hub/template/family-hub.template.yaml' },
   { id: 'cafe-ops', file: 'examples/cafe-ops/template/cafe-ops.template.yaml' },
+  { id: 'bar-ops', file: 'examples/bar-ops/template/bar-ops.template.yaml' },
   { id: 'warband-club', file: 'examples/warband-club/template/warband-club.template.yaml' },
   { id: 'tea-supply-link', file: 'examples/tea-supply-link/template/tea-shop.template.yaml' },
   { id: 'tea-chain-hq', file: 'examples/tea-chain-hq/template/chain-hq.template.yaml' },

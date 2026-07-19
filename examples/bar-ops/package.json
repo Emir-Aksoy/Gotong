@@ -1,0 +1,18 @@
+{
+  "name": "@gotong/example-bar-ops",
+  "version": "0.0.0",
+  "type": "module",
+  "private": true,
+  "description": "酒吧运营 (bar / pub) — an ORGANIZATION hub template: declarative workflows (staff onboarding / age-check incident review / late-night casual-worker wage) with surface.me member self-service and human: manager approval (HITL). The bar-flavored sibling of cafe-ops. Deterministic, no API key.",
+  "scripts": {
+    "start": "tsx src/index.ts",
+    "load-template": "tsx src/load-template.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@gotong/core": "workspace:*",
+    "@gotong/workflow": "workspace:*",
+    "@gotong/inbox": "workspace:*",
+    "yaml": "^2.6.0"
+  }
+}

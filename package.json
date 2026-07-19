@@ -58,6 +58,8 @@
     "demo:battle-monk-training:template": "pnpm --filter @gotong/example-battle-monk-training load-template",
     "demo:cafe-ops": "pnpm --filter @gotong/example-cafe-ops start",
     "demo:cafe-ops:template": "pnpm --filter @gotong/example-cafe-ops load-template",
+    "demo:bar-ops": "pnpm --filter @gotong/example-bar-ops start",
+    "demo:bar-ops:template": "pnpm --filter @gotong/example-bar-ops load-template",
     "demo:smart-home-hub": "pnpm --filter @gotong/example-smart-home-hub start",
     "demo:smart-home-hub:template": "pnpm --filter @gotong/example-smart-home-hub load-template",
     "demo:warband-club": "pnpm --filter @gotong/example-warband-club start",
