@@ -4,18 +4,47 @@
 #
 # 前三个上手案例 (编程 / 研究 / 成长) 的编排是 DispatchToolset (Phase 10) 代码级接线,
 # 模板 workflows: [] 留空。组织的价值在**正式流程**,所以这个模板把声明式工作流真正
-# 装进 workflows[] —— 三条覆盖了门店最常见的三件事:
+# 装进 workflows[] —— 七条覆盖一家门店真实要管的事(排班·请假·工资·库存·合规):
 #   1. 新员工岗位上手 (surface.me 成员自助, 无审批)
 #   2. 排班提报 + 店长确认 (human: HITL)
 #   3. 加班申报 + 店长审批 (human: HITL, "LLM 建议金额, 人定钱")
+#   4. 请假申请 + 店长审批 (human: HITL)
+#   5. 临时工工时结算 + 老板审批 (human: HITL, 同 3 —— LLM 给建议, 人定钱)
+#   6. 库存盘点与预警 (无人值守, 进 acceptance)
+#   7. 合规自查清单 (无人值守, 进 acceptance + 每周定时)
+#
+# ── 一条钉死的红线:工资的钱不由 LLM 拍板 ────────────────────────────────────
+#   诚实说清可载入模板里到底发生了什么(别把 demo 的能力当模板的):
+#   - 在**这个可载入模板**里,加班(3)与临时工薪(5)的金额是 LLM(DeepSeek)按你店面
+#     政策算出的**建议数字** —— 它是建议,不是权威算薪。所以模板一律标「以你的正式
+#     工资系统为准」,并把**每一笔都门控在人审批后**(临时工薪的 record 步 when 门控:
+#     不批就不出结算单)。
+#   - 想要**更接近确定性的算薪**,有两条路,但都有诚实边界:① 给 ops-assistant 挂一个算薪
+#     MCP 工具,让它**借工具算**而不是自己估 —— 但最终仍由 LLM 决定是否调用、并产出文本,是
+#     「LLM 借工具给的建议」,不是 compute 绕开了 LLM;要让确定性代码真正服务 compute,得加一个
+#     由确定性 participant 服务的算薪 capability(本模板没内置,也没有 payroll 槽位)。② 看
+#     examples/cafe-ops/src/standins.ts 的 assessOvertime =
+#     Math.round(h*baseHourly*multiplier*100)/100 —— 那是 demo 里 TypeScript 的确定性算法,
+#     证明这条路能走通,但只在 demo 跑、不在本模板运行。
+#   - 结构性保证(模板真的做得到的):人审批定钱、**不自动发钱、不写回工资库、不做劳动法
+#     裁定**。模板不带任何支付/写工资库的连接器。详见 docs/zh/STOREFRONT-OPS.md §三。
+#
+# ── human: 审批步是「路由」,不是「角色门」────────────────────────────────────
+#   每条 human: 流的 manager_id / approver_id 是**发起人在表单里手填的一个 userId**,
+#   审批卡就路由到那个人的收件箱。框架**不校验**这个 userId 是不是店长/老板、是不是
+#   发起人自己(broker 只认「一个非空 assignee」,同 pro-firm-hub / cafe 既有 manager_id)。
+#   要真正锁死「必须店长批、不能自批」需要权威角色校验 —— 纯模板做不到,靠发起人填对 +
+#   部署纪律。填错 userId 则任务没人收、会一直挂着。
 #
 # 装走的是「能干活的骨架」:
-#   - 2 个托管 LLM agent (培训师 + 运营助手),覆盖三条工作流派发的全部 capability
-#     (cafe.train-position / cafe.overtime-policy / cafe.schedule-draft);
-#     工作流里的 human: 步骤派到 gotong.human/v1 —— 那是 host 自带的收件箱 broker,
-#     不是模板 agent。
+#   - 3 个托管 LLM agent (培训师 / 运营助手 / 库存合规助手),覆盖七条流派发的全部
+#     capability;工作流里的 human: 步骤派到 gotong.human/v1 —— 那是 host 自带的收件箱
+#     broker,不是模板 agent。
 #   - 1 个可寻址知识库槽位 (店面运营手册 / mcp-obsidian):岗位 SOP、规范、加班政策、
-#     排班规则都从这里读。
+#     排班规则、合规清单都从这里读。
+#   - 2 个**可选**只读连接器槽位 (inventory 库存源 / timesheet 考勤源):有状态经营
+#     数据走 MCP、框架不存;不挂进诚实模式照样跑。
+#   - 2 条 golden-run 验收 (盘点 / 合规自查) + 1 条定时建议 (合规每周一)。
 #   - 一次性 DeepSeek apiKeyPrompt。
 #
 # 知识**内容**不在这个文件里 (Stream B 决策 #4):模板只带「MCP 接线 + presetData
@@ -31,16 +60,17 @@ schema: gotong.template/v1
 template:
   name: 门店运营(奶茶 / 咖啡店)
   description: |-
-    一个面向连锁 / 单店门店的组织 hub:新员工自助学到本岗位的操作与规范,排班与加班
-    走「成员提报 → 店长审批」的正式流程。模板带 2 个托管 agent(岗位培训师 + 运营
-    助手)、3 条声明式工作流(上手 / 排班 / 加班)、一个指向店面运营手册的 KB 槽位
-    接线,以及一次性 DeepSeek key 提示。覆盖面广、上手快:导入即用,把你自己的运营
-    手册接到 KB 槽位就能落地。
+    一家门店真实要管的事一次装齐:新员工自助学本岗位操作规范,排班 / 请假 / 加班 / 临时工
+    工时结算走「成员提报 → 店长(或老板)审批」的正式流程,库存盘点预警与合规自查一键出
+    清单。模板带 3 个托管 agent(岗位培训师 / 运营助手 / 库存合规助手)、7 条声明式工作流、
+    一个店面运营手册 KB 槽位 + 2 个可选只读连接器槽位(库存 / 考勤),以及一次性 DeepSeek key
+    提示。工资一律「LLM 建议、人定钱」,模板不发钱、不写工资库(见 docs/zh/STOREFRONT-OPS.md)。
+    导入即用,把你自己的运营手册与数据源接进来就能落地。
 
   version: 1
 
-  # ── 2 个 agent:岗位培训师 + 运营助手 ──────────────────────────────────────────
-  # 两个都挂同一个店面运营手册(mcp-obsidian)。host spawn 时各自拉起 mcp-obsidian
+  # ── 3 个 agent:岗位培训师 + 运营助手 + 库存合规助手 ──────────────────────────
+  # 三个都挂同一个店面运营手册(mcp-obsidian)。host spawn 时各自拉起 mcp-obsidian
   # 子进程,把工具(obsidian__search / obsidian__get_file_contents)暴露给该 agent 的
   # tool-use 循环(server 名 = `obsidian` → 工具命名 obsidian__*,同 examples/obsidian-kb)。
   agents:
@@ -72,10 +102,11 @@ template:
             OBSIDIAN_HOST: ${OBSIDIAN_HOST}
             OBSIDIAN_PORT: ${OBSIDIAN_PORT}
 
-    # 运营助手:加班按政策算「建议金额」(店长定钱)、排班把可排时段整理成草案(店长确认)。
+    # 运营助手:处理人力事务性核算 —— 加班/临时工薪按政策算「建议金额」(人定钱)、
+    # 排班/请假把成员提报整理成草案(店长确认)。钱的事一律只给建议,人在审批步定。
     - id: ops-assistant
       displayName: 运营助手
-      capabilities: [cafe.overtime-policy, cafe.schedule-draft]
+      capabilities: [cafe.overtime-policy, cafe.schedule-draft, cafe.leave-review, cafe.casual-wage]
       kind: llm
       provider: openai-compatible
       baseURL: https://api.deepseek.com/v1
@@ -86,15 +117,36 @@ template:
 
         加班 (capability cafe.overtime-policy):
         - 从店面运营手册读加班政策(基础时薪、倍率、计薪规则)。**倍率结合加班日别**:
-          工作日 1.5 倍、休息日 / 周末 2 倍、法定节假日 3 倍 —— 按申报的 `day_kind` 选
-          对应倍率,算出**建议金额**并写清算式(时薪 × 倍率 × 时长)。同样的时长在不同
-          日别金额不同,别一律按 1.5 倍。
-        - 你只给「建议」。最终金额必须由店长在审批步骤里 approve 才算数 —— 钱的事 LLM
-          建议、人来定。不要把建议说成已批准。
+          按申报的 `day_kind` 选对应倍率(店面政策示例:工作日 1.5 / 休息日·周末 2 /
+          法定节假日 3 倍,**以手册里你店实际政策为准**),给出**建议金额**并写清算式
+          (时薪 × 倍率 × 时长)。同样的时长在不同日别金额不同,别一律按 1.5 倍。
+        - 如果你的工具列表里有算薪类工具,优先用它算(更精确、可审计);没有就按上面的
+          政策自己算 —— 那样你给的是 LLM 按政策算的**建议数字**,不是权威工资单。
+        - 你只给「建议」。最终金额必须由店长在审批步骤里 approve 才算数,且**以正式工资
+          系统为准** —— 钱的事 LLM 建议、人来定。不要把建议说成已批准、已发放。
 
         排班 (capability cafe.schedule-draft):
         - 把成员提报的可排时段整理成一份排班草案(按班次归并、标出冲突/空缺),供店长确认。
         - 你只出草案,不直接发布;发布与否由店长在确认步骤里定。
+
+        请假 (capability cafe.leave-review):
+        - 把店员提报的请假(类型 / 日期 / 事由)整理成一张清晰的请假单给店长审批。**若接了
+          排班 / 考勤源**就据实核对会不会造成班次空缺或撞班冲突;**没接**就据申报本身提示
+          可能的班次影响,并写明「班表影响需人工核对」,别假装看到了真实排班。
+        - 你只核对整理,**不批假** —— 准不准由店长在审批步定。
+
+        临时工工时结算 (capability cafe.casual-wage) —— 按 payload 的 step 区分两种活:
+        - 【step = compute 算建议】按提报的工时明细与时薪(从店面政策读,或用提报的时薪)
+          算出**建议金额**,**写清算式**(时薪 × 各班次工时,含周末 / 节假日倍率如适用)。
+          如果工具列表里有算薪工具,优先用它;没有就自己按政策算 —— 那是 LLM 按政策算的
+          建议数字,不是权威工资单。看到可能的异常(工时偏高、时薪偏低)就**提示需人工核对
+          当地劳动法规**,别自己下「违法 / 合法」的结论,也不擅自改数。
+        - 【step = record 建结算单】老板已批准(能走到这步就是批了)。把 payload 的 approved_math
+          (已批准的核算)原样整理成一句话结算单记录(「X 本期工时结算 ¥N,已审批」),数字照抄别改
+          —— 但这只是**给你的指令**,不是结构保证。真正被批的那笔以审批步为准,工作流输出里也会
+          用 ref 原样带上 approved_math。这是记录,不是发钱动作。
+        - 你只给「建议金额」,钱由老板在审批步定。算完必须标明「以正式工资系统为准,这不是
+          最终工资单」;绝不假装已发钱 / 已入账。钱的事:LLM 建议、人定钱。
       mcpServers:
         - name: obsidian
           command: uvx
@@ -104,7 +156,44 @@ template:
             OBSIDIAN_HOST: ${OBSIDIAN_HOST}
             OBSIDIAN_PORT: ${OBSIDIAN_PORT}
 
-  # ── 3 条声明式工作流 ───────────────────────────────────────────────────────────
+    # 库存合规助手:盘点/预警(读库存 → 对照安全线标低)、合规自查(按 SOP 出检查清单)。
+    # 两件都是「AI 出清单、人照做」—— 不设审批步(它只提醒不裁决),所以能进 acceptance 机器验收。
+    - id: inventory-compliance-aide
+      displayName: 库存合规助手
+      capabilities: [cafe.inventory-review, cafe.compliance-check]
+      kind: llm
+      provider: openai-compatible
+      baseURL: https://api.deepseek.com/v1
+      providerLabel: DeepSeek
+      model: deepseek-chat
+      system: |
+        你是门店的库存合规助手,处理盘点预警与合规自查。语气简洁、就事论事、全程中文。
+
+        库存盘点与预警 (capability cafe.inventory-review):
+        - 按要盘的区域(原料 / 包材 / 成品)出一张盘点清单,逐项列出该盘什么、单位、怎么点。
+        - 如果你的工具列表里有库存数据库(inventory)类 MCP 工具,先读真实库存,对照安全库存线
+          **标出低于安全线、需要补货的项**(预警);没有工具就出通用盘点清单,并如实说明未接库存源。
+        - 你只出清单和预警,不改库存数、不自动下补货单。补货是另一条流(店长审批 / 跨供货商)。
+
+        合规自查 (capability cafe.compliance-check):
+        - 按店面运营手册的合规规范,出一份自查清单,覆盖:食品安全(冷链温度 / 交叉污染 /
+          洗手消毒)、原料保质期(临期先用 / 过期弃用)、证照到期(营业执照 / 卫生许可 / 健康证)、
+          现金与会员信息、消防与卫生。逐项给「查什么 + 合格标准」。
+        - 你出的是**对照清单和提醒**,不做合规裁定 —— 是否合格由负责人现场逐项确认,涉及法律
+          的以主管部门要求为准。手册没覆盖的,提示「问店长 / 查最新法规」,不编。
+
+        诚实规矩:没接库存源就别编具体库存数字;没有真实证照到期日就写「核对实际到期日」,
+        不虚构日期。绝不因为「没接数据源」就说「我无法访问」然后罢工 —— 诚实模式下照样把清单出完整。
+      mcpServers:
+        - name: obsidian
+          command: uvx
+          args: [mcp-obsidian]
+          env:
+            OBSIDIAN_API_KEY: ${OBSIDIAN_API_KEY}
+            OBSIDIAN_HOST: ${OBSIDIAN_HOST}
+            OBSIDIAN_PORT: ${OBSIDIAN_PORT}
+
+  # ── 7 条声明式工作流 ───────────────────────────────────────────────────────────
   # 每条都是一个 gotong.workflow/v1 的内层 block(id / trigger / steps / …);导入时
   # parseTemplate 会逐条重新序列化成完整 workflow yaml 交给 workflow runtime 校验 + 注册。
   # surface.me 让成员能在 /me 自助发起(角色门 + 用户作用域由 /me 层强制);human: 步骤
@@ -146,7 +235,9 @@ template:
           description: 培训师按岗位调出 SOP + 规范, 回答新人问题。
           dispatch:
             strategy: { kind: capability, capabilities: [cafe.train-position] }
-            title: "岗位上手: $trigger.payload.position"
+            # dispatch title 不做 $ref 插值(只有 payload 会 resolveRefs),所以用静态标题;
+            # 具体岗位在 payload.position 里传给培训师。
+            title: 新员工岗位上手带教
             payload:
               position: $trigger.payload.position
               question: $trigger.payload.question
@@ -202,7 +293,14 @@ template:
             assignee: $trigger.payload.manager_id
             kind: approval
             title: 排班确认
-            prompt: 请确认该排班建议是否可发布。
+            # 审批卡内联助手整理好的排班草案(human 步的 prompt 会做 $ref 插值),
+            # 店长不用翻上一步就能看到要确认什么。staff_id 是 /me 盖进的提报人 userId
+            # (一串 id 不是名字),店长得知道这是谁报的。
+            prompt: |
+              提报人(userId)：$trigger.payload.staff_id
+              第 $trigger.payload.week 周排班建议如下，请确认是否可发布：
+
+              $draft.output.text
       output:
         week: $trigger.payload.week
         draft: $draft.output
@@ -269,12 +367,273 @@ template:
             assignee: $trigger.payload.manager_id
             kind: approval
             title: 加班审批
-            prompt: 请复核该加班申报与建议金额, 决定是否批准。
+            # 审批卡内联申报要点 + 助手核算(prompt 会插值 $ref),店长一眼看清批什么。
+            # staff_id 是 /me 盖进的申报人 userId(是 id 不是名字)。
+            prompt: |
+              申报人(userId)：$trigger.payload.staff_id
+              加班申报：$trigger.payload.date · $trigger.payload.hours 小时 · 事由：$trigger.payload.reason
+              助手按店面政策核算的建议金额（仅供参考）：
+
+              $assess.output.text
+
+              请复核后决定是否批准。批准金额以正式工资系统为准。
       output:
         date: $trigger.payload.date
         hours: $trigger.payload.hours
         suggestion: $assess.output
         approval: $manager-approval.output
+
+    # (4) 请假申请 + 店长审批 (HITL)。店员报请假 → 助手核对班表冲突 → 店长批。
+    - id: cafe-leave-request
+      name: 请假申请 + 店长审批
+      description: 店员提报请假, 助手核对与排班的冲突整理成请假单, 店长审批。
+      governance:
+        data_sensitivity: confidential
+        required_credentials: [deepseek]
+        required_human_roles: [店长 (store manager)]
+        external_systems: [obsidian (店面运营手册 / 排班规则), deepseek (整理请假单)]
+        notes: |-
+          店员自助提报, 店长审批准不准; 助手只核对整理不批假。**请假事由(可能含病假等敏感信息)
+          会随整理上下文发送到所配置的模型后端(DeepSeek)** —— 故标 confidential;介意就别在事由里
+          写敏感细节, 或把 leave-review 换成不外发的处理方式。
+      trigger:
+        capability: cafe.request-leave
+        payload_schema:
+          - id: leave_type
+            label: 请假类型
+            type: select
+            required: true
+            options:
+              - { value: personal, label: 事假 }
+              - { value: sick, label: 病假 }
+              - { value: annual, label: 年假 }
+          - id: dates
+            label: 请假日期 (每行一天或一段, 如 "周三 全天")
+            type: textarea
+            rows: 3
+            required: true
+          - id: reason
+            label: 事由
+            type: textarea
+            rows: 2
+            required: true
+          - id: manager_id
+            label: 审批店长 (userId)
+            type: text
+            required: true
+      surface:
+        me:
+          enabled: true
+          label: 我要请假
+          description: 提报请假类型与日期, 店长审批。
+          allowed_roles: [owner, admin, member]
+          user_scope_field: staff_id
+      steps:
+        - id: review
+          description: 助手核对请假与排班冲突, 整理成请假单。
+          dispatch:
+            strategy: { kind: capability, capabilities: [cafe.leave-review] }
+            title: 请假核对
+            payload:
+              leave_type: $trigger.payload.leave_type
+              dates: $trigger.payload.dates
+              reason: $trigger.payload.reason
+        - id: manager-approval
+          description: 店长审批请假。
+          human:
+            assignee: $trigger.payload.manager_id
+            kind: approval
+            title: 请假审批
+            # 审批卡内联申请要点 + 助手整理的请假单(prompt 会插值 $ref)。
+            # staff_id 是 /me 盖进的申请人 userId(是 id 不是名字)。
+            prompt: |
+              申请人(userId)：$trigger.payload.staff_id
+              请假申请：$trigger.payload.leave_type · 日期：$trigger.payload.dates
+              事由：$trigger.payload.reason
+
+              —— 助手整理的请假单 ——
+              $review.output.text
+
+              请复核后决定是否准假。
+      output:
+        leave_type: $trigger.payload.leave_type
+        review: $review.output
+        approval: $manager-approval.output
+
+    # (5) 临时工工时结算 + 老板审批 (HITL) — "LLM 建议, 人定钱"。
+    #     compute 按政策算建议金额 → 老板 approve。照加班流同型: 助手只建议, 钱由人定。
+    - id: cafe-casual-wage
+      name: 临时工工时结算 + 老板审批
+      description: 录临时工本期工时, 助手按政策算建议金额, 老板审批定钱。
+      governance:
+        data_sensitivity: confidential
+        required_credentials: [deepseek]
+        required_human_roles: [老板 / 店长 (owner)]
+        external_systems: ["timesheet (考勤 / 工时, 只读)"]
+        notes: |-
+          涉及薪酬。助手给的是 LLM 按政策算的**建议金额**(接了算薪工具则用工具), 最终金额须老板
+          approve 才算数, 且以你的正式工资系统为准 —— 模板不发钱、不写回工资库、不做劳动法裁定。
+      trigger:
+        capability: cafe.settle-casual-wage
+        payload_schema:
+          - id: worker_name
+            label: 临时工姓名 / 工号
+            type: text
+            required: true
+          - id: period
+            label: 结算周期 (如 "本周" 或 "2026-07-13 ~ 07-19")
+            type: text
+            required: true
+          - id: shifts
+            label: 工时明细 (每行一班, 如 "周六 18:00-24:00 6h 休息日")
+            type: textarea
+            rows: 5
+            required: true
+          - id: hourly_rate
+            label: 时薪 (留空则助手按店面政策读)
+            type: text
+          - id: approver_id
+            label: 审批老板 (userId — 由 ta 在收件箱审批)
+            type: text
+            required: true
+      surface:
+        me:
+          enabled: true
+          label: 结算临时工工时
+          description: 录临时工本期工时, 助手算建议金额, 老板审批。
+          # 算别人工资是管理动作, 只对 owner/admin 开; 临时工薪不定时, member 门不影响定时 sweeper。
+          allowed_roles: [owner, admin]
+          user_scope_field: settled_by
+      steps:
+        - id: compute
+          description: 助手按工时与时薪(按政策)算建议金额, 列算式, 标异常 (仅供参考)。
+          dispatch:
+            strategy: { kind: capability, capabilities: [cafe.casual-wage] }
+            title: 临时工薪核算
+            payload:
+              step: compute
+              worker_name: $trigger.payload.worker_name
+              period: $trigger.payload.period
+              shifts: $trigger.payload.shifts
+              hourly_rate: $trigger.payload.hourly_rate
+        - id: approve
+          description: 老板复核建议金额, 决定是否批准结算。
+          human:
+            assignee: $trigger.payload.approver_id
+            kind: approval
+            title: 临时工薪审批
+            prompt: |-
+              「$trigger.payload.worker_name」$trigger.payload.period 的工时结算, 批准吗?
+              金额以正式工资系统为准。
+
+              —— 建议核算 ——
+              $compute.output.text
+        # record 用 `when` 门控在审批上 —— human approval 被拒时返回正常 {approved:false} ok
+        # 输出、**不中断 run**(见 packages/inbox/src/types.ts)。不加这道门, 拒绝时照样出结算单
+        # =「不批就不出」是假话。先例: pro-firm-hub 的 finalize、solo-company-hub 的 finalize。
+        - id: record
+          description: 批准后建档结算单 (拒绝则跳过, 不出结算单、不发钱、不写工资库)。
+          when: "$approve.output.approved == true"
+          dispatch:
+            strategy: { kind: capability, capabilities: [cafe.casual-wage] }
+            title: 结算单建档
+            payload:
+              step: record
+              worker_name: $trigger.payload.worker_name
+              period: $trigger.payload.period
+              approved_math: $compute.output.text
+      output:
+        worker_name: $trigger.payload.worker_name
+        period: $trigger.payload.period
+        suggestion: $compute.output
+        approval: $approve.output
+        # 权威的「被批准金额」= 老板在审批卡上看到的那笔,用 ref 原样带出(确定性,不经 record
+        # 的 LLM 重写)。record.text 只是助手整理的人读文案,可能措辞不同 —— 认这个字段。
+        approved_math: $compute.output.text
+        record: $record.output
+
+    # (6) 库存盘点与预警 — 无人值守 (进 acceptance)。助手出盘点清单 + 对照安全线标低库存。
+    - id: cafe-inventory-count
+      name: 库存盘点与预警
+      description: 助手按区域出盘点清单, 接了库存源则对照安全线标出需补货的低库存项。
+      governance:
+        data_sensitivity: internal
+        required_credentials: [deepseek]
+        external_systems: ["inventory (库存数据库, 只读)"]
+        notes: 无人值守生成盘点清单; 接了 inventory 读真实库存标预警, 没接进诚实模式出通用清单 (不编库存数)。
+      trigger:
+        capability: cafe.count-inventory
+        payload_schema:
+          - id: area
+            label: 盘点区域
+            type: select
+            required: true
+            options:
+              - { value: ingredients, label: 原料 (茶叶 / 奶 / 糖浆 / 珍珠等) }
+              - { value: packaging, label: 包材 (杯 / 盖 / 吸管 / 打包袋) }
+              - { value: all, label: 全店 }
+          - id: focus
+            label: 特别关注 (可选, 如 "临期品" 或 "周末备货")
+            type: text
+      surface:
+        me:
+          enabled: true
+          label: 盘点与库存预警
+          description: 选区域, 助手出盘点清单并标出需补货的低库存项。
+          allowed_roles: [owner, admin, member]
+          user_scope_field: counted_by
+      steps:
+        - id: review
+          description: 助手出盘点清单 + 对照安全线标低库存预警。
+          dispatch:
+            strategy: { kind: capability, capabilities: [cafe.inventory-review] }
+            title: 库存盘点清单
+            payload:
+              area: $trigger.payload.area
+              focus: $trigger.payload.focus
+      output:
+        area: $trigger.payload.area
+        review: $review.output
+
+    # (7) 合规自查清单 — 无人值守 (进 acceptance + schedules 定时)。助手按 SOP 出自查清单。
+    - id: cafe-compliance-check
+      name: 合规自查清单
+      description: 助手按店面合规规范出一份自查清单 (食品安全 / 保质期 / 证照 / 现金 / 卫生), 负责人照着查。
+      governance:
+        data_sensitivity: internal
+        required_credentials: [deepseek]
+        external_systems: [obsidian (店面运营手册 / 合规规范)]
+        notes: |-
+          无人值守生成对照清单, 不做合规裁定 (责任在人)。这条流被下面 schedules 定时自动跑, 而定时
+          sweeper 以最低权限 member 判可运行性, 故 allowed_roles 必须含 member, 否则定时永不触发。
+      trigger:
+        capability: cafe.compliance-check
+        payload_schema:
+          - id: scope
+            label: 自查范围 (可选)
+            type: select
+            options:
+              - { value: daily, label: 每日开店前 }
+              - { value: weekly, label: 每周 }
+              - { value: monthly, label: 月度 (含证照到期核对) }
+      surface:
+        me:
+          enabled: true
+          label: 出合规自查清单
+          description: 助手按店面规范出一份合规自查清单, 照着逐项查。
+          allowed_roles: [owner, admin, member]
+          user_scope_field: requested_by
+      steps:
+        - id: checklist
+          description: 助手按合规规范出自查清单。
+          dispatch:
+            strategy: { kind: capability, capabilities: [cafe.compliance-check] }
+            title: 合规自查清单
+            payload:
+              scope: $trigger.payload.scope
+      output:
+        scope: $trigger.payload.scope
+        checklist: $checklist.output
 
   # ── 1 个可寻址知识库槽位:MCP 接线 + 预置数据「指针」(不是内容!)──────────────
   # 槽位 name(`store_ops_manual`)是 KB 的可寻址身份(也是 Stream C 联邦 per-link
@@ -299,7 +658,51 @@ template:
           注意这是「指针」,不是内容。两种用法:① 把种子手册直接拷进你的 Obsidian
           vault;或 ② 打包托管,让这个 ref 指过去再显式拉取。框架永不经手你的手册内容。
 
-  # ── 一键:导入时提示填一次 API key,自动应用到两个 agent ──────────────────────
+  # ── 只读连接器槽位 —— 全部可选;不挂进诚实模式 ────────────────────────────────
+  # 「抽象需求」槽位:只声明「需要一个叫 X 的 MCP server」,不点名厂商、不预挂到 agent。
+  # 装的人用**只读**凭证把自己的源接进来。有状态经营数据(库存数 / 工时)全走 MCP、
+  # 框架不存 —— 搬走 .gotong/ 不会带走你的库存和考勤。
+  requires:
+    connectors:
+      - id: inventory
+        kind: mcp
+        optional: true
+        capability: inventory.read
+        hint: 你的库存数据库(原料 / 包材 / 成品的当前数量与安全库存线)。用**只读**凭证接, server 名用 inventory, 接好后还要在「库存合规助手」agent 上挂这个 server 它才读得到。库存盘点流的预警从这里读;不挂则出通用盘点清单、不编库存数。
+      - id: timesheet
+        kind: mcp
+        optional: true
+        capability: timesheet.read
+        hint: 你的考勤 / 工时源(临时工与正式工的打卡 / 排班工时)。用**只读**凭证接, server 名用 timesheet, 接好后还要在「运营助手」agent 上挂这个 server。挂上后运营助手能查它核对工时 —— 但临时工薪流目前仍以表单手录的 shifts 为准(想让它主动查考勤替代手录, 得在该 agent 的 system prompt 里加指令);不挂就纯手录。
+
+  # ── 黄金验收 —— 装完面板「跑验收」, 零 LLM 结构断言判卷 ──────────────────────
+  # 只放两条无人值守的流(盘点 / 合规自查);合格线 = 诚实模式(开箱不挂任何连接器也必须绿)。
+  # 带 human: 步的流(排班 / 加班 / 请假 / 临时工薪)刻意不进 —— 无人值守必然停在审批步,
+  # 它们的验收就是店长 / 老板照按钮真批一次, 机器替不了。
+  acceptance:
+    - id: smoke-inventory-count
+      workflowId: cafe-inventory-count
+      # 值加引号: flow 映射 { } 里的 ASCII 逗号是字段分隔符, 不加引号会静默截断。
+      trigger: { area: "all", focus: "临期品与周末备货" }
+      assert:
+        contains: [盘点, 清单]
+        forbid: [我无法访问, 无法生成]
+      note: 开箱无库存源也必须绿(诚实模式出通用盘点清单);报「我无法访问 / 无法生成」= 不合格。
+    - id: smoke-compliance-check
+      workflowId: cafe-compliance-check
+      trigger: { scope: "weekly" }
+      assert:
+        contains: [食品安全, 保质期]
+        forbid: [我无法访问, 无法生成]
+      note: 开箱按店面规范出通用合规自查清单;报「我无法访问 / 无法生成」= 不合格。
+
+  # ── 定时建议 —— 只带节奏不带人; 装完「定时」卡点「补人启用」选成员 ────────────
+  schedules:
+    - workflowId: cafe-compliance-check
+      cadence: { kind: weekly, weekday: 1, hour: 9 }
+      note: 装完在「定时」卡补人启用, 每周一早 9 点(默认按 UTC+8)自动出合规自查清单;不在该时区就在「定时」卡改时间。
+
+  # ── 一键:导入时提示填一次 API key,自动应用到三个 agent ──────────────────────
   defaults:
     apiKeyPrompt:
       provider: openai-compatible

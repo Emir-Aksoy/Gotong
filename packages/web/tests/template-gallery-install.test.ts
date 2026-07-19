@@ -9,7 +9,7 @@
  *
  * The bytes move untouched: the yaml the catalog hands out is the yaml the
  * import route parses. If a shipped template ever stops installing cleanly,
- * this test goes red. cafe-ops is the fixture (2 agents, 3 workflows, 1 KB).
+ * this test goes red. cafe-ops is the fixture (3 agents, 7 workflows, 1 KB).
  *
  * The host here has NO agent lifecycle wired, so the import route skips the
  * spawn step — cafe-ops' real-DeepSeek agents land as records without needing
@@ -85,38 +85,59 @@ async function installFromCatalog(id: string): Promise<{ status: number; json: a
 }
 
 describe('template gallery one-click install round-trip (G-M3)', () => {
-  it('installs cafe-ops: lands 2 agents, forwards 3 workflows, reports 1 KB slot', async () => {
+  it('installs cafe-ops: lands 3 agents, forwards 7 workflows, reports 1 KB slot', async () => {
     const r = await installFromCatalog('cafe-ops')
     expect(r.status).toBe(200)
     expect(r.json.ok).toBe(true)
     expect(r.json.template).toMatchObject({ name: '门店运营(奶茶 / 咖啡店)' })
 
-    // Both agents actually landed in the Space (not just echoed in the response).
+    // All three agents actually landed in the Space (not just echoed in the response).
     expect(r.json.team.created.map((a: any) => a.id).sort()).toEqual([
+      'inventory-compliance-aide',
       'onboarding-trainer',
       'ops-assistant',
     ])
     const ids = (await b.space.agents()).map((a) => a.id)
     expect(ids).toContain('onboarding-trainer')
     expect(ids).toContain('ops-assistant')
+    expect(ids).toContain('inventory-compliance-aide')
 
-    // All three declared workflows were forwarded to the surface.
-    expect(b.wfCalls).toHaveLength(3)
-    expect(r.json.workflows.map((w: any) => w.ok)).toEqual([true, true, true])
+    // All seven declared workflows were forwarded to the surface.
+    expect(b.wfCalls).toHaveLength(7)
+    expect(r.json.workflows.map((w: any) => w.ok)).toEqual([
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+    ])
 
     // KB slot reported, never auto-wired (decision #4).
     expect(r.json.knowledgeBases.map((k: any) => k.name)).toEqual(['store_ops_manual'])
   })
 
-  it('a second install is idempotent — both agents skipped, not duplicated', async () => {
+  it('a second install is idempotent — all three agents skipped, not duplicated', async () => {
     await installFromCatalog('cafe-ops')
     const again = await installFromCatalog('cafe-ops')
     expect(again.status).toBe(200)
     expect(again.json.team.created).toHaveLength(0)
-    expect(again.json.team.skipped.sort()).toEqual(['onboarding-trainer', 'ops-assistant'])
-    // Still exactly two agents in the Space — no clones.
+    expect(again.json.team.skipped.sort()).toEqual([
+      'inventory-compliance-aide',
+      'onboarding-trainer',
+      'ops-assistant',
+    ])
+    // Still exactly three agents in the Space — no clones.
     const ids = (await b.space.agents()).map((a) => a.id)
-    expect(ids.filter((x) => x === 'onboarding-trainer' || x === 'ops-assistant')).toHaveLength(2)
+    expect(
+      ids.filter(
+        (x) =>
+          x === 'onboarding-trainer' ||
+          x === 'ops-assistant' ||
+          x === 'inventory-compliance-aide',
+      ),
+    ).toHaveLength(3)
   })
 
   it('installs child-desk: zero agents, but its workflows still land', async () => {

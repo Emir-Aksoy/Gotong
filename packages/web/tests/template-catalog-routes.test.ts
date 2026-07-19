@@ -85,16 +85,24 @@ describe('template gallery catalog routes (G-M2)', () => {
     }
   })
 
-  it('projects install metadata server-side (cafe-ops: 2 agents, 3 workflows, 1 KB)', async () => {
+  it('projects install metadata server-side (cafe-ops: 3 agents, 7 workflows, 1 KB)', async () => {
     const { templates } = (await (await authed('/api/admin/templates/catalog')).json()) as {
       templates: CatalogEntry[]
     }
     const cafe = templates.find((t) => t.id === 'cafe-ops')!
-    expect(cafe.agents.map((a) => a.id)).toEqual(['onboarding-trainer', 'ops-assistant'])
+    expect(cafe.agents.map((a) => a.id)).toEqual([
+      'onboarding-trainer',
+      'ops-assistant',
+      'inventory-compliance-aide',
+    ])
     expect(cafe.workflows.map((w) => w.id)).toEqual([
       'cafe-staff-onboarding',
       'cafe-shift-availability',
       'cafe-overtime-claim',
+      'cafe-leave-request',
+      'cafe-casual-wage',
+      'cafe-inventory-count',
+      'cafe-compliance-check',
     ])
     expect(cafe.knowledgeBases.map((k) => k.name)).toEqual(['store_ops_manual'])
     expect(cafe.apiKeyPrompt).toMatchObject({ provider: 'openai-compatible', label: 'DeepSeek' })
