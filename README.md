@@ -328,6 +328,7 @@ pnpm demo:battle-monk-training     # a growth coach writing state into a persist
 
 # organization hubs (declarative workflows + surface.me self-service + human: HITL approval)
 pnpm demo:cafe-ops                 # 奶茶/咖啡店: onboarding / shifts / overtime, manager approves
+pnpm demo:bar-ops                  # 酒吧: 年龄核查事件复核 (合规 when 门控, 经理审批) + 深夜薪倍率
 pnpm demo:warband-club             # a fan club collaborating over one shared archive
 ```
 

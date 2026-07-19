@@ -1,6 +1,6 @@
 # 例子分级索引 · 先跑哪个，再深到哪
 
-> `examples/` 有 50 个端到端 demo。平铺成一堆，新人不知道从哪下手。这一页按
+> `examples/` 有 50+ 个端到端 demo。平铺成一堆，新人不知道从哪下手。这一页按
 > **上手台阶**给它们排了序：从「零前置 5 分钟就见结果」一路到「跨 hub 联邦 / 桥接外部
 > agent / 完整形态 hub」。每行标了**前置**——绝大多数是 `零`（确定性、无 key、无网络，
 > `pnpm start` 直接跑）。
@@ -106,7 +106,8 @@ pnpm demo                          # = hello-collab（官方第一步，见 QUIC
 
 | 例子 | 一句话 | 前置 |
 |---|---|---|
-| [`cafe-ops`](../../examples/cafe-ops) | 门店运营组织 hub：入职 / 排班 / 加班申领工作流 + `/me` 自助 + 经理 HITL | 零 |
+| [`cafe-ops`](../../examples/cafe-ops) | 门店运营组织 hub（奶茶店，7 条流）：入职 / 排班 / 加班 / 请假 / 临时工薪 / 库存盘点 / 合规自查 + `/me` 自助 + 经理 HITL；工资红线「LLM 建议、人定钱」 | 零 |
+| [`bar-ops`](../../examples/bar-ops) | 门店运营组织 hub（酒吧，6 条流）：招牌是**年龄核查事件复核流**——同一道 `when` 门控用在**合规决定**上（确认才写正式拒售条目，拒绝的运行仍留痕、record 步 skipped）+ 深夜/周末临时工薪 | 零 |
 | [`warband-club`](../../examples/warband-club) | 协作 + 共享资源的组织 hub：成员投稿进一个共享档案、查询、提议由队长确认（单 hub 共享） | 零 |
 | [`battle-monk-training`](../../examples/battle-monk-training) | 个人成长 hub：教官 router 驱动三支柱（身/心/识），各自写进持久 Codex | 零 |
 | [`personal-research-hub`](../../examples/personal-research-hub) | 个人研究/知识库 hub：Karpathy 的「LLM as compiler」循环，编纂 + 反查你的 wiki | 零 |
@@ -125,13 +126,13 @@ pnpm demo                          # = hello-collab（官方第一步，见 QUIC
 
 ## 按主题横查
 
-- **人在环 / HITL** → `hello-collab` · `cli-human` · `cafe-ops` · `personal-butler` · `cross-org-rfp`
+- **人在环 / HITL** → `hello-collab` · `cli-human` · `cafe-ops` · `bar-ops` · `personal-butler` · `cross-org-rfp`
 - **工作流** → `workflow-architect` · `workflow-assistant` · `cross-hub-workflow` · `tea-supply-link` · `tea-chain-hq`
 - **记忆 / 管家** → `personal-butler` · `butler-task-notebook` · `butler-vector-recall` · `memory-upgrade` · `butler-cross-hub`（更多能力细节见 [`ledger/MEMORY-ADVANCED-FINAL.md`](ledger/MEMORY-ADVANCED-FINAL.md)）
 - **MCP / 知识库** → `mcp-tools-quickstart` · `mcp-tools-llm-agent` · `rag-mcp` · `elasticsearch-kb` · `obsidian-kb` · `cross-hub-mcp`
 - **跨 hub / 联邦** → 见 ④；真网络看 `cross-hub-federation`
 - **桥接外部 agent** → 见 ⑤；契约看 [`AGENT-ADAPTER-CONTRACT.md`](AGENT-ADAPTER-CONTRACT.md)
-- **组织 hub 模板** → `cafe-ops` · `warband-club` · `tea-supply-link` · `tea-chain-hq`
+- **组织 hub 模板** → `cafe-ops` · `bar-ops` · `warband-club` · `tea-supply-link` · `tea-chain-hq`
 
 **想自己写一个** → [`PARTICIPANT.md`](PARTICIPANT.md)（20 行写一个 Participant）+
 [`AGENT.md`](AGENT.md)（接进已在跑的 hub）。
