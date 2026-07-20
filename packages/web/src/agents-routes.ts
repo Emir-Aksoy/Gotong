@@ -876,7 +876,14 @@ export async function handleAgentsRoute(
         displayName: a.displayName,
         managed: a.managed,
       })
-      if (apiKey && a.managed.provider === 'openai-compatible') {
+      // Any real provider takes a key — only `mock` has nothing to
+      // authenticate. This used to be `=== 'openai-compatible'`, which
+      // SILENTLY dropped the key an operator had just pasted for an
+      // anthropic/openai bundle: import "succeeded", the agent spawned
+      // keyless, and the first dispatch failed with a 401 far from the
+      // cause. The two sibling paths (PUT /:id, inline create) never had
+      // that filter; this one was the odd one out.
+      if (apiKey && a.managed.provider !== 'mock') {
         try { await ctx.space.setAgentApiKey(a.id, apiKey) }
         catch (err) { log.warn('bundle import: failed to set per-agent key', { id: a.id, err }) }
       }

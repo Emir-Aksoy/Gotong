@@ -4,23 +4,26 @@
 # scripts/env-registry-gate.mjs 会断言「源码引用的 GOTONG_* 集合」== 「本表集合」:
 #   - 代码里加了新旋钮却没登记 → 门变红 (这正是防旋钮无声膨胀的护栏)。
 #   - 本表留了源码已删的旋钮     → 门变红 (保持诚实)。
-# 所以第 104 个旋钮无法悄悄落地——必须自觉编辑本表。
+# 所以下一个旋钮无法悄悄落地——必须自觉编辑本表。
 #
-# 作用域 = 生产源码 (packages/<pkg>/src 下的 .ts)。测试脚手架里的 GOTONG_* 不算旋钮，
-# 不登记。每项一行的「是什么 / 默认」说明是 GUARD-M2 惯例文档的活儿，不在本表。
+# 作用域 = 生产源码 (packages/<pkg>/src 下的 .ts) 里**非注释**的引用。两条精度规则:
+#   1. 只出现在注释里的名字不算旋钮 (2026-07-20 剔除 3 个: GOTONG_A2A_AGENTS 是
+#      Route-B P1-M11b 已删的 env blob、GOTONG_WS_HARDENING_PROFILE 是从没读过的
+#      设想、GOTONG_MASTER_KEY_ 是 GOTONG_MASTER_KEY_* 通配片段)。
+#   2. 形似旋钮但根本不是环境变量的, 行尾打 `# not-a-knob:` 标签: 仍然钉住
+#      (出现/消失照样红门), 但不计进对外报的旋钮数。
+# 测试脚手架里的 GOTONG_* 不算旋钮，不登记。每项「是什么 / 默认」的说明是 GUARD-M2
+# 惯例文档的活儿，不在本表。
 #
-# 当前登记数: 120  (其中 GOTONG_BOOTSTRAP 是 app.html 注入占位符——非旋钮, 见该行注释;
-#                  M-EMB1 新增 3 个 GOTONG_BUTLER_EMBEDDER_* 真语义 embedder opt-in, 109→112;
-#                  M-GRAPH 新增 GOTONG_BUTLER_MEMORY_LINKS 联想图模式 opt-in, 112→113;
-#                  M-RECON 新增 GOTONG_BUTLER_MEMORY_RECONCILE 陈旧/矛盾校正 opt-in, 113→114;
-#                  LIB-M4 新增 GOTONG_BUTLER_MEMORY_LIBRARIAN 图书馆员上架 opt-in, 114→115;
-#                  VOICE-M3 新增 4 个 GOTONG_BUTLER_VOICE_* TTS 语音回复 opt-in, 115→119;
-#                  ASR-M3 新增 GOTONG_BUTLER_ASR_MODEL 语音收听 opt-in, 119→120)
+# 当前登记数: 113 个真旋钮 + 4 个 not-a-knob 形似项 = 117 行
+#   (沿革: …109 →M-EMB1 +3 embedder→112 →M-GRAPH +1 links→113 →M-RECON +1 reconcile→114
+#    →LIB-M4 +1 librarian→115 →VOICE-M3 +4 TTS→119 →ASR-M3 +1 ASR→120
+#    →2026-07-20 计数精度修正 −3 注释项、−4 形似项分开计 →113)
 # 重新播种 (审慎变更后):  node scripts/env-registry-gate.mjs --list > scripts/gotong-env-registry.txt
+#   ⚠ --list 只吐名字, 会冲掉上面的 not-a-knob 标签——播种后记得把 4 个标签补回来。
 #
 # ── 按名称排序 ──
 GOTONG_A2A_ADVERTISE_SKILLS
-GOTONG_A2A_AGENTS
 GOTONG_A2A_INBOUND_CAPABILITY
 GOTONG_A2A_INBOUND_ENABLED
 GOTONG_A2A_OUTBOUND_QUOTA_WINDOW_MS
@@ -44,7 +47,7 @@ GOTONG_ASSISTANT_NO_EXAMPLES
 GOTONG_ASSISTANT_PROVIDER
 GOTONG_AUDIT_KEEP_DAYS
 GOTONG_BACKUP_DIR
-GOTONG_BOOTSTRAP        # 非旋钮 — app.html 的 <!--GOTONG_BOOTSTRAP--> 注入占位符 (同 GOTONG_ROLE)
+GOTONG_BOOTSTRAP        # not-a-knob: app.html 的 <!--GOTONG_BOOTSTRAP--> 服务端注入占位符 (static-routes.ts)
 GOTONG_BUTLER
 GOTONG_BUTLER_GOVERNED
 GOTONG_BUTLER_MAINTENANCE
@@ -74,7 +77,7 @@ GOTONG_HITL_TIMEOUT_MS
 GOTONG_HOST
 GOTONG_HUB_URL
 GOTONG_IM_CHAT_CAPABILITY
-GOTONG_KEY
+GOTONG_KEY              # not-a-knob: help.ts 里 `--api-key=$GOTONG_KEY` 的 shell 示例变量, hub 不读
 GOTONG_LARK_APP_ID
 GOTONG_LARK_APP_SECRET
 GOTONG_LEDGER_KEEP_DAYS
@@ -82,7 +85,6 @@ GOTONG_LOG_DISABLED
 GOTONG_LOG_FORMAT
 GOTONG_LOG_LEVEL
 GOTONG_MASTER_KEY
-GOTONG_MASTER_KEY_
 GOTONG_MASTER_KEY_PROVIDER
 GOTONG_MAX_DISPATCH_DEPTH
 GOTONG_MAX_PENDING_INVITES
@@ -113,7 +115,7 @@ GOTONG_QQ_WEBHOOK_PORT
 GOTONG_RESUME_CLAIM_TTL_MS
 GOTONG_RESUME_SWEEP_MS
 GOTONG_RES_ENDPOINTS
-GOTONG_ROLE
+GOTONG_ROLE             # not-a-knob: app.html 的 <!--GOTONG_ROLE--> 服务端注入占位符 (static-routes.ts)
 GOTONG_RUN_ARCHIVE_DAYS
 GOTONG_RUN_KEEP
 GOTONG_SECRET_KEY
@@ -131,11 +133,10 @@ GOTONG_TELEGRAM_BOT_TOKEN
 GOTONG_TRANSCRIPT_ARCHIVE_DAYS
 GOTONG_TRANSCRIPT_KEEP_SEGMENTS
 GOTONG_TRUST_PROXY
-GOTONG_URL
+GOTONG_URL              # not-a-knob: cli 脚手架模板生成的**用户 agent 文件**读它, hub 自己不读
 GOTONG_WEB_PORT
 GOTONG_WECHAT_BASE_URL
 GOTONG_WECHAT_BOT_TOKEN
 GOTONG_WORKFLOWS_DIR
 GOTONG_WORKFLOW_RESUME_GRACE_MS
-GOTONG_WS_HARDENING_PROFILE
 GOTONG_WS_PORT
