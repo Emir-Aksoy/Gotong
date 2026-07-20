@@ -164,8 +164,10 @@ set -a; . ./.env.local; set +a
 pnpm host                               # 或 ./gotong-host（单文件二进制）
 ```
 
-启动日志里会打印一次性 admin URL（`http://127.0.0.1:3000/admin?token=...`），
-**在这台机器的浏览器里打开**就进 admin 了（loopback，别人开不了）。
+启动横幅会指向**回环设置向导**（web 根路径，无需 token），本机首跑还会替你开浏览器。
+带 token 的一次性 admin URL 走**文件**不走日志：`cat .gotong/runtime/admin-link.txt`
+（mode `0600`；token 是凭证级的，永不进 `journalctl` / `docker logs`）。两条路都
+**只在这台机器的浏览器里打开**（loopback，别人开不了）。
 
 > 不想 clone 仓库？`npx gotong start` 直接从 npm 起同一个 host（Node ≥ 20 即可；
 > 环境变量姿势不变，先 `set -a; . ./.env.local; set +a` 再 npx）。升级走

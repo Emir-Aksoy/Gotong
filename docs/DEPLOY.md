@@ -61,9 +61,13 @@ gotong-host
 | `GOTONG_SPACE_NAME` | `Gotong` | Label written into `space.json` on first init |
 | `GOTONG_ADMIN_DISPLAY_NAME` | `Operator` | First admin's display name (on first init only) |
 
-When the binary boots it **prints the first-run admin URL exactly
-once**. Save it. Subsequent boots only print the `/admin` URL, since the
-admin's token already lives (hashed) in `admins.json`.
+On first boot the binary mints one admin token and writes the URL to
+`<GOTONG_SPACE>/runtime/admin-link.txt` (mode `0600`). It is **never
+printed** — stdout from a daemon ends up in `journalctl` / `docker
+logs`, and the token is secret-grade. The boot banner only tells you
+the path. Read the file once, then delete it. Subsequent boots mint
+nothing new — the admin's token already lives (hashed) in
+`admins.json`.
 
 ---
 
@@ -115,10 +119,13 @@ than `tsx src/main.ts` because there's no module loader walk.
 pnpm host
 # Web       : http://127.0.0.1:3000
 # WebSocket : ws://127.0.0.1:4000
-# (first-run admin URL printed here)
+# → the banner points you at the setup wizard (no token needed on loopback)
 ```
 
-Open the admin URL once, the cookie is set, you're in. Stop with
+Locally the friendly path in is the **setup wizard** at the web root —
+the banner prints that URL and, unless `GOTONG_OPEN_BROWSER=0`, opens
+your browser for you. The token-bearing `/admin` URL is the backup path
+and lives in `./.gotong/runtime/admin-link.txt` (mode `0600`). Stop with
 `Ctrl-C`. Your space lives in `./.gotong/`.
 
 This is functionally identical to `pnpm demo:open-space`, just without
@@ -347,21 +354,33 @@ sudo systemctl enable --now caddy
 sudo journalctl -u gotong -f
 ```
 
-In the log, find the line:
+**The admin URL is NOT in the log.** Since v3.4 (H20) the token never
+touches stdout — `journalctl` / `docker logs` / any log shipper would
+otherwise capture secret material. The log only points at the file:
 
 ```
-First-run admin URL (shown ONCE — save it):
-  http://127.0.0.1:3000/admin?token=<HEX>
+备用 admin token URL 已写入 (读后即焚) / backup admin link saved:
+  /srv/gotong-data/runtime/admin-link.txt
+  mode 0o600 — only the user running this host can read it.
 ```
 
-Replace `http://127.0.0.1:3000` with `https://hub.example.com` and open
+Read it (mode `0600`, owned by the service user — so `sudo`), then
+**delete it**:
+
+```bash
+sudo cat /srv/gotong-data/runtime/admin-link.txt
+sudo rm  /srv/gotong-data/runtime/admin-link.txt
+```
+
+The file holds `http://127.0.0.1:3000/admin?token=<HEX>` — replace the
+`http://127.0.0.1:3000` prefix with `https://hub.example.com` and open
 it in your browser. The cookie sticks because `GOTONG_COOKIE_SECURE=1`
 and the page is served over TLS. Subsequent restarts of the service do
-not re-print the token — admins persist in `admins.json`.
+not re-mint a token — admins persist in `admins.json`.
 
-> **Lost the URL?** If you missed the bootstrap line (terminal closed,
-> log shipper filtered it, scrollback gone), use the no-listener
-> recovery subcommand:
+> **Lost the file?** If you deleted the link file before using it (or
+> the first boot predates your `GOTONG_HOST` being right), use the
+> no-listener recovery subcommand:
 >
 > ```bash
 > sudo -u gotong -H GOTONG_SPACE=/srv/gotong-data \
@@ -370,11 +389,14 @@ not re-print the token — admins persist in `admins.json`.
 > ```
 >
 > Opens `GOTONG_SPACE` without starting the Hub or WebSocket / Web
-> listeners, appends a new admin to `admins.json`, prints the one-time
-> URL (respecting `GOTONG_HOST` / `GOTONG_WEB_PORT` / `GOTONG_COOKIE_SECURE`
-> so the printed URL points at your public hostname), and exits.
-> Existing admins, cookies, and sessions are untouched. Pass an
-> optional display name to label the row: `mint-admin-token "Carol"`.
+> listeners, appends a new admin to `admins.json`, and **rewrites
+> `runtime/admin-link.txt`** (same 0600 file, same H20 reason — never
+> stdout). It respects `GOTONG_HOST` / `GOTONG_WEB_PORT` /
+> `GOTONG_COOKIE_SECURE`, so with `GOTONG_HOST=hub.example.com` the URL
+> inside the file already points at your public hostname — no prefix
+> surgery needed. Existing admins, cookies, and sessions are untouched.
+> Pass an optional display name to label the row:
+> `mint-admin-token "Carol"`.
 
 ### C.8 Onboard more admins
 

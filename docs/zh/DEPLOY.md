@@ -49,7 +49,7 @@ gotong-host
 | `GOTONG_SPACE_NAME` | `Gotong` | 写入 `space.json` 的工作区标签（仅首次初始化） |
 | `GOTONG_ADMIN_DISPLAY_NAME` | `Operator` | 第一个 admin 的显示名（仅首次初始化） |
 
-二进制启动时**仅一次**打印首启 admin URL。务必存下来。后续启动只打印 `/admin` URL，因为 admin 的 token（hash 形式）已经写在 `admins.json` 里。
+首次启动时二进制铸一个 admin token，把 URL 写进 `<GOTONG_SPACE>/runtime/admin-link.txt`（mode `0600`）。它**从不打印**——守护进程的 stdout 会进 `journalctl` / `docker logs`，而这个 token 是凭证级的。启动横幅只告诉你文件路径。读一次，然后删掉。后续启动不会再铸新的——admin 的 token（hash 形式）已经写在 `admins.json` 里。
 
 ---
 
@@ -86,10 +86,10 @@ chmod +x gotong-host
 pnpm host
 # Web       : http://127.0.0.1:3000
 # WebSocket : ws://127.0.0.1:4000
-# （首启 admin URL 在这里打印）
+# → 横幅指向设置向导（回环上无需 token）
 ```
 
-打开 admin URL，cookie 写入浏览器，你就进去了。`Ctrl-C` 停止。工作区在 `./.gotong/`。
+本机上友好的入口是 web 根路径的**设置向导**——横幅会打印那个 URL，并且除非 `GOTONG_OPEN_BROWSER=0`，还会替你打开浏览器。带 token 的 `/admin` URL 是备用路径，在 `./.gotong/runtime/admin-link.txt`（mode `0600`）里。`Ctrl-C` 停止。工作区在 `./.gotong/`。
 
 这个跟 `pnpm demo:open-space` 功能上等价，只是没有 demo agent —— 想从干净的房间开始、自己挂 agent 的场景用它。
 
@@ -302,16 +302,24 @@ sudo systemctl enable --now caddy
 sudo journalctl -u gotong -f
 ```
 
-在日志里找这一行：
+**admin URL 不在日志里。** 从 v3.4 (H20) 起 token 永不进 stdout —— 否则 `journalctl` / `docker logs` / 任何 log shipper 都会把凭证抄走。日志只给你文件路径：
 
 ```
-First-run admin URL (shown ONCE — save it):
-  http://127.0.0.1:3000/admin?token=<HEX>
+备用 admin token URL 已写入 (读后即焚) / backup admin link saved:
+  /srv/gotong-data/runtime/admin-link.txt
+  mode 0o600 — only the user running this host can read it.
 ```
 
-把 `http://127.0.0.1:3000` 替换成 `https://hub.example.com`，在浏览器里打开。`GOTONG_COOKIE_SECURE=1` 加 TLS，cookie 黏住。后续重启 systemd service 不会重新打印 token —— admin 已经持久化在 `admins.json` 里。
+读它（mode `0600`，属主是 service 用户，所以要 `sudo`），然后**删掉**：
 
-> **URL 丢了？** 如果错过 bootstrap 那行日志（终端关掉、log shipper 过滤掉、scrollback 翻过去），用下面这条**不启动 listener** 的恢复命令：
+```bash
+sudo cat /srv/gotong-data/runtime/admin-link.txt
+sudo rm  /srv/gotong-data/runtime/admin-link.txt
+```
+
+文件里是 `http://127.0.0.1:3000/admin?token=<HEX>` —— 把 `http://127.0.0.1:3000` 这段前缀换成 `https://hub.example.com`，在浏览器里打开。`GOTONG_COOKIE_SECURE=1` 加 TLS，cookie 黏住。后续重启 systemd service 不会再铸 token —— admin 已经持久化在 `admins.json` 里。
+
+> **文件丢了？** 如果没用就删了（或者首启时 `GOTONG_HOST` 还没填对），用下面这条**不启动 listener** 的恢复命令：
 >
 > ```bash
 > sudo -u gotong -H GOTONG_SPACE=/srv/gotong-data \
@@ -319,7 +327,7 @@ First-run admin URL (shown ONCE — save it):
 >   /opt/gotong/packages/host/bin/gotong-host.js mint-admin-token
 > ```
 >
-> 它不启动 Hub / WebSocket / Web listener，只 open `GOTONG_SPACE`，往 `admins.json` 加一个新 admin，按 `GOTONG_HOST` / `GOTONG_WEB_PORT` / `GOTONG_COOKIE_SECURE` 打印一次性 URL（公网 hostname 直接对得上），然后退出。已存在的 admin、cookie、session 都不动。可选传 display name 给新 admin 加标签：`mint-admin-token "Carol"`。
+> 它不启动 Hub / WebSocket / Web listener，只 open `GOTONG_SPACE`，往 `admins.json` 加一个新 admin，然后**重写 `runtime/admin-link.txt`**（同一个 0600 文件、同一个 H20 理由——永不进 stdout），最后退出。它认 `GOTONG_HOST` / `GOTONG_WEB_PORT` / `GOTONG_COOKIE_SECURE`，所以带上 `GOTONG_HOST=hub.example.com` 时文件里的 URL 已经指向你的公网域名——不用再手动改前缀。已存在的 admin、cookie、session 都不动。可选传 display name 给新 admin 加标签：`mint-admin-token "Carol"`。
 
 ### C.8 邀请更多 admin
 

@@ -112,7 +112,7 @@ npx gotong start
 
 # B. Docker (no Node setup, works on macOS / Windows / Linux)
 docker compose up
-# → http://127.0.0.1:3000  + admin URL printed in the logs
+# → http://127.0.0.1:3000  (setup wizard — no token needed on loopback)
 # → state persists under ./data
 
 # C. From source (cloned repo, full demo set available)
@@ -121,7 +121,10 @@ pnpm build
 pnpm host
 ```
 
-All three boot the same binary. Open the printed admin URL → save the token → you're in.
+All three boot the same binary. Open the printed setup-wizard URL → you're in.
+(The token-bearing `/admin` URL is the backup path and lives in
+`<space>/runtime/admin-link.txt`, mode `0600` — it is never printed, so log
+shippers never see it.)
 
 **First-run nicety (new).** After boot the host prints a prominent next-step
 banner pointing at the loopback setup wizard, and on a local (loopback) first
@@ -228,7 +231,8 @@ unsafe. It prints the safe last mile: fill the env, run
 
 ```bash
 docker compose up
-# → http://127.0.0.1:3000/admin?token=<打印出来>
+# → http://127.0.0.1:3000 (回环设置向导, 无需 token; 带 token 的备用链接在
+#   ./data/runtime/admin-link.txt, mode 0600 — 永不打印进日志)
 # → 首屏顶部不显示 "owner" 角色 chip (个人用户不需要看见组织角色)
 # → 副标题写"我的 AI 桌面"(不是"管理员控制台")
 # → 设置 tab 出现 [升级到团队模式] 按钮 — 哪天想拉人就点一下
@@ -254,7 +258,7 @@ The first ready-to-run shipped experience. 7 教练 (访谈 + 身体 / 心理 / 
 
 ```text
 1. 装好 host (Docker 或源码,见上)
-2. 打开打印的 admin URL → 进 admin
+2. 打开打印的设置向导 URL → 走完向导 → 进 admin
 3. 申请 DeepSeek API key: https://platform.deepseek.com (新用户送 10 元额度,够跑几十次)
 4. Admin → 工作流 tab → 点 [导入团队 (bundle)] → 点 [🎁 用内置模板:个人成长]
    → 粘贴 DeepSeek key → [导入]

@@ -294,8 +294,24 @@ if [ -n "$PACK_FILE" ]; then
   [ -z "$PACK_ABS" ] && PACK_ABS="$PACK_FILE"
   # `|| true`: the env file may not exist yet (fresh box, pre-step-5 dry run).
   WEB_PORT="$(grep -E '^GOTONG_WEB_PORT=' "$ENV_FILE" 2>/dev/null | head -1 | cut -d= -f2 || true)"
+  # provision POSTs, and every non-GET goes through checkOrigin(): when
+  # GOTONG_ALLOWED_HOSTS is set, a `Host: 127.0.0.1:3000` request is 403
+  # "forbidden: untrusted host" — there is no loopback exemption. So the
+  # URL we print must be the PUBLIC hostname (Caddy forwards Host through).
+  ALLOWED="$(grep -E '^GOTONG_ALLOWED_HOSTS=' "$ENV_FILE" 2>/dev/null | head -1 | cut -d= -f2 | cut -d, -f1 | tr -d '"' || true)"
+  if [ -z "$ALLOWED" ]; then
+    # No allow-list configured → checkOrigin is disabled → loopback works.
+    PROVISION_URL="http://127.0.0.1:${WEB_PORT:-3000}"
+    PROVISION_NOTE=""
+  elif [ "$ALLOWED" = "hub.example.com" ]; then
+    PROVISION_URL="https://<你的域名>"
+    PROVISION_NOTE="  ⚠ GOTONG_ALLOWED_HOSTS 还是样例值 — 先在 $ENV_FILE 填真域名"
+  else
+    PROVISION_URL="https://$ALLOWED"
+    PROVISION_NOTE=""
+  fi
   PROVISION_CMD="node $PREFIX/packages/cli/bin/gotong.js provision $PACK_ABS \\
-         --url http://127.0.0.1:${WEB_PORT:-3000} --token <admin-token> --user <成员id>"
+         --url $PROVISION_URL --token <admin-token> --user <成员id>"
 fi
 
 # ── start (opt-in) or print the safe last mile ────────────────────────────────
@@ -303,12 +319,15 @@ echo
 if [ -n "$DO_START" ]; then
   echo "── starting (--start) ──"
   run systemctl restart gotong
-  note "Watch for the one-time admin URL:"
-  note "  sudo journalctl -u gotong -f"
+  note "The admin URL is NOT in the log (H20 — the token never hits stdout)."
+  note "Read it from the 0600 file, then delete it:"
+  note "  sudo cat $SPACE/runtime/admin-link.txt"
+  note "  sudo rm  $SPACE/runtime/admin-link.txt"
   if [ -n "$PROVISION_CMD" ]; then
     note ""
-    note "开荒 (--pack): once you have the admin token from the journal, run:"
+    note "开荒 (--pack): once you have the admin token from that file, run:"
     note "  $PROVISION_CMD"
+    [ -n "$PROVISION_NOTE" ] && note "$PROVISION_NOTE"
     note "  (绿/黄/红开荒报告; --user 可省 — 建议行装完在 admin「定时」卡补人)"
   fi
 else
@@ -324,12 +343,17 @@ else
   3. Put Caddy in front (TLS :443 → 127.0.0.1) + firewall to 80/443/SSH:
        docs/zh/DEPLOY.md §C.5 (Caddyfile) · §C.6 (ufw)
 
-  4. Start it + grab the one-time admin URL from the log:
+  4. Start it, then read the admin URL from the 0600 file (it is NEVER
+     printed to the log — the token must not reach journalctl):
        sudo systemctl enable --now gotong
-       sudo journalctl -u gotong -f
+       sudo cat $SPACE/runtime/admin-link.txt
+       sudo rm  $SPACE/runtime/admin-link.txt   # 读后即焚
 ${PROVISION_CMD:+
   5. 开荒 (--pack): 装模板 → 建调度 → 跑验收, one command with the token from step 4:
-       $PROVISION_CMD
+       $PROVISION_CMD${PROVISION_NOTE:+
+$PROVISION_NOTE}
+     (一旦 GOTONG_ALLOWED_HOSTS 填了值, --url 就必须用其中的域名 —
+      回环 Host 会被 checkOrigin 判 403 forbidden: untrusted host)
 }
   Full runbook (topology, IP-exposure risks, IM member onboarding):
     docs/zh/GO-LIVE.md

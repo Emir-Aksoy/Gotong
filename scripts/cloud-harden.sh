@@ -25,10 +25,12 @@
 # (jq / ss / crontab) downgrade that one check to a warning, never a hard error.
 #
 # Usage:
-#   ./scripts/cloud-harden.sh [ENV_FILE] [--space DIR]
+#   ./scripts/cloud-harden.sh [ENV_FILE] [--space DIR] [--unit NAME]
 #     ENV_FILE   path to the systemd EnvironmentFile (default: /etc/gotong.env)
 #     --space    workspace dir for the admins.json check (default: $GOTONG_SPACE
 #                from the env file, else /srv/gotong-data)
+#     --unit     systemd unit to probe for an injected master key
+#                (default: gotong)
 #
 # Exit codes:
 #   0 — no red findings (warnings are fine)
@@ -40,11 +42,12 @@ set -euo pipefail
 
 ENV_FILE="/etc/gotong.env"
 SPACE_OVERRIDE=""
+UNIT="gotong"
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
     -h | --help)
-      sed -n '2,40p' "$0" | sed 's/^# \{0,1\}//'
+      sed -n '2,39p' "$0" | sed 's/^# \{0,1\}//'
       exit 0
       ;;
     --space)
@@ -53,6 +56,14 @@ while [ "$#" -gt 0 ]; do
       ;;
     --space=*)
       SPACE_OVERRIDE="${1#--space=}"
+      shift
+      ;;
+    --unit)
+      UNIT="${2:-}"
+      shift 2
+      ;;
+    --unit=*)
+      UNIT="${1#--unit=}"
       shift
       ;;
     -*)
@@ -202,7 +213,41 @@ case "$PROVIDER" in
       warn "GOTONG_MASTER_KEY is written plaintext in $ENV_FILE" \
         "inject it via a systemd secret instead; keep this file free of the KEK"
     else
-      pass "master key uses the env provider, not present in the file (injected via secret — good)"
+      # Absent from this file is NOT proof it is injected elsewhere. With
+      # provider=env and no key, the host THROWS at boot
+      # (identity/crypto.ts resolveMasterKeyProvider). Calling that a pass
+      # sent operators straight into a crash loop, so probe for a real
+      # injection source and only claim what we can see.
+      MK_SRC=""
+      if command -v systemctl >/dev/null 2>&1 &&
+        systemctl cat "$UNIT" >/dev/null 2>&1; then
+        # `Environment=` from the unit + drop-ins. grep -q: never echo the KEK.
+        if systemctl show "$UNIT" -p Environment --value 2>/dev/null |
+          grep -q 'GOTONG_MASTER_KEY='; then
+          MK_SRC="systemd Environment= (unit or drop-in)"
+        fi
+        if [ -z "$MK_SRC" ]; then
+          # Other EnvironmentFile= entries — format: "/path (ignore_errors=no)".
+          while read -r ef _rest; do
+            [ -z "$ef" ] && continue
+            [ "$ef" = "$ENV_FILE" ] && continue
+            [ -r "$ef" ] || continue
+            if grep -qE '^[[:space:]]*GOTONG_MASTER_KEY=.' "$ef"; then
+              MK_SRC="EnvironmentFile=$ef"
+              break
+            fi
+          done <<<"$(systemctl show "$UNIT" -p EnvironmentFiles --value 2>/dev/null | tr ' ' '\n' | grep '^/' || true)"
+        fi
+        if [ -n "$MK_SRC" ]; then
+          pass "master key injected via $MK_SRC (not on the data disk — good)"
+        else
+          fail "GOTONG_MASTER_KEY_PROVIDER=env but no GOTONG_MASTER_KEY anywhere in unit '$UNIT'" \
+            "the host will REFUSE TO BOOT — see docs/zh/PROD-HARDENING-RUNBOOK.md 「黄4 master key 移出数据盘」"
+        fi
+      else
+        warn "provider=env and the KEK is not in $ENV_FILE — cannot confirm it is injected" \
+          "no systemd unit '$UNIT' visible here (pass --unit NAME); if it is truly unset the host will refuse to boot"
+      fi
     fi
     ;;
   '' | local-file)
