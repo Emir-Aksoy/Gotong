@@ -184,6 +184,115 @@ describe('ComposedToolset.listTools — cross-child name collision (R8)', () => 
   })
 })
 
+// The routing table. `callTool` used to re-list every child on every single
+// call; for an McpToolset child that's a live `tools/list` round-trip per
+// server. These pin the two halves of the fix: the steady state costs zero
+// listings, and the miss path still picks up a tool face that moved.
+describe('ComposedToolset.callTool — route cache', () => {
+  /** A child whose tool list is mutable and whose listings are counted. */
+  function countingToolset(names: string[]) {
+    const state = {
+      names: [...names],
+      listCalls: 0,
+      calledWith: [] as string[],
+    }
+    const toolset: LlmAgentToolset = {
+      listTools: async () => {
+        state.listCalls++
+        return state.names.map((name) => ({
+          name,
+          inputSchema: { type: 'object' as const },
+        }))
+      },
+      callTool: async (name: string) => {
+        state.calledWith.push(name)
+        return { content: [{ type: 'text' as const, text: `ran ${name}` }] }
+      },
+    }
+    return { state, toolset }
+  }
+
+  it('lists each child once no matter how many calls follow', async () => {
+    const a = countingToolset(['a1', 'a2'])
+    const b = countingToolset(['b1'])
+    const composed = ComposedToolset.of(a.toolset, b.toolset)
+
+    for (const n of ['a1', 'b1', 'a2', 'a1', 'b1']) await composed.callTool(n, {})
+
+    // One rebuild, triggered by the first (cold) call. Before the cache this
+    // was 5 sweeps × 2 children = 10 listings — and each of those is a network
+    // round-trip when the child is an McpToolset.
+    expect(a.state.listCalls).toBe(1)
+    expect(b.state.listCalls).toBe(1)
+    expect(a.state.calledWith).toEqual(['a1', 'a2', 'a1'])
+    expect(b.state.calledWith).toEqual(['b1', 'b1'])
+  })
+
+  it('picks up a tool hot-added after the cache is warm', async () => {
+    // This is what `local-agent-pool.installMcpServer` does to a running
+    // agent's toolset. A cache that never rebuilt would strand the new tool.
+    const a = countingToolset(['a1'])
+    const composed = ComposedToolset.of(a.toolset)
+    await composed.callTool('a1', {})
+    expect(a.state.listCalls).toBe(1)
+
+    a.state.names.push('late')
+    const r = await composed.callTool('late', {})
+
+    expect((r.content[0] as { text: string }).text).toBe('ran late')
+    expect(a.state.listCalls).toBe(2) // the miss forced exactly one re-list
+    // ...and the newly-learned name is now cached too.
+    await composed.callTool('late', {})
+    expect(a.state.listCalls).toBe(2)
+  })
+
+  it('lets the old owner answer for a name that disappeared', async () => {
+    // `uninstallMcpServer` removes a server mid-session. The stale entry routes
+    // to the child that owned it, which reports its own specific failure
+    // ("no server named 'x'"). LlmAgent turns that throw into an isError tool
+    // result, so the turn survives — with a better diagnosis than the old
+    // code's blanket "unknown tool".
+    const state = { names: ['gone'], listCalls: 0 }
+    const child: LlmAgentToolset = {
+      listTools: async () => {
+        state.listCalls++
+        return state.names.map((name) => ({ name, inputSchema: { type: 'object' as const } }))
+      },
+      callTool: async (name: string) => {
+        if (!state.names.includes(name)) throw new Error(`no server named '${name}'`)
+        return { content: [{ type: 'text' as const, text: `ran ${name}` }] }
+      },
+    }
+    const composed = ComposedToolset.of(child)
+    await composed.callTool('gone', {})
+
+    state.names = []
+    await expect(composed.callTool('gone', {})).rejects.toThrow(/no server named 'gone'/)
+  })
+
+  it('shares one rebuild across concurrent misses', async () => {
+    // Without the in-flight guard, parallel tool_use with N unknown names would
+    // fan out N full sweeps — the exact cost this cache exists to remove.
+    const a = countingToolset(['a1', 'a2', 'a3'])
+    const composed = ComposedToolset.of(a.toolset)
+    await Promise.all([
+      composed.callTool('a1', {}),
+      composed.callTool('a2', {}),
+      composed.callTool('a3', {}),
+    ])
+    expect(a.state.listCalls).toBe(1)
+  })
+
+  it('still answers isError for a name no child has', async () => {
+    const a = countingToolset(['a1'])
+    const composed = ComposedToolset.of(a.toolset)
+    const r = await composed.callTool('nope', {})
+    expect(r.isError).toBe(true)
+    expect((r.content[0] as { text: string }).text).toMatch(/unknown tool: nope/)
+    expect(a.state.calledWith).toEqual([])
+  })
+})
+
 describe('ComposedToolset.runForTask — nesting', () => {
   it('returns fn\'s value verbatim when no child implements runForTask', async () => {
     const composed = ComposedToolset.of(

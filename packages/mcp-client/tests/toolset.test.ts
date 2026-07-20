@@ -305,6 +305,17 @@ describe('McpToolset — multi-server namespacing', () => {
     expect(betaTools.find((t) => t.name === 'beta__echo_v2')).toBeTruthy()
   })
 
+  it('listTools() keeps server-registration order despite querying in parallel', async () => {
+    // The servers are queried concurrently (their round-trips are independent,
+    // and serializing them stacked every server's latency in front of the
+    // agent's first reply). Results are reassembled in registration order, so
+    // whichever server answers first must not reorder the tool list the LLM
+    // sees — an unstable order would also churn the prompt cache.
+    await ts.connect()
+    const owners = (await ts.listTools()).map((t) => t.serverName)
+    expect(owners).toEqual([...Array(4).fill('alpha'), ...Array(4).fill('beta')])
+  })
+
   it('callTool() routes to the right server even with overlapping tool names', async () => {
     await ts.connect()
     const a = await ts.callTool('alpha__echo', { text: 'A' })

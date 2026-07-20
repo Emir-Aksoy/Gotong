@@ -284,31 +284,44 @@ export class McpToolset extends EventEmitter {
    * Calls `tools/list` against each live server. Dead servers
    * contribute nothing — they don't throw, they just disappear from
    * the result. Use `.status()` to surface them to the operator.
+   *
+   * The servers are queried **concurrently**: each round-trip is
+   * independent (one `state`, one client, no shared writes), so paying
+   * for them one after another just added up every server's latency
+   * into the caller's wait. `LlmAgent` takes this snapshot once at the
+   * head of each task, so that sum sat directly in front of the
+   * agent's first reply. Results are reassembled in server-registration
+   * order, so the tool list the LLM sees stays stable regardless of
+   * which server answers first.
    */
   async listTools(): Promise<NamespacedTool[]> {
     this.requireConnected()
-    const out: NamespacedTool[] = []
-    for (const state of this.servers.values()) {
-      if (state.status !== 'live' || !state.client) continue
-      try {
-        const res = await state.client.listTools({}, {
-          timeout: this.listToolsTimeoutMs,
-        })
-        state.tools = res.tools.map((t: Tool) => ({
-          ...t,
-          name: `${state.config.name}${NAME_SEP}${t.name}`,
-          serverName: state.config.name,
-          serverToolName: t.name,
-        }))
-        out.push(...state.tools)
-      } catch (err) {
-        // Don't tear the whole toolset down for one server's list
-        // failure. Mark dead, log via lastError, and keep going.
-        state.status = 'dead'
-        state.lastError = err instanceof Error ? err.message : String(err)
-      }
-    }
-    return out
+    const perServer = await Promise.all(
+      [...this.servers.values()].map(async (state): Promise<NamespacedTool[]> => {
+        if (state.status !== 'live' || !state.client) return []
+        try {
+          const res = await state.client.listTools({}, {
+            timeout: this.listToolsTimeoutMs,
+          })
+          state.tools = res.tools.map((t: Tool) => ({
+            ...t,
+            name: `${state.config.name}${NAME_SEP}${t.name}`,
+            serverName: state.config.name,
+            serverToolName: t.name,
+          }))
+          return state.tools
+        } catch (err) {
+          // Don't tear the whole toolset down for one server's list
+          // failure. Mark dead, log via lastError, and keep going.
+          // Caught per server so `Promise.all` never rejects — one bad
+          // server must not cancel the others' results.
+          state.status = 'dead'
+          state.lastError = err instanceof Error ? err.message : String(err)
+          return []
+        }
+      }),
+    )
+    return perServer.flat()
   }
 
   /**

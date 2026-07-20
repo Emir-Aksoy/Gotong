@@ -115,20 +115,70 @@ export class ComposedToolset implements LlmAgentToolset {
     return all
   }
 
+  /**
+   * name → owning child. Built lazily and **rebuilt on every miss**, so a
+   * name that appears later (hot-added MCP server) still routes.
+   *
+   * The version before this cached nothing: it re-listed every child on
+   * every single tool call, and for an `McpToolset` child `listTools()` is a
+   * live `tools/list` round-trip per server. 4 tool calls across 5 servers =
+   * 20 round-trips spent re-deriving an answer that hadn't changed.
+   *
+   * Rebuild-on-miss is what keeps that loop's stated purpose intact. The
+   * three ways the tool face can move, and what happens to each:
+   *
+   *   - **name appears** (`installMcpServer` hot-adds): first call misses →
+   *     rebuild → routes. Same as before.
+   *   - **name disappears** (`uninstallMcpServer`): the stale entry routes to
+   *     the old child, which answers with its own honest error ("no server
+   *     named 'x'" / "server 'x' is no longer live"). `LlmAgent` turns any
+   *     throw from `callTool` into an `isError` tool result (agent.ts), so the
+   *     turn survives either way — and that error names the actual problem,
+   *     where the old code could only say "unknown tool".
+   *   - **name moves between children**: the next miss rebuilds the whole map,
+   *     so stale entries don't outlive a rebuild.
+   *
+   * `listTools()` is deliberately NOT cached: it's the once-per-task snapshot
+   * `LlmAgent` takes (agent.ts `runToolLoop`), and hot-add propagation is
+   * documented to ride on exactly that (`local-agent-pool.installMcpServer`).
+   */
+  private route = new Map<string, LlmAgentToolset>()
+  private rebuilding: Promise<void> | null = null
+
+  private rebuildRoute(): Promise<void> {
+    // Concurrent misses share one rebuild — otherwise parallel tool_use with
+    // N unknown names fans out N full listTools sweeps, the very thing this
+    // cache exists to kill.
+    if (this.rebuilding) return this.rebuilding
+    const p = (async () => {
+      const next = new Map<string, LlmAgentToolset>()
+      for (const t of this.toolsets) {
+        for (const td of await t.listTools()) {
+          // First-match-wins, mirroring the old loop's order. Collisions are
+          // `listTools()`'s job to shout about (and it runs first, per task);
+          // re-deciding that here would only change WHERE the same wiring bug
+          // surfaces.
+          if (!next.has(td.name)) next.set(td.name, t)
+        }
+      }
+      this.route = next
+    })().finally(() => {
+      if (this.rebuilding === p) this.rebuilding = null
+    })
+    this.rebuilding = p
+    return p
+  }
+
   async callTool(
     name: string,
     args: Record<string, unknown>,
   ): Promise<LlmToolCallResult> {
-    // Find the first child that advertises the name. Loop instead of
-    // building a name→toolset Map up-front so toolsets that mutate
-    // their tool list at runtime (some MCP servers add tools on
-    // demand) are still routed correctly.
-    for (const t of this.toolsets) {
-      const tools = await t.listTools()
-      if (tools.some((td) => td.name === name)) {
-        return t.callTool(name, args)
-      }
+    let owner = this.route.get(name)
+    if (!owner) {
+      await this.rebuildRoute()
+      owner = this.route.get(name)
     }
+    if (owner) return owner.callTool(name, args)
     return {
       content: [
         {
