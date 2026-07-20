@@ -47,7 +47,7 @@ const REPO = resolve(HERE, '..')
  * on purpose — that visible edit is the guard.
  */
 const BUDGETS = [
-  { file: 'packages/host/src/main.ts', max: 3000 }, // the assembly binary — SLIM 抽 heartbeat-engine 后 2941,棘轮 3040→2980;C-M2-M4b 令牌刷新计时器 2980→2986;C-M2-M5a 出站 OAuth 连接器 CRUD surface 接线(factory construct + serveWeb opt)显式抬 2986→2990;MU-M5 记忆树 git 快照 opt-in 接线(GOTONG_BUTLER_MEMORY_GIT 解析 + sweeper gitSnapshot)显式抬 2990→2996;审计 P1 全局 unhandledRejection 兜底网(installProcessSafetyNet)防后台计时器崩宿主,显式抬 2996→3000
+  { file: 'packages/host/src/main.ts', max: 2960 }, // the assembly binary — SLIM 抽 heartbeat-engine 后 2941,棘轮 3040→2980;C-M2-M4b 令牌刷新计时器 2980→2986;C-M2-M5a 出站 OAuth 连接器 CRUD surface 接线(factory construct + serveWeb opt)显式抬 2986→2990;MU-M5 记忆树 git 快照 opt-in 接线(GOTONG_BUTLER_MEMORY_GIT 解析 + sweeper gitSnapshot)显式抬 2990→2996;审计 P1 全局 unhandledRejection 兜底网(installProcessSafetyNet)防后台计时器崩宿主,显式抬 2996→3000;审计⑦-1 抽出 transcript-line.ts(describe 日志渲染器,纯函数无闭包依赖)后 2945,下调 3000→2960——按上文体检记录 1 留 15 行余量,不再零余量
   { file: 'packages/web/src/server.ts', max: 2381 }, // web route assembly (types → server-types.ts); 2350→2370 C-M2-M3b 出站 OAuth connect 路由对(公开 callback + admin begin 派发),抽 blessed OIDC/SAML 派发风险更高故显式抬棘轮;2370→2381 C-M2-M5a 出站 OAuth 连接器 CRUD 路由组接线(import+re-export+ctx+HandlerCtx 字段+派发块,逻辑在 oauth-connector-admin-routes.ts 不计),同 OIDC/SAML 派发家族
   { file: 'packages/web/src/me-routes.ts', max: 2850 }, // /me route sprawl (types → me-routes-types.ts)
   // 2026-07-20 收编的三个失管大文件（见头注第 2 条）。预算 = 当时行数 + ~45 行
