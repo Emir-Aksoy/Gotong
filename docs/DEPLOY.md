@@ -291,8 +291,16 @@ WantedBy=multi-user.target
 hub.example.com {
     encode zstd gzip
 
-    # Caddy adds X-Forwarded-* headers automatically; we use them for
-    # client IP in the rate limiter. No additional config needed.
+    # Caddy adds X-Forwarded-* automatically and — with no
+    # `trusted_proxies` configured, as here — IGNORES any XFF the
+    # client sent, so the value the host keys its rate limiter on
+    # cannot be forged. Nothing more is needed on this lane.
+    #
+    # If you later add `trusted_proxies` (e.g. you put a CDN in
+    # front), also add `header_up -X-Forwarded-For` inside this
+    # block — otherwise a client inside a trusted range can prepend
+    # a fake IP and walk around the per-IP limiter. See
+    # `caddy/Caddyfile`, which does exactly that for the compose lane.
     reverse_proxy 127.0.0.1:3000 {
         # Generous timeouts: SSE stream is long-poll
         transport http {

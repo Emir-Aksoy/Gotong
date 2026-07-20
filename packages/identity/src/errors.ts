@@ -76,6 +76,11 @@ export type IdentityErrorCode =
   //   `alert_rule_not_found`  get/update/remove targeted an id with no row.
   | 'alert_rule_exists'
   | 'alert_rule_not_found'
+  // The store carries schema versions this build has no migration for — i.e.
+  // a NEWER Gotong touched it and someone is now booting an older one. Fatal
+  // at store-open time on purpose; migrations are forward-only, so the fix is
+  // to go forward again or restore the pre-upgrade backup, never to force it.
+  | 'schema_from_the_future'
   // v5 Stream F day-3 — control-plane alert FIRINGS (breach history).
   //   `alert_firing_open`       openPeerSummaryAlertFiring hit the partial
   //                             unique index — a firing is already OPEN for

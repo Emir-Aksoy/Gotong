@@ -242,8 +242,14 @@ WantedBy=multi-user.target
 hub.example.com {
     encode zstd gzip
 
-    # Caddy 自动加 X-Forwarded-*；我们用它作为 rate limiter 的客户端 IP 源，
-    # 不需要额外配置。
+    # Caddy 自动加 X-Forwarded-*，而且在**没配 trusted_proxies**（就像这里）
+    # 时会**忽略客户端自带的 XFF**，所以 host 用来给限流器分桶的那个 IP 伪造
+    # 不了。这条车道到此为止，不需要额外配置。
+    #
+    # 但你若以后加了 trusted_proxies（比如前面挂 CDN），必须同时在本块里加
+    # `header_up -X-Forwarded-For`——否则一个来自受信网段的客户端可以在 XFF
+    # 前面塞个假 IP，绕开按 IP 的限流。compose 车道的 `caddy/Caddyfile` 正是
+    # 这么做的，可作参照。
     reverse_proxy 127.0.0.1:3000 {
         # 宽松超时：SSE 流是 long-poll
         transport http {

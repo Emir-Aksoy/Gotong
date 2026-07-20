@@ -72,13 +72,15 @@ grepped, and `jq`'d. That is on purpose.
 
 ### Scripts
 
-Three small bash scripts under `scripts/backup/`:
+Five bash scripts under `scripts/backup/`:
 
 | Script | Job |
 |---|---|
 | `backup.sh` | Tar + gzip the workspace; exclude both master keys (secret.key + identity-master.key) + sessions. |
 | `restore.sh` | Extract a backup to a fresh directory; stash any existing target. |
 | `verify.sh` | Sanity-check a workspace (or backup) using `jq` only — no Node needed. |
+| `prune.sh` | Drop tarballs older than N days. Built for cron: quiet on success, validates its args, and only ever matches `gotong-*.tar.gz` so it can't sweep an unrelated archive parked in the same directory. |
+| `drill.sh` | Disaster-recovery drill: backup → restore → verify → invariant diff, **exiting non-zero when a backup does not cleanly restore**. Read-only on the source, safe against a live `.gotong/`. This is the one that turns "we have backups" into "we have backups that work". |
 
 The same semantics also ship as TS-native CLI commands — `gotong backup` /
 `gotong restore` — for machines without bash (Windows, the portable bundle).
@@ -86,6 +88,13 @@ They add a `gotong-backup-manifest.json` (file list + sha256) inside the
 archive, and `gotong restore` refuses to touch the target unless every hash
 verifies. Servers with cron keep using the `.sh` scripts; both formats
 exclude the same keys/sessions. See `gotong help backup` / `gotong help restore`.
+
+> **Backups are also your only rollback.** Schema migrations are forward-only —
+> no `down` SQL exists — so reverting the binary does *not* revert the store; an
+> older host now refuses to boot against a migrated database rather than
+> silently running old code on a new schema. Take a fresh backup immediately
+> before every upgrade, not just nightly. Procedure:
+> [`docs/zh/UPGRADE-RUNBOOK.md`](zh/UPGRADE-RUNBOOK.md).
 
 ### One-shot example
 
@@ -111,15 +120,40 @@ a write-heavy room.
   17 *  *   *   *  gotong  /opt/gotong/scripts/backup/backup.sh /var/lib/gotong/.gotong /var/backups/gotong
   0  3  *   *   *  gotong  /opt/gotong/scripts/backup/prune.sh /var/backups/gotong 14
   0  4  *   *   *  gotong  rclone copy /var/backups/gotong remote:gotong-backups/
+  0  5  *   *   0  gotong  /opt/gotong/scripts/backup/drill.sh /var/lib/gotong/.gotong
 ```
 
-There's no built-in `prune.sh`; here's a 3-liner that does it:
+The weekly `drill.sh` line is the one people skip and then regret: it
+restores the backup into a scratch dir and diffs the invariants, so cron
+mails you the week a backup silently stops restoring — instead of you
+finding out during the outage. An untested backup is a guess.
 
-```bash
-#!/usr/bin/env bash
-# scripts/backup/prune.sh <dir> <keep-days>
-find "$1" -name "gotong-*.tar.gz" -mtime "+$2" -print -delete
+**Installed from npm instead of a git checkout?** Then there is no
+`scripts/` directory on the box. Use the CLI, which produces the same
+`gotong-<label>-<UTC-timestamp>.tar.gz` name — so `prune.sh`'s glob and any
+retention tooling you already have keep working across both:
+
+```cron
+  17 *  *   *   *  gotong  gotong backup /var/lib/gotong/.gotong /var/backups/gotong
+  0  3  *   *   *  gotong  find /var/backups/gotong -maxdepth 1 -type f -name 'gotong-*.tar.gz' -mtime +14 -print -delete
 ```
+
+Pick one lane and stay in it. The two are interchangeable by design — same
+exclusions, same filename — but the `.sh` lane needs no Node (it runs on a
+bare recovery box) while the CLI lane needs no bash (Windows, portable
+bundle) and additionally verifies a sha256 manifest before restore writes
+anything.
+
+> **One asymmetry, on purpose.** Only the CLI lane records
+> `<space>/runtime/last-backup.json` — the fact Atong's `backup_status` reads
+> and its staleness reminder watches. `backup.sh` deliberately never writes
+> into the workspace it is archiving, because `drill.sh` runs it against a
+> **live** `.gotong/` and that read-only promise is what makes the drill safe.
+> Consequence: back up purely via cron `.sh` and Atong will keep saying it has
+> never seen a backup. That is a blind spot, not a broken backup — your
+> tarballs are fine. If you want Atong in the loop, run the CLI lane, or add a
+> weekly `gotong backup` alongside the hourly `.sh` one purely to refresh the
+> fact.
 
 ### Master key handling
 

@@ -9,9 +9,19 @@
  * transaction and records the version in `schema_migrations`. Safe to
  * call on every host startup; the function short-circuits when
  * everything is already applied.
+ *
+ * Migrations are FORWARD-ONLY: no `down` SQL exists, by design. That
+ * makes a binary downgrade the dangerous direction, so applyMigrations
+ * refuses to open a database carrying versions this build has never
+ * heard of — see the `schema_from_the_future` guard below. Without it
+ * an older host boots perfectly happily on a newer store (it finds all
+ * of ITS migrations already applied and short-circuits), then runs old
+ * code against new columns. Upgrade procedure + why restore-from-backup
+ * is the only real rollback: docs/zh/UPGRADE-RUNBOOK.md.
  */
 
 import { transactionImmediate, type SqliteDb } from './db.js'
+import { IdentityError } from './errors.js'
 
 interface Migration {
   version: number
@@ -1266,6 +1276,29 @@ export function applyMigrations(db: SqliteDb): { applied: number[] } {
       (r) => r.version,
     ),
   )
+  // Downgrade tripwire. Every version in the table that this build has no
+  // migration for was written by a NEWER host — the store is ahead of the
+  // binary. Nothing below would notice: the loop only looks for missing
+  // versions, finds none, and returns cleanly, leaving old code to read
+  // and write a schema it was never compiled against (silent data damage,
+  // not a crash). Refuse instead, and say so in terms an operator mid-
+  // rollback can act on. Cheap: one set difference on a table with <100
+  // rows, once per store open.
+  const knownVersions = new Set(MIGRATIONS.map((m) => m.version))
+  const ahead = [...appliedVersions].filter((v) => !knownVersions.has(v)).sort((a, b) => a - b)
+  if (ahead.length > 0) {
+    throw new IdentityError({
+      code: 'schema_from_the_future',
+      message:
+        `identity store is newer than this build: it records schema version(s) ` +
+        `${ahead.join(', ')}, but this binary only knows up to v${latestSchemaVersion()}. ` +
+        `A newer Gotong migrated this store, and migrations are forward-only — ` +
+        `there is no down path. Re-install the newer version to boot, or restore ` +
+        `the pre-upgrade backup (see docs/zh/UPGRADE-RUNBOOK.md). Do NOT delete ` +
+        `rows from schema_migrations to get past this — the columns are already there.`,
+    })
+  }
+
   const newlyApplied: number[] = []
   const recheck = db.prepare('SELECT 1 FROM schema_migrations WHERE version = ?')
   for (const m of MIGRATIONS) {

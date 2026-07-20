@@ -38,12 +38,23 @@ export const SECURITY_HEADERS: Record<string, string> = {
  * ignored — a remote attacker can set the header on every request
  * to defeat a naïve rate limiter, so we don't trust it by default.
  *
- * When `trustProxy` is on, callers are expected to be behind a
- * proxy that overwrites XFF (Caddy `reverse_proxy` and nginx
- * `proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for`
- * both do). If the proxy passes through client-supplied XFF
- * untouched, the limiter is again trivially bypassable — that's
- * a proxy-config bug, not a server bug.
+ * We read the FIRST entry, so with `trustProxy` on the whole limiter
+ * rests on the proxy not letting a client forge that entry. Note the
+ * mechanism that actually protects you, because it is not "the proxy
+ * overwrites XFF": both Caddy and nginx *append* the peer address to
+ * whatever arrived. What keeps it honest is that they ignore an
+ * incoming XFF unless it came from an address the operator explicitly
+ * trusted — Caddy's docs: "by default, the proxy will ignore their
+ * values from incoming requests, to prevent spoofing".
+ *
+ * The footgun is therefore an over-broad trust list, not a missing
+ * one. Our own `caddy/Caddyfile` sets `trusted_proxies static
+ * private_ranges` (needed so Caddy trusts the compose network), which
+ * would also trust a client dialling in from a private range — hence
+ * the belt-and-braces `header_up -X-Forwarded-For` there, stripping
+ * the client value before Caddy sets its own. If you widen
+ * `trusted_proxies` on a lane that lacks that strip, the limiter
+ * becomes forgeable — a proxy-config bug, not a server bug.
  */
 export function clientIp(ctx: SecurityCtx, req: IncomingMessage): string {
   if (ctx.trustProxy) {
