@@ -42,11 +42,11 @@
   "dependencies": {
     "@gotong/core": "workspace:*",
     "@gotong/protocol": "workspace:*",
+    "@gotong/workflow": "workspace:*",
     "yaml": "^2.6.0"
   },
   "devDependencies": {
     "@gotong/identity": "workspace:*",
-    "@gotong/workflow": "workspace:*",
     "esbuild": "^0.28.1",
     "vitest": "^4.1.10"
   }

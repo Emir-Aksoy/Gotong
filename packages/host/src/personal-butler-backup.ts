@@ -12,8 +12,12 @@
  *
  * 数据源 = CLI backup 成功后落的 `runtime/last-backup.json` 事实(谁跑的备份
  * 都算数:命令行打的档也让 backup_status 如实报)。打包本体**直接调
- * `@gotong/cli` 的 `backup()`**(host 本就依赖 cli;同一份代码,不 shell-out
- * 不复制),档案落 `<space>/backups/`——staging 排除规则已把这个目录挡在归档
+ * `@gotong/cli` 的 `backup()`**(同一份代码,不 shell-out 不复制)。这是条
+ * **运行时**依赖,必须写在 host 的 `dependencies` 里——2026-07-20 之前它错在
+ * devDependencies,而 monorepo 里察觉不到(pnpm 不管声明在哪个块都把 workspace
+ * 包摊平了,本仓库又是唯一的消费者),外人 `npm i @gotong/host` 会在这一行
+ * ERR_MODULE_NOT_FOUND。现在 publish-readiness 第 5 条盯着。
+ * 档案落 `<space>/backups/`——staging 排除规则已把这个目录挡在归档
  * 外(backup-core.isBackupOutputPath),档案永不套档案。
  *
  * 诚实边界(宁少列也核准):「上次备份之后新增了什么」只报 **peers**(行有

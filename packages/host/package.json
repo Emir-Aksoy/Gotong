@@ -74,6 +74,7 @@
   "dependencies": {
     "@gotong/a2a": "workspace:*",
     "@gotong/acp-agent": "workspace:*",
+    "@gotong/cli": "workspace:*",
     "@gotong/core": "workspace:*",
     "@gotong/evals": "workspace:*",
     "@gotong/hub-steward": "workspace:*",
@@ -107,7 +108,6 @@
     "ws": "^8.21.1"
   },
   "devDependencies": {
-    "@gotong/cli": "workspace:*",
     "@gotong/cli-agent": "workspace:*",
     "@gotong/sdk-node": "workspace:*",
     "@types/ws": "^8.5.13",

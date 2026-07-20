@@ -940,6 +940,9 @@ importers:
       '@gotong/acp-agent':
         specifier: workspace:*
         version: link:../acp-agent
+      '@gotong/cli':
+        specifier: workspace:*
+        version: link:../cli
       '@gotong/core':
         specifier: workspace:*
         version: link:../core
@@ -1031,9 +1034,6 @@ importers:
         specifier: ^8.21.1
         version: 8.21.1
     devDependencies:
-      '@gotong/cli':
-        specifier: workspace:*
-        version: link:../cli
       '@gotong/cli-agent':
         specifier: workspace:*
         version: link:../cli-agent
@@ -1240,10 +1240,10 @@ importers:
       '@gotong/personal-memory':
         specifier: workspace:*
         version: link:../personal-memory
-    devDependencies:
       '@gotong/services-sdk':
         specifier: workspace:*
         version: link:../services-sdk
+    devDependencies:
       vitest:
         specifier: ^4.1.10
         version: 4.1.10(@types/node@26.1.1)(vite@8.1.5(@types/node@26.1.1)(esbuild@0.28.1)(tsx@4.23.1)(yaml@2.9.0))
@@ -1393,6 +1393,9 @@ importers:
       '@gotong/protocol':
         specifier: workspace:*
         version: link:../protocol
+      '@gotong/workflow':
+        specifier: workspace:*
+        version: link:../workflow
       yaml:
         specifier: ^2.6.0
         version: 2.9.0
@@ -1400,9 +1403,6 @@ importers:
       '@gotong/identity':
         specifier: workspace:*
         version: link:../identity
-      '@gotong/workflow':
-        specifier: workspace:*
-        version: link:../workflow
       esbuild:
         specifier: ^0.28.1
         version: 0.28.1

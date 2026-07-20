@@ -35,10 +35,10 @@
   "dependencies": {
     "@gotong/core": "workspace:*",
     "@gotong/llm": "workspace:*",
-    "@gotong/personal-memory": "workspace:*"
+    "@gotong/personal-memory": "workspace:*",
+    "@gotong/services-sdk": "workspace:*"
   },
   "devDependencies": {
-    "@gotong/services-sdk": "workspace:*",
     "vitest": "^4.1.10"
   }
 }
