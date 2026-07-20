@@ -247,7 +247,7 @@ jobs:
 
       - name: Attach to GitHub Release
         if: github.event_name == 'release'
-        uses: softprops/action-gh-release@718ea10b132b3b2eba29c1007bb80653f286566b # v3.0.1
+        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
         with:
           files: ${{ matrix.target.artifact }}
           fail_on_unmatched_files: true
@@ -305,7 +305,7 @@ jobs:
 
       - name: Attach SHA256SUMS to GitHub Release
         if: github.event_name == 'release'
-        uses: softprops/action-gh-release@718ea10b132b3b2eba29c1007bb80653f286566b # v3.0.1
+        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
         with:
           files: binaries/SHA256SUMS
           fail_on_unmatched_files: true
@@ -427,7 +427,7 @@ jobs:
 
       - name: Attach SBOM to GitHub Release
         if: github.event_name == 'release'
-        uses: softprops/action-gh-release@718ea10b132b3b2eba29c1007bb80653f286566b # v3.0.1
+        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
         with:
           # sbom-action wrote the file to the path we passed via
           # `output-file` above.
