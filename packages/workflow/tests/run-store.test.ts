@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -46,6 +46,38 @@ describe('RunStore.write / read / pathFor', () => {
 
   it('read() returns null for missing files', async () => {
     expect(await store.read('nope')).toBeNull()
+  })
+
+  // `ensureDirs()` memoizes because `WorkflowRunner.persist()` calls it before
+  // every step write — two synchronous stats per step, re-answering a settled
+  // question. These two pin both halves of that trade.
+  it('ensureDirs() does no work once the tree is known to exist', async () => {
+    expect(existsSync(store.runsDir)).toBe(true)
+    rmSync(store.root, { recursive: true, force: true })
+    store.ensureDirs()
+    // Deliberately still gone: the memo means a bare ensureDirs() is free, and
+    // recovery is `write()`'s job (next test) rather than a stat on every step.
+    expect(existsSync(store.runsDir)).toBe(false)
+  })
+
+  it('write() recreates a tree deleted behind its back', async () => {
+    await store.write(makeRun({ runId: 'r_1', workflowId: 'wf_a', startedAt: 1, status: 'done' }))
+    rmSync(store.root, { recursive: true, force: true })
+
+    await store.write(makeRun({ runId: 'r_2', workflowId: 'wf_a', startedAt: 2, status: 'done' }))
+
+    expect((await store.read('r_2'))?.runId).toBe('r_2')
+    expect(await store.read('r_1')).toBeNull() // the wipe really happened
+  })
+
+  it('write() still propagates non-ENOENT failures', async () => {
+    // The retry is scoped to "the directory vanished". Anything else must
+    // surface, not get quietly retried into the same wall. Parking a directory
+    // on the tmp path makes the write fail EISDIR — a real errno, no mocking.
+    mkdirSync(`${store.pathFor('r_x')}.tmp`, { recursive: true })
+    await expect(
+      store.write(makeRun({ runId: 'r_x', workflowId: 'wf_a', startedAt: 1, status: 'done' })),
+    ).rejects.toMatchObject({ code: 'EISDIR' })
   })
 })
 

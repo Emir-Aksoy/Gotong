@@ -111,14 +111,29 @@ export class RunStore {
     this.archiveDir = join(this.runsDir, SUBDIR_ARCHIVE)
   }
 
-  /** Create the directory tree if it doesn't exist. Idempotent. */
+  /** Set once the tree is known to exist; cleared if a write proves otherwise. */
+  private dirsReady = false
+
+  /**
+   * Create the directory tree if it doesn't exist. Idempotent, and after the
+   * first success it costs nothing.
+   *
+   * The memo matters because `WorkflowRunner.persist()` calls this before every
+   * single step write — two synchronous `existsSync` stats per step, on the
+   * event loop, re-answering a question whose answer was already yes. `write()`
+   * clears the flag if the tree turns out to be gone (someone deleted the space
+   * directory under a running host), so this stays self-healing rather than
+   * trading correctness for the syscalls.
+   */
   ensureDirs(): void {
+    if (this.dirsReady) return
     if (!existsSync(this.runsDir)) {
       mkdirSync(this.runsDir, { recursive: true })
     }
     if (!existsSync(this.definitionsDir)) {
       mkdirSync(this.definitionsDir, { recursive: true })
     }
+    this.dirsReady = true
   }
 
   /** Path for one run file. */
@@ -128,13 +143,24 @@ export class RunStore {
 
   /**
    * Write the run state atomically. Writes to `<file>.tmp` then renames.
-   * Throws if the directory tree doesn't exist (call `ensureDirs` first).
+   *
+   * A missing directory tree is recreated and the write retried once — that's
+   * what lets {@link ensureDirs} memoize. Any other error propagates, and a
+   * second ENOENT (i.e. the recreate didn't take) does too, so a genuinely
+   * broken path still fails loudly instead of looping.
    */
   async write(state: RunState): Promise<void> {
     const file = this.pathFor(state.runId)
     const tmp = `${file}.tmp`
     const body = JSON.stringify(state, null, 2)
-    await writeFile(tmp, body, 'utf8')
+    try {
+      await writeFile(tmp, body, 'utf8')
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException)?.code !== 'ENOENT') throw err
+      this.dirsReady = false
+      this.ensureDirs()
+      await writeFile(tmp, body, 'utf8')
+    }
     await rename(tmp, file)
   }
 
