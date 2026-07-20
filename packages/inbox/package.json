@@ -1,6 +1,6 @@
 {
   "name": "@gotong/inbox",
-  "version": "0.1.0",
+  "version": "4.0.0",
   "type": "module",
   "description": "Gotong member task inbox — file-first InboxStore + HumanInboxParticipant broker that turns a workflow's human-in-the-loop step into a parked Task a person resolves from /me.",
   "license": "MIT",

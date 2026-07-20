@@ -1,6 +1,6 @@
 {
   "name": "@gotong/im-discord",
-  "version": "0.1.0",
+  "version": "4.0.0",
   "type": "module",
   "description": "Gotong IM bridge for Discord — implements ImBridge against the Bot API (WebSocket Gateway v10 + REST). No discord.js dep (uses fetch + WebSocket).",
   "license": "MIT",

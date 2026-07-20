@@ -1,6 +1,6 @@
 {
   "name": "@gotong/im-telegram",
-  "version": "0.1.0",
+  "version": "4.0.0",
   "type": "module",
   "description": "Gotong IM bridge for Telegram — implements ImBridge via Bot API long-polling. No external Telegram SDK (uses fetch).",
   "license": "MIT",

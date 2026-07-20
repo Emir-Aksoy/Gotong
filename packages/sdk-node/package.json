@@ -1,6 +1,6 @@
 {
   "name": "@gotong/sdk-node",
-  "version": "3.1.0",
+  "version": "4.0.0",
   "type": "module",
   "description": "Gotong Node SDK — connect agents to a remote Hub over WebSocket.",
   "license": "MIT",

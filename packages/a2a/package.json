@@ -1,6 +1,6 @@
 {
   "name": "@gotong/a2a",
-  "version": "0.1.0",
+  "version": "4.0.0",
   "type": "module",
   "description": "Gotong A2A (Agent2Agent) interop — blocking message/send wire types + a tiny injectable client, shared by the inbound A2A server (host) and the outbound A2aRemoteParticipant.",
   "license": "MIT",

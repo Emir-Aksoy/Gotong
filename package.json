@@ -1,6 +1,6 @@
 {
   "name": "gotong-monorepo",
-  "version": "0.0.0",
+  "version": "4.0.0",
   "private": true,
   "type": "module",
   "description": "Gotong (gotong-royong — the whole village shoulders the work together): a framework for orchestrating agent clusters and humans as collaborative participants.",
@@ -101,7 +101,8 @@
     "check:kernel-deps": "node scripts/kernel-deps-gate.mjs",
     "check:env-registry": "node scripts/env-registry-gate.mjs",
     "check:line-budget": "node scripts/line-budget-gate.mjs",
-    "check:guards": "node scripts/kernel-deps-gate.mjs && node scripts/env-registry-gate.mjs && node scripts/line-budget-gate.mjs",
+    "check:version": "node scripts/version-gate.mjs",
+    "check:guards": "node scripts/kernel-deps-gate.mjs && node scripts/env-registry-gate.mjs && node scripts/line-budget-gate.mjs && node scripts/version-gate.mjs",
     "check:publish": "node scripts/publish-readiness-gate.mjs",
     "check:npx-smoke": "node scripts/npx-smoke.mjs",
     "check:pypi-pack": "node scripts/pypi-pack-gate.mjs",

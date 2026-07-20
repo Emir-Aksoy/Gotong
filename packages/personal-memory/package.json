@@ -1,6 +1,6 @@
 {
   "name": "@gotong/personal-memory",
-  "version": "0.1.0",
+  "version": "4.0.0",
   "type": "module",
   "description": "Gotong personal-butler memory — file-first MemorySession + prefix-cache-preserving frozen block + remember/recall/forget MemoryToolset + MemoryAugmentedAgent. The memory engine the resident butler stands on (对标 OpenClaw / Hermes).",
   "license": "MIT",

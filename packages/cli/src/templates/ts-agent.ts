@@ -42,8 +42,11 @@ export function renderTsTemplate(opts: TsTemplateOpts): TsTemplateOutput {
         // Track the current published major. Pre-3.1 this was pinned
         // to `^2.0.0` — stale across the v3.0 release, so
         // `gotong new ts-agent foo && pnpm install` failed with
-        // ERESOLVE for any new user. Bump alongside sdk-node majors.
-        '@gotong/sdk-node': '^3.0.0',
+        // ERESOLVE for any new user. Bump alongside sdk-node majors;
+        // `templates.test.ts` derives the expected value from
+        // sdk-node's package.json and goes red the moment they drift
+        // (it caught the 3→4 lockstep bump, which is the whole point).
+        '@gotong/sdk-node': '^4.0.0',
       },
       devDependencies: {
         tsx: '^4.7.0',

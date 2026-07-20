@@ -1,6 +1,6 @@
 {
   "name": "@gotong/service-datastore-sqlite",
-  "version": "1.0.0",
+  "version": "4.0.0",
   "type": "module",
   "description": "Gotong datastore service — SQLite-backed implementation. First-party plugin: per-owner KV (single _kv table) + raw SQL on one .sqlite per declared datastore.",
   "license": "MIT",

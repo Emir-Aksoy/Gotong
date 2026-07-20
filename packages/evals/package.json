@@ -1,6 +1,6 @@
 {
   "name": "@gotong/evals",
-  "version": "0.1.0",
+  "version": "4.0.0",
   "type": "module",
   "description": "Gotong workflow + agent prompt eval harness — lightweight structural checkers that catch output-format regressions without burning LLM tokens.",
   "license": "MIT",

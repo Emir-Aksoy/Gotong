@@ -1,6 +1,6 @@
 {
   "name": "@gotong/im-wechat",
-  "version": "0.1.0",
+  "version": "4.0.0",
   "type": "module",
   "description": "Gotong IM bridge for WeChat via the official iLink Bot API (ClawBot plugin) — HTTP/JSON long-polling, no SDK dep.",
   "license": "MIT",

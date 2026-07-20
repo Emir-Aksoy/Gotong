@@ -1,6 +1,6 @@
 {
   "name": "@gotong/cli-agent",
-  "version": "0.1.0",
+  "version": "4.0.0",
   "type": "module",
   "description": "Gotong outbound CLI shell-out adapter — wraps a self-hosted coding-agent CLI (Claude Code / Codex / OpenCode / Aider …) as a hub Participant, with a checkpoint loop + cooperative on-demand park so a person can observe / intercept / hand off / resume / terminate the task (AGENT-ADAPTER-CONTRACT).",
   "license": "MIT",

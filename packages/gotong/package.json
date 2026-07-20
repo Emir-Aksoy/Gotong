@@ -1,6 +1,6 @@
 {
   "name": "gotong",
-  "version": "0.1.0",
+  "version": "4.0.0",
   "type": "module",
   "description": "Gotong (gotong-royong) — npx-able meta package: `npx gotong start` boots a full hub. Real CLI lives in @gotong/cli; this package owns the short name and pulls @gotong/host into the install closure.",
   "license": "MIT",

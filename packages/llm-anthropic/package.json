@@ -1,6 +1,6 @@
 {
   "name": "@gotong/llm-anthropic",
-  "version": "3.1.0",
+  "version": "4.0.0",
   "type": "module",
   "description": "Gotong LLM provider for Anthropic — wraps @anthropic-ai/sdk and implements LlmProvider.",
   "license": "MIT",

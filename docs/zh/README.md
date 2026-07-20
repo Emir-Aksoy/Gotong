@@ -72,7 +72,8 @@
 - [`FORWARD-DEPLOY.md`](FORWARD-DEPLOY.md) — **前置部署 playbook**（FDE：给一个团队/一段生活装上智能体网络的五段流水线 + 两边界守则；含方案包 schema 草案）
 - [`GO-LIVE.md`](GO-LIVE.md) — 上线 runbook（T1 家用 / T2 云 / T3 联邦）
 - [`UPGRADE-RUNBOOK.md`](UPGRADE-RUNBOOK.md) — **升级 runbook**（已在跑的 hub 换版本）：迁移单向不可逆 → **回滚二进制 ≠ 回滚**，唯一真回滚是恢复备份；升级前备份 / `gotong update` 各装法与出码 / 升级后四项验收
-- [`PUBLISH-RUNBOOK.md`](PUBLISH-RUNBOOK.md) — 发布 runbook（npm 36 包 + PyPI；发布前门 / OTP / 回滚=deprecate 纪律）
+- [`PUBLISH-RUNBOOK.md`](PUBLISH-RUNBOOK.md) — 发布 runbook（npm 37 包 + PyPI；发布前门 / OTP / 回滚=deprecate 纪律）
+- [`VERSIONING.md`](VERSIONING.md) — **版本号怎么管**：37 包 lockstep 共用一个号（`workspace:*` 发布时被改写成精确钉版，独立版本在这张依赖图下走不通）；根 `package.json` 唯一真相源 + `bump-version.mjs` + `check:version` 门
 - [`DEPLOY.md`](DEPLOY.md) · [`PORTABLE-BUNDLE.md`](PORTABLE-BUNDLE.md) — 部署 / 便携包分发
 - [`PROD-HARDENING-RUNBOOK.md`](PROD-HARDENING-RUNBOOK.md) · [`PRE-LAUNCH-TEST-PLAN.md`](PRE-LAUNCH-TEST-PLAN.md) · [`REAL-WORLD-TESTING.md`](REAL-WORLD-TESTING.md) — 生产加固 / 上线前测试 / 真机测试
 - [`CLOUD-RESOURCE-FOOTPRINT.md`](CLOUD-RESOURCE-FOOTPRINT.md) — 云资源占用

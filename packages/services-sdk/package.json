@@ -1,6 +1,6 @@
 {
   "name": "@gotong/services-sdk",
-  "version": "1.0.0",
+  "version": "4.0.0",
   "type": "module",
   "description": "Gotong Services SDK — plugin contract, registry, loader. Same surface for first-party and third-party service plugins (memory / artifact / datastore / …).",
   "license": "MIT",

@@ -1,6 +1,6 @@
 {
   "name": "@gotong/saml",
-  "version": "0.1.0",
+  "version": "4.0.0",
   "type": "module",
   "description": "Gotong SAML 2.0 SP protocol core — AuthnRequest generation, SAMLResponse/Assertion parsing, XML-DSig signature validation (xml-crypto) with explicit signature-wrapping (XSW) guards, and condition validation. Pure functions; the host glue drives the redirect/ACS round-trip and identity owns account linking.",
   "license": "MIT",

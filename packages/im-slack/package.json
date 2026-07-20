@@ -1,6 +1,6 @@
 {
   "name": "@gotong/im-slack",
-  "version": "0.1.0",
+  "version": "4.0.0",
   "type": "module",
   "description": "Gotong IM bridge for Slack — implements ImBridge over the official Socket Mode transport (outbound WebSocket, 免穿透). xapp- app token + xoxb- bot token; hand-rolled ws state machine, no @slack/bolt / @slack/socket-mode dep.",
   "license": "MIT",

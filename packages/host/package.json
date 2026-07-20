@@ -1,6 +1,6 @@
 {
   "name": "@gotong/host",
-  "version": "3.2.0",
+  "version": "4.0.0",
   "type": "module",
   "description": "Production host binary for Gotong — runs Hub + WebSocket + Web from environment variables. No demo state, no built-in agents.",
   "license": "MIT",

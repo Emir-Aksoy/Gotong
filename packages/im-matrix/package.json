@@ -1,6 +1,6 @@
 {
   "name": "@gotong/im-matrix",
-  "version": "0.1.0",
+  "version": "4.0.0",
   "type": "module",
   "description": "Gotong IM bridge for Matrix — implements ImBridge against the Matrix Client-Server API. Sync long-poll; no matrix-bot-sdk dep (uses fetch).",
   "license": "MIT",

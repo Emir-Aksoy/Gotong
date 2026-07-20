@@ -1,6 +1,6 @@
 {
   "name": "@gotong/workflow-assistant",
-  "version": "0.1.0",
+  "version": "4.0.0",
   "type": "module",
   "description": "Gotong workflow assistant — LlmAgent that turns a natural-language description into an gotong.workflow/v1 YAML draft. Lives outside @gotong/workflow so the runner stays free of any LLM runtime dependency.",
   "license": "MIT",
