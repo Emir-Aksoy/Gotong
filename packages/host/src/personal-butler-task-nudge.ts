@@ -30,10 +30,10 @@
  * which cancels the nudge naturally.
  */
 
-import { mkdir, readFile, readdir, rename, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, readdir } from 'node:fs/promises'
 import { join } from 'node:path'
 
-import type { Logger } from '@gotong/core'
+import { writeFileAtomic, type Logger } from '@gotong/core'
 import {
   formatTaskNudgeMessage,
   readTaskNotesSnapshot,
@@ -214,10 +214,7 @@ export class ButlerTaskNudgeSweeper {
 
   private async writeMarks(dir: string, marks: NudgeMarksFile): Promise<void> {
     await mkdir(dir, { recursive: true })
-    const file = join(dir, MARKS_FILE)
-    const tmp = `${file}.tmp`
-    await writeFile(tmp, `${JSON.stringify(marks, null, 2)}\n`, 'utf8')
-    await rename(tmp, file)
+    await writeFileAtomic(join(dir, MARKS_FILE), `${JSON.stringify(marks, null, 2)}\n`)
   }
 
   /** Member namespaces under `<rootDir>/user/` (dir name = verbatim userId). */

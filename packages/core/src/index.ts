@@ -8,6 +8,17 @@ export {
   DEFAULT_CONFIG,
   SPACE_FILE_VERSION,
 } from './space.js'
+
+// 原子写 —— 「写唯一临时文件再 rename」的唯一实现。全仓十来处曾各写各的
+// `${path}.tmp`（同一个并发撞名 bug 被独立发现过三次），从这里 import，别再手搓。
+export {
+  SECURE_FILE_MODE,
+  uniqueTmpPath,
+  writeFileAtomic,
+  writeFileAtomicSync,
+  writeJsonAtomic,
+  writeJsonAtomicSync,
+} from './fs-atomic.js'
 export type {
   SpaceMeta,
   SpaceConfig,

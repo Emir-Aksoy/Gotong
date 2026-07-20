@@ -17,9 +17,10 @@
  * card is a fixed template around the stored string.
  */
 
-import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, rm } from 'node:fs/promises'
 import { dirname } from 'node:path'
 
+import { writeFileAtomic } from '@gotong/core'
 import type { LlmAgentToolset, LlmToolCallResult, LlmToolDefinition } from '@gotong/llm'
 
 /** A stored language label is free text (any language) but length-capped so a
@@ -57,9 +58,7 @@ export async function readReplyLanguage(file: string): Promise<string | null> {
 /** Persist the pinned language atomically (tmp+rename). */
 export async function writeReplyLanguage(file: string, language: string): Promise<void> {
   await mkdir(dirname(file), { recursive: true })
-  const tmp = `${file}.tmp`
-  await writeFile(tmp, `${JSON.stringify({ language })}\n`, 'utf8')
-  await rename(tmp, file)
+  await writeFileAtomic(file, `${JSON.stringify({ language })}\n`)
 }
 
 /** Remove the preference (best-effort — a missing file is already "cleared"). */

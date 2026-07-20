@@ -41,10 +41,10 @@
  * byte-identical to today.
  */
 
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, rename } from 'node:fs/promises'
 import { dirname } from 'node:path'
 
-import type { Task } from '@gotong/core'
+import { writeFileAtomic, type Task } from '@gotong/core'
 import type { LlmAgentToolset, LlmToolCallResult, LlmToolDefinition } from '@gotong/llm'
 
 import { ButlerError } from './errors.js'
@@ -178,9 +178,8 @@ export function openTaskNotebook(opts: OpenTaskNotebookOptions): TaskNotebook {
 
   const save = async (nb: NotebookFile): Promise<void> => {
     await mkdir(dirname(opts.file), { recursive: true })
-    const tmp = `${opts.file}.tmp`
-    await writeFile(tmp, `${JSON.stringify(nb, null, 2)}\n`, 'utf8')
-    await rename(tmp, opts.file) // atomic-ish: a crash never leaves half a file
+    // atomic: a crash never leaves half a file
+    await writeFileAtomic(opts.file, `${JSON.stringify(nb, null, 2)}\n`)
   }
 
   /** Serialize a mutation onto the chain; reads share it so they see writes. */

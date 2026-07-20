@@ -24,10 +24,16 @@
  */
 
 import { existsSync, mkdirSync, unlinkSync } from 'node:fs'
-import { readFile, rename, writeFile } from 'node:fs/promises'
+import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
-import { createLogger, extractRequiredCapabilities, type Hub, type HubLink } from '@gotong/core'
+import {
+  createLogger,
+  extractRequiredCapabilities,
+  writeFileAtomic,
+  type Hub,
+  type HubLink,
+} from '@gotong/core'
 import { NEVER_RESUME_AT } from '@gotong/inbox'
 
 import { scrubSecrets } from './scrub-secrets.js'
@@ -835,14 +841,8 @@ export class WorkflowController {
       mkdirSync(this.definitionsDir, { recursive: true })
     }
     const filePath = join(this.definitionsDir, `${sanitiseFileBase(def.id)}.yaml`)
-    const tmp = `${filePath}.tmp`
-    await writeFile(tmp, text, 'utf8')
-    try {
-      await rename(tmp, filePath)
-    } catch (err) {
-      try { unlinkSync(tmp) } catch { /* ignore */ }
-      throw err
-    }
+    // 失败时删掉半成品这件事由 writeFileAtomic 自己做（名字唯一，不删就漏）。
+    await writeFileAtomic(filePath, text)
     return filePath
   }
 

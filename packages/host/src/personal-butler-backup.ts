@@ -31,11 +31,11 @@
  */
 
 import { readFileSync } from 'node:fs'
-import { mkdir, readFile, readdir, rename, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, readdir } from 'node:fs/promises'
 import { join } from 'node:path'
 
 import { backup, parseLastBackupFact, LAST_BACKUP_FACT_NAME, type LastBackupFact } from '@gotong/cli'
-import type { Logger } from '@gotong/core'
+import { writeFileAtomic, type Logger } from '@gotong/core'
 import type { LlmAgentToolset, LlmToolCallResult, LlmToolDefinition } from '@gotong/llm'
 import { GovernedActionToolset } from '@gotong/personal-butler'
 import { ownerDir } from '@gotong/service-memory-file'
@@ -472,10 +472,7 @@ export class ButlerBackupNudgeSweeper {
 
   private async writeMarks(dir: string, marks: BackupNudgeMarksFile): Promise<void> {
     await mkdir(dir, { recursive: true })
-    const file = join(dir, MARKS_FILE)
-    const tmp = `${file}.tmp`
-    await writeFile(tmp, `${JSON.stringify(marks, null, 2)}\n`, 'utf8')
-    await rename(tmp, file)
+    await writeFileAtomic(join(dir, MARKS_FILE), `${JSON.stringify(marks, null, 2)}\n`)
   }
 
   /** 成员命名空间(`<rootDir>/user/*`,目录名 = 原样 userId)——同 TN-M2。 */

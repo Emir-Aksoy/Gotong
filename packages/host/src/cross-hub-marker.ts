@@ -34,8 +34,10 @@
  */
 
 import { existsSync, mkdirSync } from 'node:fs'
-import { readFile, rename, writeFile } from 'node:fs/promises'
+import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
+
+import { writeFileAtomic } from '@gotong/core'
 
 /** The slice the controller (capture) and the edit service (consult) depend on. */
 export interface CrossHubMarkerStore {
@@ -113,9 +115,6 @@ export class FileCrossHubMarkerStore implements CrossHubMarkerStore {
       capabilities: merged,
       updatedAt: new Date().toISOString(),
     }
-    const file = this.fileFor(workflowId)
-    const tmp = `${file}.tmp`
-    await writeFile(tmp, JSON.stringify(payload, null, 2), 'utf8')
-    await rename(tmp, file)
+    await writeFileAtomic(this.fileFor(workflowId), JSON.stringify(payload, null, 2))
   }
 }

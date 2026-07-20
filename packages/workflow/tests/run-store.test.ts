@@ -72,12 +72,16 @@ describe('RunStore.write / read / pathFor', () => {
 
   it('write() still propagates non-ENOENT failures', async () => {
     // The retry is scoped to "the directory vanished". Anything else must
-    // surface, not get quietly retried into the same wall. Parking a directory
-    // on the tmp path makes the write fail EISDIR — a real errno, no mocking.
-    mkdirSync(`${store.pathFor('r_x')}.tmp`, { recursive: true })
+    // surface, not get quietly retried into the same wall. Parking a FILE where
+    // the runs dir belongs makes the write fail ENOTDIR — a real errno, no
+    // mocking, and (unlike squatting on the tmp path) it survives tmp names
+    // being unique.
+    rmSync(store.root, { recursive: true, force: true })
+    mkdirSync(store.root, { recursive: true })
+    writeFileSync(store.runsDir, 'not a directory', 'utf8')
     await expect(
       store.write(makeRun({ runId: 'r_x', workflowId: 'wf_a', startedAt: 1, status: 'done' })),
-    ).rejects.toMatchObject({ code: 'EISDIR' })
+    ).rejects.toMatchObject({ code: 'ENOTDIR' })
   })
 })
 

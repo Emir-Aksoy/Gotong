@@ -1,14 +1,8 @@
-import {
-  existsSync,
-  mkdirSync,
-  readFileSync,
-  readdirSync,
-  renameSync,
-  statSync,
-  writeFileSync,
-} from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, readdirSync, statSync } from 'node:fs'
 import { appendFile, readFile, rename } from 'node:fs/promises'
 import { basename, dirname, join } from 'node:path'
+
+import { writeFileAtomicSync } from '../fs-atomic.js'
 
 import { createLogger } from '../logger.js'
 import { normalizeNamespace } from '../tenant.js'
@@ -267,9 +261,7 @@ export class FileStorage implements Storage {
    */
   private writeHwmFile(seq: number): void {
     try {
-      const tmp = `${this.hwmPath}.tmp`
-      writeFileSync(tmp, String(seq), 'utf8')
-      renameSync(tmp, this.hwmPath)
+      writeFileAtomicSync(this.hwmPath, String(seq))
     } catch (err) {
       log.warn('failed to persist transcript high-water seq', { err })
     }

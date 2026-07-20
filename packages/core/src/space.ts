@@ -1,6 +1,6 @@
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto'
-import { chmodSync, existsSync, mkdirSync, renameSync, writeFileSync } from 'node:fs'
-import { chmod, lstat, readFile, rename, writeFile } from 'node:fs/promises'
+import { chmodSync, existsSync, mkdirSync } from 'node:fs'
+import { chmod, lstat, readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
 /**
@@ -47,27 +47,10 @@ export class SpaceUnsafeError extends Error {
 }
 
 /**
- * File mode for files holding token hashes, encrypted secrets, or session
- * ids — readable + writable by the owner, nothing for group / other.
- *
- * Pre-3.4 these files were written with the process umask (typically
- * 0o644 on Linux / macOS), meaning any local user on a shared host
- * could read both `secrets.enc.json` AND the sibling `runtime/secret.key`
- * — defeating the "encrypted-at-rest" design which assumed the master
- * key was unrecoverable from on-disk reads alone. See `.github/AUDIT-v3.3.md`
- * finding C4.
- *
- * Applied via the `mode` option to `writeFile` (atomic at file creation
- * on POSIX) and a best-effort `chmod` sweep at `Space.open` time for
- * upgrades from pre-3.4 workspaces. No-op on Windows (chmod is honoured
- * but the POSIX bits aren't a meaningful security boundary there;
- * BitLocker / ACLs do the work instead).
- */
-const SECURE_FILE_MODE = 0o600
-/**
  * Workspace root directory mode — owner-only. Pairs with `SECURE_FILE_MODE`
- * so that even if an individual file slips through (e.g. tmp file from
- * a third-party tool), the parent directory denies traversal.
+ * (see `./fs-atomic.js`) so that even if an individual file slips through
+ * (e.g. tmp file from a third-party tool), the parent directory denies
+ * traversal.
  */
 const SECURE_DIR_MODE = 0o700
 
@@ -79,6 +62,11 @@ import {
   type EncryptedSecret,
   type SecretsFile,
 } from './secrets.js'
+import {
+  SECURE_FILE_MODE,
+  writeJsonAtomic,
+  writeJsonAtomicSync,
+} from './fs-atomic.js'
 import { FileStorage } from './storage/file.js'
 import { DEFAULT_TENANT } from './tenant.js'
 import type { ParticipantId } from './types.js'
@@ -1560,40 +1548,5 @@ async function readJson<T>(path: string): Promise<T> {
   return JSON.parse(raw) as T
 }
 
-/**
- * Pre-3.1 used a fixed `${path}.tmp` suffix. Two concurrent writers
- * to the same file (e.g. two `upsertAgent` calls racing) would both
- * create the same `.tmp` — the second `writeFile` overwrote the first
- * mid-rename, breaking the atomic guarantee and occasionally leaving
- * a half-written JSON behind. Adding pid + nanotime + 6 random bytes
- * makes the tmp name unique per call; the final `rename` is still
- * atomic on POSIX so the last-writer-wins semantic is preserved.
- */
-function uniqueTmpSuffix(): string {
-  return `.${process.pid}.${process.hrtime.bigint().toString(36)}.${randomBytes(3).toString('hex')}.tmp`
-}
-
-/**
- * Atomic JSON write. The `mode` parameter sets the file permission bits
- * **at creation time** on POSIX (via `writeFile`'s mode option), avoiding
- * the chmod-after-create race that was finding H6 in the v3.3 audit.
- *
- * Pass `SECURE_FILE_MODE` (0o600) for any file holding token hashes,
- * encrypted secrets, or session ids. Pass nothing (or 0o644) for files
- * that are public-by-design like `space.json`.
- */
-async function writeJsonAtomic(path: string, data: unknown, mode?: number): Promise<void> {
-  const tmp = `${path}${uniqueTmpSuffix()}`
-  const options: Parameters<typeof writeFile>[2] =
-    mode !== undefined ? { encoding: 'utf8', mode } : 'utf8'
-  await writeFile(tmp, JSON.stringify(data, null, 2) + '\n', options)
-  await rename(tmp, path)
-}
-
-function writeJsonAtomicSync(path: string, data: unknown, mode?: number): void {
-  const tmp = `${path}${uniqueTmpSuffix()}`
-  const options: Parameters<typeof writeFileSync>[2] =
-    mode !== undefined ? { encoding: 'utf8', mode } : 'utf8'
-  writeFileSync(tmp, JSON.stringify(data, null, 2) + '\n', options)
-  renameSync(tmp, path)
-}
+// 原子写(唯一 tmp 名 + 创建时带权限位,v3.3 审计 H6)已抽到 ./fs-atomic.ts ——
+// 同一个 bug 曾在三个包里各修一遍,现在只有一个地方可以修。

@@ -8,14 +8,16 @@
  *       <itemId>.json     — one item per file, written atomically
  *       …
  *
- * Mirrors `@gotong/workflow`'s `RunStore`: atomic `<file>.tmp` + rename so a
+ * Mirrors `@gotong/workflow`'s `RunStore`: `writeFileAtomic` (tmp+rename) so a
  * `kill -9` mid-write can never leave a half-formed item, and zero deps on the
  * Hub — only paths + file IO. Drop the directory → drop the inbox.
  */
 
 import { existsSync, mkdirSync } from 'node:fs'
-import { readFile, readdir, rename, writeFile } from 'node:fs/promises'
+import { readFile, readdir } from 'node:fs/promises'
 import { join } from 'node:path'
+
+import { writeFileAtomic } from '@gotong/core'
 
 import {
   InboxError,
@@ -89,10 +91,7 @@ export class FileInboxStore implements InboxStore {
 
   async write(item: InboxItem): Promise<void> {
     this.ensureDirs()
-    const file = this.pathFor(item.itemId)
-    const tmp = `${file}.tmp`
-    await writeFile(tmp, JSON.stringify(item, null, 2), 'utf8')
-    await rename(tmp, file)
+    await writeFileAtomic(this.pathFor(item.itemId), JSON.stringify(item, null, 2))
   }
 
   async get(itemId: string): Promise<InboxItem | null> {

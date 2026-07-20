@@ -21,13 +21,15 @@
  * implementation can slot in later WITHOUT touching callers. The workflow
  * package stays zero-runtime-dependency (only node builtins + `@gotong/core`).
  *
- * Writes are atomic (`<file>.tmp` then rename), mirroring `RunStore`.
+ * Writes are atomic (`writeFileAtomic`), mirroring `RunStore`.
  */
 
 import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync } from 'node:fs'
-import { readFile, readdir, rename, rm, writeFile } from 'node:fs/promises'
+import { readFile, readdir, rm } from 'node:fs/promises'
 import { join } from 'node:path'
+
+import { writeFileAtomic } from '@gotong/core'
 
 import { WorkflowRevisionError, type RevisionMeta, type WorkflowRevision } from './lifecycle.js'
 import { sanitiseFileBase } from './paths.js'
@@ -122,9 +124,7 @@ export class FileRevisionStore implements RevisionStore {
         'revision_exists',
       )
     }
-    const tmp = `${file}.tmp`
-    await writeFile(tmp, JSON.stringify(rev, null, 2), 'utf8')
-    await rename(tmp, file)
+    await writeFileAtomic(file, JSON.stringify(rev, null, 2))
   }
 
   async read(workflowId: string, revision: number): Promise<WorkflowRevision | null> {

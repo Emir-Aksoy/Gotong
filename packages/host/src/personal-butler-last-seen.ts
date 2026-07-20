@@ -25,8 +25,10 @@
  *    means next turn sees a slightly staler "last seen" — advisory, never fatal.
  */
 
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
+import { mkdir, readFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
+
+import { writeFileAtomic } from '@gotong/core'
 
 /** Inject a greeting only after this long away — an active chat (minutes apart)
  *  stays silent. Morning-after-sleep is always well past this. */
@@ -115,9 +117,7 @@ export async function readLastSeen(file: string): Promise<number | null> {
 /** Persist NOW atomically (tmp+rename). Best-effort — caller swallows. */
 export async function writeLastSeen(file: string, ms: number): Promise<void> {
   await mkdir(dirname(file), { recursive: true })
-  const tmp = `${file}.tmp`
-  await writeFile(tmp, `${JSON.stringify({ at: ms })}\n`, 'utf8')
-  await rename(tmp, file)
+  await writeFileAtomic(file, `${JSON.stringify({ at: ms })}\n`)
 }
 
 /**

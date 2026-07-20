@@ -32,16 +32,18 @@
  * archived — boot-resume needs it on the active path (a human-inbox-parked run
  * is also `status: 'running'`, so this one rule keeps both resumable).
  *
- * Writes are atomic: write to `<file>.tmp`, then rename. A `kill -9`
- * mid-write can never leave the run file half-formed.
+ * Writes are atomic (`writeFileAtomic`: unique `<file>.<uniq>.tmp`, then
+ * rename). A `kill -9` mid-write can never leave the run file half-formed.
  *
  * This module has zero dependencies on the Hub — it only knows about paths
  * and file IO.
  */
 
 import { existsSync, mkdirSync } from 'node:fs'
-import { readFile, readdir, rename, writeFile } from 'node:fs/promises'
+import { readFile, readdir, rename } from 'node:fs/promises'
 import { join } from 'node:path'
+
+import { writeFileAtomic } from '@gotong/core'
 
 import type { RunState, RunStatus, RunSummary } from './types.js'
 
@@ -142,7 +144,7 @@ export class RunStore {
   }
 
   /**
-   * Write the run state atomically. Writes to `<file>.tmp` then renames.
+   * Write the run state atomically (see `writeFileAtomic`).
    *
    * A missing directory tree is recreated and the write retried once — that's
    * what lets {@link ensureDirs} memoize. Any other error propagates, and a
@@ -151,17 +153,15 @@ export class RunStore {
    */
   async write(state: RunState): Promise<void> {
     const file = this.pathFor(state.runId)
-    const tmp = `${file}.tmp`
     const body = JSON.stringify(state, null, 2)
     try {
-      await writeFile(tmp, body, 'utf8')
+      await writeFileAtomic(file, body)
     } catch (err) {
       if ((err as NodeJS.ErrnoException)?.code !== 'ENOENT') throw err
       this.dirsReady = false
       this.ensureDirs()
-      await writeFile(tmp, body, 'utf8')
+      await writeFileAtomic(file, body)
     }
-    await rename(tmp, file)
   }
 
   /** Load a run state by id. Returns `null` if the file doesn't exist. */

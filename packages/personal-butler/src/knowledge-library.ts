@@ -22,9 +22,10 @@
  *     同级;知识文件里「读到」的对外动作照旧走 governed 闸,一步不少。
  */
 
-import { lstat, mkdir, readdir, readFile, rename, stat, writeFile } from 'node:fs/promises'
+import { lstat, mkdir, readdir, readFile, rename, stat } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 
+import { writeFileAtomic } from '@gotong/core'
 import type { LlmAgentToolset, LlmToolCallResult, LlmToolDefinition } from '@gotong/llm'
 
 import { ButlerError } from './errors.js'
@@ -141,11 +142,6 @@ interface WalkedFile {
   rel: string
   bytes: number
 }
-
-// LIB-M4 起知识树有**两个**写者:成员轮的常驻 handle + 6h 图书馆员的临时
-// handle(各自 enqueue 只串行自己)。tmp 名唯一化让并发整篇写永远是
-// 「后 rename 者整篇赢」,绝不可能在同一个 tmp 里交错字节。
-let tmpSeq = 0
 
 export function openKnowledgeLibrary(opts: OpenKnowledgeLibraryOptions): KnowledgeLibrary {
   const nowMs = opts.now ?? (() => Date.now())
@@ -285,9 +281,10 @@ export function openKnowledgeLibrary(opts: OpenKnowledgeLibraryOptions): Knowled
           )
         }
         await mkdir(dirname(abs), { recursive: true })
-        const tmp = `${abs}.${nowMs().toString(36)}-${(++tmpSeq).toString(36)}.tmp`
-        await writeFile(tmp, content, 'utf8')
-        await rename(tmp, abs) // 崩溃永不留半份文件
+        // LIB-M4 起知识树有**两个**写者:成员轮的常驻 handle + 6h 图书馆员的临时
+        // handle(各自 enqueue 只串行自己)。writeFileAtomic 的唯一 tmp 名让并发
+        // 整篇写永远是「后 rename 者整篇赢」,绝不可能在同一个 tmp 里交错字节。
+        await writeFileAtomic(abs, content)
         return { path: rel, bytes, created: existingBytes === null }
       }),
 

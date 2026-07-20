@@ -12,15 +12,17 @@
  * Unlike `RevisionStore` (write-once snapshots), the lifecycle record is the
  * single mutable pointer per workflow: state, currentRevision, headRevision,
  * the revision metadata list, and the transition audit log. Every transition
- * rewrites it atomically (`<file>.tmp` then rename).
+ * rewrites it atomically (`writeFileAtomic`).
  *
  * Defined behind the `LifecycleStore` interface so a SQLite-backed
  * implementation can slot in later without touching callers.
  */
 
 import { existsSync, mkdirSync } from 'node:fs'
-import { readFile, readdir, rename, unlink, writeFile } from 'node:fs/promises'
+import { readFile, readdir, unlink } from 'node:fs/promises'
 import { join } from 'node:path'
+
+import { writeFileAtomic } from '@gotong/core'
 
 import type { LifecycleRecord } from './lifecycle.js'
 import { sanitiseFileBase } from './paths.js'
@@ -75,10 +77,7 @@ export class FileLifecycleStore implements LifecycleStore {
   }
 
   async write(record: LifecycleRecord): Promise<void> {
-    const file = this.pathFor(record.workflowId)
-    const tmp = `${file}.tmp`
-    await writeFile(tmp, JSON.stringify(record, null, 2), 'utf8')
-    await rename(tmp, file)
+    await writeFileAtomic(this.pathFor(record.workflowId), JSON.stringify(record, null, 2))
   }
 
   async list(): Promise<LifecycleRecord[]> {

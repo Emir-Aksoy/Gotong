@@ -33,10 +33,10 @@
  * fake, and the real-filesystem wiring lives in {@link openButlerRecallIndex}.
  */
 
-import { readFile, rename, stat, writeFile } from 'node:fs/promises'
+import { readFile, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 
-import type { Logger } from '@gotong/core'
+import { writeFileAtomic, type Logger } from '@gotong/core'
 import {
   InvertedIndex,
   buildInvertedIndex,
@@ -283,9 +283,8 @@ export function openButlerRecallIndex(
       }
     },
     async persist(data) {
-      const tmp = `${indexPath}.tmp`
-      await writeFile(tmp, JSON.stringify(data), 'utf8')
-      await rename(tmp, indexPath) // atomic swap so a reader never sees a half file
+      // atomic swap so a reader never sees a half file
+      await writeFileAtomic(indexPath, JSON.stringify(data))
     },
   }
 
