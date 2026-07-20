@@ -131,6 +131,7 @@ import { recoverMasterKeyRotation } from './master-key-recovery.js'
 import { applyRunRetention, parseRunRetention } from './run-retention.js'
 import { applyTranscriptRetention, parseTranscriptRetention } from './transcript-retention.js'
 import { describe } from './transcript-line.js'
+import { parseButlerEnv } from './butler-env.js'
 import { writeAdminLinkFile } from './admin-link.js'
 import {
   env,
@@ -264,12 +265,7 @@ import {
   type ButlerOnboardingKeyCheck,
 } from './personal-butler-onboarding.js'
 import { butlerApprovalItemFor, butlerResolvePushback } from './personal-butler-escalation.js'
-import {
-  ButlerMaintenanceSweeper,
-  BUTLER_MAINTENANCE_INTERVAL_MS,
-} from './personal-butler-maintenance.js'
-import { BUTLER_PROACTIVE_INTERVAL_MS } from './personal-butler-proactive.js'
-import { BUTLER_RUN_BROADCAST_INTERVAL_MS } from './personal-butler-run-broadcast.js'
+import { ButlerMaintenanceSweeper } from './personal-butler-maintenance.js'
 import { armButlerSweeps } from './personal-butler-sweeps.js'
 import { createWorkflowScheduleAdminSurface } from './workflow-schedule-admin.js'
 import { WorkflowScheduleSweeper } from './workflow-schedule-sweeper.js'
@@ -944,9 +940,15 @@ async function main(): Promise<void> {
   // member services exist — each APPROVAL-GATED to /me (`GOTONG_BUTLER_GOVERNED`
   // off ⇒ pure-memory). Memory lives under the SAME `<space>/butler/memory`
   // subtree the /me privacy view reads — one and the same bytes.
-  const butlerMemoryRoot = join(space.root, 'butler', 'memory')
-  const butlerEnv = (process.env.GOTONG_BUTLER ?? '').trim().toLowerCase()
-  const butlerDefaultOn = !['0', 'false', 'off', 'no'].includes(butlerEnv)
+  // 所有 GOTONG_BUTLER* 旋钮(开关方向、级联、周期钳位)解析在 butler-env.ts,
+  // 那里有它们仨条不好从代码读出来的语义 + 单测。
+  const {
+    memoryRoot: butlerMemoryRoot, defaultOn: butlerDefaultOn, governedOn: butlerGovernedOn,
+    memoryLinksOn: butlerMemoryLinksOn, maintenanceOn: butlerMaintenanceOn, maintenanceMs: butlerMaintenanceMs,
+    memoryGitOn: butlerMemoryGitOn, memoryReconcileOn: butlerMemoryReconcileOn,
+    memoryLibrarianOn: butlerMemoryLibrarianOn, proactiveOn: butlerProactiveOn, proactiveMs: butlerProactiveMs,
+    runBroadcastOn: butlerRunBroadcastOn, runBroadcastMs: butlerRunBroadcastMs,
+  } = parseButlerEnv(process.env, space.root)
   // M-EMB1 — opt-in real embedder for 阿同 recall (unset ⇒ local default, byte-identical).
   const butlerEmbedder = butlerEmbedderFromEnv()
   if (butlerEmbedder) log.info(butlerEmbedder.disclosure, { dataLeavesBox: butlerEmbedder.dataLeavesBox })
@@ -955,13 +957,7 @@ async function main(): Promise<void> {
   if (butlerVoice) log.info(butlerVoice.disclosure, { dataLeavesBox: butlerVoice.dataLeavesBox })
   const butlerHearing = butlerHearingFromEnv()
   if (butlerHearing) log.info(butlerHearing.disclosure, { dataLeavesBox: butlerHearing.dataLeavesBox })
-  // M-GRAPH — opt-in graph mode (GOTONG_BUTLER_MEMORY_LINKS): 6h sweep writes meta.links + recall expands one hop. Off ⇒ byte-identical.
-  const butlerMemoryLinksOn =
-    butlerDefaultOn &&
-    ['1', 'true', 'on', 'yes'].includes((process.env.GOTONG_BUTLER_MEMORY_LINKS ?? '').trim().toLowerCase())
   // BF-M7 — governed set(建/改/删自己的 agent+改工作流)逐项 park 到 /me;执行器=/me steward 同一服务(闸不越面);refs lazy 读,缺 ⇒ 纯记忆。
-  const butlerGovernedEnv = (process.env.GOTONG_BUTLER_GOVERNED ?? '').trim().toLowerCase()
-  const butlerGovernedOn = !['0', 'false', 'off', 'no'].includes(butlerGovernedEnv)
   let butlerGovernedAgentsRef: StewardAgentDirectory | undefined
   let butlerGovernedWorkflowEditorRef: StewardWorkflowEditor | undefined
   // BE-M3 — the butler's governed "用大白话给我建个工作流" verb reuses the member
@@ -1016,37 +1012,7 @@ async function main(): Promise<void> {
   // butler is on; opt out with GOTONG_BUTLER_MAINTENANCE ∈ {0,false,off,no}. Cadence
   // via GOTONG_BUTLER_MAINTENANCE_MS (clamped [1min, 24h]). Constructed after the
   // agent pool exists (it borrows the pool's provider-resolution); see below.
-  const butlerMaintenanceEnv = (process.env.GOTONG_BUTLER_MAINTENANCE ?? '').trim().toLowerCase()
-  const butlerMaintenanceOn =
-    butlerDefaultOn && !['0', 'false', 'off', 'no'].includes(butlerMaintenanceEnv)
-  const butlerMaintenanceMs = Math.min(
-    24 * 60 * 60 * 1000,
-    Math.max(60_000, Number(process.env.GOTONG_BUTLER_MAINTENANCE_MS) || BUTLER_MAINTENANCE_INTERVAL_MS),
-  )
-  // MU-M5 — opt-in per-member git snapshot in the 6h sweep (GOTONG_BUTLER_MEMORY_GIT; off, best-effort, byte-unchanged when unset).
-  const butlerMemoryGitOn =
-    butlerMaintenanceOn &&
-    ['1', 'true', 'on', 'yes'].includes((process.env.GOTONG_BUTLER_MEMORY_GIT ?? '').trim().toLowerCase())
-  // M-RECON — opt-in (GOTONG_BUTLER_MEMORY_RECONCILE): the 6h sweep retires stale/contradictory ad-hoc facts via reversible bitemporal close. Off ⇒ byte-unchanged.
-  const butlerMemoryReconcileOn = butlerMaintenanceOn && ['1', 'true', 'on', 'yes'].includes((process.env.GOTONG_BUTLER_MEMORY_RECONCILE ?? '').trim().toLowerCase())
-  // LIB-M4 — opt-in (GOTONG_BUTLER_MEMORY_LIBRARIAN): the 6h sweep shelves topical ad-hoc facts into knowledge/ + rewrites INDEX.md. Off ⇒ byte-unchanged.
-  const butlerMemoryLibrarianOn = butlerMaintenanceOn && ['1', 'true', 'on', 'yes'].includes((process.env.GOTONG_BUTLER_MEMORY_LIBRARIAN ?? '').trim().toLowerCase())
-  // S3-M2 — proactive daily-brief sweep (opt out GOTONG_BUTLER_PROACTIVE, cadence _MS [5min,1h]); DEFAULT-OFF until `set_daily_brief`.
-  const butlerProactiveEnv = (process.env.GOTONG_BUTLER_PROACTIVE ?? '').trim().toLowerCase()
-  const butlerProactiveOn =
-    butlerDefaultOn && !['0', 'false', 'off', 'no'].includes(butlerProactiveEnv)
-  const butlerProactiveMs = Math.min(
-    60 * 60 * 1000,
-    Math.max(5 * 60 * 1000, Number(process.env.GOTONG_BUTLER_PROACTIVE_MS) || BUTLER_PROACTIVE_INTERVAL_MS),
-  )
-  // BE-M5 — tell a member when a run THEY started finishes (opt out GOTONG_BUTLER_RUN_BROADCAST, cadence _MS [1min,1h]); DEFAULT-OFF until `set_run_broadcast`.
-  const butlerRunBroadcastEnv = (process.env.GOTONG_BUTLER_RUN_BROADCAST ?? '').trim().toLowerCase()
-  const butlerRunBroadcastOn =
-    butlerDefaultOn && !['0', 'false', 'off', 'no'].includes(butlerRunBroadcastEnv)
-  const butlerRunBroadcastMs = Math.min(
-    60 * 60 * 1000,
-    Math.max(60_000, Number(process.env.GOTONG_BUTLER_RUN_BROADCAST_MS) || BUTLER_RUN_BROADCAST_INTERVAL_MS),
-  )
+  // (旋钮解析全在 butler-env.ts;S3-M2 主动晨报、BE-M5 运行播报同理。)
   // CARE-M4 — 活体校验 closure, bound after the pool starts (below); the
   // onboarding toolset reads it lazily so an early butler answers honestly.
   let butlerOnboardingKeyCheckRef: ButlerOnboardingKeyCheck | undefined
