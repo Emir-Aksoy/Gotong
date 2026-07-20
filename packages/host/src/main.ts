@@ -132,6 +132,7 @@ import { applyRunRetention, parseRunRetention } from './run-retention.js'
 import { applyTranscriptRetention, parseTranscriptRetention } from './transcript-retention.js'
 import { describe } from './transcript-line.js'
 import { parseButlerEnv } from './butler-env.js'
+import { wirePeers } from './wire-peers.js'
 import { writeAdminLinkFile } from './admin-link.js'
 import {
   env,
@@ -1466,258 +1467,28 @@ async function main(): Promise<void> {
     }
   }
   if (identity && process.env.GOTONG_PEERS_DISABLED !== '1') {
-    const spaceMeta = await space.meta()
-    const selfHubId = spaceMeta.hubId ?? 'self'
-    const pollMs = envInt('GOTONG_PEER_POLL_MS', 5_000)
-    const inboundToken = process.env.GOTONG_PEER_INBOUND_TOKEN
-    // Audit #142 — single source of truth for "is this host behind a
-    // reverse proxy".
-    const trustProxy = envBool('GOTONG_TRUST_PROXY', false)
-    // Audit #149 — env wiring for the inbound rate limit. Default
-    // 60/60s mirrors PeerRegistry's own default (set to 0 either side
-    // to disable; useful in closed networks / tests). Operators
-    // raise these when running a peer farm where 60 hellos / 60s is
-    // genuinely too tight, or drop them when under sustained attack
-    // and a tighter floor is preferable to letting one IP saturate.
-    const rateLimitMax = envInt('GOTONG_PEER_INBOUND_RATE_MAX', 60)
-    const rateLimitWindowMs = envInt('GOTONG_PEER_INBOUND_RATE_WINDOW_MS', 60_000)
-    const inboundRateLimit = { max: rateLimitMax, windowMs: rateLimitWindowMs }
-    // Phase 19 P4-M4 — fixed window for the per-link inbound quota counter
-    // (`perLinkQuotaBudget` tasks per window). Default 60s; in-memory, resets
-    // on restart (a fail-closed safety cap, not a billing ledger).
-    const linkQuotaWindowMs = envInt('GOTONG_PEER_LINK_QUOTA_WINDOW_MS', 60_000)
-    // Provider side of the cross-hub MCP proxy. Reads the same hub
-    // registry the admin UI writes; only servers flagged `shared` are
-    // ever served to a peer (ACL lives inside respond()).
-    mcpProxy = new McpProxyHost({ space, logger: log })
-    const proxyRespond = mcpProxy.respond
-    // Phase 18 A-M1 — peer capability manifest provider, composed with the
-    // MCP proxy onto the single rpcResponder: `mcp.*` → MCP proxy, anything
-    // else → manifest host. `peerWrapperIds` is a thunk so it reflects the
-    // registry's CURRENT peers (each wrapper is registered under the peer's
-    // hub id) — we advertise our own agents, never a neighbour's.
-    const peerWrapperIds = () =>
-      new Set((peerRegistry?.status() ?? []).map((r) => r.peerId))
-    const peerManifestHost = new PeerManifestHost({
-      hub,
-      hubId: selfHubId,
-      peerWrapperIds,
-    })
-    // v5 E5 — privacy-safe footprint summary (the free-graph control plane).
-    // Counts only, built on demand from the same hub + workflow + identity
-    // surfaces. The deps are shared by the RPC provider (answers a peer's
-    // `peer.summary`) AND the federation surface's `local()` (this hub's own
-    // footprint in the admin control plane). Composed onto the rpcResponder
-    // below; the per-link gate in peer-registry denies `peer.summary` unless the
-    // row opted into sharing.
-    const summaryDeps: BuildSummaryDeps = {
-      hub,
-      hubId: selfHubId,
-      peerWrapperIds,
-      workflows: workflowController,
-      identity,
-    }
-    const peerSummaryHost = new PeerSummaryHost(summaryDeps)
-    // v5 Stream G day-5 — cross-hub transcript chain provider. Answers a peer's
-    // `peer.transcript { taskId }` with the slice of THIS hub's transcript for
-    // that one task (its task / result / llm stream / resume markers — never our
-    // internal sub-dispatches, which carry different ids). Composed onto the
-    // rpcResponder below; the per-link gate in peer-registry denies it unless the
-    // row opted into sharing (`share_transcript`, identity v27).
-    const peerTranscriptHost = new PeerTranscriptHost({ hub, hubId: selfHubId })
-    // Phase 18 B-M3 — outbound cross-org approval gate. A peer row flagged
-    // `requireApprovalOutbound` has its outbound sender wrapped so a task parks
-    // as an approval item in the owner's /me inbox and only crosses the org
-    // boundary once approved. Approver = the org owner resolved at boot (MVP; a
-    // later node can make it per-peer configurable). Wired only when both the
-    // inbox store and an owner exist; otherwise the registry logs + stays
-    // ungated (loud, not a silent fail-open).
-    const approverUserId = findOwnerUserId(identity)
-    let outboundApprovalGate:
-      | ((inner: RemoteHubViaLink, row: PeerRegistration) => Participant)
-      | undefined
-    if (inboxStore && approverUserId) {
-      const store = inboxStore
-      const approver = approverUserId
-      outboundApprovalGate = (inner, row) =>
-        new ApprovalGatedParticipant({
-          inner,
-          store,
-          approver,
-          peerLabel: row.label ?? row.peerId,
-        })
-    } else if (inboxStore) {
-      log.warn('outbound approval gate not wired: no org owner resolved')
-    }
-    peerRegistry = new PeerRegistry({
+    // 联邦整条腿的接线在 wire-peers.ts —— 那里也写着它到底依赖什么。
+    // 「装不装」留在这儿:联邦要 v4 身份,那是装配层的决定。
+    const wired = await wirePeers({
       hub,
       identity,
-      selfHubId,
-      // D1 fix — inbound mesh rides serveWebSocket's first-frame demux, not a sibling ws.wss listener (see server.ts routeMeshTo).
+      space,
+      logger: log,
+      // D1 fix — 入站 mesh 骑 serveWebSocket 的首帧 demux,不是另起 ws.wss 监听器。
       acceptInbound: (h) => ws.routeMeshTo(h),
-      ...(inboundToken ? { sharedInboundPeerToken: inboundToken } : {}),
-      pollIntervalMs: pollMs,
-      inboundRateLimit,
-      perLinkQuotaWindowMs: linkQuotaWindowMs,
-      ...(trustProxy ? { trustProxy: true } : {}),
-      rpcResponder: (call) => {
-        if (call.method.startsWith('mcp.')) return proxyRespond(call)
-        if (call.method === PEER_SUMMARY_METHODS.get) return peerSummaryHost.respond(call)
-        if (call.method === PEER_TRANSCRIPT_METHODS.get) return peerTranscriptHost.respond(call)
-        return peerManifestHost.respond(call)
-      },
-      ...(outboundApprovalGate ? { outboundApprovalGate } : {}),
-      logger: log,
+      inboxStore,
+      approverUserId: findOwnerUserId(identity),
+      workflows: workflowController,
     })
-    peerRegistry.start()
-    // D2 — make this registry visible to the Hub's cross-hub resolver
-    // closure above: any explicit dispatch whose target isn't local but whose
-    // task.origin points at a connected peer forwards over the live HubLink.
-    peerRegistryRef = peerRegistry
-    // NET-M1 — the butler's sanitized mesh roster rides the same registry
-    // (live connected state) + identity rows (outbound posture).
-    const rosterRegistry = peerRegistry
-    butlerPeerRosterRef = buildButlerPeerSurface({
-      status: () => rosterRegistry.status(),
-      rows: () => identity.listPeers(),
-    })
-    // Bind the federation discovery surface to this registry. Each call
-    // asks every connected peer what it shares; an offline peer or a
-    // listShared that throws (e.g. an older peer without the method)
-    // degrades to `online:false` / empty rather than failing the whole
-    // list — the UI shows the peer with no servers.
-    const fedRegistry = peerRegistry
-    mcpFederation = {
-      listPeerShared: async () => {
-        const rows = fedRegistry.status()
-        const out = await Promise.all(
-          rows.map(async (row) => {
-            const link = row.connected ? fedRegistry.linkForHub(row.peerId) : null
-            if (!link) {
-              return { peer: row.peerId, label: row.label, online: false, servers: [] }
-            }
-            try {
-              const servers = await fetchPeerSharedMcp(link)
-              return { peer: row.peerId, label: row.label, online: true, servers }
-            } catch (err) {
-              log.warn('mcp federation: listShared failed', {
-                peer: row.peerId,
-                err: err instanceof Error ? err.message : String(err),
-              })
-              return { peer: row.peerId, label: row.label, online: true, servers: [] }
-            }
-          }),
-        )
-        return out
-      },
-    }
-    // Phase 18 A-M2 — on-demand peer capability manifest discovery for the
-    // admin UI. In-process cache over the same registry; the admin refreshes.
-    peerFederation = createPeerManifestFederation(fedRegistry, { logger: log })
-    // v5 E5-M3 — the control plane: this hub's own footprint (`local`) joined
-    // with each connected peer's voluntarily-shared summary. In-process cache
-    // over the same registry; the admin refreshes on demand.
-    //
-    // v5 Stream F multi-channel (M3) — opt-in best-effort retry/backoff + a
-    // dedup window for alert delivery. Retry defaults to a single attempt
-    // (behavior unchanged); the dedup window defaults to 60s (the firing
-    // lifecycle already notifies once — this is the secondary net).
-    const clampInt = (raw: string | undefined, def: number, lo: number, hi: number): number => {
-      const n = Number(raw ?? '')
-      return Number.isFinite(n) ? Math.min(hi, Math.max(lo, Math.trunc(n))) : def
-    }
-    const alertRetryAttempts = clampInt(process.env.GOTONG_PEER_SUMMARY_ALERT_RETRY_ATTEMPTS, 1, 1, 6)
-    const alertRetryBaseMs = clampInt(process.env.GOTONG_PEER_SUMMARY_ALERT_RETRY_BASE_MS, 500, 50, 30_000)
-    const alertDedupWindowMs = clampInt(process.env.GOTONG_PEER_SUMMARY_ALERT_DEDUP_MS, 60_000, 0, 3_600_000)
-    peerSummaryFederation = createPeerSummaryFederation(fedRegistry, {
-      buildLocal: () => buildLocalSummary(summaryDeps),
-      // v5 Stream F — persist a counts-only snapshot per refresh so the control
-      // plane can draw trends. IdentityStore duck-types the snapshot sink; the
-      // history query reads it back. Without this the plane is point-in-time only.
-      snapshots: identity,
-      // v5 Stream F-M5 — alert rules + live evaluation. IdentityStore duck-types
-      // the rule sink; the federation exposes CRUD + evaluateAlerts on top.
-      alertRules: identity,
-      // v5 Stream F day-3 — firing history (edge-trigger open→resolve) + webhook
-      // notification channels. IdentityStore duck-types both. The federation
-      // exposes channel CRUD + `evaluateAndDeliver`; the opt-in alert sweep below
-      // drives proactive delivery. Webhook transport defaults to global fetch +
-      // process.env (the secret in `headerEnv` is read at delivery time).
-      firings: identity,
-      channels: identity,
-      // v5 Stream F multi-channel (M3) — best-effort retry/backoff for the
-      // dispatcher (defaults to a single attempt = unchanged) + the dedup
-      // window for the in-memory deduper (0 disables). Delivery still routes
-      // through global fetch + process.env; the deduper is created and held
-      // by the federation surface.
-      deliver: { retry: { maxAttempts: alertRetryAttempts, baseDelayMs: alertRetryBaseMs } },
-      deliverDedupWindowMs: alertDedupWindowMs,
-      logger: log,
-    })
-    // v5 Stream F day-3 — proactive alert-delivery sweep. OPT-IN: only runs when
-    // GOTONG_PEER_SUMMARY_ALERT_SWEEP_MS is set to a positive value (clamped to
-    // [10s, 1h]). Each tick refreshes peer summaries then edge-triggers breaches
-    // into firings + POSTs webhooks (notify ONCE per breach). A reentrancy guard
-    // prevents a slow tick (many channels / slow webhooks) from overlapping the
-    // next. Off by default: the admin UI's point-in-time evaluation is unchanged,
-    // and a hub with no channels configured delivers nothing even when enabled.
-    {
-      const fed = peerSummaryFederation
-      const rawAlertInterval = Number(process.env.GOTONG_PEER_SUMMARY_ALERT_SWEEP_MS ?? '0')
-      const alertIntervalMs =
-        Number.isFinite(rawAlertInterval) && rawAlertInterval >= 10_000
-          ? Math.min(rawAlertInterval, 3_600_000)
-          : 0
-      if (alertIntervalMs > 0) {
-        let alertInflight = false
-        const sweepAlerts = async (): Promise<void> => {
-          if (alertInflight) return
-          alertInflight = true
-          try {
-            // Refresh first so peer summaries are current before we evaluate —
-            // a refresh failure on one peer leaves its last reading (the row's
-            // `stale` flag stays the UI's honesty signal), it never aborts the pass.
-            await fed.refresh()
-            const report = await fed.evaluateAndDeliver()
-            if (report.opened.length > 0 || report.resolved.length > 0) {
-              const failed = report.deliveries.filter((d) => !d.ok).length
-              log.info('peer summary alert sweep', {
-                opened: report.opened.length,
-                resolved: report.resolved.length,
-                deliveries: report.deliveries.length,
-                failedDeliveries: failed,
-              })
-            }
-          } catch (err) {
-            log.error('peer summary alert sweep failed', {
-              err: err instanceof Error ? err.message : String(err),
-            })
-          } finally {
-            alertInflight = false
-          }
-        }
-        alertSweepTimer = setInterval(() => {
-          void sweepAlerts()
-        }, alertIntervalMs)
-        alertSweepTimer.unref?.()
-        log.info('peer summary alert sweep started', { intervalMs: alertIntervalMs })
-      }
-    }
-    // Phase 6 #4 — per-peer resolver is auto-wired by PeerRegistry
-    // when identity is present (it is here — we only enter this block
-    // when identity is wired). The shared token remains as fallback
-    // for peers not yet enrolled in the peers table; in practice the
-    // resolver path wins for any peer that IS enrolled because
-    // verifyPeerToken consults the resolver first.
-    log.info('peer registry started', {
-      selfHubId,
-      pollIntervalMs: pollMs,
-      inboundAuth: inboundToken ? 'per-peer+shared-fallback' : 'per-peer',
-      trustProxy,
-      inboundRateLimit: rateLimitMax > 0 && rateLimitWindowMs > 0
-        ? `${rateLimitMax}/${rateLimitWindowMs}ms`
-        : 'disabled',
-    })
+    mcpProxy = wired.mcpProxy
+    peerRegistry = wired.peerRegistry
+    // D2 — 让 Hub 的跨 hub resolver 闭包看见这个 registry。
+    peerRegistryRef = wired.peerRegistry
+    butlerPeerRosterRef = wired.peerRoster
+    mcpFederation = wired.mcpFederation
+    peerFederation = wired.peerFederation
+    peerSummaryFederation = wired.peerSummaryFederation
+    alertSweepTimer = wired.alertSweepTimer
   }
   // Readiness flag — flips to true after workflow resume finishes (see
   // the setTimeout block below). `/readyz` reads this; `/healthz` is
