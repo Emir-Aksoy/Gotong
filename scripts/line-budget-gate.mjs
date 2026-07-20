@@ -12,6 +12,20 @@
  * but must be a deliberate, visible edit here (and justified in the commit) —
  * that friction is the whole point. You cannot balloon main.ts silently.
  *
+ * 两条 2026-07-20 体检记录，读之前先知道：
+ *
+ *   1. **零余量会把这道门变成注释绞肉机。** main.ts 卡在 3000/3000、me-routes
+ *      卡在 2850/2850 各自二十来个提交，于是每次加一行都得先删一行注释——
+ *      CLAUDE.md 明写「注释写为什么」，这道门却在拿它换行数。行数只是**膨胀
+ *      的代理指标**，不是目标本身。顶到上限的正解是**拆文件**（下调预算），
+ *      不是刮注释。新加的条目一律留一点余量，就是为了不再复制这个病。
+ *   2. **盯的文件集会过期。** 这三条写下时，全仓最大的文件
+ *      `identity/store.ts`(3295) 比 main.ts 还大，却因为不在「装配层」而一直
+ *      没人管；`web/identity-routes.ts`(2686)、`host/local-agent-pool.ts`(2326)
+ *      同理。名字叫装配层是历史来由，不是原则——按大小收编即可。下一档
+ *      （`identity/types.ts` 2092、`core/space.ts` 1599）暂不入册：类型定义长
+ *      与逻辑长不是一回事，等它们真的开始涨再说。
+ *
  *   node scripts/line-budget-gate.mjs           # exit 0 within budget / 1 over
  *   node scripts/line-budget-gate.mjs --report   # print current vs budget, exit 0
  *
@@ -36,6 +50,11 @@ const BUDGETS = [
   { file: 'packages/host/src/main.ts', max: 3000 }, // the assembly binary — SLIM 抽 heartbeat-engine 后 2941,棘轮 3040→2980;C-M2-M4b 令牌刷新计时器 2980→2986;C-M2-M5a 出站 OAuth 连接器 CRUD surface 接线(factory construct + serveWeb opt)显式抬 2986→2990;MU-M5 记忆树 git 快照 opt-in 接线(GOTONG_BUTLER_MEMORY_GIT 解析 + sweeper gitSnapshot)显式抬 2990→2996;审计 P1 全局 unhandledRejection 兜底网(installProcessSafetyNet)防后台计时器崩宿主,显式抬 2996→3000
   { file: 'packages/web/src/server.ts', max: 2381 }, // web route assembly (types → server-types.ts); 2350→2370 C-M2-M3b 出站 OAuth connect 路由对(公开 callback + admin begin 派发),抽 blessed OIDC/SAML 派发风险更高故显式抬棘轮;2370→2381 C-M2-M5a 出站 OAuth 连接器 CRUD 路由组接线(import+re-export+ctx+HandlerCtx 字段+派发块,逻辑在 oauth-connector-admin-routes.ts 不计),同 OIDC/SAML 派发家族
   { file: 'packages/web/src/me-routes.ts', max: 2850 }, // /me route sprawl (types → me-routes-types.ts)
+  // 2026-07-20 收编的三个失管大文件（见头注第 2 条）。预算 = 当时行数 + ~45 行
+  // 余量：够一次正常修改落地，不够无声膨胀，也不逼人删注释换行数。
+  { file: 'packages/identity/src/store.ts', max: 3340 }, // 3295 — 全仓最大;users/credentials/sessions/vault/quota/peers… 全挤在一个 store
+  { file: 'packages/web/src/identity-routes.ts', max: 2730 }, // 2686 — 身份路由组,与 me-routes 同型 sprawl
+  { file: 'packages/host/src/local-agent-pool.ts', max: 2370 }, // 2326 — spawn/路由/MCP 热插拔/探针都在这
 ]
 
 /** Match `wc -l`: count newline characters. */
