@@ -18,6 +18,13 @@
  *   1 = 用法错误 / pack 文件读不了
  *   2 = 装模板失败(解析拒绝 / HTTP 错 / 网络不通)
  *   3 = 装上了但没到位: 工作流落地失败 / 建调度失败 / 验收红
+ *   4 = --strict 且有黄行(见下)
+ *
+ * `--strict`: 把黄也当失败(出码 4)。默认「黄=0」是给人看的姿态 —— 一个
+ * 人读得到报告,自己决定连接器要不要接。但自动化读不到:CI / 部署流水线
+ * 只看出码,于是「装了个没配 key 的 agent」这种半成品会一路绿灯过关,
+ * 直到有人真去用才发现。`--strict` 给流水线一个「必须全绿才算部署成功」
+ * 的开关,而不改变人工路径的默认行为。
  */
 
 import { readFile } from 'node:fs/promises'
@@ -38,6 +45,7 @@ interface ProvisionFlags {
   token: string
   user?: string
   skipAcceptance: boolean
+  strict: boolean
 }
 
 /** Parse args; string = usage error (printed by the caller). Exported for tests. */
@@ -47,10 +55,12 @@ export function parseProvisionArgs(args: readonly string[]): ProvisionFlags | st
   let token: string | undefined
   let user: string | undefined
   let skipAcceptance = false
+  let strict = false
   for (let i = 0; i < args.length; i++) {
     const a = args[i]!
     if (a === '--help' || a === '-h') return 'help'
     if (a === '--skip-acceptance') { skipAcceptance = true; continue }
+    if (a === '--strict') { strict = true; continue }
     if (a === '--url' || a === '--token' || a === '--user') {
       const v = args[++i]
       if (!v || v.startsWith('--')) return `${a} 需要一个值`
@@ -66,7 +76,7 @@ export function parseProvisionArgs(args: readonly string[]): ProvisionFlags | st
   if (!file) return '缺 pack 文件路径(gotong.template/v1 YAML)'
   if (!url) return '缺 --url <hub 地址,如 http://127.0.0.1:8787>'
   if (!token) return '缺 --token <admin token>'
-  return { file, url: url.replace(/\/+$/, ''), token, skipAcceptance, ...(user ? { user } : {}) }
+  return { file, url: url.replace(/\/+$/, ''), token, skipAcceptance, strict, ...(user ? { user } : {}) }
 }
 
 /** Plain-text cadence for report lines (mirrors the admin card's wording). */
@@ -274,7 +284,12 @@ export async function provision(
     out('装上了但还没到位——按上面红行修,然后重跑同一条命令(装模板是幂等的,已存在的 agent 会复用)。')
     return 3
   }
-  if (yellow.length > 0) out('可用,但上面黄行补齐后才是完整体验。')
-  else out('全绿,开箱即用。')
+  if (yellow.length > 0) {
+    out('可用,但上面黄行补齐后才是完整体验。')
+    if (flags.strict) {
+      out('--strict: 黄行按失败计——补齐后重跑(装模板是幂等的)。')
+      return 4
+    }
+  } else out('全绿,开箱即用。')
   return 0
 }

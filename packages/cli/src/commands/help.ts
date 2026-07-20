@@ -393,16 +393,26 @@ Options:
   --token <token>      admin bearer token (必填)
   --user <memberId>    把模板的定时建议补人启用;run 归属该成员
   --skip-acceptance    不跑黄金用例(省 token;报告里黄牌记一笔)
+  --strict             黄行也算失败(出码 4)——给 CI / 部署流水线用
   --help / -h          Show this message
 
 Exit codes: 0 绿或仅黄 / 1 用法或文件错误 / 2 装模板失败 / 3 装上了但
-没到位(工作流落地失败、建调度失败、或验收红)。
+没到位(工作流落地失败、建调度失败、或验收红) / 4 --strict 且有黄行。
+
+默认「黄=0」是给人看的:人读得到报告,自己决定连接器要不要接。自动化读
+不到——CI 只看出码,于是「装了个没配 key 的 agent」会一路绿灯过关。要求
+「必须全绿才算部署成功」就加 --strict。
+
+注意 --url 必须是 hub 的 GOTONG_ALLOWED_HOSTS 里列出的域名。设了 allowlist
+之后,回环地址会被 CSRF 门判 403 forbidden: untrusted host(非 GET 一律校验
+Host,无回环豁免)。
 
 Examples:
   gotong provision templates/bundles/morning-brief-hub.yaml \\
     --url http://127.0.0.1:3000 --token "$GOTONG_ADMIN_TOKEN"
-  gotong provision pack.yaml --url http://hub:3000 --token t --user u-alice
-  gotong provision pack.yaml --url http://hub:3000 --token t --skip-acceptance
+  gotong provision pack.yaml --url https://hub.example.com --token t --user u-alice
+  gotong provision pack.yaml --url https://hub.example.com --token t --skip-acceptance
+  gotong provision pack.yaml --url https://hub.example.com --token t --user u-alice --strict
 `,
   model: `gotong model [--url <hub>] [--token <admin-token>] [--agent <id>]
 

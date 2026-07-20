@@ -28,7 +28,9 @@ import {
   collectChecks,
   collectDefinitionChecks,
   doctor,
+  isExposedDeployment,
   mkdirpReal,
+  perimeterChecks,
   probePortReal,
   probePathReal,
   type DoctorDeps,
@@ -459,5 +461,116 @@ describe('runCli doctor wiring', () => {
     }
     expect(writes.join('')).toContain('gotong doctor')
     expect(writes.join('')).toContain('Pre-flight')
+  })
+})
+
+/**
+ * Perimeter section — the checks that only apply once a box faces a network.
+ *
+ * The load-bearing property is the GATE, not the individual verdicts: a home
+ * hub on loopback must see ZERO extra lines (otherwise every laptop user is
+ * nagged about TLS they don't need), while a VPS must not be told "all checks
+ * passed" while serving session cookies in the clear.
+ */
+describe('perimeterChecks — network-facing only', () => {
+  it('a loopback home box is not "exposed" and gets no perimeter lines', () => {
+    for (const env of [
+      {},
+      { GOTONG_HOST: '127.0.0.1' },
+      { GOTONG_HOST: 'localhost', GOTONG_SPACE: '.gotong' },
+      { GOTONG_HOST: '::1' },
+    ]) {
+      expect(isExposedDeployment(env)).toBe(false)
+      expect(perimeterChecks(env)).toEqual([])
+    }
+  })
+
+  it('each of the three exposure signals flips the section on', () => {
+    // A public bind is obvious; the other two are how a T3-behind-Caddy box
+    // looks (bind stays loopback, but the operator declared a real domain
+    // and/or demanded Secure cookies).
+    expect(isExposedDeployment({ GOTONG_HOST: '0.0.0.0' })).toBe(true)
+    expect(isExposedDeployment({ GOTONG_ALLOWED_HOSTS: 'hub.example.com' })).toBe(true)
+    expect(isExposedDeployment({ GOTONG_COOKIE_SECURE: '1' })).toBe(true)
+  })
+
+  it('a correctly hardened T3 box passes with no blockers', () => {
+    const checks = perimeterChecks({
+      GOTONG_HOST: '127.0.0.1',
+      GOTONG_COOKIE_SECURE: '1',
+      GOTONG_ALLOWED_HOSTS: 'hub.example.com,hub-ws.example.com',
+      GOTONG_TRUST_PROXY: '1',
+      GOTONG_GATING: 'admin-approval',
+      GOTONG_MASTER_KEY_PROVIDER: 'env',
+    })
+    expect(checks.length).toBeGreaterThan(0)
+    expect(checks.filter((c) => c.level !== 'ok')).toEqual([])
+  })
+
+  it('flags plaintext cookies, an empty allow-list, open gating and the insecure override', () => {
+    const checks = perimeterChecks({
+      GOTONG_HOST: '0.0.0.0',
+      GOTONG_GATING: 'open',
+      GOTONG_ALLOW_INSECURE: '1',
+    })
+    const errors = checks.filter((c) => c.level === 'error').map((c) => c.label)
+    expect(errors).toContain('Cookie security')
+    expect(errors).toContain('Host allow-list')
+    expect(errors).toContain('Agent gating')
+    expect(errors).toContain('Insecure override')
+    // Every non-ok line carries an imperative remedy — a finding with no fix
+    // is a dead end for the operator who just hit it.
+    for (const c of checks.filter((x) => x.level !== 'ok')) expect(c.fix).toBeTruthy()
+  })
+
+  it('warns (not fails) on the softer perimeter items', () => {
+    const checks = perimeterChecks({
+      GOTONG_HOST: '0.0.0.0',
+      GOTONG_COOKIE_SECURE: '1',
+      GOTONG_ALLOWED_HOSTS: 'hub.example.com',
+    })
+    const warns = checks.filter((c) => c.level === 'warn').map((c) => c.label)
+    expect(warns).toContain('Bind address')       // non-loopback: works, but prefer a proxy
+    expect(warns).toContain('Proxy trust')        // rate-limit accuracy, not a hole
+    expect(warns).toContain('Master key location') // file KEK: fine at home, weak on a VPS
+    expect(checks.filter((c) => c.level === 'error')).toEqual([])
+  })
+
+  it('perimeter blockers make `doctor` exit non-zero and print the harden pointer', () => {
+    const writes: string[] = []
+    const deps: DoctorDeps = {
+      env: { GOTONG_HOST: '0.0.0.0', GOTONG_SPACE: '.gotong' },
+      nodeVersion: '20.0.0',
+      resolveHost: () => '/x',
+      probePort: async () => ({ status: 'free' }),
+      probePath: async () => 'writable',
+      runWorkspaceCheck: async () => { throw new Error('no host') },
+      out: (l) => writes.push(l),
+      err: () => {},
+    }
+    return doctor([], deps).then((code) => {
+      const text = writes.join('')
+      expect(code).toBe(1)
+      expect(text).toContain('Perimeter')
+      expect(text).toContain('cloud-harden.sh')
+    })
+  })
+
+  it('a home box never sees the perimeter section at all', () => {
+    const writes: string[] = []
+    const deps: DoctorDeps = {
+      env: { GOTONG_SPACE: '.gotong' },
+      nodeVersion: '20.0.0',
+      resolveHost: () => '/x',
+      probePort: async () => ({ status: 'free' }),
+      probePath: async () => 'writable',
+      runWorkspaceCheck: async () => { throw new Error('no host') },
+      out: (l) => writes.push(l),
+      err: () => {},
+    }
+    return doctor([], deps).then((code) => {
+      expect(code).toBe(0)
+      expect(writes.join('')).not.toContain('Perimeter')
+    })
   })
 })

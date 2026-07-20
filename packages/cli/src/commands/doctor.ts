@@ -319,6 +319,125 @@ export async function collectChecks(deps: DoctorDeps = {}): Promise<DoctorCheck[
   ]
 }
 
+const LOOPBACK = new Set(['127.0.0.1', 'localhost', '::1', '[::1]', ''])
+
+/**
+ * Is this box being configured to face a network, rather than a laptop?
+ *
+ * The doctor serves both a home hub on loopback (T1 — none of the perimeter
+ * settings apply, and demanding TLS there would be noise) and a VPS behind a
+ * reverse proxy (T3 — where every one of them is load-bearing). We can't ask,
+ * so we infer from the config the operator already wrote:
+ *
+ *   - a non-loopback bind  → obviously reachable
+ *   - GOTONG_ALLOWED_HOSTS → you only list public domains when you have them
+ *     (this is the T3-behind-Caddy shape, where the bind IS still loopback)
+ *   - GOTONG_COOKIE_SECURE → you only demand Secure cookies over TLS
+ *
+ * Any one of them flips the perimeter section on. A pure home box sets none
+ * and sees zero extra lines.
+ */
+export function isExposedDeployment(env: Record<string, string | undefined>): boolean {
+  const host = (env.GOTONG_HOST ?? '').trim()
+  if (!LOOPBACK.has(host)) return true
+  if ((env.GOTONG_ALLOWED_HOSTS ?? '').trim()) return true
+  if ((env.GOTONG_COOKIE_SECURE ?? '').trim() === '1') return true
+  return false
+}
+
+/**
+ * Perimeter checks — only for a network-facing box (see isExposedDeployment).
+ *
+ * These duplicate part of `scripts/cloud-harden.sh` on purpose. That script is
+ * the fuller check (it also reads host facts: listening sockets, admins.json,
+ * cron, firewall) but it only ships in a source checkout and nothing points an
+ * operator at it — an FDE who installed from npm and runs the documented
+ * `gotong doctor` would otherwise expose a box with plaintext cookies and no
+ * CSRF defence and be told "all checks passed". Declared config is something
+ * the doctor can read anywhere, so it reads it.
+ */
+export function perimeterChecks(env: Record<string, string | undefined>): DoctorCheck[] {
+  if (!isExposedDeployment(env)) return []
+  const out: DoctorCheck[] = []
+  const get = (k: string) => (env[k] ?? '').trim()
+
+  const host = get('GOTONG_HOST')
+  if (!LOOPBACK.has(host)) {
+    out.push({
+      level: 'warn',
+      label: 'Bind address',
+      detail: `GOTONG_HOST=${host} is not loopback — the host itself faces the network`,
+      fix: 'Prefer GOTONG_HOST=127.0.0.1 with Caddy/nginx terminating TLS in front (DEPLOY.md §C.5).',
+    })
+  } else {
+    out.push({ level: 'ok', label: 'Bind address', detail: `GOTONG_HOST=${host || '127.0.0.1'} (loopback — only a same-host proxy reaches it)` })
+  }
+
+  const insecure = get('GOTONG_ALLOW_INSECURE')
+  if (insecure && !['0', 'false', 'no'].includes(insecure.toLowerCase())) {
+    out.push({
+      level: 'error',
+      label: 'Insecure override',
+      detail: `GOTONG_ALLOW_INSECURE=${insecure} downgrades the exposed-bind guard to a warning`,
+      fix: 'Unset it and fix TLS instead — on a public network this leaks session cookies in plaintext.',
+    })
+  }
+
+  out.push(
+    get('GOTONG_COOKIE_SECURE') === '1'
+      ? { level: 'ok', label: 'Cookie security', detail: 'GOTONG_COOKIE_SECURE=1 (Secure + SameSite=Strict)' }
+      : {
+          level: 'error',
+          label: 'Cookie security',
+          detail: `GOTONG_COOKIE_SECURE is ${get('GOTONG_COOKIE_SECURE') || 'unset'} on a network-facing box`,
+          fix: 'Set GOTONG_COOKIE_SECURE=1 — otherwise the session cookie travels in the clear.',
+        },
+  )
+
+  const allowed = get('GOTONG_ALLOWED_HOSTS')
+  out.push(
+    allowed
+      ? { level: 'ok', label: 'Host allow-list', detail: `GOTONG_ALLOWED_HOSTS=${allowed}` }
+      : {
+          level: 'error',
+          label: 'Host allow-list',
+          detail: 'GOTONG_ALLOWED_HOSTS is empty — CSRF / DNS-rebinding defence is OFF',
+          fix: 'List every user-facing domain, e.g. GOTONG_ALLOWED_HOSTS=hub.example.com,hub-ws.example.com',
+        },
+  )
+
+  if (get('GOTONG_GATING') === 'open') {
+    out.push({
+      level: 'error',
+      label: 'Agent gating',
+      detail: 'GOTONG_GATING=open — any agent that reaches the port can join unattended',
+      fix: 'Use GOTONG_GATING=admin-approval on an exposed host.',
+    })
+  }
+
+  if (get('GOTONG_TRUST_PROXY') !== '1') {
+    out.push({
+      level: 'warn',
+      label: 'Proxy trust',
+      detail: `GOTONG_TRUST_PROXY is ${get('GOTONG_TRUST_PROXY') || 'unset'}`,
+      fix: 'Behind a reverse proxy set =1, so the admin-login rate limit keys on the real client IP and not the proxy.',
+    })
+  }
+
+  // The default file-backed KEK sits on the same disk as the ciphertext it
+  // protects: one stolen snapshot opens the vault. Fine at home, not on a VPS.
+  if ((get('GOTONG_MASTER_KEY_PROVIDER') || 'local-file') !== 'env') {
+    out.push({
+      level: 'warn',
+      label: 'Master key location',
+      detail: 'the KEK is a file under GOTONG_SPACE — a disk snapshot captures key + ciphertext together',
+      fix: 'On a cloud box set GOTONG_MASTER_KEY_PROVIDER=env and inject GOTONG_MASTER_KEY (PROD-HARDENING-RUNBOOK.md 「黄4」).',
+    })
+  }
+
+  return out
+}
+
 /** Map definitions counts to doctor ✓/✖ lines (summary; details are `gotong check`). */
 function definitionChecks(s: WorkspaceCheckSummary): DoctorCheck[] {
   const out: DoctorCheck[] = []
@@ -446,7 +565,21 @@ export async function doctor(args: readonly string[], deps: DoctorDeps = {}): Pr
     out('\n')
   }
 
-  const all = [...checks, ...defChecks]
+  // Perimeter — empty (and silent) unless this box is configured to face a
+  // network. See perimeterChecks() for why the doctor carries these at all.
+  const perimeter = perimeterChecks(deps.env ?? process.env)
+  if (perimeter.length) {
+    out('Perimeter (network-facing deployment detected):\n')
+    for (const c of perimeter) {
+      out(`  ${MARK[c.level]} ${c.label} — ${c.detail}\n`)
+      if (c.fix && c.level !== 'ok') out(`      → ${c.fix}\n`)
+    }
+    out('  ℹ Deeper check (listening sockets, admin count, backup cron, firewall):\n')
+    out('      bash scripts/cloud-harden.sh /etc/gotong.env\n')
+    out('\n')
+  }
+
+  const all = [...checks, ...defChecks, ...perimeter]
   const errors = all.filter((c) => c.level === 'error').length
   const warns = all.filter((c) => c.level === 'warn').length
   if (errors > 0) {
@@ -475,6 +608,11 @@ reads — WITHOUT booting it — and prints, per check, ✓ / ⚠ / ✖ with a f
   - workflow + agent definitions parse — when @gotong/host and a seeded
     GOTONG_SPACE are present (same validators as \`gotong check\`; skipped on a
     fresh box where there's nothing loaded yet)
+
+On a box configured to face a network (non-loopback bind, or GOTONG_ALLOWED_HOSTS
+/ GOTONG_COOKIE_SECURE set) it adds a PERIMETER section: TLS cookies, host
+allow-list, agent gating, proxy trust, master-key location. A home hub on
+loopback sets none of those and sees no extra lines.
 
 It reports the NAMES of key env vars, never their values. Exit code is 0 when
 there are no ✖ blockers (⚠ are advisory), 1 otherwise.

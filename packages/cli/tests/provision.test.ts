@@ -14,7 +14,8 @@ describe('parseProvisionArgs', () => {
   it('parses the full flag set and strips trailing slashes off --url', () => {
     expect(
       parseProvisionArgs([
-        'pack.yaml', '--url', 'http://h:3000///', '--token', 't', '--user', 'u-a', '--skip-acceptance',
+        'pack.yaml', '--url', 'http://h:3000///', '--token', 't', '--user', 'u-a',
+        '--skip-acceptance', '--strict',
       ]),
     ).toEqual({
       file: 'pack.yaml',
@@ -22,7 +23,18 @@ describe('parseProvisionArgs', () => {
       token: 't',
       user: 'u-a',
       skipAcceptance: true,
+      strict: true,
     })
+  })
+
+  // --strict turns the yellow band into a failure for pipelines. Default OFF:
+  // the human-facing report keeps its "yellow is a reminder, not a failure"
+  // posture, so adding the flag can never change an existing invocation.
+  it('--strict defaults off and does not need a value', () => {
+    expect(parseProvisionArgs(['p.yaml', '--url', 'http://h', '--token', 't']))
+      .toMatchObject({ strict: false })
+    expect(parseProvisionArgs(['p.yaml', '--url', 'http://h', '--token', 't', '--strict']))
+      .toMatchObject({ strict: true })
   })
 
   it('minimal invocation: file + url + token, no user', () => {
