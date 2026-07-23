@@ -183,6 +183,12 @@ import { randomInt } from 'node:crypto'
 
 const DEFAULT_SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000 // 7 days
 
+// Perf audit A② — how stale last_seen_at may get before getSessionByToken
+// writes it again. last_seen_at is display-only (expiry runs on the absolute
+// expires_at), so a sub-minute lag is invisible — while an SPA polling every
+// few seconds stops costing one synchronous UPDATE per request.
+const SESSION_TOUCH_INTERVAL_MS = 60_000
+
 // Route B P0-M1 — tenant/namespace of this identity store. An identity DB is
 // already one tenant's (the `dbPath` is tenant-resolved by the host); this is
 // the self-describing label so higher layers can read back *which* tenant.
@@ -1520,9 +1526,11 @@ export class IdentityStore {
    *     CASCADE should have killed the session row too; we double-
    *     check)
    *
-   * Side effect: updates `last_seen_at` to now. Cheap (one indexed
-   * UPDATE by PK) but it IS a write per request. If that ever becomes
-   * a bottleneck, batch it in memory and flush periodically.
+   * Side effect: refreshes `last_seen_at` — but only when the stored value
+   * is ≥SESSION_TOUCH_INTERVAL_MS stale (perf audit A②). The old shape was
+   * an unconditional UPDATE per request; with an SPA polling every few
+   * seconds that is a synchronous write on every single hit. The returned
+   * `lastSeenAt` mirrors what the row actually holds after the call.
    */
   getSessionByToken(token: string):
     | { user: User; role: Role; session: Session }
@@ -1539,7 +1547,8 @@ export class IdentityStore {
     const membership = this.getMembership(sRow.user_id)
     if (!membership) return null
 
-    this.stmtTouchSession.run(now, token)
+    const touch = now - sRow.last_seen_at >= SESSION_TOUCH_INTERVAL_MS
+    if (touch) this.stmtTouchSession.run(now, token)
 
     return {
       user,
@@ -1549,7 +1558,7 @@ export class IdentityStore {
         userId: sRow.user_id,
         expiresAt: sRow.expires_at,
         createdAt: sRow.created_at,
-        lastSeenAt: now,
+        lastSeenAt: touch ? now : sRow.last_seen_at,
       },
     }
   }

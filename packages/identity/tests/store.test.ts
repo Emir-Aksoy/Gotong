@@ -16,7 +16,7 @@
  *     refactor to introduce a subtle bug)
  */
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 
 import {
   openIdentityStore,
@@ -482,6 +482,34 @@ describe('IdentityStore', () => {
       expect(removed).toBe(1)
       // Live one still there.
       expect(store.getSessionByToken(live.token)).not.toBeNull()
+    })
+
+    it('touch throttle: last_seen_at rewritten only when ≥60s stale (perf audit A②)', () => {
+      vi.useFakeTimers()
+      try {
+        const t0 = 1_000_000
+        vi.setSystemTime(t0)
+        store.createUser({ email: 'a@x.test', password: 'pw-long-enough' })
+        const s = store.authenticatePassword({
+          email: 'a@x.test',
+          password: 'pw-long-enough',
+        })
+        // In-window lookup: no write — the stored stamp (t0) is echoed back.
+        vi.setSystemTime(t0 + 30_000)
+        expect(store.getSessionByToken(s.token)?.session.lastSeenAt).toBe(t0)
+        // Past the interval: the lookup writes and reports the new stamp.
+        vi.setSystemTime(t0 + 61_000)
+        expect(store.getSessionByToken(s.token)?.session.lastSeenAt).toBe(
+          t0 + 61_000,
+        )
+        // The write really landed — the next in-window lookup echoes it.
+        vi.setSystemTime(t0 + 61_000 + 10_000)
+        expect(store.getSessionByToken(s.token)?.session.lastSeenAt).toBe(
+          t0 + 61_000,
+        )
+      } finally {
+        vi.useRealTimers()
+      }
     })
 
     it('FK cascade: deleting a credential does NOT kill live sessions (sessions are independent of cred)', () => {
