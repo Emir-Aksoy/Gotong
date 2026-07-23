@@ -488,6 +488,22 @@ T3 起了反代后直接开 `https://域名`，T2 经 `ssh -L` 隧道开 `http:/
 - [ ] ≥2 个 admin；确认 `mint-admin-token` 恢复路径可用
 - [ ] 证书签发跑通（谨慎先用 Let's Encrypt staging）
 - [ ] 确认知道怎么从备份恢复（出事前先演练一次：`scripts/backup/drill.sh`）
+- [ ] （长期运行）retention 保留策略已设：默认全关=磁盘只增不减；建议起步值见下
+
+**retention 建议起步值** —— 框架绝不静默删数据，所以默认全关；打算长期跑的 hub
+建议显式设置。设了之后启动时执行一次、**运行期每 6 小时自动重执行**（不用为了
+瘦身而重启）。transcript / workflow run 两族是**归档不是删除**（字节挪进
+`archive/`，审计导出照常可达）；identity 三类 `*_KEEP_DAYS` 是**真删除**，但保留
+窗口内随时可走 CSV/JSONL 导出留档：
+
+```bash
+GOTONG_TRANSCRIPT_KEEP_SEGMENTS=50    # 留最新 50 个封存段（~400MB），更旧的进 archive/
+GOTONG_RUN_KEEP=2000                  # 只归档终态 run；running 永不动
+GOTONG_LEDGER_KEEP_DAYS=400           # 计费对账留超一年
+GOTONG_AUDIT_KEEP_DAYS=400
+GOTONG_PEER_SUMMARY_KEEP_DAYS=90
+GOTONG_ALERT_FIRINGS_KEEP_DAYS=90    # 只删已解除的告警；open 永不删
+```
 
 ---
 

@@ -434,8 +434,12 @@ Everything Gotong persists is append-only by default — the
 transcript, workflow run records, and the identity DB's ledger /
 audit / control-plane tables all grow until you say otherwise. The
 retention knobs below are **all off unless set** (the host never
-silently deletes data), applied once at boot, and a malformed value
-fails the boot loudly instead of being ignored.
+silently deletes data), and a malformed value fails the boot loudly
+instead of being ignored. A configured policy is applied once at
+boot **and re-applied every 6 hours at runtime** (perf audit A⑤) —
+age cutoffs re-anchor to the sweep clock, so a host that is never
+restarted still honors its policy instead of growing until the next
+reboot.
 
 | Env | What it bounds | Semantics |
 |---|---|---|

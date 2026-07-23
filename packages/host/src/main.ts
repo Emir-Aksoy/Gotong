@@ -129,6 +129,7 @@ import { rotateMasterKey } from './rotate-master-key.js'
 import { applyRetentionPolicies, parseRetentionPolicies } from './retention.js'
 import { recoverMasterKeyRotation } from './master-key-recovery.js'
 import { applyRunRetention, parseRunRetention } from './run-retention.js'
+import { armRetentionSweeper } from './retention-sweeper.js'
 import { applyTranscriptRetention, parseTranscriptRetention } from './transcript-retention.js'
 import { describe } from './transcript-line.js'
 import { parseButlerEnv } from './butler-env.js'
@@ -1339,6 +1340,18 @@ async function main(): Promise<void> {
     }
   }
 
+  // Perf audit A⑤ — re-apply the SAME retention policies every 6h at runtime
+  // (cutoffs re-anchored per tick). Null when no retention env is set: zero
+  // timers, byte-identical host. See retention-sweeper.ts for why re-applying
+  // against the live hub is safe (throwaway storage / sealed-only / terminal-only).
+  const retentionSweeper = armRetentionSweeper({
+    env: process.env,
+    storage: () => space.storage(),
+    runs: workflowController,
+    identity: identity ?? null,
+    log,
+  })
+
   // Phase 13 M3 — host-built-in workflow assistant agent. Registers a
   // `WorkflowAssistantAgent` on the hub (cap=`workflow:assist`) and
   // exposes a duck-typed surface for the Web layer's
@@ -2517,6 +2530,7 @@ async function main(): Promise<void> {
     }
     try { butlerSweeps.stop() } catch (err) { log.error('butler sweeps stop error', { err }) }
     try { workflowScheduleSweeper.stop() } catch (err) { log.error('workflow schedule stop error', { err }) }
+    if (retentionSweeper) { try { retentionSweeper.stop() } catch (err) { log.error('retention sweeper stop error', { err }) } }
     if (oauthRefresher) { try { oauthRefresher.stop() } catch (err) { log.error('oauth refresh stop error', { err }) } }
     if (services) {
       try { await services.shutdownAll() } catch (err) { log.error('services shutdown error', { err }) }
