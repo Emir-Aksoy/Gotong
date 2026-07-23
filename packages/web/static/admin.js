@@ -3920,6 +3920,13 @@
       if (snap.spaceWritable === false) {
         signals.push(hubHealthSignalRow("red", t6.healthSpaceUnwritable(snap.spacePath || ""), ""));
       }
+      if (snap.updateAvailable) {
+        signals.push(hubHealthSignalRow(
+          "yellow",
+          t6.healthUpdateAvailable(snap.updateAvailable.current, snap.updateAvailable.latest),
+          ""
+        ));
+      }
       const allGreen = signals.length === 0;
       const head = `
       <div class="hh-head">

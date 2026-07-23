@@ -1077,6 +1077,8 @@
         const tail = mins > 0 ? `已断供约 ${mins} 分钟` : '刚刚断供'
         return `管家大脑当前不可用(${why})— ${tail}。命令面仍可用;查供应商状态 / key / 额度。`
       },
+      // --- B② — 新版可用(opt-in 探针;黄条垫底,更新仍由人跑) ---
+      healthUpdateAvailable: (current, latest) => `有新版本可用:当前 ${current},最新 ${latest} — 在服务器上跑 gotong update 升级(先看发布说明,更新完手动重启)。`,
       // --- MR-M3 — per-provider 路由降级(黄条:已切备用,服务未断)---
       healthRouting: (agentId, candidate, state, kind, mins) => {
         const kinds = { auth: '认证失败', quota: '额度用尽', rate_limited: '被限流', network: '连不上', timeout: '超时', model_not_found: '模型不存在' }
@@ -3119,6 +3121,8 @@
         const tail = mins > 0 ? `down for ~${mins} min` : 'just went down'
         return `The butler's brain is currently unavailable (${why}) — ${tail}. Commands still work; check provider status / key / quota.`
       },
+      // --- B② — newer release available (opt-in probe; advisory yellow, applying stays human) ---
+      healthUpdateAvailable: (current, latest) => `A newer Gotong is available: ${current} → ${latest} — run gotong update on the server (read the release notes first; restart manually after).`,
       // --- MR-M3 — per-provider routing degradation (yellow: failed over, still serving) ---
       healthRouting: (agentId, candidate, state, kind, mins) => {
         const kinds = { auth: 'auth failed', quota: 'quota exhausted', rate_limited: 'rate limited', network: 'unreachable', timeout: 'timeout', model_not_found: 'model not found' }

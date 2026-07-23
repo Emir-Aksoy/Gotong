@@ -22,7 +22,7 @@ import { join } from 'node:path'
 
 import { afterEach, describe, expect, it } from 'vitest'
 
-import { detectInstallForm, update, type UpdateDeps } from '../src/commands/update.js'
+import { detectInstallForm, parseSemverTriple, update, type UpdateDeps } from '../src/commands/update.js'
 
 const cleanups: string[] = []
 afterEach(() => {
@@ -249,5 +249,118 @@ describe('gotong update — other forms', () => {
   it('usage: unknown args → exit 1', async () => {
     const d = deps('', { selfDir: tmp('gotong-form4-') })
     expect(await update(['--nope'], d)).toBe(1)
+  })
+})
+
+describe('gotong update --check (perf audit B②)', () => {
+  it('git form: behind origin → exit 5 with the commit count, HEAD untouched, nothing built', async () => {
+    const { bare, clone } = mkRepo()
+    pushRemoteCommit(bare)
+    const before = head(clone)
+    const d = deps(clone, {
+      runBuild: () => {
+        throw new Error('check must not build')
+      },
+    })
+    expect(await update(['--check'], d)).toBe(5)
+    expect(head(clone)).toBe(before) // fetch only — the working tree never moves
+    const text = d.outArr.join('\n')
+    expect(text).toContain('领先 1 个 commit')
+    expect(text).toContain('gotong update')
+  })
+
+  it('git form: current → exit 0; a DIRTY tree does not block a read-only check', async () => {
+    const { bare, clone } = mkRepo()
+    const current = deps(clone)
+    expect(await update(['--check'], current)).toBe(0)
+    expect(current.outArr.join('\n')).toContain('已是最新')
+
+    // dirty tracked edit + a remote commit: plain update refuses (exit 3),
+    // --check still answers (exit 5).
+    writeFileSync(join(clone, 'pnpm-workspace.yaml'), "packages:\n  - 'packages/*'\n# edited\n")
+    pushRemoteCommit(bare)
+    const dirty = deps(clone)
+    expect(await update(['--check'], dirty)).toBe(5)
+    expect(head(clone)).toBe(head(clone)) // and nothing merged
+  })
+
+  it('git form: local ahead of origin only → current (exit 0)', async () => {
+    const { clone } = mkRepo()
+    writeFileSync(join(clone, 'LOCAL.md'), 'unpushed work\n')
+    sh(clone, 'git', ['add', '-A'])
+    sh(clone, 'git', [...GIT_ID, 'commit', '-m', 'local-only'])
+    const d = deps(clone)
+    expect(await update(['--check'], d)).toBe(0)
+    expect(d.outArr.join('\n')).toContain('本地还领先')
+  })
+
+  it('npm form: registry newer → exit 5 + apply hint; equal → 0; probe failure → 4', async () => {
+    const p = tmp('gotong-check-npm-')
+    mkdirSync(join(p, 'node_modules', 'gotong'), { recursive: true })
+    const base: Partial<UpdateDeps> = {
+      selfDir: join(p, 'node_modules', 'gotong'),
+      readSelfVersion: async () => '4.0.0',
+    }
+
+    const newer = deps('', { ...base, fetchLatestVersion: async () => '4.1.0' })
+    expect(await update(['--check'], newer)).toBe(5)
+    const text = newer.outArr.join('\n')
+    expect(text).toContain('4.0.0 → 4.1.0')
+    expect(text).toContain('gotong update')
+
+    const equal = deps('', { ...base, fetchLatestVersion: async () => '4.0.0' })
+    expect(await update(['--check'], equal)).toBe(0)
+    expect(equal.outArr.join('\n')).toContain('已是最新')
+
+    // local dev checkout ahead of the registry = current, not behind
+    const ahead = deps('', { ...base, readSelfVersion: async () => '5.0.0', fetchLatestVersion: async () => '4.9.9' })
+    expect(await update(['--check'], ahead)).toBe(0)
+
+    const down = deps('', {
+      ...base,
+      fetchLatestVersion: async () => {
+        throw new Error('ECONNRESET')
+      },
+    })
+    expect(await update(['--check'], down)).toBe(4)
+    expect(down.errArr.join('\n')).toContain('拿不到最新版本号')
+
+    const garbage = deps('', { ...base, fetchLatestVersion: async () => 'not-a-version' })
+    expect(await update(['--check'], garbage)).toBe(4)
+    expect(garbage.errArr.join('\n')).toContain('认不出')
+  })
+
+  it('portable + rsync forms can ANSWER --check (5/0) even though applying stays refused/pointed', async () => {
+    const p = tmp('gotong-check-forms-')
+    mkdirSync(join(p, 'bundle', 'app'), { recursive: true })
+    writeFileSync(join(p, 'bundle', 'BUNDLE-INFO.txt'), 'stamp')
+    const portable = deps('', {
+      selfDir: join(p, 'bundle', 'app'),
+      readSelfVersion: async () => '4.0.0',
+      fetchLatestVersion: async () => '4.2.0',
+    })
+    expect(await update(['--check'], portable)).toBe(5)
+    expect(portable.outArr.join('\n')).toContain('PORTABLE-BUNDLE.md')
+
+    mkdirSync(join(p, 'deploy', 'packages', 'host'), { recursive: true })
+    writeFileSync(join(p, 'deploy', 'pnpm-workspace.yaml'), '')
+    const rsync = deps('', {
+      selfDir: join(p, 'deploy'),
+      readSelfVersion: async () => '4.0.0',
+      fetchLatestVersion: async () => '4.0.0',
+    })
+    expect(await update(['--check'], rsync)).toBe(0) // vs plain update's exit 2
+
+    mkdirSync(join(p, 'lonely'), { recursive: true })
+    const unknown = deps('', { selfDir: join(p, 'lonely') })
+    expect(await update(['--check'], unknown)).toBe(2) // unknown form stays refused
+  })
+
+  it('parseSemverTriple: triples, v-prefix, prerelease; garbage → null', () => {
+    expect(parseSemverTriple('4.0.0')).toEqual([4, 0, 0])
+    expect(parseSemverTriple('v4.1.2')).toEqual([4, 1, 2])
+    expect(parseSemverTriple('4.1.0-rc.1')).toEqual([4, 1, 0])
+    expect(parseSemverTriple('4.0')).toBeNull()
+    expect(parseSemverTriple('garbage')).toBeNull()
   })
 })

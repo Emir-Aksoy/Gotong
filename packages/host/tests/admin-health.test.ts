@@ -40,6 +40,8 @@ function svc(opts: {
   readLlmOutage?: () => Promise<{ kind: string; since: number } | null>
   // MR-M3 — routing-health projection; same optional-dep contract.
   routingHealth?: () => HealthRoutingRow[]
+  // B② — new-version notice; same optional-dep contract.
+  readUpdateAvailable?: () => { current: string; latest: string } | null | undefined
 }) {
   return createAdminHealthService({
     listAgents: async () => opts.agents,
@@ -54,6 +56,7 @@ function svc(opts: {
     ...(opts.listConnectorSlots ? { listConnectorSlots: opts.listConnectorSlots } : {}),
     ...(opts.readLlmOutage ? { readLlmOutage: opts.readLlmOutage } : {}),
     ...(opts.routingHealth ? { routingHealth: opts.routingHealth } : {}),
+    ...(opts.readUpdateAvailable ? { readUpdateAvailable: opts.readUpdateAvailable } : {}),
   })
 }
 
@@ -375,6 +378,45 @@ describe('createAdminHealthService.snapshot', () => {
         },
       }).snapshot()
       expect(s.routing).toEqual([])
+      expect(s.managedCount).toBe(1)
+    })
+  })
+
+  describe('updateAvailable (perf audit B②)', () => {
+    it('omits the field when the dep is not injected OR the probe has no answer yet', async () => {
+      const unwired = await svc({ agents: [managed('a1', 'openai')] }).snapshot()
+      expect('updateAvailable' in unwired).toBe(false)
+
+      // knob on but no successful probe yet → still absent (unknown ≠ current)
+      const unprobed = await svc({
+        agents: [managed('a1', 'openai')],
+        readUpdateAvailable: () => undefined,
+      }).snapshot()
+      expect('updateAvailable' in unprobed).toBe(false)
+    })
+
+    it('null when probed and current; the row when a newer release exists', async () => {
+      const current = await svc({
+        agents: [managed('a1', 'openai')],
+        readUpdateAvailable: () => null,
+      }).snapshot()
+      expect(current.updateAvailable).toBe(null)
+
+      const behind = await svc({
+        agents: [managed('a1', 'openai')],
+        readUpdateAvailable: () => ({ current: '4.0.0', latest: '4.1.0' }),
+      }).snapshot()
+      expect(behind.updateAvailable).toEqual({ current: '4.0.0', latest: '4.1.0' })
+    })
+
+    it('degrades a dep fault to ABSENT — never a false "up to date" null', async () => {
+      const s = await svc({
+        agents: [managed('a1', 'openai')],
+        readUpdateAvailable: () => {
+          throw new Error('boom')
+        },
+      }).snapshot()
+      expect('updateAvailable' in s).toBe(false)
       expect(s.managedCount).toBe(1)
     })
   })

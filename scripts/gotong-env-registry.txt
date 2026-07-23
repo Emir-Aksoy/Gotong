@@ -15,10 +15,10 @@
 # 测试脚手架里的 GOTONG_* 不算旋钮，不登记。每项「是什么 / 默认」的说明是 GUARD-M2
 # 惯例文档的活儿，不在本表。
 #
-# 当前登记数: 113 个真旋钮 + 4 个 not-a-knob 形似项 = 117 行
+# 当前登记数: 114 个真旋钮 + 4 个 not-a-knob 形似项 = 118 行
 #   (沿革: …109 →M-EMB1 +3 embedder→112 →M-GRAPH +1 links→113 →M-RECON +1 reconcile→114
 #    →LIB-M4 +1 librarian→115 →VOICE-M3 +4 TTS→119 →ASR-M3 +1 ASR→120
-#    →2026-07-20 计数精度修正 −3 注释项、−4 形似项分开计 →113)
+#    →2026-07-20 计数精度修正 −3 注释项、−4 形似项分开计 →113 →perf-B② +1 update-check→114)
 # 重新播种 (审慎变更后):  node scripts/env-registry-gate.mjs --list > scripts/gotong-env-registry.txt
 #   ⚠ --list 只吐名字, 会冲掉上面的 not-a-knob 标签——播种后记得把 4 个标签补回来。
 #
@@ -133,6 +133,7 @@ GOTONG_TELEGRAM_BOT_TOKEN
 GOTONG_TRANSCRIPT_ARCHIVE_DAYS
 GOTONG_TRANSCRIPT_KEEP_SEGMENTS
 GOTONG_TRUST_PROXY
+GOTONG_UPDATE_CHECK     # opt-in 每日新版探针 (perf audit B②): 查 npm dist-tags → 面板黄条 + 日志; 未设=零网络零定时器
 GOTONG_URL              # not-a-knob: cli 脚手架模板生成的**用户 agent 文件**读它, hub 自己不读
 GOTONG_WEB_PORT
 GOTONG_WECHAT_BASE_URL

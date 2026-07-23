@@ -1435,6 +1435,14 @@ import { createWorkflows } from './workflows.js'
     if (snap.spaceWritable === false) {
       signals.push(hubHealthSignalRow('red', t.healthSpaceUnwritable(snap.spacePath || ''), ''))
     }
+    // YELLOW, last (perf audit B②) — a newer release exists (opt-in
+    // GOTONG_UPDATE_CHECK probe). Advisory below every operational signal:
+    // applying it stays a human running `gotong update`. Field absent (knob
+    // off / no probe answer yet) → nothing, honestly.
+    if (snap.updateAvailable) {
+      signals.push(hubHealthSignalRow('yellow',
+        t.healthUpdateAvailable(snap.updateAvailable.current, snap.updateAvailable.latest), ''))
+    }
 
     const allGreen = signals.length === 0
     const head = `

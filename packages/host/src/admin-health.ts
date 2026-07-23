@@ -118,6 +118,15 @@ export interface HealthSnapshot {
    * not down (that's `llmOutage`). Minutes/cooldown fold in the panel.
    */
   routing?: HealthRoutingRow[]
+  /**
+   * Perf audit B② — a newer release exists (fed by the opt-in
+   * GOTONG_UPDATE_CHECK probe). Tri-state like `llmOutage`: field absent →
+   * probe not wired OR no successful probe yet (honest unknown — never
+   * conflated with "up to date"); null → probed, running the latest; row →
+   * newer available (panel renders an advisory yellow line; applying stays
+   * a human running `gotong update`).
+   */
+  updateAvailable?: { current: string; latest: string } | null
   /** ISO timestamp the snapshot was taken. */
   checkedAt: string
 }
@@ -231,6 +240,13 @@ export interface AdminHealthDeps {
    * 「未知」);注入了但一切正常 → `[]`。实现体不抛(纯读内存 Map)。
    */
   routingHealth?(): HealthRoutingRow[]
+  /**
+   * B② — read the version-check handle's in-memory answer (host injects
+   * `() => versionCheck?.latest()`). Synchronous, no network — the probe
+   * itself runs on its own daily timer. Returns undefined when the knob is
+   * off or no probe has succeeded yet → field absent (honest unknown).
+   */
+  readUpdateAvailable?(): { current: string; latest: string } | null | undefined
 }
 
 /** The duck-typed surface injected into `serveWeb`. */
@@ -378,6 +394,17 @@ export function createAdminHealthService(deps: AdminHealthDeps): AdminHealthSurf
         }
       }
 
+      // B② — new-version notice. On a dep fault degrade to ABSENT (unknown),
+      // not null — null would claim "checked, up to date", which we don't know.
+      let updateAvailable: { current: string; latest: string } | null | undefined
+      if (deps.readUpdateAvailable) {
+        try {
+          updateAvailable = deps.readUpdateAvailable()
+        } catch {
+          updateAvailable = undefined
+        }
+      }
+
       return {
         agents: rows,
         agentsMissingKey: rows.filter((r) => r.missingKey).length,
@@ -398,6 +425,7 @@ export function createAdminHealthService(deps: AdminHealthDeps): AdminHealthSurf
         ...(slotRows !== undefined ? { connectorSlots: slotRows } : {}),
         ...(llmOutage !== undefined ? { llmOutage } : {}),
         ...(routing !== undefined ? { routing } : {}),
+        ...(updateAvailable !== undefined ? { updateAvailable } : {}),
         checkedAt: new Date().toISOString(),
       }
     },

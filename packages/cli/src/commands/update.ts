@@ -26,14 +26,28 @@
  * config problems are the check's story), and the restart commands are
  * PRINTED (systemd + foreground), never run.
  *
+ * `--check` (perf audit B②) answers "is there a newer version" WITHOUT
+ * touching anything — the on-demand half of new-version notification (the
+ * opt-in background half is the host's GOTONG_UPDATE_CHECK probe):
+ *   - git form: `git fetch` + rev compare against origin (asks YOUR remote,
+ *     never npm; a dirty tree doesn't block a read-only check).
+ *   - npm / portable / rsync forms: GET the npm registry's `latest` dist-tag
+ *     for the unscoped `gotong` meta package and compare it with this CLI's
+ *     own package.json version (all packages share one version). Network
+ *     runs only because you asked — the default `gotong update` on these
+ *     forms already talks to the same places.
+ *
  * Exit codes: 0 updated / already current / portable pointer · 1 usage ·
  * 2 form can't self-update (rsync deploy, unknown) · 3 git refused (dirty
- * tree or non-fast-forward) · 4 install/build failed (dist.prev restored) —
- * npm-form failures also map here.
+ * tree or non-fast-forward; --check: fetch failed) · 4 install/build failed
+ * (dist.prev restored) — npm-form and --check-probe failures also map here ·
+ * 5 --check only: a newer version exists (scriptable: `gotong update --check
+ * || alert`).
  */
 
 import { spawnSync } from 'node:child_process'
 import { existsSync, readdirSync, renameSync, rmSync } from 'node:fs'
+import { readFile } from 'node:fs/promises'
 import { dirname, join, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -75,8 +89,82 @@ export interface UpdateDeps {
   runCheck?: () => Promise<number>
   /** the npm-form updater (default: real `npm i -g gotong@latest`). */
   runNpmInstall?: () => number
+  /** --check: npm registry probe (default: GET the `gotong` dist-tags). */
+  fetchLatestVersion?: () => Promise<string>
+  /** --check: this install's own version (default: the CLI's package.json). */
+  readSelfVersion?: () => Promise<string | null>
   out?: (line: string) => void
   err?: (line: string) => void
+}
+
+// ── --check version compare (B②) ────────────────────────────────────────────
+// A deliberate small copy of the host's semver-triple helpers: the CLI stays
+// dependency-tiny on purpose, and 10 lines don't justify a package edge.
+
+/** `[major,minor,patch]` or null; prerelease/build suffixes compare by triple. */
+export function parseSemverTriple(v: string): [number, number, number] | null {
+  const m = /^v?(\d+)\.(\d+)\.(\d+)(?:[-+]|$)/.exec(v.trim())
+  return m ? [Number(m[1]), Number(m[2]), Number(m[3])] : null
+}
+
+async function fetchLatestReal(): Promise<string> {
+  const res = await fetch('https://registry.npmjs.org/-/package/gotong/dist-tags', {
+    signal: AbortSignal.timeout(10_000),
+    headers: { accept: 'application/json' },
+  })
+  if (!res.ok) throw new Error(`registry answered ${res.status}`)
+  const body = (await res.json()) as { latest?: unknown }
+  if (typeof body.latest !== 'string' || !body.latest) throw new Error('no latest dist-tag')
+  return body.latest
+}
+
+async function readSelfVersionReal(): Promise<string | null> {
+  try {
+    // here = dist/commands (built) or src/commands (vitest) — package.json is
+    // two levels up either way (same trick as main.ts's --version).
+    const here = dirname(fileURLToPath(import.meta.url))
+    const raw = await readFile(join(here, '..', '..', 'package.json'), 'utf8')
+    const v = (JSON.parse(raw) as { version?: string }).version
+    return typeof v === 'string' ? v : null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * The non-git `--check`: registry `latest` vs this install's own version.
+ * Exit 0 current · 5 newer available (prints `applyHint`) · 4 no reliable
+ * answer (network / unparseable — never guessed into a verdict).
+ */
+async function registryCheck(
+  deps: UpdateDeps,
+  out: (l: string) => void,
+  err: (l: string) => void,
+  applyHint: string,
+): Promise<number> {
+  let latest: string
+  try {
+    latest = await (deps.fetchLatestVersion ?? fetchLatestReal)()
+  } catch (e) {
+    err(`[gotong update] 拿不到最新版本号(${e instanceof Error ? e.message : String(e)})— 网络或 registry 问题,稍后再试。`)
+    return 4
+  }
+  const self = await (deps.readSelfVersion ?? readSelfVersionReal)()
+  const cur = self ? parseSemverTriple(self) : null
+  const lat = parseSemverTriple(latest)
+  if (!cur || !lat) {
+    err(`[gotong update] 版本串认不出(本机 ${self ?? '未知'} / npm latest ${latest})— 无法可靠对比。`)
+    return 4
+  }
+  // First differing position decides; local ahead of the registry (dev checkout) = current.
+  const cmp = lat[0] !== cur[0] ? lat[0] - cur[0] : lat[1] !== cur[1] ? lat[1] - cur[1] : lat[2] - cur[2]
+  if (cmp > 0) {
+    out(`[gotong update] 有新版: ${self} → ${latest}`)
+    out(`  ${applyHint}`)
+    return 5
+  }
+  out(`[gotong update] 已是最新 (本机 ${self},npm latest ${latest})。`)
+  return 0
 }
 
 function git(root: string, args: string[]): { status: number; stdout: string; stderr: string } {
@@ -109,8 +197,10 @@ export async function update(args: readonly string[], deps: UpdateDeps = {}): Pr
     printHelp('update')
     return 0
   }
-  if (args.length > 0) {
-    err(`[gotong update] 不认识的参数: ${args.join(' ')}`)
+  const checkOnly = args.includes('--check')
+  const stray = args.find((a) => a !== '--check')
+  if (stray !== undefined) {
+    err(`[gotong update] 不认识的参数: ${stray}`)
     printHelp('update')
     return 1
   }
@@ -119,12 +209,18 @@ export async function update(args: readonly string[], deps: UpdateDeps = {}): Pr
   const detected = detectInstallForm(selfDir)
 
   if (detected.form === 'portable') {
+    if (checkOnly) {
+      return registryCheck(deps, out, err, '便携包更新 = 下载新包解压替换整个 bundle 目录(数据在包外);见 docs/zh/PORTABLE-BUNDLE.md。')
+    }
     out('[gotong update] 便携包形态 — 包内自带 runtime,不做原地更新。')
     out('  更新 = 下载新包解压替换整个 bundle 目录;数据目录在包外,原样保留。')
     out('  下载与校验步骤见 docs/zh/PORTABLE-BUNDLE.md。')
     return 0
   }
   if (detected.form === 'npm') {
+    if (checkOnly) {
+      return registryCheck(deps, out, err, '应用更新: gotong update(会跑 npm i -g gotong@latest)。')
+    }
     out('[gotong update] 全局 npm 安装形态 — 交给 npm:')
     out('  npm i -g gotong@latest')
     const code = deps.runNpmInstall
@@ -138,6 +234,11 @@ export async function update(args: readonly string[], deps: UpdateDeps = {}): Pr
     return 0
   }
   if (detected.form === 'checkout-no-git') {
+    if (checkOnly) {
+      // The question "is there a newer release" is still answerable here even
+      // though APPLYING one isn't (that stays the exit-2 refusal below).
+      return registryCheck(deps, out, err, '这台是 rsync 副本:在源 checkout 上更新后重新同步过来。')
+    }
     err('[gotong update] 这是一份没有 .git 的部署副本(rsync 形态),这台机器上没有可拉取的历史。')
     err('  更新姿势: 在源 checkout 上 gotong update(或 git pull)后重新 rsync 过来;')
     err('  或改用 cloud-quickstart.sh --clone 部署,之后就能原地 update。')
@@ -153,20 +254,23 @@ export async function update(args: readonly string[], deps: UpdateDeps = {}): Pr
   const root = detected.root
   out(`[gotong update] git checkout: ${root}`)
 
-  // untracked-files=no: only edits to TRACKED files block the update — a
-  // production checkout legitimately carries untracked strays (dist, logs,
-  // data dirs); if one truly collides with an incoming file, the ff merge
-  // itself refuses and we relay that.
-  const dirty = git(root, ['status', '--porcelain', '--untracked-files=no'])
-  if (dirty.status !== 0) {
-    err(`[gotong update] git status 失败: ${dirty.stderr}`)
-    return 3
-  }
-  if (dirty.stdout.length > 0) {
-    err('[gotong update] 工作区有未提交改动 —— 不代解决(纪律与 cloud-quickstart 同:绝不覆盖你的本地编辑)。')
-    err('  先 git stash / commit / checkout -- 处理干净,再重跑。改动:')
-    for (const l of dirty.stdout.split('\n').slice(0, 10)) err(`    ${l}`)
-    return 3
+  if (!checkOnly) {
+    // untracked-files=no: only edits to TRACKED files block the update — a
+    // production checkout legitimately carries untracked strays (dist, logs,
+    // data dirs); if one truly collides with an incoming file, the ff merge
+    // itself refuses and we relay that. --check skips this: a read-only
+    // compare has nothing to protect.
+    const dirty = git(root, ['status', '--porcelain', '--untracked-files=no'])
+    if (dirty.status !== 0) {
+      err(`[gotong update] git status 失败: ${dirty.stderr}`)
+      return 3
+    }
+    if (dirty.stdout.length > 0) {
+      err('[gotong update] 工作区有未提交改动 —— 不代解决(纪律与 cloud-quickstart 同:绝不覆盖你的本地编辑)。')
+      err('  先 git stash / commit / checkout -- 处理干净,再重跑。改动:')
+      for (const l of dirty.stdout.split('\n').slice(0, 10)) err(`    ${l}`)
+      return 3
+    }
   }
 
   const branch = git(root, ['rev-parse', '--abbrev-ref', 'HEAD']).stdout || 'main'
@@ -180,6 +284,18 @@ export async function update(args: readonly string[], deps: UpdateDeps = {}): Pr
   if (local === remote) {
     out(`[gotong update] 已是最新 (${branch} @ ${local.slice(0, 7)}),什么都不用做。`)
     return 0
+  }
+  if (checkOnly) {
+    // Count only commits WE lack; a local-ahead-only checkout (unpushed dev
+    // work) is current, not behind.
+    const behind = Number(git(root, ['rev-list', '--count', `HEAD..origin/${branch}`]).stdout || '0')
+    if (behind === 0) {
+      out(`[gotong update] 已是最新 (本地还领先 origin/${branch},没有可拉取的新 commit)。`)
+      return 0
+    }
+    out(`[gotong update] 有新版: origin/${branch} 领先 ${behind} 个 commit (${local.slice(0, 7)} → ${remote.slice(0, 7)})。`)
+    out('  应用更新: gotong update')
+    return 5
   }
 
   const merge = git(root, ['merge', '--ff-only', `origin/${branch}`])

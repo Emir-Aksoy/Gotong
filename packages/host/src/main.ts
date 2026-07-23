@@ -130,6 +130,7 @@ import { applyRetentionPolicies, parseRetentionPolicies } from './retention.js'
 import { recoverMasterKeyRotation } from './master-key-recovery.js'
 import { applyRunRetention, parseRunRetention } from './run-retention.js'
 import { armRetentionSweeper } from './retention-sweeper.js'
+import { armVersionCheck } from './version-check.js'
 import { applyTranscriptRetention, parseTranscriptRetention } from './transcript-retention.js'
 import { describe } from './transcript-line.js'
 import { parseButlerEnv } from './butler-env.js'
@@ -1341,9 +1342,8 @@ async function main(): Promise<void> {
   }
 
   // Perf audit A⑤ — re-apply the SAME retention policies every 6h at runtime
-  // (cutoffs re-anchored per tick). Null when no retention env is set: zero
-  // timers, byte-identical host. See retention-sweeper.ts for why re-applying
-  // against the live hub is safe (throwaway storage / sealed-only / terminal-only).
+  // (cutoffs re-anchored per tick). No retention env ⇒ null, zero timers.
+  // Runtime safety (throwaway storage / sealed-only / terminal-only): see file.
   const retentionSweeper = armRetentionSweeper({
     env: process.env,
     storage: () => space.storage(),
@@ -1352,13 +1352,15 @@ async function main(): Promise<void> {
     log,
   })
 
+  // Perf audit B② — opt-in daily new-version probe (GOTONG_UPDATE_CHECK);
+  // unset ⇒ null, zero timers/network. Answer feeds the health panel below.
+  const versionCheck = armVersionCheck({ env: process.env, current: BAKED_VERSION, log })
+
   // Phase 13 M3 — host-built-in workflow assistant agent. Registers a
-  // `WorkflowAssistantAgent` on the hub (cap=`workflow:assist`) and
-  // exposes a duck-typed surface for the Web layer's
-  // `POST /api/admin/workflows/assist` route. Returns null (and the
-  // route stays 503) when GOTONG_ASSISTANT_DISABLED=1 or no LLM API key
-  // can be resolved for the configured provider — non-AI hosts pay zero
-  // boot cost beyond the env probe.
+  // `WorkflowAssistantAgent` (cap=`workflow:assist`) + duck-typed surface for
+  // the Web layer's `POST /api/admin/workflows/assist`. Returns null (route
+  // stays 503) when GOTONG_ASSISTANT_DISABLED=1 or no LLM key resolves for the
+  // configured provider — non-AI hosts pay zero boot cost beyond the env probe.
   const assistConfig = resolveWorkflowAssistConfig()
   const workflowAssist = assistConfig
     ? createWorkflowAssistAgent({
@@ -2164,9 +2166,8 @@ async function main(): Promise<void> {
       return { total: all.length, published: live.length }
     },
     countRuns: async () => (await workflowController.countRuns()).total,
-    // DEPLOY-B3 — live IM bridge rows for the settings page. `imBridges` is
-    // assigned after this closure is built; the `?? []` keeps the boot window
-    // honest ("no live bridge yet" is literally true then).
+    // DEPLOY-B3 — live IM bridge rows. `imBridges` is assigned after this
+    // closure is built; `?? []` keeps the boot window honestly "none yet".
     imStatus: () => imBridges?.status() ?? [],
     // FDE-M1b — flatten the per-pack registry to the rows the 体检 wants;
     // fulfilment (filled) is admin-health's job, not the file's.
@@ -2185,6 +2186,8 @@ async function main(): Promise<void> {
     // MR-M3 — per-provider routing health (degraded fallback candidates), read
     // from the in-memory tracker the pool feeds. Pure, synchronous, never throws.
     routingHealth: () => routingHealth.snapshot(),
+    // B② — new-version notice from the opt-in probe (knob off ⇒ undefined ⇒ absent).
+    readUpdateAvailable: () => versionCheck?.latest(),
   })
   patrolHealthRef = adminHealth
 
@@ -2531,6 +2534,7 @@ async function main(): Promise<void> {
     try { butlerSweeps.stop() } catch (err) { log.error('butler sweeps stop error', { err }) }
     try { workflowScheduleSweeper.stop() } catch (err) { log.error('workflow schedule stop error', { err }) }
     if (retentionSweeper) { try { retentionSweeper.stop() } catch (err) { log.error('retention sweeper stop error', { err }) } }
+    if (versionCheck) { try { versionCheck.stop() } catch (err) { log.error('version check stop error', { err }) } }
     if (oauthRefresher) { try { oauthRefresher.stop() } catch (err) { log.error('oauth refresh stop error', { err }) } }
     if (services) {
       try { await services.shutdownAll() } catch (err) { log.error('services shutdown error', { err }) }

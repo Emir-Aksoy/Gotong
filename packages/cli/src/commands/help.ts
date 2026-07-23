@@ -26,7 +26,7 @@ Commands:
                               --tier=identity|relations for key-only / +peers subsets)
   restore <tgz> --space <dir> Verify a backup's manifest, then restore it
   migrate <scan|apply> <dir>  Find / fix legacy (AipeHub-era) identifiers
-  update                      Update this install in place (git ff-only / npm / portable)
+  update                      Update this install in place (git ff-only / npm / portable); --check only asks
   help [command]              Show usage for a specific command
   --version                   Print the CLI version
 
@@ -353,7 +353,7 @@ Examples:
   gotong setting restore gotong-prod-20260626T101530Z.tar.gz /opt/gotong --yes
   gotong setting rotate-master-key
 `,
-  update: `gotong update
+  update: `gotong update [--check]
 
 探测这份 Gotong 是怎么装的,原地更新那种形态;**永不代跑重启**(重启权在
 运维手里,更新完只打印 systemd/前台两句重启命令)。
@@ -369,11 +369,18 @@ Examples:
   rsync 部署     这台机器没有 .git 可拉 —— 提示回源 checkout 更新后重新
                  rsync,或改用 cloud-quickstart --clone 部署。
 
+--check 只查不动(可放 cron 当新版提醒;后台常驻探针见 GOTONG_UPDATE_CHECK
+旋钮): git 形态 fetch 后比对 origin(只问你自己的远端,不碰 npm;脏工作区
+不拦只读检查);其余形态查 npm registry 的 latest 标签比对本机版本。
+
 Exit codes: 0 更新成功/已最新/便携包指路 / 1 用法 / 2 形态无法自更新 /
-3 git 拒绝(脏工作区或非快进) / 4 安装或构建失败(dist.prev 已还原)。
+3 git 拒绝(脏工作区或非快进;--check 时=fetch 失败) / 4 安装或构建失败
+(dist.prev 已还原;--check 时=拿不到可靠答案) / 5 仅 --check:有新版
+(脚本可依赖: gotong update --check || 报警)。
 
 Examples:
   gotong update
+  gotong update --check
 `,
   provision: `gotong provision <pack.yaml> --url <hub> --token <admin-token> [options]
 
