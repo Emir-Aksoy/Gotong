@@ -1,8 +1,10 @@
 # Monitoring + alerting
 
-Gotong ships Prometheus-format metrics at `/api/admin/metrics` (admin-
-gated). This doc covers: what's exposed, how to scrape it, the ten
-recommended alert rules, and what to do when each one fires.
+Gotong ships Prometheus-format metrics at `GET /metrics`, gated by a
+dedicated bearer token (`GOTONG_METRICS_TOKEN`, fail-closed); admins
+see the same body at `/api/admin/metrics`. This doc covers: what's
+exposed, how to scrape it, the ten recommended alert rules, and what
+to do when each one fires.
 
 If you only have 30 minutes, do the **minimum viable monitoring**
 section. That's three rules + a dashboard, catches the three most
@@ -51,19 +53,30 @@ by the `scrape.example.yml` recipe.
 
 ## 2. Setting up the scrape
 
-The metrics endpoint is admin-gated. Don't reuse a human admin's
-token — mint a dedicated machine admin and rotate it like any other
-secret.
+The scrape route is `GET /metrics`, gated by a dedicated bearer
+token (`GOTONG_METRICS_TOKEN`) — not by the admin session. Don't
+mint a machine admin for Prometheus: a scraper should read metrics,
+not hold an admin credential. The route is fail-closed — env var
+unset → 404 (an unconfigured deployment exposes no anonymous
+metrics); set but wrong/absent bearer → 401.
 
 ```bash
-# On the host, mint a machine admin:
-pnpm host -- mint-admin --display-name 'prometheus-scraper' > /tmp/scraper.out
-TOKEN="$(grep -oE '[a-f0-9]{64}' /tmp/scraper.out)"
+# 1. Generate a long random secret:
+openssl rand -hex 32 > /tmp/gotong.token
 
-# Push the token to your Prometheus host as a 0600 file:
-scp /tmp/scraper.out prometheus-host:/etc/prometheus/gotong.token
+# 2. On the Gotong host: set GOTONG_METRICS_TOKEN to that value in
+#    the hub's environment (systemd `Environment=` /
+#    `EnvironmentFile=`, or your wrapper script) and restart the hub.
+
+# 3. Push the same token to your Prometheus box as a 0600 file:
+scp /tmp/gotong.token prometheus-host:/etc/prometheus/gotong.token
 ssh prometheus-host 'sudo chown prometheus:prometheus /etc/prometheus/gotong.token && sudo chmod 0600 /etc/prometheus/gotong.token'
+rm /tmp/gotong.token
 ```
+
+Rotation = generate a new secret and swap both sides (host env +
+token file); no Prometheus restart needed — `bearer_token_file` is
+re-read on every scrape.
 
 Then merge the contents of
 [`monitoring/prometheus/scrape.example.yml`](../monitoring/prometheus/scrape.example.yml)
@@ -72,7 +85,7 @@ into your `prometheus.yml`:
 ```yaml
 scrape_configs:
   - job_name: gotong
-    metrics_path: /api/admin/metrics
+    metrics_path: /metrics
     scheme: https
     bearer_token_file: /etc/prometheus/gotong.token
     static_configs:
@@ -81,6 +94,11 @@ scrape_configs:
     static_configs:
       - targets: ['hub.example.com:9100']
 ```
+
+Prefer zero assembly?
+[`monitoring/docker-compose.yml`](../monitoring/docker-compose.yml)
+brings up Prometheus + Alertmanager + Grafana pre-wired to this same
+mechanism — see [`monitoring/README.md`](../monitoring/README.md).
 
 Reload Prometheus (`curl -X POST .../-/reload` or restart) and confirm
 the targets are `UP` in the Prometheus UI under
@@ -126,9 +144,10 @@ including RSS, which the hub exports itself), one `gotong-host`
 ssh hub.example.com 'systemctl status gotong-host'
 
 # 2. If the service is running but Prometheus can't reach it,
-#    check the token:
+#    check the token (404 = GOTONG_METRICS_TOKEN unset on the host,
+#    401 = token file no longer matches the host env):
 curl -s -H "Authorization: Bearer $(cat /etc/prometheus/gotong.token)" \
-     https://hub.example.com/api/admin/metrics | head
+     https://hub.example.com/metrics | head
 
 # 3. If the service is dead, check the logs:
 ssh hub.example.com 'journalctl -u gotong-host -n 200 --no-pager'
@@ -150,8 +169,8 @@ see [`docs/OPERATIONS.md`](OPERATIONS.md) § Disaster recovery.
 
 # 2. If `failed`, check the most recent transcript entries via the
 #    admin UI or:
-curl -s -H "Authorization: Bearer $TOKEN" \
-     "https://hub.example.com/api/admin/metrics" | grep tasks_total
+curl -s -H "Authorization: Bearer $(cat /etc/prometheus/gotong.token)" \
+     "https://hub.example.com/metrics" | grep tasks_total
 
 # 3. Most common: an LLM provider key expired. Re-save in the admin
 #    UI under "Secrets" or via Space.setProviderApiKey.
