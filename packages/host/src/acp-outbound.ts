@@ -238,10 +238,11 @@ export class AcpOutboundManager {
   }
 
   /**
-   * OBSERVE seam → transcript. Best-effort: the agent's streamed message text is
-   * appended as an `llm_stream_chunk` event so the admin UI's existing typewriter
-   * renderer shows ACP output in real time — the same pipeline LlmAgent streaming
-   * already uses, no new plumbing. An ACP coding agent IS LLM-backed, so the chunk
+   * OBSERVE seam → transcript observers. Best-effort: the agent's streamed
+   * message text is fanned out as an `llm_stream_chunk` event so the admin UI's
+   * existing typewriter renderer shows ACP output in real time — the same
+   * pipeline LlmAgent streaming already uses, no new plumbing. Ephemeral (perf
+   * audit A③) — never stored. An ACP coding agent IS LLM-backed, so the chunk
    * is genuinely streamed model text; we shape it `{type:'text'}` so the SSE
    * forwarder and "show the final text" aggregators treat it identically. Non-text
    * updates (tool_call / plan) carry no text and are skipped (still observable via
@@ -250,13 +251,13 @@ export class AcpOutboundManager {
   private emitChunk(agentId: string, taskId: string, text: string | undefined): void {
     if (!text) return
     try {
-      this.hub.transcript.append({
+      this.hub.transcript.emitEphemeral({
         ts: Date.now(),
         kind: 'llm_stream_chunk',
         data: { taskId, agentId, chunk: { type: 'text', text } },
       })
     } catch (err) {
-      this.log.warn('transcript append failed for acp stream chunk', {
+      this.log.warn('transcript emit failed for acp stream chunk', {
         err: err instanceof Error ? err.message : String(err),
       })
     }

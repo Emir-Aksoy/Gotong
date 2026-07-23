@@ -501,16 +501,17 @@ export function createHubStewardService(deps: {
   if (config.model) agentOpts.model = config.model
   agentOpts.maxTokens = config.maxTokens ?? 2048
   agentOpts.onStreamChunk = (chunk, task) => {
-    // Mirror the assistant: pipe chunks into the transcript so an operator
-    // auditing the trail sees the steward typing. Best-effort.
+    // Mirror the assistant: fan chunks out to live transcript observers so
+    // an operator watching the SSE stream sees the steward typing. Ephemeral
+    // (perf audit A③) — never stored. Best-effort.
     try {
-      hub.transcript.append({
+      hub.transcript.emitEphemeral({
         ts: Date.now(),
         kind: 'llm_stream_chunk',
         data: { taskId: task.id, agentId: ids.agentId, chunk },
       })
     } catch (err) {
-      logger.warn('hub-steward: transcript append failed for llm_stream_chunk', {
+      logger.warn('hub-steward: transcript emit failed for llm_stream_chunk', {
         err: err instanceof Error ? err.message : String(err),
       })
     }

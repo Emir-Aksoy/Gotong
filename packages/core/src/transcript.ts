@@ -51,6 +51,33 @@ export class Transcript {
     this.storage.appendTranscriptEntry(full).catch((err) => {
       log.error('persist failed', { err })
     })
+    this.fanout(full)
+    return full
+  }
+
+  /**
+   * Fan an entry out to live observers WITHOUT recording it — no in-memory
+   * push, no storage write (perf audit A③). For high-volume transient kinds
+   * (`llm_stream_chunk`) whose whole value is real-time display: the final
+   * task_result / message entry already carries the full text, so persisting
+   * every token chunk only grows RAM and disk with redundancy.
+   *
+   * The entry still consumes a seq from the shared counter so an observer's
+   * stream stays strictly ordered against persisted entries. The persisted
+   * log tolerates the resulting gaps by construction — `load()` takes the
+   * max, `since()` compares, nothing assumes contiguity. After a crash the
+   * skipped numbers may be reissued; that is safe because ephemeral seqs are
+   * only ever handed to live observers (SSE wire, stdout line, chunk sinks),
+   * never to anything durable.
+   */
+  emitEphemeral(entry: Omit<TranscriptEntry, 'seq'>): TranscriptEntry {
+    this.seq += 1
+    const full = { ...entry, seq: this.seq } as TranscriptEntry
+    this.fanout(full)
+    return full
+  }
+
+  private fanout(full: TranscriptEntry): void {
     for (const obs of this.observers) {
       try {
         obs(full)
@@ -58,7 +85,6 @@ export class Transcript {
         log.error('observer threw', { err })
       }
     }
-    return full
   }
 
   all(): TranscriptEntry[] {

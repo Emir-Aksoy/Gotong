@@ -22,11 +22,14 @@
  * is set. A hub that never flips it leaks nothing.
  *
  * Privacy scope — the slice carries ONLY the events of the ONE task the caller
- * dispatched (its task / result / llm_stream_chunk / task_resumed / evaluation,
- * matched by id). The far hub's OWN internal sub-dispatches run under DIFFERENT
- * task ids, so filtering by the single `taskId` excludes them by construction —
- * there is nowhere in the slice to put a neighbour's deeper hop. The caller
- * already sent the task payload and got the result; what's new is the trace.
+ * dispatched (its task / result / task_resumed / evaluation, matched by id; plus
+ * llm_stream_chunk on transcripts persisted before perf audit A③ made chunks
+ * ephemeral — new chunks never enter the stored log, so new slices carry the
+ * structural events and the final result, not the token stream). The far hub's
+ * OWN internal sub-dispatches run under DIFFERENT task ids, so filtering by the
+ * single `taskId` excludes them by construction — there is nowhere in the slice
+ * to put a neighbour's deeper hop. The caller already sent the task payload and
+ * got the result; what's new is the trace.
  *
  * Wire contract — one method:
  *
@@ -52,10 +55,12 @@ export const PEER_TRANSCRIPT_METHODS = {
 export const PEER_TRANSCRIPT_VERSION = '1'
 
 /**
- * Max events one slice carries. A task's trace is bounded by how chatty the
- * agent was (mostly `llm_stream_chunk` count); a generous default covers nearly
- * every real case. On overflow the slice keeps the chronological PREFIX and sets
- * `truncated` so the UI can say "see the peer directly for the full trace".
+ * Max events one slice carries. Sized when `llm_stream_chunk` still persisted
+ * (a task's trace was mostly chunk count); since perf audit A③ made chunks
+ * ephemeral a fresh trace is a handful of structural events, so the cap now
+ * only bites on pre-A③ transcripts replayed from disk. On overflow the slice
+ * keeps the chronological PREFIX and sets `truncated` so the UI can say "see
+ * the peer directly for the full trace".
  */
 const DEFAULT_EVENT_CAP = 1000
 
@@ -106,6 +111,8 @@ export function taskIdOfEntry(entry: TranscriptEntry): TaskId | null {
       return entry.data.id
     case 'task_result':
       return entry.data.taskId
+    // Kept although new chunks are ephemeral (perf audit A③): transcripts
+    // persisted before the change still replay chunk entries through load().
     case 'llm_stream_chunk':
       return entry.data.taskId
     case 'task_resumed':

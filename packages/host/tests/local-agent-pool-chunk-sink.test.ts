@@ -4,10 +4,10 @@
  * The steward's WFEDIT-D4 discipline at pool scope: a caller registers a
  * sink under a private random key, rides the key in
  * `payload.__streamSinkKey`, and the spawn-time stream hook routes THAT
- * dispatch's text chunks to exactly that sink. Everything else is
- * byte-identical to today: the transcript still gets every chunk, a
- * dispatch with no key feeds no sink, and a throwing sink never breaks
- * the agent's reply.
+ * dispatch's text chunks to exactly that sink. Chunks fan out to live
+ * transcript observers but are never RECORDED (perf audit A③ — the final
+ * result carries the full text); a dispatch with no key feeds no sink,
+ * and a throwing sink never breaks the agent's reply.
  *
  * Real `LocalAgentPool.spawn` + mock provider (the same boot shape as
  * local-agent-pool-dispatch.test.ts) — this is a wiring test of the real
@@ -52,7 +52,7 @@ describe('NA-M6b — LocalAgentPool chat chunk sinks', () => {
     await rm(root, { recursive: true, force: true })
   })
 
-  function streamEntries(): string[] {
+  function recordedStreamEntries(): string[] {
     return hub.transcript
       .all()
       .filter((e): e is Extract<TranscriptEntry, { kind: 'llm_stream_chunk' }> =>
@@ -63,6 +63,12 @@ describe('NA-M6b — LocalAgentPool chat chunk sinks', () => {
 
   it('routes text chunks of a keyed dispatch to the registered sink (concat = reply)', async () => {
     const got: string[] = []
+    const liveKinds: string[] = []
+    const unsub = hub.onEvent((e) => {
+      if (e.kind === 'llm_stream_chunk') {
+        liveKinds.push((e.data.chunk as { type?: string }).type ?? '?')
+      }
+    })
     const key = pool.registerChatChunkSink((text) => got.push(text))
 
     const result = await hub.dispatch({
@@ -71,13 +77,16 @@ describe('NA-M6b — LocalAgentPool chat chunk sinks', () => {
       payload: { prompt: 'hello', __streamSinkKey: key },
     })
     pool.releaseChatChunkSink(key)
+    unsub()
 
     expect(result.kind).toBe('ok')
     const reply = (result as { output: { text: string } }).output.text
     expect(got.length).toBeGreaterThan(0)
     expect(got.join('')).toBe(reply)
-    // The transcript tap is unchanged — chunks still land there too.
-    expect(streamEntries()).toContain('text')
+    // A③ — the live observer tap (SSE upstream) still sees every chunk,
+    // but nothing is recorded in the transcript log.
+    expect(liveKinds).toContain('text')
+    expect(recordedStreamEntries()).toEqual([])
   })
 
   it('feeds nothing on a dispatch without a key, and nothing after release', async () => {

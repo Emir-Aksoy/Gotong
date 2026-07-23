@@ -375,22 +375,22 @@ export function createWorkflowAssistAgent(deps: {
   // of its own request, never via the global admin transcript stream.
   const assistChunkSinks = new Map<string, (chunk: string) => void>()
 
-  // Phase 13 follow-up — pipe LLM stream chunks into the transcript so
-  // the admin UI's assist modal can show the LLM typing in real time
-  // (mirrors what LocalAgentPool does for user-authored managed agents).
-  // Without this hook every assist call looks like a 30-40s silent
-  // pause to the user; with it they get incremental feedback.
-  // Best-effort: a failure to append a single chunk shouldn't break
-  // the assist call itself, so we log and continue.
+  // Phase 13 follow-up — fan LLM stream chunks out to live transcript
+  // observers so the admin UI's assist modal can show the LLM typing in
+  // real time (mirrors what LocalAgentPool does for user-authored managed
+  // agents). Ephemeral (perf audit A③) — never stored. Without this hook
+  // every assist call looks like a 30-40s silent pause to the user; with
+  // it they get incremental feedback. Best-effort: a failure to emit a
+  // single chunk shouldn't break the assist call itself, so log + continue.
   agentOpts.onStreamChunk = (chunk, task) => {
     try {
-      hub.transcript.append({
+      hub.transcript.emitEphemeral({
         ts: Date.now(),
         kind: 'llm_stream_chunk',
         data: { taskId: task.id, agentId: WORKFLOW_ASSISTANT_DEFAULT_ID, chunk },
       })
     } catch (err) {
-      logger.warn('workflow-assistant: transcript append failed for llm_stream_chunk', {
+      logger.warn('workflow-assistant: transcript emit failed for llm_stream_chunk', {
         err: err instanceof Error ? err.message : String(err),
       })
     }

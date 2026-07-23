@@ -1038,23 +1038,24 @@ export class LocalAgentPool implements ManagedAgentLifecycle {
     // real provider HTTP path is hard to drive from a unit test).
     const onAuthFailure = this.buildAuthFailureHook(record, resolution)
 
-    // Phase 8 M6 — pipe LLM stream chunks into the transcript so the
-    // admin UI (M7) can show real-time agent output. The hook is
-    // best-effort: if appending fails (extremely rare — transcript
-    // append is sync queue) we log and keep streaming so the agent
-    // still produces its final response.
+    // Phase 8 M6 — fan LLM stream chunks out to live transcript observers
+    // so the admin UI (M7) can show real-time agent output. Ephemeral since
+    // perf audit A③: chunks reach hub.onEvent (SSE / stdout) but are never
+    // stored — the final result carries the full text, so persisting every
+    // token only grew RAM + disk. Best-effort: a failing emit is logged and
+    // streaming continues so the agent still produces its final response.
     const hubRef = this.hub
     const agentIdRef = record.id
     const chunkSinks = this.chatChunkSinks
     const onStreamChunk = (chunk: unknown, task: Task): void => {
       try {
-        hubRef.transcript.append({
+        hubRef.transcript.emitEphemeral({
           ts: Date.now(),
           kind: 'llm_stream_chunk',
           data: { taskId: task.id, agentId: agentIdRef, chunk },
         })
       } catch (err) {
-        log.warn('transcript append failed for llm_stream_chunk', {
+        log.warn('transcript emit failed for llm_stream_chunk', {
           err: err instanceof Error ? err.message : String(err),
         })
       }

@@ -296,11 +296,20 @@ export type TranscriptEntry =
       }
     }
   /**
-   * LLM streaming chunk (Phase 8 M6). Appended by the host's
+   * LLM streaming chunk (Phase 8 M6). Emitted by the host's
    * LocalAgentPool whenever an LlmAgent's onStreamChunk hook fires —
    * which is every provider-yielded chunk in real time. Carries
    * task + agent attribution so a single SSE stream can multiplex
    * many concurrent agents.
+   *
+   * EPHEMERAL since perf audit A③: producers use
+   * `Transcript.emitEphemeral`, so chunks reach live observers
+   * (hub.onEvent → admin SSE / stdout line / chunk sinks) but are
+   * never pushed to the in-memory log or persisted to disk — the
+   * final task_result carries the full text, so stored chunks were
+   * pure redundancy growing RAM + transcript.jsonl without bound.
+   * The kind stays in this union because transcripts persisted
+   * BEFORE the change still replay entries of it through `load()`.
    *
    * `chunk` is the provider-neutral `LlmStreamChunk` payload (text /
    * tool_use / usage / end / error). Declared as `unknown` here to
