@@ -38,10 +38,10 @@ groups:
         annotations:
           summary: "Gotong host unreachable (job={{ $labels.job }}, instance={{ $labels.instance }})"
           description: >
-            Prometheus has been unable to scrape /api/admin/metrics for
-            2 minutes. Process crashed, port closed, admin Bearer token
-            rotated without updating the scrape config, or network
-            partition. Runbook: docs/MONITORING.md § Host down.
+            Prometheus has been unable to scrape /metrics for 2 minutes.
+            Process crashed, port closed, GOTONG_METRICS_TOKEN rotated
+            without updating the scrape config, or network partition.
+            Runbook: docs/MONITORING.md § Host down.
 
       # ----------------------------------------------------------------
       # 2. Task failure rate elevated
