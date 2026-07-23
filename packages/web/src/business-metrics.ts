@@ -54,23 +54,59 @@ export interface MetricsIdentitySource {
 /** The canonical workflow run statuses — seeded so a gauge series always exists. */
 const RUN_STATUSES = ['running', 'done', 'failed', 'cancelled'] as const
 
-export async function collectBusinessMetrics(sources: {
-  workflows?: MetricsWorkflowSource
-  identity?: MetricsIdentitySource
-}): Promise<BusinessMetrics> {
+/**
+ * Perf audit A⑥ — `countRuns` is an O(active-runs) full-file scan in the
+ * host's RunStore, and `/metrics` gets scraped on a tight interval. A short
+ * TTL memo bounds that scan to once per window regardless of scrape rate.
+ * Only the workflow-runs family is cached: the identity families below are
+ * indexed SQLite lookups, cheap enough to stay fresh.
+ *
+ * The cache object is per-server state (created once in serveWeb, passed per
+ * call) — module-level state would bleed across servers and tests. Callers
+ * that pass no cache get the pre-A⑥ behavior byte-for-byte.
+ */
+export interface BusinessMetricsCache {
+  workflowRuns?: { at: number; value: Record<string, number> }
+}
+
+export function createBusinessMetricsCache(): BusinessMetricsCache {
+  return {}
+}
+
+const WORKFLOW_RUNS_CACHE_TTL_MS = 30_000
+
+export async function collectBusinessMetrics(
+  sources: {
+    workflows?: MetricsWorkflowSource
+    identity?: MetricsIdentitySource
+  },
+  opts?: { cache?: BusinessMetricsCache; now?: () => number },
+): Promise<BusinessMetrics> {
   const out: BusinessMetrics = {}
 
   // --- workflow runs by status (exact count over active set, best-effort) --
   const wf = sources.workflows
   if (wf && typeof wf.countRuns === 'function') {
-    try {
-      const { byStatus } = await wf.countRuns()
-      const seeded: Record<string, number> = {}
-      for (const s of RUN_STATUSES) seeded[s] = 0 // ensure all four series exist
-      for (const [status, n] of Object.entries(byStatus)) seeded[status] = n
-      out.workflowRuns = seeded
-    } catch {
-      // omit the family — a scan error must not fail the whole scrape
+    const cache = opts?.cache
+    const now = opts?.now ?? Date.now
+    const hit =
+      cache?.workflowRuns !== undefined &&
+      now() - cache.workflowRuns.at < WORKFLOW_RUNS_CACHE_TTL_MS
+    if (hit && cache?.workflowRuns) {
+      // Copy — a caller mutating the snapshot must not poison the cache.
+      out.workflowRuns = { ...cache.workflowRuns.value }
+    } else {
+      try {
+        const { byStatus } = await wf.countRuns()
+        const seeded: Record<string, number> = {}
+        for (const s of RUN_STATUSES) seeded[s] = 0 // ensure all four series exist
+        for (const [status, n] of Object.entries(byStatus)) seeded[status] = n
+        out.workflowRuns = seeded
+        if (cache) cache.workflowRuns = { at: now(), value: { ...seeded } }
+      } catch {
+        // omit the family — a scan error must not fail the whole scrape.
+        // Deliberately no stale-serve here: error behavior is unchanged.
+      }
     }
   }
 

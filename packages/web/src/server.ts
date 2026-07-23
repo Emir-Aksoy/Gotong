@@ -27,6 +27,8 @@ import {
 import { HttpStats, renderMetrics } from './metrics.js'
 import {
   collectBusinessMetrics,
+  createBusinessMetricsCache,
+  type BusinessMetricsCache,
   type MetricsIdentitySource,
 } from './business-metrics.js'
 
@@ -319,6 +321,7 @@ export function serveWeb(hub: Hub, opts: WebServerOptions = {}): Promise<WebServ
     resourceAdaptation: opts.resourceAdaptation,
     reconcileHeartbeats: opts.reconcileHeartbeats,
     workflows: opts.workflows,
+    businessMetricsCache: createBusinessMetricsCache(),
     templatePersonnel: opts.templatePersonnel,
     meAgents: opts.meAgents,
     meAgentAdmin: opts.meAgentAdmin,
@@ -485,6 +488,8 @@ interface HandlerCtx {
   /** v5 D-M4 — see WebServerOptions.reconcileHeartbeats doc above. */
   reconcileHeartbeats: (() => Promise<void>) | undefined
   workflows: WorkflowSurface | undefined
+  /** Perf audit A⑥ — per-server TTL memo for the countRuns scan on /metrics. */
+  businessMetricsCache: BusinessMetricsCache
   /** v5 B-M3 — see WebServerOptions.templatePersonnel doc above. */
   templatePersonnel: TemplatePersonnelSource | undefined
   /** Phase 19 P1-M3 — see WebServerOptions.meAgents doc above. */
@@ -876,7 +881,7 @@ async function handle(
     const business = await collectBusinessMetrics({
       workflows: ctx.workflows,
       identity: ctx.identity as unknown as MetricsIdentitySource | undefined,
-    }).catch(() => ({}))
+    }, { cache: ctx.businessMetricsCache }).catch(() => ({}))
     const text = renderMetrics(ctx.hub, { httpStats: ctx.httpStats, business })
     res.writeHead(200, {
       'content-type': 'text/plain; version=0.0.4; charset=utf-8',
@@ -1742,7 +1747,7 @@ async function handle(
       // ctx.identity structurally carries countSuspendedTasks + aggregateLedger
       // on a current host; the narrow MetricsIdentitySource models just those.
       identity: ctx.identity as unknown as MetricsIdentitySource | undefined,
-    }).catch(() => ({}))
+    }, { cache: ctx.businessMetricsCache }).catch(() => ({}))
     const text = renderMetrics(ctx.hub, { httpStats: ctx.httpStats, business })
     res.writeHead(200, {
       // OpenMetrics content-type so Prometheus's scraper does the right thing.

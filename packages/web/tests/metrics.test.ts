@@ -403,3 +403,109 @@ describe('collectBusinessMetrics (Phase 19 P3-M1)', () => {
     expect(await collectBusinessMetrics({})).toEqual({})
   })
 })
+
+describe('collectBusinessMetrics workflow-runs cache (perf audit A⑥)', () => {
+  async function load() {
+    return await import('../src/business-metrics.js')
+  }
+
+  it('within TTL: second call serves the memo without re-scanning', async () => {
+    const { collectBusinessMetrics, createBusinessMetricsCache } = await load()
+    const cache = createBusinessMetricsCache()
+    let scans = 0
+    let t = 1_000
+    const sources = {
+      workflows: {
+        async countRuns() {
+          scans++
+          return { total: 1, byStatus: { done: 1 } }
+        },
+      },
+    }
+    const opts = { cache, now: () => t }
+    const first = await collectBusinessMetrics(sources, opts)
+    t += 29_000 // still inside the 30s window
+    const second = await collectBusinessMetrics(sources, opts)
+    expect(scans).toBe(1)
+    expect(second.workflowRuns).toEqual(first.workflowRuns)
+    // The served snapshot is a copy — mutating it must not poison the cache.
+    second.workflowRuns!.done = 999
+    t += 500
+    const third = await collectBusinessMetrics(sources, opts)
+    expect(third.workflowRuns!.done).toBe(1)
+    expect(scans).toBe(1)
+  })
+
+  it('past TTL: re-scans and refreshes the memo', async () => {
+    const { collectBusinessMetrics, createBusinessMetricsCache } = await load()
+    const cache = createBusinessMetricsCache()
+    let scans = 0
+    let t = 1_000
+    const sources = {
+      workflows: {
+        async countRuns() {
+          scans++
+          return { total: scans, byStatus: { done: scans } }
+        },
+      },
+    }
+    const opts = { cache, now: () => t }
+    await collectBusinessMetrics(sources, opts)
+    t += 30_000 // exactly at the boundary — `<` means expired
+    const second = await collectBusinessMetrics(sources, opts)
+    expect(scans).toBe(2)
+    expect(second.workflowRuns!.done).toBe(2)
+  })
+
+  it('scan error with an empty cache: family omitted, nothing cached', async () => {
+    const { collectBusinessMetrics, createBusinessMetricsCache } = await load()
+    const cache = createBusinessMetricsCache()
+    const snap = await collectBusinessMetrics(
+      {
+        workflows: {
+          async countRuns(): Promise<{ total: number; byStatus: Record<string, number> }> {
+            throw new Error('disk gone')
+          },
+        },
+      },
+      { cache, now: () => 1_000 },
+    )
+    expect(snap.workflowRuns).toBeUndefined()
+    expect(cache.workflowRuns).toBeUndefined()
+  })
+
+  it('no cache passed: pre-A⑥ behavior (scan every call)', async () => {
+    const { collectBusinessMetrics } = await load()
+    let scans = 0
+    const sources = {
+      workflows: {
+        async countRuns() {
+          scans++
+          return { total: 1, byStatus: { done: 1 } }
+        },
+      },
+    }
+    await collectBusinessMetrics(sources)
+    await collectBusinessMetrics(sources)
+    expect(scans).toBe(2)
+  })
+
+  it('identity families stay fresh even on a workflow-runs cache hit', async () => {
+    const { collectBusinessMetrics, createBusinessMetricsCache } = await load()
+    const cache = createBusinessMetricsCache()
+    let suspended = 1
+    const sources = {
+      workflows: {
+        async countRuns() {
+          return { total: 0, byStatus: {} }
+        },
+      },
+      identity: { countSuspendedTasks: () => suspended },
+    }
+    const opts = { cache, now: () => 1_000 }
+    await collectBusinessMetrics(sources, opts)
+    suspended = 7
+    const second = await collectBusinessMetrics(sources, opts)
+    expect(second.suspendedTasks).toBe(7) // deliberately uncached
+  })
+})
