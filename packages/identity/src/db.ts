@@ -75,6 +75,14 @@ export function openDb(path: string): SqliteDb {
   // WAL: concurrent readers + one writer. Same default as service-
   // datastore-sqlite for consistency.
   db.pragma('journal_mode = WAL')
+  // NORMAL instead of the FULL default: under WAL, FULL fsyncs the WAL on
+  // every commit — and identity writes sit on per-request hot paths
+  // (session touch, usage ledger, quota), each fsync blocking the single
+  // event loop. NORMAL only fsyncs at checkpoint: a power cut can lose the
+  // most recent transactions but can never corrupt the database (crash
+  // safety of the process itself is unaffected). This is the mode
+  // better-sqlite3 itself recommends alongside WAL.
+  db.pragma('synchronous = NORMAL')
   // FK enforcement is off by default in SQLite — turn it on so our
   // ON DELETE CASCADE rules actually fire.
   db.pragma('foreign_keys = ON')

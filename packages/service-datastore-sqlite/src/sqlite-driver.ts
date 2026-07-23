@@ -55,6 +55,11 @@ export function openDb(path: string): RawDb {
   // write infrequently, the admin UI reads concurrently. WAL trades a
   // bit of disk for concurrent reader-writer with zero locks.
   db.pragma('journal_mode = WAL')
+  // NORMAL instead of the FULL default: under WAL, FULL fsyncs the WAL on
+  // every commit and better-sqlite3 runs synchronously on the event loop.
+  // NORMAL only fsyncs at checkpoint — a power cut can lose the newest
+  // transactions but never corrupts the file. Mirrors @gotong/identity.
+  db.pragma('synchronous = NORMAL')
   // Foreign keys off by default in SQLite; turn on so agent-authored
   // schemas with FK constraints actually enforce them.
   db.pragma('foreign_keys = ON')
