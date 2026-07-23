@@ -259,7 +259,15 @@ export type {
 
 interface SseClient {
   res: ServerResponse
+  /** A④ — present ⇒ only these event kinds are forwarded (unset = full firehose). */
+  kinds?: Set<string>
 }
+
+// Perf audit A④ — cut an SSE client whose socket has this much unflushed
+// data queued: a stalled reader would otherwise buffer the event firehose
+// in server memory without bound. EventSource auto-reconnects (retry: 2000)
+// and resumes from live events — this stream has no replay contract.
+const SSE_MAX_BUFFERED_BYTES = 1024 * 1024
 
 /**
  * Boot the web server. The Hub **must** be bound to a Space (`new Hub({
@@ -293,8 +301,10 @@ export function serveWeb(hub: Hub, opts: WebServerOptions = {}): Promise<WebServ
   const unsubscribe = hub.onEvent((event) => {
     const payload = `event: ${event.kind}\ndata: ${JSON.stringify(event)}\n\n`
     for (const c of sseClients) {
+      if (c.kinds && !c.kinds.has(event.kind)) continue
       try {
         c.res.write(payload)
+        if (c.res.writableLength > SSE_MAX_BUFFERED_BYTES) c.res.destroy()
       } catch {
         /* client disappeared; cleanup happens on 'close' */
       }
@@ -890,20 +900,15 @@ async function handle(
     return
   }
 
-  // --- CSRF defence: writes must originate from an allowed host ---------
-  // GET/HEAD/OPTIONS are exempt (no side effects, browsers won't preflight
-  // simple GETs anyway). For everything else, require Host + Origin match
-  // when allowedHosts is configured.
+  // --- CSRF defence: non-GET/HEAD/OPTIONS writes must originate from an
+  // allowed host (Host + Origin match) when allowedHosts is configured.
   if (method !== 'GET' && method !== 'HEAD' && method !== 'OPTIONS') {
     if (!checkOrigin(ctx, req, res)) return
   }
 
   // --- SSE stream ---------------------------------------------------------
-  // Auth-gated: SSE leaks the full Hub event firehose (task payloads,
-  // evaluations, service-trash refs, pending applications). Pre-3.1
-  // this was anonymous, which let any port-reachable peer dump every
-  // dispatched task in real time. Require either an admin session or
-  // a worker session to subscribe.
+  // Auth-gated (admin or worker session): the stream is the full Hub event
+  // firehose — task payloads, evaluations, refs — anonymous pre-3.1 leaked it.
   if (method === 'GET' && path === '/api/stream') {
     if (!(await requireAdminOrWorker(ctx, req, res))) return
     res.writeHead(200, {
@@ -913,17 +918,20 @@ async function handle(
       'x-accel-buffering': 'no',
     })
     res.write('retry: 2000\n\n')
-    const client: SseClient = { res }
+    // A④ — optional ?kinds=a,b,c narrows the stream to those event kinds.
+    const kinds = new Set(
+      (url.searchParams.get('kinds') ?? '').split(',').map((s) => s.trim()).filter(Boolean),
+    )
+    const client: SseClient = kinds.size ? { res, kinds } : { res }
     ctx.sseClients.add(client)
     req.on('close', () => ctx.sseClients.delete(client))
     return
   }
 
   // --- state snapshot -----------------------------------------------------
-  // Auth-gated: returns the full transcript + admins/workers/tasks
-  // dump. Pre-3.1 this was anonymous and exposed every operational
-  // detail of the room. Require admin or worker auth; the response
-  // payload is unchanged either way (room state is the same for all
+  // Auth-gated (admin or worker): full transcript + admins/workers/tasks
+  // dump was anonymous pre-3.1. Response payload unchanged either way
+  // (room state is the same for all
   // signed-in principals — admins use the same view).
   if (method === 'GET' && path === '/api/state') {
     if (!(await requireAdminOrWorker(ctx, req, res))) return
