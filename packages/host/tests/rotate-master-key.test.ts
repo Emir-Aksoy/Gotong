@@ -138,4 +138,120 @@ describe('rotateMasterKey (Route B P0-M4d)', () => {
       s.close()
     }
   })
+
+  it('refuses to overwrite a staged .next from an interrupted rotation (sole-copy protection)', () => {
+    const id = seed('sk-brick')
+    const K_STAGED = Buffer.alloc(32, 0x44)
+    // Simulate a crash AFTER the DB re-wrap, BEFORE the promote: the DB is
+    // wrapped under K_STAGED and `<keyfile>.next` holds the ONLY copy of it —
+    // the live file still has the retired K_OLD.
+    const s = openIdentityStore({ dbPath, masterKey: K_OLD })
+    s.rotateVaultMasterKey(K_STAGED)
+    s.close()
+    writeFileSync(`${keyFile}.next`, K_STAGED, { mode: 0o600 })
+
+    // A blind re-run must refuse BEFORE staging anything: overwriting `.next`
+    // here would destroy the only key that opens the DB — vault bricked.
+    expect(() => rotateMasterKey({ spaceDir: dir, generateKey: () => K_NEW })).toThrow(
+      /interrupted rotation/,
+    )
+
+    // The sole copy survived byte-for-byte, the live file is untouched…
+    expect(readFileSync(`${keyFile}.next`).equals(K_STAGED)).toBe(true)
+    expect(readFileSync(keyFile).equals(K_OLD)).toBe(true)
+    // …and the staged key still opens the vault — nothing was bricked.
+    const rec = openIdentityStore({ dbPath, masterKey: K_STAGED })
+    expect(rec.readVaultSecret(id)).toBe('sk-brick')
+    rec.close()
+  })
+
+  it('a rival .next landing AFTER the pre-check still cannot be clobbered (atomic wx claim)', () => {
+    const id = seed('sk-race')
+    const K_RIVAL = Buffer.alloc(32, 0x55)
+
+    // generateKey runs between the existsSync pre-check and the staging
+    // write — plant a rival staged key there, simulating a concurrent
+    // rotation winning the race in that window. The exclusive-create (`wx`)
+    // write must lose LOUDLY: silently overwriting would destroy what may be
+    // the rival's sole copy of a key its rotation is about to promote.
+    expect(() =>
+      rotateMasterKey({
+        spaceDir: dir,
+        generateKey: () => {
+          writeFileSync(`${keyFile}.next`, K_RIVAL, { mode: 0o600 })
+          return K_NEW
+        },
+      }),
+    ).toThrow(/interrupted rotation/)
+
+    // Rival's staged bytes intact; our rotation committed nothing.
+    expect(readFileSync(`${keyFile}.next`).equals(K_RIVAL)).toBe(true)
+    expect(readFileSync(keyFile).equals(K_OLD)).toBe(true)
+    const s = openIdentityStore({ dbPath, masterKey: K_OLD })
+    expect(s.readVaultSecret(id)).toBe('sk-race')
+    s.close()
+  })
+
+  it('a concurrent recovery sweeping .next BEFORE the commit aborts the rotation cleanly', () => {
+    const id = seed('sk-swept')
+    // A parallel `rotate-master-key` run does recovery FIRST, and recovery
+    // cannot tell our in-flight staging from crashed-rotation debris — while
+    // the live key still opens the DB it deletes `.next`. Without the
+    // pre-commit re-check the rotation would commit the DB to a key whose
+    // only durable copy is gone, then die at the promote: vault bricked.
+    expect(() =>
+      rotateMasterKey({
+        spaceDir: dir,
+        generateKey: () => K_NEW,
+        beforeDbRewrap: () => rmSync(`${keyFile}.next`),
+      }),
+    ).toThrow(/concurrent/)
+
+    // Nothing committed: the live key still opens the vault, no staging left.
+    expect(readFileSync(keyFile).equals(K_OLD)).toBe(true)
+    expect(existsSync(`${keyFile}.next`)).toBe(false)
+    const s = openIdentityStore({ dbPath, masterKey: K_OLD })
+    expect(s.readVaultSecret(id)).toBe('sk-swept')
+    s.close()
+  })
+
+  it('a rival key REPLACING .next before the commit also aborts (byte re-verify, not existence)', () => {
+    const id = seed('sk-replaced')
+    const K_RIVAL = Buffer.alloc(32, 0x55)
+    expect(() =>
+      rotateMasterKey({
+        spaceDir: dir,
+        generateKey: () => K_NEW,
+        beforeDbRewrap: () => writeFileSync(`${keyFile}.next`, K_RIVAL, { mode: 0o600 }),
+      }),
+    ).toThrow(/concurrent/)
+
+    // We aborted without committing; the rival's staging is left for ITS run.
+    expect(readFileSync(`${keyFile}.next`).equals(K_RIVAL)).toBe(true)
+    expect(readFileSync(keyFile).equals(K_OLD)).toBe(true)
+    const s = openIdentityStore({ dbPath, masterKey: K_OLD })
+    expect(s.readVaultSecret(id)).toBe('sk-replaced')
+    s.close()
+  })
+
+  it('a concurrent recovery sweeping .next AFTER the commit cannot brick — the key re-materialises', () => {
+    const id = seed('sk-heal')
+    // Once the DB committed to the new key, the only correct end-state is
+    // live=new. The staged file may be swept in the tiny window after the
+    // re-check — step 4 must rewrite it from memory and finish, because at
+    // that point `.next` (not the live file) is what opens the vault.
+    rotateMasterKey({
+      spaceDir: dir,
+      generateKey: () => K_NEW,
+      afterDbRewrap: () => rmSync(`${keyFile}.next`),
+    })
+
+    // Rotation COMPLETED despite the sweep: live key is the new one and opens
+    // the vault; no staging debris remains.
+    expect(readFileSync(keyFile).equals(K_NEW)).toBe(true)
+    expect(existsSync(`${keyFile}.next`)).toBe(false)
+    const s = openIdentityStore({ dbPath, masterKey: K_NEW })
+    expect(s.readVaultSecret(id)).toBe('sk-heal')
+    s.close()
+  })
 })

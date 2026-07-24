@@ -193,10 +193,11 @@ export async function restore(args: readonly string[], deps: RestoreDeps = {}): 
 
     if (!manifest.includesMasterKey) {
       out('')
-      out('Reminder: this backup does NOT contain the master keys. Put back')
-      out('runtime/secret.key (v3) and/or identity-master.key (v4 vault KEK)')
-      out('from wherever you keep them, or the host cannot decrypt')
-      out('secrets.enc.json / the identity vault. See docs/OPERATIONS.md.')
+      out('Reminder: this backup does NOT contain the master key. Put back')
+      out('identity-master.key (the unified root key — since B① the LLM-key')
+      out('store derives from it too; pre-unification backups may also need')
+      out('runtime/secret.key) or the host cannot decrypt the vault /')
+      out('secrets.enc.json. See docs/OPERATIONS.md.')
     }
 
     // 恢复完自动体检(计划验收:恢复完自动跑 doctor 定义校验)。

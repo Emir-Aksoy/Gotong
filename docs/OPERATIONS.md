@@ -34,7 +34,7 @@ restarts lives here.
     ├── pending-apps.json      # in-flight admission applications
     ├── admin-sessions.json    # active admin cookie sids
     ├── worker-sessions.json   # active worker cookie sids
-    └── secret.key             # 🔑 v3 SpaceSecrets master key — protect separately
+    └── secret.key             # 🔑 legacy space-secrets key (pre-unification only — see below)
 ```
 
 (`identity.sqlite` runs in WAL mode, so at runtime you'll also see
@@ -42,22 +42,31 @@ transient `identity.sqlite-wal` / `-shm` companions.)
 
 These files deserve special care:
 
-- **`runtime/secret.key`** is the v3 master encryption key for
-  `secrets.enc.json`. Anyone with both files has every provider/agent
-  API key. **Back it up separately**, with separate access controls
-  (1Password / GCP Secret Manager / AWS KMS-protected S3 bucket / paper
-  envelope in a safe — anything that doesn't share an access policy with
-  the rest of the workspace).
-
-- **`identity-master.key`** is the v4 identity-vault KEK (default
+- **`identity-master.key`** is the single root key (KEK, default
   `local-file` provider). It wraps the DEK that encrypts the vault
   inside `identity.sqlite` — SSO/OIDC client secrets, TOTP seeds,
-  per-user credentials. Same rule, same blast radius: anyone holding
-  both this key and `identity.sqlite` can decrypt the whole vault.
-  **Back it up separately too.** Online KEK rotation stages the next
-  key as `identity-master.key.next`, so treat the entire
-  `identity-master.key*` family as the secret. `backup.sh` excludes it
-  for exactly the same reason it excludes `secret.key`.
+  per-user credentials — **and**, since the key unification, the
+  space-secrets key (for `secrets.enc.json`, i.e. every provider/agent
+  LLM API key) is derived from it via HKDF. One key, whole blast
+  radius: anyone holding this key plus the workspace can decrypt
+  everything. **Back it up separately**, with separate access controls
+  (1Password / GCP Secret Manager / AWS KMS-protected S3 bucket / paper
+  envelope in a safe — anything that doesn't share an access policy with
+  the rest of the workspace). KEK rotation (run with the host
+  stopped) stages the next key as `identity-master.key.next`, so treat
+  the entire `identity-master.key*` family as the secret. `backup.sh` and
+  `gotong backup` exclude it by default.
+
+- **`runtime/secret.key`** is the **legacy** space-secrets key. It only
+  exists in workspaces created before the unification: on the first
+  boot with an identity KEK present, the host re-encrypts
+  `secrets.enc.json` under the derived key and retires this file to
+  `runtime/secret.key.pre-unify.bak` (renamed, never deleted — a
+  pre-migration ciphertext copy is kept as
+  `secrets.enc.json.pre-unify.bak` too). If you still see a live
+  `runtime/secret.key`, the workspace hasn't been unified yet (or the
+  legacy key was missing at migration time — the boot log says so):
+  until then it guards all LLM keys and needs the same offsite care.
 
 - **`runtime/*-sessions.json`** are short-lived; restoring them from
   an old backup revives cookie sids that a stale browser tab can
@@ -157,14 +166,14 @@ anything.
 
 ### Master key handling
 
-Two master keys can exist in a workspace; **neither** belongs in the
-same destination as the workspace backups. `backup.sh` refuses to
-include either in the archive, but it can't enforce your cron.
+Since the key unification there is **one** root key to safeguard:
+`identity-master.key`. It wraps the `identity.sqlite` vault DEK, and
+the space-secrets key (for `secrets.enc.json`) is derived from it.
+It never belongs in the same destination as the workspace backups —
+`backup.sh` and `gotong backup` refuse to include it, but they can't
+enforce your cron.
 
-- **`secret.key`** (v3) encrypts `secrets.enc.json`.
-- **`identity-master.key`** (v4) wraps the `identity.sqlite` vault DEK.
-
-Recommended places for **both** keys (each as its own entry):
+Recommended places for the key:
 
 - **1Password / Bitwarden vault item** with a controlled-access tag,
   one entry per environment (staging / prod).
@@ -173,12 +182,87 @@ Recommended places for **both** keys (each as its own entry):
 - **Sealed offsite paper copy** for the worst-case "everything else
   is gone" recovery.
 
-Rotate the **v3** key by setting `GOTONG_SECRET_KEY=<32 hex bytes>` on
-the host and re-saving each provider key through the admin UI; then
-delete old `secret.key` copies. Rotate the **v4** KEK online with the
-host `rotate-master-key` subcommand — it re-wraps the vault DEK under a
-new key staged at `identity-master.key.next`, then promotes it, with no
-plaintext re-entry. Back up the new key the same way and retire the old.
+Rotate the KEK with the host `rotate-master-key` subcommand — it
+re-wraps the vault DEK under a new key staged at
+`identity-master.key.next` **and** re-encrypts `secrets.enc.json`
+under the new derived key (staged as `secrets.enc.json.next`), then
+promotes both, with no plaintext re-entry. One rotation covers both
+stores. **Stop the host first.** A running host still holds the old
+derived key in memory: a secret saved between staging and promote is
+written under the old key, so the staged copy no longer covers the
+live file — the rotation refuses to settle it (a loud error, never a
+silent clobber) and you are left reconciling the two files by hand.
+`systemctl stop gotong-host` → rotate → start.
+Run **one rotation at a time** — concurrent runs can't brick the
+vault (every staging claim is re-verified byte-for-byte before the
+commit), but the losing run aborts and can leave a
+`secrets.enc.json.next` behind that blocks the next rotation until
+you move it aside. And keep the workspace on a **local disk**: the
+crash-safety story leans on POSIX rename atomicity and fsync, which
+NFS/SMB weaken.
+Back up the new key the same way and retire the old — including any
+offsite copies of it.
+
+If boot recovery sweeps a staged key it judges stale, the bytes are
+moved to a sweep-unique `identity-master.key.next.discarded.*` slot
+(never overwriting an earlier one) — never deleted. The key promote
+uses the same slots as its transient claim staging, so a crash in
+the middle of a promote can also strand real key bytes there — and
+is caught by the same message below. Normally these
+are dead bytes you can remove once the vault opens fine. But if a
+boot refuses to start with a message naming one of these files
+("the live key cannot unwrap the vault DEK, but swept staging file …
+can"), a concurrent rotation committed and lost its staging to a
+racing sweep — recover with one move inside the space dir:
+`mv <the exact filename from the message> identity-master.key.next`,
+then start again; boot recovery promotes it.
+
+The provider-secrets staging gets the same care: recovery deletes or
+promotes `secrets.enc.json.next` only when a per-entry trial-decrypt
+under a vault-proven key shows nothing would be lost; a copy it
+cannot judge is **kept** in place (noted in the log, and it blocks
+the next rotation until moved aside). A transient
+`secrets.enc.json.next.judging.*` file is the reconciler's private
+claim slot; a crash can strand one, and the next boot re-parks it
+onto the staging path by itself — leave them alone. If a boot refuses to start
+naming both `secrets.enc.json` and `secrets.enc.json.next`, the live
+secrets no longer read under the promoted key and the kept staging
+may be the only surviving re-encryption: inspect the two files, put
+the right one at `secrets.enc.json` (or move both aside and re-enter
+the API keys in the admin panel), remove the staging, start again.
+
+**Legacy (pre-unification) workspaces** additionally carry
+`runtime/secret.key` (env override `GOTONG_SECRET_KEY`) guarding
+`secrets.enc.json`. Both keys need offsite care until the first boot
+with the identity layer completes the migration; after that only the
+root key matters, and the legacy pair sticks around as
+`*.pre-unify.bak` files (excluded from backups, safe to stash offsite
+alongside the retired key).
+
+**Do not downgrade a unified workspace** to a pre-unification Gotong
+binary. The old binary doesn't know the v2 `secrets.enc.json` marker
+and looks for `runtime/secret.key` — which no longer exists — so it
+mints a fresh junk key, fails to decrypt every stored secret, and on
+the next secret write re-stamps the file under the junk key (mixing
+keys and dropping the marker). If you genuinely must roll back:
+restore the migration snapshots first — copy
+`secrets.enc.json.pre-unify.bak` over `secrets.enc.json` and
+`runtime/secret.key.pre-unify.bak` back to `runtime/secret.key` —
+which returns the workspace to its exact pre-unification state;
+secrets added or changed *after* unification are not in that snapshot
+and must be re-entered.
+
+Two rollback nuances. **Numbered copies**: the backups never clobber —
+a differing pre-existing `.pre-unify.bak` pushes the new one to
+`.pre-unify.bak.2`, `.3`, … There is no marker pairing a secrets
+snapshot with the key that wrote it, so with multiple copies pair them
+by *decrypt trial*: restore one pair, boot the old binary, and if the
+secrets fail to decrypt (AES-GCM rejects a wrong key loudly, nothing
+is corrupted by trying) swap in the next candidate. **Env-supplied
+legacy key**: if the legacy key came from `GOTONG_SECRET_KEY` rather
+than the key file, there is no `runtime/secret.key.pre-unify.bak` to
+restore — nothing was renamed. Roll back the secrets file alone and
+keep the env var set; that value still decrypts the snapshot.
 
 ### Moving house — one workspace to a new machine
 
@@ -275,6 +359,11 @@ space/workers.json
 > alongside `secret.key` in the next step, and restore it the same way.
 > The automated drill (`scripts/backup/drill.sh`) asserts **both** keys
 > are absent from the restore.
+>
+> **Post-unification note.** A workspace that has completed the key
+> unification has no live `runtime/secret.key` — `identity-master.key`
+> is the only key to stash and restore (Steps 2 and 5 apply to it
+> alone). Everything else in the drill is unchanged.
 
 ### Step 2 — separately stash secret.key
 
@@ -401,8 +490,11 @@ next snapshot.
 
 ## 5. Troubleshooting
 
-**"Restored host won't decrypt provider keys."** `secret.key` is
-missing, wrong, or zero bytes. Re-copy from offsite, restart.
+**"Restored host won't decrypt provider keys."** The key guarding
+`secrets.enc.json` is missing or wrong. Post-unification that's
+`identity-master.key` (the file's `version: 2` marks it as bound to
+the derived key); pre-unification it's `runtime/secret.key`. Re-copy
+the right one from offsite, restart.
 
 **"`transcript.jsonl` has a bad line and the host refuses to boot."**
 That's the rarest failure mode but it happens if the disk filled up

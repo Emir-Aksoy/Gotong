@@ -1,4 +1,12 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import {
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -55,6 +63,14 @@ function reWrapDbTo(newKey: Buffer): void {
   s.close()
 }
 
+/** Bytes of every `.next.discarded*` slot (sweep slots are uniquely named). */
+function discardedSlots(): Buffer[] {
+  return readdirSync(dir)
+    .filter((n) => n.startsWith(`${MASTER_KEY_FILENAME}.next.discarded`))
+    .sort()
+    .map((n) => readFileSync(join(dir, n)))
+}
+
 describe('recoverMasterKeyRotation (Route B P0-M5)', () => {
   it('promotes the staged key when the DB was re-wrapped under it (crash after re-wrap, before promote)', () => {
     const id = seed('sk-live')
@@ -81,7 +97,12 @@ describe('recoverMasterKeyRotation (Route B P0-M5)', () => {
     const rec = recoverMasterKeyRotation(dir)
     expect(rec.action).toBe('discarded')
 
-    expect(existsSync(stagedFile)).toBe(false) // stale staged key removed
+    expect(existsSync(stagedFile)).toBe(false) // stale staged key removed…
+    // …but MOVED, not deleted: probe-then-discard is not atomic, so the swept
+    // bytes could be a concurrent rotation's key whose DB commit landed in the
+    // window. Keeping them in a `.next.discarded.*` slot turns that worst case
+    // into an operator recovery instead of a bricked vault.
+    expect(discardedSlots().some((b) => b.equals(K_NEW))).toBe(true)
     expect(readFileSync(keyFile).equals(K_OLD)).toBe(true) // live key untouched
     const next = openIdentityStore({ dbPath, masterKey: readFileSync(keyFile) })
     expect(next.readVaultSecret(id)).toBe('sk-live')
@@ -97,6 +118,7 @@ describe('recoverMasterKeyRotation (Route B P0-M5)', () => {
     const rec = recoverMasterKeyRotation(dir)
     expect(rec.action).toBe('discarded')
     expect(existsSync(stagedFile)).toBe(false)
+    expect(discardedSlots().some((b) => b.equals(K_NEW))).toBe(true) // moved, not deleted
     expect(readFileSync(keyFile).equals(K_OLD)).toBe(true)
   })
 
@@ -121,6 +143,25 @@ describe('recoverMasterKeyRotation (Route B P0-M5)', () => {
     expect(readFileSync(keyFile).equals(K_OLD)).toBe(true)
   })
 
+  it('an UNREADABLE DB is inconclusive — never discards the staged key over it', () => {
+    // A torn restore can leave junk bytes at identity.sqlite while a staged
+    // key from an interrupted rotation sits in `.next`. Before the probe grew
+    // its 'unreadable' answer this read as 'no-vault' ("nothing at risk") and
+    // recovery DISCARDED the staged key — which may be the only key that
+    // unwraps the DEK hiding behind the unreadable file. Fail closed instead:
+    // leave both files for an operator and let the normal boot fail loudly.
+    writeFileSync(keyFile, K_OLD, { mode: 0o600 })
+    writeFileSync(dbPath, 'this is not a sqlite database\n')
+    writeFileSync(stagedFile, K_NEW, { mode: 0o600 })
+
+    const rec = recoverMasterKeyRotation(dir)
+    expect(rec.action).toBe('inconclusive')
+
+    // Both keys survive byte-for-byte for the operator to investigate.
+    expect(readFileSync(stagedFile).equals(K_NEW)).toBe(true)
+    expect(readFileSync(keyFile).equals(K_OLD)).toBe(true)
+  })
+
   it("is a no-op for a non-local-file provider, never touching .next", () => {
     seed('sk-live')
     writeFileSync(stagedFile, K_NEW, { mode: 0o600 })
@@ -130,5 +171,84 @@ describe('recoverMasterKeyRotation (Route B P0-M5)', () => {
     // The env-provider key is managed out of band — we must not delete .next.
     expect(existsSync(stagedFile)).toBe(true)
     expect(readFileSync(keyFile).equals(K_OLD)).toBe(true)
+  })
+
+  it('a sweep NEVER overwrites an existing .discarded copy (sweep-unique slots)', () => {
+    // Two racing sweeps: a fixed-name rename() would clobber, burying the
+    // first swept key under the second — and the buried one can be the only
+    // copy a concurrently-committed rotation's DB needs. Each sweep must land
+    // in its own slot, leaving every earlier slot byte-identical.
+    seed('sk-live')
+    writeFileSync(`${stagedFile}.discarded`, K_THIRD, { mode: 0o600 }) // earlier sweep's bytes
+    writeFileSync(stagedFile, K_NEW, { mode: 0o600 }) // stale staged key (live still opens)
+
+    const rec = recoverMasterKeyRotation(dir)
+    expect(rec.action).toBe('discarded')
+
+    expect(existsSync(stagedFile)).toBe(false)
+    // The earlier sweep's bytes survive untouched at their exact name; ours
+    // landed in a fresh sweep-unique slot alongside them.
+    expect(readFileSync(`${stagedFile}.discarded`).equals(K_THIRD)).toBe(true)
+    const slots = discardedSlots()
+    expect(slots.length).toBe(2)
+    expect(slots.some((b) => b.equals(K_NEW))).toBe(true)
+  })
+
+  it('rescue probe: a swept key the DB needs stops the boot loudly and names the file', () => {
+    // The TOCTOU aftermath: a concurrent rotation committed its DB re-wrap,
+    // a racing recovery swept its staging, and it crashed before self-heal.
+    // No `.next` remains — only the discarded copy holds the committed key.
+    const id = seed('sk-live')
+    reWrapDbTo(K_NEW) // DB now under K_NEW…
+    writeFileSync(keyFile, K_OLD, { mode: 0o600 }) // …live is the old key…
+    writeFileSync(`${stagedFile}.discarded`, K_NEW, { mode: 0o600 }) // …swept staging has the new one.
+
+    const rec = recoverMasterKeyRotation(dir)
+    expect(rec.action).toBe('inconclusive')
+    expect(rec.reason).toContain('identity-master.key.next.discarded')
+
+    // Nothing is auto-promoted — both files stay for the operator's one-move
+    // fix, and it genuinely works: .discarded → .next, then recovery promotes.
+    expect(readFileSync(`${stagedFile}.discarded`).equals(K_NEW)).toBe(true)
+    expect(readFileSync(keyFile).equals(K_OLD)).toBe(true)
+    renameSync(`${stagedFile}.discarded`, stagedFile)
+    expect(recoverMasterKeyRotation(dir).action).toBe('promoted')
+    const next = openIdentityStore({ dbPath, masterKey: readFileSync(keyFile) })
+    expect(next.readVaultSecret(id)).toBe('sk-live')
+    next.close()
+  })
+
+  it('rescue probe also fires with a dead .next present (rival left its staging behind)', () => {
+    // DB=K_NEW / live=K_OLD / .next=K_THIRD (a rival rotation's dead staging,
+    // its CAS lost) / .discarded=K_NEW (a racing sweep archived the committed
+    // key). The main path sees neither live nor staged unwrap the DEK — the
+    // rescue probe must still name the exact slot, not shrug generically.
+    const id = seed('sk-live')
+    reWrapDbTo(K_NEW)
+    writeFileSync(keyFile, K_OLD, { mode: 0o600 })
+    writeFileSync(stagedFile, K_THIRD, { mode: 0o600 })
+    writeFileSync(`${stagedFile}.discarded`, K_NEW, { mode: 0o600 })
+
+    const rec = recoverMasterKeyRotation(dir)
+    expect(rec.action).toBe('inconclusive')
+    expect(rec.reason).toContain('identity-master.key.next.discarded')
+
+    // The operator fix works here too: put the named file at `.next` (over
+    // the dead rival's bytes) and re-run — recovery promotes it.
+    renameSync(`${stagedFile}.discarded`, stagedFile)
+    expect(recoverMasterKeyRotation(dir).action).toBe('promoted')
+    const next = openIdentityStore({ dbPath, masterKey: readFileSync(keyFile) })
+    expect(next.readVaultSecret(id)).toBe('sk-live')
+    next.close()
+  })
+
+  it('rescue probe stays quiet while the live key is healthy (stale discards do not nag)', () => {
+    seed('sk-live') // DB under K_OLD, live = K_OLD → healthy
+    writeFileSync(`${stagedFile}.discarded`, K_NEW, { mode: 0o600 })
+
+    const rec = recoverMasterKeyRotation(dir)
+    expect(rec.action).toBe('none')
+    // Left in place for manual cleanup, never re-judged while live works.
+    expect(readFileSync(`${stagedFile}.discarded`).equals(K_NEW)).toBe(true)
   })
 })

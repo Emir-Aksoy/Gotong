@@ -64,6 +64,7 @@ export {
   loadOrCreateMasterKey,
   emptySecretsFile,
   SECRETS_FILE_VERSION,
+  SECRETS_FILE_VERSION_UNIFIED,
 } from './secrets.js'
 export type { EncryptedSecret, SecretsFile } from './secrets.js'
 

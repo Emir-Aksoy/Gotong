@@ -181,9 +181,18 @@ export function isSessionPath(rel: string): boolean {
 /**
  * master key 两个世代。`identity-master.key*` 只认**根级**——
  * .sh 的排除模式 `$LEAF/identity-master.key*` 锚在 leaf 根,照抄。
+ * B① 统一后 `runtime/secret.key*` 前缀盖住退役改名件(.pre-unify.bak);
+ * `secrets.enc.json.pre-unify.bak*`(旧钥密文回滚对,含防覆盖 `.N` 副本)与
+ * `.next*`(轮换暂存 + reconcile 的 `.judging.*` claim slot)是机器本地
+ * 回滚产物,同罪排除——档案里只留当前一代密文。
  */
 export function isMasterKeyPath(rel: string): boolean {
-  return rel === 'runtime/secret.key' || rel.startsWith('identity-master.key')
+  return (
+    rel.startsWith('runtime/secret.key') ||
+    rel.startsWith('identity-master.key') ||
+    rel.startsWith('secrets.enc.json.pre-unify.bak') ||
+    rel.startsWith('secrets.enc.json.next')
+  )
 }
 
 /** identity.sqlite 家族(db + WAL 伴生),由快照阶梯单独处理。 */

@@ -58,6 +58,8 @@ function makeSpace(dir: string): void {
   writeFileSync(join(dir, 'runtime', 'secret.key'), 'v3-master-key-bytes', 'utf8')
   writeFileSync(join(dir, 'identity-master.key'), 'v4-kek-bytes', 'utf8')
   writeFileSync(join(dir, 'identity-master.key.next'), 'v4-kek-rotation-staging', 'utf8')
+  // recovery 的 discard 是挪走不真删——被弃钥字节也属钥匙家族,绝不进默认档。
+  writeFileSync(join(dir, 'identity-master.key.next.discarded'), 'v4-kek-swept-bytes', 'utf8')
   writeFileSync(join(dir, 'runtime', 'admin-sessions.json'), '{"sid":"stale"}', 'utf8')
   writeFileSync(join(dir, 'runtime', 'worker-sessions.json'), '{"sid":"stale2"}', 'utf8')
   writeFileSync(join(dir, 'workflows', 'definitions', 'demo.yaml'), 'id: demo\n', 'utf8')
@@ -330,7 +332,11 @@ describe('KIT-M1 restore — 先验后落盘', () => {
     const { tgz } = await runBackup(space, join(root, 'bk'))
     const r = await runRestore(tgz, join(root, 'restored'))
     expect(r.code).toBe(0)
-    expect(r.out.join('\n')).toContain('does NOT contain the master keys')
+    const text = r.out.join('\n')
+    // B① 后是「单钥」口径:统一根钥 + 旧代备份可能还要 runtime/secret.key。
+    expect(text).toContain('does NOT contain the master key')
+    expect(text).toContain('identity-master.key (the unified root key')
+    expect(text).toContain('runtime/secret.key')
   })
 })
 
@@ -344,7 +350,20 @@ describe('KIT-M1 纯函数核', () => {
     expect(shouldSkipForStaging('runtime/secret.key', true)).toBe(false)
     expect(shouldSkipForStaging('identity-master.key', false)).toBe(true)
     expect(shouldSkipForStaging('identity-master.key.next', false)).toBe(true)
+    expect(shouldSkipForStaging('identity-master.key.next.discarded', false)).toBe(true)
     expect(shouldSkipForStaging('identity-master.key', true)).toBe(false)
+    // B① 统一的伴生密材:退役旧钥改名件 + 迁移前备份(旧钥可解)+ 轮换暂存件。
+    expect(shouldSkipForStaging('runtime/secret.key.pre-unify.bak', false)).toBe(true)
+    expect(shouldSkipForStaging('secrets.enc.json.pre-unify.bak', false)).toBe(true)
+    expect(shouldSkipForStaging('secrets.enc.json.next', false)).toBe(true)
+    // reconcile 的 claim slot 同罪(crash 停在上面时是本机回滚产物)。
+    expect(shouldSkipForStaging('secrets.enc.json.next.judging.9-ab12', false)).toBe(true)
+    expect(shouldSkipForStaging('secrets.enc.json.pre-unify.bak', true)).toBe(false)
+    // 防覆盖 .N 副本同罪——与 .sh 的 glob `pre-unify.bak*` 逐字对齐。
+    expect(shouldSkipForStaging('secrets.enc.json.pre-unify.bak.2', false)).toBe(true)
+    expect(shouldSkipForStaging('runtime/secret.key.pre-unify.bak.2', false)).toBe(true)
+    // 活数据文件本体照收——密文没有钥匙救不回,备份必须带。
+    expect(shouldSkipForStaging('secrets.enc.json', false)).toBe(false)
     // .sh 的排除模式锚在 leaf 根——子目录里的同名文件不匹配。
     expect(shouldSkipForStaging('nested/identity-master.key', false)).toBe(false)
     expect(shouldSkipForStaging('nested/runtime/secret.key', false)).toBe(false)

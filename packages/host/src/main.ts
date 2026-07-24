@@ -104,6 +104,7 @@ import {
   AUDIT_ACTIONS,
   openIdentityStore,
   principalKey,
+  probeVaultMasterKey,
   userPrincipal,
   resolveMasterKeyProvider,
   type IdentityStore,
@@ -128,6 +129,7 @@ import { resolveProfileEnv, profileBannerLines } from './profile.js'
 import { rotateMasterKey } from './rotate-master-key.js'
 import { applyRetentionPolicies, parseRetentionPolicies } from './retention.js'
 import { recoverMasterKeyRotation } from './master-key-recovery.js'
+import { deriveSpaceSecretsKey, unifySpaceSecrets } from './space-secrets-unify.js'
 import { applyRunRetention, parseRunRetention } from './run-retention.js'
 import { armRetentionSweeper } from './retention-sweeper.js'
 import { armVersionCheck } from './version-check.js'
@@ -420,36 +422,30 @@ async function main(): Promise<void> {
     }
   }
 
-  // v4 identity layer. Opens (or creates) `<space>/identity.sqlite`, bootstraps
-  // an `owner` user with NO credentials (A2.2: the first operator gets a
-  // password via the C1 setup wizard, or `gotong-host mint-admin-token` as the
-  // emergency fallback). Idempotent: subsequent boots return `bootstrapped:
-  // false` and never mutate. The legacy v3 `/admin?token=...` (printed at boot
-  // bottom) stays valid for host-level admin routes, not `/api/admin/identity/*`.
+  // v4 identity layer. Opens/creates `<space>/identity.sqlite`, bootstraps an
+  // owner with NO credentials (C1 wizard / mint-admin-token). Idempotent.
   let identity: IdentityStore | undefined
   let orgApiPool: OrgApiPool | undefined
+  let identityKek: Buffer | undefined
   try {
-    // Route B P0-M5 — recover from an interrupted master-key rotation BEFORE
-    // we load the live key. A crash between P0-M4d's DB re-wrap and its
-    // key-file promote leaves `<keyfile>.next` holding the only key that
-    // unwraps the vault; loading the stale live key below would brick it.
-    // local-file only; best-effort (a failure here must not block boot — the
-    // normal path still fails loudly if the key genuinely can't open the vault).
+    // Route B P0-M5 — finish/unwind an interrupted master-key rotation BEFORE
+    // loading the live key. 'inconclusive' OR a crashed recovery needs an
+    // operator; booting on would half-run with vault reads failing — refuse.
     try {
       const rec = recoverMasterKeyRotation(SPACE_DIR, env('GOTONG_MASTER_KEY_PROVIDER'))
-      if (rec.action !== 'none') {
+      if (rec.action === 'inconclusive') {
+        log.error('identity: master key state needs an operator — refusing to start', { reason: rec.reason })
+        process.exit(1)
+      }
+      if (rec.action !== 'none' || rec.reason.includes('NOTE:')) {
         log.info('identity: master key rotation recovery', { action: rec.action, reason: rec.reason })
       }
     } catch (err) {
-      log.warn('identity: master key rotation recovery failed (continuing)', { err })
+      log.error('identity: master key rotation recovery crashed — refusing to start', { err })
+      process.exit(1)
     }
-    // B1.2 / Route B P0-M4a — resolve the vault master key through a
-    // pluggable provider. Default `local-file` creates the 0600 key file
-    // on first run (a wrong-length pre-existing key throws — a stale key
-    // means existing vault rows can't decrypt, so fail loudly). Set
-    // GOTONG_MASTER_KEY_PROVIDER=env + GOTONG_MASTER_KEY (64 hex) to inject the
-    // key from a secret manager without touching disk; =kms-stub is a
-    // reserved seam that fails closed.
+    // B1.2 / P0-M4a — pluggable master-key provider: default local-file 0600
+    // on first run; PROVIDER=env + GOTONG_MASTER_KEY injects from a manager.
     const masterKeyProvider = resolveMasterKeyProvider({
       kind: env('GOTONG_MASTER_KEY_PROVIDER'),
       localFilePath: join(SPACE_DIR, 'identity-master.key'),
@@ -459,6 +455,7 @@ async function main(): Promise<void> {
     // describe() is log-safe (source label only, never key bytes).
     log.info('identity: master key provider', { source: masterKeyProvider.describe() })
     const masterKey = masterKeyProvider.load()
+    identityKek = masterKey // hoisted for B① — probed against the vault DEK before any bind
     identity = openIdentityStore({
       dbPath: join(SPACE_DIR, 'identity.sqlite'),
       masterKey,
@@ -474,13 +471,8 @@ async function main(): Promise<void> {
         users: identity.countUsers(),
       })
     }
-    // Phase 7 M4 — env override for org mode. Without GOTONG_MODE the
-    // store auto-detects (personal when single-user, team otherwise)
-    // and auto-promotes on 2nd user or first invitation. GOTONG_MODE
-    // pins a specific value, useful for:
-    //   - team deployments that don't want the auto-detect ever firing
-    //   - personal hubs that want to stay personal even after testing
-    //     invitations
+    // Phase 7 M4 — GOTONG_MODE pins org mode; unset = auto-detect personal,
+    // auto-promote on the 2nd user or first invitation.
     const modeOverride = process.env.GOTONG_MODE
     if (modeOverride === 'personal' || modeOverride === 'team') {
       identity.setOrgMode(modeOverride)
@@ -492,43 +484,51 @@ async function main(): Promise<void> {
       })
     }
     log.info('identity: org_mode', { mode: identity.getOrgMode() })
-    // B1.2 — org-level LLM key pool wraps the vault. Created here so
-    // both LocalAgentPool (key resolution chain) and any future B-tier
-    // consumer (knowledge service, mcp pool) share the same memoised
-    // view of org-owned credentials.
+    // B1.2 — org-level LLM key pool: one memoised vault view shared org-wide.
     orgApiPool = new OrgApiPool({ identity })
   } catch (err) {
-    // Degrade gracefully: if SQLite open / migrate / master-key load
-    // failed, log loudly but keep the host up. Pre-v4 auth paths
-    // (Space.admins) still work and the LLM key chain falls back to
-    // the v3 workspace store + env — the operator just loses access
-    // to v4-only surfaces (identity routes + org-pool key resolution).
+    // Degrade gracefully: log loudly but keep the host up. Pre-v4 auth
+    // (Space.admins) still works. The B① block below re-probes the KEK
+    // against the vault DEK before binding space secrets, so a degraded
+    // identity never smuggles an unproven key into the LLM-key store.
     log.error('identity: bootstrap failed (continuing without v4 identity)', { err })
     identity = undefined
     orgApiPool = undefined
   }
 
-  // V4-AUDIT-05: periodically reap expired session rows. Bearer auth
-  // (V4-AUDIT-04 fix) mints 60s-TTL sessions on every request — without
-  // this sweep, expired rows accumulate forever. 1h cadence is a balance
-  // between "DB doesn't bloat" and "sweep doesn't churn IO". `unref()`
-  // so the timer never holds the event loop open after a graceful stop.
+  // B① — space secrets bind to HKDF(identity KEK): one key file, rotation
+  // covers both stores. Gates: DEK-probe 'mismatch' never binds; 'no-vault'
+  // (unprovable KEK — key-less restore mints junk) never binds over committed
+  // v2 entries; a blocked migration keeps the legacy path, retried next boot.
+  if (identityKek) {
+    try {
+      const probe = probeVaultMasterKey(join(SPACE_DIR, 'identity.sqlite'), identityKek)
+      if (probe === 'mismatch' || probe === 'unreadable') {
+        log.warn(`space secrets: KEK unproven against the vault (${probe}) — unification skipped (restored without identity-master.key? torn identity.sqlite?)`)
+      } else {
+        const derived = deriveSpaceSecretsKey(identityKek)
+        const uni = unifySpaceSecrets({ spaceDir: SPACE_DIR, derivedKey: derived, envSecretKey: env('GOTONG_SECRET_KEY'), kekUnproven: probe === 'no-vault', log })
+        if (uni.action !== 'already-unified') log.info('space secrets: key unification', { action: uni.action, bound: uni.bound })
+        if (uni.bound) space.bindSecretsMasterKey(derived)
+      }
+    } catch (err) {
+      log.warn('space secrets: key unification failed (legacy key path stays active)', { err })
+    }
+  }
+
+  // V4-AUDIT-05: reap expired session rows hourly (bearer auth mints 60s-TTL
+  // sessions per request; without a sweep the rows accumulate forever).
   let identityCleanupTimer: NodeJS.Timeout | undefined
   let usageSweepTimer: NodeJS.Timeout | undefined
   let orgQuotaSweepTimer: NodeJS.Timeout | undefined
-  // v5 Stream F day-3 — control-plane alert delivery sweep. OPT-IN: fires every
-  // GOTONG_PEER_SUMMARY_ALERT_SWEEP_MS (0 / unset = off) to edge-trigger breaches
-  // into firings + POST webhooks. Off by default — point-in-time evaluation in
-  // the admin UI is unchanged; proactive delivery is a deliberate enable.
+  // v5 Stream F day-3 — alert delivery sweep, OPT-IN via
+  // GOTONG_PEER_SUMMARY_ALERT_SWEEP_MS (0 / unset = off).
   let alertSweepTimer: NodeJS.Timeout | undefined
-  // Phase 11 M3 — resume sweep. Fires every GOTONG_RESUME_SWEEP_MS
-  // (default 30 s); each tick reads due rows from suspended_tasks
-  // and re-dispatches them via Hub.resumeTask.
+  // Phase 11 M3 — resume sweep: every GOTONG_RESUME_SWEEP_MS (default 30s)
+  // re-dispatches due suspended_tasks rows via Hub.resumeTask.
   let resumeSweepTimer: NodeJS.Timeout | undefined
-  // One-shot grace timer that kicks off the boot-time workflow resume scan
-  // (see far below). Tracked like the sweeps so shutdown can cancel it —
-  // otherwise a stop within the grace window leaves it to fire into a
-  // half-torn-down host.
+  // One-shot grace timer for the boot-time workflow resume scan; tracked so
+  // shutdown can cancel it before it fires into a half-torn-down host.
   let resumeKickoffTimer: NodeJS.Timeout | undefined
   if (identity) {
     const sweep = (): void => {

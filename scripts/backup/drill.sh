@@ -7,8 +7,9 @@
 # throwaway dir, runs verify.sh, and then diffs the structural invariants that
 # decide whether the restored copy is actually usable — same admins (or you
 # can't log in), encrypted secrets carried over, and the master keys correctly
-# ABSENT (backup.sh excludes both the v3 secret.key and the v4
-# identity-master.key by design). It reports PASS/FAIL and a non-zero
+# ABSENT (backup.sh excludes the v3 secret.key* family — including the retired
+# .pre-unify.bak from key unification — and the v4 identity-master.key* family
+# by design, plus unification/rotation debris). It reports PASS/FAIL and a non-zero
 # exit so a cron failure mail / CI red tells you your DR is broken BEFORE the
 # day you need it.
 #
@@ -156,18 +157,35 @@ if [ -f "$SRC/secrets.enc.json" ]; then
 fi
 
 # the master keys must NOT be in the backup — bundling either next to the
-# ciphertext it unlocks defeats the encryption. backup.sh excludes both on
-# purpose: runtime/secret.key (v3) and the identity-master.key* family (v4 vault
-# KEK + rotation .next staging). Check each independently — a v4 host has both.
-if [ -f "$RESTORE_DIR/runtime/secret.key" ]; then
-  fail "runtime/secret.key leaked into the backup (v3 master key must be excluded)"
+# ciphertext it unlocks defeats the encryption. backup.sh excludes both key
+# FAMILIES on purpose: runtime/secret.key* (legacy v3 + the retired
+# .pre-unify.bak left by key unification — still a working key for the
+# pre-unify ciphertext) and identity-master.key* (v4 vault KEK + rotation
+# .next staging). Check each independently — a v4 host has both.
+if ls "$RESTORE_DIR"/runtime/secret.key* >/dev/null 2>&1; then
+  fail "runtime/secret.key* leaked into the backup (legacy v3 key family must be excluded)"
 else
-  ok "v3 master key (runtime/secret.key) correctly absent"
+  ok "v3 master key family (runtime/secret.key*) correctly absent"
 fi
 if ls "$RESTORE_DIR"/identity-master.key* >/dev/null 2>&1; then
   fail "identity-master.key leaked into the backup (v4 vault KEK must be excluded)"
 else
   ok "v4 master key (identity-master.key) correctly absent"
+fi
+
+# unification/rotation debris must not travel either: the pre-unify ciphertext
+# snapshot (and its never-clobber .N copies — hence the glob) pairs with the
+# retired key we just proved absent, and a staged .next copy would land a
+# restored host mid-migration instead of clean.
+if ls "$RESTORE_DIR"/secrets.enc.json.pre-unify.bak* >/dev/null 2>&1; then
+  fail "secrets.enc.json.pre-unify.bak* leaked into the backup (pre-unification snapshots must be excluded)"
+else
+  ok "pre-unification snapshots (secrets.enc.json.pre-unify.bak*) correctly absent"
+fi
+if [ -f "$RESTORE_DIR/secrets.enc.json.next" ]; then
+  fail "secrets.enc.json.next leaked into the backup (staged rotation copy must be excluded)"
+else
+  ok "staged rotation copy (secrets.enc.json.next) correctly absent"
 fi
 
 echo

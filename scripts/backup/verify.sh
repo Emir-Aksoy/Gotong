@@ -112,9 +112,19 @@ fi
 # 5. transcript.jsonl — append-only event log; one bad line breaks replay
 check_jsonl "$DIR/transcript.jsonl" "transcript.jsonl"
 
-# 6. secrets.enc.json — must parse, but we can't decrypt without secret.key
+# 6. secrets.enc.json — must parse, but we can't decrypt its entries here.
+#    Note the version: it decides WHICH master key this workspace needs
+#    (B① unification: v2 derives from identity-master.key; v1 = legacy
+#    standalone runtime/secret.key), so step 7's advice can be honest.
+#    Three-way on purpose: an UNKNOWN version (newer Gotong / string-typed
+#    / junk) must never be treated as v1 — the core refuses such files.
+SECRETS_VER="absent"
 if [ -f "$DIR/secrets.enc.json" ]; then
   check_json "$DIR/secrets.enc.json" "secrets.enc.json (encrypted; not decoded here)"
+  # Mirrors core readSecretsFile: MISSING field -> 1; numbers pass through;
+  # an explicit null, a string "2", or anything else is NOT a valid version
+  # (core refuses those files — has() distinguishes missing from null).
+  SECRETS_VER="$(jq -r 'if (has("version") | not) then 1 elif (.version|type) == "number" then .version else "unknown" end' "$DIR/secrets.enc.json" 2>/dev/null || echo "unknown")"
 fi
 
 # 7. runtime/secret.key — explicitly expected to be ABSENT in a backup
@@ -124,8 +134,21 @@ if [ -f "$DIR/runtime/secret.key" ]; then
   echo "  excludes it. If you restored from a 3rd-party backup that bundled"
   echo "  it, audit your access controls."
   WARNS=$((WARNS + 1))
+elif [ "$SECRETS_VER" = "2" ]; then
+  echo "ℹ runtime/secret.key MISSING — expected, and do NOT put one back:"
+  echo "  secrets.enc.json is v2 (unified) — its key derives from"
+  echo "  identity-master.key, and a v2 file refuses the legacy key path."
+elif [ "$SECRETS_VER" = "1" ]; then
+  echo "ℹ runtime/secret.key MISSING — expected. secrets.enc.json is v1 (legacy);"
+  echo "  restore your secret.key (or GOTONG_SECRET_KEY) before starting the host."
+elif [ "$SECRETS_VER" = "absent" ]; then
+  echo "ℹ runtime/secret.key MISSING — expected. No secrets.enc.json here either:"
+  echo "  nothing to unlock; do not create a key file."
 else
-  echo "ℹ runtime/secret.key MISSING — expected. Drop one in before starting the host."
+  echo "⚠ secrets.enc.json has an unrecognized version — written by a newer"
+  echo "  Gotong? Do NOT guess keys (and do NOT create runtime/secret.key);"
+  echo "  use tooling that matches the version that wrote this backup."
+  WARNS=$((WARNS + 1))
 fi
 
 # 7b. identity-master.key — v4 identity-vault KEK (default local-file provider).

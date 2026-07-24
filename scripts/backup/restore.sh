@@ -9,15 +9,17 @@
 #      operator can swap back without re-downloading from object storage.
 #   3. Extract.
 #   4. Run verify.sh on the result.
-#   5. Print a checklist: place secret.key, double-check space.json,
-#      restart the host.
+#   5. Print a checklist: restore the right master key for the file's
+#      generation (v2 unified → identity-master.key / GOTONG_MASTER_KEY;
+#      v1 legacy → runtime/secret.key / GOTONG_SECRET_KEY), double-check
+#      space.json, restart the host.
 #
 # Usage:
 #   ./restore.sh <backup-file.tar.gz> <target-dir>
 #   ./restore.sh <backup-file.tar.gz> <target-dir> --force
 #
 # Exit codes:
-#   0 — restore complete (operator still needs to drop secret.key)
+#   0 — restore complete (operator still needs to restore the master key)
 #   1 — usage / arg error
 #   2 — backup file missing / unreadable
 #   3 — target exists and --force not given
@@ -39,8 +41,10 @@ Flags:
             and proceed. Without this flag, a non-empty target is an
             error.
 
-After restore, you MUST place a valid secret.key in <target-dir>/runtime/
-before the host can decrypt secrets.enc.json. See docs/OPERATIONS.md.
+After restore, you MUST restore the master key the archive deliberately
+omits — WHICH key depends on secrets.enc.json's version (the checklist
+detects it): v2 unified -> identity-master.key (or GOTONG_MASTER_KEY);
+v1 legacy -> runtime/secret.key (or GOTONG_SECRET_KEY). docs/OPERATIONS.md.
 EOF
   exit 1
 }
@@ -127,18 +131,72 @@ fi
 
 # --- post-restore checklist --------------------------------------------------
 
+# Which master key this workspace needs depends on secrets.enc.json's
+# generation (B① unification): v2 derives its key from identity-master.key;
+# v1 uses the standalone runtime/secret.key. Detect it so the checklist
+# names the RIGHT key. Three-way on purpose: an UNKNOWN version (newer
+# Gotong / string-typed / junk) must never fall back to v1 advice — the
+# core refuses such files, and minting a legacy key for one is a footgun.
+SECRETS_VER="absent"
+if [ -f "$TARGET/secrets.enc.json" ]; then
+  if command -v jq >/dev/null 2>&1; then
+    # Mirrors core readSecretsFile: MISSING field -> 1; numbers pass through;
+    # an explicit null, a string "2", or anything else is NOT a valid version
+    # (core refuses those files — has() distinguishes missing from null).
+    SECRETS_VER="$(jq -r 'if (has("version") | not) then 1 elif (.version|type) == "number" then .version else "unknown" end' "$TARGET/secrets.enc.json" 2>/dev/null || echo "unknown")"
+  else
+    SECRETS_VER="undetected"
+  fi
+fi
+case "$SECRETS_VER" in
+  2)
+    KEY_STEP="  1. Restore identity-master.key into $TARGET/identity-master.key
+       (or set GOTONG_MASTER_KEY on the host). secrets.enc.json here is
+       v2 (unified): its key is DERIVED from that identity master key.
+       Do NOT create runtime/secret.key — a v2 file refuses the legacy
+       key path. The archive omits the key file on purpose; without it
+       neither the identity vault nor the LLM-provider keys decrypt."
+    ;;
+  1)
+    KEY_STEP="  1. Restore your master key(s), which the archive omits on purpose:
+       identity-master.key -> $TARGET/identity-master.key (or
+       GOTONG_MASTER_KEY) for the identity vault, and — because
+       secrets.enc.json here is v1 (legacy) — secret.key ->
+       $TARGET/runtime/secret.key (or GOTONG_SECRET_KEY=<64 hex>).
+       If the legacy key is lost, re-enter provider keys after boot;
+       the next boot then migrates the file to the unified v2 shape."
+    ;;
+  absent)
+    KEY_STEP="  1. Restore identity-master.key into $TARGET/identity-master.key
+       (or set GOTONG_MASTER_KEY on the host) for the identity vault.
+       This archive has no secrets.enc.json — there are no provider
+       secrets to unlock; the file is created on first key entry.
+       Do NOT create runtime/secret.key."
+    ;;
+  undetected)
+    KEY_STEP="  1. Restore identity-master.key into $TARGET/identity-master.key
+       (or set GOTONG_MASTER_KEY). Could not detect secrets.enc.json's
+       version (jq not installed) — check its top-level \"version\" field
+       yourself: 2 (unified) needs identity-master.key ONLY; 1/absent
+       (legacy) additionally needs runtime/secret.key (or
+       GOTONG_SECRET_KEY=<64 hex>)."
+    ;;
+  *)
+    KEY_STEP="  1. secrets.enc.json has an UNRECOGNIZED version — likely written
+       by a newer Gotong than this script. Do NOT guess keys and do NOT
+       create runtime/secret.key. Restore identity-master.key (or
+       GOTONG_MASTER_KEY) for the identity vault, then restore/boot with
+       the Gotong version that wrote this backup. docs/OPERATIONS.md."
+    ;;
+esac
+
 cat <<EOF
 
 ✓ restore complete: $TARGET
 
 Next steps (REQUIRED before the host will be functional):
 
-  1. Drop your secret.key into $TARGET/runtime/secret.key
-       The archive does NOT contain it on purpose. Without it,
-       LLM-provider API keys in secrets.enc.json cannot be decrypted.
-       If you don't have one, you can rotate by setting
-       GOTONG_SECRET_KEY=<32-byte hex> on the host and re-running
-       \`space.setProviderApiKey\` for each provider.
+$KEY_STEP
 
   2. Verify space.json metadata matches your expectations:
        cat $TARGET/space.json

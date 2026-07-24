@@ -22,6 +22,7 @@ import { join } from 'node:path'
 import { Space } from '@gotong/core'
 import { BAKED_VERSION } from './version.js'
 import { rotateMasterKey } from './rotate-master-key.js'
+import { recoverMasterKeyRotation } from './master-key-recovery.js'
 import { writeAdminLinkFile } from './admin-link.js'
 
 export function pkgVersion(): string {
@@ -109,19 +110,43 @@ export async function mintAdminTokenCmd(displayNameArg: string | undefined): Pro
  * Reads GOTONG_SPACE / GOTONG_MASTER_KEY_PROVIDER / GOTONG_MASTER_KEY exactly like the
  * boot path, so it loads the SAME current key, then generates a fresh random
  * key, re-wraps the data key in the DB under it (O(1) — secret rows untouched,
- * M4b/M4c), and persists the new key to `<space>/identity-master.key`. The new
+ * M4b/M4c; the one exception is a pre-envelope vault's first rotation, which
+ * migrates its legacy rows once), and persists the new key to
+ * `<space>/identity-master.key`. The new
  * key is NEVER printed (it's secret-grade; an attacker reading logs must not get
- * it). A running host keeps serving on its cached data key; the new KEK takes
- * effect on the next restart — that is the no-downtime property.
+ * it). Since B① the space-secrets file (LLM keys) derives from the KEK and is
+ * re-encrypted in the same rotation — so run this with the host STOPPED: a
+ * running host still holds the old derived key and its writes could be lost to
+ * (or mix keys with) the staged copy. (Pre-B① the old "keep serving on the
+ * cached data key" claim was true; the unification traded it for one root key.)
  *
- * Exits 2 on any failure (wrong provider, missing/wrong-length key, db open),
- * and because the orchestration fails before it mutates, a failed run never
- * half-rotates.
+ * Exits 2 on any failure (wrong provider, missing/wrong-length key, db open).
+ * Refusals land before the DB re-wrap commit point and leave at worst inert
+ * `.next` staging, which the recovery pass below (same one boot runs)
+ * reconciles. A failure or crash AFTER the commit does leave the live key one
+ * step behind the DB — `.next` then holds the key the DB needs — and the same
+ * recovery promotes it on the next run/boot; the new key survives on disk
+ * either way (local filesystems; see rotate-master-key.ts header).
  */
 export function rotateMasterKeyCmd(): void {
   const dir = env('GOTONG_SPACE', '.gotong')!
   let result: { keyFilePath: string }
   try {
+    // Reconcile any interrupted prior rotation FIRST — after a crash between
+    // the DB re-wrap and the promote, `<keyfile>.next` is the only key that
+    // opens the vault; rotateMasterKey() refuses to touch that state, and
+    // this recovery (promote or discard, the same logic boot runs) is what
+    // makes a plain operator re-run come out clean instead of erroring.
+    // 'inconclusive' is a VERDICT, not a shrug: the key state needs the
+    // operator (the reason may name the exact rescue file) — rotating on top
+    // would stage a key the old KEK can't commit and bury that pointer.
+    const rec = recoverMasterKeyRotation(dir, env('GOTONG_MASTER_KEY_PROVIDER'))
+    if (rec.action === 'inconclusive') {
+      process.stderr.write(
+        `error: master key state needs an operator before rotating: ${rec.reason}\n`,
+      )
+      process.exit(2)
+    }
     result = rotateMasterKey({
       spaceDir: dir,
       providerKind: env('GOTONG_MASTER_KEY_PROVIDER'),
@@ -144,10 +169,16 @@ export function rotateMasterKeyCmd(): void {
       `  Vault master key rotated for ${dir}.\n` +
       `  New key written to (mode 0o600): ${result.keyFilePath}\n` +
       `\n` +
-      `  The data key was re-wrapped in place — existing secrets were NOT\n` +
-      `  re-encrypted, and the OLD master key no longer opens this vault.\n` +
-      `  A running host keeps serving on its cached key; restart it to adopt\n` +
-      `  the new key. Back up the new key file with the same care as the db.\n\n`,
+      `  The data key was re-wrapped in place — vault secret rows were NOT\n` +
+      `  re-encrypted (exception: a pre-envelope vault's one-time envelope\n` +
+      `  migration); secrets.enc.json WAS re-encrypted under the new derived\n` +
+      `  key (B① unification). The OLD master key no longer opens this vault.\n` +
+      `  The supported procedure is stop -> rotate -> start. If the host WAS\n` +
+      `  running just now, restarting does not undo the damage: any secret it\n` +
+      `  saved during the rotation was written under the old derived key and is\n` +
+      `  now lost or key-mixed — verify your LLM keys still load, and restore\n` +
+      `  secrets.enc.json from a consistent backup if not. Back up the new key\n` +
+      `  file with the same care as the db; retire offsite copies of the old.\n\n`,
   )
 }
 
@@ -179,11 +210,18 @@ SUBCOMMANDS
       Rotate the identity vault master key (KEK) without starting the
       Hub. Loads the current key (GOTONG_MASTER_KEY_PROVIDER / GOTONG_MASTER_KEY),
       generates a fresh random key, re-wraps the data key under it in O(1)
-      (secrets are NOT re-encrypted), and writes the new key to
-      <GOTONG_SPACE>/identity-master.key (mode 0600, never printed). The OLD
-      key stops working; a running host adopts the new key on next restart.
+      (vault secret rows are NOT re-encrypted — except once, on a
+      pre-envelope vault's first rotation; secrets.enc.json IS — the
+      LLM-key store derives from the KEK since B①), and writes the new key
+      to <GOTONG_SPACE>/identity-master.key (mode 0600, never printed).
+      STOP the host first — a running host still holds the old derived
+      key and could lose writes to (or mix keys with) the staged copy.
       local-file provider only — env / kms keys are rotated out of band.
-      Exits with status 2 on failure (never half-rotates).
+      Exits with status 2 on failure. Refusals happen before anything
+      commits; a crash mid-rotation leaves a staged state that boot
+      recovery (or the recovery pass a re-run does first) completes —
+      the new key is never lost. Run ONE rotation at a time, on a local
+      disk (not NFS/SMB) — docs/OPERATIONS.md.
 
 ENVIRONMENT
   GOTONG_SPACE              workspace directory (default: .gotong)

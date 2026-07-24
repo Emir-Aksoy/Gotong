@@ -105,25 +105,28 @@ export function decryptSecret(masterKey: Buffer, enc: EncryptedSecret): string {
  * `GOTONG_SECRET_KEY` and not rely on the file mode.
  */
 export async function loadOrCreateMasterKey(keyPath: string): Promise<Buffer> {
+  // Strict shape both sources: Buffer.from(…, 'hex') silently drops a
+  // trailing odd/invalid tail, so a 65-char value would "pass" the length
+  // check with a key the operator never wrote. Exactly 64 hex chars or refuse.
+  const HEX_KEY = /^[0-9a-fA-F]{64}$/
   const env = process.env.GOTONG_SECRET_KEY
   if (env) {
-    const buf = Buffer.from(env, 'hex')
-    if (buf.length !== KEY_BYTES) {
+    const s = env.trim()
+    if (!HEX_KEY.test(s)) {
       throw new Error(
-        `GOTONG_SECRET_KEY must be ${KEY_BYTES * 2} hex chars (${KEY_BYTES} bytes); got ${env.length} chars`,
+        `GOTONG_SECRET_KEY must be exactly ${KEY_BYTES * 2} hex chars (${KEY_BYTES} bytes); got ${env.length} chars`,
       )
     }
-    return buf
+    return Buffer.from(s, 'hex')
   }
   if (existsSync(keyPath)) {
     const hex = (await readFile(keyPath, 'utf8')).trim()
-    const buf = Buffer.from(hex, 'hex')
-    if (buf.length !== KEY_BYTES) {
+    if (!HEX_KEY.test(hex)) {
       throw new Error(
-        `master key at '${keyPath}' is not ${KEY_BYTES} bytes (got ${buf.length}); delete it to regenerate`,
+        `master key at '${keyPath}' is not exactly ${KEY_BYTES * 2} hex chars; delete it to regenerate`,
       )
     }
-    return buf
+    return Buffer.from(hex, 'hex')
   }
   const fresh = randomBytes(KEY_BYTES)
   await mkdir(dirname(keyPath), { recursive: true })
@@ -145,9 +148,17 @@ export async function loadOrCreateMasterKey(keyPath: string): Promise<Buffer> {
 /**
  * Disk shape of `<space>/secrets.enc.json`. Version is a hard integer
  * so a future major rewrite can refuse to load old files cleanly.
+ *
+ *   - v1: entries encrypted under the standalone legacy key
+ *     (`runtime/secret.key` / `GOTONG_SECRET_KEY`).
+ *   - v2 (B① key unification): entries encrypted under a key DERIVED from
+ *     the identity master key (KEK) and injected via
+ *     `Space.bindSecretsMasterKey`. A v2 file is unreadable without that
+ *     binding — Space refuses the legacy fallback for it rather than
+ *     decrypt-failing entry by entry (or worse, minting a junk key file).
  */
 export interface SecretsFile {
-  version: 1
+  version: 1 | 2
   /** Workspace-level provider keys: `{ anthropic: {...}, openai: {...} }`. */
   providers: Record<string, EncryptedSecret>
   /** Per-agent overrides keyed by agent id. */
@@ -155,6 +166,8 @@ export interface SecretsFile {
 }
 
 export const SECRETS_FILE_VERSION = 1
+/** Version stamped once the file is bound to the derived (unified) key. */
+export const SECRETS_FILE_VERSION_UNIFIED = 2
 
 export function emptySecretsFile(): SecretsFile {
   return { version: SECRETS_FILE_VERSION, providers: {}, agents: {} }

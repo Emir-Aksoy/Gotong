@@ -2502,10 +2502,11 @@ export class IdentityStore {
   }
 
   /**
-   * Route B P0-M4c — rotate the vault master key (KEK) online. Re-wraps the
-   * data key under `newMasterKey` in O(1); secret rows are untouched. The
-   * caller is responsible for persisting `newMasterKey` so the next boot
-   * loads it (see the host `rotate-master-key` subcommand).
+   * Route B P0-M4c — rotate the vault master key (KEK) at the store level.
+   * Re-wraps the data key under `newMasterKey` in O(1); secret rows are
+   * untouched (exception: a pre-envelope vault's one-time envelope
+   * migration). The caller persists `newMasterKey` and stops the host around
+   * the operation — see the host `rotate-master-key` subcommand.
    */
   rotateVaultMasterKey(newMasterKey: Buffer): void {
     this.vault.rotateMasterKey(newMasterKey)

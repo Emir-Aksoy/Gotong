@@ -295,6 +295,9 @@ describe('KIT-M2 纯函数核', () => {
       'identity.sqlite',
       'identity.sqlite-wal',
       'runtime/secret.key',
+      'runtime/secret.key.pre-unify.bak', // B① 退役改名件
+      'secrets.enc.json.pre-unify.bak', // B① 迁移前备份
+      'secrets.enc.json.next', // B① 轮换暂存件
       'identity-master.key',
       'identity-master.key.next',
       'runtime/admin-sessions.json',

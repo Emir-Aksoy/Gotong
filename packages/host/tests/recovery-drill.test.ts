@@ -23,7 +23,7 @@
  */
 
 import { execFileSync } from 'node:child_process'
-import { appendFileSync } from 'node:fs'
+import { appendFileSync, writeFileSync } from 'node:fs'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
@@ -73,6 +73,14 @@ async function seedSpace(dir: string): Promise<void> {
   await init.space.setProviderApiKey('anthropic', 'sk-ant-fakedrillkey')
   await init.space.upsertAgent({ id: 'writer', allowedCapabilities: ['draft'] })
   await init.space.upsertAgent({ id: 'reviewer', allowedCapabilities: ['review'] })
+  // Plant every B① key/debris artifact backup.sh must exclude. Without these
+  // the drill's absence asserts pass VACUOUSLY (nothing to leak); with them,
+  // a broken exclude pattern leaks the file into the restore and the drill
+  // goes red — the asserts actually bite.
+  writeFileSync(join(dir, 'runtime', 'secret.key.pre-unify.bak'), 'ab'.repeat(32) + '\n')
+  writeFileSync(join(dir, 'secrets.enc.json.pre-unify.bak'), '{"version":1,"providers":{},"agents":{}}')
+  writeFileSync(join(dir, 'secrets.enc.json.pre-unify.bak.2'), '{"version":1,"providers":{},"agents":{}}')
+  writeFileSync(join(dir, 'secrets.enc.json.next'), '{"version":2,"providers":{},"agents":{}}')
 }
 
 maybe('Route B P0-M7-M3 — recovery drill catches a bad backup', () => {
@@ -106,10 +114,14 @@ maybe('Route B P0-M7-M3 — recovery drill catches a bad backup', () => {
     // The structural-invariant stage actually executed — not just verify.
     expect(out).toContain('admins preserved')
     expect(out).toContain('encrypted secrets carried over')
-    // backup.sh excludes BOTH master keys; drill.sh asserts each independently
-    // (v3 runtime/secret.key + v4 identity-master.key), so a v4 host proves both.
-    expect(out).toContain('v3 master key (runtime/secret.key) correctly absent')
+    // backup.sh excludes BOTH master-key FAMILIES (B①: globs cover the retired
+    // .pre-unify.bak too) plus unification/rotation debris; drill.sh asserts
+    // each independently, so a v4 host proves all four. seedSpace planted the
+    // artifacts, so these lines prove real exclusion — not vacuous absence.
+    expect(out).toContain('v3 master key family (runtime/secret.key*) correctly absent')
     expect(out).toContain('v4 master key (identity-master.key) correctly absent')
+    expect(out).toContain('pre-unification snapshots (secrets.enc.json.pre-unify.bak*) correctly absent')
+    expect(out).toContain('staged rotation copy (secrets.enc.json.next) correctly absent')
   })
 
   it('a torn-transcript space drills RED (non-zero exit, never PASSED)', () => {

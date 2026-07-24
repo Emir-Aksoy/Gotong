@@ -118,7 +118,7 @@ GOTONG_RES_ENDPOINTS
 GOTONG_ROLE             # not-a-knob: app.html 的 <!--GOTONG_ROLE--> 服务端注入占位符 (static-routes.ts)
 GOTONG_RUN_ARCHIVE_DAYS
 GOTONG_RUN_KEEP
-GOTONG_SECRET_KEY
+GOTONG_SECRET_KEY       # legacy(B① 统一后): v3 space-secrets 旧钥 env 覆盖;迁移期读一次用于解密旧文件,统一完成后仅未注入派生钥的独立 core 消费方仍认它
 GOTONG_SERVICES_NO_SEED
 GOTONG_SLACK_APP_TOKEN
 GOTONG_SLACK_BOT_TOKEN

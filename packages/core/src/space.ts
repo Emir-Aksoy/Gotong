@@ -59,6 +59,7 @@ import {
   emptySecretsFile,
   encryptSecret,
   loadOrCreateMasterKey,
+  SECRETS_FILE_VERSION_UNIFIED,
   type EncryptedSecret,
   type SecretsFile,
 } from './secrets.js'
@@ -138,6 +139,8 @@ export class Space {
   }
   /** Cached master key — lazily loaded the first time secrets are touched. */
   private masterKey: Buffer | null = null
+  /** True once bindSecretsMasterKey injected the derived key (B① unification). */
+  private secretsKeyBound = false
   /**
    * Per-file write serialisation. Read-modify-write methods (upsertAgent,
    * touchWorker, addAdminSession, set*ApiKey, …) used to lose updates
@@ -798,27 +801,88 @@ export class Space {
   // --- secrets (v2.1) -------------------------------------------------------
 
   /**
+   * B① key unification: bind space-secrets encryption to an externally
+   * derived key (the host derives it from the identity master key via
+   * HKDF). Once bound, `runtime/secret.key` / `GOTONG_SECRET_KEY` are
+   * never consulted, and every write stamps the file as version 2 so a
+   * later un-bound boot refuses honestly instead of decrypt-failing.
+   * Must be called before the first secrets access; re-binding with a
+   * different key is a caller bug and throws.
+   */
+  bindSecretsMasterKey(key: Buffer): void {
+    if (!Buffer.isBuffer(key) || key.length !== 32) {
+      throw new Error('bindSecretsMasterKey: key must be a 32-byte Buffer')
+    }
+    if (this.masterKey && !this.masterKey.equals(key)) {
+      throw new Error('bindSecretsMasterKey: a different secrets key is already active')
+    }
+    this.masterKey = key
+    this.secretsKeyBound = true
+  }
+
+  /**
    * Lazy master-key load. The key is cached on the Space instance — it's
    * needed on every spawn, and re-reading the file or env var on each
    * call would be wasteful. Tests should construct a fresh Space when
-   * they want a different key.
+   * they want a different key. `file` gates the legacy fallback: a v2
+   * (unified) file is bound to the derived key, so loading — let alone
+   * CREATING — `runtime/secret.key` for it would silently encrypt new
+   * entries under a key that can never decrypt the old ones.
    */
-  private async getMasterKey(): Promise<Buffer> {
+  private async getMasterKey(file: SecretsFile): Promise<Buffer> {
+    // File generation decides the key — BEFORE any cache. A legacy key
+    // cached earlier in this instance's life must never touch a file
+    // that has since become v2 (that would write a mixed-key file).
+    this.assertSecretsGenerationCoherent(file)
+    if (file.version === SECRETS_FILE_VERSION_UNIFIED || this.secretsKeyBound) return this.masterKey!
     if (this.masterKey) return this.masterKey
     this.masterKey = await loadOrCreateMasterKey(this.paths.runtime.secretKey)
     return this.masterKey
   }
 
   /**
+   * Generation-coherence gate for every secrets WRITE — including removals,
+   * which need no key but still re-stamp the file (bound ⇒ v2) on save.
+   * Split from {@link getMasterKey} so a v1 removal doesn't mint
+   * `runtime/secret.key` as a side effect of a check.
+   */
+  private assertSecretsGenerationCoherent(file: SecretsFile): void {
+    if (file.version === SECRETS_FILE_VERSION_UNIFIED) {
+      if (!this.secretsKeyBound) {
+        throw new Error(
+          'secrets.enc.json is v2 (bound to the identity master key) but no derived key was bound — identity failed to load this boot?',
+        )
+      }
+      return
+    }
+    // Bound Space over a v1 file: legitimate only while the store is
+    // EMPTY (fresh space — the first write stamps v2). Entries mean
+    // the file regressed underneath us (restored mid-run?) — refuse
+    // rather than guess which key they belong to.
+    if (this.secretsKeyBound && Object.keys(file.providers).length + Object.keys(file.agents).length > 0) {
+      throw new Error(
+        'secrets.enc.json regressed to v1 with entries while a derived key is bound — refusing to mix keys (restart the host)',
+      )
+    }
+  }
+
+  /**
    * Read `secrets.enc.json`. Returns an empty file shape if it doesn't
-   * exist yet — a fresh space starts with no keys configured.
+   * exist yet — a fresh space starts with no keys configured. The
+   * on-disk version survives the round-trip (v2 = unified-key marker).
    */
   private async readSecretsFile(): Promise<SecretsFile> {
     try {
       const raw = await readFile(this.paths.secrets, 'utf8')
       const parsed = JSON.parse(raw) as Partial<SecretsFile>
+      // Known generations only. A future v3 must be refused loudly — treating
+      // it as v1 would decrypt-fail AND let the next write destroy its marker.
+      const v = parsed.version
+      if (v !== undefined && v !== 1 && v !== SECRETS_FILE_VERSION_UNIFIED) {
+        throw new Error(`secrets.enc.json has unknown version ${JSON.stringify(v)} — refusing (newer Gotong wrote it?)`)
+      }
       return {
-        version: 1,
+        version: v === SECRETS_FILE_VERSION_UNIFIED ? 2 : 1,
         providers: parsed.providers ?? {},
         agents: parsed.agents ?? {},
       }
@@ -829,7 +893,10 @@ export class Space {
   }
 
   private async writeSecretsFile(file: SecretsFile): Promise<void> {
-    await writeJsonAtomic(this.paths.secrets, file, SECURE_FILE_MODE)
+    // With a bound (derived) key every write commits the file to v2; an
+    // un-bound writer preserves whatever generation it read.
+    const version = this.secretsKeyBound ? SECRETS_FILE_VERSION_UNIFIED : file.version
+    await writeJsonAtomic(this.paths.secrets, { ...file, version }, SECURE_FILE_MODE)
   }
 
   /**
@@ -852,7 +919,7 @@ export class Space {
     const file = await this.readSecretsFile()
     const enc = file.providers[provider]
     if (!enc) return null
-    const key = await this.getMasterKey()
+    const key = await this.getMasterKey(file)
     return decryptSecret(key, enc)
   }
 
@@ -861,11 +928,13 @@ export class Space {
     if (!plaintext || plaintext.length === 0) {
       throw new Error('setProviderApiKey: plaintext must be a non-empty string')
     }
-    const key = await this.getMasterKey()
-    const enc = encryptSecret(key, plaintext)
     await this.withFileLock(this.paths.secrets, async () => {
       const file = await this.readSecretsFile()
-      file.providers[provider] = enc
+      // Encrypt inside the lock: the key choice depends on the file
+      // generation just read (v2 without a bound key must refuse, not
+      // write a mixed-key file).
+      const key = await this.getMasterKey(file)
+      file.providers[provider] = encryptSecret(key, plaintext)
       await this.writeSecretsFile(file)
     })
   }
@@ -875,6 +944,9 @@ export class Space {
     return this.withFileLock(this.paths.secrets, async () => {
       const file = await this.readSecretsFile()
       if (!file.providers[provider]) return false
+      // Deleting needs no key, but the save re-stamps the file — same
+      // generation gate as the encrypting writers (no v2 over v1 entries).
+      this.assertSecretsGenerationCoherent(file)
       delete file.providers[provider]
       await this.writeSecretsFile(file)
       return true
@@ -894,7 +966,7 @@ export class Space {
     const file = await this.readSecretsFile()
     const enc = file.agents[agentId]
     if (!enc) return null
-    const key = await this.getMasterKey()
+    const key = await this.getMasterKey(file)
     return decryptSecret(key, enc)
   }
 
@@ -903,11 +975,11 @@ export class Space {
     if (!plaintext || plaintext.length === 0) {
       throw new Error('setAgentApiKey: plaintext must be a non-empty string')
     }
-    const key = await this.getMasterKey()
-    const enc = encryptSecret(key, plaintext)
     await this.withFileLock(this.paths.secrets, async () => {
       const file = await this.readSecretsFile()
-      file.agents[agentId] = enc
+      // Same lock-scoped key choice as setProviderApiKey (v2 guard).
+      const key = await this.getMasterKey(file)
+      file.agents[agentId] = encryptSecret(key, plaintext)
       await this.writeSecretsFile(file)
     })
   }
@@ -917,6 +989,8 @@ export class Space {
     return this.withFileLock(this.paths.secrets, async () => {
       const file = await this.readSecretsFile()
       if (!file.agents[agentId]) return false
+      // Same generation gate as removeProviderApiKey (write re-stamps).
+      this.assertSecretsGenerationCoherent(file)
       delete file.agents[agentId]
       await this.writeSecretsFile(file)
       return true

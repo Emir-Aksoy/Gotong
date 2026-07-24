@@ -49,9 +49,9 @@ export function isForbiddenTarget(rel: string): boolean {
   const base = rel.split('/').pop() ?? rel
   return (
     base === 'transcript.jsonl' ||
-    base === 'secrets.enc.json' ||
+    base.startsWith('secrets.enc.json') || // 含 B① .pre-unify.bak / .next 回滚对
     base.startsWith('identity.sqlite') ||
-    rel === 'runtime/secret.key' ||
+    rel.startsWith('runtime/secret.key') || // 含 B① 退役改名件
     base.startsWith('identity-master.key') ||
     base.endsWith('-sessions.json')
   )

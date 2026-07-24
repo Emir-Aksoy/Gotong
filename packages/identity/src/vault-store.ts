@@ -332,19 +332,24 @@ export class VaultStore {
   }
 
   /**
-   * Route B P0-M4c — rotate the master key (KEK) online.
+   * Route B P0-M4c — rotate the master key (KEK) at the store level.
    *
    * Unwraps the data key (DEK) with the current KEK, re-wraps it under
    * `newMasterKey`, and atomically replaces the vault_meta row. Secret rows
    * are NEVER touched — that's the whole point of the envelope — so this is
-   * O(1) no matter how many secrets exist, and a *running* host that already
-   * cached the DEK keeps working unchanged: only the at-rest wrapping moved.
+   * O(1) no matter how many secrets exist (one exception: a pre-envelope
+   * vault's first use migrates its legacy rows inside requireDek, once), and
+   * only the at-rest wrapping moves: a process that already cached the DEK
+   * keeps working unchanged.
    *
    * After this returns the OLD key can no longer unwrap the vault. The
    * operator must persist `newMasterKey` (the host `rotate-master-key`
-   * subcommand does this) so the next boot loads it. A no-downtime rotation
-   * is therefore: run the rotation (re-wraps this row) → persist the new key
-   * → the live host is unaffected, the next restart uses the new key.
+   * subcommand does this) so the next boot loads it. NOTE (B①): although
+   * this store-level re-wrap is cheap and DEK-cache-safe in itself, the
+   * OPERATOR flow is stop-the-host-first — since B① the space-secrets file
+   * rotates together with the KEK, and a live host still writing under the
+   * old derived key could lose or key-mix those writes (see the host's
+   * rotate-master-key.ts).
    *
    * Throws `vault_not_configured` if no key was set, `vault_decrypt_failed`
    * if the current key can't unwrap the DEK, `invalid_input` if
@@ -358,6 +363,28 @@ export class VaultStore {
     // so a bad new key can't half-rotate the vault.
     const reWrapped = wrapDataKey(newMasterKey, dek)
     const apply = (): void => {
+      // CAS under the write lock (mirrors requireDek's seed re-check): the
+      // unwrap above ran OUTSIDE this transaction, so a concurrent rotation
+      // may have re-wrapped the row since — both of us held the old KEK's
+      // cached DEK, and blindly writing would let BOTH rotations "succeed",
+      // silently orphaning the other one's key while its caller persists it
+      // as live. The wrap row must still be one OUR master key unwraps;
+      // otherwise the old key is no longer current and this rotation loses.
+      const cur = this.stmtVaultMetaGet.get(VAULT_DEK_META_KEY) as
+        | { value: string }
+        | undefined
+      if (cur) {
+        try {
+          unwrapDataKey(this.requireMasterKey(), cur.value)
+        } catch {
+          throw new IdentityError({
+            code: 'vault_decrypt_failed',
+            message:
+              'master key rotated concurrently: the stored DEK wrap no longer matches ' +
+              'the key this rotation started from — aborting without writing',
+          })
+        }
+      }
       this.stmtVaultMetaPut.run(VAULT_DEK_META_KEY, reWrapped, Date.now())
     }
     if (this.db.inTransaction) apply()

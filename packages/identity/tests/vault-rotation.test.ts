@@ -142,3 +142,41 @@ describe('IdentityStore.rotateVaultMasterKey — reopen forwarder (Route B P0-M4
     s3.close()
   })
 })
+
+describe('concurrent rotation CAS (the second committer must LOSE)', () => {
+  let dir: string
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'gotong-rot-cas-'))
+  })
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('two stores racing the re-wrap: the loser throws vault_decrypt_failed and writes nothing', () => {
+    const dbPath = join(dir, 'identity.sqlite')
+    // Both "processes" open under K1 and cache the DEK while the DB is still
+    // wrapped under K1 — rotateMasterKey's unwrap runs OUTSIDE the write
+    // transaction, so without the in-transaction CAS both re-wraps would
+    // "succeed": the loser's caller would then persist a key the DB row no
+    // longer matches, and its staged `.next` bytes (possibly the ONLY copy of
+    // the key the DB briefly committed to) become sweepable debris.
+    const a = openIdentityStore({ dbPath, masterKey: K1 })
+    const id = a.createVaultEntry({ kind: 'llm_provider', ownerKind: 'org', secret: 'raced' }).id
+    const b = openIdentityStore({ dbPath, masterKey: K1 })
+    expect(b.readVaultSecret(id)).toBe('raced') // B caches the DEK pre-race
+
+    a.rotateVaultMasterKey(K2) // A commits first → the wrap row is K2's now
+
+    expect(readCode(() => b.rotateVaultMasterKey(K3))).toBe('vault_decrypt_failed')
+    a.close()
+    b.close()
+
+    // The winner's key opens the vault; the loser's never took effect.
+    const winner = openIdentityStore({ dbPath, masterKey: K2 })
+    expect(winner.readVaultSecret(id)).toBe('raced')
+    winner.close()
+    const loser = openIdentityStore({ dbPath, masterKey: K3 })
+    expect(readCode(() => loser.readVaultSecret(id))).toBe('vault_decrypt_failed')
+    loser.close()
+  })
+})

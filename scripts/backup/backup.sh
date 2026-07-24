@@ -4,21 +4,29 @@
 # Design choices:
 #
 #   - We DO NOT include the master encryption keys in the archive.
-#     Two key files can live in a workspace, depending on its vintage:
-#       * `runtime/secret.key`   — the v3 SpaceSecrets master key that
-#         encrypts `secrets.enc.json` (provider API keys, per-agent
-#         overrides).
-#       * `identity-master.key`  — the v4 identity-vault KEK (default
+#     Two key families can live in a workspace, depending on its vintage:
+#       * `runtime/secret.key*`  — the legacy v3 SpaceSecrets master key
+#         that encrypts `secrets.enc.json` (provider API keys, per-agent
+#         overrides). After key unification (perf audit B①) the live key
+#         derives from the identity KEK and this file is RETIRED to
+#         `runtime/secret.key.pre-unify.bak` — still a working key for
+#         the pre-unify ciphertext, hence the glob covers the family.
+#       * `identity-master.key*` — the v4 identity-vault KEK (default
 #         `local-file` provider) that wraps the DEK encrypting the vault
 #         inside `identity.sqlite` (SSO client secrets, TOTP seeds,
-#         per-user credentials). Online rotation (P0-M4d) stages a new
-#         key to `identity-master.key.next`, so we exclude the whole
-#         `identity-master.key*` family.
+#         per-user credentials) AND, post-unification, derives the
+#         SpaceSecrets key. Online rotation (P0-M4d) stages a new key to
+#         `identity-master.key.next`, so the glob covers that too.
 #     Bundling either key next to the ciphertext it unlocks means
 #     whoever can read the backup can read every secret — it defeats the
 #     at-rest encryption for the backup copy. The recipe in
 #     `docs/OPERATIONS.md` keeps each key in a separate location with
 #     separate access controls (1Password, env provider, etc).
+#     Unification/rotation debris (`secrets.enc.json.pre-unify.bak*` — the
+#     glob covers never-clobber `.N` copies — and the staged
+#     `secrets.enc.json.next`) is excluded as well: the live
+#     `secrets.enc.json` already carries every secret, and a restored
+#     workspace should start clean, not mid-migration.
 #
 #   - We DO NOT include `runtime/admin-sessions.json` or
 #     `runtime/worker-sessions.json`. Restoring those revives stale
@@ -67,8 +75,10 @@ Flags:
                 backup is the default.
 
 Always excluded from the archive (security / freshness):
-  runtime/secret.key          (v3 SpaceSecrets master key)
-  identity-master.key*        (v4 identity-vault KEK + rotation staging)
+  runtime/secret.key*             (legacy v3 SpaceSecrets key + retired .pre-unify.bak)
+  identity-master.key*            (v4 identity-vault KEK + rotation staging)
+  secrets.enc.json.pre-unify.bak* (pre-unification ciphertext snapshot + .N copies)
+  secrets.enc.json.next*          (staged rotation copy + judging claim slots)
   runtime/admin-sessions.json
   runtime/worker-sessions.json
 EOF
@@ -187,8 +197,10 @@ if [ -n "$SNAP_ROOT" ]; then
   TMP_TAR="${OUT%.gz}"
   tar -cf "$TMP_TAR" \
     -C "$PARENT_DIR" \
-    --exclude="$LEAF_NAME/runtime/secret.key" \
+    --exclude="$LEAF_NAME/runtime/secret.key*" \
     --exclude="$LEAF_NAME/identity-master.key*" \
+    --exclude="$LEAF_NAME/secrets.enc.json.pre-unify.bak*" \
+    --exclude="$LEAF_NAME/secrets.enc.json.next*" \
     --exclude="$LEAF_NAME/runtime/admin-sessions.json" \
     --exclude="$LEAF_NAME/runtime/worker-sessions.json" \
     --exclude="$LEAF_NAME/identity.sqlite" \
@@ -202,8 +214,10 @@ if [ -n "$SNAP_ROOT" ]; then
 else
   tar -czf "$OUT" \
     -C "$PARENT_DIR" \
-    --exclude="$LEAF_NAME/runtime/secret.key" \
+    --exclude="$LEAF_NAME/runtime/secret.key*" \
     --exclude="$LEAF_NAME/identity-master.key*" \
+    --exclude="$LEAF_NAME/secrets.enc.json.pre-unify.bak*" \
+    --exclude="$LEAF_NAME/secrets.enc.json.next*" \
     --exclude="$LEAF_NAME/runtime/admin-sessions.json" \
     --exclude="$LEAF_NAME/runtime/worker-sessions.json" \
     "$LEAF_NAME" \
@@ -215,8 +229,10 @@ fi
 SIZE="$(du -h "$OUT" | awk '{print $1}')"
 echo "✓ backup written: $OUT ($SIZE)"
 echo
-echo "Reminder: master keys were intentionally NOT included — neither"
-echo "runtime/secret.key (v3) nor identity-master.key (v4 vault KEK)."
-echo "Keep them safe and SEPARATE; each is required to decrypt its"
-echo "ciphertext (secrets.enc.json / identity.sqlite) on restore."
+echo "Reminder: master keys were intentionally NOT included — neither the"
+echo "runtime/secret.key* family (legacy v3 + retired .pre-unify.bak) nor"
+echo "identity-master.key* (v4 vault KEK — post-unification the single root"
+echo "key that also derives the SpaceSecrets key). Keep keys safe and"
+echo "SEPARATE from this archive; identity-master.key is required to decrypt"
+echo "both identity.sqlite and secrets.enc.json on restore."
 echo "See docs/OPERATIONS.md."
