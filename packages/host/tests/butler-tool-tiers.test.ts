@@ -11,6 +11,10 @@
  *      出现任何目录工具名 —— 一等描述点名目录工具 = 模型直调必空。
  *   ④ 能力不减端到端:目录里的 set_reply_language 经 use_tool 真执行,
  *      偏好文件真落盘;B1 能力清单仍是平铺全集(目录化不改「能干什么」)。
+ *   ⑤ 轮数够用:工厂造的管家真能跑完 >8 轮的事务 —— 两层脸让「查目录」也
+ *      占一轮,LlmAgent 的通用默认 8 是按单层脸切的,不抬就会在正常事务
+ *      中途 abort。守的是构造点那行 maxToolRounds 不被删、不被挪到
+ *      `...rest` 之前。
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
@@ -20,6 +24,7 @@ import { join } from 'node:path'
 
 import type { Hub, Logger, ParticipantId, Task } from '@gotong/core'
 import type { LlmProvider, LlmRequest, LlmStreamChunk, LlmToolDefinition } from '@gotong/llm'
+import { BUTLER_MAX_TOOL_ROUNDS } from '@gotong/personal-butler'
 
 import { buildButlerFactory, type ButlerFactoryRefs } from '../src/personal-butler-factory.js'
 import {
@@ -277,5 +282,39 @@ describe('AFR-M3 — 工具面分层名单防腐门(真工厂)', () => {
     console.log(
       `[AFR-M3] 每轮工具面 schema:单层 ${single.faces[0]!.length} 工具 ~${before}tk → 两层 ${two.faces[0]!.length} 工具 ~${after}tk(省 ~${before - after}tk,-${Math.round(((before - after) / before) * 100)}%)`,
     )
+  })
+})
+
+describe('⑤ 轮数够用 — 工厂造的管家跑得完深事务', () => {
+  /**
+   * 12 轮长度按最坏情况取:两层脸下一趟像样的差事(查目录 → 取日历 → 读知识
+   * 文件 → 起草 → 再查一处 → 改)轻松过 8,而撞顶不是优雅降级 —— 整个差事
+   * 当场 abort,什么都不交付。全用 `list_tool_directory`(纯渲染、幂等、无
+   * 副作用)凑轮数:这里要证的是轮数预算,不是某个工具的行为。
+   */
+  const DEEP_PLAN = Array.from({ length: 12 }, () => ({ name: 'list_tool_directory', input: {} }))
+
+  it('12 轮事务跑到底,不在半路 abort', async () => {
+    const provider = new TierScriptProvider(DEEP_PLAN)
+    const r = await buildButler(provider, root).onTask(task('t7', 'u7', '办件复杂的事。'))
+
+    expect((r as { kind: string }).kind).toBe('ok')
+    // 撞顶的症状是回复正文变成 `[butler: aborted after N tool-use rounds]`。
+    expect(JSON.stringify(r)).not.toContain('aborted after')
+    // 12 个工具轮 + 1 个收尾轮 = 13 次 provider 调用:计划一条没被砍。
+    expect(provider.faces.length).toBe(13)
+  })
+
+  it('上限本身还在(不是拆了保险丝)', async () => {
+    // 远超上限的计划仍必须被拦下 —— 抬高 ≠ 取消。
+    const provider = new TierScriptProvider(
+      Array.from({ length: BUTLER_MAX_TOOL_ROUNDS + 5 }, () => ({
+        name: 'list_tool_directory',
+        input: {},
+      })),
+    )
+    const r = await buildButler(provider, join(root, 'c')).onTask(task('t8', 'u8', '死循环。'))
+
+    expect(JSON.stringify(r)).toContain(`aborted after ${BUTLER_MAX_TOOL_ROUNDS} tool-use rounds`)
   })
 })

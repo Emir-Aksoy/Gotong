@@ -37,6 +37,7 @@ export {
 
 export {
   PersonalButlerAgent,
+  BUTLER_MAX_TOOL_ROUNDS,
   type PersonalButlerAgentOptions,
 } from './agent.js'
 

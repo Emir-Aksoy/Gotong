@@ -29,6 +29,7 @@ import type { Hub, Logger } from '@gotong/core'
 import { TwoTierToolset, type LlmProvider } from '@gotong/llm'
 import type { Embedder } from '@gotong/personal-memory'
 import {
+  BUTLER_MAX_TOOL_ROUNDS,
   PersonalButlerAgent,
   buildButlerClockProbe,
   composeContextProbes,
@@ -622,6 +623,11 @@ export function buildButlerFactory(deps: ButlerFactoryDeps): ButlerFactory {
 
         return new PersonalButlerAgent({
           ...rest,
+          // AFTER the spread on purpose: `rest` comes from the pool's spec-derived
+          // options, and `ManagedAgentSpec` carries no round cap — so this can't be
+          // shadowing an operator's setting, it's filling a gap. See the constant
+          // for why the butler needs more headroom than the generic default of 8.
+          maxToolRounds: BUTLER_MAX_TOOL_ROUNDS,
           memory,
           memoryRetriever: recallIndex.retriever({ activeOnly: true }),
           // M-GRAPH — graph mode on ⇒ recall expands one hop along links the 6h

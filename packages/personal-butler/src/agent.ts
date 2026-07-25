@@ -108,6 +108,38 @@ export interface PersonalButlerAgentOptions
   stableContext?: () => Promise<string | null>
 }
 
+/**
+ * The butler's tool-round ceiling — raised above `LlmAgent`'s framework-wide
+ * default of 8.
+ *
+ * That 8 is a runaway-loop backstop for a GENERIC agent, and it was set when
+ * every tool sat on one flat face. Two things have since made 8 bind on
+ * legitimate work rather than on runaway loops:
+ *
+ *   1. AFR-M2/M3 two-tier tool face. The long tail now lives behind
+ *      `list_tool_directory` + `use_tool`, and BOTH are ordinary tool calls —
+ *      so any errand that touches a long-tail tool pays at least one extra
+ *      round for the directory lookup that the flat face never charged. The
+ *      cap was never re-cut for it.
+ *   2. The butler is an ERRAND runner, not a one-shot answerer. A routine
+ *      "check the calendar, read the relevant knowledge file, draft it, look
+ *      one thing up, revise" is 5-6 rounds of honest work before the model has
+ *      spent a single round on a retry or a correction.
+ *
+ * Hitting the cap is not a graceful degradation: `handleTask` aborts the whole
+ * errand with `[butler: aborted after N tool-use rounds]`, mid-task, with
+ * nothing delivered. Under-cutting it costs real completions; over-cutting it
+ * costs at most a few wasted calls on the rare true runaway, which the cap
+ * still catches.
+ *
+ * A constant, not a knob (SESS / NA-M2 idiom): the number encodes what the
+ * butler IS, and shipping it as a `ManagedAgentSpec` field would mean five
+ * seams (spec + manifest validation + agents-routes + panel capture-echo +
+ * resource-adapt echo) and a silent-drop footgun, for a value nobody has
+ * needed to tune per hub.
+ */
+export const BUTLER_MAX_TOOL_ROUNDS = 16
+
 export class PersonalButlerAgent extends MemoryAugmentedAgent {
   /** Held for GATING (governs / classify / describe). Execution routes through
    *  the composed `this.toolset`, which already includes them. Empty for a
