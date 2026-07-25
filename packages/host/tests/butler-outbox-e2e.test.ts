@@ -55,7 +55,7 @@ class EchoAgent extends AgentParticipant {
   }
   protected async handleTask(task: Task): Promise<unknown> {
     const p = task.payload
-    const text = typeof p === 'object' && p !== null && 'text' in p ? String((p as { text: unknown }).text) : ''
+    const text = typeof p === 'object' && p !== null && 'prompt' in p ? String((p as { prompt: unknown }).prompt) : ''
     return { text: `echo: ${text}` }
   }
 }

@@ -263,7 +263,7 @@ workflow:
     const parked = await hub.dispatch({
       from: 'im:telegram:1001',
       strategy: { kind: 'explicit', to: 'butler' },
-      payload: { text: '把 mailer 删了' },
+      payload: { prompt: '把 mailer 删了' },
       origin: { orgId: 'local', userId: aliceId },
     })
     expect(parked.kind).toBe('suspended')
@@ -288,7 +288,7 @@ workflow:
     await hub.dispatch({
       from: 'im:telegram:1001',
       strategy: { kind: 'explicit', to: 'butler' },
-      payload: { text: '问问对面 hub' },
+      payload: { prompt: '问问对面 hub' },
       origin: { orgId: 'local', userId: aliceId },
     })
     await Promise.all(itemWrites)

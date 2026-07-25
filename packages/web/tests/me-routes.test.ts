@@ -47,7 +47,7 @@ import {
 // ②TC-ME — the member quick-chat route's ownership gate is `MeAgentAdminSurface`;
 // `server.ts` only imports these (doesn't re-export), so pull them straight from
 // the route module where they're declared.
-import type { MeAgentAdminSurface, MeChatStreamSurface, MeOwnedAgentView } from '../src/me-routes.js'
+import type { MeAgentAdminSurface, MeChatSessionSurface, MeChatStreamSurface, MeOwnedAgentView } from '../src/me-routes.js'
 
 /**
  * ease-of-use ①TC-ME — a recording fake for the member key probe. Captures
@@ -276,6 +276,8 @@ async function boot(
     meAgentAdmin?: MeAgentAdminSurface
     /** NA-M6b — wire a fake chunk-sink pair for quick-chat `stream:true`. */
     meChatStream?: MeChatStreamSurface
+    /** SESS — wire a fake session window for quick-chat continuity. */
+    meChatSession?: MeChatSessionSurface
   } = {},
 ): Promise<BootResult> {
   const withGrowthReports = opts.withGrowthReports ?? true
@@ -334,6 +336,7 @@ async function boot(
     ...(opts.llmKeyTest ? { llmKeyTest: opts.llmKeyTest } : {}),
     ...(opts.meAgentAdmin ? { meAgentAdmin: opts.meAgentAdmin } : {}),
     ...(opts.meChatStream ? { meChatStream: opts.meChatStream } : {}),
+    ...(opts.meChatSession ? { meChatSession: opts.meChatSession } : {}),
     ...(opts.adminLoginRateLimit
       ? { adminLoginRateLimit: opts.adminLoginRateLimit }
       : {}),
@@ -1598,6 +1601,150 @@ describe('POST /api/me/agents/:id/chat — stream: true (NA-M6b)', () => {
       expect(j.result?.output?.text).toBe('plain')
     } finally {
       await teardown(noSurface)
+    }
+  })
+})
+
+// ---------------------------------------------------------------------------
+// SESS — quick-chat session window (conversation continuity)
+//
+// The route's contract is deliberately thin: (a) a NON-EMPTY history from the
+// surface rides the payload verbatim (empty is omitted, not sent as []);
+// (b) the member's words are recorded BEFORE dispatch (said is said, even if
+// the model then fails); (c) the reply is appended ONLY for an ok-result with
+// text — a failed/parked result is never fabricated into "the butler said".
+// Butler-gating (non-butler agents get []/no-op) lives in the HOST adapter,
+// not here — the web trusts the injected surface, same duck discipline as
+// every other *Surface.
+// ---------------------------------------------------------------------------
+
+class FakeChatSession implements MeChatSessionSurface {
+  readonly appended: Array<{ userId: string; agentId: string; role: 'user' | 'assistant'; text: string }> = []
+  readonly historyCalls: Array<{ userId: string; agentId: string }> = []
+  constructor(private readonly prior: Array<{ role: 'user' | 'assistant'; content: string }> = []) {}
+  async history(userId: string, agentId: string): Promise<Array<{ role: 'user' | 'assistant'; content: string }>> {
+    this.historyCalls.push({ userId, agentId })
+    return this.prior
+  }
+  async append(userId: string, agentId: string, role: 'user' | 'assistant', text: string): Promise<void> {
+    this.appended.push({ userId, agentId, role, text })
+  }
+}
+
+describe('POST /api/me/agents/:id/chat — session window (SESS)', () => {
+  const post = (b: BootResult, body: unknown) =>
+    fetch(`${b.baseUrl}/api/me/agents/${OWNED_AGENT_ID}/chat`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', cookie: b.memberCookie },
+      body: JSON.stringify(body),
+    })
+
+  it('no surface wired → payload is {prompt} only, no history key (byte-identical)', async () => {
+    const b = await boot({ meAgentAdmin: new StubMeAgentAdmin(new Set([OWNED_AGENT_ID])) })
+    try {
+      const stub = new StubChatAgent(OWNED_AGENT_ID, okChatReply('hi'))
+      b.hub.register(stub)
+      expect((await post(b, { prompt: '你好' })).status).toBe(200)
+      expect(Object.keys(stub.received[0]!.payload as object)).toEqual(['prompt'])
+    } finally {
+      await teardown(b)
+    }
+  })
+
+  it('empty history omitted; user turn recorded before dispatch; ok reply appended after', async () => {
+    const session = new FakeChatSession()
+    const b = await boot({
+      meAgentAdmin: new StubMeAgentAdmin(new Set([OWNED_AGENT_ID])),
+      meChatSession: session,
+    })
+    try {
+      const stub = new StubChatAgent(OWNED_AGENT_ID, okChatReply('答复在此'))
+      b.hub.register(stub)
+      expect((await post(b, { prompt: '查一下' })).status).toBe(200)
+      // Empty history is OMITTED — the dispatched payload stays {prompt}.
+      expect('history' in (stub.received[0]!.payload as object)).toBe(false)
+      // Both sides of the turn were recorded, keyed by user AND agent (the
+      // host adapter needs the agentId to butler-gate).
+      expect(session.appended).toEqual([
+        { userId: b.memberUserId, agentId: OWNED_AGENT_ID, role: 'user', text: '查一下' },
+        { userId: b.memberUserId, agentId: OWNED_AGENT_ID, role: 'assistant', text: '答复在此' },
+      ])
+      expect(session.historyCalls).toEqual([{ userId: b.memberUserId, agentId: OWNED_AGENT_ID }])
+    } finally {
+      await teardown(b)
+    }
+  })
+
+  it('prior turns from the surface ride payload.history verbatim', async () => {
+    const prior = [
+      { role: 'user' as const, content: '明天天气如何?' },
+      { role: 'assistant' as const, content: '要我帮你查天气预报吗?' },
+    ]
+    const session = new FakeChatSession(prior)
+    const b = await boot({
+      meAgentAdmin: new StubMeAgentAdmin(new Set([OWNED_AGENT_ID])),
+      meChatSession: session,
+    })
+    try {
+      const stub = new StubChatAgent(OWNED_AGENT_ID, okChatReply('好的,晴天。'))
+      b.hub.register(stub)
+      expect((await post(b, { prompt: '查一下' })).status).toBe(200)
+      const payload = stub.received[0]!.payload as { prompt?: string; history?: unknown }
+      // The model now SEES its own question — the "查一下 → 查什么?" fix on
+      // the web leg; the current sentence stays OUT of history.
+      expect(payload.prompt).toBe('查一下')
+      expect(payload.history).toEqual(prior)
+    } finally {
+      await teardown(b)
+    }
+  })
+
+  it('a failed result records the user turn but NOT an assistant turn', async () => {
+    const session = new FakeChatSession()
+    const b = await boot({
+      meAgentAdmin: new StubMeAgentAdmin(new Set([OWNED_AGENT_ID])),
+      meChatSession: session,
+    })
+    try {
+      b.hub.register(
+        new StubChatAgent(OWNED_AGENT_ID, (task) => ({
+          kind: 'failed',
+          taskId: task.id,
+          by: OWNED_AGENT_ID,
+          error: 'model exploded',
+          ts: 0,
+        })),
+      )
+      expect((await post(b, { prompt: '你好' })).status).toBe(200)
+      // Said is said — the member's words landed…
+      expect(session.appended.map((a) => a.role)).toEqual(['user'])
+      // …but no reply was fabricated from a failed result.
+      expect(session.appended.some((a) => a.role === 'assistant')).toBe(false)
+    } finally {
+      await teardown(b)
+    }
+  })
+
+  it('stream:true records the reply too (recordReply runs before the result line)', async () => {
+    const session = new FakeChatSession()
+    const sinks = new FakeChatStreamSinks()
+    const b = await boot({
+      meAgentAdmin: new StubMeAgentAdmin(new Set([OWNED_AGENT_ID])),
+      meChatStream: sinks,
+      meChatSession: session,
+    })
+    try {
+      b.hub.register(new StubChatAgent(OWNED_AGENT_ID, okChatReply('流式答复')))
+      const r = await post(b, { prompt: '你好', stream: true })
+      expect(r.status).toBe(200)
+      const lines = ndjsonLines(await r.text())
+      expect(lines[lines.length - 1]!.kind).toBe('result')
+      expect(session.appended).toEqual([
+        { userId: b.memberUserId, agentId: OWNED_AGENT_ID, role: 'user', text: '你好' },
+        { userId: b.memberUserId, agentId: OWNED_AGENT_ID, role: 'assistant', text: '流式答复' },
+      ])
+    } finally {
+      await teardown(b)
     }
   })
 })

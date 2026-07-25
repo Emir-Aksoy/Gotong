@@ -25,6 +25,7 @@ import { join } from 'node:path'
 
 import type { Hub } from '@gotong/core'
 import type { IdentityStore } from '@gotong/identity'
+import { ButlerSessionWindow } from '@gotong/personal-butler'
 
 import type { AdminHealthSurface } from './admin-health.js'
 import type { FailureLang } from './failure-translator.js'
@@ -113,6 +114,15 @@ export async function armImBridgeWiring(deps: ImBridgeWiringDeps): Promise<ImBri
     // F1 — 出站推送地基:绑定成员的每条入站消息都记下最新可达聊天,
     // 后续提醒 / 审批回推 / 播报走返回的 pushToMember。
     reachableDir: join(deps.spaceRoot, 'butler', 'reachable'),
+    // 对话连续性 — 每成员滚动会话窗(「查一下 → 查什么?」修复):自由文本带上
+    // 一小段最近轮次骑 payload.history,deliverToMember 的每次推送也记成
+    // 「管家说过的话」。窗口 ≠ 记忆(长期仍走 episodic 蒸馏)、≠ 授权(governed
+    // 照 park)。handle.sessions 再暴露给 web /me quick-chat——同一实例,IM 与
+    // 网页是同一场对话。
+    sessions: new ButlerSessionWindow({
+      rootDir: join(deps.spaceRoot, 'butler', 'sessions'),
+      logger: deps.log,
+    }),
     // IMA-M2 — /inbox /approve /deny 的审批面(有 inbox 才有)。
     ...(deps.approvals ? { approvals: new ImApprovalService(deps.approvals) } : {}),
     // VOICE-M3 — opt-in 语音回复;未配 undefined = 发送逐字节不变。

@@ -240,6 +240,7 @@ import type {
   StewardHistoryTurn,
   MeHubStewardSurface,
   MeChatStreamSurface,
+  MeChatSessionSurface,
 } from './me-routes-types.js'
 export type {
   MeWorkflowSummaryLike,
@@ -283,6 +284,7 @@ export type {
   StewardHistoryTurn,
   MeHubStewardSurface,
   MeChatStreamSurface,
+  MeChatSessionSurface,
 } from './me-routes-types.js'
 
 export interface HandleMeRouteCtx {
@@ -394,6 +396,11 @@ export interface HandleMeRouteCtx {
    * through to today's plain-JSON reply (old hosts / old SPAs both keep working).
    */
   meChatStream: MeChatStreamSurface | undefined
+  /**
+   * Session window — butler conversation continuity across web + IM. Undefined
+   * when the host wired no window; quick-chat payload is then byte-identical.
+   */
+  meChatSession: MeChatSessionSurface | undefined
   /**
    * ease-of-use ①TC-ME — member "test connection" probe for a BYO key. Same
    * object the setup/admin probe uses (server.ts `ctx.llmKeyTest`), inlined here
@@ -2410,6 +2417,18 @@ async function handleMeChatAgent(
   }
   const rawTimeout = typeof body.timeoutMs === 'number' ? body.timeoutMs : 60_000
   const timeoutMs = Math.max(1000, Math.min(600_000, rawTimeout))
+  // Session window — prior butler turns ride payload.history (the host gates
+  // by agent: non-butler agents get []/no-op, so nothing leaks across agents).
+  // Record the member's words BEFORE dispatch (said is said, even if the model
+  // then fails); the reply is recorded only when one actually came back.
+  const session = ctx.meChatSession
+  const history = session ? await session.history(userId, agentId) : []
+  await session?.append(userId, agentId, 'user', prompt)
+  const recordReply = async (result: unknown) => {
+    const r = result as { kind?: unknown; output?: { text?: unknown } } | null
+    const text = r && r.kind === 'ok' && typeof r.output?.text === 'string' ? r.output.text : ''
+    if (text) await session?.append(userId, agentId, 'assistant', text)
+  }
   const dispatchChat = (extra?: Record<string, unknown>) =>
     Promise.race([
       ctx.hub.dispatch({
@@ -2418,7 +2437,7 @@ async function handleMeChatAgent(
         // attribution as /me/dispatch. orgId 'local' marks same-hub origin.
         origin: { orgId: 'local', userId },
         strategy: { kind: 'explicit', to: agentId },
-        payload: { prompt, ...(extra ?? {}) },
+        payload: { prompt, ...(history.length > 0 ? { history } : {}), ...(extra ?? {}) },
         title: `chat — ${userId}`,
       }),
       new Promise<never>((_, reject) =>
@@ -2442,6 +2461,7 @@ async function handleMeChatAgent(
     const key = sinks.register((text) => writeLine({ kind: 'chunk', text }))
     try {
       const result = await dispatchChat({ __streamSinkKey: key })
+      await recordReply(result)
       writeLine({ kind: 'result', ok: true, result })
     } catch (err) {
       // Headers are already out as 200 — carry the failure in the result line.
@@ -2453,7 +2473,9 @@ async function handleMeChatAgent(
     return
   }
   try {
-    sendJson(res, { ok: true, result: await dispatchChat() })
+    const result = await dispatchChat()
+    await recordReply(result)
+    sendJson(res, { ok: true, result })
   } catch (err) {
     // 504 = timed out, or dispatch rejected (eg. quota fail-closed). The SPA
     // folds this through describeError, so a timeout / refused key reads as

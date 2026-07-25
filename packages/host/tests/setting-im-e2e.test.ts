@@ -93,8 +93,8 @@ class ChatEchoAgent extends AgentParticipant {
     seenTasks.push(task)
     const payload = task.payload
     const text =
-      typeof payload === 'object' && payload !== null && 'text' in payload
-        ? String((payload as { text: unknown }).text)
+      typeof payload === 'object' && payload !== null && 'prompt' in payload
+        ? String((payload as { prompt: unknown }).prompt)
         : '(no text)'
     return { text: `echo: ${text}` }
   }

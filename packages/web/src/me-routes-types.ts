@@ -752,3 +752,20 @@ export interface MeChatStreamSurface {
   register(sink: (text: string) => void): string
   release(key: string): void
 }
+
+/**
+ * Session window (对话连续性) — the member's rolling conversation transcript
+ * with their BUTLER, shared with the IM bridge so web quick-chat and the IM
+ * chat are one continuous conversation. `history` feeds `payload.history` on
+ * dispatch (prior turns only — the current prompt is appended by the agent's
+ * own request builder); `append` records what each side actually said. The
+ * HOST decides which agent gets a window (butler-enabled rows only) — for any
+ * other agent `history` returns `[]` and `append` is a no-op, so two distinct
+ * agents never leak turns into each other. Duck type; entries are structural
+ * (no `@gotong/llm` import in web). Undefined → quick-chat dispatches exactly
+ * today's payload (byte-identical).
+ */
+export interface MeChatSessionSurface {
+  history(userId: string, agentId: string): Promise<Array<{ role: 'user' | 'assistant'; content: string }>>
+  append(userId: string, agentId: string, role: 'user' | 'assistant', text: string): Promise<void>
+}

@@ -82,6 +82,17 @@ export {
 } from './knowledge-library.js'
 
 export {
+  ButlerSessionWindow,
+  SESSION_IDLE_MS,
+  SESSION_MAX_TURNS,
+  SESSION_TURN_MAX_CHARS,
+  type SessionRole,
+  type SessionMessage,
+  type ButlerSessionWindowOptions,
+  type SessionWindowLogger,
+} from './session-window.js'
+
+export {
   knowledgeLibrarianReviewer,
   parseLibrarianPlan,
   isPromoted,

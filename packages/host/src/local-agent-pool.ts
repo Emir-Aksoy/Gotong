@@ -1750,6 +1750,24 @@ export class LocalAgentPool implements ManagedAgentLifecycle {
   }
 
   /**
+   * Session-window gate — is this agent id a butler-enabled row? The /me
+   * quick-chat leg asks before reading/writing the member's conversation
+   * window, so a NON-butler agent (e.g. the DUO expert) never sees or taints
+   * the butler conversation. Fail-closed: unknown id / corrupt agents.json →
+   * false (no window beats a leaked one).
+   */
+  async isButlerAgent(agentId: string): Promise<boolean> {
+    let rows: readonly AgentRecord[]
+    try {
+      rows = await this.space.agents()
+    } catch {
+      return false
+    }
+    const row = rows.find((r) => r.id === agentId)
+    return row ? this.butlerEnabledFor(row) : false
+  }
+
+  /**
    * B2 — the resident butler's READ-ONLY connector tools (weather / calendar /
    * news), for the proactive daily-brief enrichment (see `personal-butler-proactive`).
    * Returns the SAME read/write split the factory applies at spawn — only the

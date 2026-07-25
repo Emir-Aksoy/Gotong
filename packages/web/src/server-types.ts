@@ -32,6 +32,7 @@ import type {
   MeWorkflowCreateSurface,
   MeHubStewardSurface,
   MeChatStreamSurface,
+  MeChatSessionSurface,
 } from './me-routes.js'
 import type { WorkflowWizardSurface } from './wizard-routes.js'
 import type {
@@ -339,6 +340,11 @@ export interface WebServerOptions {
    * on the member quick-chat route degrades to the plain JSON reply.
    */
   meChatStream?: MeChatStreamSurface
+  /**
+   * Session window — butler conversation continuity (shared with the IM
+   * bridge). When absent, quick-chat dispatches today's payload byte-identical.
+   */
+  meChatSession?: MeChatSessionSurface
   /**
    * SW-M9 A-M6 — optional OPERATOR-console hub steward surface. The host wires a
    * SECOND `HostStewardService` here (the site-wide operator one). When absent,

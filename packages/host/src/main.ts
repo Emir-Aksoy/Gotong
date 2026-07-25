@@ -2372,6 +2372,19 @@ async function main(): Promise<void> {
     ...(hubSteward ? { hubSteward } : {}),
     // NA-M6b — quick-chat NDJSON typing preview; the sinks live on the pool.
     meChatStream: { register: (s) => localAgents.registerChatChunkSink(s), release: (k) => localAgents.releaseChatChunkSink(k) },
+    // 对话连续性 — quick-chat 与 IM 共用 im-bridge-wiring 构造的同一会话窗;
+    // 仅管家行有窗(专家等其他 agent 读空写弃),窗 ≠ 记忆 ≠ 授权。
+    ...(imBridges?.sessions
+      ? {
+          meChatSession: {
+            history: async (u: string, a: string) =>
+              (await localAgents.isButlerAgent(a)) ? imBridges!.sessions!.history(u) : [],
+            append: async (u: string, a: string, role: 'user' | 'assistant', text: string) => {
+              if (await localAgents.isButlerAgent(a)) await imBridges!.sessions!.append(u, role, text)
+            },
+          },
+        }
+      : {}),
     // SW-M9 A-M7 — the OPERATOR-console steward (site-wide twin); null on the same
     // conditions, in which case /api/admin/steward/{plan,apply} return 503.
     ...(operatorSteward ? { operatorSteward } : {}),

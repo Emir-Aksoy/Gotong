@@ -237,6 +237,24 @@ export interface HostImConfig {
   llmOutage?: HostImLlmOutageConfig
   /** VOICE-M3 — 见 StartImBridgesOptions.voice。absent → 发送逐字节不变。 */
   voice?: Pick<ButlerVoice, 'synthesize'>
+  /**
+   * 会话窗口 — 自由文本对话的滚动上下文(修「上轮问、这轮忘」)。present 时:
+   * dispatch 前读最近轮次注入 `payload.history`,成员这句与阿同的回复各记
+   * 一笔;absent → payload 与今天逐字节不变(仍是单句)。窗口只是渲染辅助,
+   * 长期记忆仍走 captureTurn + 蒸馏,治理闸照旧。
+   */
+  sessions?: ImSessionSurface
+}
+
+/**
+ * 会话窗口注入面(生产=ButlerSessionWindow;测试给内存假件)。合同:两个
+ * 方法都 never-throw(丢一条窗口记录不能坏一轮对话),`history` 保证
+ * 「合并同角色 + 以 assistant 结尾」的 provider 安全形状。
+ */
+export interface ImSessionSurface {
+  /** Prior turns of the live conversation (plain text, provider-safe shape). */
+  history(userId: string): Promise<Array<{ role: 'user' | 'assistant'; content: string }>>
+  append(userId: string, role: 'user' | 'assistant', text: string): Promise<void>
 }
 
 /** CARE-M2 — 断供滤镜的注入面(host 装配;测试给 tmp 文件 + spy)。 */
@@ -442,11 +460,20 @@ export async function handleImMessage(
     }
 
     case 'free': {
+      // Session window (opt-in): prior turns ride `payload.history` — the seam
+      // `LlmAgent.buildRequest` has always had. Read BEFORE recording this
+      // sentence (history must not contain it), record BEFORE dispatch (said
+      // is said, even if the model then fails). `prompt` (not `text`) is the
+      // field both `buildRequest` and the memory capture recognize — episodic
+      // entries record the member's actual words, not the task title.
+      const history = config.sessions ? await config.sessions.history(userId) : []
+      await config.sessions?.append(userId, 'user', msg.text)
       const result = await config.hub.dispatch({
         from: makeFromId(platform, msg.from.platformUserId),
         strategy: { kind: 'capability', capabilities: [config.freeTextCapability] },
         payload: {
-          text: msg.text,
+          prompt: msg.text,
+          ...(history.length > 0 ? { history } : {}),
           ...(msg.attachments && msg.attachments.length > 0 ? { attachments: msg.attachments } : {}),
         },
         title: `im:${platform}`,
@@ -458,6 +485,10 @@ export async function handleImMessage(
         return
       }
       const summary = summariseResult(result, config.approvals !== undefined)
+      // Whatever goes back — reply, failure line, suspend pointer — is what
+      // the butler "said"; the next turn must know it (voice is rendering
+      // only, the window records the text the clip was synthesized from).
+      await config.sessions?.append(userId, 'assistant', summary)
       // VOICE-M3 — only the assistant's OK reply speaks; failure / suspend
       // telemetry carries commands (/inbox 短码) that must stay copyable text.
       await reply(bridge, msg, summary, result.kind === 'ok' ? await voiceClipFor(config, summary) : undefined)
@@ -849,6 +880,13 @@ export interface StartImBridgesOptions {
     /** 探活节律毫秒。缺省 = LLM_RECOVERY_PROBE_INTERVAL_MS;主要给测试缩短。 */
     probeIntervalMs?: number
   }
+  /**
+   * 会话窗口(见 HostImConfig.sessions)。接了它:①自由文本对话带滚动上下文;
+   * ②一切经 `deliverToMember` 的异步推送(转派结果/播报/提醒/审批回推)同记
+   * 一笔 assistant 轮——下一轮阿同知道自己刚推送过什么(修「专家结果不进
+   * 接待记忆」的双脑黑洞)。缺省 → 派发与推送逐字节不变。
+   */
+  sessions?: ImSessionSurface
 }
 
 /**
@@ -877,6 +915,13 @@ export interface ImBridgesHandle {
    * from "bridge down" from "send threw".
    */
   pushToMember?: (userId: string, text: string) => Promise<ButlerPushResult>
+  /**
+   * Session window — the SAME surface that was passed in via
+   * `StartImBridgesOptions.sessions`, re-exposed so the caller (main.ts) can
+   * hand it to the web /me quick-chat leg: one window instance, one
+   * conversation across IM and web. Present only when sessions were wired.
+   */
+  sessions?: ImSessionSurface
   /**
    * DEPLOY-B1 — start ONE not-yet-running vault-capable platform, resolving
    * credentials at call time (env first, then the vault row the caller just
@@ -1044,12 +1089,21 @@ export async function startImBridges(
   // 面向成员的统一投递原语:有 outbox 走持久重投,否则退回 raw best-effort push。
   // 一切成员向投递(pushToMember、断供 announce)都走它,重试语义一处、齐整。
   // reachable 不在 → undefined(纯 env IM 没有出站推送面,字节不变)。
-  const deliverToMember: ((userId: string, text: string) => Promise<ButlerPushResult>) | undefined =
+  const deliverRaw: ((userId: string, text: string) => Promise<ButlerPushResult>) | undefined =
     reachable
       ? outbox
         ? (userId, text) => outbox!.deliver(userId, text)
         : (userId, text) => reachable!.push(userId, text)
       : undefined
+  // 会话窗口:推送先记一笔 assistant 轮再投递(转派结果/播报也是「阿同说过
+  // 的话」)。outbox 排队场景时序仍对——失联成员回来说话时 flush 先投旧信,
+  // 新一轮读窗口已含它;flush 补投不经这里,不会重复记。append never-throws。
+  const deliverToMember = deliverRaw && opts.sessions
+    ? async (userId: string, text: string) => {
+        await opts.sessions!.append(userId, 'assistant', text)
+        return deliverRaw(userId, text)
+      }
+    : deliverRaw
 
   // CARE-M2 — 断供/恢复的边沿播报出口:发给 BE-M5 运行播报已开的成员
   // (同一份同意,零新旋钮)。best-effort:一个成员送不到不挡下一个;
@@ -1101,6 +1155,7 @@ export async function startImBridges(
     log: opts.log,
     ...(opts.setting ? { setting: opts.setting } : {}),
     ...(opts.voice ? { voice: opts.voice } : {}),
+    ...(opts.sessions ? { sessions: opts.sessions } : {}),
     ...(llmOutage ? { llmOutage } : {}),
     ...(reachable
       ? {
@@ -1225,6 +1280,7 @@ export async function startImBridges(
         return { platform: b.platform, ...(source ? { source } : {}) }
       }),
     ...(deliverToMember ? { pushToMember: deliverToMember } : {}),
+    ...(opts.sessions ? { sessions: opts.sessions } : {}),
     ...(opts.hotStart ? { startPlatform } : {}),
     async stop() {
       if (recoveryTimer) clearInterval(recoveryTimer)
