@@ -242,8 +242,13 @@ export class A2aRemoteParticipant extends AgentParticipant {
 /** Pull the text to send out of a dispatched task payload. */
 function payloadToText(payload: unknown): string {
   if (typeof payload === 'string') return payload
-  if (payload && typeof payload === 'object' && typeof (payload as { text?: unknown }).text === 'string') {
-    return (payload as { text: string }).text
+  if (payload && typeof payload === 'object') {
+    // `text` is the A2A body convention; `prompt` is what LlmAgent-shaped
+    // payloads carry (SESS). Recognize both, or a `{prompt}` payload leaves
+    // this hub as `{"prompt":"…"}` JSON — the outbound half of the same disease.
+    const p = payload as { text?: unknown; prompt?: unknown }
+    if (typeof p.text === 'string') return p.text
+    if (typeof p.prompt === 'string') return p.prompt
   }
   return JSON.stringify(payload ?? '')
 }

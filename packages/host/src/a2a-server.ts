@@ -220,7 +220,15 @@ export class A2aServer {
     const dispatchInput = {
       from: peerId,
       strategy: { kind: 'capability' as const, capabilities: [capability] },
-      payload: { text },
+      // Both keys carry the same body ON PURPOSE. `text` is this framework's
+      // A2A convention (the outbound participant reads it, workflow steps pipe
+      // `$trigger.payload.text`), so renaming it would break existing readers.
+      // But `LlmAgent.buildRequest` only knows `messages`/`prompt`/`topic`, so a
+      // `{text}`-only payload landing on a managed agent gets JSON.stringify'd —
+      // the model reads `{"text":"…"}` instead of the message. Same disease SESS
+      // cured on the IM leg by renaming; at this door additive is the only
+      // non-breaking cure.
+      payload: { text, prompt: text },
       origin: { orgId: peerId, userId: message.value.messageId },
     }
 

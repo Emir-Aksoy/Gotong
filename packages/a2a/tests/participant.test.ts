@@ -119,6 +119,30 @@ describe('A2aRemoteParticipant (Phase 18 C-M4)', () => {
     expect(body.params.message.parts[0].text).toBe(JSON.stringify({ a: 1, b: 'two' }))
   })
 
+  // `{prompt}` is the LlmAgent-shaped payload (SESS). Without this it would go
+  // out over the wire as `{"prompt":"…"}` JSON — the outbound half of the same
+  // disease the inbound door fixes. `text` still wins when both are present.
+  it('sends a `{prompt}` payload as prose, and prefers `text` when both exist', async () => {
+    const { fn, calls } = fakeFetch(() =>
+      jsonResponse({ jsonrpc: '2.0', id: 1, result: agentMessage('ok', 'm') }),
+    )
+    const p = new A2aRemoteParticipant({
+      id: 'ext',
+      capabilities: ['ask'],
+      url: 'u',
+      token: 't',
+      fetchImpl: fn,
+    })
+
+    await p.onTask(makeTask({ prompt: 'summarize the contract' }))
+    expect(JSON.parse(calls[0]!.init.body as string).params.message.parts[0].text).toBe(
+      'summarize the contract',
+    )
+
+    await p.onTask(makeTask({ text: 'from text', prompt: 'from prompt' }))
+    expect(JSON.parse(calls[1]!.init.body as string).params.message.parts[0].text).toBe('from text')
+  })
+
   it('maps a remote HTTP error to a failed task result (not a throw)', async () => {
     const { fn } = fakeFetch(() => new Response('nope', { status: 502 }))
     const p = new A2aRemoteParticipant({

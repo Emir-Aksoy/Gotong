@@ -22,7 +22,7 @@ const NEVER = 9_999_999_999_000
 interface DispatchArgs {
   from: string
   strategy: { kind: string; capabilities?: string[] }
-  payload: { text?: string }
+  payload: { text?: string; prompt?: string }
   origin?: { orgId?: string; userId?: string }
 }
 
@@ -144,6 +144,18 @@ describe('A2aServer.handle — happy path (Phase 18 C-M3)', () => {
     expect(calls[0]!.payload.text).toBe('ping')
     expect(calls[0]!.origin).toEqual({ orgId: 'hubA', userId: 'm-1' })
     expect(calls[0]!.from).toBe('hubA')
+  })
+
+  // Regression — the inbound body must reach a managed agent as PROSE, not as
+  // the JSON blob `LlmAgent.buildRequest` falls back to for unrecognized payload
+  // shapes. `text` stays for the outbound participant / workflow `$trigger`
+  // readers; `prompt` is what makes the model see the message.
+  it('dispatches the body under BOTH `text` (A2A convention) and `prompt` (LlmAgent)', async () => {
+    const { server, calls } = makeServer({ defaultCapability: 'chat' })
+    const { res } = fakeRes()
+    await server.handle(fakeReq({ headers: AUTH, body: sendBody('帮我查个东西') }), res)
+
+    expect(calls[0]!.payload).toEqual({ text: '帮我查个东西', prompt: '帮我查个东西' })
   })
 
   it('metadata.skill overrides the default capability', async () => {
