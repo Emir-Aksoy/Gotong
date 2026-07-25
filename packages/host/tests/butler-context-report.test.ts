@@ -12,7 +12,7 @@
  *     上限,不是注水数)。
  */
 
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -21,6 +21,9 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 import type { Task } from '@gotong/core'
 import {
+  ButlerSessionWindow,
+  SESSION_MAX_TURNS,
+  SESSION_TURN_MAX_CHARS,
   buildButlerClockProbe,
   composeContextProbes,
   openKnowledgeLibrary,
@@ -32,6 +35,7 @@ import type { MemoryEntry } from '@gotong/services-sdk'
 
 import type { AdminHealthSurface, HealthSnapshot } from '../src/admin-health.js'
 import {
+  HISTORY_SOURCE_MARKERS,
   INLINE_PROBE_MARKERS,
   STABLE_CARD_REGISTRY,
   VOLATILE_PROBE_REGISTRY,
@@ -149,6 +153,73 @@ let indexSample: string // LIB-M3 索引卡样本(真 builder 真库)
 let indexTruncated: string // LIB-M3 索引卡截断顶(胖索引 → ≤500tk)
 let report: ContextReport
 let emptyProbes: ButlerContextProbe[] // 空态探针组(compose 胶水断言用)
+let historyRows: ContextCardEntry[] // SESS 会话窗填充曲线(空窗/典型/满态)
+
+/**
+ * 量 SESS 会话窗的三个刻度 —— 真 `ButlerSessionWindow` 真读写。
+ *
+ * 为什么不手造样张:`history()` 的产物经过三道真规则(同角色相邻合并、
+ * **尾部 user 丢弃**、`SESSION_MAX_TURNS` 截断),手抄的数组量的是我以为的
+ * 形状,不是模型真收到的字节。满态刻度尤其:喂满 `SESSION_TURN_MAX_CHARS`
+ * 的长文再看剩下几条,那才是最坏情况的真上界。
+ *
+ * 「一条消息」在 wire 上不止正文——role 字段、分隔结构都要钱。这里按每条
+ * 加 4 token 的保守常量计入,报告如实标出来,免得账算得比实际乐观。
+ */
+const PER_MESSAGE_OVERHEAD_TOKENS = 4
+
+async function measureSessionWindow(rootDir: string): Promise<ContextCardEntry[]> {
+  const render = (msgs: readonly { role: string; content: string }[]) =>
+    msgs.map((m) => `${m.role}: ${m.content}`).join('\n')
+
+  // 空窗:成员发来的第一条消息,窗里什么都没有 ⇒ 零字节。
+  const emptyWin = new ButlerSessionWindow({ rootDir: join(rootDir, 'empty'), now: () => NOW })
+  const emptyHistory = await emptyWin.history('member-emir')
+
+  // 典型:三个来回的日常对话(问 → 答 → 追问 → 答 → 再问 → 答)。
+  const typicalWin = new ButlerSessionWindow({ rootDir: join(rootDir, 'typical'), now: () => NOW })
+  const TYPICAL: [string, string][] = [
+    ['user', '帮我看看下周去怡保的机票'],
+    ['assistant', '查到三班:周二早 08:15(RM 89)、周三下午 14:40(RM 76)、周五晚 19:20(RM 112)。要我把周三那班的详情整理给你吗?'],
+    ['user', '要'],
+    ['assistant', '周三 14:40 出发、15:35 抵达,亚航 AK5312,RM 76 含 7kg 手提行李。托运另加 RM 40。要现在订吗?'],
+    ['user', '先别订,等我问过我妈'],
+    ['assistant', '好,我记下了:怡保机票待定,等你问过妈妈再说。要我周一提醒你一次吗?'],
+  ]
+  for (const [role, text] of TYPICAL) {
+    await typicalWin.append('member-emir', role as 'user' | 'assistant', text)
+  }
+  const typicalHistory = await typicalWin.history('member-emir')
+
+  // 满态:每条都顶到 SESSION_TURN_MAX_CHARS,条数顶到 SESSION_MAX_TURNS。
+  // 这是设计上界,不是注水数 —— 量的就是「最坏情况这段要多少钱」。
+  const fullWin = new ButlerSessionWindow({ rootDir: join(rootDir, 'full'), now: () => NOW })
+  const wall = '装'.repeat(SESSION_TURN_MAX_CHARS + 200) // 超发 200 字,证明单条裁剪咬住
+  for (let i = 0; i < SESSION_MAX_TURNS + 6; i++) {
+    // 超发 6 条,顺带证明条数截断也咬住(而不是靠我数着喂)。
+    await fullWin.append('member-emir', i % 2 === 0 ? 'user' : 'assistant', wall)
+  }
+  // 关键:再补一条 user —— 这才是**派发时刻**的真实形状。SESS 在 dispatch
+  // 前先把成员这句记进窗(说了就是说了),所以 history() 看到的尾条恒为 user,
+  // 恒被丢弃(当前这句由 buildRequest 另行追加,不丢会背靠背两条 user)。
+  // 尾条是 assistant 的窗只存在于推送之后、下一句之前,那一刻没人在读它。
+  await fullWin.append('member-emir', 'user', wall)
+  const fullHistory = await fullWin.history('member-emir')
+
+  const row = (state: string, msgs: readonly { role: string; content: string }[]): ContextCardEntry => ({
+    segment: 'history',
+    card: 'session-window',
+    state,
+    // 每条的结构性开销折成等价字符补进文本,免得只量正文低估真实账单。
+    text: render(msgs) + ' '.repeat(msgs.length * PER_MESSAGE_OVERHEAD_TOKENS),
+  })
+
+  return [
+    row(`空窗(0 条)`, emptyHistory),
+    row(`典型(${typicalHistory.length} 条)`, typicalHistory),
+    row(`满态(${fullHistory.length} 条)`, fullHistory),
+  ]
+}
 
 beforeAll(async () => {
   dir = await mkdtemp(join(tmpdir(), 'gotong-ctx-report-'))
@@ -284,6 +355,12 @@ beforeAll(async () => {
   )
   indexTruncated = (await buildButlerKnowledgeIndexCard({ library: kbFat })())!
 
+  // ── history 段(SESS 会话窗)三个刻度 ─────────────────────────────────────
+  // 真 ButlerSessionWindow 真读写:填充曲线必须来自真 append/history 的裁剪与
+  // 合并规则(尾部 user 丢弃、同角色合并、SESSION_MAX_TURNS 截断),手抄样张
+  // 量不到这些。三刻度 = 空窗(首条消息) / 典型(3 来回) / 满态(常量上界)。
+  historyRows = await measureSessionWindow(join(dir, 'sessions'))
+
   const entries: ContextCardEntry[] = [
     { segment: 'stable', card: 'persona', state: '样本', text: PERSONA_SAMPLE },
     { segment: 'stable', card: 'frozen-block', state: '空记忆', text: frozenEmpty },
@@ -293,6 +370,7 @@ beforeAll(async () => {
     ...Object.entries(volatileFull).map(([card, text]): ContextCardEntry => {
       return { segment: 'volatile', card, state: card === 'clock' ? '恒在' : '满态', text }
     }),
+    ...historyRows,
   ]
   report = measureContextFace(entries)
 })
@@ -345,17 +423,46 @@ describe('LIB-M1 上下文段级基线', () => {
     expect(indexTruncated).toContain('只显示前')
   })
 
-  it('度量:行数=5 stable + 8 volatile,段小计与行和一致', () => {
-    expect(report.rows.length).toBe(13)
+  it('度量:行数=5 stable + 8 volatile + 3 history,段小计与行和一致', () => {
+    expect(report.rows.length).toBe(16)
     const vol = report.segments.find((s) => s.segment === 'volatile')!
     const sta = report.segments.find((s) => s.segment === 'stable')!
+    const his = report.segments.find((s) => s.segment === 'history')!
     expect(vol.cards).toBe(8)
     expect(sta.cards).toBe(5)
+    expect(his.cards).toBe(3)
     const sum = (rows: readonly { estTokens: number }[]) => rows.reduce((a, r) => a + r.estTokens, 0)
     expect(vol.estTokens).toBe(sum(report.rows.filter((r) => r.segment === 'volatile')))
     expect(sta.estTokens).toBe(sum(report.rows.filter((r) => r.segment === 'stable')))
-    expect(report.totalEstTokens).toBe(vol.estTokens + sta.estTokens)
-    for (const r of report.rows) expect(r.estTokens).toBeGreaterThan(0)
+    expect(his.estTokens).toBe(sum(report.rows.filter((r) => r.segment === 'history')))
+    expect(report.totalEstTokens).toBe(vol.estTokens + sta.estTokens + his.estTokens)
+    // 空窗行按设计就是 0(见下面那道门),其余每行都必须真有字 —— fixture 烂了立刻红。
+    for (const r of report.rows) {
+      if (r.state.startsWith('空窗')) continue
+      expect(r.estTokens, `行 ${r.card}/${r.state} 量到 0 —— fixture 没点火`).toBeGreaterThan(0)
+    }
+  })
+
+  it('history 段:空窗零字节 / 典型丢掉尾部 user / 满态被常量咬住', () => {
+    const [empty, typical, full] = report.rows.filter((r) => r.segment === 'history')
+
+    // 空窗 = 首条消息的姿态:窗里没东西就一个字节都不注 —— 与 volatile 探针
+    // 「无信号=null=prompt 字节不变」同一条契约,这里对 messages 数组成立。
+    expect(empty!.chars).toBe(0)
+    expect(empty!.estTokens).toBe(0)
+
+    // 典型:喂了 6 条(3 来回),尾条是 assistant 所以一条不丢 —— 若哪天
+    // 合并/丢弃规则改了,这个数会动,报告的「典型」刻度也就不再是那个意思。
+    expect(typical!.state).toContain('(6 条)')
+
+    // 满态:窗留 SESSION_MAX_TURNS 条,派发时刻尾条恒为 user 恒被丢 ⇒ 11 条。
+    // 「送到模型的最多就是 MAX-1 条」是这段的真上界,不是 MAX 条。
+    // 数字从真常量推,常量一改这里就红 —— 逼人重新看一眼最坏情况的账。
+    expect(full!.state).toContain(`(${SESSION_MAX_TURNS - 1} 条)`)
+    const bodyOnly = (SESSION_MAX_TURNS - 1) * SESSION_TURN_MAX_CHARS
+    // 正文顶到每条上限(裁剪真的咬住,不是我少喂了字);另计 role 前缀与结构开销。
+    expect(full!.chars).toBeGreaterThanOrEqual(bodyOnly)
+    expect(full!.chars).toBeLessThan(bodyOnly * 1.05)
   })
 
   it('tripwire:factory 探针注入点 ≡ 注册表(加探针不登记就红)', async () => {
@@ -376,22 +483,47 @@ describe('LIB-M1 上下文段级基线', () => {
     expect(src.match(/stableContext:/g)?.length ?? 0).toBe(1)
   })
 
+  it('tripwire:history 段注入点 ≡ 注册表(会话窗多长一张嘴不登记就红)', async () => {
+    // 会话窗不在构造路径(factory)上而在派发路径上,所以钉的是消费
+    // `ButlerSessionWindow.history()` 的源文件与标记。
+    for (const [file, marker] of Object.entries(HISTORY_SOURCE_MARKERS)) {
+      const src = await readFile(fileURLToPath(new URL(`../src/${file}`, import.meta.url)), 'utf8')
+      expect(src, `${file} 的会话窗读取点标记消失 —— 改了写法请同步 HISTORY_SOURCE_MARKERS`).toMatch(
+        marker,
+      )
+    }
+    // 全 host 源码里读会话窗的地方必须恰好等于登记数:多一处 = 多一张嘴,
+    // 报告里的填充曲线就不再覆盖全部注入,基线会悄悄失真。
+    const hostSrcDir = fileURLToPath(new URL('../src/', import.meta.url))
+    const files = (await readdir(hostSrcDir)).filter((f) => f.endsWith('.ts'))
+    let readers = 0
+    for (const f of files) {
+      const src = await readFile(join(hostSrcDir, f), 'utf8')
+      readers += src.match(/sessions[!?]?\.history\(/g)?.length ?? 0
+    }
+    expect(readers).toBe(Object.keys(HISTORY_SOURCE_MARKERS).length)
+  })
+
   it('报告:打印段级基线(pnpm report:atong-context 的输出)', () => {
     const clockRow = report.rows.find((r) => r.card === 'clock')!
     const vol = report.segments.find((s) => s.segment === 'volatile')!
     const personaRow = report.rows.find((r) => r.card === 'persona')!
     const frozenRows = report.rows.filter((r) => r.card === 'frozen-block')
     const indexRows = report.rows.filter((r) => r.card === 'knowledge-index')
+    const his = report.rows.filter((r) => r.segment === 'history')
     const rendered = renderContextReport(report, [
       '---- 场景 ----',
       `每轮必付底价(volatile 仅时钟): ~${clockRow.estTokens} tokens`,
       `volatile 满配(八探针齐发): ~${vol.estTokens} tokens`,
       `stable 段(人设样本+冻结块): 空记忆 ~${personaRow.estTokens + frozenRows[0]!.estTokens} → 预算饱和 ~${personaRow.estTokens + frozenRows[1]!.estTokens} tokens`,
       `stable 增量(LIB-M3 索引卡): 样本 ~${indexRows[0]!.estTokens} → 截断顶 ~${indexRows[1]!.estTokens} tokens(预算 ${KNOWLEDGE_INDEX_CARD_BUDGET_TOKENS})`,
+      `history 段(SESS 会话窗): 空窗 ${his[0]!.estTokens} → 典型 ~${his[1]!.estTokens} → 满态 ~${his[2]!.estTokens} tokens(窗留 ${SESSION_MAX_TURNS} 条 × ${SESSION_TURN_MAX_CHARS} 字,派发时尾条 user 恒丢 ⇒ 送模型上界 ${SESSION_MAX_TURNS - 1} 条)`,
+      `→ 每轮上下文合计:典型对话 ~${personaRow.estTokens + frozenRows[1]!.estTokens + indexRows[0]!.estTokens + vol.estTokens + his[1]!.estTokens} → 最坏 ~${personaRow.estTokens + frozenRows[1]!.estTokens + indexRows[1]!.estTokens + vol.estTokens + his[2]!.estTokens} tokens(不含工具面)`,
     ])
     expect(rendered).toContain('合计')
     expect(rendered).toContain('每轮必付底价')
     expect(rendered).toContain('cache_control')
+    expect(rendered).toContain('会话窗')
     console.log(`\n${rendered}\n`)
   })
 })

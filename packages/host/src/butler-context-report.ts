@@ -4,11 +4,16 @@
  *
  * # 为什么先量段,不量总量
  *
- * NA-M3 之后,上下文在 wire 上分两段,经济学完全不同:
+ * NA-M3 之后,上下文在 wire 上分三段,经济学完全不同:
  *   - **stable 段** = `req.system`(冻结记忆块 + 成员人设):anthropic provider
  *     给它挂 cache_control,轮间命中按 0.1× 计价——这段"贵在变更,不贵在存在"。
  *   - **volatile 段** = `req.systemVolatile`(composeContextProbes 探针尾卡):
  *     每轮内容可变,永不进缓存,每轮全价。
+ *   - **history 段** = `req.messages` 的前缀(SESS 会话窗骑 `payload.history`):
+ *     不是"卡",是**随对话深度增长的消息数组**。前两段量的是恒定成本,这段
+ *     量的是**填充曲线**——空窗 → 典型 → 满态,因为它是三段里唯一会随一次
+ *     对话变长的。上界由常量钉死(SESSION_MAX_TURNS × SESSION_TURN_MAX_CHARS),
+ *     报告直接从真常量算,常量一改数字就动。
  *
  * LIB(图书馆员)track 的核心动作正是往 stable 段加一张索引卡(M3)、并约束
  * 它永不随知识总量增长。没有段级基线,"加了多少/省了多少"就是拍脑袋。
@@ -20,8 +25,11 @@
 
 import { estimateTokens } from './butler-toolface-report.js'
 
-/** 段位:stable = req.system(缓存前缀);volatile = req.systemVolatile(每轮全价)。 */
-export type ContextSegment = 'stable' | 'volatile'
+/**
+ * 段位:stable = req.system(缓存前缀);volatile = req.systemVolatile(每轮全价);
+ * history = req.messages 前缀(SESS 会话窗,随对话深度增长)。
+ */
+export type ContextSegment = 'stable' | 'volatile' | 'history'
 
 /** 一张被度量的上下文卡(探针产物 / 人设样本 / 冻结块)。 */
 export interface ContextCardEntry {
@@ -97,6 +105,24 @@ export const STABLE_CARD_REGISTRY: Readonly<Record<string, string>> = {
   'knowledge-index': 'buildButlerKnowledgeIndexCard',
 }
 
+/**
+ * history 段注入点(SESS):会话窗只有这几张嘴把 `history` 骑进 payload。前两段
+ * 的 tripwire 扫的是 factory 里的 builder 调用点;会话窗不走 factory(它在
+ * **派发路径**上,不在构造路径上),所以钉的是消费 `ButlerSessionWindow.history()`
+ * 的源文件与其标记。
+ *
+ * 只登记两条,因为 host 源码里也只有两条:IM 腿自己读,web `/me` 腿由 main.ts
+ * 的适配器代读(web 侧 me-routes 调的是这个适配器装上的 surface,不自己开窗)。
+ * 多长一张嘴而不登记 ⇒ 报告漏量 ⇒ tripwire 红。
+ *
+ * 注:`hub-steward-service` 里也有个 `payload.history`,那是 steward 自己的
+ * 会话历史(sanitizeStewardHistory),另一个 agent 另一条路径,刻意不在此表。
+ */
+export const HISTORY_SOURCE_MARKERS: Readonly<Record<string, RegExp>> = {
+  'im-bridge.ts': /config\.sessions\s*\?\s*await\s+config\.sessions\.history\(/,
+  'main.ts': /imBridges!\.sessions!\.history\(/,
+}
+
 const encoder = new TextEncoder()
 
 /** 度量一组上下文卡(纯函数,入参顺序即行序)。 */
@@ -112,7 +138,7 @@ export function measureContextFace(entries: readonly ContextCardEntry[]): Contex
 
   const segments: ContextSegmentRollup[] = []
   const bySegment = new Map<ContextSegment, ContextSegmentRollup>()
-  for (const seg of ['stable', 'volatile'] as const) {
+  for (const seg of ['stable', 'volatile', 'history'] as const) {
     const roll: ContextSegmentRollup = { segment: seg, cards: 0, chars: 0, bytes: 0, estTokens: 0 }
     segments.push(roll)
     bySegment.set(seg, roll)
@@ -160,6 +186,9 @@ export function renderContextReport(report: ContextReport, notes: readonly strin
   for (const n of notes) lines.push(n)
   lines.push(
     '注:stable 段 = req.system(冻结块+人设,挂 cache_control,轮间命中 0.1×);volatile 段 = req.systemVolatile(探针尾卡,每轮全价)。',
+  )
+  lines.push(
+    '注:history 段 = req.messages 前缀(SESS 会话窗)。前两段是恒定成本,这段随对话深度长——所以量的是填充曲线不是单一数,合计行按满态算(最坏情况)。',
   )
   lines.push(
     '注:工具面(~35 工具 schema)另有专尺 `pnpm report:atong-toolface`(AFR-M1),不在本表重量。',
