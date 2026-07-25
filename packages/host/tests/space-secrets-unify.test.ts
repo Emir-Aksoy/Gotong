@@ -306,6 +306,75 @@ describe('unifySpaceSecrets (boot migration)', () => {
     expect(r).toMatchObject({ action: 'fresh', bound: true })
   })
 
+  // Regression — the production lock-out (2026-07-25). A hub whose identity
+  // vault is legitimately empty (IM/LLM credentials come from env) gets
+  // 'no-vault' from the probe on EVERY boot, so kekUnproven stays true
+  // forever. Boot 1 migrates and binds (the legacy key vouches); every boot
+  // after must ALSO bind, or the file its own predecessor just wrote becomes
+  // permanently unreadable and per-agent API keys stop resolving — observed
+  // in production as 'routing: skipping unbuildable fallback', i.e. the
+  // fallback model silently gone.
+  it('kekUnproven: every boot AFTER an unproven-KEK migration still binds', () => {
+    writeLegacyKeyFile()
+    writeV1File({ agents: { butler: 'sk-mimo-1' } })
+
+    expect(unifySpaceSecrets({ spaceDir: dir, derivedKey: derived, kekUnproven: true })).toMatchObject({
+      action: 'migrated',
+      bound: true,
+    })
+    // Twice more: this is steady state, not a one-boot grace period.
+    for (const _ of [1, 2]) {
+      expect(unifySpaceSecrets({ spaceDir: dir, derivedKey: derived, kekUnproven: true })).toMatchObject({
+        action: 'already-unified',
+        bound: true,
+      })
+    }
+    expect(decryptSecret(derived, readFileJson().agents.butler!)).toBe('sk-mimo-1')
+  })
+
+  it('kekUnproven: a v2 entry that opens under the derived key outranks the absent vault', () => {
+    // The ciphertext is the stronger witness — AES-GCM, so opening it is
+    // cryptographic proof of the key, while the vault can only ever say
+    // "nothing here to test against" on a hub that keeps no vault secrets.
+    writeFileSync(
+      secretsPath,
+      JSON.stringify({ version: 2, providers: { anthropic: encryptSecret(derived, 'sk-ant-1') }, agents: {} }),
+    )
+    expect(unifySpaceSecrets({ spaceDir: dir, derivedKey: derived, kekUnproven: true })).toMatchObject({
+      action: 'already-unified',
+      bound: true,
+    })
+  })
+
+  it('kekUnproven: one readable entry vouches even when a stale sibling does not', () => {
+    // Same doctrine the proven-KEK guard already uses: ≥1 readable entry = this
+    // era, the rest are carried ciphertext exactly as migration leaves behind.
+    writeFileSync(
+      secretsPath,
+      JSON.stringify({
+        version: 2,
+        providers: {
+          live: encryptSecret(derived, 'sk-live'),
+          stale: encryptSecret(deriveSpaceSecretsKey(KEK_C), 'sk-stale'),
+        },
+        agents: {},
+      }),
+    )
+    expect(unifySpaceSecrets({ spaceDir: dir, derivedKey: derived, kekUnproven: true })).toMatchObject({
+      action: 'already-unified',
+      bound: true,
+    })
+  })
+
+  it('kekUnproven: an EMPTY v2 file binds — no entry exists to strand under a junk key', () => {
+    writeFileSync(secretsPath, JSON.stringify({ version: 2, providers: {}, agents: {} }))
+    const junkDerived = deriveSpaceSecretsKey(KEK_B)
+    expect(unifySpaceSecrets({ spaceDir: dir, derivedKey: junkDerived, kekUnproven: true })).toMatchObject({
+      action: 'already-unified',
+      bound: true,
+    })
+  })
+
   it('a PROVEN KEK of the wrong era never binds over v2 entries it cannot read', () => {
     // DB and secrets file restored from different generations: the vault
     // vouches for this KEK, yet every v2 entry was written under some OTHER

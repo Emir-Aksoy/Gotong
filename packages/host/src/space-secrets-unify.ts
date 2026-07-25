@@ -133,14 +133,22 @@ export interface UnifyOptions {
   envSecretKey?: string
   /**
    * True when the caller could NOT prove the KEK against the vault DEK
-   * (probe returned 'no-vault': DB absent, no DEK row yet, or unreadable).
-   * An unproven KEK may be a freshly auto-minted junk key after a restore
-   * that (correctly) excluded `identity-master.key` — a committed v2 file
-   * WITH entries is evidence of a previous key era, so we refuse to bind
-   * rather than let writes poison the store under an unprovable key.
-   * v1 migration stays allowed: there the legacy key itself vouches for
-   * the plaintexts, and a fresh identity's minted KEK is legitimately the
-   * new root. Absent/false = proven ('ok' probe).
+   * (probe returned 'no-vault': DB absent, no vault tables, or an empty
+   * vault with no seeded DEK). An unproven KEK may be a freshly auto-minted
+   * junk key after a restore that (correctly) excluded `identity-master.key`,
+   * and a committed v2 file WITH entries is evidence of a previous key era —
+   * so we refuse to bind rather than let writes poison the store.
+   *
+   * The vault is only ONE of two possible witnesses, and the weaker one:
+   * `secrets.enc.json` itself vouches for the KEK whenever an entry opens
+   * under the derived key, and that verdict WINS over this flag. It has to,
+   * because a hub with env-sourced credentials has a legitimately empty
+   * vault, so the probe answers 'no-vault' forever — judging on the vault
+   * alone would refuse such a hub its own migrated file on every boot.
+   *
+   * v1 migration stays allowed regardless: there the legacy key itself
+   * vouches for the plaintexts, and a fresh identity's minted KEK is
+   * legitimately the new root. Absent/false = proven ('ok' probe).
    */
   kekUnproven?: boolean
   log?: LogDuck
@@ -190,15 +198,29 @@ export function unifySpaceSecrets(opts: UnifyOptions): UnifyResult {
   }
 
   if (file.version === SECRETS_FILE_VERSION_UNIFIED) {
-    // Unproven KEK + committed v2 entries: an earlier era encrypted these
-    // under a key we cannot prove we hold. Binding would refuse reads
-    // per-entry but let WRITES land under a possibly-junk key — mixed keys
-    // the moment the real key comes back. Stay unbound: Space's v2 guard
-    // refuses loudly and the operator restores identity-master.key.
-    if (opts.kekUnproven && Object.keys(file.providers).length + Object.keys(file.agents).length > 0) {
+    // An entry that OPENS under the derived key is the key's proof, and a
+    // cryptographic one (AES-GCM: forging a tag is negligible) — strictly
+    // stronger than the vault DEK probe. It has to be consulted first,
+    // because the probe can never say 'ok' on a hub whose identity vault is
+    // legitimately empty (IM/LLM credentials sourced from env): it answers
+    // 'no-vault' forever. The v1 migration below binds WITHOUT a proven KEK
+    // by design — the legacy key vouches for the plaintexts — so judging v2
+    // on the vault alone made the very next boot refuse the file its own
+    // predecessor had just written, and keep refusing it every boot after.
+    // Migrate-then-lock-out; observed in production 2026-07-25.
+    const v2Entries = [...Object.values(file.providers), ...Object.values(file.agents)]
+    const provenByEntry = v2Entries.some((enc) => decryptsUnder(enc, opts.derivedKey))
+
+    // Unproven KEK + committed v2 entries, none of which open: an earlier era
+    // encrypted these under a key we cannot prove we hold. Binding would
+    // refuse reads per-entry but let WRITES land under a possibly-junk key —
+    // mixed keys the moment the real key comes back. Stay unbound: Space's v2
+    // guard refuses loudly and the operator restores identity-master.key.
+    if (opts.kekUnproven && v2Entries.length > 0 && !provenByEntry) {
       log?.warn(
-        'space secrets: v2 entries exist but the KEK cannot be proven against the vault — binding refused. ' +
-          'Restore identity-master.key (or GOTONG_MASTER_KEY) from your key stash; see docs/OPERATIONS.md.',
+        'space secrets: v2 entries exist but nothing vouches for the KEK — neither the vault nor any ' +
+          'entry opens under it; binding refused. Restore identity-master.key (or GOTONG_MASTER_KEY) ' +
+          'from your key stash; see docs/OPERATIONS.md.',
       )
       return { action: 'none', bound: false }
     }
@@ -208,8 +230,7 @@ export function unifySpaceSecrets(opts: UnifyOptions): UnifyResult {
     // writes stamp THIS era into THAT file: a mixed-key file no single key
     // ever fully reads again. (≥1 readable entry = this era; the rest are
     // carried legacy ciphertext, same as migration leaves behind.)
-    const v2Entries = [...Object.values(file.providers), ...Object.values(file.agents)]
-    if (v2Entries.length > 0 && !v2Entries.some((enc) => decryptsUnder(enc, opts.derivedKey))) {
+    if (v2Entries.length > 0 && !provenByEntry) {
       log?.warn(
         'space secrets: no v2 entry decrypts under the derived key — another KEK generation wrote this ' +
           'file; binding refused to avoid mixing eras. Restore the matching identity-master.key, or move ' +
