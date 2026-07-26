@@ -307,6 +307,13 @@
     openai: { provider: 'openai', label: 'OpenAI' },
   }
 
+  // 部署摩擦 ⑤ — model prefills for the first-agent step. Per the 2026-07-26
+  // decision: ONLY DeepSeek gets a default (`deepseek-chat` is the repo-wide
+  // template convention and has been stable for years); Anthropic/OpenAI
+  // model names churn, so a baked-in default would rot into "first message
+  // 404s" — those stay hand-typed.
+  const SETUP_AGENT_MODEL_DEFAULTS = { deepseek: 'deepseek-chat', anthropic: '', openai: '' }
+
   function revealKeyStep(pwForm) {
     const keyForm = document.getElementById('setup-key-form')
     if (!keyForm) { window.location.reload(); return }
@@ -331,10 +338,10 @@
     }
     const status = document.getElementById('setup-key-status')
     const skipBtn = document.getElementById('setup-key-skip')
-    // Skip → advance to the (also optional) IM step. DEPLOY-B2: the wizard
-    // ends at the IM step now, which reloads to the login screen.
+    // Skip → advance to the (also optional) agent step, then IM. 部署摩擦 ⑤:
+    // the wizard order is password → key → agent → IM.
     if (skipBtn) {
-      skipBtn.addEventListener('click', () => { revealImStep(keyForm) })
+      skipBtn.addEventListener('click', () => { revealAgentStep(keyForm) })
     }
     // ease-of-use ①TC — "test connection" probes the typed key WITHOUT saving
     // it, so a wrong key / wrong provider / empty balance is caught here. Maps
@@ -416,7 +423,7 @@
         }
         status.className = 'login-status ok'
         status.textContent = t('setupKeySaved')
-        setTimeout(() => { revealImStep(keyForm) }, 700)
+        setTimeout(() => { revealAgentStep(keyForm) }, 700)
       } catch (err) {
         status.className = 'login-status error'
         status.textContent = t('meSetupFailedErr', err?.message || err)
@@ -424,7 +431,84 @@
     })
   }
 
-  // DEPLOY-B2 — first-run IM step (the third wizard panel). Saves the bot
+  // 部署摩擦 ⑤ — first-run agent step (the third wizard panel). Creates the
+  // first chat-capable agent (the row the butler folds onto) via the
+  // loopback-only setup route, so an IM message actually gets answered when
+  // the wizard ends. Both exits (create / skip) advance to the IM step.
+  function revealAgentStep(prevForm) {
+    const agentForm = document.getElementById('setup-agent-form')
+    if (!agentForm) { revealImStep(prevForm); return }
+    if (prevForm) prevForm.hidden = true
+    agentForm.hidden = false
+    attachAgentForm(agentForm)
+  }
+
+  function attachAgentForm(agentForm) {
+    if (agentForm.dataset.bound === '1') return
+    agentForm.dataset.bound = '1'
+    const status = document.getElementById('setup-agent-status')
+    const provSel = document.getElementById('setup-agent-provider')
+    const modelInput = agentForm.querySelector('input[name="model"]')
+    // Inherit the key step's provider choice (that's the org key this agent
+    // will resolve), then keep the model prefill in sync with the selection.
+    const keyForm = document.getElementById('setup-key-form')
+    const keyChoice = keyForm?.querySelector('select[name="provider"]')?.value
+    if (provSel && keyChoice) provSel.value = keyChoice
+    const syncModel = () => {
+      if (!modelInput || !provSel) return
+      modelInput.value = SETUP_AGENT_MODEL_DEFAULTS[provSel.value] ?? ''
+    }
+    if (provSel) bindOnce(provSel, 'change', syncModel)
+    syncModel()
+    const skipBtn = document.getElementById('setup-agent-skip')
+    if (skipBtn) {
+      skipBtn.addEventListener('click', () => { revealImStep(agentForm) })
+    }
+    agentForm.addEventListener('submit', async (e) => {
+      e.preventDefault()
+      const fd = new FormData(agentForm)
+      const choice = String(provSel?.value || 'deepseek')
+      const preset = SETUP_KEY_PRESETS[choice] || SETUP_KEY_PRESETS.deepseek
+      const model = String(fd.get('model') || '').trim()
+      const name = String(fd.get('name') || '').trim()
+      if (!model) {
+        status.className = 'login-status error'
+        status.textContent = t('setupAgentNeedModel')
+        return
+      }
+      status.className = 'login-status'
+      status.textContent = t('setupAgentSaving')
+      try {
+        const r = await fetch('/api/setup/first-agent', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            provider: preset.provider,
+            model,
+            ...(name ? { name } : {}),
+            ...(preset.baseURL ? { baseURL: preset.baseURL } : {}),
+            label: preset.label,
+          }),
+        })
+        const j = await r.json().catch(() => ({}))
+        if (!r.ok) {
+          status.className = 'login-status error'
+          status.textContent = j?.error || t('meSetupFailedHttp', r.status)
+          return
+        }
+        status.className = 'login-status ok'
+        status.textContent = j?.existing
+          ? t('setupAgentExisting')
+          : (j?.spawned ? t('setupAgentLive') : t('setupAgentSavedRestart'))
+        setTimeout(() => { revealImStep(agentForm) }, 900)
+      } catch (err) {
+        status.className = 'login-status error'
+        status.textContent = t('meSetupFailedErr', err?.message || err)
+      }
+    })
+  }
+
+  // DEPLOY-B2 — first-run IM step (the fourth wizard panel). Saves the bot
   // credential to the org vault and hot-starts the bridge, so "paste the
   // token → the bot answers" happens inside the wizard, no restart. Both
   // exits (save / skip) reload to the login screen.

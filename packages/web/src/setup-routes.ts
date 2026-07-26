@@ -29,6 +29,16 @@
  *     those go through the admin credential UI. Repeatable (overwrites
  *     the prior org row for the same provider tag).
  *
+ *   POST /api/setup/first-agent   (部署摩擦 ⑤)
+ *     LOOPBACK or OPERATOR SESSION. Body: `{provider, model, baseURL?,
+ *     name?, label?}` — creates the FIRST `chat`-capable managed agent
+ *     (the row the butler fold-in stands on) and hot-spawns it, so an
+ *     IM message actually gets answered when the wizard ends. No key
+ *     material passes through: the agent resolves the org vault row
+ *     the key step wrote (selectLlmApiKey consults the org pool for
+ *     every provider tag, including openai-compatible). Idempotent —
+ *     an existing chat-capable agent short-circuits to `existing: true`.
+ *
  * # Trust model — two anchors, neither trusts a network middleman
  *
  * Every write above requires ONE of:
@@ -59,6 +69,7 @@
  */
 
 import type { IncomingMessage, ServerResponse } from 'node:http'
+import type { AgentRecord, ManagedAgentLifecycle, Space } from '@gotong/core'
 import { readJsonBody, sendJson } from './http-helpers.js'
 import type { IdentitySurface } from './identity-routes.js'
 
@@ -106,6 +117,17 @@ export interface SetupRoutesCtx {
    * case. Absent → byte-identical to the loopback-only behaviour.
    */
   isOperator?: (req: IncomingMessage) => Promise<boolean>
+  /**
+   * 部署摩擦 ⑤ — the "create the first chat agent" step. Wired straight to
+   * the host's Space + agent lifecycle (the same objects agents-routes
+   * uses), so the wizard's agent goes through the exact persist/spawn
+   * machinery as an admin-panel create. Absent → the route answers 503 and
+   * the SPA quietly skips the step.
+   */
+  firstAgent?: {
+    space: Pick<Space, 'agents' | 'upsertAgent' | 'removeAgent'>
+    lifecycle?: Pick<ManagedAgentLifecycle, 'start'>
+  }
 }
 
 // -- helpers --------------------------------------------------------------
@@ -192,6 +214,18 @@ function vaultProviderTag(meta: Record<string, unknown> | null | undefined): str
  * the owner is configuring their own hub's default key.
  */
 const SETUP_LLM_PROVIDERS = new Set(['openai-compatible', 'anthropic', 'openai'])
+
+/**
+ * 部署摩擦 ⑤ — defaults for the wizard's first-agent step. The persona line
+ * is the recommended opening from docs/zh/PERSONAL-BUTLER-DESIGN.md (命名节);
+ * the member can rewrite it any time in the admin panel — the wizard only
+ * guarantees a `chat`-capable row exists so the butler fold-in has somewhere
+ * to stand. The fixed id matches the repo-wide convention for the butler row.
+ */
+const FIRST_AGENT_ID = 'assistant'
+const FIRST_AGENT_NAME = '阿同 (Atong)'
+const FIRST_AGENT_SYSTEM =
+  '你叫「阿同」(Atong),是我的常驻私人管家。记得我说过的事,用大白话帮我干活;拿不准、要花钱、要对外发的,先停下来问我。'
 
 // -- route handler --------------------------------------------------------
 
@@ -508,6 +542,176 @@ export async function handleSetupRoute(
       } catch { /* audit failure is non-fatal */ }
     }
     sendJson(res, { ok: true, platform, bridge })
+    return true
+  }
+
+  // 部署摩擦 ⑤ — the wizard's THIRD panel: create the first chat-capable
+  // agent so the butler (阿同) has a row to fold onto. Without it the wizard
+  // ended "green" (password + key + bridge) and the very first IM message
+  // still got "no participant" — 悬崖 2 in the deployment assessment. Same
+  // two-anchor + single-user gates as the sibling steps.
+  if (path === '/api/setup/first-agent' && method === 'POST') {
+    const id = ctx.identity
+    const fa = ctx.firstAgent
+    if (!fa) {
+      sendJson(res, { error: 'first-agent step not wired on this host' }, 503)
+      return true
+    }
+    if (!id) {
+      sendJson(res, { error: 'v4 identity store not enabled on this host' }, 503)
+      return true
+    }
+    const sockAddr = req.socket?.remoteAddress ?? ''
+    const anchor = await setupTrustAnchor(ctx, req)
+    if (!anchor) {
+      sendJson(
+        res,
+        { error: 'setup-first-agent needs loopback or an admin session; create agents via the admin panel on a remote host' },
+        403,
+      )
+      return true
+    }
+    const users = id.listUsers()
+    if (users.length !== 1) {
+      sendJson(res, { error: 'setup already complete (multi-user host)' }, 409)
+      return true
+    }
+    const owner = users[0]!
+    let body: unknown
+    try { body = await readJsonBody(req) }
+    catch { sendJson(res, { error: 'invalid JSON body' }, 400); return true }
+    const b = (body ?? {}) as {
+      provider?: unknown
+      model?: unknown
+      baseURL?: unknown
+      name?: unknown
+      label?: unknown
+    }
+    const provider = typeof b.provider === 'string' ? b.provider : ''
+    const model = typeof b.model === 'string' ? b.model.trim() : ''
+    const baseURL = typeof b.baseURL === 'string' && b.baseURL.trim() ? b.baseURL.trim() : undefined
+    const name = typeof b.name === 'string' && b.name.trim() ? b.name.trim().slice(0, 64) : FIRST_AGENT_NAME
+    const providerLabel = typeof b.label === 'string' && b.label.trim() ? b.label.trim().slice(0, 64) : undefined
+    if (!SETUP_LLM_PROVIDERS.has(provider)) {
+      sendJson(res, { error: `unsupported provider (allowed: ${[...SETUP_LLM_PROVIDERS].join(', ')})` }, 400)
+      return true
+    }
+    // 只 DeepSeek 预填 (2026-07-26 拍板): the SPA prefills deepseek-chat for the
+    // DeepSeek preset and leaves Anthropic/OpenAI hand-typed — a baked-in
+    // default there would rot into "first message 404s". Server side, model is
+    // simply required.
+    if (!model || model.length > 128) {
+      sendJson(res, { error: "model is required (the provider's current model id, e.g. deepseek-chat)" }, 400)
+      return true
+    }
+    if (provider === 'openai-compatible' && !(baseURL && /^https?:\/\//.test(baseURL))) {
+      sendJson(res, { error: 'baseURL (https://…) is required for openai-compatible' }, 400)
+      return true
+    }
+    // Idempotent re-runs: a chat-capable agent already stands in front of the
+    // conversational channel — report it instead of stacking a second one.
+    let existing: readonly AgentRecord[]
+    try { existing = await fa.space.agents() }
+    catch (err) {
+      sendJson(res, { error: `agent list failed: ${err instanceof Error ? err.message : String(err)}` }, 500)
+      return true
+    }
+    const chatRow = existing.find((a) => a.allowedCapabilities.includes('chat'))
+    if (chatRow) {
+      sendJson(res, { ok: true, existing: true, agentId: chatRow.id })
+      return true
+    }
+    if (existing.some((a) => a.id === FIRST_AGENT_ID)) {
+      sendJson(res, { error: `agent '${FIRST_AGENT_ID}' exists but is not chat-capable; finish in the admin panel` }, 409)
+      return true
+    }
+    // openai-compatible has exactly one wizard-viable key source — the org row
+    // the key step wrote (selectLlmApiKey skips workspace/env for the umbrella
+    // tag but DOES consult the org pool). Missing ⇒ refuse BEFORE touching
+    // disk, pointing back at the key step; a dead-on-arrival agent row behind
+    // a 200 would be this wizard's own 假绿. anthropic/openai can also resolve
+    // host-env keys the web layer can't see, so they skip this precheck and
+    // let the spawn verdict speak.
+    if (provider === 'openai-compatible' && typeof id.listVaultEntries === 'function') {
+      const hasOrgKey = id
+        .listVaultEntries({ kind: 'llm_provider', ownerKind: 'org', activeOnly: true })
+        .some((e) => vaultProviderTag(e.metadata) === provider)
+      if (!hasOrgKey) {
+        sendJson(
+          res,
+          { error: 'no LLM key saved for this provider yet — go back one step and save a key first, or skip', code: 'no_org_key' },
+          400,
+        )
+        return true
+      }
+    }
+    let record: AgentRecord
+    try {
+      record = (await fa.space.upsertAgent({
+        id: FIRST_AGENT_ID,
+        allowedCapabilities: ['chat'],
+        displayName: name,
+        managed: {
+          kind: 'llm',
+          provider: provider as 'anthropic' | 'openai' | 'openai-compatible',
+          model,
+          system: FIRST_AGENT_SYSTEM,
+          ...(baseURL ? { baseURL } : {}),
+          ...(providerLabel ? { providerLabel } : {}),
+        },
+      })) as AgentRecord
+    } catch (err) {
+      sendJson(res, { error: `agent write failed: ${err instanceof Error ? err.message : String(err)}` }, 400)
+      return true
+    }
+    // Spawn NOW so the IM step's promise ("paste the token, the bot answers")
+    // is true inside the wizard. A spawn failure names a real disease (bad
+    // model id / missing env key) — undo the row and surface it, instead of
+    // leaving a dead agent behind a 200. No lifecycle wired (minimal hosts /
+    // tests) → persisted honestly, spawns on next boot.
+    let spawned = false
+    if (fa.lifecycle) {
+      try {
+        await fa.lifecycle.start(record)
+        spawned = true
+      } catch (err) {
+        try { await fa.space.removeAgent(FIRST_AGENT_ID) } catch { /* undo is best-effort */ }
+        sendJson(
+          res,
+          { error: `agent could not start: ${err instanceof Error ? err.message : String(err)}`, code: 'spawn_failed' },
+          400,
+        )
+        return true
+      }
+    }
+    // E4-M1 mirror — seed the owner grant when the identity store carries the
+    // agent-grant facade (the wizard's owner IS the single user; without the
+    // grant, listOwned-based features like escalate refuse the row later).
+    // Best-effort: a grant hiccup must never fail a create that succeeded.
+    const grants = id as unknown as {
+      hasAgentGrant?: unknown
+      setAgentGrant?: (i: { agentId: string; userId: string; perm: string; grantedBy?: string | null }) => unknown
+    }
+    if (typeof grants.hasAgentGrant === 'function' && typeof grants.setAgentGrant === 'function') {
+      try {
+        grants.setAgentGrant({ agentId: FIRST_AGENT_ID, userId: owner.id, perm: 'owner', grantedBy: owner.id })
+      } catch { /* best-effort */ }
+    }
+    // Audit mirrors the sibling steps: actor_source='anonymous' (pre-identity
+    // surface), admitting anchor in metadata, no secret material anywhere.
+    if (typeof id.writeAuditLog === 'function') {
+      try {
+        id.writeAuditLog({
+          action: 'setup_first_agent',
+          actorSource: 'anonymous',
+          targetUserId: owner.id,
+          ip: sockAddr,
+          metadata: { agentId: FIRST_AGENT_ID, provider, model, spawned, anchor },
+          success: true,
+        })
+      } catch { /* audit failure is non-fatal */ }
+    }
+    sendJson(res, { ok: true, agentId: FIRST_AGENT_ID, spawned })
     return true
   }
 

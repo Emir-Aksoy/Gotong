@@ -29,7 +29,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Readable } from 'node:stream'
 
-import { Hub, Space } from '@gotong/core'
+import { Hub, Space, type AgentRecord, type ManagedAgentLifecycle } from '@gotong/core'
 import { MASTER_KEY_LEN_BYTES, openIdentityStore, type IdentityStore } from '@gotong/identity'
 
 import { serveWeb, type WebServerHandle } from '../src/server.js'
@@ -56,6 +56,8 @@ async function boot(opts: {
       | { ok: false; reason: string; detail?: string }
     >
   }
+  /** 部署摩擦 ⑤ — fake agent lifecycle for the first-agent tests. */
+  lifecycle?: ManagedAgentLifecycle
 } = {}): Promise<BootResult> {
   const withIdentity = opts.withIdentity ?? true
   const tmp = await mkdtemp(join(tmpdir(), 'gotong-web-setup-'))
@@ -99,6 +101,7 @@ async function boot(opts: {
     port: 0,
     ...(identity ? { identity } : {}),
     ...(opts.imHotStart ? { imHotStart: opts.imHotStart } : {}),
+    ...(opts.lifecycle ? { lifecycle: opts.lifecycle } : {}),
   })
 
   return {
@@ -397,6 +400,228 @@ describe('POST /api/setup/owner-llm-key', () => {
     try {
       const r = await postKey(b.baseUrl, '{not json')
       expect(r.status).toBe(400)
+    } finally { await teardown(b) }
+  })
+})
+
+// 部署摩擦 ⑤ — the optional agent step. Same gates as the sibling steps;
+// creates the FIRST chat-capable managed agent (the row the butler folds
+// onto) and hot-spawns it via the injected lifecycle.
+describe('POST /api/setup/first-agent', () => {
+  function fakeLifecycle(opts: { failStart?: boolean } = {}) {
+    const started: AgentRecord[] = []
+    const lifecycle: ManagedAgentLifecycle = {
+      async start(record) {
+        if (opts.failStart) throw new Error('model not found: no-such-model')
+        started.push(record)
+      },
+      async stop() { /* not exercised */ },
+      async availableProviders() { return ['mock'] },
+    }
+    return { lifecycle, started }
+  }
+
+  async function postAgent(baseUrl: string, body: unknown): Promise<Response> {
+    return fetch(`${baseUrl}/api/setup/first-agent`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: typeof body === 'string' ? body : JSON.stringify(body),
+    })
+  }
+
+  /** Mirror the wizard: the key step runs first and writes the org key row. */
+  async function saveDeepseekOrgKey(baseUrl: string): Promise<void> {
+    const r = await fetch(`${baseUrl}/api/setup/owner-llm-key`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        provider: 'openai-compatible',
+        apiKey: 'sk-deepseek-secret',
+        baseURL: 'https://api.deepseek.com/v1',
+        label: 'DeepSeek',
+      }),
+    })
+    expect(r.status).toBe(200)
+  }
+
+  const DEEPSEEK_AGENT = {
+    provider: 'openai-compatible',
+    model: 'deepseek-chat',
+    baseURL: 'https://api.deepseek.com/v1',
+    label: 'DeepSeek',
+  }
+
+  it('DeepSeek preset — creates the chat agent, spawns it, seeds grant + audit', async () => {
+    const { lifecycle, started } = fakeLifecycle()
+    const b = await boot({ lifecycle })
+    try {
+      await saveDeepseekOrgKey(b.baseUrl)
+      const r = await postAgent(b.baseUrl, DEEPSEEK_AGENT)
+      expect(r.status).toBe(200)
+      expect(await r.json()).toEqual({ ok: true, agentId: 'assistant', spawned: true })
+
+      // The persisted row is exactly what the butler fold-in stands on:
+      // chat-capable + managed llm spec with the recommended persona.
+      const agents = await b.space.agents()
+      expect(agents.length).toBe(1)
+      const row = agents[0]!
+      expect(row.id).toBe('assistant')
+      expect(row.allowedCapabilities).toContain('chat')
+      expect(row.displayName).toBe('阿同 (Atong)')
+      expect(row.managed?.kind).toBe('llm')
+      expect(row.managed?.provider).toBe('openai-compatible')
+      expect(row.managed?.model).toBe('deepseek-chat')
+      expect(row.managed?.baseURL).toBe('https://api.deepseek.com/v1')
+      expect(row.managed?.providerLabel).toBe('DeepSeek')
+      expect(row.managed?.system).toContain('阿同')
+      // No key material on the row — it resolves the org vault tier at spawn.
+      expect(JSON.stringify(row)).not.toContain('sk-deepseek-secret')
+
+      // Spawned through the injected lifecycle, with the persisted record.
+      expect(started.length).toBe(1)
+      expect(started[0]!.id).toBe('assistant')
+
+      // E4-M1 mirror — the single user got the owner grant.
+      expect(b.identity!.hasAgentGrant!('assistant', b.ownerUserId!, 'owner')).toBe(true)
+
+      // Audit row, secret-free, anchored.
+      const audit = b.identity!.listAuditLog!({ action: 'setup_first_agent' })
+      expect(audit.length).toBe(1)
+      expect(audit[0]!.targetUserId).toBe(b.ownerUserId)
+      expect(audit[0]!.metadata?.spawned).toBe(true)
+      expect(audit[0]!.metadata?.anchor).toBe('loopback')
+    } finally { await teardown(b) }
+  })
+
+  it('idempotent — an existing chat-capable agent short-circuits, no second row/spawn', async () => {
+    const { lifecycle, started } = fakeLifecycle()
+    const b = await boot({ lifecycle })
+    try {
+      await saveDeepseekOrgKey(b.baseUrl)
+      await postAgent(b.baseUrl, DEEPSEEK_AGENT)
+      const r = await postAgent(b.baseUrl, DEEPSEEK_AGENT)
+      expect(r.status).toBe(200)
+      expect(await r.json()).toEqual({ ok: true, existing: true, agentId: 'assistant' })
+      expect((await b.space.agents()).length).toBe(1)
+      expect(started.length).toBe(1)
+    } finally { await teardown(b) }
+  })
+
+  it('openai-compatible without the org key → 400 no_org_key, nothing persisted', async () => {
+    const { lifecycle, started } = fakeLifecycle()
+    const b = await boot({ lifecycle })
+    try {
+      const r = await postAgent(b.baseUrl, DEEPSEEK_AGENT)
+      expect(r.status).toBe(400)
+      const j = await r.json()
+      expect(j.code).toBe('no_org_key')
+      expect((await b.space.agents()).length).toBe(0)
+      expect(started.length).toBe(0)
+    } finally { await teardown(b) }
+  })
+
+  it('anthropic skips the org-key precheck (host env keys are the spawn verdict)', async () => {
+    const { lifecycle, started } = fakeLifecycle()
+    const b = await boot({ lifecycle })
+    try {
+      const r = await postAgent(b.baseUrl, { provider: 'anthropic', model: 'claude-x' })
+      expect(r.status).toBe(200)
+      expect(await r.json()).toEqual({ ok: true, agentId: 'assistant', spawned: true })
+      const row = (await b.space.agents())[0]!
+      expect(row.managed?.provider).toBe('anthropic')
+      expect(row.managed?.baseURL).toBeUndefined()
+      expect(started.length).toBe(1)
+    } finally { await teardown(b) }
+  })
+
+  it('spawn failure → 400 spawn_failed and the row is undone (no dead agent behind a 200)', async () => {
+    const { lifecycle } = fakeLifecycle({ failStart: true })
+    const b = await boot({ lifecycle })
+    try {
+      await saveDeepseekOrgKey(b.baseUrl)
+      const r = await postAgent(b.baseUrl, DEEPSEEK_AGENT)
+      expect(r.status).toBe(400)
+      const j = await r.json()
+      expect(j.code).toBe('spawn_failed')
+      expect(String(j.error)).toMatch(/no-such-model/)
+      expect((await b.space.agents()).length).toBe(0)
+    } finally { await teardown(b) }
+  })
+
+  it('no lifecycle wired → row persists honestly with spawned: false', async () => {
+    const b = await boot()
+    try {
+      const r = await postAgent(b.baseUrl, { provider: 'anthropic', model: 'claude-x' })
+      expect(r.status).toBe(200)
+      expect(await r.json()).toEqual({ ok: true, agentId: 'assistant', spawned: false })
+      expect((await b.space.agents()).length).toBe(1)
+      const audit = b.identity!.listAuditLog!({ action: 'setup_first_agent' })
+      expect(audit[0]!.metadata?.spawned).toBe(false)
+    } finally { await teardown(b) }
+  })
+
+  it('custom name is honored; missing model → 400', async () => {
+    const { lifecycle } = fakeLifecycle()
+    const b = await boot({ lifecycle })
+    try {
+      const bad = await postAgent(b.baseUrl, { provider: 'anthropic', model: '   ' })
+      expect(bad.status).toBe(400)
+      expect((await bad.json()).error).toMatch(/model is required/)
+
+      const r = await postAgent(b.baseUrl, { provider: 'anthropic', model: 'claude-x', name: '小管家' })
+      expect(r.status).toBe(200)
+      expect((await b.space.agents())[0]!.displayName).toBe('小管家')
+    } finally { await teardown(b) }
+  })
+
+  it('multi-user host → 409, nothing persisted', async () => {
+    const { lifecycle } = fakeLifecycle()
+    const b = await boot({ preCreateExtraUser: true, lifecycle })
+    try {
+      const r = await postAgent(b.baseUrl, { provider: 'anthropic', model: 'claude-x' })
+      expect(r.status).toBe(409)
+      expect((await b.space.agents()).length).toBe(0)
+    } finally { await teardown(b) }
+  })
+
+  it("id 'assistant' taken by a non-chat agent → 409, existing row untouched", async () => {
+    const { lifecycle } = fakeLifecycle()
+    const b = await boot({ lifecycle })
+    try {
+      await b.space.upsertAgent({ id: 'assistant', allowedCapabilities: ['solo.comms'] })
+      const r = await postAgent(b.baseUrl, { provider: 'anthropic', model: 'claude-x' })
+      expect(r.status).toBe(409)
+      const rows = await b.space.agents()
+      expect(rows.length).toBe(1)
+      expect(rows[0]!.allowedCapabilities).toEqual(['solo.comms'])
+      expect(rows[0]!.managed).toBeUndefined()
+    } finally { await teardown(b) }
+  })
+
+  it('non-loopback + no operator session → 403 (fail closed, nothing persisted)', async () => {
+    // Direct-invoke: a real HTTP round-trip through 127.0.0.1 cannot forge a
+    // non-loopback socket (same NOTE as the owner-password describe).
+    const b = await boot()
+    try {
+      const req = Readable.from([JSON.stringify({ provider: 'anthropic', model: 'claude-x' })]) as unknown as
+        IncomingMessage & { headers: Record<string, string>; socket: { remoteAddress: string } }
+      req.headers = { 'content-type': 'application/json', 'x-forwarded-for': '127.0.0.1' }
+      req.socket = { remoteAddress: '203.0.113.7' }
+      let status = 0
+      const res = {
+        writeHead(s: number) { status = s; return this },
+        end() { /* body unused */ },
+      } as unknown as ServerResponse
+      const handled = await handleSetupRoute(
+        {
+          identity: b.identity as unknown as SetupRoutesCtx['identity'],
+          firstAgent: { space: b.space },
+        },
+        req, res, 'POST', '/api/setup/first-agent',
+      )
+      expect(handled).toBe(true)
+      expect(status).toBe(403)
+      expect((await b.space.agents()).length).toBe(0)
     } finally { await teardown(b) }
   })
 })

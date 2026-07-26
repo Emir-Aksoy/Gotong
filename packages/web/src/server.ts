@@ -1256,6 +1256,7 @@ async function handle(
         identity: ctx.identity,
         llmKeyTest: ctx.llmKeyTest,
         imHotStart: ctx.imHotStart,
+        firstAgent: { space: ctx.space, lifecycle: ctx.lifecycle },
         isOperator: async (r) => (await findAdminFromRequest(ctx, r)).kind === 'admin',
       },
       req, res, method, path,

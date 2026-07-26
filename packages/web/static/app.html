@@ -116,20 +116,50 @@
                route; honest hint says it only tests, never stores. -->
           <div class="login-row">
             <button type="button" id="setup-key-test" class="ghost" data-i18n="testConnBtn">测试连接</button>
-            <button type="submit" data-i18n="setupKeySubmit">保存并完成</button>
+            <button type="submit" data-i18n="setupKeySubmit">保存并继续</button>
             <button type="button" id="setup-key-skip" class="ghost" data-i18n="setupKeySkip">跳过,以后再配</button>
           </div>
           <small class="login-meta" data-i18n="testConnHint">会用你填的 Key 向模型方发一次最小请求来验证。只用来测试,不保存、不外传。</small>
           <div id="setup-key-status" class="login-status"></div>
         </form>
 
-        <!-- DEPLOY-B2 — optional third step. Revealed after the key step
-             (saved or skipped). Writes the bot token to the org vault
+        <!-- 部署摩擦 ⑤ — optional third step. Revealed after the key step
+             (saved or skipped). Creates the FIRST chat-capable agent — the
+             row the butler folds onto — so an IM message actually gets
+             answered. Both exits (create / skip) advance to the IM step. -->
+        <form id="setup-agent-form" hidden>
+          <h2 data-i18n="setupAgentTitle">第三步 (可选) — 创建第一个智能体</h2>
+          <p class="login-meta" data-i18n="setupAgentIntro">
+            给 hub 一个能对话的智能体(贴身管家「阿同」)。不建的话,成员在 IM 里说话没人接。人设以后随时可改。
+          </p>
+          <label><span data-i18n="setupAgentName">名字</span>
+            <input name="name" type="text" value="阿同 (Atong)" maxlength="64" />
+          </label>
+          <label><span data-i18n="setupAgentProvider">模型提供方</span>
+            <select name="provider" id="setup-agent-provider">
+              <option value="deepseek" data-i18n="setupKeyProviderDeepseek">DeepSeek (推荐 · 性价比高)</option>
+              <option value="anthropic" data-i18n="setupKeyProviderAnthropic">Anthropic (Claude)</option>
+              <option value="openai" data-i18n="setupKeyProviderOpenai">OpenAI</option>
+            </select>
+          </label>
+          <label><span data-i18n="setupAgentModel">模型名</span>
+            <input name="model" type="text" autocomplete="off" spellcheck="false" data-i18n-placeholder="setupAgentModelPh" placeholder="如 deepseek-chat" />
+          </label>
+          <small class="login-meta" data-i18n="setupAgentModelHint">选 DeepSeek 时已预填 deepseek-chat;其他提供方请填厂商当前的模型名(写错会导致对话报错,可随时在管理面板改)。</small>
+          <div class="login-row">
+            <button type="submit" data-i18n="setupAgentSubmit">创建并继续</button>
+            <button type="button" id="setup-agent-skip" class="ghost" data-i18n="setupAgentSkip">跳过,以后再建</button>
+          </div>
+          <div id="setup-agent-status" class="login-status"></div>
+        </form>
+
+        <!-- DEPLOY-B2 — optional fourth step. Revealed after the agent step
+             (created or skipped). Writes the bot token to the org vault
              (loopback-only POST /api/setup/owner-im) and hot-starts the
              bridge — the promise is "paste the token, the bot answers".
              "Skip" reloads straight to the login screen. -->
         <form id="setup-im-form" hidden>
-          <h2 data-i18n="setupImTitle">第三步 (可选) — 接一个 IM 机器人</h2>
+          <h2 data-i18n="setupImTitle">第四步 (可选) — 接一个 IM 机器人</h2>
           <p class="login-meta" data-i18n="setupImIntro">
             填一个机器人凭证,成员就能直接在聊天软件里用这个 hub(出站长连接,家里电脑不用公网)。token 只存本机加密保险库。也可以跳过,以后用环境变量配。
           </p>
