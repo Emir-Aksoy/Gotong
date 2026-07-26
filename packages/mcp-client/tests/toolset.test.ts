@@ -157,7 +157,14 @@ describe('McpToolset — single server happy path', () => {
     await ts.connect()
     const tools = await ts.listTools()
     const names = tools.map((t) => t.name).sort()
-    expect(names).toEqual(['fs__add', 'fs__crash', 'fs__echo', 'fs__fail'])
+    expect(names).toEqual([
+      'fs__add',
+      'fs__crash',
+      'fs__echo',
+      'fs__elicit_confirm',
+      'fs__elicit_url',
+      'fs__fail',
+    ])
     // Every tool carries provenance for ops attribution.
     expect(tools.every((t) => t.serverName === 'fs')).toBe(true)
     // The serverToolName is the un-prefixed original.
@@ -254,10 +261,10 @@ describe('McpToolset — error surfaces', () => {
       expect(bad?.lastError).toBeTruthy()
 
       // listTools still works — the dead server contributes nothing,
-      // the live one contributes its four tools.
+      // the live one contributes its six tools.
       const tools = await mixed.listTools()
       expect(tools.every((t) => t.serverName === 'good')).toBe(true)
-      expect(tools).toHaveLength(4)
+      expect(tools).toHaveLength(6)
 
       // callTool against the dead server raises server_crashed.
       await expect(mixed.callTool('bad__whatever', {})).rejects.toMatchObject({
@@ -294,13 +301,13 @@ describe('McpToolset — multi-server namespacing', () => {
   it('listTools() merges results from every live server', async () => {
     await ts.connect()
     const tools = await ts.listTools()
-    // Server `alpha` contributes 4 tools, server `beta` contributes 4
-    // (echo_v2 / add_v2 / fail_v2 / crash_v2).
-    expect(tools).toHaveLength(8)
+    // Each server contributes the fake server's six tools (beta's carry
+    // the `_v2` suffix).
+    expect(tools).toHaveLength(12)
     const alphaTools = tools.filter((t) => t.serverName === 'alpha')
     const betaTools = tools.filter((t) => t.serverName === 'beta')
-    expect(alphaTools).toHaveLength(4)
-    expect(betaTools).toHaveLength(4)
+    expect(alphaTools).toHaveLength(6)
+    expect(betaTools).toHaveLength(6)
     expect(alphaTools.find((t) => t.name === 'alpha__echo')).toBeTruthy()
     expect(betaTools.find((t) => t.name === 'beta__echo_v2')).toBeTruthy()
   })
@@ -313,7 +320,7 @@ describe('McpToolset — multi-server namespacing', () => {
     // sees — an unstable order would also churn the prompt cache.
     await ts.connect()
     const owners = (await ts.listTools()).map((t) => t.serverName)
-    expect(owners).toEqual([...Array(4).fill('alpha'), ...Array(4).fill('beta')])
+    expect(owners).toEqual([...Array(6).fill('alpha'), ...Array(6).fill('beta')])
   })
 
   it('callTool() routes to the right server even with overlapping tool names', async () => {
@@ -679,6 +686,134 @@ describe('McpToolset — runtime addServer / removeServer (R5)', () => {
       await ts.addServer({ name: 'remote', transport: 'http', url: 'not a url' })
       expect(ts.status().find((r) => r.name === 'a')?.status).toBe('live')
       expect(ts.status().find((r) => r.name === 'remote')?.status).toBe('dead')
+    } finally {
+      await ts.disconnect()
+    }
+  })
+})
+
+// =============================================================================
+// ELIC — elicitation seam. Real spawn + real `elicitation/create` over
+// the stdio wire, exercising capability negotiation end to end: the
+// fake server's `elicit_confirm` tool calls `elicitInput` and reports
+// what the client answered (`elicit-result:<json>` / `elicit-error:<msg>`).
+// =============================================================================
+
+describe('McpToolset — elicitation (ELIC-M1)', () => {
+  function textOf(res: { content: unknown }): string {
+    const first = (res.content as Array<{ type: string; text: string }>)[0]
+    return first?.text ?? ''
+  }
+
+  it('default (no handler): capability stays undeclared — server-side elicitInput throws', async () => {
+    const ts = new McpToolset({ servers: [makeFakeServerConfig('fake')] })
+    try {
+      await ts.connect()
+      const text = textOf(await ts.callTool('fake__elicit_confirm', {}))
+      expect(text).toMatch(/^elicit-error:/)
+      expect(text).toContain('does not support form elicitation')
+    } finally {
+      await ts.disconnect()
+    }
+  })
+
+  it('accept round-trip: handler answer reaches the server verbatim, handler sees the request', async () => {
+    const seen: Array<{ serverName: string; message: string; requestedSchema: unknown }> = []
+    const ts = new McpToolset({
+      servers: [makeFakeServerConfig('fake')],
+      elicitation: async (req) => {
+        seen.push(req)
+        return { action: 'accept', content: { workspace: 'w1' } }
+      },
+    })
+    try {
+      await ts.connect()
+      const text = textOf(await ts.callTool('fake__elicit_confirm', {}))
+      expect(text).toMatch(/^elicit-result:/)
+      expect(JSON.parse(text.slice('elicit-result:'.length))).toMatchObject({
+        action: 'accept',
+        content: { workspace: 'w1' },
+      })
+      expect(seen).toHaveLength(1)
+      expect(seen[0]).toMatchObject({
+        serverName: 'fake',
+        message: 'Which workspace?',
+        requestedSchema: {
+          type: 'object',
+          properties: { workspace: { type: 'string' } },
+        },
+      })
+    } finally {
+      await ts.disconnect()
+    }
+  })
+
+  it('decline round-trip: the server receives a spec-clean decline', async () => {
+    const ts = new McpToolset({
+      servers: [makeFakeServerConfig('fake')],
+      elicitation: async () => ({ action: 'decline' }),
+    })
+    try {
+      await ts.connect()
+      const text = textOf(await ts.callTool('fake__elicit_confirm', {}))
+      expect(text).toMatch(/^elicit-result:/)
+      expect(JSON.parse(text.slice('elicit-result:'.length))).toMatchObject({ action: 'decline' })
+    } finally {
+      await ts.disconnect()
+    }
+  })
+
+  it('handler crash maps to cancel — the transport survives and later calls work', async () => {
+    const ts = new McpToolset({
+      servers: [makeFakeServerConfig('fake')],
+      elicitation: async () => {
+        throw new Error('answerer exploded')
+      },
+    })
+    try {
+      await ts.connect()
+      const text = textOf(await ts.callTool('fake__elicit_confirm', {}))
+      expect(text).toMatch(/^elicit-result:/)
+      expect(JSON.parse(text.slice('elicit-result:'.length))).toMatchObject({ action: 'cancel' })
+      // Channel still healthy after the crash-mapped answer.
+      const echo = await ts.callTool('fake__echo', { text: 'still-alive' })
+      expect(echo.content[0]).toMatchObject({ type: 'text', text: 'still-alive' })
+    } finally {
+      await ts.disconnect()
+    }
+  })
+
+  it('url-mode never reaches the handler — undeclared, so the server-side SDK refuses it', async () => {
+    const calls: unknown[] = []
+    const ts = new McpToolset({
+      servers: [makeFakeServerConfig('fake')],
+      elicitation: async (req) => {
+        calls.push(req)
+        return { action: 'accept', content: { workspace: 'w1' } }
+      },
+    })
+    try {
+      await ts.connect()
+      const text = textOf(await ts.callTool('fake__elicit_url', {}))
+      expect(text).toMatch(/^elicit-error:/)
+      expect(text.toLowerCase()).toContain('url')
+      expect(calls).toHaveLength(0)
+    } finally {
+      await ts.disconnect()
+    }
+  })
+
+  it('schema-mismatched accept surfaces as the SERVER-side validation error (content passes through verbatim)', async () => {
+    const ts = new McpToolset({
+      servers: [makeFakeServerConfig('fake')],
+      // workspace must be a string per requestedSchema; answer a number.
+      elicitation: async () => ({ action: 'accept', content: { workspace: 123 } }),
+    })
+    try {
+      await ts.connect()
+      const text = textOf(await ts.callTool('fake__elicit_confirm', {}))
+      expect(text).toMatch(/^elicit-error:/)
+      expect(text).toContain('does not match requested schema')
     } finally {
       await ts.disconnect()
     }

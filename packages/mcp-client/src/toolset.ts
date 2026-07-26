@@ -32,6 +32,7 @@ import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
 import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js'
 import type { Transport } from '@modelcontextprotocol/sdk/shared/transport.js'
+import { ElicitRequestSchema } from '@modelcontextprotocol/sdk/types.js'
 import { EventEmitter } from 'node:events'
 
 import { McpClientError } from './errors.js'
@@ -55,9 +56,60 @@ const NAME_SEP = '__'
 /** Validates a server name at connect-time so a typo is caught loudly. */
 const SERVER_NAME_RE = /^[a-zA-Z][a-zA-Z0-9_-]*$/
 
+/**
+ * One `elicitation/create` request from an MCP server, as handed to the
+ * toolset's {@link McpElicitationHandler}. Form mode only — the spec
+ * restricts `requestedSchema` to a flat object of primitives
+ * (string / number / boolean / enum), and the SDK validates an
+ * `accept` answer's `content` against it on the SERVER side, so the
+ * handler can pass content through without re-validating.
+ */
+export interface McpElicitationRequest {
+  /** Which server in this toolset is asking (the namespacing prefix). */
+  serverName: string
+  /** Human-readable question the server wants answered. */
+  message: string
+  /** Flat object schema for the expected answer, passed through verbatim. */
+  requestedSchema: {
+    type: 'object'
+    properties: Record<string, unknown>
+    required?: string[]
+  }
+}
+
+/**
+ * The three spec-defined answers. `decline` = an explicit "no" (servers
+ * MUST degrade gracefully); `cancel` = dismissed without a choice (the
+ * toolset also maps a handler crash here — an internal failure is not
+ * a user's "no").
+ */
+export type McpElicitationAnswer =
+  | { action: 'accept'; content: Record<string, string | number | boolean | string[]> }
+  | { action: 'decline' }
+  | { action: 'cancel' }
+
+export type McpElicitationHandler = (
+  req: McpElicitationRequest,
+) => Promise<McpElicitationAnswer>
+
 export interface McpToolsetOptions {
   /** One or more MCP server configurations. At least one is required. */
   servers: readonly McpServerConfig[]
+
+  /**
+   * Opt-in elicitation support (MCP 2025-06 spec: a server may ask the
+   * client questions mid-`tools/call`). When present, every client in
+   * the toolset declares the `elicitation.form` capability and routes
+   * `elicitation/create` requests here. When absent the capability set
+   * stays `{}` exactly as before — spec-correct servers then skip
+   * elicitation entirely (byte-identical behaviour).
+   *
+   * URL-mode elicitation (server asks the client to open a browser) is
+   * deliberately NOT declared — it is a different trust surface; an
+   * off-spec server sending it anyway is declined without ever
+   * reaching the handler.
+   */
+  elicitation?: McpElicitationHandler
 
   /**
    * Tool-listing timeout per server, in ms. Defaults to 10_000.
@@ -154,6 +206,7 @@ export class McpToolset extends EventEmitter {
   private readonly listToolsTimeoutMs: number
   private readonly callToolTimeoutMs: number
   private readonly clientInfo: { name: string; version: string }
+  private readonly elicitation?: McpElicitationHandler
   private connectCalled = false
 
   constructor(opts: McpToolsetOptions) {
@@ -171,6 +224,7 @@ export class McpToolset extends EventEmitter {
     this.listToolsTimeoutMs = opts.listToolsTimeoutMs ?? 10_000
     this.callToolTimeoutMs = opts.callToolTimeoutMs ?? 60_000
     this.clientInfo = opts.clientInfo ?? DEFAULT_CLIENT_INFO
+    if (opts.elicitation) this.elicitation = opts.elicitation
   }
 
   /**
@@ -448,7 +502,14 @@ export class McpToolset extends EventEmitter {
       state.lastError = err instanceof Error ? err.message : String(err)
       return
     }
-    const client = new Client(this.clientInfo, { capabilities: {} })
+    // Declare the elicitation capability only when someone can actually
+    // answer — advertising an unanswerable capability would be a lie.
+    const client = new Client(this.clientInfo, {
+      capabilities: this.elicitation ? { elicitation: { form: {} } } : {},
+    })
+    if (this.elicitation) {
+      this.wireElicitation(client, state.config.name)
+    }
 
     // If the child dies mid-session, mark dead so callTool fails fast.
     transport.onclose = () => {
@@ -540,6 +601,48 @@ export class McpToolset extends EventEmitter {
       // previous default ('inherit') would dump raw stderr to the
       // parent process — noisier and harder to control for tests.
       stderr: 'pipe',
+    })
+  }
+
+  /**
+   * Route one server's `elicitation/create` requests to the injected
+   * handler. Three hard rules:
+   *
+   *   1. URL-mode (or anything without a flat `requestedSchema`) never
+   *      reaches the handler — we only declared `form`, so an off-spec
+   *      server sending url-mode anyway gets a flat decline.
+   *   2. A handler crash maps to `cancel`, never a transport error —
+   *      one bad answerer must not kill the JSON-RPC channel (and an
+   *      internal failure is not the user saying "no").
+   *   3. Content passes through verbatim: the SDK validates an accept's
+   *      `content` against `requestedSchema` on the SERVER side, so a
+   *      mismatch surfaces as the server's own InvalidParams error.
+   */
+  private wireElicitation(client: Client, serverName: string): void {
+    const handler = this.elicitation
+    if (!handler) return
+    client.setRequestHandler(ElicitRequestSchema, async (req) => {
+      const params = req.params as {
+        mode?: string
+        message?: string
+        requestedSchema?: McpElicitationRequest['requestedSchema']
+      }
+      if (
+        (params.mode !== undefined && params.mode !== 'form') ||
+        typeof params.message !== 'string' ||
+        params.requestedSchema?.type !== 'object'
+      ) {
+        return { action: 'decline' as const }
+      }
+      try {
+        return await handler({
+          serverName,
+          message: params.message,
+          requestedSchema: params.requestedSchema,
+        })
+      } catch {
+        return { action: 'cancel' as const }
+      }
     })
   }
 

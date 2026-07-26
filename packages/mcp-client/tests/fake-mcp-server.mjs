@@ -15,6 +15,12 @@
  *                     message; used to test tool_call_failed.
  *   crash           — exits the process; used to test
  *                     server_crashed-style behaviour.
+ *   elicit_confirm  — asks the client a form-mode elicitation question
+ *                     ('Which workspace?') and reports the verbatim
+ *                     answer as `elicit-result:<json>`, or the thrown
+ *                     error as `elicit-error:<msg>`.
+ *   elicit_url      — same framing for a url-mode elicitation attempt
+ *                     (the toolset never declares url support).
  *
  * Flags:
  *
@@ -108,6 +114,56 @@ server.tool(
     // shouldn't deadlock if a tool exits its own server.)
     setImmediate(() => process.exit(0))
     return { content: [{ type: 'text', text: 'goodbye' }] }
+  },
+)
+
+// ELIC — elicitation vehicles. Both frame the outcome as text so the
+// client-side tests can assert the full wire round-trip without parsing
+// JSON-RPC errors:
+//
+//   elicit-result:<json>  — server's elicitInput resolved (client answered)
+//   elicit-error:<msg>    — server's elicitInput threw (capability missing,
+//                            schema-mismatched accept, ...)
+server.tool(
+  'elicit_confirm' + suffix,
+  'Asks the client a question via form-mode elicitation.',
+  {},
+  async () => {
+    try {
+      const res = await server.server.elicitInput({
+        mode: 'form',
+        message: 'Which workspace?',
+        requestedSchema: {
+          type: 'object',
+          properties: { workspace: { type: 'string' } },
+          required: ['workspace'],
+        },
+      })
+      return { content: [{ type: 'text', text: 'elicit-result:' + JSON.stringify(res) }] }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      return { content: [{ type: 'text', text: 'elicit-error:' + msg }] }
+    }
+  },
+)
+
+server.tool(
+  'elicit_url' + suffix,
+  'Attempts url-mode elicitation (never declared by the toolset).',
+  {},
+  async () => {
+    try {
+      const res = await server.server.elicitInput({
+        mode: 'url',
+        message: 'Open this link to continue.',
+        url: 'https://example.com/auth',
+        elicitationId: 'e-1',
+      })
+      return { content: [{ type: 'text', text: 'elicit-result:' + JSON.stringify(res) }] }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      return { content: [{ type: 'text', text: 'elicit-error:' + msg }] }
+    }
   },
 )
 

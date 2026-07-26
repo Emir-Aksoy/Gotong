@@ -302,6 +302,28 @@ agent 已经用这条路接 Brave Search 做实时搜索。
 这是 **per-agent 内联** 写法。把 MCP server 注册到 **hub 级**、让任意 agent
 按名 opt-in、还能跨 hub 共享给 peer —— 见下面第 7 节。
 
+### 6a. elicitation —— 连接器中途提问（ELIC）
+
+MCP 2025-06 起,server 可以在一次 `tools/call` 进行中反问 client
+（`elicitation/create`,如「哪个 workspace?」,答案三选一
+`accept / decline / cancel`）。Gotong 客户端的姿态:
+
+- **agent 路径 = 声明能力 + 确定性婉拒**。`McpToolset` 声明
+  `elicitation.form` 并对每个请求答 `decline` + 记一条结构化 warn
+  （server 名 + 问题 + 字段名）。为什么不把问题 park 给成员:elicit
+  活在**一次 callTool 的等待窗内**（客户端超时默认 60s）,而收件箱 / IM
+  审批是分钟到小时级,物理上塞不进这扇窗。`decline` 是规范一等答案
+  （spec 要求 server 优雅降级）,比不声明更好——规范正确的连接器由此走
+  自己设计的 decline 分支,而不是抛「client 不支持」。
+- **url 模式不声明**。server 要求打开浏览器链接是另一个信任面;越 wire
+  发来的 url-mode 请求不经 handler 直接婉拒。
+- **缝已留**:`McpToolsetOptions.elicitation` 可注入任意应答器（见
+  `@gotong/mcp-client` 的 `McpElicitationHandler`）。未注入时能力集保持
+  `{}`,与从前逐字节一致。将来若真实连接器高频需要交互式应答,换
+  handler 即可,不动结构。
+- **accept 的内容校验在 server 侧**（SDK 会拿 `requestedSchema` 验
+  `content`）,client 原样透传,不做第二套校验。
+
 ## 7. Hub 级 MCP 集成 + 跨 hub 联邦（#2）
 
 第 6 节是单个 agent record 内联 `mcpServers`。**更进一步**:把 MCP server

@@ -11,6 +11,9 @@ export { McpToolset } from './toolset.js'
 export type {
   McpToolsetOptions,
   McpToolsetEvents,
+  McpElicitationRequest,
+  McpElicitationAnswer,
+  McpElicitationHandler,
 } from './toolset.js'
 export { McpClientError } from './errors.js'
 export type { McpClientErrorKind } from './errors.js'

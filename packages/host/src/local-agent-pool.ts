@@ -58,6 +58,7 @@ import {
 } from './mcp-config.js'
 import type { ServerSecretSource } from './oauth-secret-source.js'
 import { buildButlerMcpToolsets } from './personal-butler-mcp.js'
+import { declineElicitations } from './mcp-elicitation.js'
 import { mergeButlerBonusMcpSpecs } from './butler-web-search.js'
 import { RemoteMcpToolset, parseRemoteMcpRef } from './mcp-proxy.js'
 import {
@@ -2335,7 +2336,9 @@ function buildToolset(
         }),
     }),
   )
-  const toolset = new McpToolset({ servers: configs })
+  // ELIC — 声明 elicitation 能力并确定性婉拒(agent 路径无人同步在场);
+  // 规范正确的连接器由此走自己的 decline 降级分支而非「client 不支持」。
+  const toolset = new McpToolset({ servers: configs, elicitation: declineElicitations(log, agentId) })
   // Route MCP-server stderr into our structured logger. Operators
   // running `journalctl -u gotong` get one unified stream.
   toolset.on('server-stderr', ({ serverName, line }) => {
