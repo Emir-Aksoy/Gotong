@@ -87,6 +87,7 @@ import { buildButlerLlmsToolset, type ButlerLlmSurface } from './personal-butler
 import { buildButlerLlmCatalogToolset } from './personal-butler-llm-catalog.js'
 import { buildButlerGuideToolset } from './personal-butler-guide.js'
 import { buildButlerHubSenseProbe, buildButlerHubHealthToolset } from './personal-butler-hub-sense.js'
+import { buildButlerPanelToolset, type ButlerPanelSurface } from './personal-butler-panel.js'
 import { buildButlerSelfStatusToolset } from './personal-butler-self-status.js'
 import {
   buildButlerOnboardingProbe,
@@ -224,6 +225,12 @@ export interface ButlerFactoryDeps {
    * 不进投影——切片类型根本没有 email 字段,surface join 只挑声明的列。
    */
   members?: ButlerMemberSurfaceDeps
+  /**
+   * SDUI-M4 — 面板店面(main.ts 传 buildMePanelSurface 的同一实例——与 web
+   * 路由/模板 sink 共享,per-user 串行链才真正串行)。缺席 ⇒ get_my_panel /
+   * set_panel_layout 都不装。写路径带 by:'butler' 归因 = 横幅播报的数据源。
+   */
+  panel?: ButlerPanelSurface
 }
 
 export function buildButlerFactory(deps: ButlerFactoryDeps): ButlerFactory {
@@ -448,6 +455,11 @@ export function buildButlerFactory(deps: ButlerFactoryDeps): ButlerFactory {
         const membersToolset = membersSurface
           ? buildButlerMembersToolset({ members: membersSurface, logger: log })
           : undefined
+        // SDUI-M4 — benign 面板编排一对(E1 直改+三重安全网)。userId 闭包
+        // = 只够到本成员自己的面板;写路径全走店面 setPanel 同一校验咽喉。
+        const panelToolset = deps.panel
+          ? buildButlerPanelToolset({ userId, surface: deps.panel, logger: log })
+          : undefined
         // SEN-M3 — benign 自我状态一卡:大脑链/断供/累计用量/记忆规模/任务数/
         // 备份六块既有投影拼成「我现在怎么样」(零新权威点)。碎片 dep 缺席
         // 该行「(未接)」逐行降级,工具本身无条件装(笔记本永远在)。
@@ -560,6 +572,7 @@ export function buildButlerFactory(deps: ButlerFactoryDeps): ButlerFactory {
           ...(hubHealthToolset ? [hubHealthToolset] : []),
           ...(schedulesToolset ? [schedulesToolset] : []),
           ...(membersToolset ? [membersToolset] : []),
+          ...(panelToolset ? [panelToolset] : []),
           selfStatusToolset,
           ...(planWizardToolset ? [planWizardToolset] : []),
           ...(consolidateToolset ? [consolidateToolset] : []),
@@ -582,6 +595,7 @@ export function buildButlerFactory(deps: ButlerFactoryDeps): ButlerFactory {
           ...(hubHealthToolset ? [hubHealthToolset] : []),
           ...(schedulesToolset ? [schedulesToolset] : []),
           ...(membersToolset ? [membersToolset] : []),
+          ...(panelToolset ? [panelToolset] : []),
           selfStatusToolset,
           knowledgeToolset,
           ...(consolidateToolset ? [consolidateToolset] : []),

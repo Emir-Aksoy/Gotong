@@ -281,9 +281,48 @@
       .catch(function () { /* badge is best-effort; inbox errors surface in the component */ })
   }
 
+  // ---- butler-change banner (SDUI-M4, the LOUD half of the safety net) -----
+  // Shown whenever the LAST panel mutation was made by the butler — structural
+  // honesty independent of whatever the model chose to say in chat. 撤销 hits
+  // the one-slot restore; 知道了 acks THIS change only (keyed by timestamp in
+  // localStorage) — the next butler change shows the banner again.
+  var ACK_KEY = 'gotong-sdui-change-ack'
+  function ackGet() {
+    try { return window.localStorage.getItem(ACK_KEY) } catch (_e) { return null }
+  }
+  function ackSet(at) {
+    try { window.localStorage.setItem(ACK_KEY, at) } catch (_e) { /* private mode — banner just reappears */ }
+  }
+
+  function renderButlerBanner(host, lastChange) {
+    var strip = el('div', 'sdui-butler-banner')
+    strip.appendChild(el('span', 'sdui-butler-banner-text', t('sduiButlerChanged')))
+    var status = el('span', 'me-meta sdui-butler-banner-status', '')
+    var undo = el('button', 'sdui-butler-undo', t('sduiButlerUndo'))
+    undo.type = 'button'
+    undo.addEventListener('click', function () {
+      putPanel('/api/me/panel', { restore: true }, t('sduiButlerUndone'), status).then(function (ok) {
+        if (ok) loadPanel()
+      })
+    })
+    var ok = el('button', 'sdui-butler-ack', t('sduiButlerAck'))
+    ok.type = 'button'
+    ok.addEventListener('click', function () {
+      ackSet(lastChange.at)
+      strip.remove()
+    })
+    strip.appendChild(undo)
+    strip.appendChild(ok)
+    strip.appendChild(status)
+    host.appendChild(strip)
+  }
+
   function renderPanel(host, data) {
     host.replaceChildren()
     renderBadge(host)
+    if (data.lastChange && data.lastChange.by === 'butler' && ackGet() !== data.lastChange.at) {
+      renderButlerBanner(host, data.lastChange)
+    }
     if (data.source === 'fallback') {
       host.appendChild(el('div', 'sdui-notice', t('sduiDegraded')))
     }

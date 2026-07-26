@@ -40,7 +40,12 @@ class StubPanel implements MePanelSurface {
   readonly calls: string[] = []
   readonly applied: Array<{ userId: string; libraryId: string }> = []
   readonly resets: string[] = []
+  readonly restores: string[] = []
   source: 'default' | 'member' | 'fallback' = 'default'
+  /** M4: when set, panel() echoes it (banner attribution passthrough). */
+  lastChange: { by: 'butler' | 'human'; at: string } | undefined
+  /** M4: when false, restoreSnapshot throws the duck not_found. */
+  hasSnapshot = true
   library: Array<{ id: string; title: string; description?: string }> = [
     { id: 'farm', title: '农事面', description: '给父亲' },
   ]
@@ -53,12 +58,24 @@ class StubPanel implements MePanelSurface {
       this.boom = false
       throw new Error('panel store exploded')
     }
-    return { schemaVersion: 1, config: CFG, source: this.source }
+    return {
+      schemaVersion: 1,
+      config: CFG,
+      source: this.source,
+      ...(this.lastChange ? { lastChange: this.lastChange } : {}),
+    }
   }
 
   async resetPanel(userId: string) {
     this.resets.push(userId)
     this.source = 'default'
+  }
+
+  async restoreSnapshot(userId: string) {
+    if (!this.hasSnapshot) throw new StoreError('not_found', 'no panel snapshot to restore')
+    this.restores.push(userId)
+    this.source = 'member'
+    return { schemaVersion: 1, config: CFG, source: 'member' as const }
   }
 
   async listLibrary() {
@@ -210,6 +227,32 @@ describe('/api/me/panel — SDUI member panel config (M2 read + M3 write)', () =
     expect(r.status).toBe(200)
     expect(r.json.source).toBe('default')
     expect(b.stub!.resets).toEqual([b.memberUserId])
+  })
+
+  // ── M4 banner + undo face ─────────────────────────────────────────────────
+
+  it('GET passes lastChange through verbatim (the SPA banner reads it)', async () => {
+    b = await boot()
+    b.stub!.lastChange = { by: 'butler', at: '2026-07-26T00:00:00.000Z' }
+    const r = await req('GET')
+    expect(r.status).toBe(200)
+    expect(r.json.lastChange).toEqual({ by: 'butler', at: '2026-07-26T00:00:00.000Z' })
+  })
+
+  it('PUT { restore: true } restores the snapshot for the SESSION user', async () => {
+    b = await boot()
+    const r = await req('PUT', { body: { restore: true } })
+    expect(r.status).toBe(200)
+    expect(r.json.source).toBe('member')
+    expect(b.stub!.restores).toEqual([b.memberUserId])
+  })
+
+  it('PUT { restore: true } with no snapshot → 404 via the duck code', async () => {
+    b = await boot()
+    b.stub!.hasSnapshot = false
+    const r = await req('PUT', { body: { restore: true } })
+    expect(r.status).toBe(404)
+    expect(b.stub!.restores).toHaveLength(0)
   })
 
   it('PUT with any other body → 400 (free-form config is NOT a member face)', async () => {

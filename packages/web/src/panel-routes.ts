@@ -38,6 +38,9 @@ export interface MePanelResult {
   schemaVersion: number
   config: unknown
   source: 'default' | 'member' | 'fallback'
+  /** SDUI-M4 attribution of the last mutation (host reads the undo slot).
+   * `by:'butler'` drives the SPA's 「阿同调整了你的面板 [撤销]」 banner. */
+  lastChange?: { by: 'butler' | 'human'; at: string }
 }
 
 export interface MePanelSurface {
@@ -45,6 +48,9 @@ export interface MePanelSurface {
   resetPanel(userId: string): Promise<void>
   listLibrary(): Promise<{ id: string; title: string; description?: string }[]>
   applyLibrary(userId: string, libraryId: string): Promise<MePanelResult>
+  /** SDUI-M4 one-slot undo (swap semantics; store throws duck `not_found`
+   * when nothing was ever changed → 404). */
+  restoreSnapshot(userId: string): Promise<MePanelResult>
 }
 
 export interface MePanelRouteDeps {
@@ -58,7 +64,8 @@ function storeErrorStatus(err: unknown): number {
   return 500
 }
 
-/** Shared by the member and admin write faces: {libraryId} | {reset:true}. */
+/** Shared by the member and admin write faces:
+ *  {libraryId} | {reset:true} | {restore:true} (M4 undo — banner's 撤销). */
 async function applyPanelWrite(
   surface: MePanelSurface,
   req: IncomingMessage,
@@ -66,9 +73,13 @@ async function applyPanelWrite(
   userId: string,
 ): Promise<void> {
   const body = (await readJsonBody(req).catch(() => null)) as
-    | { libraryId?: unknown; reset?: unknown }
+    | { libraryId?: unknown; reset?: unknown; restore?: unknown }
     | null
   try {
+    if (body && body.restore === true) {
+      sendJson(res, await surface.restoreSnapshot(userId))
+      return
+    }
     if (body && body.reset === true) {
       await surface.resetPanel(userId)
       sendJson(res, await surface.panel(userId))
@@ -78,7 +89,7 @@ async function applyPanelWrite(
       sendJson(res, await surface.applyLibrary(userId, body.libraryId))
       return
     }
-    sendJson(res, { error: 'body must be { libraryId } or { reset: true }' }, 400)
+    sendJson(res, { error: 'body must be { libraryId }, { reset: true } or { restore: true }' }, 400)
   } catch (err) {
     sendJson(
       res,

@@ -95,6 +95,11 @@ export const BUTLER_DIRECTORY_BENIGN = [
   'read_knowledge_file',
   'write_knowledge_file',
   'archive_knowledge_file',
+  // SDUI-M4 面板编排一对 — 改布局是偶发动作非每轮动词(TN/LIB 同域 benign:
+  // 只写本成员自己的展示编排,动作各走各闸);互相点名全在目录内部。写侧
+  // 三重安全网(校验拒/横幅播报/快照撤销)在店面与渲染器层结构性成立。
+  'get_my_panel',
+  'set_panel_layout',
 ] as const
 
 export type ButlerFirstClassBenign = (typeof BUTLER_FIRST_CLASS_BENIGN)[number]

@@ -58,6 +58,7 @@ import { buildButlerGuideToolset } from '../src/personal-butler-guide.js'
 import { buildButlerLlmsToolset } from '../src/personal-butler-llms.js'
 import { buildButlerObserveToolset } from '../src/personal-butler-observe.js'
 import { buildButlerOnboardingToolset } from '../src/personal-butler-onboarding.js'
+import { buildButlerPanelToolset } from '../src/personal-butler-panel.js'
 import { buildButlerPeersToolset } from '../src/personal-butler-peers.js'
 import { buildButlerProfileToolset } from '../src/personal-butler-profile.js'
 import { buildButlerRemindersToolset } from '../src/personal-butler-reminders.js'
@@ -113,6 +114,7 @@ const MEASURED_BUILDERS: Record<string, string> = {
   'self-status': 'buildButlerSelfStatusToolset',
   schedules: 'buildButlerSchedulesToolset',
   members: 'buildButlerMembersToolset',
+  panel: 'buildButlerPanelToolset',
 }
 
 /**
@@ -300,6 +302,22 @@ function buildFullFace(): ToolFaceEntry[] {
       kind: 'benign',
       toolset: buildButlerMembersToolset({
         members: { listForButler: async () => [] },
+      }),
+    },
+    // SDUI-M4 面板编排一对:benign,店面走 stub(schema 度量与真店面无关)。
+    {
+      module: 'panel',
+      kind: 'benign',
+      toolset: buildButlerPanelToolset({
+        userId: U,
+        surface: {
+          panel: async () => ({ schemaVersion: 1, config: {}, source: 'default' as const }),
+          listLibrary: async () => [],
+          setPanel: async () => ({}),
+          applyLibrary: async () => ({}),
+          resetPanel: async () => undefined,
+          restoreSnapshot: async () => ({}),
+        },
       }),
     },
   ]

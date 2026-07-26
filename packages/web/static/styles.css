@@ -3683,6 +3683,18 @@ body[data-simple-mode="1"] section.adv-only { display: none !important; }
   background: #3a1d1d; border: 1px solid #8a4040; border-radius: 8px;
   padding: 0.5rem 0.8rem; margin-bottom: 0.8rem;
 }
+/* SDUI-M4 butler-change banner — the LOUD half of the E1 safety net. */
+.sdui-butler-banner {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 0.6rem;
+  background: #16283a; border: 1px solid #2f5a86; border-radius: 8px;
+  padding: 0.5rem 0.8rem; margin-bottom: 0.8rem;
+}
+.sdui-butler-banner-text { font-weight: 600; }
+.sdui-butler-undo, .sdui-butler-ack {
+  padding: 0.25rem 0.7rem; border-radius: 6px;
+  border: 1px solid #666; background: transparent; color: inherit; cursor: pointer;
+}
+.sdui-butler-undo { margin-left: auto; border-color: #2f5a86; }
 .sdui-title { margin: 0.2rem 0 0.6rem; }
 .sdui-section { margin-bottom: 1rem; }
 .sdui-heading { margin: 0.4rem 0; opacity: 0.85; }

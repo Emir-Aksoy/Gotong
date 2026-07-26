@@ -27,7 +27,7 @@
  *    template import that called it.
  */
 
-import { readdir, readFile, rename, rm, mkdir } from 'node:fs/promises'
+import { readdir, readFile, rename, rm, mkdir, stat } from 'node:fs/promises'
 import { join, dirname } from 'node:path'
 
 import { createLogger, writeJsonAtomic } from '@gotong/core'
@@ -45,10 +45,18 @@ const log = createLogger('me-panel')
 /** Same charset as a KB slot / MCP server name — a library id IS a filename. */
 const LIBRARY_ID_RE = /^[a-zA-Z][a-zA-Z0-9_-]*$/
 
+/** Who performed a panel mutation. 'human' = the member or an admin (fork D:
+ * humans get no AI-change gate); 'butler' drives the loud SPA banner. */
+export type PanelActor = 'butler' | 'human'
+
 export interface MePanelResult {
   schemaVersion: number
   config: unknown
   source: 'default' | 'member' | 'fallback'
+  /** Attribution of the LAST mutation (from the undo slot). The SPA shows the
+   * 「阿同调整了你的面板 [撤销]」 banner iff `by === 'butler'` — the loud half
+   * of the E1 safety net; absent until the first mutation ever happens. */
+  lastChange?: { by: PanelActor; at: string }
 }
 
 export interface PanelLibraryEntry {
@@ -76,15 +84,29 @@ export class PanelStoreError extends Error {
   }
 }
 
+/** Mutation options: attribution defaults to 'human' — web faces stay 2-arg,
+ * ONLY the butler toolset passes { by: 'butler' } (which arms the banner). */
+export interface PanelWriteOpts {
+  by?: PanelActor
+}
+
 export interface MePanelSurfaceHost {
   panel(userId: string): Promise<MePanelResult>
   /** THE validation choke point — every write path funnels through here. */
-  setPanel(userId: string, value: unknown): Promise<MePanelResult>
-  resetPanel(userId: string): Promise<void>
+  setPanel(userId: string, value: unknown, opts?: PanelWriteOpts): Promise<MePanelResult>
+  resetPanel(userId: string, opts?: PanelWriteOpts): Promise<void>
   listLibrary(): Promise<PanelLibraryEntry[]>
-  applyLibrary(userId: string, libraryId: string): Promise<MePanelResult>
+  applyLibrary(userId: string, libraryId: string, opts?: PanelWriteOpts): Promise<MePanelResult>
   /** Template-import sink (PanelLibrarySink duck). Best-effort, never throws. */
   installPanels(pack: string, panels: readonly InstallablePanel[]): Promise<void>
+  /**
+   * SDUI-M4 one-slot undo: swap the panel back to the state recorded before
+   * the LAST mutation (member「换上」, admin install, or the butler's
+   * `set_panel_layout` — every mutation snapshots first). Swap semantics:
+   * restoring twice toggles back — no state is ever lost. Throws
+   * `not_found` when nothing has ever been changed.
+   */
+  restoreSnapshot(userId: string, opts?: PanelWriteOpts): Promise<MePanelResult>
 }
 
 export function buildMePanelSurface(opts: { spaceDir: string }): MePanelSurfaceHost {
@@ -110,28 +132,35 @@ export function buildMePanelSurface(opts: { spaceDir: string }): MePanelSurfaceH
   }
 
   async function readMember(userId: string): Promise<MePanelResult> {
-    let raw: string
-    try {
-      raw = await readFile(memberFile(userId), 'utf8')
-    } catch {
-      return defaultResult('default') // no file — the built-in default panel
-    }
-    let parsed: unknown
-    try {
-      parsed = JSON.parse(raw)
-    } catch {
-      log.warn('member panel file unreadable — serving default (fallback)', { userId })
-      return defaultResult('fallback')
-    }
-    const v = validatePanelConfig(parsed)
-    if (!v.ok) {
-      log.warn('member panel file invalid — serving default (fallback)', {
-        userId,
-        errors: v.errors.slice(0, 3),
-      })
-      return defaultResult('fallback')
-    }
-    return { schemaVersion: PANEL_SCHEMA_VERSION, config: v.config, source: 'member' }
+    const result = await (async (): Promise<MePanelResult> => {
+      let raw: string
+      try {
+        raw = await readFile(memberFile(userId), 'utf8')
+      } catch {
+        return defaultResult('default') // no file — the built-in default panel
+      }
+      let parsed: unknown
+      try {
+        parsed = JSON.parse(raw)
+      } catch {
+        log.warn('member panel file unreadable — serving default (fallback)', { userId })
+        return defaultResult('fallback')
+      }
+      const v = validatePanelConfig(parsed)
+      if (!v.ok) {
+        log.warn('member panel file invalid — serving default (fallback)', {
+          userId,
+          errors: v.errors.slice(0, 3),
+        })
+        return defaultResult('fallback')
+      }
+      return { schemaVersion: PANEL_SCHEMA_VERSION, config: v.config, source: 'member' }
+    })()
+    // Attach attribution on EVERY source — a butler reset serves 'default' yet
+    // must still arm the banner (the member sees what changed and can undo).
+    const lastChange = await readLastChange(userId)
+    if (lastChange) result.lastChange = lastChange
+    return result
   }
 
   async function writeMember(userId: string, config: PanelConfig): Promise<void> {
@@ -205,12 +234,60 @@ export function buildMePanelSurface(opts: { spaceDir: string }): MePanelSurfaceH
       .sort()
   }
 
-  async function setPanel(userId: string, value: unknown): Promise<MePanelResult> {
+  // ── SDUI-M4 one-slot undo ──────────────────────────────────────────────────
+  // `panel-prev.json` records the state BEFORE the last mutation — config (or
+  // null meaning "no member file / default shape") + who mutated (`by`, the
+  // banner's data source). Written inside the same per-user chain as the
+  // mutation itself, so snapshot+write are never torn by a concurrent writer.
+  // restoreSnapshot SWAPS (prev becomes what was current), so no state is ever
+  // destroyed and restore-of-restore toggles back.
+  const prevFile = (userId: string): string =>
+    join(ownerDir(uiRoot, { kind: 'user', id: userId }), 'panel-prev.json')
+
+  async function readCurrentConfig(userId: string): Promise<PanelConfig | null> {
+    // Corrupt/invalid current file counts as null: the reader was already
+    // serving the default, so "the state before the change" IS the default.
+    try {
+      const v = validatePanelConfig(JSON.parse(await readFile(memberFile(userId), 'utf8')))
+      return v.ok ? v.config : null
+    } catch {
+      return null
+    }
+  }
+
+  async function snapshotCurrent(userId: string, by: PanelActor): Promise<void> {
+    const config = await readCurrentConfig(userId)
+    const file = prevFile(userId)
+    await mkdir(dirname(file), { recursive: true })
+    await writeJsonAtomic(file, { savedAt: new Date().toISOString(), by, config })
+  }
+
+  async function readLastChange(userId: string): Promise<MePanelResult['lastChange'] | null> {
+    let doc: unknown
+    try {
+      doc = JSON.parse(await readFile(prevFile(userId), 'utf8'))
+    } catch {
+      return null
+    }
+    const d = doc as { savedAt?: unknown; by?: unknown } | null
+    if (!d || typeof d !== 'object' || typeof d.savedAt !== 'string') return null
+    // Unknown/missing attribution reads as 'human' — never a false banner.
+    return { by: d.by === 'butler' ? 'butler' : 'human', at: d.savedAt }
+  }
+
+  async function setPanel(
+    userId: string,
+    value: unknown,
+    opts?: PanelWriteOpts,
+  ): Promise<MePanelResult> {
     const v = validatePanelConfig(value)
     if (!v.ok) {
       throw new PanelStoreError('invalid', `invalid panel config: ${v.errors.join('; ')}`)
     }
-    await serialize(userId, () => writeMember(userId, v.config))
+    await serialize(userId, async () => {
+      await snapshotCurrent(userId, opts?.by ?? 'human')
+      await writeMember(userId, v.config)
+    })
     return { schemaVersion: PANEL_SCHEMA_VERSION, config: v.config, source: 'member' }
   }
 
@@ -218,8 +295,48 @@ export function buildMePanelSurface(opts: { spaceDir: string }): MePanelSurfaceH
     panel: readMember,
     setPanel,
 
-    async resetPanel(userId) {
-      await serialize(userId, () => rm(memberFile(userId), { force: true }))
+    async resetPanel(userId, opts) {
+      await serialize(userId, async () => {
+        // A no-op reset (already default) must NOT clobber a useful undo slot.
+        const exists = await stat(memberFile(userId)).then(
+          () => true,
+          () => false,
+        )
+        if (exists) await snapshotCurrent(userId, opts?.by ?? 'human')
+        await rm(memberFile(userId), { force: true })
+      })
+    },
+
+    async restoreSnapshot(userId, opts) {
+      return serialize(userId, async () => {
+        let doc: unknown
+        try {
+          doc = JSON.parse(await readFile(prevFile(userId), 'utf8'))
+        } catch {
+          throw new PanelStoreError('not_found', 'no panel snapshot to restore')
+        }
+        const recorded = (doc as { config?: unknown } | null)?.config ?? null
+        let target: PanelConfig | null = null
+        if (recorded !== null) {
+          // Re-validate: the contract may have narrowed since the snapshot was
+          // taken. Invalid ⇒ typed error, NOTHING touched (incl. the slot).
+          const v = validatePanelConfig(recorded)
+          if (!v.ok) {
+            throw new PanelStoreError('invalid', `snapshot no longer valid: ${v.errors.join('; ')}`)
+          }
+          target = v.config
+        }
+        // Swap: the slot now records the pre-restore state, attributed to
+        // whoever asked for the restore (member undo click disarms the banner;
+        // a butler-driven undo honestly re-arms it).
+        await snapshotCurrent(userId, opts?.by ?? 'human')
+        if (target === null) {
+          await rm(memberFile(userId), { force: true })
+          return defaultResult('default')
+        }
+        await writeMember(userId, target)
+        return { schemaVersion: PANEL_SCHEMA_VERSION, config: target, source: 'member' as const }
+      })
     },
 
     async listLibrary() {
@@ -231,14 +348,16 @@ export function buildMePanelSurface(opts: { spaceDir: string }): MePanelSurfaceH
       return out
     },
 
-    async applyLibrary(userId, libraryId) {
+    async applyLibrary(userId, libraryId, opts) {
       // The id becomes a filename — whitelist BEFORE any path assembly.
       if (typeof libraryId !== 'string' || !LIBRARY_ID_RE.test(libraryId)) {
         throw new PanelStoreError('not_found', 'unknown library panel')
       }
       const hit = await readLibraryFile(libraryId)
       if (!hit) throw new PanelStoreError('not_found', 'unknown library panel')
-      return setPanel(userId, hit.config)
+      // Thread attribution through — the butler's most common write mode is
+      // exactly this one; dropping opts here silently disarms the banner.
+      return setPanel(userId, hit.config, opts)
     },
 
     async installPanels(pack, panels) {

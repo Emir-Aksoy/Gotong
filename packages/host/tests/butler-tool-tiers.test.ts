@@ -148,6 +148,15 @@ function buildButler(provider: LlmProvider, root: string, singleTier?: boolean) 
     ...(singleTier === undefined ? {} : { singleTierToolFace: singleTier }),
     backupOps: fakeBackupOps,
     members: { users: () => [], membershipRole: () => null },
+    // SDUI-M4 — 最大脸必须带面板店面,get_my_panel / set_panel_layout 才在。
+    panel: {
+      panel: async () => ({ schemaVersion: 1, config: {}, source: 'default' as const }),
+      listLibrary: async () => [],
+      setPanel: async () => ({}),
+      applyLibrary: async () => ({}),
+      resetPanel: async () => undefined,
+      restoreSnapshot: async () => ({}),
+    },
   })
   return factory(
     {

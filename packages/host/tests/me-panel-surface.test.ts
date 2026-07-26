@@ -188,6 +188,13 @@ describe('me-panel-surface (SDUI-M3)', () => {
     expect((await s.panel('u1')).config).toEqual(CFG_A)
   })
 
+  it('applyLibrary threads attribution opts through to the snapshot (M4)', async () => {
+    const s = surface()
+    await s.installPanels('pack-x', [{ id: 'farm', title: '农事面', config: CFG_A }])
+    await s.applyLibrary('u1', 'farm', { by: 'butler' })
+    expect((await s.panel('u1')).lastChange?.by).toBe('butler')
+  })
+
   it('applyLibrary rejects unknown and hostile ids as not_found (whitelist before path)', async () => {
     const s = surface()
     await expect(s.applyLibrary('u1', 'missing')).rejects.toMatchObject({ code: 'not_found' })
@@ -219,5 +226,81 @@ describe('me-panel-surface (SDUI-M3)', () => {
     const onDisk = JSON.parse(await readFile(memberPanelFile('u1'), 'utf8'))
     expect(onDisk).toEqual(CFG_B)
     expect((await s.panel('u1')).config).toEqual(CFG_B)
+  })
+})
+
+describe('me-panel-surface — one-slot undo + attribution (SDUI-M4)', () => {
+  it('restoreSnapshot with no history → typed not_found, nothing touched', async () => {
+    const s = surface()
+    await expect(s.restoreSnapshot('u1')).rejects.toMatchObject({ code: 'not_found' })
+    expect((await s.panel('u1')).source).toBe('default')
+  })
+
+  it('undo after a change restores the previous config; undo again toggles back (swap)', async () => {
+    const s = surface()
+    await s.setPanel('u1', CFG_A)
+    await s.setPanel('u1', CFG_B)
+    const r1 = await s.restoreSnapshot('u1')
+    expect(r1.config).toEqual(CFG_A)
+    expect(JSON.parse(await readFile(memberPanelFile('u1'), 'utf8'))).toEqual(CFG_A)
+    // Swap semantics: the slot now holds B — a second restore brings B back.
+    const r2 = await s.restoreSnapshot('u1')
+    expect(r2.config).toEqual(CFG_B)
+  })
+
+  it('undo of the FIRST ever change returns to the default (config:null snapshot)', async () => {
+    const s = surface()
+    await s.setPanel('u1', CFG_A)
+    const r = await s.restoreSnapshot('u1')
+    expect(r.source).toBe('default')
+    await expect(readFile(memberPanelFile('u1'), 'utf8')).rejects.toThrow()
+    // …and restoring again re-applies CFG_A (nothing was destroyed).
+    expect((await s.restoreSnapshot('u1')).config).toEqual(CFG_A)
+  })
+
+  it("undo of a butler reset re-applies the pre-reset shape (banner's 撤销 path)", async () => {
+    const s = surface()
+    await s.setPanel('u1', CFG_A)
+    await s.resetPanel('u1', { by: 'butler' })
+    expect((await s.panel('u1')).source).toBe('default')
+    const r = await s.restoreSnapshot('u1')
+    expect(r.config).toEqual(CFG_A)
+    expect(r.source).toBe('member')
+  })
+
+  it('a no-op reset (already default) does NOT clobber the undo slot', async () => {
+    const s = surface()
+    await s.setPanel('u1', CFG_A) // slot: null (was default)
+    await s.restoreSnapshot('u1') // back to default; slot: CFG_A
+    await s.resetPanel('u1') // already default — slot must stay CFG_A
+    expect((await s.restoreSnapshot('u1')).config).toEqual(CFG_A)
+  })
+
+  it("lastChange attribution: butler write arms it, human write reads 'human'", async () => {
+    const s = surface()
+    expect((await s.panel('u1')).lastChange).toBeUndefined()
+    await s.setPanel('u1', CFG_A, { by: 'butler' })
+    const afterButler = await s.panel('u1')
+    expect(afterButler.lastChange?.by).toBe('butler')
+    expect(typeof afterButler.lastChange?.at).toBe('string')
+    // Default attribution ('human') — the web faces never pass opts.
+    await s.setPanel('u1', CFG_B)
+    expect((await s.panel('u1')).lastChange?.by).toBe('human')
+  })
+
+  it("a butler RESET still surfaces lastChange on the default panel (banner on 'default')", async () => {
+    const s = surface()
+    await s.setPanel('u1', CFG_A)
+    await s.resetPanel('u1', { by: 'butler' })
+    const r = await s.panel('u1')
+    expect(r.source).toBe('default')
+    expect(r.lastChange?.by).toBe('butler')
+  })
+
+  it("member undo click records 'human' — the banner disarms after 撤销", async () => {
+    const s = surface()
+    await s.setPanel('u1', CFG_A, { by: 'butler' })
+    await s.restoreSnapshot('u1') // no opts = the member clicked 撤销
+    expect((await s.panel('u1')).lastChange?.by).toBe('human')
   })
 })

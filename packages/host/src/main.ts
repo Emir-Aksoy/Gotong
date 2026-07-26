@@ -1033,6 +1033,8 @@ async function main(): Promise<void> {
         peerCreatedTimes: () => identityForBackup.listPeers().map((p) => p.createdAt),
       })
     : undefined
+  // SDUI-M3/M4 — ONE panel store shared by web routes / template sink / butler.
+  const mePanelSurface = buildMePanelSurface({ spaceDir: space.root })
   // Per-user butler assembly lives in personal-butler-factory.ts (GUARD
   // extraction); refs() reads the forward-declared refs at butler-build time.
   const butlerFactory: ButlerFactory = buildButlerFactory({
@@ -1045,6 +1047,7 @@ async function main(): Promise<void> {
     runBroadcastOn: butlerRunBroadcastOn,
     embedder: butlerEmbedder?.embed,
     memoryLinks: butlerMemoryLinksOn,
+    panel: mePanelSurface,
     refs: () => ({
       governedAgents: butlerGovernedAgentsRef,
       workflowEditor: butlerGovernedWorkflowEditorRef,
@@ -2140,7 +2143,6 @@ async function main(): Promise<void> {
   // suggestion writes a REAL schedule row, so neither file can go stale.
   const connectorSlots = createConnectorSlotStore({ spaceDir: space.root })
   const scheduleSuggestions = createScheduleSuggestionStore({ spaceDir: space.root })
-  const mePanelSurface = buildMePanelSurface({ spaceDir: space.root })
 
   // FDE-M2 — golden-run acceptance: recorded at template import, run from the
   // admin workflows page THROUGH the member gate as the calling admin, judged
