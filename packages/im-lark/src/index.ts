@@ -10,6 +10,8 @@ export {
   type LarkLongConnection,
   defaultLarkConnectionFactory,
   VOICE_TRANSCRIBE_FAILED,
+  IMAGE_DESCRIBE_FAILED,
+  renderImageDescription,
 } from './bridge.js'
 export { opusDurationMs } from './audio.js'
 export {

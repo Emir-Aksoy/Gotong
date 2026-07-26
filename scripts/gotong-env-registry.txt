@@ -68,6 +68,7 @@ GOTONG_BUTLER_VOICE_KEY         # VOICE-M3 opt-in: TTS 端点的 Bearer key;只�
 GOTONG_BUTLER_VOICE_MODEL       # VOICE-M3 opt-in: TTS 模型名(wire 必填参数,无静默默认)
 GOTONG_BUTLER_VOICE_VOICE       # VOICE-M3 opt-in: 厂商官方系统音色 id(永不接真人克隆音色——民法典 1023 声音权)
 GOTONG_BUTLER_ASR_MODEL         # ASR-M3 opt-in: 语音收听 ASR 模型名;复用 VOICE_URL/_KEY 凭证,三者全设才开耳(飞书语音消息下载→转写→当文字走同一管道)
+GOTONG_BUTLER_VISION_MODEL      # VIS-M3 opt-in: 图片识别 VL 模型名;复用 VOICE_URL/_KEY 凭证,三者全设才开眼(飞书图片下载→识别成文字→当文字走同一管道;看≠授权)
 GOTONG_COOKIE_SECURE
 GOTONG_DEFAULT_LANG
 GOTONG_GATING

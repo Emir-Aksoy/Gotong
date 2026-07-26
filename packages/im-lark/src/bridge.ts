@@ -192,6 +192,18 @@ export interface LarkBridgeOptions {
    * Unset = today's byte-identical behavior (empty text, opaque URI).
    */
   transcriber?: (bytes: Uint8Array) => Promise<string | null>
+  /**
+   * VIS-M2 — opt-in inbound image description (mirror of `transcriber`).
+   * When set, an image/sticker message (Lark carries at most ONE attachment
+   * per message) has its bytes downloaded (`downloadResource` type=image,
+   * same `im:message` read permission) and fed here with the attachment's
+   * mime; the returned description lands in the message text as an explicit
+   * `(图片: …)` marker so the note flows through the NORMAL text pipeline
+   * (commands, butler, park — 看≠授权). `null` = could not describe → the
+   * text becomes an honest "(图片,识别失败)" marker instead of silence.
+   * Unset = today's byte-identical behavior (empty text, opaque URI).
+   */
+  imageDescriber?: (bytes: Uint8Array, mime: string) => Promise<string | null>
 }
 
 type Listener = (msg: ImMessage) => void | Promise<void>
@@ -207,6 +219,23 @@ const DELIVERED_CACHE_MAX = 512
  */
 export const VOICE_TRANSCRIBE_FAILED = '(语音消息,转写失败)'
 
+/**
+ * VIS-M2 — what an image message's text becomes when description was
+ * configured but could not produce one. Same honesty posture as the voice
+ * marker: the butler can tell the member "你发了张图但我没看清" instead of
+ * treating the message as empty. Exported so wiring / tests assert exactly it.
+ */
+export const IMAGE_DESCRIBE_FAILED = '(图片,识别失败)'
+
+/**
+ * VIS-M2 — how a successful description is rendered into the message text.
+ * The parenthetical frame matters: the model must read this as "a rendering
+ * of an image the member sent", never as the member's own words.
+ */
+export function renderImageDescription(text: string): string {
+  return `(图片: ${text})`
+}
+
 export class LarkBridge implements ImBridge {
   readonly platform = 'lark'
 
@@ -217,6 +246,7 @@ export class LarkBridge implements ImBridge {
   private readonly connectionFactory: LarkConnectionFactory
   private readonly onError: (err: unknown) => void
   private readonly transcriber?: (bytes: Uint8Array) => Promise<string | null>
+  private readonly imageDescriber?: (bytes: Uint8Array, mime: string) => Promise<string | null>
 
   private running = false
   private listeners: Listener[] = []
@@ -244,6 +274,7 @@ export class LarkBridge implements ImBridge {
     this.connectionFactory = opts.connectionFactory ?? defaultLarkConnectionFactory
     this.onError = opts.onError ?? (() => {})
     this.transcriber = opts.transcriber
+    this.imageDescriber = opts.imageDescriber
   }
 
   async start(): Promise<void> {
@@ -371,6 +402,7 @@ export class LarkBridge implements ImBridge {
     const imMsg = larkToImMessage(event, { stripBotMentions: this.stripBotMentions })
     if (!imMsg) return
     await this.transcribeVoiceNote(imMsg, messageId)
+    await this.describeInboundImage(imMsg, messageId)
     await this.deliver(imMsg)
   }
 
@@ -406,6 +438,41 @@ export class LarkBridge implements ImBridge {
       this.onError(err)
       msg.text = VOICE_TRANSCRIBE_FAILED
     }
+  }
+
+  /**
+   * VIS-M2 — fill an image/sticker message's text with a description, in
+   * place (mirror of {@link transcribeVoiceNote}).
+   *
+   * Fires only when ALL of: a describer is configured, an image attachment
+   * is present (Lark messages carry at most one attachment, and image
+   * messages carry no caption text by spec), and the event carried a real
+   * message_id (the download endpoint needs message_id + file_key as a
+   * PAIR). Unset describer = byte-identical passthrough.
+   *
+   * Failure is honest, never silent: download/describe problems set the
+   * fixed "(图片,识别失败)" marker and surface via onError. Success renders
+   * as "(图片: …)" — an explicit frame so downstream reads it as a
+   * rendering of the image, not the member's own words. The attachment
+   * stays either way (the description is a rendering, not the picture).
+   */
+  private async describeInboundImage(msg: ImMessage, messageId: unknown): Promise<void> {
+    if (!this.imageDescriber) return
+    if (typeof messageId !== 'string' || messageId.length === 0) return
+    const image = (msg.attachments ?? []).find((a) => a.kind === 'image')
+    const parsed = parseLarkUri(image?.url)
+    if (!image || !parsed || parsed.kind !== 'image') return
+    let rendered: string
+    try {
+      const bytes = await this.client.downloadResource(messageId, parsed.key, 'image')
+      const text = await this.imageDescriber(bytes, image.mime ?? 'image/jpeg')
+      rendered = text === null ? IMAGE_DESCRIBE_FAILED : renderImageDescription(text)
+    } catch (err) {
+      this.onError(err)
+      rendered = IMAGE_DESCRIBE_FAILED
+    }
+    // Image messages have empty text in practice; keep any text defensively.
+    msg.text = msg.text.length > 0 ? `${msg.text}\n${rendered}` : rendered
   }
 
   private recordDelivered(messageId: unknown): boolean {

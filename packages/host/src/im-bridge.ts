@@ -54,6 +54,7 @@ import { WechatBridge } from '@gotong/im-wechat'
 import { WebSocket as NodeWebSocket } from 'ws'
 
 import type { ButlerHearing } from './butler-hearing.js'
+import type { ButlerSeeing } from './butler-seeing.js'
 import { ButlerOutbox } from './butler-outbox.js'
 import { ButlerReachableRegistry, type ButlerPushResult } from './butler-reachable.js'
 import type { ButlerVoice } from './butler-voice.js'
@@ -746,6 +747,7 @@ function buildVaultablePlatformBridge(
   creds: ResolvedImCreds,
   log: ImLogger,
   hearing?: Pick<ButlerHearing, 'transcribe'>,
+  seeing?: Pick<ButlerSeeing, 'describe'>,
 ): ImBridge {
   if (platform === 'telegram') {
     return new TelegramBridge({
@@ -765,6 +767,8 @@ function buildVaultablePlatformBridge(
     appSecret: creds.fields.appSecret!,
     // ASR-M3 — absent hearing = no transcriber key at all (inbound byte-identical).
     ...(hearing ? { transcriber: foldHearingTranscriber(hearing, log) } : {}),
+    // VIS-M3 — absent seeing = no describer key at all (inbound byte-identical).
+    ...(seeing ? { imageDescriber: foldSeeingDescriber(seeing, log) } : {}),
     onError: (err) => log.warn('lark bridge error', { err: String(err) }),
   })
 }
@@ -785,6 +789,27 @@ export function foldHearingTranscriber(
     const r = await hearing.transcribe(Buffer.from(bytes))
     if (r.kind === 'text') return r.text
     if (r.kind === 'failed') log.warn('im hearing: transcription failed', { reason: r.reason })
+    return null
+  }
+}
+
+/**
+ * VIS-M3 — fold the three-state {@link ButlerSeeing} result into the Lark
+ * bridge's `string | null` image-describer contract (mirror of
+ * {@link foldHearingTranscriber}): `text` → description, `skipped`
+ * (non-image / oversize — in-design) → quiet null, `failed` (infra) → warn +
+ * null. The bridge substitutes its honest "(图片,识别失败)" marker for null;
+ * `describe()` itself never throws. Exported for the anti-corrosion test —
+ * production reaches it only through the Lark construction above.
+ */
+export function foldSeeingDescriber(
+  seeing: Pick<ButlerSeeing, 'describe'>,
+  log: ImLogger,
+): (bytes: Uint8Array, mime: string) => Promise<string | null> {
+  return async (bytes, mime) => {
+    const r = await seeing.describe(Buffer.from(bytes), mime)
+    if (r.kind === 'text') return r.text
+    if (r.kind === 'failed') log.warn('im seeing: image description failed', { reason: r.reason })
     return null
   }
 }
@@ -847,6 +872,16 @@ export interface StartImBridgesOptions {
    * inbound handling byte-identical (voice notes arrive with empty text).
    */
   hearing?: Pick<ButlerHearing, 'transcribe'>
+  /**
+   * VIS-M3 — opt-in inbound image seeing (`butlerSeeingFromEnv`, shared
+   * `GOTONG_BUTLER_VOICE_URL`/`_KEY` + `GOTONG_BUTLER_VISION_MODEL` all set).
+   * Lark photos/stickers are downloaded and described BEFORE dispatch so the
+   * butler reads what was sent; `skipped`/`failed` fold to null → the bridge
+   * substitutes its honest "(图片,识别失败)" marker. 看≠授权: the description
+   * walks the same governed pipeline as typed text. Absent → inbound handling
+   * byte-identical (image messages arrive with empty text).
+   */
+  seeing?: Pick<ButlerSeeing, 'describe'>
   /**
    * F1 — where to persist reachable routes (`<space>/butler/reachable`). When set,
    * `startImBridges` builds a {@link ButlerReachableRegistry}, rehydrates it, and
@@ -986,7 +1021,7 @@ export async function startImBridges(
   const makeVaultable = (platform: ImVaultPlatform, creds: ResolvedImCreds): ImBridge =>
     opts.makeBridge
       ? opts.makeBridge(platform, creds)
-      : buildVaultablePlatformBridge(platform, creds, opts.log, opts.hearing)
+      : buildVaultablePlatformBridge(platform, creds, opts.log, opts.hearing, opts.seeing)
 
   const telegram = resolveImCreds('telegram', opts.identity, opts.log)
   if (telegram) {

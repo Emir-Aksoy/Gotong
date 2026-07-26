@@ -68,6 +68,12 @@ export interface ImBridgeWiringDeps {
    * 缺省 → 入站处理逐字节不变(语音消息保持空文本)。
    */
   hearing?: ImBridgeHearing
+  /**
+   * VIS-M3 — opt-in 图片识别(main.ts 构造 `butlerSeeingFromEnv()`)。
+   * 给了它,飞书图片/表情在派发前下载+识别成文字(看≠授权,后续管道同打字);
+   * 缺省 → 入站处理逐字节不变(图片消息保持空文本)。
+   */
+  seeing?: ImBridgeSeeing
 }
 
 /** 窄鸭子:只要 synthesize 一面(butler-voice 的 ButlerVoice 天然满足)。 */
@@ -85,6 +91,18 @@ export interface ImBridgeVoiceSynth {
 export interface ImBridgeHearing {
   transcribe(
     bytes: Buffer,
+  ): Promise<
+    | { kind: 'text'; text: string }
+    | { kind: 'skipped'; reason: string }
+    | { kind: 'failed'; reason: string }
+  >
+}
+
+/** 窄鸭子:只要 describe 一面(butler-seeing 的 ButlerSeeing 天然满足)。 */
+export interface ImBridgeSeeing {
+  describe(
+    bytes: Buffer,
+    mime: string,
   ): Promise<
     | { kind: 'text'; text: string }
     | { kind: 'skipped'; reason: string }
@@ -129,6 +147,8 @@ export async function armImBridgeWiring(deps: ImBridgeWiringDeps): Promise<ImBri
     ...(deps.voice ? { voice: deps.voice } : {}),
     // ASR-M3 — opt-in 语音收听;未配 undefined = 入站逐字节不变。
     ...(deps.hearing ? { hearing: deps.hearing } : {}),
+    // VIS-M3 — opt-in 图片识别;未配 undefined = 入站逐字节不变。
+    ...(deps.seeing ? { seeing: deps.seeing } : {}),
     // CARE-M8 — 投递失败入盘、成员可达时重投的每成员 outbox。给了它,
     // reachable push 的失败不再只是一行日志(短暂失联的成员不漏播报/提醒)。
     outboxDir: join(deps.spaceRoot, 'butler', 'outbox'),

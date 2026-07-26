@@ -264,6 +264,7 @@ import { buildButlerBackupOps } from './personal-butler-backup.js'
 import { buildButlerFactory } from './personal-butler-factory.js'
 import { butlerEmbedderFromEnv } from './butler-embedder.js'
 import { butlerHearingFromEnv } from './butler-hearing.js'
+import { butlerSeeingFromEnv } from './butler-seeing.js'
 import { butlerVoiceFromEnv } from './butler-voice.js'
 import {
   buildOnboardingKeyCheck,
@@ -955,11 +956,13 @@ async function main(): Promise<void> {
   // M-EMB1 — opt-in real embedder for 阿同 recall (unset ⇒ local default, byte-identical).
   const butlerEmbedder = butlerEmbedderFromEnv()
   if (butlerEmbedder) log.info(butlerEmbedder.disclosure, { dataLeavesBox: butlerEmbedder.dataLeavesBox })
-  // VOICE-M3/ASR-M3 — opt-in 语音嘴+耳(URL/_KEY 共享;_MODEL+_VOICE 开嘴、_ASR_MODEL 开耳;未配 ⇒ 字节不变)。
+  // VOICE-M3/ASR-M3/VIS-M3 — opt-in 语音嘴+耳+眼(URL/_KEY 共享;_MODEL+_VOICE 开嘴、_ASR_MODEL 开耳、_VISION_MODEL 开眼;未配 ⇒ 字节不变)。
   const butlerVoice = butlerVoiceFromEnv()
   if (butlerVoice) log.info(butlerVoice.disclosure, { dataLeavesBox: butlerVoice.dataLeavesBox })
   const butlerHearing = butlerHearingFromEnv()
   if (butlerHearing) log.info(butlerHearing.disclosure, { dataLeavesBox: butlerHearing.dataLeavesBox })
+  const butlerSeeing = butlerSeeingFromEnv()
+  if (butlerSeeing) log.info(butlerSeeing.disclosure, { dataLeavesBox: butlerSeeing.dataLeavesBox })
   // BF-M7 — governed set(建/改/删自己的 agent+改工作流)逐项 park 到 /me;执行器=/me steward 同一服务(闸不越面);refs lazy 读,缺 ⇒ 纯记忆。
   let butlerGovernedAgentsRef: StewardAgentDirectory | undefined
   let butlerGovernedWorkflowEditorRef: StewardWorkflowEditor | undefined
@@ -2262,9 +2265,10 @@ async function main(): Promise<void> {
       spaceRoot: space.root,
       health: adminHealth,
       defaultLang: config.defaultLang,
-      // VOICE-M3/ASR-M3 — opt-in 语音回复+收听;未配 undefined = 字节不变。
+      // VOICE-M3/ASR-M3/VIS-M3 — opt-in 语音回复+收听+图片识别;未配 undefined = 字节不变。
       ...(butlerVoice ? { voice: butlerVoice } : {}),
       ...(butlerHearing ? { hearing: butlerHearing } : {}),
+      ...(butlerSeeing ? { seeing: butlerSeeing } : {}),
       // IMA-M2 — /inbox /approve /deny:读走 InboxStore、写走 HostInboxService(既有权威)。
       ...(inboxStore && inboxService ? { approvals: { store: inboxStore, inbox: inboxService } } : {}),
       // CARE-M5 — 恢复探活骑 onboarding key check 只读活体链;lazy ref 兜未就绪;status==='ok' 才算真恢复。

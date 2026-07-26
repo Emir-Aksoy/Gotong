@@ -17,8 +17,10 @@ import type { ImMessage } from '@gotong/im-adapter'
 import { afterEach, describe, expect, it } from 'vitest'
 
 import {
+  IMAGE_DESCRIBE_FAILED,
   LarkBridge,
   VOICE_TRANSCRIBE_FAILED,
+  renderImageDescription,
   type LarkConnectionFactory,
   type LarkConnectionFactoryParams,
 } from '../src/bridge.js'
@@ -165,6 +167,7 @@ function makeBridge(opts: {
   onError?: (e: unknown) => void
   stripBotMentions?: boolean
   transcriber?: (bytes: Uint8Array) => Promise<string | null>
+  imageDescriber?: (bytes: Uint8Array, mime: string) => Promise<string | null>
 }): LarkBridge {
   return new LarkBridge({
     appId: 'cli_x',
@@ -174,6 +177,7 @@ function makeBridge(opts: {
     onError: opts.onError,
     stripBotMentions: opts.stripBotMentions,
     transcriber: opts.transcriber,
+    imageDescriber: opts.imageDescriber,
   })
 }
 
@@ -622,6 +626,170 @@ describe('LarkBridge ASR-M2 — voice-note transcription', () => {
     })
     expect(messages).toHaveLength(1)
     expect(messages[0].text).toBe('hello bot')
+    expect(called).toBe(0)
+    expect(client.downloads).toHaveLength(0)
+  })
+})
+
+/**
+ * VIS-M2 — inbound image description (mirror of the ASR-M2 block).
+ *
+ * What must hold:
+ *  ① opt-in: no describer ⇒ byte-identical passthrough (empty text, no
+ *    download, opaque lark-image: URI untouched).
+ *  ② the description lands as an explicit "(图片: …)" frame and flows down
+ *    the NORMAL listener path; the image attachment stays (the description
+ *    is a rendering, not the picture).
+ *  ③ failure is honest, never silent: download / describe problems set the
+ *    fixed "(图片,识别失败)" marker and surface via onError.
+ *  ④ the download pairs message_id + file_key exactly with type='image',
+ *    and the describer receives the attachment's mime (sticker=webp).
+ */
+describe('LarkBridge VIS-M2 — inbound image description', () => {
+  const IMAGE_EVENT = (messageId = 'om_img1') =>
+    buildEvent({
+      messageId,
+      message: {
+        message_type: 'image',
+        content: JSON.stringify({ image_key: 'ik_photo1' }),
+      },
+    })
+
+  async function run(opts: {
+    client?: FakeLarkClient
+    imageDescriber?: (bytes: Uint8Array, mime: string) => Promise<string | null>
+    onError?: (e: unknown) => void
+    event?: LarkMessageReceiveEvent
+  }): Promise<{ messages: ImMessage[]; client: FakeLarkClient }> {
+    const client = opts.client ?? new FakeLarkClient()
+    const conn = fakeConnection()
+    const bridge = makeBridge({
+      factory: conn.factory,
+      client,
+      imageDescriber: opts.imageDescriber,
+      onError: opts.onError,
+    })
+    const messages: ImMessage[] = []
+    bridge.onMessage((m) => {
+      messages.push(m)
+    })
+    await bridge.start()
+    await conn.emit(opts.event ?? IMAGE_EVENT())
+    await bridge.stop()
+    return { messages, client }
+  }
+
+  it('② downloads the image, describes it, and delivers the framed description', async () => {
+    const seen: Array<{ bytes: Uint8Array; mime: string }> = []
+    const { messages, client } = await run({
+      imageDescriber: async (bytes, mime) => {
+        seen.push({ bytes, mime })
+        return '一张超市小票,合计 RM 45.80'
+      },
+    })
+    expect(messages).toHaveLength(1)
+    expect(messages[0].text).toBe('(图片: 一张超市小票,合计 RM 45.80)')
+    expect(messages[0].text).toBe(renderImageDescription('一张超市小票,合计 RM 45.80'))
+    // ④ message_id + file_key as a PAIR, type='image'.
+    expect(client.downloads).toEqual([{ messageId: 'om_img1', fileKey: 'ik_photo1', type: 'image' }])
+    // The describer saw exactly the downloaded bytes + the attachment mime.
+    expect(seen).toHaveLength(1)
+    expect(seen[0]!.bytes).toBe(client.downloadBytes)
+    expect(seen[0]!.mime).toBe('image/jpeg')
+    // ② the attachment survives — the description is a rendering, not the picture.
+    expect(messages[0].attachments?.[0]?.kind).toBe('image')
+    expect(messages[0].attachments?.[0]?.url).toBe('lark-image:ik_photo1')
+  })
+
+  it('④ a sticker rides the same leg with its webp mime', async () => {
+    const mimes: string[] = []
+    const { messages } = await run({
+      imageDescriber: async (_bytes, mime) => {
+        mimes.push(mime)
+        return '一个比心的卡通表情'
+      },
+      event: buildEvent({
+        messageId: 'om_sticker1',
+        message: { message_type: 'sticker', content: JSON.stringify({ file_key: 'fk_sticker1' }) },
+      }),
+    })
+    expect(mimes).toEqual(['image/webp'])
+    expect(messages[0].text).toBe(renderImageDescription('一个比心的卡通表情'))
+  })
+
+  it('① no describer ⇒ byte-identical passthrough: empty text, zero downloads', async () => {
+    const { messages, client } = await run({})
+    expect(messages).toHaveLength(1)
+    expect(messages[0].text).toBe('')
+    expect(client.downloads).toHaveLength(0)
+  })
+
+  it('③ describer returning null ⇒ honest failure marker, message still delivered', async () => {
+    const { messages } = await run({ imageDescriber: async () => null })
+    expect(messages).toHaveLength(1)
+    expect(messages[0].text).toBe(IMAGE_DESCRIBE_FAILED)
+  })
+
+  it('③ download failure ⇒ marker + onError, never a dropped message', async () => {
+    const client = new FakeLarkClient()
+    client.downloadError = new Error('resource gone')
+    const errors: unknown[] = []
+    const { messages } = await run({
+      client,
+      imageDescriber: async () => 'should not be reached',
+      onError: (e) => {
+        errors.push(e)
+      },
+    })
+    expect(messages).toHaveLength(1)
+    expect(messages[0].text).toBe(IMAGE_DESCRIBE_FAILED)
+    expect(errors).toHaveLength(1)
+  })
+
+  it('③ describer throwing ⇒ marker + onError (fail-soft, listener still runs)', async () => {
+    const errors: unknown[] = []
+    const { messages } = await run({
+      imageDescriber: async () => {
+        throw new Error('vision down')
+      },
+      onError: (e) => {
+        errors.push(e)
+      },
+    })
+    expect(messages).toHaveLength(1)
+    expect(messages[0].text).toBe(IMAGE_DESCRIBE_FAILED)
+    expect(errors).toHaveLength(1)
+  })
+
+  it('text messages never touch the describer (no image attachment)', async () => {
+    let called = 0
+    const { messages, client } = await run({
+      imageDescriber: async () => {
+        called += 1
+        return 'nope'
+      },
+      event: buildEvent({ messageId: 'om_text2' }),
+    })
+    expect(messages).toHaveLength(1)
+    expect(messages[0].text).toBe('hello bot')
+    expect(called).toBe(0)
+    expect(client.downloads).toHaveLength(0)
+  })
+
+  it('a voice note never touches the describer (audio rides the ASR leg only)', async () => {
+    let called = 0
+    const { messages, client } = await run({
+      imageDescriber: async () => {
+        called += 1
+        return 'nope'
+      },
+      event: buildEvent({
+        messageId: 'om_voice2',
+        message: { message_type: 'audio', content: JSON.stringify({ file_key: 'fk_v2' }) },
+      }),
+    })
+    expect(messages).toHaveLength(1)
+    expect(messages[0].text).toBe('')
     expect(called).toBe(0)
     expect(client.downloads).toHaveLength(0)
   })

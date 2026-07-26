@@ -38,6 +38,7 @@ import type {
 import {
   handleImMessage,
   foldHearingTranscriber,
+  foldSeeingDescriber,
   makeIdentityImBindingResolver,
   startImBridges,
   type HostImConfig,
@@ -622,6 +623,56 @@ describe('ASR-M3 — foldHearingTranscriber', () => {
     expect(warns).toHaveLength(1)
     expect(warns[0]!.msg).toContain('transcription failed')
     expect(warns[0]!.data).toMatchObject({ reason: '未装 ffmpeg — 语音转写需要它转码 wav' })
+  })
+})
+
+// VIS-M3 — the seeing→describer fold, ASR 折叠的镜像:text → 描述串,
+// skipped(设计内:超限/非图/空结果)→ 安静 null,failed(基建)→ warn + null。
+// mime 必须原样穿透(飞书 image=jpeg / sticker=webp 的判定在桥层)。
+describe('VIS-M3 — foldSeeingDescriber', () => {
+  function warnCollector(): { warns: Array<{ msg: string; data?: unknown }>; log: Logger } {
+    const warns: Array<{ msg: string; data?: unknown }> = []
+    return {
+      warns,
+      log: { ...silentLogger, warn: (msg: string, data?: unknown) => void warns.push({ msg, data }) },
+    }
+  }
+
+  it('text result becomes the description string (bytes + mime pass through intact)', async () => {
+    const { warns, log } = warnCollector()
+    const seen: Array<{ bytes: Buffer; mime: string }> = []
+    const fold = foldSeeingDescriber(
+      {
+        describe: async (bytes, mime) => (seen.push({ bytes, mime }), { kind: 'text', text: '一张电费单,金额 89 元' }),
+      },
+      log,
+    )
+    await expect(fold(new Uint8Array([0xff, 0xd8, 0xff]), 'image/webp')).resolves.toBe('一张电费单,金额 89 元')
+    expect(Array.from(seen[0]!.bytes)).toEqual([0xff, 0xd8, 0xff])
+    expect(seen[0]!.mime).toBe('image/webp')
+    expect(warns).toHaveLength(0)
+  })
+
+  it('skipped (oversize / non-image — in-design) folds to null with ZERO warns', async () => {
+    const { warns, log } = warnCollector()
+    const fold = foldSeeingDescriber(
+      { describe: async () => ({ kind: 'skipped', reason: '图片超过 10MB 上限' }) },
+      log,
+    )
+    await expect(fold(new Uint8Array([1]), 'image/jpeg')).resolves.toBeNull()
+    expect(warns).toHaveLength(0)
+  })
+
+  it('failed (infra) folds to null AND warns with the reason', async () => {
+    const { warns, log } = warnCollector()
+    const fold = foldSeeingDescriber(
+      { describe: async () => ({ kind: 'failed', reason: '识别请求超时' }) },
+      log,
+    )
+    await expect(fold(new Uint8Array([1]), 'image/jpeg')).resolves.toBeNull()
+    expect(warns).toHaveLength(1)
+    expect(warns[0]!.msg).toContain('image description failed')
+    expect(warns[0]!.data).toMatchObject({ reason: '识别请求超时' })
   })
 })
 
