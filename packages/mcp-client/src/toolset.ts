@@ -105,9 +105,11 @@ export interface McpToolsetOptions {
    * elicitation entirely (byte-identical behaviour).
    *
    * URL-mode elicitation (server asks the client to open a browser) is
-   * deliberately NOT declared — it is a different trust surface; an
-   * off-spec server sending it anyway is declined without ever
-   * reaching the handler.
+   * deliberately NOT declared — it is a different trust surface. The SDK
+   * (≥1.29) enforces the declared modes itself: a url-mode request is
+   * answered with an InvalidParams error BEFORE any handler runs, so the
+   * server sees a protocol-level rejection, not a decline result. The
+   * handler never receives url-mode requests either way.
    */
   elicitation?: McpElicitationHandler
 
@@ -609,8 +611,12 @@ export class McpToolset extends EventEmitter {
    * handler. Three hard rules:
    *
    *   1. URL-mode (or anything without a flat `requestedSchema`) never
-   *      reaches the handler — we only declared `form`, so an off-spec
-   *      server sending url-mode anyway gets a flat decline.
+   *      reaches the handler. The SDK (≥1.29) does the real gating: it
+   *      schema-validates the request and checks the declared modes, and
+   *      rejects url-mode with an InvalidParams error before our code
+   *      runs. The guard below is defense-in-depth for a looser SDK, not
+   *      the active path — and note the SDK's rejection is a protocol
+   *      error on the server side, NOT a decline result.
    *   2. A handler crash maps to `cancel`, never a transport error —
    *      one bad answerer must not kill the JSON-RPC channel (and an
    *      internal failure is not the user saying "no").

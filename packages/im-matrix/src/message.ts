@@ -167,6 +167,12 @@ export function matrixToImMessage(
     attachments: attachments.length > 0 ? attachments : undefined,
     messageId: event.event_id,
     chatId: roomId,
+    // GRP — deliberately no `chatKind`: Matrix events don't say whether the
+    // room is a DM. "Direct" is client-side `m.direct` account data, not a
+    // room property, and answering it would take a per-room state fetch (a
+    // "DM" room can also silently gain members later). Absent = the host's
+    // direct default, i.e. multi-user Matrix rooms keep pre-GRP behavior —
+    // the one documented residual; see `ImMessage.chatKind` in im-adapter.
     ts: event.origin_server_ts,
   }
 }

@@ -193,6 +193,18 @@ export function slackToImMessage(
     attachments: attachments.length > 0 ? attachments : undefined,
     messageId: event.ts,
     chatId: event.channel,
+    // GRP — `channel_type` when Slack sends it ('im' is the only DM kind;
+    // mpim is a multi-person room). Fall back to the documented id prefix
+    // (D… IM / C… channel / G… private group); anything else stays absent.
+    ...(event.channel_type === 'im'
+      ? { chatKind: 'direct' as const }
+      : event.channel_type === 'channel' || event.channel_type === 'group' || event.channel_type === 'mpim'
+        ? { chatKind: 'group' as const }
+        : event.channel.startsWith('D')
+          ? { chatKind: 'direct' as const }
+          : event.channel.startsWith('C') || event.channel.startsWith('G')
+            ? { chatKind: 'group' as const }
+            : {}),
     ts,
   }
 }

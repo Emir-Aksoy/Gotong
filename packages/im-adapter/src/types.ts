@@ -91,8 +91,15 @@ export interface ImMessage {
   /**
    * GRP — what kind of chat the message arrived in. `'group'` = a shared
    * room where multiple humans see the thread; `'direct'` = a 1:1 DM.
-   * Absent = the bridge doesn't discriminate — consumers treat that as
-   * direct (the conservative default).
+   *
+   * Every bridge whose wire can tell the two apart MUST set this
+   * (telegram / lark / wechat / qq / slack / discord all do): consumers
+   * key session windows AND push routing off it, so a group mislabeled
+   * direct records a shared room as someone's personal push address.
+   * Absent is reserved for structurally-undiscriminable wires (today:
+   * matrix, where "DM" is client-side account data) and malformed
+   * payloads — consumers fall back to direct, which for those rooms
+   * keeps the pre-GRP behavior. That residual is documented, not silent.
    */
   chatKind?: 'direct' | 'group'
   /** Unix ms when the platform claims the message was sent. */

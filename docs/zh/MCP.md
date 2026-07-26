@@ -310,13 +310,18 @@ MCP 2025-06 起,server 可以在一次 `tools/call` 进行中反问 client
 
 - **agent 路径 = 声明能力 + 确定性婉拒**。`McpToolset` 声明
   `elicitation.form` 并对每个请求答 `decline` + 记一条结构化 warn
-  （server 名 + 问题 + 字段名）。为什么不把问题 park 给成员:elicit
+  （server 名 + 清洗截断后的问题摘要 + 字段名摘要,原始长度以
+  `messageChars`/`fieldCount` 保留——message/fields 是对端任意内容,
+  日志面不给注入面当喇叭）。为什么不把问题 park 给成员:elicit
   活在**一次 callTool 的等待窗内**（客户端超时默认 60s）,而收件箱 / IM
   审批是分钟到小时级,物理上塞不进这扇窗。`decline` 是规范一等答案
   （spec 要求 server 优雅降级）,比不声明更好——规范正确的连接器由此走
-  自己设计的 decline 分支,而不是抛「client 不支持」。
-- **url 模式不声明**。server 要求打开浏览器链接是另一个信任面;越 wire
-  发来的 url-mode 请求不经 handler 直接婉拒。
+  自己设计的 decline 分支,而不是抛「client 不支持」。跨 hub 共享
+  server 的 proxy 路径（第 7 节）同一策略。
+- **url 模式不声明**。server 要求打开浏览器链接是另一个信任面。硬发
+  url-mode 请求的 server 拿到的是 **SDK 层（≥1.29）的 InvalidParams
+  协议错误**——SDK 先按声明的 mode 把关,请求根本到不了 handler;
+  handler 里的同型守卫只是纵深防御,不是活路径。
 - **缝已留**:`McpToolsetOptions.elicitation` 可注入任意应答器（见
   `@gotong/mcp-client` 的 `McpElicitationHandler`）。未注入时能力集保持
   `{}`,与从前逐字节一致。将来若真实连接器高频需要交互式应答,换

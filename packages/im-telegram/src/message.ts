@@ -124,6 +124,14 @@ export function telegramToImMessage(msg: TelegramMessage): ImMessage | null {
     attachments: attachments.length > 0 ? attachments : undefined,
     messageId: String(msg.message_id),
     chatId: String(msg.chat.id),
+    // GRP — the host must not treat a group thread as a private one (session
+    // window + push routing both key off this). Unrecognized future values map
+    // to nothing rather than guessing.
+    ...(msg.chat.type === 'private'
+      ? { chatKind: 'direct' as const }
+      : msg.chat.type === 'group' || msg.chat.type === 'supergroup' || msg.chat.type === 'channel'
+        ? { chatKind: 'group' as const }
+        : {}),
     // Telegram `date` is unix seconds; ImMessage wants ms.
     ts: msg.date * 1000,
   }

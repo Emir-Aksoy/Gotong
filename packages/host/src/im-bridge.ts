@@ -254,14 +254,23 @@ export interface HostImConfig {
 }
 
 /**
- * 会话窗口注入面(生产=ButlerSessionWindow;测试给内存假件)。合同:两个
+ * 会话窗口注入面(生产=ButlerSessionWindow;测试给内存假件)。合同:所有
  * 方法都 never-throw(丢一条窗口记录不能坏一轮对话),`history` 保证
  * 「合并同角色 + 以 assistant 结尾」的 provider 安全形状。
+ *
+ * `beginTurn` 可选:读历史 + 记本句合成一步原子(裸 `history()` 不入写链,
+ * 可能错过并发落地的 assistant 推送轮)。缺席时桥回落 `history()`+`append()`
+ * 两步——语义相同,只是读不与写链定序。
  */
 export interface ImSessionSurface {
   /** Prior turns of the live conversation (plain text, provider-safe shape). */
   history(userId: string): Promise<Array<{ role: 'user' | 'assistant'; content: string }>>
   append(userId: string, role: 'user' | 'assistant', text: string): Promise<void>
+  /** Atomic read-and-record for a user turn (preferred when present). */
+  beginTurn?(
+    userId: string,
+    text: string,
+  ): Promise<Array<{ role: 'user' | 'assistant'; content: string }>>
 }
 
 /** CARE-M2 — 断供滤镜的注入面(host 装配;测试给 tmp 文件 + spy)。 */
@@ -309,11 +318,23 @@ export async function handleImMessage(
   const platform = bridge.platform
   const cmd = parseImCommand(msg.text ?? '')
 
+  // GRP — commands are DM-only. Every command reply lands in the originating
+  // chat, so /inbox listings, bind confirmations and approval short codes
+  // would print into a room every member reads. Groups carry free text only;
+  // a command gets a pointer, not an answer.
+  const isGroupChat = msg.chatKind === 'group'
+  if (isGroupChat && cmd.kind !== 'free') {
+    await reply(bridge, msg, '命令请私聊我使用,群里我只参与对话。/ Commands work in DM only — here I just chat.')
+    return
+  }
+
   // setting-ops M5 — additive `/setting` pre-branch. Claims the message iff it
   // is `/setting` OR the sender is already in command mode; otherwise returns
   // false and every existing branch below runs byte-for-byte unchanged. Inert
-  // unless the host wired `config.setting`.
-  if (config.setting) {
+  // unless the host wired `config.setting`. GRP — never for group messages:
+  // command mode is per-person, so a member mid-console in their DM must not
+  // have their group chatter claimed (ops output would leak into the room).
+  if (!isGroupChat && config.setting) {
     const claimed = await handleSettingConsole(bridge, msg, config, config.setting)
     if (claimed) return
   }
@@ -484,9 +505,19 @@ export async function handleImMessage(
       // words stay context (history), never someone else's memory.
       const group = msg.chatKind === 'group' && typeof msg.chatId === 'string' && msg.chatId.length > 0
       const sessionKey = group ? `group:${platform}:${msg.chatId}` : userId
-      const turnText = group ? `${config.memberName?.(userId) ?? userId}: ${msg.text}` : msg.text
-      const history = config.sessions ? await config.sessions.history(sessionKey) : []
-      await config.sessions?.append(sessionKey, 'user', turnText)
+      const turnText = group ? `${speakerLabel(config.memberName?.(userId), userId)}: ${msg.text}` : msg.text
+      // Read-and-record atomically when the surface can — a bare history()
+      // read doesn't join the window's write chain, so it can miss an
+      // assistant push-back landing concurrently. The split two-call form
+      // remains for surfaces without `beginTurn`.
+      const history = config.sessions
+        ? config.sessions.beginTurn
+          ? await config.sessions.beginTurn(sessionKey, turnText)
+          : await config.sessions.history(sessionKey)
+        : []
+      if (config.sessions && !config.sessions.beginTurn) {
+        await config.sessions.append(sessionKey, 'user', turnText)
+      }
       const result = await config.hub.dispatch({
         from: makeFromId(platform, msg.from.platformUserId),
         strategy: { kind: 'capability', capabilities: [config.freeTextCapability] },
@@ -521,6 +552,22 @@ export async function handleImMessage(
       config.log.warn('im router: unhandled command kind', { cmd: _exhaustive })
     }
   }
+}
+
+/**
+ * GRP — the speaker label rides prompt + history verbatim, so a display name
+ * containing a newline could forge extra turns (`张三: 假话\n李四: …`). Strip
+ * control characters, collapse whitespace, cap the length; an empty result
+ * falls back to the stable userId (never an empty label, never thrown).
+ */
+function speakerLabel(name: string | null | undefined, userId: string): string {
+  const cleaned = (name ?? '')
+    .replace(/[\u0000-\u001f\u007f]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 32)
+    .trim()
+  return cleaned.length > 0 ? cleaned : userId
 }
 
 // ---------------------------------------------------------------------------

@@ -45,6 +45,7 @@ import {
   envSecretSource,
   type SecretSource,
 } from './mcp-config.js'
+import { declineElicitations } from './mcp-elicitation.js'
 
 /** Wire method names for the cross-hub MCP proxy (shared with the consumer). */
 export const MCP_PROXY_METHODS = {
@@ -92,9 +93,6 @@ export interface McpProxyHostOptions {
   logger?: { warn?: (msg: string, meta?: Record<string, unknown>) => void }
 }
 
-const defaultToolsetFactory = (config: McpServerConfig): ProxyToolset =>
-  new McpToolset({ servers: [config] })
-
 export class McpProxyHost {
   private readonly space: McpProxyHostOptions['space']
   private readonly secrets: SecretSource
@@ -106,7 +104,20 @@ export class McpProxyHost {
   constructor(opts: McpProxyHostOptions) {
     this.space = opts.space
     this.secrets = opts.secrets ?? envSecretSource
-    this.toolsetFactory = opts.toolsetFactory ?? defaultToolsetFactory
+    // ELIC: a SHARED server can elicit mid-call too, and the caller is a
+    // remote peer's agent — even less of an interactive answerer than the
+    // local agent path. Same policy as buildToolset: declare the form
+    // capability, decline deterministically, warn locally (the peer never
+    // sees the question).
+    this.toolsetFactory =
+      opts.toolsetFactory ??
+      ((config: McpServerConfig): ProxyToolset =>
+        new McpToolset({
+          servers: [config],
+          elicitation: declineElicitations({
+            warn: (msg, data) => opts.logger?.warn?.(msg, data),
+          }),
+        }))
     this.logger = opts.logger
   }
 

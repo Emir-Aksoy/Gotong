@@ -84,6 +84,14 @@ describe('wechatToImMessage', () => {
   it('a group_id becomes the chatId when the protocol ever opens groups', () => {
     const m = wechatToImMessage(inboundText({ group_id: 'g-42' }))!
     expect(m.chatId).toBe('g-42')
+    // GRP — the same discriminant must also label the chat kind, or the host
+    // would record the group as the sender's personal push address.
+    expect(m.chatKind).toBe('group')
+  })
+
+  it('GRP — DM messages carry chatKind direct (blank group_id included)', () => {
+    expect(wechatToImMessage(inboundText())!.chatKind).toBe('direct')
+    expect(wechatToImMessage(inboundText({ group_id: '  ' }))!.chatKind).toBe('direct')
   })
 })
 

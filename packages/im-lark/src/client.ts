@@ -366,45 +366,81 @@ export function createLarkClient(opts: LarkClientOptions): LarkClient {
       const url = `${baseUrl}${path}?type=${type}`
       const token = await getToken()
       const ctrl = new AbortController()
+      // The timer covers the WHOLE download (headers + body), not just the
+      // header round-trip — a stalled body read must not hang the bridge.
       const timer = setTimeout(() => ctrl.abort(), defaultTimeoutMs)
-      let res: Response
       try {
-        res = await fetchImpl(url, {
+        const res = await fetchImpl(url, {
           method: 'GET',
           headers: { authorization: `Bearer ${token}` },
           signal: ctrl.signal,
         })
+        if (!res.ok) {
+          // Errors come back as the usual JSON envelope; the success path is
+          // a raw binary stream, so only parse JSON on failure.
+          let parsed: LarkApiErrorBody | null = null
+          try {
+            parsed = (await res.json()) as LarkApiErrorBody
+          } catch {
+            // Body wasn't JSON.
+          }
+          throw new LarkApiError({
+            method: 'GET',
+            path,
+            status: res.status,
+            code: parsed?.code ?? null,
+            msg: parsed?.msg ?? null,
+          })
+        }
+        const capError = () =>
+          new LarkApiError({
+            method: 'GET',
+            path,
+            status: res.status,
+            code: null,
+            msg: `resource exceeds the ${MAX_RESOURCE_BYTES / 1024 / 1024}MB download cap`,
+          })
+        // Refuse before reading a byte when the server declares the size…
+        const declared = Number(res.headers.get('content-length'))
+        if (Number.isFinite(declared) && declared > MAX_RESOURCE_BYTES) {
+          ctrl.abort()
+          throw capError()
+        }
+        // …and enforce the cap WHILE streaming, so an undeclared (or lying)
+        // length can never buffer past cap + one chunk before the refusal.
+        // (`arrayBuffer()`-then-check would materialize the whole body first.)
+        const reader =
+          res.body && typeof res.body.getReader === 'function' ? res.body.getReader() : null
+        if (!reader) {
+          // Exotic fetch impls may hand back a bodyless Response — one-shot
+          // read with the same post-check is the honest fallback there.
+          const bytes = new Uint8Array(await res.arrayBuffer())
+          if (bytes.length > MAX_RESOURCE_BYTES) throw capError()
+          return bytes
+        }
+        const chunks: Uint8Array[] = []
+        let total = 0
+        for (;;) {
+          const { done, value } = await reader.read()
+          if (done) break
+          if (!value || value.length === 0) continue
+          total += value.length
+          if (total > MAX_RESOURCE_BYTES) {
+            await reader.cancel().catch(() => {})
+            throw capError()
+          }
+          chunks.push(value)
+        }
+        const bytes = new Uint8Array(total)
+        let offset = 0
+        for (const c of chunks) {
+          bytes.set(c, offset)
+          offset += c.length
+        }
+        return bytes
       } finally {
         clearTimeout(timer)
       }
-      if (!res.ok) {
-        // Errors come back as the usual JSON envelope; the success path is a
-        // raw binary stream, so only parse JSON on failure.
-        let parsed: LarkApiErrorBody | null = null
-        try {
-          parsed = (await res.json()) as LarkApiErrorBody
-        } catch {
-          // Body wasn't JSON.
-        }
-        throw new LarkApiError({
-          method: 'GET',
-          path,
-          status: res.status,
-          code: parsed?.code ?? null,
-          msg: parsed?.msg ?? null,
-        })
-      }
-      const bytes = new Uint8Array(await res.arrayBuffer())
-      if (bytes.length > MAX_RESOURCE_BYTES) {
-        throw new LarkApiError({
-          method: 'GET',
-          path,
-          status: res.status,
-          code: null,
-          msg: `resource exceeds the ${MAX_RESOURCE_BYTES / 1024 / 1024}MB download cap`,
-        })
-      }
-      return bytes
     },
 
     invalidateToken(): void {

@@ -167,6 +167,12 @@ export function qqToImMessage(
     text,
     messageId: typeof d.id === 'string' && d.id.length > 0 ? d.id : undefined,
     chatId,
+    // GRP — the event type already told us the surface: QQ group chats and
+    // guild channels are rooms; C2C and guild DMs are one-on-one.
+    chatKind:
+      payload.t === 'GROUP_AT_MESSAGE_CREATE' || payload.t === 'AT_MESSAGE_CREATE'
+        ? ('group' as const)
+        : ('direct' as const),
     ts: parseQqTimestamp(d.timestamp),
   }
 }

@@ -190,6 +190,91 @@ describe('ButlerSessionWindow', () => {
     expect(raw.turns.map((t) => t.text)).toEqual(['a', 'b', 'c', 'd'])
   })
 
+  it('beginTurn returns prior history and records the turn in one atomic step', async () => {
+    const w = makeWindow()
+    await w.append('u1', 'user', '早')
+    await w.append('u1', 'assistant', '早上好')
+
+    const history = await w.beginTurn('u1', '帮我订位')
+    // Returned history = the state BEFORE this turn (buildRequest appends it).
+    expect(history).toEqual([
+      { role: 'user', content: '早' },
+      { role: 'assistant', content: '早上好' },
+    ])
+    // …and the turn IS recorded (visible to the next reader).
+    const raw = JSON.parse(
+      readFileSync(join(dir, `${encodeURIComponent('u1')}.json`), 'utf8'),
+    ) as { turns: { text: string }[] }
+    expect(raw.turns.map((t) => t.text)).toEqual(['早', '早上好', '帮我订位'])
+  })
+
+  it('beginTurn: a concurrent assistant push-back is visible to the turn queued after it', async () => {
+    // The race the split history()+append() pair allows: a bare history()
+    // read never joins the write chain, so it can run while an out-of-band
+    // assistant push-back (escalation result / broadcast) is mid-append and
+    // miss the line the butler just said. beginTurn JOINS the chain: what a
+    // turn sees = everything queued before it, deterministically.
+    const w = makeWindow()
+    await w.append('u1', 'user', '转派给专家')
+    await w.append('u1', 'assistant', '好,已转派')
+    const [, h] = await Promise.all([
+      w.append('u1', 'assistant', '「专家」办完了'),
+      w.beginTurn('u1', '结果如何?'),
+    ])
+    expect(h.map((m) => m.content).join('\n')).toContain('「专家」办完了')
+    // All four prior entries + the new user turn are on disk, in queue order.
+    const raw = JSON.parse(
+      readFileSync(join(dir, `${encodeURIComponent('u1')}.json`), 'utf8'),
+    ) as { turns: { text: string }[] }
+    expect(raw.turns.map((t) => t.text)).toEqual([
+      '转派给专家',
+      '好,已转派',
+      '「专家」办完了',
+      '结果如何?',
+    ])
+  })
+
+  it('beginTurn: an un-replied sibling user turn stays invisible (alternation rule, by design)', async () => {
+    // Two group members talking at once: the second's history renders the
+    // first's turn as a TRAILING user group, which render() drops so the
+    // appended current sentence never breaks user/assistant alternation.
+    // Both turns still land on disk — nothing is lost, only deferred until
+    // the assistant replies.
+    const w = makeWindow()
+    const [h1, h2] = await Promise.all([
+      w.beginTurn('room', 'Alice: 今晚吃什么?'),
+      w.beginTurn('room', 'Bob: 火锅吧'),
+    ])
+    expect(h1).toEqual([])
+    expect(h2).toEqual([])
+    const raw = JSON.parse(
+      readFileSync(join(dir, `${encodeURIComponent('room')}.json`), 'utf8'),
+    ) as { turns: { text: string }[] }
+    expect(raw.turns.map((t) => t.text)).toEqual(['Alice: 今晚吃什么?', 'Bob: 火锅吧'])
+  })
+
+  it('beginTurn with empty text returns history without recording anything', async () => {
+    const w = makeWindow()
+    await w.append('u1', 'user', '你好')
+    await w.append('u1', 'assistant', '你好!')
+    const h = await w.beginTurn('u1', '   ')
+    expect(h).toHaveLength(2)
+    const raw = JSON.parse(
+      readFileSync(join(dir, `${encodeURIComponent('u1')}.json`), 'utf8'),
+    ) as { turns: unknown[] }
+    expect(raw.turns).toHaveLength(2)
+  })
+
+  it('beginTurn never throws even when rootDir is unwritable', async () => {
+    const w = new ButlerSessionWindow({
+      rootDir: join(dir, 'not-a-dir-file'),
+      now: () => clock,
+      logger: { warn: () => {} },
+    })
+    writeFileSync(join(dir, 'not-a-dir-file'), 'block the mkdir')
+    await expect(w.beginTurn('u1', '会丢但不能炸')).resolves.toEqual([])
+  })
+
   it('encodes hostile userIds into safe filenames (no traversal)', async () => {
     const w = makeWindow()
     await w.append('../../evil', 'user', 'x')

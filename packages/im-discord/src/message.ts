@@ -154,6 +154,9 @@ export function discordToImMessage(
     attachments: attachments.length > 0 ? attachments : undefined,
     messageId: message.id,
     chatId: message.channel_id,
+    // GRP — guild messages are rooms; a message without guild_id is a DM
+    // (Discord bots cannot join multi-user group DMs).
+    chatKind: message.guild_id ? ('group' as const) : ('direct' as const),
     ts: tsMs,
   }
 }

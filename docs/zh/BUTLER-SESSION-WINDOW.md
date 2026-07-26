@@ -66,6 +66,12 @@ Phase 9 起就支持 history 前置(`agent.ts:505`),零内核改动。
 **`{text}`→`{prompt}` 改名**——一个改名同时治好病因 ② 的两半(模型看到
 纯文本;episodic 捕获记到成员原话)。
 
+「读」优先走 `beginTurn(key, text)`(纯核新方法,读渲染 + 记 user 轮在
+**同一条 per-user 写链里原子完成**):裸 `history()` 不入写链,可能错过
+并发落地的 assistant 推送轮(如转派结果恰好在这一瞬回来);`beginTurn`
+入链后「本轮看到什么」= 链上排在它前面的全部写入,按调用序确定。surface
+不支持 `beginTurn` 时回落 history+append 两拍(既有形态,合同不变)。
+
 `deliverToMember` 咽喉(转派结果 / 运行播报 / 提醒 / 审批回推 / 断供恢复
 播报的唯一出口)包一层:每次推送同时记 assistant 轮——**病因 ③ 的修复**,
 「专家办完了」从此是管家「说过的话」。
@@ -119,21 +125,33 @@ SESS 落地时窗只按 Gotong userId 归户——群里两个人跟阿同说话
 - **说话人标注**:群轮次带 `名字: 文本` 前缀,且名字骑 **prompt 本身**
   (不是只进 history)——说话人自己的 episodic 捕获因此仍归户正确。
   名字来自 host wiring 注入的 `memberName`(identity displayName 同步读),
-  缺省回落 Gotong userId。
+  缺省回落 Gotong userId。标注前先过 `speakerLabel` 清洗(去控制字符、
+  折叠空白、截 32 字,空则回落 userId)——displayName 是成员可自改的
+  任意串,不清洗则 `张三: 假话\n阿同` 这类名字能在 prompt 里伪造轮次。
 - **记忆仍按说话人归户**:capture 只吃 `payload.prompt`,群友的话只以
   history 形式当上下文,绝不进别人的长期记忆。
 - **群 ≠ 个人推送地址**(顺手修的既有披露洞):此前群消息会把成员的
   reachable 路线整行覆盖成群 chatId——审批提醒/转派结果会当众落在群里。
   修法=`recordReachable` 对群消息不记 chatId(仍记活跃度,freshness/outbox
   flush 照常),push 回落 `platformUserId` 直发 DM(飞书 open_id 是语义
-  等价目的地);成员下次私聊即恢复 DM 路线。
+  等价目的地);成员下次私聊即恢复 DM 路线。落盘的 chatId 还带
+  `chatKind: 'direct'` **出处标记**,读取端只认带标记的行——GRP 之前写下
+  的存量路线文件可能存着群 chatId,无标记一律丢弃回落 DM(降级,永不外泄);
+  成员下一条私聊消息即重写自愈。
 - **桥边界**:im-adapter `ImMessage.chatKind?: 'direct' | 'group'`,缺席=
-  按 direct 保守处理。飞书 DM 与群同用 `oc_` 前缀 chatId,`chat_type` 是
-  唯一可靠判别,已映射(p2p→direct / group→group / 未知→缺席)。
+  按 direct 处理。**六座可判别的桥全部映射**:飞书按 `chat_type`(DM 与群
+  同用 `oc_` 前缀 chatId,这是唯一可靠判别)、telegram 按 `chat.type`、
+  微信按 `group_id` 有无、QQ 按事件类型、slack 按 `channel_type`(缺席时
+  按 D/C/G 前缀回落)、discord 按 `guild_id` 有无。**唯一记档残余是
+  matrix**:事件层结构性判不出房间是不是 DM(`m.direct` 是客户端侧账号
+  数据不是房间属性),故不设 chatKind——多人 Matrix 房间维持 GRP 之前的
+  行为,是记档的残余不是静默的。
 - **触发策略在平台侧**:飞书标准 bot 权限本来只投递 @提及消息=天然
   @-mention 闸;桥内不做 bot-mention 判定(事件里拿不到 bot 自己的
-  open_id,做了就是猜)。「读全群消息」权限不要求也不建议。命令面在群里
-  也应答是既有行为,敏感命令(如 `/inbox`)建议私聊。
+  open_id,做了就是猜)。「读全群消息」权限不要求也不建议。**命令面
+  DM-only**:命令回复落在来源聊天窗,`/inbox` 清单、绑定确认、审批短码
+  都会当众印进群——群里发命令得到的是一句指路(「命令请私聊我使用」),
+  不是答案;setting 运维台同理只在私聊应答。
 
 验收:im-lark 91(chat_type 映射)/ host 2467+5 skip(im-session-window-e2e
 7=4+3:群共窗+标注 / 群窗私窗分离 / 群非推送地址+DM 回落)/ 四门 PASS,

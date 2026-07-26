@@ -215,19 +215,20 @@ async function measureSessionWindow(rootDir: string): Promise<ContextCardEntry[]
     // 超发 6 条,顺带证明条数截断也咬住(而不是靠我数着喂)。
     await fullWin.append('member-emir', i % 2 === 0 ? 'user' : 'assistant', wall)
   }
-  // 关键:再补一条 user —— 这才是**派发时刻**的真实形状。SESS 在 dispatch
-  // 前先把成员这句记进窗(说了就是说了),所以 history() 看到的尾条恒为 user,
-  // 恒被丢弃(当前这句由 buildRequest 另行追加,不丢会背靠背两条 user)。
-  // 尾条是 assistant 的窗只存在于推送之后、下一句之前,那一刻没人在读它。
-  await fullWin.append('member-emir', 'user', wall)
+  // 派发时刻的真实形状:SESS 是**先读窗、后记当前句**(beginTurn 的渲染
+  // 快照取自记录之前;split 回落形态也是 history() 在 append 之前)。所以
+  // 模型看到的窗尾恒为上一轮的 assistant 回复,一条不丢 —— 上界就是
+  // SESSION_MAX_TURNS 整。尾部 user 丢弃规则只在「上一句没得到回复」的
+  // 残窗里点火(派发失败/回复未落),那不是满态基线该量的形状。
   const fullHistory = await fullWin.history('member-emir')
 
   const row = (state: string, msgs: readonly { role: string; content: string }[]): ContextCardEntry => ({
     segment: 'history',
     card: 'session-window',
     state,
-    // 每条的结构性开销折成等价字符补进文本,免得只量正文低估真实账单。
-    text: render(msgs) + ' '.repeat(msgs.length * PER_MESSAGE_OVERHEAD_TOKENS),
+    // 每条的结构性开销折成等价字符补进文本：尺子按 4 个非 CJK 字符 ≈ 1 token
+    // 折算,所以每条补 4×4 个空格才真计入 4 token(裸控制字节永不进源文件)。
+    text: render(msgs) + ' '.repeat(msgs.length * PER_MESSAGE_OVERHEAD_TOKENS * 4),
   })
 
   return [
@@ -464,7 +465,7 @@ describe('LIB-M1 上下文段级基线', () => {
     }
   })
 
-  it('history 段:空窗零字节 / 典型丢掉尾部 user / 满态被常量咬住', () => {
+  it('history 段:空窗零字节 / 典型 6 条如实 / 满态被常量咬住', () => {
     const [empty, typical, full] = report.rows.filter((r) => r.segment === 'history')
 
     // 空窗 = 首条消息的姿态:窗里没东西就一个字节都不注 —— 与 volatile 探针
@@ -476,11 +477,11 @@ describe('LIB-M1 上下文段级基线', () => {
     // 合并/丢弃规则改了,这个数会动,报告的「典型」刻度也就不再是那个意思。
     expect(typical!.state).toContain('(6 条)')
 
-    // 满态:窗留 SESSION_MAX_TURNS 条,派发时刻尾条恒为 user 恒被丢 ⇒ 11 条。
-    // 「送到模型的最多就是 MAX-1 条」是这段的真上界,不是 MAX 条。
+    // 满态:派发是先读窗后记当前句,窗尾恒为上轮 assistant,一条不丢 ⇒
+    // 送到模型的真上界就是 SESSION_MAX_TURNS 整条。
     // 数字从真常量推,常量一改这里就红 —— 逼人重新看一眼最坏情况的账。
-    expect(full!.state).toContain(`(${SESSION_MAX_TURNS - 1} 条)`)
-    const bodyOnly = (SESSION_MAX_TURNS - 1) * SESSION_TURN_MAX_CHARS
+    expect(full!.state).toContain(`(${SESSION_MAX_TURNS} 条)`)
+    const bodyOnly = SESSION_MAX_TURNS * SESSION_TURN_MAX_CHARS
     // 正文顶到每条上限(裁剪真的咬住,不是我少喂了字);另计 role 前缀与结构开销。
     expect(full!.chars).toBeGreaterThanOrEqual(bodyOnly)
     expect(full!.chars).toBeLessThan(bodyOnly * 1.05)
@@ -538,7 +539,7 @@ describe('LIB-M1 上下文段级基线', () => {
       `volatile 满配(九探针齐发): ~${vol.estTokens} tokens`,
       `stable 段(人设样本+冻结块): 空记忆 ~${personaRow.estTokens + frozenRows[0]!.estTokens} → 预算饱和 ~${personaRow.estTokens + frozenRows[1]!.estTokens} tokens`,
       `stable 增量(LIB-M3 索引卡): 样本 ~${indexRows[0]!.estTokens} → 截断顶 ~${indexRows[1]!.estTokens} tokens(预算 ${KNOWLEDGE_INDEX_CARD_BUDGET_TOKENS})`,
-      `history 段(SESS 会话窗): 空窗 ${his[0]!.estTokens} → 典型 ~${his[1]!.estTokens} → 满态 ~${his[2]!.estTokens} tokens(窗留 ${SESSION_MAX_TURNS} 条 × ${SESSION_TURN_MAX_CHARS} 字,派发时尾条 user 恒丢 ⇒ 送模型上界 ${SESSION_MAX_TURNS - 1} 条)`,
+      `history 段(SESS 会话窗): 空窗 ${his[0]!.estTokens} → 典型 ~${his[1]!.estTokens} → 满态 ~${his[2]!.estTokens} tokens(窗留 ${SESSION_MAX_TURNS} 条 × ${SESSION_TURN_MAX_CHARS} 字,派发先读窗后记当前句、尾条是上轮 assistant 一条不丢 ⇒ 送模型上界 ${SESSION_MAX_TURNS} 条)`,
       `→ 每轮上下文合计:典型对话 ~${personaRow.estTokens + frozenRows[1]!.estTokens + indexRows[0]!.estTokens + vol.estTokens + his[1]!.estTokens} → 最坏 ~${personaRow.estTokens + frozenRows[1]!.estTokens + indexRows[1]!.estTokens + vol.estTokens + his[2]!.estTokens} tokens(不含工具面)`,
     ])
     expect(rendered).toContain('合计')

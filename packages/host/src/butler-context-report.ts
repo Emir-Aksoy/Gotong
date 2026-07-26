@@ -112,15 +112,17 @@ export const STABLE_CARD_REGISTRY: Readonly<Record<string, string>> = {
  * **派发路径**上,不在构造路径上),所以钉的是消费 `ButlerSessionWindow.history()`
  * 的源文件与其标记。
  *
- * 只登记两条,因为 host 源码里也只有两条:IM 腿自己读,web `/me` 腿由 main.ts
- * 的适配器代读(web 侧 me-routes 调的是这个适配器装上的 surface,不自己开窗)。
- * 多长一张嘴而不登记 ⇒ 报告漏量 ⇒ tripwire 红。
+ * 只登记两条,因为 host 源码里也只有两条:IM 腿自己读(优先 `beginTurn`
+ * 读记同链,无 surface 支持时回落 history+append 两拍),web `/me` 腿由
+ * main.ts 的适配器代读(web 侧 me-routes 调的是这个适配器装上的 surface,
+ * 不自己开窗)。多长一张嘴而不登记 ⇒ 报告漏量 ⇒ tripwire 红。
  *
  * 注:`hub-steward-service` 里也有个 `payload.history`,那是 steward 自己的
  * 会话历史(sanitizeStewardHistory),另一个 agent 另一条路径,刻意不在此表。
  */
 export const HISTORY_SOURCE_MARKERS: Readonly<Record<string, RegExp>> = {
-  'im-bridge.ts': /config\.sessions\s*\?\s*await\s+config\.sessions\.history\(/,
+  'im-bridge.ts':
+    /config\.sessions\.beginTurn\s*\?\s*await config\.sessions\.beginTurn\(sessionKey, turnText\)\s*:\s*await config\.sessions\.history\(sessionKey\)/,
   'main.ts': /imBridges!\.sessions!\.history\(/,
 }
 

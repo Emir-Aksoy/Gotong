@@ -226,4 +226,20 @@ describe('telegramToImMessage', () => {
     const im = telegramToImMessage(makeMsg({ text: 'x' }))
     expect(im!.attachments).toBeUndefined()
   })
+
+  // GRP — session windows and push routing key off chatKind, so a group
+  // mislabeled direct would record the group as a personal push address.
+  it('maps chat.type to chatKind (private→direct, group family→group)', () => {
+    expect(telegramToImMessage(makeMsg({ text: 'x' }))!.chatKind).toBe('direct')
+    for (const type of ['group', 'supergroup', 'channel']) {
+      const im = telegramToImMessage(makeMsg({ text: 'x', chat: { id: 100, type } }))
+      expect(im!.chatKind).toBe('group')
+    }
+  })
+
+  it('unknown chat.type leaves chatKind absent (no guessing)', () => {
+    const im = telegramToImMessage(makeMsg({ text: 'x', chat: { id: 100, type: 'holo_space' } }))
+    expect(im!.chatKind).toBeUndefined()
+    expect('chatKind' in im!).toBe(false)
+  })
 })

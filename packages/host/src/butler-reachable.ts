@@ -45,8 +45,21 @@ export interface ReachableRoute {
   platform: string
   platformUserId: string
   displayName?: string | null
-  /** Platform chat / room id (DM vs group). Absent when the bridge didn't surface one. */
+  /**
+   * Platform chat id of the member's DM with us. Present only together with
+   * `chatKind: 'direct'` — the writer (`recordReachable`) never passes a group
+   * room id here (GRP: a room must not become a personal push address).
+   */
   chatId?: string
+  /**
+   * GRP — provenance marker for `chatId`: 'direct' = observed on a 1:1 chat.
+   * Stamped with every chatId since GRP. `parseRoute` DROPS a persisted chatId
+   * whose file lacks this marker: a pre-GRP file may hold a group room id, and
+   * pushing there would put personal reminders in front of the whole room.
+   * The dropped route falls back to the platformUserId DM and the file
+   * self-heals on the member's next direct message.
+   */
+  chatKind?: 'direct'
   /** When this route was last observed (freshest inbound wins). */
   updatedAt: number
 }
@@ -126,12 +139,17 @@ export class ButlerReachableRegistry {
    * a bound member, so the route always points at their freshest chat. Write-
    * through is best-effort and DEDUPED — an unchanged route (the common case: a
    * member chatting repeatedly from the same DM) doesn't rewrite the file.
+   *
+   * Contract: callers only pass `chatId` for DIRECT chats (`recordReachable`
+   * omits it for group messages) — the stored route stamps it `chatKind:
+   * 'direct'` on that promise.
    */
   record(input: {
     userId: string
     platform: string
     platformUserId: string
     displayName?: string | null
+    /** The member's DM chat id — never a group room id (see contract above). */
     chatId?: string
   }): void {
     if (!input.userId) return // unbound / spoof — nothing to key on
@@ -146,7 +164,7 @@ export class ButlerReachableRegistry {
       platform: input.platform,
       platformUserId: input.platformUserId,
       ...(input.displayName !== undefined ? { displayName: input.displayName } : {}),
-      ...(input.chatId !== undefined ? { chatId: input.chatId } : {}),
+      ...(input.chatId !== undefined ? { chatId: input.chatId, chatKind: 'direct' as const } : {}),
       updatedAt: this.now(),
     }
     this.routes.set(input.userId, route)
@@ -225,7 +243,13 @@ export class ButlerReachableRegistry {
       ...(typeof o.displayName === 'string' || o.displayName === null
         ? { displayName: o.displayName }
         : {}),
-      ...(typeof o.chatId === 'string' ? { chatId: o.chatId } : {}),
+      // GRP — trust a persisted chatId only with the 'direct' provenance
+      // marker; legacy (pre-GRP) files may hold a group room id (see the
+      // ReachableRoute.chatKind doc). Dropping it here means the push falls
+      // back to the platformUserId DM — degraded, never leaked.
+      ...(typeof o.chatId === 'string' && o.chatKind === 'direct'
+        ? { chatId: o.chatId, chatKind: 'direct' as const }
+        : {}),
       updatedAt: typeof o.updatedAt === 'number' ? o.updatedAt : 0,
     }
   }

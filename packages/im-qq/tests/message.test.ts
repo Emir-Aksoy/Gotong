@@ -131,6 +131,22 @@ describe('qqToImMessage', () => {
     expect(im!.text).toBe('ping')
   })
 
+  // GRP — group chats and guild channels are rooms; C2C and guild DMs are
+  // one-on-one. Session windows + push routing key off this label.
+  it('labels chatKind per event type (rooms vs one-on-one)', () => {
+    const base = { id: 'M', content: 'x', author: { id: 'U' } }
+    expect(
+      qqToImMessage(dispatch('GROUP_AT_MESSAGE_CREATE', { ...base, group_openid: 'G' }))!.chatKind,
+    ).toBe('group')
+    expect(
+      qqToImMessage(dispatch('AT_MESSAGE_CREATE', { ...base, channel_id: 'CH' }))!.chatKind,
+    ).toBe('group')
+    expect(qqToImMessage(dispatch('C2C_MESSAGE_CREATE', base))!.chatKind).toBe('direct')
+    expect(
+      qqToImMessage(dispatch('DIRECT_MESSAGE_CREATE', { ...base, guild_id: 'GU' }))!.chatKind,
+    ).toBe('direct')
+  })
+
   it('can preserve guild mentions when asked', () => {
     const im = qqToImMessage(
       dispatch('AT_MESSAGE_CREATE', {

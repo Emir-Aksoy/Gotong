@@ -381,4 +381,62 @@ describe('downloadResource', () => {
       code: 232001,
     })
   })
+
+  it('refuses before reading a byte when content-length declares an oversized body', async () => {
+    let bodyRead = false
+    const fetchImpl = (async (url: string) => {
+      if (url.includes('/auth/v3/')) {
+        return new Response(
+          JSON.stringify({ code: 0, msg: 'ok', tenant_access_token: 'tok', expire: 7200 }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        )
+      }
+      const stream = new ReadableStream<Uint8Array>(
+        {
+          pull(controller) {
+            bodyRead = true
+            controller.enqueue(new Uint8Array(1024))
+          },
+        },
+        // HWM 0 — no construction-time priming pull; `pull` fires only on a
+        // real read, so the flag measures OUR consumption, nothing else.
+        { highWaterMark: 0 },
+      )
+      return new Response(stream, {
+        status: 200,
+        headers: { 'content-length': String(64 * 1024 * 1024) }, // 64MB > 32MB cap
+      })
+    }) as unknown as typeof fetch
+    const c = createLarkClient({ appId: 'cli_x', appSecret: 's', fetchImpl })
+    await expect(c.downloadResource('om_big', 'fk_big', 'file')).rejects.toThrow(/download cap/)
+    expect(bodyRead).toBe(false)
+  })
+
+  it('enforces the cap mid-stream when the length is undeclared — never buffers the whole body', async () => {
+    // An endless 1MB-chunk stream with no content-length: the old
+    // arrayBuffer()-then-check would buffer forever; the streaming cap must
+    // cancel after ~32MB and reject.
+    let chunksServed = 0
+    const CHUNK = new Uint8Array(1024 * 1024)
+    const fetchImpl = (async (url: string) => {
+      if (url.includes('/auth/v3/')) {
+        return new Response(
+          JSON.stringify({ code: 0, msg: 'ok', tenant_access_token: 'tok', expire: 7200 }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        )
+      }
+      const stream = new ReadableStream<Uint8Array>({
+        pull(controller) {
+          chunksServed++
+          controller.enqueue(CHUNK)
+        },
+      })
+      return new Response(stream, { status: 200 })
+    }) as unknown as typeof fetch
+    const c = createLarkClient({ appId: 'cli_x', appSecret: 's', fetchImpl })
+    await expect(c.downloadResource('om_liar', 'fk_liar', 'file')).rejects.toThrow(/download cap/)
+    // Stopped right past the cap (32 chunks + the one that tripped it),
+    // not "as many as the server felt like sending".
+    expect(chunksServed).toBeLessThanOrEqual(36)
+  })
 })

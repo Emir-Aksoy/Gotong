@@ -192,6 +192,9 @@ describe('matrixToImMessage', () => {
     // Matrix uses ms natively — no *1000 conversion.
     expect(im!.ts).toBe(1_700_000_000_000)
     expect(im!.attachments).toBeUndefined()
+    // GRP — deliberately absent: events don't say whether the room is a DM
+    // (m.direct is client-side account data). Documented residual, not a gap.
+    expect('chatKind' in im!).toBe(false)
   })
 
   it('maps m.notice and m.emote as text too', () => {

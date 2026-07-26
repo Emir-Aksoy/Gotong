@@ -178,6 +178,22 @@ describe('slackToImMessage', () => {
     expect(im!.attachments).toBeUndefined()
   })
 
+  // GRP — session windows and push routing key off chatKind; a channel
+  // mislabeled direct would record the room as a personal push address.
+  it('labels chatKind from channel_type, falling back to the id prefix', () => {
+    const opts = { botUserId: BOT_USER_ID }
+    expect(slackToImMessage(makeEvent({ channel_type: 'im' }), opts)!.chatKind).toBe('direct')
+    for (const channel_type of ['channel', 'group', 'mpim'] as const) {
+      expect(slackToImMessage(makeEvent({ channel_type }), opts)!.chatKind).toBe('group')
+    }
+    // No channel_type on the event → documented id prefixes decide.
+    expect(slackToImMessage(makeEvent({ channel: 'D111DM' }), opts)!.chatKind).toBe('direct')
+    expect(slackToImMessage(makeEvent({ channel: 'C111ROOM' }), opts)!.chatKind).toBe('group')
+    expect(slackToImMessage(makeEvent({ channel: 'G111PRIV' }), opts)!.chatKind).toBe('group')
+    // Unknown prefix and no channel_type → absent, no guessing.
+    expect(slackToImMessage(makeEvent({ channel: 'X111ODD' }), opts)!.chatKind).toBeUndefined()
+  })
+
   it('strips bot mentions by default', () => {
     const im = slackToImMessage(
       makeEvent({ text: `<@${BOT_USER_ID}> /help` }),

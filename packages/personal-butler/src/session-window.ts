@@ -146,31 +146,65 @@ export class ButlerSessionWindow {
 
   /**
    * The prior turns of the CURRENT conversation, rendered ready for
-   * `payload.history`. Returns `[]` when there is no live conversation
-   * (no file, corrupt file, or idle past {@link SESSION_IDLE_MS}).
+   * `payload.history` (see {@link render} for the provider-safe shape
+   * guarantees). Returns `[]` when there is no live conversation (no file,
+   * corrupt file, or idle past {@link SESSION_IDLE_MS}).
    *
-   * Rendering guarantees a provider-safe shape:
-   * - consecutive same-role entries merge into one message (strict-alternation
-   *   providers reject back-to-back same-role turns);
-   * - a trailing `user` entry is DROPPED — the current sentence is appended by
-   *   `LlmAgent.buildRequest` right after this history, and two user messages
-   *   in a row would break alternation. (A trailing user entry only exists
-   *   when the previous turn produced no reply at all — rare, and that text
-   *   is already in episodic memory.)
+   * NOTE — when the read is immediately followed by recording the same
+   * speaker's turn, prefer {@link beginTurn}: the split pair is racy across
+   * concurrent speakers.
    */
   async history(userId: string): Promise<SessionMessage[]> {
     const turns = await this.readTurns(userId)
     if (turns.length === 0) return []
     if (this.isStale(turns)) return []
+    return render(turns)
+  }
 
-    const merged: { role: SessionRole; parts: string[] }[] = []
-    for (const t of turns) {
-      const last = merged[merged.length - 1]
-      if (last && last.role === t.role) last.parts.push(t.text)
-      else merged.push({ role: t.role, parts: [t.text] })
-    }
-    if (merged.length > 0 && merged[merged.length - 1]!.role === 'user') merged.pop()
-    return merged.map((m) => ({ role: m.role, content: m.parts.join('\n\n') }))
+  /**
+   * Read-and-record as ONE atomic step: returns the rendered prior history
+   * and appends this user turn inside the SAME per-key chain link. A bare
+   * `history()` read never joins the write chain, so it can interleave with
+   * an in-flight append — e.g. an out-of-band assistant push-back landing
+   * just as the member's next message arrives: the split read can miss the
+   * line the butler just said. Joining the chain makes "what this turn
+   * sees" = "everything queued before it", deterministically. (An
+   * un-replied SIBLING user turn is still invisible — {@link render}'s
+   * trailing-user drop, the alternation rule — by design, not a race.)
+   *
+   * Same contracts as its halves: empty/whitespace text records nothing
+   * (history is still returned), and it never throws — worst case is an
+   * empty history plus a warn, never a failed turn.
+   */
+  beginTurn(userId: string, text: string): Promise<SessionMessage[]> {
+    const prev = this.chains.get(userId) ?? Promise.resolve()
+    const next = prev.then(async (): Promise<SessionMessage[]> => {
+      try {
+        const turns = await this.readTurns(userId)
+        const live = this.isStale(turns) ? [] : turns
+        const rendered = render(live)
+        const clipped = clip(text)
+        if (clipped.length > 0) {
+          live.push({ role: 'user', text: clipped, at: this.now() })
+          const trimmed = live.slice(-SESSION_MAX_TURNS)
+          await mkdir(this.rootDir, { recursive: true })
+          const shape: SessionFileShape = { v: 1, turns: trimmed }
+          await writeFileAtomic(this.fileFor(userId), JSON.stringify(shape))
+        }
+        return rendered
+      } catch (err) {
+        this.logger?.warn('session window: beginTurn failed', { userId, err: String(err) })
+        return []
+      }
+    })
+    this.chains.set(
+      userId,
+      next.then(
+        () => undefined,
+        () => undefined,
+      ),
+    )
+    return next
   }
 
   /**
@@ -252,4 +286,25 @@ function clip(text: string): string {
   const t = text.trim()
   if (t.length <= SESSION_TURN_MAX_CHARS) return t
   return t.slice(0, SESSION_TURN_MAX_CHARS - 1) + '…'
+}
+
+/**
+ * Render stored turns into the provider-safe `payload.history` shape:
+ * consecutive same-role entries merge (strict-alternation providers reject
+ * back-to-back same-role turns) and a trailing `user` entry is DROPPED — the
+ * current sentence is appended by `LlmAgent.buildRequest` right after this
+ * history, and two user messages in a row would break alternation. (A
+ * trailing user entry only exists when the previous turn produced no reply
+ * at all — rare, and that text is already in episodic memory.)
+ */
+function render(turns: SessionTurnRecord[]): SessionMessage[] {
+  if (turns.length === 0) return []
+  const merged: { role: SessionRole; parts: string[] }[] = []
+  for (const t of turns) {
+    const last = merged[merged.length - 1]
+    if (last && last.role === t.role) last.parts.push(t.text)
+    else merged.push({ role: t.role, parts: [t.text] })
+  }
+  if (merged.length > 0 && merged[merged.length - 1]!.role === 'user') merged.pop()
+  return merged.map((m) => ({ role: m.role, content: m.parts.join('\n\n') }))
 }

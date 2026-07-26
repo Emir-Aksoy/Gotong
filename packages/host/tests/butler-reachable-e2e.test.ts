@@ -260,6 +260,55 @@ describe('F1 — butler outbound-push foundation', () => {
     expect(reg.routeFor('bob')).toMatchObject({ platformUserId: 'tg-bob', chatId: 'dm:bob' })
   })
 
+  it('GRP — a legacy route file without the direct marker loses its chatId on load', async () => {
+    // Pre-GRP files carry no `chatKind` marker, so the persisted chatId could
+    // be a GROUP room id (the old router recorded groups as routes). Trusting
+    // it would put personal reminders in front of the whole room — the load
+    // path must drop it and let the push fall back to the platformUserId DM.
+    const { bridge } = registry()
+    const { writeFile, mkdir } = await import('node:fs/promises')
+    await mkdir(dir, { recursive: true })
+    await writeFile(
+      join(dir, 'alice.json'),
+      JSON.stringify({
+        platform: 'telegram',
+        platformUserId: 'tg-alice',
+        chatId: 'group:oc_room_9', // poisoned: a room, not her DM
+        updatedAt: 123,
+      }),
+      'utf8',
+    )
+
+    const reg2 = new ButlerReachableRegistry({
+      dir,
+      bridgeFor: (p) => (p === bridge.platform ? bridge : undefined),
+      logger: silentLogger,
+    })
+    await reg2.load()
+    const route = reg2.routeFor('alice')
+    expect(route).toMatchObject({ platform: 'telegram', platformUserId: 'tg-alice' })
+    expect(route?.chatId).toBeUndefined()
+
+    // The push still delivers — to her platformUserId DM, never the room.
+    expect(await reg2.push('alice', '提醒')).toEqual({ delivered: true })
+    expect(bridge.sent.at(-1)!.to.platformUserId).toBe('tg-alice')
+    expect(bridge.sent.at(-1)!.chatId).toBeUndefined()
+  })
+
+  it('GRP — a route recorded today stamps the direct marker and survives reload intact', async () => {
+    const { reg, bridge } = registry()
+    reg.record({ userId: 'alice', platform: 'telegram', platformUserId: 'tg-alice', chatId: 'dm:alice' })
+    await reg.flush()
+
+    const reg2 = new ButlerReachableRegistry({
+      dir,
+      bridgeFor: (p) => (p === bridge.platform ? bridge : undefined),
+      logger: silentLogger,
+    })
+    await reg2.load()
+    expect(reg2.routeFor('alice')).toMatchObject({ chatId: 'dm:alice', chatKind: 'direct' })
+  })
+
   it('a corrupt route file is skipped on load, never blocking the others', async () => {
     // Persist alice cleanly, then drop a garbage file for bob; load() keeps alice.
     const { reg, bridge } = registry()

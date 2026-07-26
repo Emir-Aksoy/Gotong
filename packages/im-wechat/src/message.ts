@@ -95,6 +95,9 @@ export function wechatToImMessage(msg: WechatMessage): ImMessage | null {
     // Group chat isn't open on this protocol yet; when a group_id ever
     // appears we surface it as the chat, else the DM peer is the chat.
     chatId: msg.group_id?.trim() || senderId,
+    // GRP — same discriminant as the chatId choice above: a present group_id
+    // IS the group signal on this wire, everything else is a DM peer.
+    chatKind: msg.group_id?.trim() ? ('group' as const) : ('direct' as const),
     ts: msg.create_time_ms,
   }
 }

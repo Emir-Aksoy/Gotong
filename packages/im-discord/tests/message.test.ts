@@ -183,6 +183,14 @@ describe('discordExtractAttachments', () => {
 })
 
 describe('discordToImMessage', () => {
+  // GRP — session windows and push routing key off chatKind; a guild
+  // channel mislabeled direct would record it as a personal push address.
+  it('labels chatKind: guild messages are group, no guild_id means DM', () => {
+    const opts = { botUserId: BOT_USER_ID }
+    expect(discordToImMessage(makeMessage({ guild_id: 'G1' }), opts)!.chatKind).toBe('group')
+    expect(discordToImMessage(makeMessage(), opts)!.chatKind).toBe('direct')
+  })
+
   it('maps a basic guild text message', () => {
     const im = discordToImMessage(makeMessage(), { botUserId: BOT_USER_ID })
     expect(im).not.toBeNull()
