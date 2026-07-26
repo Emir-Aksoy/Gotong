@@ -108,7 +108,38 @@ main.ts 适配器按 `localAgents.isButlerAgent(agentId)` 门控:**只有管家�
 - **零新旋钮**(env 注册表 114 冻结):三个阈值全是常量;surface 接不接
   就是开关。
 
-## 六、验收与已知场外
+## 六、群聊维度(GRP)
+
+SESS 落地时窗只按 Gotong userId 归户——群里两个人跟阿同说话,各自一份
+失忆窗,互相看不见对方刚说了什么。GRP 把群变成**一场对话**:
+
+- **群窗键 `group:<platform>:<chatId>`**:群消息共享一个 room-scoped 窗,
+  不再每说话人各一份。披露姿态保守——窗里只装群内本来人人可见的内容,
+  =零新披露;群窗与私窗是两场对话,永不互串(e2e 钉死)。
+- **说话人标注**:群轮次带 `名字: 文本` 前缀,且名字骑 **prompt 本身**
+  (不是只进 history)——说话人自己的 episodic 捕获因此仍归户正确。
+  名字来自 host wiring 注入的 `memberName`(identity displayName 同步读),
+  缺省回落 Gotong userId。
+- **记忆仍按说话人归户**:capture 只吃 `payload.prompt`,群友的话只以
+  history 形式当上下文,绝不进别人的长期记忆。
+- **群 ≠ 个人推送地址**(顺手修的既有披露洞):此前群消息会把成员的
+  reachable 路线整行覆盖成群 chatId——审批提醒/转派结果会当众落在群里。
+  修法=`recordReachable` 对群消息不记 chatId(仍记活跃度,freshness/outbox
+  flush 照常),push 回落 `platformUserId` 直发 DM(飞书 open_id 是语义
+  等价目的地);成员下次私聊即恢复 DM 路线。
+- **桥边界**:im-adapter `ImMessage.chatKind?: 'direct' | 'group'`,缺席=
+  按 direct 保守处理。飞书 DM 与群同用 `oc_` 前缀 chatId,`chat_type` 是
+  唯一可靠判别,已映射(p2p→direct / group→group / 未知→缺席)。
+- **触发策略在平台侧**:飞书标准 bot 权限本来只投递 @提及消息=天然
+  @-mention 闸;桥内不做 bot-mention 判定(事件里拿不到 bot 自己的
+  open_id,做了就是猜)。「读全群消息」权限不要求也不建议。命令面在群里
+  也应答是既有行为,敏感命令(如 `/inbox`)建议私聊。
+
+验收:im-lark 91(chat_type 映射)/ host 2467+5 skip(im-session-window-e2e
+7=4+3:群共窗+标注 / 群窗私窗分离 / 群非推送地址+DM 回落)/ 四门 PASS,
+零新旋钮(chatKind 是类型字段、memberName 是注入缝,均非 env)。
+
+## 七、验收与已知场外
 
 验收:personal-butler 112(纯核 14)/ host 2428+5skip(新 e2e 4:字节
 不变 / 首条无 history + 派发前落 user / 第二条骑 history 且不含当前句 /

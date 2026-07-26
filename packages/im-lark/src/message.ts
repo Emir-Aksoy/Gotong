@@ -297,6 +297,15 @@ export function larkToImMessage(
     attachments: attachments.length > 0 ? attachments : undefined,
     messageId: message.message_id,
     chatId: message.chat_id,
+    // GRP — carry the group/DM discriminant across the bridge boundary.
+    // Lark uses oc_-prefixed chat ids for BOTH, so chat_type is the only
+    // reliable signal; an unrecognized value maps to nothing (consumers
+    // treat absent as direct — the conservative side).
+    ...(message.chat_type === 'group'
+      ? { chatKind: 'group' as const }
+      : message.chat_type === 'p2p'
+        ? { chatKind: 'direct' as const }
+        : {}),
     ts,
   }
 }

@@ -141,6 +141,8 @@ export async function armImBridgeWiring(deps: ImBridgeWiringDeps): Promise<ImBri
       rootDir: join(deps.spaceRoot, 'butler', 'sessions'),
       logger: deps.log,
     }),
+    // GRP — 群窗说话人标注用的成员名(identity 是同进程 SQLite,同步读)。
+    memberName: (userId) => identityForIm.getUserById(userId)?.displayName ?? null,
     // IMA-M2 — /inbox /approve /deny 的审批面(有 inbox 才有)。
     ...(deps.approvals ? { approvals: new ImApprovalService(deps.approvals) } : {}),
     // VOICE-M3 — opt-in 语音回复;未配 undefined = 发送逐字节不变。

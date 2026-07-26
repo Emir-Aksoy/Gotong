@@ -243,8 +243,14 @@ export interface HostImConfig {
    * dispatch 前读最近轮次注入 `payload.history`,成员这句与阿同的回复各记
    * 一笔;absent → payload 与今天逐字节不变(仍是单句)。窗口只是渲染辅助,
    * 长期记忆仍走 captureTurn + 蒸馏,治理闸照旧。
+   *
+   * GRP — 群消息(msg.chatKind==='group')的窗按房间共享,键
+   * `group:<platform>:<chatId>`;群窗只装群内本来人人可见的内容,轮次带
+   * 说话人标注。私聊与未标 chatKind 的桥完全不变。
    */
   sessions?: ImSessionSurface
+  /** GRP — 见 StartImBridgesOptions.memberName(群窗说话人标注)。 */
+  memberName?: (userId: string) => string | null
 }
 
 /**
@@ -467,13 +473,25 @@ export async function handleImMessage(
       // is said, even if the model then fails). `prompt` (not `text`) is the
       // field both `buildRequest` and the memory capture recognize — episodic
       // entries record the member's actual words, not the task title.
-      const history = config.sessions ? await config.sessions.history(userId) : []
-      await config.sessions?.append(userId, 'user', msg.text)
+      //
+      // GRP — a group chat shares ONE window keyed by the ROOM, not the
+      // speaker: everyone in the group already sees the whole thread, so a
+      // room-scoped window contains nothing that isn't group-visible. Turns
+      // carry the speaker's name (`张三: …`) so the model knows who said
+      // what; the name rides the prompt too, so the speaker's own episodic
+      // capture stays correctly attributed. Long-term memory remains
+      // per-speaker — capture reads only payload.prompt, other members'
+      // words stay context (history), never someone else's memory.
+      const group = msg.chatKind === 'group' && typeof msg.chatId === 'string' && msg.chatId.length > 0
+      const sessionKey = group ? `group:${platform}:${msg.chatId}` : userId
+      const turnText = group ? `${config.memberName?.(userId) ?? userId}: ${msg.text}` : msg.text
+      const history = config.sessions ? await config.sessions.history(sessionKey) : []
+      await config.sessions?.append(sessionKey, 'user', turnText)
       const result = await config.hub.dispatch({
         from: makeFromId(platform, msg.from.platformUserId),
         strategy: { kind: 'capability', capabilities: [config.freeTextCapability] },
         payload: {
-          prompt: msg.text,
+          prompt: turnText,
           ...(history.length > 0 ? { history } : {}),
           ...(msg.attachments && msg.attachments.length > 0 ? { attachments: msg.attachments } : {}),
         },
@@ -489,7 +507,7 @@ export async function handleImMessage(
       // Whatever goes back — reply, failure line, suspend pointer — is what
       // the butler "said"; the next turn must know it (voice is rendering
       // only, the window records the text the clip was synthesized from).
-      await config.sessions?.append(userId, 'assistant', summary)
+      await config.sessions?.append(sessionKey, 'assistant', summary)
       // VOICE-M3 — only the assistant's OK reply speaks; failure / suspend
       // telemetry carries commands (/inbox 短码) that must stay copyable text.
       await reply(bridge, msg, summary, result.kind === 'ok' ? await voiceClipFor(config, summary) : undefined)
@@ -922,6 +940,11 @@ export interface StartImBridgesOptions {
    * 接待记忆」的双脑黑洞)。缺省 → 派发与推送逐字节不变。
    */
   sessions?: ImSessionSurface
+  /**
+   * GRP — 成员显示名查询(群窗说话人标注用:群里每轮记成「张三: …」)。
+   * 缺省 → 群窗标注回落 Gotong userId;私聊路径完全不经它。
+   */
+  memberName?: (userId: string) => string | null
 }
 
 /**
@@ -1191,6 +1214,7 @@ export async function startImBridges(
     ...(opts.setting ? { setting: opts.setting } : {}),
     ...(opts.voice ? { voice: opts.voice } : {}),
     ...(opts.sessions ? { sessions: opts.sessions } : {}),
+    ...(opts.memberName ? { memberName: opts.memberName } : {}),
     ...(llmOutage ? { llmOutage } : {}),
     ...(reachable
       ? {
@@ -1473,11 +1497,18 @@ function recordReachable(
   platform: string,
   msg: ImMessage,
 ): void {
+  // GRP — a group is NOT a member's personal push address: speaking in a
+  // group still proves "active on this platform" (freshness + outbox flush),
+  // but the group chatId must never become the route for personal pushes
+  // (approval reminders / escalation results would land in front of the
+  // whole room). Omitting chatId makes the push fall back to the member's
+  // platformUserId — a DM — which is the honest destination.
+  const group = msg.chatKind === 'group'
   config.onReachable?.({
     userId,
     platform,
     from: msg.from,
-    ...(msg.chatId !== undefined ? { chatId: msg.chatId } : {}),
+    ...(!group && msg.chatId !== undefined ? { chatId: msg.chatId } : {}),
   })
 }
 

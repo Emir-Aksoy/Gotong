@@ -128,6 +128,8 @@ describe('session window × IM bridge (free case + push-back seam)', () => {
       identity,
       log: silentLogger,
       makeBridge: () => fake,
+      // Mirrors the production wiring — only the GRP group path reads this.
+      memberName: (id) => identity.getUserById(id)?.displayName ?? null,
       ...(opts.reachable ? { reachableDir: join(dir, 'butler', 'reachable') } : {}),
       ...(opts.sessions ? { sessions: opts.sessions } : {}),
     })
@@ -199,5 +201,89 @@ describe('session window × IM bridge (free case + push-back seam)', () => {
     const next = seenPayloads[seenPayloads.length - 1] as { history?: SessionMessage[] }
     const assistantSaid = (next.history ?? []).filter((m) => m.role === 'assistant').map((m) => m.content)
     expect(assistantSaid.join('\n')).toContain('「专家」办完了:报告在此')
+  })
+
+  // ── GRP — group chats ────────────────────────────────────────────────────
+
+  const BOB: ImUser = { platform: 'telegram', platformUserId: '3002', displayName: 'Bob' }
+  const GROUP_CHAT = 'grp:100'
+  const groupMsg = (from: ImUser, text: string): ImMessage => ({
+    from,
+    text,
+    chatId: GROUP_CHAT,
+    chatKind: 'group',
+    ts: 1_700_000_000_000,
+  })
+
+  async function bindBob(): Promise<string> {
+    const bob = identity.createUser({ email: 'bob@example.com', displayName: 'Bob' })
+    const code = identity.issueImBindingCode({ userId: bob.id }).code
+    const before = fake.outbound.length
+    await fake.inject({ from: BOB, text: `/bind ${code}`, chatId: 'private:3002', ts: 1_700_000_000_000 })
+    for (let i = 0; i < 50 && fake.outbound.length === before; i++) await delay(2)
+    fake.outbound.length = 0 // 同 startAndBind:绑定回执不算进后续断言
+    return bob.id
+  }
+
+  async function sayIn(msg: ImMessage): Promise<void> {
+    const before = fake.outbound.length
+    await fake.inject(msg)
+    for (let i = 0; i < 200 && fake.outbound.length === before; i++) await delay(2)
+    expect(fake.outbound.length).toBeGreaterThan(before)
+  }
+
+  it('GRP: a group shares ONE room-scoped window — speakers see each other, turns carry names', async () => {
+    await startAndBind({ sessions })
+    await bindBob()
+
+    await sayIn(groupMsg(ALICE, '今晚聚餐哪家好?'))
+    await sayIn(groupMsg(BOB, '要不火锅?'))
+
+    // Bob's dispatch: his own sentence is name-prefixed (episodic capture
+    // stays correctly attributed), and history carries ALICE's group turn —
+    // the room is one conversation, not per-speaker amnesia.
+    const bobPayload = seenPayloads[seenPayloads.length - 1] as {
+      prompt: string
+      history?: SessionMessage[]
+    }
+    expect(bobPayload.prompt).toBe('Bob: 要不火锅?')
+    expect(bobPayload.history).toEqual([
+      { role: 'user', content: 'Alice: 今晚聚餐哪家好?' },
+      { role: 'assistant', content: 'echo: Alice: 今晚聚餐哪家好?' },
+    ])
+    // Replies went to the group chat, not a DM.
+    expect(fake.outbound.every((o) => o.chatId === GROUP_CHAT)).toBe(true)
+  })
+
+  it('GRP: the group window and the personal DM window are separate conversations', async () => {
+    await startAndBind({ sessions })
+    await sayIn(groupMsg(ALICE, '群里聊的事'))
+
+    // Alice then DMs — her personal window never saw the group exchange:
+    // first DM of a fresh conversation ⇒ no history key at all, unprefixed.
+    await say('私聊问一句')
+    const dm = seenPayloads[seenPayloads.length - 1] as { prompt: string; history?: unknown }
+    expect(dm.prompt).toBe('私聊问一句')
+    expect(dm.history).toBeUndefined()
+  })
+
+  it('GRP: a group is NOT a personal push address — pushes fall back to DM', async () => {
+    await startAndBind({ sessions, reachable: true })
+
+    // Alice's freshest interaction is a GROUP message. The reachable route
+    // must not point at the room: a personal push (approval reminder /
+    // escalation result) would land in front of the whole group.
+    await sayIn(groupMsg(ALICE, '在群里说了句话'))
+    fake.outbound.length = 0
+    const pushed = await handle!.pushToMember!(aliceId, '你的审批提醒')
+    expect(pushed.delivered).toBe(true)
+    expect(fake.outbound[fake.outbound.length - 1]!.chatId).toBeUndefined()
+
+    // After a DM, the route carries the DM chat again.
+    await say('回到私聊')
+    fake.outbound.length = 0
+    const pushed2 = await handle!.pushToMember!(aliceId, '第二条提醒')
+    expect(pushed2.delivered).toBe(true)
+    expect(fake.outbound[fake.outbound.length - 1]!.chatId).toBe('private:3001')
   })
 })

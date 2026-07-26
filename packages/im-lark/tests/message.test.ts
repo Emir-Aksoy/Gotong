@@ -238,6 +238,17 @@ describe('larkToImMessage', () => {
     expect(im!.attachments).toBeUndefined()
   })
 
+  it('GRP — maps chat_type across the bridge boundary (p2p→direct, group→group, unknown→absent)', () => {
+    expect(larkToImMessage(makeEvent({}))!.chatKind).toBe('direct')
+    expect(
+      larkToImMessage(makeEvent({ message: { chat_type: 'group' } }))!.chatKind,
+    ).toBe('group')
+    const unknown = larkToImMessage(
+      makeEvent({ message: { chat_type: 'weird' as unknown as 'p2p' } }),
+    )
+    expect(unknown!.chatKind).toBeUndefined()
+  })
+
   it('strips bot mentions when configured (default)', () => {
     const im = larkToImMessage(
       makeEvent({

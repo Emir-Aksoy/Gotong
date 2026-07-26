@@ -88,6 +88,13 @@ export interface ImMessage {
   messageId?: string
   /** Platform-side chat / room id. */
   chatId?: string
+  /**
+   * GRP — what kind of chat the message arrived in. `'group'` = a shared
+   * room where multiple humans see the thread; `'direct'` = a 1:1 DM.
+   * Absent = the bridge doesn't discriminate — consumers treat that as
+   * direct (the conservative default).
+   */
+  chatKind?: 'direct' | 'group'
   /** Unix ms when the platform claims the message was sent. */
   ts?: number
 }
