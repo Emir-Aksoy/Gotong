@@ -59,6 +59,7 @@ import {
   type MeChatStreamSurface,
   type MeChatSessionSurface,
 } from './me-routes.js'
+import type { MePanelSurface } from './panel-routes.js'
 import {
   handleWorkflowRoute,
   type WorkflowGrantSink,
@@ -353,6 +354,7 @@ export function serveWeb(hub: Hub, opts: WebServerOptions = {}): Promise<WebServ
     hubSteward: opts.hubSteward,
     meChatStream: opts.meChatStream,
     meChatSession: opts.meChatSession,
+    mePanel: opts.mePanel,
     operatorSteward: opts.operatorSteward,
     readinessGate: opts.readinessGate,
     identity: opts.identity,
@@ -544,6 +546,8 @@ interface HandlerCtx {
   meChatStream: MeChatStreamSurface | undefined
   /** Session window — see WebServerOptions.meChatSession doc above. */
   meChatSession: MeChatSessionSurface | undefined
+  /** SDUI-M2 — see WebServerOptions.mePanel doc above. */
+  mePanel: MePanelSurface | undefined
   /** SW-M9 A-M6 — see WebServerOptions.operatorSteward doc above. */
   operatorSteward: MeHubStewardSurface | undefined
   readinessGate: { isReady: () => boolean } | undefined
@@ -1196,6 +1200,7 @@ async function handle(
         // NA-M6b — quick-chat stream sinks; undefined → stream:true falls to JSON.
         meChatStream: ctx.meChatStream,
         meChatSession: ctx.meChatSession,
+        mePanel: ctx.mePanel,
         // ease-of-use ①TC-ME — member "test connection" for a BYO key; the SAME
         // probe surface the setup/admin routes use. undefined → /api/me/test-llm-key
         // returns 503. Member route is provider-restricted + no baseURL (no SSRF).

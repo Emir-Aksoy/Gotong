@@ -160,6 +160,7 @@ import { AcpOutboundManager } from './acp-outbound.js'
 import { acpApprovalItemFor } from './acp-escalation.js'
 import { type ImBridgesHandle } from './im-bridge.js'
 import { armImBridgeWiring } from './im-bridge-wiring.js'
+import { buildMePanelSurface } from './me-panel-surface.js'
 import { OidcClient } from './oidc-client.js'
 import { OidcLoginService } from './oidc-login-service.js'
 import { createOAuthConnectSurface } from './oauth-connect-service.js'
@@ -2389,6 +2390,8 @@ async function main(): Promise<void> {
           },
         }
       : {}),
+    // SDUI-M2 — member panel config (default panel until the M3 store lands).
+    mePanel: buildMePanelSurface(),
     // SW-M9 A-M7 — the OPERATOR-console steward (site-wide twin); null on the same
     // conditions, in which case /api/admin/steward/{plan,apply} return 503.
     ...(operatorSteward ? { operatorSteward } : {}),

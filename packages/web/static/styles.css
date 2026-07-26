@@ -3663,3 +3663,54 @@ body[data-simple-mode="1"] section.adv-only { display: none !important; }
   .site-header h1 { font-size: 0.98rem; }
   .tabbar-btn { padding: 0.45rem 0.6rem; font-size: 0.78rem; }
 }
+
+/* ---- SDUI member panel (sdui-ui.js, SDUI-M2) ----------------------------- */
+/* Chrome only — component CONTENT is API-driven; the config chose layout. */
+.sdui-badge {
+  display: flex; align-items: center; gap: 0.6rem;
+  background: #2b2413; border: 1px solid #7a6420; border-radius: 8px;
+  padding: 0.5rem 0.8rem; margin-bottom: 0.8rem;
+}
+/* display:flex would otherwise override the UA [hidden] rule — the empty
+ * badge (0 pending) must truly vanish, not render as a bare strip. */
+.sdui-badge[hidden] { display: none; }
+.sdui-badge-count { font-weight: 600; }
+.sdui-badge-open, .sdui-inbox-open {
+  margin-left: auto; padding: 0.25rem 0.7rem; border-radius: 6px;
+  border: 1px solid #666; background: transparent; color: inherit; cursor: pointer;
+}
+.sdui-notice {
+  background: #3a1d1d; border: 1px solid #8a4040; border-radius: 8px;
+  padding: 0.5rem 0.8rem; margin-bottom: 0.8rem;
+}
+.sdui-title { margin: 0.2rem 0 0.6rem; }
+.sdui-section { margin-bottom: 1rem; }
+.sdui-heading { margin: 0.4rem 0; opacity: 0.85; }
+.sdui-card {
+  border: 1px solid #333; border-radius: 10px; padding: 0.7rem 0.85rem;
+  margin-bottom: 0.6rem; background: rgba(255, 255, 255, 0.02);
+}
+.sdui-placeholder { opacity: 0.65; font-size: 0.9rem; }
+.sdui-divider { border: none; border-top: 1px solid #333; margin: 0.8rem 0; }
+.sdui-chat-log { display: flex; flex-direction: column; gap: 0.4rem; max-height: 40vh; overflow-y: auto; }
+.sdui-bubble {
+  padding: 0.45rem 0.7rem; border-radius: 10px; max-width: 85%;
+  white-space: pre-wrap; word-break: break-word;
+}
+.sdui-bubble-user { align-self: flex-end; background: #1f3a5f; }
+.sdui-bubble-assistant { align-self: flex-start; background: #24242a; }
+.sdui-bubble-error { align-self: flex-start; background: #3a1d1d; border: 1px solid #8a4040; }
+.sdui-chat-row { display: flex; gap: 0.5rem; margin-top: 0.6rem; }
+.sdui-chat-input {
+  flex: 1; padding: 0.45rem 0.6rem; border-radius: 8px;
+  border: 1px solid #444; background: transparent; color: inherit;
+}
+.sdui-chat-send {
+  padding: 0.45rem 0.9rem; border-radius: 8px; border: 1px solid #666;
+  background: transparent; color: inherit; cursor: pointer;
+}
+.sdui-inbox-item {
+  display: flex; align-items: center; gap: 0.6rem;
+  padding: 0.35rem 0; border-bottom: 1px solid #2a2a2a;
+}
+.sdui-inbox-item:last-child { border-bottom: none; }

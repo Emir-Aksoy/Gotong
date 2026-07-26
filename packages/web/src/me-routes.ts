@@ -44,6 +44,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { readJsonBody, sendJson } from './http-helpers.js'
 import { handleMeWizardRoute, type WorkflowWizardSurface } from './wizard-routes.js'
+import { handleMePanelRoute, type MePanelSurface } from './panel-routes.js'
 import { readRawBody } from './uploads-routes.js'
 
 import type { Hub } from '@gotong/core'
@@ -401,6 +402,8 @@ export interface HandleMeRouteCtx {
    * when the host wired no window; quick-chat payload is then byte-identical.
    */
   meChatSession: MeChatSessionSurface | undefined
+  /** SDUI-M2 — member panel config resolver; undefined → GET /api/me/panel 503. */
+  mePanel: MePanelSurface | undefined
   /**
    * ease-of-use ①TC-ME — member "test connection" probe for a BYO key. Same
    * object the setup/admin probe uses (server.ts `ctx.llmKeyTest`), inlined here
@@ -741,6 +744,10 @@ export async function handleMeRoute(
   if (method === 'GET' && path === '/api/me/inbox') {
     await handleMeListInbox(ctx, res, userId)
     return
+  }
+  // SDUI-M2 — member panel config (implementation in panel-routes.ts, 控预算).
+  if (path === '/api/me/panel') {
+    if (await handleMePanelRoute({ panel: ctx.mePanel }, req, res, method, path, userId)) return
   }
   {
     const m =

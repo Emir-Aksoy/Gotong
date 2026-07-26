@@ -35,6 +35,7 @@ import type {
   MeChatSessionSurface,
 } from './me-routes.js'
 import type { WorkflowWizardSurface } from './wizard-routes.js'
+import type { MePanelSurface } from './panel-routes.js'
 import type {
   ConnectorSlotSink,
   LlmKeyProbe,
@@ -345,6 +346,8 @@ export interface WebServerOptions {
    * bridge). When absent, quick-chat dispatches today's payload byte-identical.
    */
   meChatSession?: MeChatSessionSurface
+  /** SDUI-M2 — member panel config resolver; absent → GET /api/me/panel 503. */
+  mePanel?: MePanelSurface
   /**
    * SW-M9 A-M6 — optional OPERATOR-console hub steward surface. The host wires a
    * SECOND `HostStewardService` here (the site-wide operator one). When absent,

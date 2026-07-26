@@ -744,7 +744,7 @@
   // (they observe <body data-active-tab> and refresh when it flips to their
   // name). Neither router used to include them, so clicking those buttons
   // just fell through to overview — R14b folds them into the one router.
-  const C1_TABS = new Set(['home', 'settings'])
+  const C1_TABS = new Set(['home', 'panel', 'settings'])
   // Every admin-shell tabbar button must be listed or the router falls the
   // click through to overview. mcp/usage/federation were added to app.html
   // after R14b folded quotas/reputation in but never registered here — so

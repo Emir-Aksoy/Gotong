@@ -40,6 +40,11 @@
     <script src="/workflow-graph.js" defer></script>
     <script src="/app-core.js" defer></script>
     <script src="/app.js" defer></script>
+    <!-- SDUI-M2 — config-driven member panel renderer. Member-visible bundle
+         (same no-role-gate posture as workflow-graph.js): self-contained IIFE
+         that lazy-activates on <body data-active-tab="panel"> and renders
+         GET /api/me/panel into #sdui-panel. -->
+    <script src="/sdui-ui.js" defer></script>
   </head>
   <body class="admin">
     <header class="site-header">
@@ -236,6 +241,7 @@
          then mirrors the hide to the corresponding <section>. -->
     <nav id="admin-tabbar" class="tabbar" data-i18n-aria="navMain" aria-label="主导航" hidden>
       <button class="tabbar-btn" type="button" data-tab="home"      data-roles="owner,admin,member,viewer" data-i18n="tabHome">我的</button>
+      <button class="tabbar-btn" type="button" data-tab="panel"     data-roles="owner,admin,member,viewer" data-i18n="tabPanel">面板</button>
       <button class="tabbar-btn" type="button" data-tab="overview"  data-roles="owner,admin" data-i18n="tabOverview">总览</button>
       <button class="tabbar-btn" type="button" data-tab="agents"    data-roles="owner,admin" data-i18n="tabAgents">智能体</button>
       <button class="tabbar-btn" type="button" data-tab="workflows" data-roles="owner,admin" data-i18n="tabWorkflows">工作流</button>
@@ -532,6 +538,12 @@
       </div>
       </details>
     </section>
+
+    <!-- SDUI-M2 — the member panel: an EMPTY host section, entirely rendered
+         by /sdui-ui.js from the per-member config (GET /api/me/panel). Same
+         empty-shell + self-contained-module protocol as the 11 admin panels
+         (setting-ops-ui.js et al.), but member-visible. -->
+    <section id="sdui-panel" class="managed-agents" data-tab="panel" data-roles="owner,admin,member,viewer" hidden></section>
 
     <!-- Settings tab — visible to every signed-in role. C1a ships only
          the "change password" + "logout" primitives; A2.3 setup-wizard
