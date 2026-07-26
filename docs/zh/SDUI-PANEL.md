@@ -6,7 +6,11 @@
 > 客户端与 hub 之间固定的只有 wire 协议 + UI schema 规范。同一个客户端,
 > 父亲打开是农事关怀面,母亲打开是本地新闻面,operator 打开是全家看板。
 >
-> Track 代号:**SDUI**(Server-Driven UI)。Status: **M0 计划,待用户批准里程碑与岔口**。
+> Track 代号:**SDUI**(Server-Driven UI)。Status: **岔口 A-E 已全部拍板(2026-07-26),M1 开工**。
+> 拍板记录:A=14 组件首批清单照 §六 / B=新增成员可见 tab,home 原样保留 /
+> C=JSON / D=owner 直装、成员随时换回 / **E=E1 benign 直改+三重安全网**
+> (保留区硬保护+每改响亮播报+改前快照一键还原;E2 提议→确认不做,单成员
+> 确认开关 v1 也不做)。
 > Last updated: 2026-07-26
 
 ---

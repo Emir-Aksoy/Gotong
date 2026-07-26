@@ -109,3 +109,22 @@ export {
   type LibrarianPlan,
   type LibrarianPromotion,
 } from './knowledge-librarian.js'
+
+export {
+  validatePanelConfig,
+  PANEL_SCHEMA_VERSION,
+  PANEL_COMPONENT_TYPES,
+  PANEL_RESERVED_TYPES,
+  PANEL_FIXED_SOURCES,
+  PANEL_SOURCE_PREFIXES,
+  PANEL_FIXED_ACTIONS,
+  PANEL_ACTION_PREFIXES,
+  PANEL_COMPONENT_CONTRACTS,
+  PANEL_LIMITS,
+  DEFAULT_PANEL,
+  type PanelConfig,
+  type PanelSection,
+  type PanelComponent,
+  type PanelComponentType,
+  type PanelValidationResult,
+} from './panel-schema.js'
