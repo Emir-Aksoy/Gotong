@@ -996,3 +996,81 @@ describe('template.schedules — FDE-M3 suggestions', () => {
     ).toThrowError(/at least one of agents \/ workflows \/ knowledgeBases/)
   })
 })
+
+// ── SDUI-M3: template.panels — gallery-installable panel presets ────────────
+// The parser is SHAPE-ONLY on config (web cannot import personal-butler); the
+// host install sink runs the real validatePanelConfig. What the parser must
+// still do loudly: ids that become library filenames, titles, and the minimal
+// "this could even be a panel" shape (schemaVersion + sections).
+
+describe('template panels (SDUI-M3)', () => {
+  const PANEL_CFG = { schemaVersion: 1, sections: [{ components: [{ type: 'chat' }] }] }
+  const panelDef = (over: Record<string, unknown> = {}): Record<string, unknown> => ({
+    id: 'p1',
+    title: '面板一',
+    config: PANEL_CFG,
+    ...over,
+  })
+
+  it('parses panels and defaults to [] when absent', () => {
+    const t = parseTemplate(
+      tmpl({ panels: [panelDef({ description: '  给父亲  ' }), panelDef({ id: 'p2' })] }),
+    )
+    expect(t.panels.map((p) => p.id)).toEqual(['p1', 'p2'])
+    expect(t.panels[0]).toMatchObject({ id: 'p1', title: '面板一', description: '给父亲' })
+    expect(t.panels[0]!.config).toEqual(PANEL_CFG)
+    expect(t.panels[1]!.description).toBeUndefined()
+
+    const none = parseTemplate(tmpl({ knowledgeBases: [{ name: 'k', useMcpServer: 'm' }] }))
+    expect(none.panels).toEqual([])
+  })
+
+  it('a panel-only template satisfies the empty-template gate', () => {
+    const t = parseTemplate(tmpl({ panels: [panelDef()] }))
+    expect(t.panels).toHaveLength(1)
+    expect(t.agents).toEqual([])
+    expect(t.workflows).toEqual([])
+  })
+
+  it('rejects bad ids (missing / charset / duplicate) — the id becomes a filename', () => {
+    expect(() => parseTemplate(tmpl({ panels: [panelDef({ id: undefined })] }))).toThrow(
+      /panels\[0\]\.id is required/,
+    )
+    expect(() => parseTemplate(tmpl({ panels: [panelDef({ id: '../evil' })] }))).toThrow(
+      /panels\[0\]\.id must match/,
+    )
+    expect(() => parseTemplate(tmpl({ panels: [panelDef(), panelDef()] }))).toThrow(
+      /duplicate panel id 'p1'/,
+    )
+  })
+
+  it('rejects a missing / empty / over-long title', () => {
+    expect(() => parseTemplate(tmpl({ panels: [panelDef({ title: undefined })] }))).toThrow(
+      /panels\[0\]\.title is required/,
+    )
+    expect(() => parseTemplate(tmpl({ panels: [panelDef({ title: '   ' })] }))).toThrow(
+      /panels\[0\]\.title is required/,
+    )
+    expect(() =>
+      parseTemplate(tmpl({ panels: [panelDef({ title: 'x'.repeat(81) })] })),
+    ).toThrow(/at most 80 characters/)
+  })
+
+  it('rejects a config that is not even panel-shaped (guaranteed junk)', () => {
+    expect(() => parseTemplate(tmpl({ panels: [panelDef({ config: undefined })] }))).toThrow(
+      /panels\[0\]\.config is required/,
+    )
+    expect(() => parseTemplate(tmpl({ panels: [panelDef({ config: 'nope' })] }))).toThrow(
+      /panels\[0\]\.config is required/,
+    )
+    expect(() =>
+      parseTemplate(tmpl({ panels: [panelDef({ config: { sections: [] } })] })),
+    ).toThrow(/schemaVersion \(number\) and sections \(array\)/)
+    expect(() =>
+      parseTemplate(tmpl({ panels: [panelDef({ config: { schemaVersion: 1 } })] })),
+    ).toThrow(/schemaVersion \(number\) and sections \(array\)/)
+    expect(() => parseTemplate(tmpl({ panels: 'nope' }))).toThrow(
+      /template\.panels must be an array/,
+    )
+  })
+})

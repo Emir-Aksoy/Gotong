@@ -745,8 +745,8 @@ export async function handleMeRoute(
     await handleMeListInbox(ctx, res, userId)
     return
   }
-  // SDUI-M2 — member panel config (implementation in panel-routes.ts, 控预算).
-  if (path === '/api/me/panel') {
+  // SDUI-M2/M3 — member panel config (implementation in panel-routes.ts, 控预算).
+  if (path === '/api/me/panel' || path.startsWith('/api/me/panel/')) {
     if (await handleMePanelRoute({ panel: ctx.mePanel }, req, res, method, path, userId)) return
   }
   {

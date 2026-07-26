@@ -291,6 +291,7 @@
     var sections = config && typeof config === 'object' ? config.sections : null
     if (!Array.isArray(sections)) {
       host.appendChild(el('p', 'me-meta', t('sduiLoadFailed')))
+      renderShapeSection(host, data.source)
       return
     }
     if (typeof config.title === 'string' && config.title) {
@@ -308,6 +309,139 @@
       })
       host.appendChild(box)
     })
+    renderShapeSection(host, data.source)
+  }
+
+  // ---- 形态 (shape) picker — SDUI-M3 --------------------------------------
+  // Installed presets come from the shape library (template installs); the
+  // member switches with PUT {libraryId} and reverts with PUT {reset:true}.
+  // The owner block is gated by CAPABILITY PROBING, not a role claim: the
+  // member list endpoint is owner-only, so a non-owner's fetch 403s and the
+  // block simply never appears (fail-closed UI).
+  function putPanel(url, body, note, statusEl) {
+    statusEl.textContent = t('sduiShapeApplying')
+    return fetch(url, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+      .then(function (r) { return r.json().catch(function () { return {} }).then(function (j) { return { ok: r.ok, j: j } }) })
+      .then(function (out) {
+        if (!out.ok) {
+          statusEl.textContent = t('sduiShapeFailed') + (out.j && out.j.error ? ': ' + out.j.error : '')
+          return false
+        }
+        statusEl.textContent = note
+        return true
+      })
+      .catch(function (err) {
+        statusEl.textContent = t('sduiShapeFailed') + ': ' + (err && err.message ? err.message : String(err))
+        return false
+      })
+  }
+
+  function renderShapeSection(host, source) {
+    var details = document.createElement('details')
+    details.className = 'sdui-shape'
+    var summary = el('summary', 'sdui-shape-summary', t('sduiShapeHeading'))
+    details.appendChild(summary)
+    var body = el('div', 'sdui-shape-body')
+    details.appendChild(body)
+    host.appendChild(details)
+
+    var status = el('p', 'me-meta sdui-shape-status', '')
+    if (source === 'member') {
+      var row = el('div', 'sdui-shape-current')
+      row.appendChild(el('span', 'me-meta', t('sduiShapeCurrentCustom')))
+      var resetBtn = el('button', 'sdui-shape-reset', t('sduiShapeReset'))
+      resetBtn.type = 'button'
+      resetBtn.addEventListener('click', function () {
+        putPanel('/api/me/panel', { reset: true }, t('sduiShapeApplied'), status).then(function (ok) {
+          if (ok) loadPanel()
+        })
+      })
+      row.appendChild(resetBtn)
+      body.appendChild(row)
+    }
+
+    var list = el('div', 'sdui-shape-list', t('sduiLoading'))
+    body.appendChild(list)
+    body.appendChild(status)
+    fetch('/api/me/panel/library')
+      .then(function (r) { return r.ok ? r.json() : null })
+      .then(function (j) {
+        var panels = j && Array.isArray(j.panels) ? j.panels : []
+        list.replaceChildren()
+        if (panels.length === 0) {
+          list.appendChild(el('p', 'me-meta', t('sduiShapeEmpty')))
+          return
+        }
+        panels.forEach(function (p) {
+          var card = el('div', 'sdui-shape-item')
+          var info = el('div', 'sdui-shape-info')
+          info.appendChild(el('strong', null, String(p.title || p.id)))
+          if (p.description) info.appendChild(el('p', 'me-meta', String(p.description)))
+          card.appendChild(info)
+          var apply = el('button', 'sdui-shape-apply', t('sduiShapeApply'))
+          apply.type = 'button'
+          apply.addEventListener('click', function () {
+            putPanel('/api/me/panel', { libraryId: p.id }, t('sduiShapeApplied'), status).then(function (ok) {
+              if (ok) loadPanel()
+            })
+          })
+          card.appendChild(apply)
+          list.appendChild(card)
+        })
+        renderOwnerInstall(body, panels, status)
+      })
+      .catch(function () {
+        list.textContent = t('sduiLoadFailed')
+      })
+  }
+
+  function renderOwnerInstall(body, panels, status) {
+    if (panels.length === 0) return
+    fetch('/api/admin/identity/users')
+      .then(function (r) { return r.ok ? r.json() : null })
+      .then(function (j) {
+        // Rows are { user: {...}, role } (identity-routes joins membership).
+        var rows = j && Array.isArray(j.users) ? j.users : []
+        if (rows.length === 0) return
+        var box = el('div', 'sdui-shape-owner')
+        box.appendChild(el('h4', 'sdui-shape-owner-title', t('sduiShapeForMember')))
+        var memberSel = document.createElement('select')
+        rows.forEach(function (row) {
+          var u = row && row.user ? row.user : row
+          if (!u || !u.id) return
+          var opt = document.createElement('option')
+          opt.value = u.id
+          opt.textContent = (u.displayName || u.email || u.id) + (row.role ? ' (' + row.role + ')' : '')
+          memberSel.appendChild(opt)
+        })
+        if (memberSel.options.length === 0) return
+        var shapeSel = document.createElement('select')
+        panels.forEach(function (p) {
+          var opt = document.createElement('option')
+          opt.value = p.id
+          opt.textContent = String(p.title || p.id)
+          shapeSel.appendChild(opt)
+        })
+        var install = el('button', 'sdui-shape-install', t('sduiShapeInstallBtn'))
+        install.type = 'button'
+        install.addEventListener('click', function () {
+          putPanel(
+            '/api/admin/panel/users/' + encodeURIComponent(memberSel.value),
+            { libraryId: shapeSel.value },
+            t('sduiShapeInstalled'),
+            status,
+          )
+        })
+        box.appendChild(memberSel)
+        box.appendChild(shapeSel)
+        box.appendChild(install)
+        body.appendChild(box)
+      })
+      .catch(function () { /* not an owner (403) — block never appears */ })
   }
 
   var loading = false

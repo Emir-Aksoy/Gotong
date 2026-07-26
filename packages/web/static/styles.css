@@ -3714,3 +3714,22 @@ body[data-simple-mode="1"] section.adv-only { display: none !important; }
   padding: 0.35rem 0; border-bottom: 1px solid #2a2a2a;
 }
 .sdui-inbox-item:last-child { border-bottom: none; }
+
+/* SDUI-M3 — 形态 (shape) picker */
+.sdui-shape { margin-top: 1.2rem; border-top: 1px solid #2a2a2a; padding-top: 0.6rem; }
+.sdui-shape-summary { cursor: pointer; font-weight: 600; }
+.sdui-shape-body { display: flex; flex-direction: column; gap: 0.6rem; padding: 0.6rem 0; }
+.sdui-shape-current, .sdui-shape-item {
+  display: flex; align-items: center; justify-content: space-between; gap: 0.6rem;
+}
+.sdui-shape-item { padding: 0.4rem 0; border-bottom: 1px solid #2a2a2a; }
+.sdui-shape-item:last-child { border-bottom: none; }
+.sdui-shape-info p { margin: 0.15rem 0 0; }
+.sdui-shape-apply, .sdui-shape-reset, .sdui-shape-install {
+  padding: 0.4rem 0.9rem; border-radius: 8px; border: 1px solid #666;
+  background: transparent; color: inherit; cursor: pointer; white-space: nowrap;
+}
+.sdui-shape-owner { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center;
+  border-top: 1px dashed #2a2a2a; padding-top: 0.6rem; }
+.sdui-shape-owner-title { width: 100%; margin: 0; font-size: 0.95rem; }
+.sdui-shape-owner select { max-width: 46%; }

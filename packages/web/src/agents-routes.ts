@@ -49,7 +49,7 @@ import {
   type ParsedAgent,
 } from './manifest.js'
 import { decryptJson } from './template-crypto.js'
-import { injectAgentSecrets, parseTemplate, type ParsedTemplate } from './template-manifest.js'
+import { injectAgentSecrets, parseTemplate, type ParsedTemplate, type TemplatePanelDef } from './template-manifest.js'
 
 const log = createLogger('agents-routes')
 
@@ -228,6 +228,19 @@ export interface AgentsRoutesCtx {
    * posture as the other two sinks. Absent → response-only reporting.
    */
   scheduleSuggestions?: ScheduleSuggestionSink
+  /**
+   * SDUI-M3 — optional sink for a template's panel presets (`panels[]`).
+   * Records shapes into the host's panel library so members can 换形态 later;
+   * REAL config validation happens inside the sink (the manifest parser only
+   * shape-checks — web cannot import personal-butler). Best-effort like its
+   * sibling sinks. Absent → response-only reporting.
+   */
+  panelLibrary?: PanelLibrarySink
+}
+
+/** SDUI-M3 — durable recorder for installed packs' panel presets. */
+export interface PanelLibrarySink {
+  installPanels(pack: string, panels: readonly TemplatePanelDef[]): Promise<void>
 }
 
 /** FDE-M3 — durable recorder for installed packs' schedule suggestions. */
@@ -1092,6 +1105,20 @@ export async function handleAgentsRoute(
         })
       }
     }
+    // SDUI-M3 — panel presets land in the host's shape library ([] clears a
+    // pack's stale entries on reinstall). The sink validates each config with
+    // the REAL validatePanelConfig and skips bad ones with a warn, so the
+    // response reports what the template DECLARED, not what survived.
+    if (ctx.panelLibrary) {
+      try {
+        await ctx.panelLibrary.installPanels(template.name, template.panels)
+      } catch (err) {
+        log.warn('panel-preset recording failed (install unaffected)', {
+          template: template.name,
+          err: err instanceof Error ? err.message : String(err),
+        })
+      }
+    }
     const agentsMissingKey: { id: string; provider: string }[] = []
     if (ctx.llmKeyProbe) {
       for (const { id, provider } of createdProviders) {
@@ -1160,6 +1187,9 @@ export async function handleAgentsRoute(
         // Enable = write a real schedule (定时卡 / provision --user) — the
         // member gate applies there; nothing fires from an install.
         scheduleSuggestions: template.scheduleSuggestions,
+        // SDUI-M3 — panel presets DECLARED by the pack (the library sink
+        // validates for real and may skip a bad one with a warn).
+        panels: template.panels.map((p) => ({ id: p.id, title: p.title })),
       },
     })
     return true

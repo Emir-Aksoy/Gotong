@@ -1,12 +1,17 @@
 /**
- * HTTP tests for the SDUI member panel route (SDUI-M2):
+ * HTTP tests for the SDUI member panel routes (SDUI-M2 read + SDUI-M3 write):
  *
- *   GET /api/me/panel  →  { schemaVersion, config, source }
+ *   GET /api/me/panel                       → { schemaVersion, config, source }
+ *   PUT /api/me/panel { libraryId }         → switch to an installed shape
+ *   PUT /api/me/panel { reset: true }       → back to the built-in default
+ *   GET /api/me/panel/library               → { panels: [{id,title,description?}] }
+ *   PUT /api/admin/panel/users/:id          → owner installs a shape for a member
  *
- * The web layer forces userId from the SESSION (never body / query), 503s when
- * no surface is wired (setting-ops posture — the SPA then shows "not enabled"
- * instead of a broken panel), and rejects non-GET verbs. A stub surface
- * records calls so we can assert the route passed the session userId.
+ * The web layer forces userId from the SESSION (never body / query) on the /me
+ * face, 503s when no surface is wired, maps store errors by duck `code`
+ * (not_found→404, invalid/too_large→400), and the admin face sits behind
+ * requireAdmin (member cookie → 401). The member write face is deliberately
+ * narrow: free-form config PUT is NOT exposed in M3.
  */
 
 import { afterEach, describe, expect, it } from 'vitest'
@@ -20,10 +25,26 @@ import { openIdentityStore, type IdentityStore } from '@gotong/identity'
 import { serveWeb, type WebServerHandle } from '../src/server.js'
 import type { MePanelSurface } from '../src/panel-routes.js'
 
+const CFG = { schemaVersion: 1, sections: [{ components: [{ type: 'chat' }] }] }
+
+class StoreError extends Error {
+  constructor(
+    readonly code: 'invalid' | 'not_found' | 'too_large',
+    message: string,
+  ) {
+    super(message)
+  }
+}
+
 class StubPanel implements MePanelSurface {
   readonly calls: string[] = []
+  readonly applied: Array<{ userId: string; libraryId: string }> = []
+  readonly resets: string[] = []
   source: 'default' | 'member' | 'fallback' = 'default'
-  /** When set, the next call throws. */
+  library: Array<{ id: string; title: string; description?: string }> = [
+    { id: 'farm', title: '农事面', description: '给父亲' },
+  ]
+  /** When set, the next panel() call throws. */
   boom = false
 
   async panel(userId: string) {
@@ -32,11 +53,25 @@ class StubPanel implements MePanelSurface {
       this.boom = false
       throw new Error('panel store exploded')
     }
-    return {
-      schemaVersion: 1,
-      config: { schemaVersion: 1, sections: [{ components: [{ type: 'chat' }] }] },
-      source: this.source,
+    return { schemaVersion: 1, config: CFG, source: this.source }
+  }
+
+  async resetPanel(userId: string) {
+    this.resets.push(userId)
+    this.source = 'default'
+  }
+
+  async listLibrary() {
+    return this.library
+  }
+
+  async applyLibrary(userId: string, libraryId: string) {
+    if (!this.library.some((e) => e.id === libraryId)) {
+      throw new StoreError('not_found', 'unknown library panel')
     }
+    this.applied.push({ userId, libraryId })
+    this.source = 'member'
+    return { schemaVersion: 1, config: CFG, source: 'member' as const }
   }
 }
 
@@ -44,6 +79,7 @@ interface Boot {
   tmp: string
   server: WebServerHandle
   identity: IdentityStore
+  adminToken: string
   memberCookie: string
   memberUserId: string
   stub: StubPanel | undefined
@@ -57,8 +93,7 @@ async function boot(opts: { withSurface?: boolean } = {}): Promise<Boot> {
   const hub = new Hub({ space })
   await hub.start()
 
-  const { admin, token: adminToken } = await space.createAdmin('TestAdmin')
-  void admin
+  const { token: adminToken } = await space.createAdmin('TestAdmin')
   const identity = openIdentityStore({ dbPath: join(tmp, 'identity.sqlite') })
   identity.bootstrap({ adminToken, ownerEmail: 'admin@local', ownerDisplayName: 'TestAdmin' })
   const member = identity.createUser({
@@ -84,10 +119,10 @@ async function boot(opts: { withSurface?: boolean } = {}): Promise<Boot> {
   if (loginRes.status !== 200) throw new Error(`member login failed ${loginRes.status}`)
   const memberCookie = loginRes.headers.get('set-cookie')!.split(';')[0]!
 
-  return { tmp, server, identity, memberCookie, memberUserId: member.id, stub }
+  return { tmp, server, identity, adminToken, memberCookie, memberUserId: member.id, stub }
 }
 
-describe('/api/me/panel — SDUI member panel config (M2)', () => {
+describe('/api/me/panel — SDUI member panel config (M2 read + M3 write)', () => {
   let b: Boot
 
   afterEach(async () => {
@@ -98,11 +133,15 @@ describe('/api/me/panel — SDUI member panel config (M2)', () => {
 
   async function req(
     method: string,
-    auth = true,
+    opts: { auth?: boolean; path?: string; body?: unknown } = {},
   ): Promise<{ status: number; json: any }> {
-    const res = await fetch(`${b.server.url}/api/me/panel`, {
+    const res = await fetch(`${b.server.url}${opts.path ?? '/api/me/panel'}`, {
       method,
-      headers: { 'content-type': 'application/json', ...(auth ? { cookie: b.memberCookie } : {}) },
+      headers: {
+        'content-type': 'application/json',
+        ...((opts.auth ?? true) ? { cookie: b.memberCookie } : {}),
+      },
+      ...(opts.body !== undefined ? { body: JSON.stringify(opts.body) } : {}),
     })
     const json = await res.json().catch(() => ({}))
     return { status: res.status, json }
@@ -110,7 +149,7 @@ describe('/api/me/panel — SDUI member panel config (M2)', () => {
 
   it('unauthenticated → 401', async () => {
     b = await boot()
-    expect((await req('GET', false)).status).toBe(401)
+    expect((await req('GET', { auth: false })).status).toBe(401)
     expect(b.stub!.calls).toHaveLength(0)
   })
 
@@ -140,18 +179,102 @@ describe('/api/me/panel — SDUI member panel config (M2)', () => {
     expect(r.json.error).toContain('not enabled')
   })
 
-  it('non-GET → 405 (no write face until the M3 store)', async () => {
-    b = await boot()
-    const r = await req('POST')
-    expect(r.status).toBe(405)
-    expect(b.stub!.calls).toHaveLength(0)
-  })
-
   it('surface throw → 500, error message surfaced', async () => {
     b = await boot()
     b.stub!.boom = true
     const r = await req('GET')
     expect(r.status).toBe(500)
     expect(r.json.error).toContain('exploded')
+  })
+
+  // ── M3 write face ─────────────────────────────────────────────────────────
+
+  it('PUT { libraryId } applies the shape for the SESSION user', async () => {
+    b = await boot()
+    const r = await req('PUT', { body: { libraryId: 'farm' } })
+    expect(r.status).toBe(200)
+    expect(r.json.source).toBe('member')
+    expect(b.stub!.applied).toEqual([{ userId: b.memberUserId, libraryId: 'farm' }])
+  })
+
+  it('PUT { libraryId } for an unknown shape → 404 via the duck code', async () => {
+    b = await boot()
+    const r = await req('PUT', { body: { libraryId: 'nope' } })
+    expect(r.status).toBe(404)
+    expect(b.stub!.applied).toHaveLength(0)
+  })
+
+  it('PUT { reset: true } resets then returns the (default) panel', async () => {
+    b = await boot()
+    const r = await req('PUT', { body: { reset: true } })
+    expect(r.status).toBe(200)
+    expect(r.json.source).toBe('default')
+    expect(b.stub!.resets).toEqual([b.memberUserId])
+  })
+
+  it('PUT with any other body → 400 (free-form config is NOT a member face)', async () => {
+    b = await boot()
+    expect((await req('PUT', { body: { config: CFG } })).status).toBe(400)
+    expect((await req('PUT', { body: {} })).status).toBe(400)
+    expect(b.stub!.applied).toHaveLength(0)
+    expect(b.stub!.resets).toHaveLength(0)
+  })
+
+  it('DELETE → 405 (only GET / PUT exist)', async () => {
+    b = await boot()
+    const r = await req('DELETE')
+    expect(r.status).toBe(405)
+    expect(b.stub!.calls).toHaveLength(0)
+  })
+
+  it('GET /api/me/panel/library lists installed shapes; non-GET → 405', async () => {
+    b = await boot()
+    const r = await req('GET', { path: '/api/me/panel/library' })
+    expect(r.status).toBe(200)
+    expect(r.json.panels).toEqual([{ id: 'farm', title: '农事面', description: '给父亲' }])
+    expect((await req('PUT', { path: '/api/me/panel/library', body: {} })).status).toBe(405)
+  })
+
+  // ── M3 admin install face ─────────────────────────────────────────────────
+
+  it('admin PUT /api/admin/panel/users/:id installs a shape for that member', async () => {
+    b = await boot()
+    const res = await fetch(
+      `${b.server.url}/api/admin/panel/users/${encodeURIComponent(b.memberUserId)}`,
+      {
+        method: 'PUT',
+        headers: {
+          'content-type': 'application/json',
+          authorization: `Bearer ${b.adminToken}`,
+        },
+        body: JSON.stringify({ libraryId: 'farm' }),
+      },
+    )
+    expect(res.status).toBe(200)
+    expect(b.stub!.applied).toEqual([{ userId: b.memberUserId, libraryId: 'farm' }])
+  })
+
+  it('member cookie on the admin face → 401 (requireAdmin gate)', async () => {
+    b = await boot()
+    const res = await fetch(`${b.server.url}/api/admin/panel/users/${b.memberUserId}`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json', cookie: b.memberCookie },
+      body: JSON.stringify({ libraryId: 'farm' }),
+    })
+    expect(res.status).toBe(401)
+    expect(b.stub!.applied).toHaveLength(0)
+  })
+
+  it('admin POST on the admin face → 405 (PUT only)', async () => {
+    b = await boot()
+    const res = await fetch(`${b.server.url}/api/admin/panel/users/${b.memberUserId}`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        authorization: `Bearer ${b.adminToken}`,
+      },
+      body: JSON.stringify({ libraryId: 'farm' }),
+    })
+    expect(res.status).toBe(405)
   })
 })

@@ -48,6 +48,7 @@ const CURATED = [
   { id: 'battle-monk-training', file: 'examples/battle-monk-training/template/battle-monk-training.template.yaml' },
   { id: 'smart-home-hub', file: 'examples/smart-home-hub/template/smart-home-hub.template.yaml' },
   { id: 'family-hub', file: 'examples/family-hub/template/family-hub.template.yaml' },
+  { id: 'family-panel-trio', file: 'examples/family-panel-trio/template/family-panel-trio.template.yaml' },
   { id: 'cafe-ops', file: 'examples/cafe-ops/template/cafe-ops.template.yaml' },
   { id: 'bar-ops', file: 'examples/bar-ops/template/bar-ops.template.yaml' },
   { id: 'warband-club', file: 'examples/warband-club/template/warband-club.template.yaml' },

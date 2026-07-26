@@ -1,0 +1,108 @@
+# 家庭面板三件套 — SDUI 形态预设包 (gotong.template/v1)
+#
+# SDUI-M3:画廊第一个「面板」资源类模板,也是第一个 panel-only 模板
+# (零 agent / 零工作流 / 零 KB —— 它装的不是「谁来干活」,而是三张
+# 「终端长什么样」的形态,落进 hub 的形态库 <space>/butler/ui/library/)。
+# 装完之后:
+#   - 成员在「面板」标签底部的「面板形态」里自己换上任意一张,随时换回默认;
+#   - owner 也可以在同一处替某位家人直接装上(fork D),对方随时可自己换掉。
+#
+# 三张形态对准 SDUI 计划文档 §八 的三个人:
+#   father-farm-care   给种地的父亲:天气 3 天 + 农事周历 + 农活清单 +
+#                      阿同随手问 + 一张常读的农事心得卡
+#   mother-local-life  给操持生活的母亲:本地新闻晨报流 + 今日天气 +
+#                      日程一览 + 阿同对话 + 三个一键动作
+#   family-ops-board   给当 operator 的你:hub 状态 + 待批收件箱(保留区)
+#                      + 用量周图 + 日程 + 对话 + 快捷入口
+#
+# ── 诚实边界 ────────────────────────────────────────────────────────────────
+#   形态 ≠ 权限:面板只是排布,组件内容全部来自 hub 既有 API,该看不到的
+#   数据换什么形态也看不到;审批收件箱是渲染器保留区,任何形态都盖不掉
+#   待批徽章。绑 connector: 数据源的组件(天气/新闻/农事日历)需要 hub 挂
+#   了同名 MCP 连接器才有真数据,没挂时组件如实显示「即将上线/未接入」,
+#   面板其余部分照常工作 —— 装形态本身零前置、零凭证。
+schema: gotong.template/v1
+template:
+  name: 家庭面板三形态(农事 / 生活 / 看板)
+  version: 1
+  description: 三张家庭成员面板形态(父亲农事 / 母亲生活 / operator 看板),装完在「面板形态」里一键换上。
+  panels:
+    - id: father-farm-care
+      title: 农事关怀面
+      description: 天气三天 + 农事周历 + 农活清单,给种地的父亲。
+      config:
+        schemaVersion: 1
+        title: "农事关怀"
+        sections:
+          - heading: "今天下不下雨"
+            components:
+              - type: weather
+                source: "connector:weather"
+                params: { days: 3 }
+              - type: calendar
+                source: "connector:calendar"
+                params: { view: week }
+          - heading: "地里的事"
+            components:
+              - type: list
+                source: "tasks.mine"
+                params: { limit: 8 }
+              - type: markdown-card
+                source: "content:farming-notes"
+          - heading: "问阿同"
+            components:
+              - type: chat
+                params: { placeholder: "问问阿同:这几天适合下种吗?" }
+    - id: mother-local-life
+      title: 本地生活面
+      description: 本地新闻晨报 + 今日天气 + 日程,给操持生活的母亲。
+      config:
+        schemaVersion: 1
+        title: "生活助手"
+        sections:
+          - heading: "今天的新闻"
+            components:
+              - type: card-feed
+                source: "connector:local-news"
+                params: { limit: 6 }
+          - heading: "天气与安排"
+            components:
+              - type: weather
+                source: "connector:weather"
+                params: { days: 1 }
+              - type: schedule-list
+                source: "schedules.mine"
+                params: { limit: 5 }
+          - heading: "找阿同"
+            components:
+              - type: chat
+                params: { placeholder: "跟阿同说说今天想做什么…" }
+              - type: quick-actions
+                params:
+                  actions: [open_chat, compose_brief, open_inbox]
+    - id: family-ops-board
+      title: 全家看板
+      description: hub 状态 + 待批事项 + 用量周图,给当 operator 的家人。
+      config:
+        schemaVersion: 1
+        title: "全家看板"
+        sections:
+          - heading: "hub 状态"
+            components:
+              - type: status-card
+                source: "status.hub"
+              - type: chart
+                source: "usage.mine"
+                params: { range: week }
+          - heading: "等我批的"
+            components:
+              - type: approval-inbox
+          - heading: "日程与对话"
+            components:
+              - type: schedule-list
+                source: "schedules.mine"
+                params: { limit: 10 }
+              - type: chat
+              - type: quick-actions
+                params:
+                  actions: [open_inbox, open_chat]

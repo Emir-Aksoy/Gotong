@@ -2140,6 +2140,7 @@ async function main(): Promise<void> {
   // suggestion writes a REAL schedule row, so neither file can go stale.
   const connectorSlots = createConnectorSlotStore({ spaceDir: space.root })
   const scheduleSuggestions = createScheduleSuggestionStore({ spaceDir: space.root })
+  const mePanelSurface = buildMePanelSurface({ spaceDir: space.root })
 
   // FDE-M2 — golden-run acceptance: recorded at template import, run from the
   // admin workflows page THROUGH the member gate as the calling admin, judged
@@ -2390,8 +2391,10 @@ async function main(): Promise<void> {
           },
         }
       : {}),
-    // SDUI-M2 — member panel config (default panel until the M3 store lands).
-    mePanel: buildMePanelSurface(),
+    // SDUI-M2/M3 — member panel store + template panel-preset sink (one object,
+    // one validatePanelConfig choke point in the host store).
+    mePanel: mePanelSurface,
+    panelLibrary: mePanelSurface,
     // SW-M9 A-M7 — the OPERATOR-console steward (site-wide twin); null on the same
     // conditions, in which case /api/admin/steward/{plan,apply} return 503.
     ...(operatorSteward ? { operatorSteward } : {}),

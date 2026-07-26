@@ -37,6 +37,7 @@ const EXPECTED_IDS = [
   'battle-monk-training',
   'smart-home-hub',
   'family-hub',
+  'family-panel-trio',
   'cafe-ops',
   'bar-ops',
   'warband-club',
@@ -73,10 +74,13 @@ describe('builtin template gallery (G-M1)', () => {
       expect(Array.isArray(parsed.workflows)).toBe(true)
       expect(Array.isArray(parsed.knowledgeBases)).toBe(true)
       // A gallery template must teach the hub something: at least one of
-      // agents / workflows / knowledge bases. (An empty manifest installs
-      // nothing — not a useful one-click.)
+      // agents / workflows / knowledge bases / panels. (An empty manifest
+      // installs nothing — not a useful one-click.)
       expect(
-        parsed.agents.length + parsed.workflows.length + parsed.knowledgeBases.length,
+        parsed.agents.length +
+          parsed.workflows.length +
+          parsed.knowledgeBases.length +
+          parsed.panels.length,
         `${t.id} installs nothing`,
       ).toBeGreaterThan(0)
     },

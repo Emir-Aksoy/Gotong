@@ -188,6 +188,25 @@ export interface TemplateScheduleSuggestion {
 }
 
 /**
+ * SDUI-M3 — one member-panel preset shipped by a template (`template.panels[]`).
+ * The `config` is an SDUI panel orchestration document. The parser here checks
+ * SHAPE only (object + schemaVersion + sections array) — the REAL
+ * `validatePanelConfig` runs inside the host's library sink at install time,
+ * because web must not import personal-butler (kernel-deps direction). The
+ * gallery anti-rot gate closes the gap for shipped templates by validating
+ * every embedded preset with the real validator (host tests).
+ */
+export interface TemplatePanelDef {
+  /** Library id — becomes the shape's filename; KB-name charset. */
+  id: string
+  /** Member-facing shape name (shown in the 「形态」 picker). */
+  title: string
+  description?: string
+  /** SDUI panel config document (shape-checked here, validated in the sink). */
+  config: unknown
+}
+
+/**
  * Optional, additive provenance for a template (community citation graph).
  * Carries NO structural meaning — the importer ignores it; it exists so credit
  * can flow back upstream and a static leaderboard can rank "how many templates
@@ -221,6 +240,8 @@ export interface ParsedTemplate {
   acceptanceCases: TemplateAcceptanceCase[]
   /** FDE-M3 — schedule suggestions (`schedules`); [] when absent. */
   scheduleSuggestions: TemplateScheduleSuggestion[]
+  /** SDUI-M3 — panel presets (`panels`); [] when absent. */
+  panels: TemplatePanelDef[]
   apiKeyPrompt?: BundleApiKeyPrompt
   /** Additive citation/attribution metadata (no structural meaning). */
   provenance?: TemplateProvenance
@@ -300,14 +321,20 @@ export function parseTemplate(raw: string): ParsedTemplate {
   const connectorSlots = parseTemplateRequires(t.requires)
   const acceptanceCases = parseTemplateAcceptance(t.acceptance, workflows)
   const scheduleSuggestions = parseTemplateSchedules(t.schedules, workflows)
+  const panels = parseTemplatePanels(t.panels)
 
   // A template with nothing in it is almost certainly a mistake — reject it
   // loudly rather than silently importing an empty architecture. (Connector
   // slots / acceptance cases / schedule suggestions alone don't count: a pack
-  // that only NEEDS or only TESTS or only SCHEDULES things installs nothing.)
-  if (agents.length === 0 && workflows.length === 0 && knowledgeBases.length === 0) {
+  // that only NEEDS or only TESTS or only SCHEDULES things installs nothing.
+  // Panels DO count — a panel-only pack installs member panel shapes,
+  // SDUI-M3's family-panel-trio being the first.)
+  if (
+    agents.length === 0 && workflows.length === 0 && knowledgeBases.length === 0 &&
+    panels.length === 0
+  ) {
     throw new ManifestError(
-      `template must declare at least one of agents / workflows / knowledgeBases`,
+      `template must declare at least one of agents / workflows / knowledgeBases / panels`,
     )
   }
 
@@ -321,6 +348,7 @@ export function parseTemplate(raw: string): ParsedTemplate {
     connectorSlots,
     acceptanceCases,
     scheduleSuggestions,
+    panels,
   }
   if (typeof t.description === 'string') out.description = t.description
   const apiKeyPrompt = parseTemplateDefaults(t.defaults)
@@ -580,6 +608,64 @@ function parseTemplateRequires(raw: unknown): TemplateConnectorSlot[] {
       slot.capability = e.capability.trim()
     }
     out.push(slot)
+  }
+  return out
+}
+
+function parseTemplatePanels(raw: unknown): TemplatePanelDef[] {
+  if (raw === undefined || raw === null) return []
+  if (!Array.isArray(raw)) {
+    throw new ManifestError('template.panels must be an array when present')
+  }
+  const out: TemplatePanelDef[] = []
+  const seen = new Set<string>()
+  for (let i = 0; i < raw.length; i++) {
+    const entry = raw[i]
+    const path = `template.panels[${i}]`
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+      throw new ManifestError(`${path} must be an object`)
+    }
+    const e = entry as Record<string, unknown>
+    if (typeof e.id !== 'string' || e.id.length === 0) {
+      throw new ManifestError(`${path}.id is required (non-empty string)`)
+    }
+    // The id becomes a library FILENAME on install — same charset as KB slots.
+    if (!KB_NAME_RE.test(e.id)) {
+      throw new ManifestError(
+        `${path}.id must match ${KB_NAME_RE} (letters/digits/_/-, start with a letter) — got '${e.id}'`,
+      )
+    }
+    if (seen.has(e.id)) {
+      throw new ManifestError(`duplicate panel id '${e.id}' inside template.panels`)
+    }
+    seen.add(e.id)
+    if (typeof e.title !== 'string' || e.title.trim().length === 0) {
+      throw new ManifestError(`${path}.title is required (non-empty string)`)
+    }
+    if (e.title.trim().length > 80) {
+      throw new ManifestError(`${path}.title must be at most 80 characters`)
+    }
+    // SHAPE check only (see TemplatePanelDef doc): a config that isn't even an
+    // object with schemaVersion + sections would install as guaranteed junk —
+    // reject loudly here; everything subtler is the sink validator's job.
+    const c = e.config
+    if (!c || typeof c !== 'object' || Array.isArray(c)) {
+      throw new ManifestError(`${path}.config is required (object)`)
+    }
+    const cfg = c as Record<string, unknown>
+    if (typeof cfg.schemaVersion !== 'number' || !Array.isArray(cfg.sections)) {
+      throw new ManifestError(
+        `${path}.config must carry schemaVersion (number) and sections (array)`,
+      )
+    }
+    const panel: TemplatePanelDef = { id: e.id, title: e.title.trim(), config: c }
+    if (e.description !== undefined) {
+      if (typeof e.description !== 'string') {
+        throw new ManifestError(`${path}.description must be a string when present`)
+      }
+      if (e.description.trim().length > 0) panel.description = e.description.trim()
+    }
+    out.push(panel)
   }
   return out
 }

@@ -138,6 +138,11 @@ export interface TemplateCatalogEntry {
    * knows the pack can prove itself after install.
    */
   acceptanceCases: { id: string; workflowId: string }[]
+  /**
+   * SDUI-M3 — panel presets the pack installs into the member shape library
+   * (ids + titles only; configs stay server-side). Shown on the gallery card.
+   */
+  panels: { id: string; title: string }[]
   /** One-click apiKeyPrompt hint, if the template declares one. */
   apiKeyPrompt?: BundleApiKeyPrompt
 }
@@ -181,6 +186,7 @@ export function buildTemplateCatalog(): TemplateCatalogEntry[] {
           ...(s.capability !== undefined ? { capability: s.capability } : {}),
         })),
         acceptanceCases: p.acceptanceCases.map((c) => ({ id: c.id, workflowId: c.workflowId })),
+        panels: p.panels.map((pp) => ({ id: pp.id, title: pp.title })),
         ...(p.apiKeyPrompt ? { apiKeyPrompt: p.apiKeyPrompt } : {}),
       })
     } catch (err) {

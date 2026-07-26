@@ -59,7 +59,7 @@ import {
   type MeChatStreamSurface,
   type MeChatSessionSurface,
 } from './me-routes.js'
-import type { MePanelSurface } from './panel-routes.js'
+import { handleAdminPanelRoute, type MePanelSurface } from './panel-routes.js'
 import {
   handleWorkflowRoute,
   type WorkflowGrantSink,
@@ -355,6 +355,7 @@ export function serveWeb(hub: Hub, opts: WebServerOptions = {}): Promise<WebServ
     meChatStream: opts.meChatStream,
     meChatSession: opts.meChatSession,
     mePanel: opts.mePanel,
+    panelLibrary: opts.panelLibrary,
     operatorSteward: opts.operatorSteward,
     readinessGate: opts.readinessGate,
     identity: opts.identity,
@@ -546,8 +547,9 @@ interface HandlerCtx {
   meChatStream: MeChatStreamSurface | undefined
   /** Session window — see WebServerOptions.meChatSession doc above. */
   meChatSession: MeChatSessionSurface | undefined
-  /** SDUI-M2 — see WebServerOptions.mePanel doc above. */
+  /** SDUI-M2/M3 — see WebServerOptions.mePanel / panelLibrary docs above. */
   mePanel: MePanelSurface | undefined
+  panelLibrary: WebServerOptions['panelLibrary']
   /** SW-M9 A-M6 — see WebServerOptions.operatorSteward doc above. */
   operatorSteward: MeHubStewardSurface | undefined
   readinessGate: { isReady: () => boolean } | undefined
@@ -869,17 +871,11 @@ async function handle(
   }
 
   // --- Internal metrics scrape (Route B P0-M7) --------------------------
-  // BEFORE the CSRF gate and OUTSIDE requireAdmin: a Prometheus scraper is a
-  // server-to-server client with no browser session, so it satisfies neither
-  // the admin cookie nor the CSRF Origin check. This route has its own
-  // bearer-token domain (GOTONG_METRICS_TOKEN), letting an operator scrape the
-  // SAME body as /api/admin/metrics WITHOUT minting a machine admin (which
-  // would widen the admin surface to a scraper credential).
-  //
-  // Fail-closed: when the token is unset the route 404s — indistinguishable
-  // from "no such endpoint", so an unconfigured deployment exposes no
-  // anonymous metrics. Set + correct bearer → 200; set + wrong/absent bearer
-  // → 401 via constant-time compare (no token-length/prefix timing oracle).
+  // BEFORE CSRF gate + OUTSIDE requireAdmin: a Prometheus scraper has no
+  // browser session, so it gets its own bearer domain (GOTONG_METRICS_TOKEN)
+  // — same body as /api/admin/metrics without minting a machine admin.
+  // Fail-closed: token unset → 404 (indistinguishable from "no endpoint");
+  // set + wrong/absent bearer → 401 via constant-time compare (no oracle).
   if (method === 'GET' && path === '/metrics') {
     if (!ctx.metricsToken) {
       res.writeHead(404, { 'content-type': 'application/json' })
@@ -1321,14 +1317,9 @@ async function handle(
   }
 
   // --- workflows (v2.1) ------------------------------------------------
-  // P3 audit cleanup — these routes used to live inline in this handler
-  // (~190 lines around line 1830). Now extracted into workflow-routes.ts;
-  // the dispatcher returns true iff it matched the request so we can
-  // fall through to the rest of the handler chain otherwise.
-  //
-  // Auth: each handler in the sub-module calls back into our
-  // `requireAdmin` closure so the v3 admin auth machinery (cookies,
-  // sessions, rate limiter) stays here in server.ts.
+  // P3 audit cleanup — extracted into workflow-routes.ts; dispatcher returns
+  // true iff matched (fall through otherwise). Auth: each sub-handler calls
+  // back into our `requireAdmin` closure (auth machinery stays here).
   // P2-M5b / v5 E4-M1 — shared resource-RBAC actor resolver for the workflow
   // AND agent admin routes. A v4 owner/admin → that user (operator iff owner);
   // a v3 Space-admin (requireAdmin passed but no v4 user) → operator bypass.
@@ -1426,6 +1417,7 @@ async function handle(
         connectorSlots: ctx.connectorSlots,
         templateAcceptance: ctx.templateAcceptance,
         scheduleSuggestions: ctx.scheduleSuggestions,
+        panelLibrary: ctx.panelLibrary,
         reconcileHeartbeats: ctx.reconcileHeartbeats,
         workflows: ctx.workflows,
         requireAdmin: (rq, rs) => requireAdmin(ctx, rq, rs),
@@ -1714,6 +1706,13 @@ async function handle(
       req, res, method, path,
     )
     if (handled) return
+  }
+
+  // SDUI-M3 — owner installs a panel shape for a member (fork D; the member
+  // can switch back any time via their own PUT /api/me/panel).
+  if (path.startsWith('/api/admin/panel/')) {
+    if (!(await requireAdmin(ctx, req, res))) return
+    if (await handleAdminPanelRoute({ panel: ctx.mePanel }, req, res, method, path)) return
   }
 
   // FDE-M2 — golden-run acceptance (list recorded packs / run through the

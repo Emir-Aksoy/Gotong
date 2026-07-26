@@ -39,6 +39,7 @@ import type { MePanelSurface } from './panel-routes.js'
 import type {
   ConnectorSlotSink,
   LlmKeyProbe,
+  PanelLibrarySink,
   RoutingProbeSurface,
   ScheduleSuggestionSink,
 } from './agents-routes.js'
@@ -346,8 +347,16 @@ export interface WebServerOptions {
    * bridge). When absent, quick-chat dispatches today's payload byte-identical.
    */
   meChatSession?: MeChatSessionSurface
-  /** SDUI-M2 — member panel config resolver; absent → GET /api/me/panel 503. */
+  /** SDUI-M2/M3 — member panel config store; absent → /api/me/panel* 503. */
   mePanel?: MePanelSurface
+  /**
+   * SDUI-M3 — durable sink for a template's panel presets (`panels[]`). The
+   * host wires the SAME store object as `mePanel` (its `installPanels`); the
+   * import records presets into the shape library so members can 换形态 after
+   * the response scrolls away. Best-effort (a fault never fails an import);
+   * absent → panels are reported in the response only.
+   */
+  panelLibrary?: PanelLibrarySink
   /**
    * SW-M9 A-M6 — optional OPERATOR-console hub steward surface. The host wires a
    * SECOND `HostStewardService` here (the site-wide operator one). When absent,
