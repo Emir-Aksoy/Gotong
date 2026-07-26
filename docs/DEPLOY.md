@@ -221,6 +221,11 @@ GOTONG_ADMIN_DISPLAY_NAME=Operator
 
 ### C.4 systemd unit
 
+> Copy-ready template: [`deploy/gotong.service`](../deploy/gotong.service)
+> (verbatim match of the unit below, with the alternative ExecStart lines
+> as comments); the master-key drop-in template lives at
+> [`deploy/gotong.service.d/50-master-key.conf`](../deploy/gotong.service.d/50-master-key.conf).
+
 `/etc/systemd/system/gotong.service`:
 
 ```ini
@@ -274,6 +279,10 @@ WantedBy=multi-user.target
 > so don't pick it unless you've actually deployed Node 22.
 
 ### C.5 Caddyfile
+
+> Copy-ready template: [`deploy/Caddyfile.baremetal`](../deploy/Caddyfile.baremetal)
+> (verbatim match of the config below — swap the two domains and go; the
+> compose blueprint uses `caddy/Caddyfile`, don't mix the two).
 
 `/etc/caddy/Caddyfile`:
 

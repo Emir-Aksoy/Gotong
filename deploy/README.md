@@ -10,14 +10,17 @@
 |---|---|---|
 | [`.env.home`](.env.home) | **T1** 家用主机 + IM | 主机绑 loopback、零公网暴露；成员私信 Telegram 机器人接入（IM 桥出站长轮询，**不需要内网穿透**）。 |
 | [`.env.cloud`](.env.cloud) | **T2/T3** 云服务器 | 主机绑 loopback，Caddy 在 :443 终结 TLS 反代进来；过线防御三件套 + master key 挪出数据盘。IM 可选，与直连 IP 并存。 |
+| [`Caddyfile.baremetal`](Caddyfile.baremetal) | **T2/T3** VPS 裸机 | 复制到 `/etc/caddy/Caddyfile` 改两处域名即用：Web + WS 双域名、SSE flush、XFF 防伪造注释、HSTS。compose 蓝图**别**用它，用 [`caddy/Caddyfile`](../caddy/Caddyfile)。 |
+| [`gotong.service`](gotong.service) | **T2/T3** VPS 裸机 | systemd unit：复制到 `/etc/systemd/system/` 即用；`EnvironmentFile=/etc/gotong.env` + 沙箱加固 + 三种可选 ExecStart 注释在文件里。 |
+| [`gotong.service.d/50-master-key.conf`](gotong.service.d/50-master-key.conf) | **T2/T3** VPS 裸机 | master key drop-in：真 key 进 root 专读的 systemd drop-in（不进明文 env、不进 git），文件头有生成/权限/离线备份三步纪律。 |
 | [`Gotong.command`](Gotong.command) | 桌面双击（macOS） | Finder 双击即起本机 host，起好后 host 自己开浏览器。零配置、不读凭证。 |
 | [`Gotong.sh`](Gotong.sh) | 桌面/通用（Linux） | `Gotong.command` 的孪生，给 Linux / 任意 POSIX shell；`chmod +x` 后运行或 `scp` 到机器上。 |
 
-Caddy 模板已有两份现成的，**不在这里重复**：
+Caddy 模板有两份，**按部署形态选**（两份 XFF 姿态不同，不要混用）：
+- [`Caddyfile.baremetal`](Caddyfile.baremetal) — VPS 裸机用（本目录，直接复制；逐行讲解见 [`docs/zh/DEPLOY.md`](../docs/zh/DEPLOY.md) §C.5）。
 - [`caddy/Caddyfile`](../caddy/Caddyfile) — docker-compose 蓝图用（域名走 `{$GOTONG_DOMAIN}` 环境变量）。
-- [`docs/zh/DEPLOY.md`](../docs/zh/DEPLOY.md) §C.5 — VPS 裸机用（带逐行注释 + WS 子域名）。
 
-systemd unit + 防火墙规则 + 首启仪式（`mint-admin-token`）：[`docs/zh/DEPLOY.md`](../docs/zh/DEPLOY.md) §C.4 / §C.6 / §C.7。
+防火墙规则 + 首启仪式：[`docs/zh/DEPLOY.md`](../docs/zh/DEPLOY.md) §C.6 / §C.7。
 
 ## 桌面双击起跑（本机最快）
 

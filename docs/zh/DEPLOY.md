@@ -176,6 +176,10 @@ GOTONG_ADMIN_DISPLAY_NAME=Operator
 
 ### C.4 systemd unit
 
+> 现成模板可直接复制：[`deploy/gotong.service`](../../deploy/gotong.service)
+>（与下面逐字一致，三种可选 ExecStart 已作注释收在文件里）；master key 的
+> drop-in 模板见 [`deploy/gotong.service.d/50-master-key.conf`](../../deploy/gotong.service.d/50-master-key.conf)。
+
 `/etc/systemd/system/gotong.service`：
 
 ```ini
@@ -225,6 +229,9 @@ WantedBy=multi-user.target
 > `--experimental-strip-types` 要求 **Node 22+** —— 在 Node 20 上启动就 `bad option: --experimental-strip-types`，除非你已经部署了 Node 22 否则别选它。
 
 ### C.5 Caddyfile
+
+> 现成模板可直接复制：[`deploy/Caddyfile.baremetal`](../../deploy/Caddyfile.baremetal)
+>（与下面逐字一致，换两处域名即用；compose 蓝图用 `caddy/Caddyfile`，别混用）。
 
 `/etc/caddy/Caddyfile`：
 

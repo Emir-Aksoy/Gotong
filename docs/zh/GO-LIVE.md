@@ -385,6 +385,9 @@ openssl rand -hex 32            # 生成一次，64 hex
 `GOTONG_MASTER_KEY_PROVIDER=env`。丢了这个 key = 解不开 vault，所以**单独离线备份它**
 （跟数据备份分开放）。
 
+> 现成模板可直接复制：[`deploy/gotong.service.d/50-master-key.conf`](../../deploy/gotong.service.d/50-master-key.conf)
+>（root 专读 drop-in 注入，文件头带生成 / chmod 600 / 离线备份三步纪律）。
+
 ### T2/T3.3 ★ 云服务器 IP 暴露风险（用户点名「要先准备好」）★
 
 一旦云主机的 IP/域名上了公网，它就会被**持续扫描**。准备清单：

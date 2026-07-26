@@ -1,0 +1,48 @@
+# ── Gotong systemd unit 模板 · 拓扑 T2/T3：VPS 裸机 ──
+#
+# 用法（VPS 上，前置：docs/zh/DEPLOY.md §C.2 的 /opt/gotong checkout + build）：
+#   sudo cp deploy/gotong.service /etc/systemd/system/gotong.service
+#   sudo systemctl daemon-reload && sudo systemctl enable --now gotong
+#   journalctl -u gotong -f          # 首启日志（admin 认领 → §C.7）
+#
+# master key 从 secret 注入（别写进 /etc/gotong.env 明文）：
+#   配套 drop-in 模板 deploy/gotong.service.d/50-master-key.conf。
+# 逐行讲解：docs/zh/DEPLOY.md §C.4。
+# 懒人路径：deploy/cloud-quickstart.sh 会生成与本文件逐字一致的 unit。
+
+[Unit]
+Description=Gotong host
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=gotong
+Group=gotong
+WorkingDirectory=/opt/gotong
+EnvironmentFile=/etc/gotong.env
+# 跑构建产物 dist/main.js。`pnpm build`（§C.2）已经生成 dist/。
+# 这是推荐路径：零运行时转换、组件最少、不挑 Node 版本。
+#
+# 三种可选 ExecStart —— 有特殊场景才换（一次只留一行生效）：
+#   ExecStart=/usr/bin/env gotong-host
+#     （已 `pnpm install -g @gotong/host` 时）
+#   ExecStart=/usr/bin/env node --experimental-strip-types /opt/gotong/packages/host/src/main.ts
+#     （跳过构建；要求 Node 22+ —— Node 20 上启动即 `bad option`，别选）
+#   ExecStart=/usr/bin/env tsx /opt/gotong/packages/host/src/main.ts
+#     （从源码跑，兼容 Node 20，但多一个全局依赖）
+ExecStart=/usr/bin/env node /opt/gotong/packages/host/dist/main.js
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/srv/gotong-data
+ProtectHome=true
+PrivateTmp=true
+MemoryMax=512M
+TasksMax=200
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

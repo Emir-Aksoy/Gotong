@@ -1,0 +1,67 @@
+# ── Gotong Caddy 模板 · 拓扑 T2/T3：VPS 裸机（非 docker-compose）──
+#
+# 用法（VPS 上）：
+#   sudo cp deploy/Caddyfile.baremetal /etc/caddy/Caddyfile
+#   # 把下面两处 hub.example.com / hub-ws.example.com 换成你的域名
+#   #（与 /etc/gotong.env 的 GOTONG_ALLOWED_HOSTS 保持一致）
+#   sudo systemctl reload caddy
+#
+# DNS 正确的话首次访问会自动签发 Let's Encrypt 证书。
+# 逐行讲解：docs/zh/DEPLOY.md §C.5。docker-compose 蓝图请用 caddy/Caddyfile
+#（域名走 {$GOTONG_DOMAIN} 环境变量，XFF 姿态不同，两份不要混用）。
+
+# 全局 —— 日志写 journal、sane timeouts
+{
+    admin off
+    log {
+        output stderr
+        format console
+    }
+}
+
+# hub.example.com 上的 Web（HTTP/HTTPS）
+hub.example.com {
+    encode zstd gzip
+
+    # Caddy 自动加 X-Forwarded-*，而且在**没配 trusted_proxies**（就像这里）
+    # 时会**忽略客户端自带的 XFF**，所以 host 用来给限流器分桶的那个 IP 伪造
+    # 不了。这条车道到此为止，不需要额外配置。
+    #
+    # 但你若以后加了 trusted_proxies（比如前面挂 CDN），必须同时在本块里加
+    # `header_up -X-Forwarded-For`——否则一个来自受信网段的客户端可以在 XFF
+    # 前面塞个假 IP，绕开按 IP 的限流。compose 车道的 `caddy/Caddyfile` 正是
+    # 这么做的，可作参照。
+    reverse_proxy 127.0.0.1:3000 {
+        # 宽松超时：SSE 流是 long-poll
+        transport http {
+            read_timeout 60s
+            write_timeout 60s
+        }
+        flush_interval -1   # SSE chunk 立刻 flush
+    }
+
+    # 标准 hardening
+    header {
+        Strict-Transport-Security "max-age=63072000; includeSubDomains; preload"
+        # Gotong 在应用层已经设了 X-Frame-Options + CSP；这里再加一次
+        # 是纵深防御。
+        X-Frame-Options "DENY"
+        Referrer-Policy "no-referrer"
+        # 别泄露 Caddy 版本号
+        -Server
+    }
+}
+
+# WebSocket 走独立子域名（运维更干净、每个服务一张证书）
+hub-ws.example.com {
+    reverse_proxy 127.0.0.1:4000 {
+        transport http {
+            read_timeout 600s
+            write_timeout 600s
+        }
+    }
+    header {
+        Strict-Transport-Security "max-age=63072000; includeSubDomains; preload"
+        -Server
+    }
+}
