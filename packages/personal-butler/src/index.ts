@@ -87,6 +87,8 @@ export {
   SESSION_IDLE_MS,
   SESSION_MAX_TURNS,
   SESSION_TURN_MAX_CHARS,
+  SESSION_RECALL_HINT,
+  buildButlerSessionHintProbe,
   type SessionRole,
   type SessionMessage,
   type ButlerSessionWindowOptions,

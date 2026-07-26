@@ -18,11 +18,15 @@ import { existsSync, mkdtempSync, readdirSync, readFileSync, writeFileSync, rmSy
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
+import type { Task } from '@gotong/core'
+
 import {
   ButlerSessionWindow,
   SESSION_IDLE_MS,
   SESSION_MAX_TURNS,
   SESSION_TURN_MAX_CHARS,
+  SESSION_RECALL_HINT,
+  buildButlerSessionHintProbe,
 } from '../src/index.js'
 
 let dir: string
@@ -194,5 +198,32 @@ describe('ButlerSessionWindow', () => {
     expect(files.length).toBe(1)
     expect(files[0]!.includes('..%2F')).toBe(true)
     expect((await w.history('../../evil')).length).toBe(2)
+  })
+})
+
+describe('buildButlerSessionHintProbe', () => {
+  const probe = buildButlerSessionHintProbe()
+  const task = (payload: unknown): Task =>
+    ({ id: 't1', from: 'im:lark:u1', title: 'im:lark', payload }) as unknown as Task
+
+  it('fires the recall hint when the turn rides a non-empty history', async () => {
+    const hint = await probe(
+      task({ prompt: '查一下', history: [{ role: 'user', content: '帮我看看机票' }] }),
+    )
+    expect(hint).toBe(SESSION_RECALL_HINT)
+    // 文案与常量互相咬住:窗多大、指哪个工具、空手怎么办 —— 三件事都得在。
+    expect(hint).toContain(String(SESSION_MAX_TURNS))
+    expect(hint).toContain('recall')
+    expect(hint).toContain('记不清')
+  })
+
+  it('stays silent on every non-windowed shape (byte-identical contract)', async () => {
+    // 与 LlmAgent.buildRequest 同一个形状测试:不是非空数组就不算带窗。
+    expect(await probe(task({ prompt: '你好' }))).toBeNull() // 无 history 键
+    expect(await probe(task({ prompt: '你好', history: [] }))).toBeNull() // 空数组
+    expect(await probe(task({ prompt: '你好', history: '早上聊过' }))).toBeNull() // 非数组
+    expect(await probe(task('一句纯字符串 payload'))).toBeNull()
+    expect(await probe(task(null))).toBeNull()
+    expect(await probe(task(undefined))).toBeNull()
   })
 })

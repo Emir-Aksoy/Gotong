@@ -47,6 +47,8 @@ import { join } from 'node:path'
 
 import { writeFileAtomic } from '@gotong/core'
 
+import type { ButlerContextProbe } from './task-notebook.js'
+
 /** A conversation goes stale after an hour of silence — the next message
  *  starts a fresh window (the old turns are already in episodic memory). */
 export const SESSION_IDLE_MS = 60 * 60 * 1000
@@ -81,6 +83,44 @@ interface SessionFileShape {
 
 export interface SessionWindowLogger {
   warn(msg: string, meta?: Record<string, unknown>): void
+}
+
+/**
+ * The one-line companion card for a windowed turn (rendered by
+ * {@link buildButlerSessionHintProbe}). Interpolates {@link SESSION_MAX_TURNS}
+ * so the copy can never drift from the constant it describes.
+ *
+ * Why it exists: the window makes the visible transcript LOOK complete, and a
+ * model over-trusts what it can see — "not in the window" quietly becomes
+ * "never said". The honest posture has two halves: point at `recall` (the
+ * whole history IS retrievable), and license "I don't remember clearly" over
+ * confabulation when retrieval comes up empty.
+ */
+export const SESSION_RECALL_HINT =
+  `【会话窗】随消息带的对话原文只有最近一段(至多 ${SESSION_MAX_TURNS} 条);` +
+  `更早说过的事不在其中。要引用更早的内容,先用 recall 工具查;查不到就如实说记不清,不要凭印象编。`
+
+/**
+ * SESS companion probe — rides the CARE-M4 `contextProbe` seam (volatile
+ * system-prompt tail). Fires ONLY when the task actually carries a
+ * `payload.history` array with entries — the same shape test
+ * `LlmAgent.buildRequest` uses to decide a turn is windowed — so every
+ * non-windowed dispatch (workflow steps, A2A, first message of a fresh
+ * conversation) stays byte-identical. Pure payload inspection: zero fs, zero
+ * LLM, nothing to fail.
+ *
+ * Deliberately NOT gated on "the window is full": even a 2-entry window sits
+ * on top of prior conversations (the 60-min idle reset), so "earlier than
+ * what you see exists" is true whenever any history rides at all.
+ */
+export function buildButlerSessionHintProbe(): ButlerContextProbe {
+  return async (task) => {
+    const payload = task.payload
+    if (payload === null || typeof payload !== 'object') return null
+    const history = (payload as { history?: unknown }).history
+    if (!Array.isArray(history) || history.length === 0) return null
+    return SESSION_RECALL_HINT
+  }
 }
 
 export interface ButlerSessionWindowOptions {

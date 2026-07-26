@@ -25,6 +25,7 @@ import {
   SESSION_MAX_TURNS,
   SESSION_TURN_MAX_CHARS,
   buildButlerClockProbe,
+  buildButlerSessionHintProbe,
   composeContextProbes,
   openKnowledgeLibrary,
   openTaskNotebook,
@@ -66,6 +67,21 @@ const DAY = 24 * HOUR
 // 探针只读 from/title,其余字段不入戏 —— 最小任务壳即可。
 const imTask = { id: 'task-im', from: 'im:telegram:10086', title: 'im:telegram' } as unknown as Task
 const webTask = { id: 'task-web', from: 'user:emir', title: '快速聊天' } as unknown as Task
+// SESS 带窗任务壳:session-hint 探针只认 `payload.history` 非空数组 —— 与
+// LlmAgent.buildRequest 判「这轮带窗」用同一个形状测试,所以点火条件必须
+// 用真带窗的任务复现,不能借上面两个无 payload 的壳。
+const windowedTask = {
+  id: 'task-im-windowed',
+  from: 'im:telegram:10086',
+  title: 'im:telegram',
+  payload: {
+    prompt: '查一下',
+    history: [
+      { role: 'user', content: '帮我看看下周去怡保的机票' },
+      { role: 'assistant', content: '查到三班,要我整理周三那班的详情吗?' },
+    ],
+  },
+} as unknown as Task
 
 /** 人设样本 —— 实际人设由成员自配,这里给一份代表性字数的参照(报告如实标「样本」)。 */
 const PERSONA_SAMPLE = [
@@ -242,6 +258,8 @@ beforeAll(async () => {
 
   const source = buildButlerSourceProbe() // imTask 的 from 就是点火条件
 
+  const sessionHint = buildButlerSessionHintProbe() // 带窗轮(windowedTask)才点火
+
   const pendingItems: ButlerPendingItem[] = [
     { kind: 'approval', title: '给妈妈发生日提醒到家庭群', prompt: '内容已拟好,等你确认后发出。' },
     { kind: 'approval', title: '续订净水器滤芯(¥189)', prompt: '下单前需要你点头。' },
@@ -299,6 +317,7 @@ beforeAll(async () => {
     'last-seen': (await lastSeen(imTask))!,
     language: (await language(imTask))!,
     source: (await source(imTask))!,
+    'session-hint': (await sessionHint(windowedTask))!,
     pending: (await pending(imTask))!,
     'hub-sense': (await hubSense(imTask))!,
     onboarding: (await onboarding(imTask))!,
@@ -318,6 +337,7 @@ beforeAll(async () => {
     buildButlerLastSeenProbe({ file: join(dir, 'empty', 'last-seen.json'), now: () => NOW }), // 首次接触
     buildButlerLanguageProbe({ file: join(dir, 'empty', 'reply-language.json') }),
     source, // webTask 无 im: 前缀
+    sessionHint, // webTask 无 payload.history → 不带窗的轮零注入
     buildButlerPendingProbe({ userId: 'member-emir', pending: () => ({ listPending: async () => [] }) }),
     buildButlerHubSenseProbe({ stateFile: join(dir, 'empty', 'patrol-state.json') }),
     buildButlerOnboardingProbe({ stateFile: emptyOnboardingState, health: () => undefined }),
@@ -380,7 +400,7 @@ afterAll(async () => {
 })
 
 describe('LIB-M1 上下文段级基线', () => {
-  it('满态:八张探针卡全部由真 builder 真点火(fixture 防腐)', () => {
+  it('满态:九张探针卡全部由真 builder 真点火(fixture 防腐)', () => {
     const expected = [...Object.keys(VOLATILE_PROBE_REGISTRY), ...Object.keys(INLINE_PROBE_MARKERS)]
     expect(Object.keys(volatileFull).sort()).toEqual([...expected].sort())
     for (const [card, text] of Object.entries(volatileFull)) {
@@ -389,12 +409,13 @@ describe('LIB-M1 上下文段级基线', () => {
     }
     // 抽查内容锚点:量的确实是那张卡,不是错位文本。
     expect(volatileFull['source']).toContain('Telegram')
+    expect(volatileFull['session-hint']).toContain('recall')
     expect(volatileFull['pending']).toContain('4')
     expect(volatileFull['hub-sense']).toContain('空间目录写不进')
     expect(volatileFull['notebook-digest']).toContain('机票')
   })
 
-  it('空态:除时钟外七探针全 null,compose 胶水零开销', async () => {
+  it('空态:除时钟外八探针全 null,compose 胶水零开销', async () => {
     const results = await Promise.all(emptyProbes.map((p) => p(webTask)))
     expect(results[0]).toBe(clockText) // 时钟恒在 —— 知道「现在」是助手底线
     for (let i = 1; i < results.length; i++) {
@@ -423,12 +444,12 @@ describe('LIB-M1 上下文段级基线', () => {
     expect(indexTruncated).toContain('只显示前')
   })
 
-  it('度量:行数=5 stable + 8 volatile + 3 history,段小计与行和一致', () => {
-    expect(report.rows.length).toBe(16)
+  it('度量:行数=5 stable + 9 volatile + 3 history,段小计与行和一致', () => {
+    expect(report.rows.length).toBe(17)
     const vol = report.segments.find((s) => s.segment === 'volatile')!
     const sta = report.segments.find((s) => s.segment === 'stable')!
     const his = report.segments.find((s) => s.segment === 'history')!
-    expect(vol.cards).toBe(8)
+    expect(vol.cards).toBe(9)
     expect(sta.cards).toBe(5)
     expect(his.cards).toBe(3)
     const sum = (rows: readonly { estTokens: number }[]) => rows.reduce((a, r) => a + r.estTokens, 0)
@@ -514,7 +535,7 @@ describe('LIB-M1 上下文段级基线', () => {
     const rendered = renderContextReport(report, [
       '---- 场景 ----',
       `每轮必付底价(volatile 仅时钟): ~${clockRow.estTokens} tokens`,
-      `volatile 满配(八探针齐发): ~${vol.estTokens} tokens`,
+      `volatile 满配(九探针齐发): ~${vol.estTokens} tokens`,
       `stable 段(人设样本+冻结块): 空记忆 ~${personaRow.estTokens + frozenRows[0]!.estTokens} → 预算饱和 ~${personaRow.estTokens + frozenRows[1]!.estTokens} tokens`,
       `stable 增量(LIB-M3 索引卡): 样本 ~${indexRows[0]!.estTokens} → 截断顶 ~${indexRows[1]!.estTokens} tokens(预算 ${KNOWLEDGE_INDEX_CARD_BUDGET_TOKENS})`,
       `history 段(SESS 会话窗): 空窗 ${his[0]!.estTokens} → 典型 ~${his[1]!.estTokens} → 满态 ~${his[2]!.estTokens} tokens(窗留 ${SESSION_MAX_TURNS} 条 × ${SESSION_TURN_MAX_CHARS} 字,派发时尾条 user 恒丢 ⇒ 送模型上界 ${SESSION_MAX_TURNS - 1} 条)`,

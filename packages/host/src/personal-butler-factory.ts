@@ -32,6 +32,7 @@ import {
   BUTLER_MAX_TOOL_ROUNDS,
   PersonalButlerAgent,
   buildButlerClockProbe,
+  buildButlerSessionHintProbe,
   composeContextProbes,
   createKnowledgeLibraryToolset,
   createTaskNotebookToolset,
@@ -667,6 +668,10 @@ export function buildButlerFactory(deps: ButlerFactoryDeps): ButlerFactory {
             buildButlerLastSeenProbe({ file: presenceFile, logger: log }),
             buildButlerLanguageProbe({ file: languageFile, logger: log }),
             buildButlerSourceProbe(),
+            // SESS — 带窗的轮子附一行「更早的对话用 recall 查」:窗让可见对话
+            // 看起来像全部,不指路模型会把「不在窗里」当「没说过」。纯 payload
+            // 探查,无 history=null=字节不变。
+            buildButlerSessionHintProbe(),
             refs.pendingInbox
               ? buildButlerPendingProbe({ userId, pending: () => refs.pendingInbox, logger: log })
               : undefined,

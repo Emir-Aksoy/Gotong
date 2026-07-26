@@ -81,6 +81,7 @@ export const VOLATILE_PROBE_REGISTRY: Readonly<Record<string, string>> = {
   'last-seen': 'buildButlerLastSeenProbe',
   language: 'buildButlerLanguageProbe',
   source: 'buildButlerSourceProbe',
+  'session-hint': 'buildButlerSessionHintProbe',
   pending: 'buildButlerPendingProbe',
   'hub-sense': 'buildButlerHubSenseProbe',
   onboarding: 'buildButlerOnboardingProbe',
