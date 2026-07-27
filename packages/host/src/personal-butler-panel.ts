@@ -48,6 +48,10 @@ export interface ButlerPanelSurface {
   ): Promise<unknown>
   resetPanel(userId: string, opts?: { by?: 'butler' | 'human' }): Promise<void>
   restoreSnapshot(userId: string, opts?: { by?: 'butler' | 'human' }): Promise<unknown>
+  // C1-c 展示内容(markdown-card 的 content:<id> 与 connector:<槽> 中转文件)
+  listContent(userId: string): Promise<{ id: string; updatedAt: string; bytes: number }[]>
+  readContent(userId: string, fileId: string): Promise<{ markdown: string; updatedAt: string } | null>
+  writeContent(userId: string, fileId: string, markdown: string | null): Promise<void>
 }
 
 const GET_TOOL: LlmToolDefinition = {
@@ -72,6 +76,44 @@ const SET_TOOL: LlmToolDefinition = {
       reset: { type: 'boolean', description: 'true = 恢复内置默认面板。' },
       undo: { type: 'boolean', description: 'true = 撤销上一次面板改动。' },
     },
+    additionalProperties: false,
+  },
+}
+
+// C1-c 展示内容三件(岔口 A=管家中转):面板永不直呼连接器——管家读到什么
+// (晨报 enrich / 成员开口问),整理后写成本成员的展示内容文件,卡片渲染那份
+// 文件并固定标注「阿同写的/整理 · 更新于 X」。写的只是给本人看的展示文本,
+// 不执行任何动作(benign 三段式同 set_panel_layout)。
+const LIST_CONTENT_TOOL: LlmToolDefinition = {
+  name: 'list_panel_content',
+  description:
+    '列这位成员面板的展示内容文件(id / 更新时间 / 大小)。markdown-card 绑 content:<id> 显示对应文件;天气/新闻/日历等绑 connector:<槽位> 的卡显示 connector.<槽位> 这份文件。只读。',
+  inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+}
+
+const READ_CONTENT_TOOL: LlmToolDefinition = {
+  name: 'read_panel_content',
+  description: '读一份面板展示内容文件的当前 markdown(改写前先看现状)。只读。',
+  inputSchema: {
+    type: 'object',
+    properties: { fileId: { type: 'string', description: '内容文件 id(list_panel_content 可列)。' } },
+    required: ['fileId'],
+    additionalProperties: false,
+  },
+}
+
+const WRITE_CONTENT_TOOL: LlmToolDefinition = {
+  name: 'write_panel_content',
+  description:
+    '写/删这位成员自己的面板展示内容文件(整篇替换)。markdown-card 绑 content:<fileId> 即显示它;把连接器读到的最新内容(天气/新闻/日历)整理后写进 connector.<槽位>(如 connector.weather),面板对应的卡就会更新并标注整理时间。纯 markdown 文本(标题/列表/粗体;链接不会渲染成可点),单份 ≤8KB、每人 ≤24 份。只是展示文本,不执行动作;删除传 delete:true。',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      fileId: { type: 'string', description: '内容文件 id(标识符,如 farming-notes / connector.weather)。' },
+      markdown: { type: 'string', description: '整篇 markdown 内容(与 delete 二选一)。' },
+      delete: { type: 'boolean', description: 'true = 删除这份内容(与 markdown 二选一)。' },
+    },
+    required: ['fileId'],
     additionalProperties: false,
   },
 }
@@ -137,12 +179,15 @@ class ButlerPanelToolset implements LlmAgentToolset {
   constructor(private readonly deps: ButlerPanelDeps) {}
 
   listTools(): LlmToolDefinition[] {
-    return [GET_TOOL, SET_TOOL]
+    return [GET_TOOL, SET_TOOL, LIST_CONTENT_TOOL, READ_CONTENT_TOOL, WRITE_CONTENT_TOOL]
   }
 
   async callTool(name: string, args: Record<string, unknown>): Promise<LlmToolCallResult> {
     if (name === GET_TOOL.name) return this.getPanel()
     if (name === SET_TOOL.name) return this.setLayout(args)
+    if (name === LIST_CONTENT_TOOL.name) return this.listContent()
+    if (name === READ_CONTENT_TOOL.name) return this.readContent(args)
+    if (name === WRITE_CONTENT_TOOL.name) return this.writeContent(args)
     return text(`未知工具:${name}`, true)
   }
 
@@ -219,6 +264,68 @@ class ButlerPanelToolset implements LlmAgentToolset {
       }
       this.deps.logger?.warn('butler panel: write failed', { err })
       return text('面板改动没能落盘,稍后再试。', true)
+    }
+  }
+
+  private async listContent(): Promise<LlmToolCallResult> {
+    try {
+      const rows = await this.deps.surface.listContent(this.deps.userId)
+      if (rows.length === 0) {
+        return text('还没有展示内容文件。write_panel_content 可写;connector:<槽位> 的卡读 connector.<槽位> 这份文件。')
+      }
+      const lines = rows.map((r) => `- ${r.id}(${r.bytes} 字节,更新于 ${r.updatedAt})`)
+      return text(`展示内容文件 ${rows.length} 份:\n${lines.join('\n')}`)
+    } catch (err) {
+      this.deps.logger?.warn('butler panel: content list failed', { err })
+      return text('暂时列不出展示内容,稍后再试。', true)
+    }
+  }
+
+  private async readContent(args: Record<string, unknown>): Promise<LlmToolCallResult> {
+    if (typeof args.fileId !== 'string' || args.fileId.length === 0) {
+      return text('要读哪份?fileId 必填(list_panel_content 可列)。', true)
+    }
+    try {
+      const doc = await this.deps.surface.readContent(this.deps.userId, args.fileId)
+      if (doc === null) return text(`没有「${args.fileId}」这份内容(还没写过,或 id 不合法)。`)
+      return text(`「${args.fileId}」(更新于 ${doc.updatedAt}):\n${doc.markdown}`)
+    } catch (err) {
+      this.deps.logger?.warn('butler panel: content read failed', { err })
+      return text('暂时读不到这份内容,稍后再试。', true)
+    }
+  }
+
+  private async writeContent(args: Record<string, unknown>): Promise<LlmToolCallResult> {
+    if (typeof args.fileId !== 'string' || args.fileId.length === 0) {
+      return text('fileId 必填(标识符,如 farming-notes / connector.weather)。', true)
+    }
+    // markdown 与 delete 恰好一种 —— 同 set_panel_layout 的互斥纪律。
+    const writing = typeof args.markdown === 'string'
+    const deleting = args.delete === true
+    if (writing === deleting) {
+      return text('每次调用恰好一种:markdown(整篇替换)或 delete:true(删除)。', true)
+    }
+    try {
+      await this.deps.surface.writeContent(
+        this.deps.userId,
+        args.fileId,
+        deleting ? null : (args.markdown as string),
+      )
+      if (deleting) return text(`已删除展示内容「${args.fileId}」。`)
+      return text(
+        `已写入「${args.fileId}」。绑 content:${args.fileId} 的 markdown-card 会显示它` +
+          (args.fileId.startsWith('connector.')
+            ? `;绑 connector:${args.fileId.slice('connector.'.length)} 的卡也会更新,并标注整理时间。`
+            : ',卡上会标注「阿同写的」和更新时间。'),
+      )
+    } catch (err) {
+      const code = storeCode(err)
+      const msg = err instanceof Error ? err.message : String(err)
+      if (code === 'invalid' || code === 'too_large') {
+        return text(`内容被拒,文件未动:${msg}`, true)
+      }
+      this.deps.logger?.warn('butler panel: content write failed', { err })
+      return text('内容没能落盘,稍后再试。', true)
     }
   }
 }

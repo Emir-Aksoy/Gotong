@@ -30,9 +30,10 @@
 import { readdir, readFile, rename, rm, mkdir, stat } from 'node:fs/promises'
 import { join, dirname } from 'node:path'
 
-import { createLogger, writeJsonAtomic } from '@gotong/core'
+import { createLogger, writeFileAtomic, writeJsonAtomic } from '@gotong/core'
 import {
   DEFAULT_PANEL,
+  PANEL_ID_RE,
   PANEL_LIMITS,
   PANEL_SCHEMA_VERSION,
   validatePanelConfig,
@@ -75,6 +76,19 @@ export interface InstallablePanel {
   config: unknown
 }
 
+/** C1-c — one butler-written display-content file (listing row). */
+export interface PanelContentEntry {
+  id: string
+  updatedAt: string
+  bytes: number
+}
+
+/** C1-c — content file body + freshness (the card's provenance stamp). */
+export interface PanelContentDoc {
+  markdown: string
+  updatedAt: string
+}
+
 /** Typed store error; web routes branch on `code` via duck (never import). */
 export class PanelStoreError extends Error {
   constructor(
@@ -109,6 +123,13 @@ export interface MePanelSurfaceHost {
    * `not_found` when nothing has ever been changed.
    */
   restoreSnapshot(userId: string, opts?: PanelWriteOpts): Promise<MePanelResult>
+  /** C1-c content read (panel data route + butler tools). null = never
+   * written / invalid id — the renderer's honest cold-start state. */
+  readContent(userId: string, fileId: string): Promise<PanelContentDoc | null>
+  listContent(userId: string): Promise<PanelContentEntry[]>
+  /** markdown null = delete. The butler toolset is the only writer in v1
+   * (userId closed over there); every write runs the per-user serial chain. */
+  writeContent(userId: string, fileId: string, markdown: string | null): Promise<void>
 }
 
 export function buildMePanelSurface(opts: { spaceDir: string }): MePanelSurfaceHost {
@@ -250,6 +271,108 @@ export function buildMePanelSurface(opts: { spaceDir: string }): MePanelSurfaceH
       .sort()
   }
 
+  // ── C1-c content files (butler-written display markdown) ─────────────────
+  // <space>/butler/ui/user/<userId>/content/<fileId>.md — the fileId charset
+  // is PANEL_ID_RE, the SAME rule the validator applies to `content:<fileId>`
+  // sources: a validated config can never reference an unservable name, and a
+  // hostile name never reaches path assembly. Relay convention: cards bound to
+  // `connector:<slot>` read the content file `connector.<slot>` — the panel
+  // never calls a connector itself (fork A); the butler curates on its own
+  // cadence and the card honestly shows WHEN. Content writes deliberately do
+  // NOT touch the M4 undo slot or the change banner — those guard LAYOUT;
+  // content honesty is the card's fixed provenance badge + updatedAt stamp.
+  const contentDir = (userId: string): string =>
+    join(ownerDir(uiRoot, { kind: 'user', id: userId }), 'content')
+
+  // Character-level (not a regex literal) so no escape can rot into raw bytes:
+  // markdown keeps \n and \t; every other C0 control, DEL, and the bidi
+  // override range is refused — display text must not smuggle spoofing marks.
+  function hostileContentChar(code: number): boolean {
+    if (code === 0x0a || code === 0x09) return false
+    if (code < 0x20 || code === 0x7f) return true
+    return (code >= 0x202a && code <= 0x202e) || (code >= 0x2066 && code <= 0x2069)
+  }
+
+  async function readContent(userId: string, fileId: string): Promise<PanelContentDoc | null> {
+    if (typeof fileId !== 'string' || !PANEL_ID_RE.test(fileId)) return null
+    const file = join(contentDir(userId), `${fileId}.md`)
+    try {
+      const st = await stat(file)
+      // A hand-placed oversized file must not be slurped into every panel
+      // load — treat as absent, loudly (readers never quarantine).
+      if (st.size > 8 * PANEL_LIMITS.maxContentBytes) {
+        log.warn('panel content file oversized — ignored', { userId, fileId, bytes: st.size })
+        return null
+      }
+      return { markdown: await readFile(file, 'utf8'), updatedAt: st.mtime.toISOString() }
+    } catch {
+      return null
+    }
+  }
+
+  async function listContent(userId: string): Promise<PanelContentEntry[]> {
+    let names: string[]
+    try {
+      names = await readdir(contentDir(userId))
+    } catch {
+      return []
+    }
+    const out: PanelContentEntry[] = []
+    for (const n of names.filter((f) => f.endsWith('.md')).sort()) {
+      const id = n.slice(0, -'.md'.length)
+      if (!PANEL_ID_RE.test(id)) continue
+      try {
+        const st = await stat(join(contentDir(userId), n))
+        out.push({ id, updatedAt: st.mtime.toISOString(), bytes: st.size })
+      } catch {
+        /* raced away — skip */
+      }
+    }
+    return out
+  }
+
+  async function writeContent(
+    userId: string,
+    fileId: string,
+    markdown: string | null,
+  ): Promise<void> {
+    if (typeof fileId !== 'string' || !PANEL_ID_RE.test(fileId)) {
+      throw new PanelStoreError('invalid', 'content id must be a plain identifier (letters, digits, . _ -)')
+    }
+    const file = join(contentDir(userId), `${fileId}.md`)
+    if (markdown === null) {
+      await serialize(userId, () => rm(file, { force: true }))
+      return
+    }
+    const text = markdown.replace(/\r\n?/g, '\n')
+    for (let i = 0; i < text.length; i++) {
+      if (hostileContentChar(text.charCodeAt(i))) {
+        throw new PanelStoreError('invalid', 'content contains control or bidi-override characters')
+      }
+    }
+    if (Buffer.byteLength(text, 'utf8') > PANEL_LIMITS.maxContentBytes) {
+      throw new PanelStoreError('too_large', `content over ${PANEL_LIMITS.maxContentBytes} bytes`)
+    }
+    await serialize(userId, async () => {
+      const dir = contentDir(userId)
+      await mkdir(dir, { recursive: true })
+      const exists = await stat(file).then(
+        () => true,
+        () => false,
+      )
+      if (!exists) {
+        const count = (await readdir(dir)).filter((f) => f.endsWith('.md')).length
+        if (count >= PANEL_LIMITS.maxContentFiles) {
+          throw new PanelStoreError(
+            'too_large',
+            `content file cap reached (${PANEL_LIMITS.maxContentFiles}) — delete one first`,
+          )
+        }
+      }
+      await writeFileAtomic(file, text.endsWith('\n') ? text : text + '\n')
+    })
+  }
+
   // ── SDUI-M4 one-slot undo ──────────────────────────────────────────────────
   // `panel-prev.json` records the state BEFORE the last mutation — config (or
   // null meaning "no member file / default shape") + who mutated (`by`, the
@@ -327,6 +450,9 @@ export function buildMePanelSurface(opts: { spaceDir: string }): MePanelSurfaceH
   return {
     panel: readMember,
     setPanel,
+    readContent,
+    listContent,
+    writeContent,
 
     async resetPanel(userId, opts) {
       await serialize(userId, async () => {

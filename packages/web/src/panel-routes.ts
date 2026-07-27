@@ -9,10 +9,13 @@
  *   GET /api/me/panel/data/tasks       read-only projections the renderer
  *   GET /api/me/panel/data/status      fetches per component. Three-state
  *   GET /api/me/panel/data/usage       honest: surface absent (or the specific
- *   source unwired on this host) → 200 { available: false } — the renderer
- *   shows 「数据源未启用」, never a broken card; wired → { available: true,
- *   schedules|tasks|cards|days: [...] }. `usage` takes ?range=week|month
- *   (whitelisted, default week — a display param; userId stays session-pinned).
+ *   GET /api/me/panel/data/content     source unwired on this host) → 200
+ *   { available: false } — the renderer shows 「数据源未启用」, never a broken
+ *   card; wired → { available: true, schedules|tasks|cards|days: [...] }.
+ *   `usage` takes ?range=week|month (whitelisted, default week — a display
+ *   param; userId stays session-pinned). `content` (C1-c) takes ?id=<fileId>
+ *   and answers { available, exists, markdown?, updatedAt? } — the member's
+ *   own butler-written display file; never-written is exists:false, not 404.
  *
  *   PUT /api/admin/panel/users/:userId   same body — owner installs a shape
  *                                        for a member (fork D; the member can
@@ -60,6 +63,11 @@ export interface MePanelSurface {
   /** SDUI-M4 one-slot undo (swap semantics; store throws duck `not_found`
    * when nothing was ever changed → 404). */
   restoreSnapshot(userId: string): Promise<MePanelResult>
+  /** C1-c butler-written display content (`content:<id>` sources and the
+   * `connector:<slot>` relay files). Optional — an older host without it
+   * makes /data/content answer { available:false }. null = never written
+   * (or invalid id): the renderer's honest cold-start state, never a 404. */
+  readContent?(userId: string, fileId: string): Promise<{ markdown: string; updatedAt: string } | null>
 }
 
 /** C1a — host `buildMePanelData` satisfies this (duck; web stays host-free).
@@ -80,11 +88,12 @@ export interface MePanelRouteDeps {
 }
 
 /** Exact-match table — unknown /data/* subpaths fall through to the site 404. */
-const PANEL_DATA_ROUTES: Record<string, 'schedules' | 'tasks' | 'status' | 'usage'> = {
+const PANEL_DATA_ROUTES: Record<string, 'schedules' | 'tasks' | 'status' | 'usage' | 'content'> = {
   '/api/me/panel/data/schedules': 'schedules',
   '/api/me/panel/data/tasks': 'tasks',
   '/api/me/panel/data/status': 'status',
   '/api/me/panel/data/usage': 'usage',
+  '/api/me/panel/data/content': 'content',
 }
 
 function storeErrorStatus(err: unknown): number {
@@ -178,6 +187,25 @@ export async function handleMePanelRoute(
         const q = new URL(req.url ?? '/', 'http://x').searchParams.get('range')
         const rows = d ? await d.usageForUser(userId, q === 'month' ? 'month' : 'week') : null
         sendJson(res, rows === null ? { available: false } : { available: true, days: rows })
+      } else if (dataKind === 'content') {
+        // C1-c — rides the panel surface itself (the content store lives in
+        // the same file family). ?id= names the file; the STORE is the id
+        // authority (hostile ids read as null → honest exists:false). userId
+        // stays session-pinned — a member can only ever read their own files.
+        const id = new URL(req.url ?? '/', 'http://x').searchParams.get('id')
+        if (!id) {
+          sendJson(res, { error: 'query param id is required' }, 400)
+        } else if (typeof deps.panel.readContent !== 'function') {
+          sendJson(res, { available: false })
+        } else {
+          const doc = await deps.panel.readContent(userId, id)
+          sendJson(
+            res,
+            doc === null
+              ? { available: true, exists: false }
+              : { available: true, exists: true, markdown: doc.markdown, updatedAt: doc.updatedAt },
+          )
+        }
       } else {
         const cards = d ? await d.hubStatus() : null
         sendJson(res, cards === null ? { available: false } : { available: true, cards })

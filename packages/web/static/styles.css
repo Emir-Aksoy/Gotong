@@ -3805,6 +3805,23 @@ body[data-simple-mode="1"] section.adv-only { display: none !important; }
 .sdui-qa-status { margin: 0.35rem 0 0; }
 .sdui-qa-status:empty { display: none; }
 
+/* SDUI-C1c — content/connector relay cards (butler-curated markdown) */
+.sdui-md-provenance { margin: 0 0 0.4rem; opacity: 0.65; font-size: 0.82rem; }
+.sdui-md-h { font-weight: 600; margin: 0.5rem 0 0.25rem; }
+.sdui-md-h1 { font-size: 1.05rem; }
+.sdui-md-h2 { font-size: 0.98rem; }
+.sdui-md-h3 { font-size: 0.92rem; }
+.sdui-md-p { margin: 0.25rem 0; }
+.sdui-md-list { margin: 0.25rem 0; padding-left: 1.2rem; }
+.sdui-md-li { margin: 0.15rem 0; }
+.sdui-feed-item {
+  border-left: 3px solid #5b8def;
+  padding: 0.35rem 0.55rem;
+  margin: 0.35rem 0;
+  background: rgba(127, 127, 127, 0.07);
+  border-radius: 0 4px 4px 0;
+}
+
 @media (max-width: 720px) {
   .sdui-cal-grid { grid-template-columns: repeat(7, minmax(72px, 1fr)); }
   .sdui-chart-meta { font-size: 0.78rem; }

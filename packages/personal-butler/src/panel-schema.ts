@@ -88,8 +88,10 @@ export const PANEL_ACTION_PREFIXES = ['start_workflow:'] as const
  * Identifier shape for prefixed source/action suffixes. Deliberately strict:
  * no `/`, no `..` (single dots allowed but not consecutive), no whitespace —
  * suffixes end up as ids handed to hub APIs, never as paths or URLs.
+ * Exported (C1-c): the content store keys files by this SAME rule, so any
+ * `content:<fileId>` a validated config carries is a servable file id.
  */
-const PANEL_ID_RE = /^(?!.*\.\.)[A-Za-z0-9_-][A-Za-z0-9._-]{0,63}$/
+export const PANEL_ID_RE = /^(?!.*\.\.)[A-Za-z0-9_-][A-Za-z0-9._-]{0,63}$/
 
 /** Explicit caps — refuse loudly instead of silently truncating. */
 export const PANEL_LIMITS = {
@@ -106,6 +108,11 @@ export const PANEL_LIMITS = {
   maxErrors: 20,
   /** On-disk cap, enforced by the M3 store (kept here as the one contract). */
   maxFileBytes: 32 * 1024,
+  /** C1-c content files (butler-written display markdown) — store-enforced.
+   * Display cards, not knowledge: deliberately far below the LIB 32KB tier. */
+  maxContentBytes: 8 * 1024,
+  /** Per-member content file count — store-enforced (overwrites always pass). */
+  maxContentFiles: 24,
 } as const
 
 export interface PanelComponent {

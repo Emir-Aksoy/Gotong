@@ -194,3 +194,77 @@ describe('renderPanelContractCheatsheet', () => {
     expect(sheet).toContain('start_workflow:<id>')
   })
 })
+
+describe('panel content tools (C1-c, butler relay — benign)', () => {
+  const contentFile = (userId: string, id: string): string =>
+    join(spaceDir, 'butler', 'ui', 'user', userId, 'content', `${id}.md`)
+
+  it('write→list→read round-trip; content writes never arm the LAYOUT banner', async () => {
+    const { surface, toolset } = build()
+    const w = await toolset.callTool('write_panel_content', {
+      fileId: 'connector.weather',
+      markdown: '# 今日天气\n晴,32°C',
+    })
+    expect(w.isError).toBeUndefined()
+    // The success text teaches the relay convention (connector.<slot> → connector:<slot> card).
+    expect(textOf(w)).toContain('connector:weather')
+
+    const listed = textOf(await toolset.callTool('list_panel_content', {}))
+    expect(listed).toContain('connector.weather')
+    const read = textOf(await toolset.callTool('read_panel_content', { fileId: 'connector.weather' }))
+    expect(read).toContain('晴,32°C')
+
+    // Content ≠ layout: no panel.json, no undo slot, no butler attribution.
+    await expect(readFile(panelFile('member-1'), 'utf8')).rejects.toThrow()
+    expect((await surface.panel('member-1')).lastChange).toBeUndefined()
+  })
+
+  it('the userId is CLOSED OVER — a member toolset only ever touches its own directory', async () => {
+    const { toolset: bobTools } = build('bob')
+    await bobTools.callTool('write_panel_content', { fileId: 'notes', markdown: 'bob 的' })
+    expect(await readFile(contentFile('bob', 'notes'), 'utf8')).toContain('bob 的')
+    await expect(readFile(contentFile('alice', 'notes'), 'utf8')).rejects.toThrow()
+
+    // alice's toolset reads its own (empty) shelf, never bob's.
+    const { toolset: aliceTools } = build('alice')
+    expect(textOf(await aliceTools.callTool('list_panel_content', {}))).toContain('还没有展示内容文件')
+    expect(textOf(await aliceTools.callTool('read_panel_content', { fileId: 'notes' }))).toContain('没有')
+  })
+
+  it('exactly one of markdown|delete per call — both or neither is refused, nothing written', async () => {
+    const { toolset } = build()
+    expect((await toolset.callTool('write_panel_content', { fileId: 'x' })).isError).toBe(true)
+    expect(
+      (await toolset.callTool('write_panel_content', { fileId: 'x', markdown: 'a', delete: true }))
+        .isError,
+    ).toBe(true)
+    await expect(readFile(contentFile('member-1', 'x'), 'utf8')).rejects.toThrow()
+  })
+
+  it('store refusals (hostile id / control chars) come back typed with 未动, not a crash', async () => {
+    const { toolset } = build()
+    const badId = await toolset.callTool('write_panel_content', {
+      fileId: '../escape',
+      markdown: 'x',
+    })
+    expect(badId.isError).toBe(true)
+    expect(textOf(badId)).toContain('未动')
+    const badBody = await toolset.callTool('write_panel_content', {
+      fileId: 'ok',
+      markdown: 'bad' + String.fromCharCode(0x202e) + 'bidi',
+    })
+    expect(badBody.isError).toBe(true)
+    await expect(readFile(contentFile('member-1', 'ok'), 'utf8')).rejects.toThrow()
+  })
+
+  it('delete round-trip; reading a never-written id is a friendly miss, not an error', async () => {
+    const { toolset } = build()
+    await toolset.callTool('write_panel_content', { fileId: 'briefing', markdown: '早报' })
+    const del = await toolset.callTool('write_panel_content', { fileId: 'briefing', delete: true })
+    expect(del.isError).toBeUndefined()
+    await expect(readFile(contentFile('member-1', 'briefing'), 'utf8')).rejects.toThrow()
+    const miss = await toolset.callTool('read_panel_content', { fileId: 'briefing' })
+    expect(miss.isError).toBeUndefined()
+    expect(textOf(miss)).toContain('没有')
+  })
+})

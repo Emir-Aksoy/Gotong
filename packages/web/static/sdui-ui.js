@@ -364,9 +364,9 @@
 
   function renderCalendar(component) {
     var src = component && typeof component.source === 'string' ? component.source : ''
-    // connector:* calendars need an external connector read seam (C1-c) —
-    // honest placeholder, never a fake grid.
-    if (src.indexOf('connector:') === 0) return placeholderCard(t('sduiConnectorSoon'))
+    // connector:* calendars read the butler-curated relay file (C1-c fork A) —
+    // rendered as a labeled list card, never a fake grid.
+    if (src.indexOf('connector:') === 0) return renderCalendarRelay(component)
     var params = componentParams(component)
     var view = params.view === 'day' || params.view === 'month' ? params.view : 'week'
     return dataCard('sdui-calendar', 'schedules', function (body, j) {
@@ -540,9 +540,139 @@
     return card
   }
 
+  // ---- content / connector relay cards (C1-c, fork A) ----------------------
+  // The panel NEVER calls a connector. The butler curates (morning-brief
+  // enrich, or the member just asks) and writes a per-member display file via
+  // write_panel_content; `content:<id>` cards read that file, and a card bound
+  // to `connector:<slot>` reads the relay file `connector.<slot>`. Every card
+  // carries a FIXED provenance badge (「阿同写的/整理」 + updatedAt) — that
+  // stamp is the honesty mechanism for butler-authored content, and freshness
+  // is visibly the butler's cadence, never a pretend live feed.
+  //
+  // Markdown is rendered as a SAFE SUBSET built entirely with textContent:
+  // #/##/### headings, - / * list items, **bold** — nothing else. Links stay
+  // literal text on purpose (a compromised butler must not be able to plant
+  // clickable phishing targets), raw HTML never parses, zero innerHTML.
+  function appendInline(node, text) {
+    var parts = String(text).split('**')
+    for (var i = 0; i < parts.length; i++) {
+      if (!parts[i]) continue
+      // Odd segments sit between a ** pair; an unmatched trailer stays plain.
+      if (i % 2 === 1 && i < parts.length - (parts.length % 2 === 0 ? 1 : 0)) {
+        node.appendChild(el('strong', null, parts[i]))
+      } else {
+        node.appendChild(document.createTextNode(parts[i]))
+      }
+    }
+  }
+
+  function renderMarkdownInto(body, markdown) {
+    var lines = String(markdown).split('\n')
+    var list = null
+    for (var i = 0; i < lines.length; i++) {
+      var line = lines[i]
+      var m = /^(#{1,3})\s+(.*)$/.exec(line)
+      if (m) {
+        list = null
+        body.appendChild(el('div', 'sdui-md-h sdui-md-h' + m[1].length, m[2]))
+        continue
+      }
+      if (/^\s*[-*]\s+/.test(line)) {
+        if (!list) { list = el('ul', 'sdui-md-list'); body.appendChild(list) }
+        var li = el('li', 'sdui-md-li')
+        appendInline(li, line.replace(/^\s*[-*]\s+/, ''))
+        list.appendChild(li)
+        continue
+      }
+      list = null
+      if (!line.trim()) continue
+      var p = el('p', 'sdui-md-p')
+      appendInline(p, line)
+      body.appendChild(p)
+    }
+  }
+
+  function fmtWhen(iso) {
+    var d = new Date(iso)
+    if (isNaN(d.getTime())) return String(iso)
+    var p2 = function (n) { return String(n).padStart(2, '0') }
+    return p2(d.getMonth() + 1) + '-' + p2(d.getDate()) + ' ' + p2(d.getHours()) + ':' + p2(d.getMinutes())
+  }
+
+  function contentSuffix(component, prefix) {
+    var src = component && typeof component.source === 'string' ? component.source : ''
+    return src.indexOf(prefix) === 0 ? src.slice(prefix.length) : ''
+  }
+
+  // Shared scaffold: fetch one content file, then badge + body. `provKey`
+  // distinguishes 「阿同写的」 (authored) from 「阿同整理」 (connector relay).
+  function relayCard(cls, fileId, provKey, emptyText, renderBody) {
+    var card = el('div', 'sdui-card ' + cls)
+    var body = el('div', 'sdui-data-body', t('sduiLoading'))
+    card.appendChild(body)
+    fetchData('content', 'id=' + encodeURIComponent(fileId)).then(function (j) {
+      body.replaceChildren()
+      if (!j) { body.appendChild(el('p', 'me-meta', t('sduiLoadFailed'))); return }
+      if (j.available !== true) { body.appendChild(el('p', 'me-meta', t('sduiSourceMissing'))); return }
+      if (j.exists !== true || typeof j.markdown !== 'string') {
+        body.appendChild(el('p', 'me-meta', emptyText))
+        return
+      }
+      // Fixed provenance stamp — rendered before any content, unconditionally.
+      body.appendChild(el('p', 'me-meta sdui-md-provenance',
+        t(provKey) + ' · ' + t('sduiContentUpdated', fmtWhen(j.updatedAt))))
+      renderBody(body, j.markdown)
+    })
+    return card
+  }
+
+  function renderMarkdownCard(component) {
+    var fileId = contentSuffix(component, 'content:')
+    return relayCard('sdui-md', fileId, 'sduiContentByButler', t('sduiContentEmpty'), renderMarkdownInto)
+  }
+
+  function renderWeather(component) {
+    var slot = contentSuffix(component, 'connector:')
+    return relayCard('sdui-weather', 'connector.' + slot, 'sduiContentCurated',
+      t('sduiConnectorEmpty', slot), renderMarkdownInto)
+  }
+
+  function renderCardFeed(component) {
+    var params = componentParams(component)
+    var limit = typeof params.limit === 'number' ? params.limit : 20
+    var slot = contentSuffix(component, 'connector:')
+    return relayCard('sdui-feed', 'connector.' + slot, 'sduiContentCurated',
+      t('sduiConnectorEmpty', slot), function (body, markdown) {
+        // Top-level list items become feed cards; anything else renders as one
+        // prose card. Honest split, no pretend per-item metadata.
+        var items = []
+        String(markdown).split('\n').forEach(function (line) {
+          if (/^\s*[-*]\s+/.test(line)) items.push(line.replace(/^\s*[-*]\s+/, ''))
+        })
+        if (items.length === 0) { renderMarkdownInto(body, markdown); return }
+        items.slice(0, limit).forEach(function (item) {
+          var row = el('div', 'sdui-feed-item')
+          appendInline(row, item)
+          body.appendChild(row)
+        })
+      })
+  }
+
+  function renderCalendarRelay(component) {
+    var slot = contentSuffix(component, 'connector:')
+    return relayCard('sdui-cal-relay', 'connector.' + slot, 'sduiContentCurated',
+      t('sduiConnectorEmpty', slot), function (body, markdown) {
+        // Relay content is butler-curated prose, not schedule rows — say so
+        // instead of drawing a grid that would imply machine-read events.
+        body.appendChild(el('p', 'me-meta sdui-cal-note', t('sduiCalendarRelayNote')))
+        renderMarkdownInto(body, markdown)
+      })
+  }
+
   // The CLOSED registry — M2 shipped chat / approval-inbox / divider; C1a adds
   // the four hub-internal data components (schedules / tasks / status); C1-b
-  // adds chart (usage.mine) + quick-actions.
+  // adds chart (usage.mine) + quick-actions; C1-c adds the content/relay trio
+  // (markdown-card / weather / card-feed). Still placeholder: image-card.
   var REGISTRY = {
     divider: function () { return el('hr', 'sdui-divider') },
     chat: renderChat,
@@ -553,6 +683,9 @@
     'status-card': function () { return renderStatusCard() },
     chart: renderChart,
     'quick-actions': renderQuickActions,
+    'markdown-card': renderMarkdownCard,
+    weather: renderWeather,
+    'card-feed': renderCardFeed,
   }
 
   function renderComponent(component) {

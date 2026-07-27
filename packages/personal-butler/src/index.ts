@@ -121,6 +121,7 @@ export {
   PANEL_ACTION_PREFIXES,
   PANEL_COMPONENT_CONTRACTS,
   PANEL_LIMITS,
+  PANEL_ID_RE,
   DEFAULT_PANEL,
   type PanelConfig,
   type PanelSection,

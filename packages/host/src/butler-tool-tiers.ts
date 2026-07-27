@@ -100,6 +100,11 @@ export const BUTLER_DIRECTORY_BENIGN = [
   // 三重安全网(校验拒/横幅播报/快照撤销)在店面与渲染器层结构性成立。
   'get_my_panel',
   'set_panel_layout',
+  // C1-c 展示内容三件 — 岔口 A 管家中转:整理连接器数据/写展示卡是偶发
+  // 动作;只写本成员自己的展示文本(LIB 书架同款边界),互相点名全在目录内。
+  'list_panel_content',
+  'read_panel_content',
+  'write_panel_content',
 ] as const
 
 export type ButlerFirstClassBenign = (typeof BUTLER_FIRST_CLASS_BENIGN)[number]

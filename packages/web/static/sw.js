@@ -26,7 +26,9 @@
 // v8 (C1b): sdui-ui.js gains chart (usage.mine) + quick-actions renderers
 // with new app-core.js keys + styles.css classes — all three precached
 // files must refresh together.
-const CACHE = 'gotong-shell-v8'
+// v9 (C1c): content/connector relay renderers (markdown-card / weather /
+// card-feed) + their app-core.js keys + styles.css classes.
+const CACHE = 'gotong-shell-v9'
 
 // Stable, role-agnostic static shell. app.html is excluded on purpose
 // (role-injected); admin.js / identity-ui.js etc. are left to the runtime

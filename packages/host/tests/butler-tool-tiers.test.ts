@@ -156,6 +156,9 @@ function buildButler(provider: LlmProvider, root: string, singleTier?: boolean) 
       applyLibrary: async () => ({}),
       resetPanel: async () => undefined,
       restoreSnapshot: async () => ({}),
+      listContent: async () => [],
+      readContent: async () => null,
+      writeContent: async () => undefined,
     },
   })
   return factory(

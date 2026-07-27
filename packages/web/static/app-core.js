@@ -1985,7 +1985,13 @@
       sduiTaskProgress: (a, b) => `${a}/${b} 步`,
       sduiStatusAllGood: '体检全绿,一切正常。',
       sduiCalendarMonthNote: '月视图暂以本周展示。',
-      sduiConnectorSoon: '这个数据源走外部连接器,还没接入——先诚实占位。',
+      // SDUI-C1c — content:/connector: 中转卡(阿同整理,面板不直呼连接器)
+      sduiContentByButler: '阿同写的',
+      sduiContentCurated: '阿同整理',
+      sduiContentUpdated: (w) => `更新于 ${w}`,
+      sduiContentEmpty: '这里还没有内容——跟阿同说一句,让 TA 写上来。',
+      sduiConnectorEmpty: (slot) => `「${slot}」还没有内容——跟阿同说一声,TA 整理好就会显示在这里。`,
+      sduiCalendarRelayNote: '阿同整理的日历内容,按列表显示。',
       // SDUI-C1b — chart (usage.mine) + quick-actions
       sduiUsageEmpty: '这段时间还没有用量记录。',
       sduiUsageWeek: '近 7 天用量(按 UTC 日)',
@@ -4116,7 +4122,13 @@
       sduiTaskProgress: (a, b) => `${a}/${b} steps`,
       sduiStatusAllGood: 'All checks green.',
       sduiCalendarMonthNote: 'Month view currently shows this week.',
-      sduiConnectorSoon: 'This source needs an external connector — not wired yet, honest placeholder.',
+      // SDUI-C1c — content:/connector: relay cards (butler-curated; the panel never calls a connector)
+      sduiContentByButler: 'Written by Atong',
+      sduiContentCurated: 'Curated by Atong',
+      sduiContentUpdated: (w) => `updated ${w}`,
+      sduiContentEmpty: 'Nothing here yet — ask Atong to write it.',
+      sduiConnectorEmpty: (slot) => `No "${slot}" content yet — ask Atong and it will show up here.`,
+      sduiCalendarRelayNote: 'Butler-curated calendar notes, shown as a list.',
       // SDUI-C1b — chart (usage.mine) + quick-actions
       sduiUsageEmpty: 'No usage recorded in this window.',
       sduiUsageWeek: 'Last 7 days (UTC days)',

@@ -391,3 +391,81 @@ describe('me-panel-surface — hardening (Codex 收口)', () => {
     expect(lib[0]!.title).toBe('保留v2')
   })
 })
+
+describe('me-panel-surface — content files (C1-c)', () => {
+  it('write → read round-trip; updatedAt is the file mtime; trailing newline normalized', async () => {
+    const s = surface()
+    await s.writeContent('alice', 'farming-notes', '# 农事\n- 追肥**别过量**')
+    const doc = await s.readContent('alice', 'farming-notes')
+    expect(doc).not.toBeNull()
+    expect(doc!.markdown).toBe('# 农事\n- 追肥**别过量**\n')
+    expect(Number.isNaN(new Date(doc!.updatedAt).getTime())).toBe(false)
+    const rows = await s.listContent('alice')
+    expect(rows.map((r) => r.id)).toEqual(['farming-notes'])
+    expect(rows[0]!.bytes).toBeGreaterThan(0)
+  })
+
+  it('never written / invalid id → null (honest cold-start, no throw)', async () => {
+    const s = surface()
+    expect(await s.readContent('alice', 'nothing-yet')).toBeNull()
+    expect(await s.readContent('alice', '../../etc/passwd')).toBeNull()
+    expect(await s.readContent('alice', 'a..b')).toBeNull()
+    expect(await s.listContent('alice')).toEqual([])
+  })
+
+  it('write rejects hostile ids as typed invalid BEFORE any path assembly', async () => {
+    const s = surface()
+    for (const bad of ['../../etc', 'a/b', 'a..b', '', 'x'.repeat(80)]) {
+      await expect(s.writeContent('alice', bad, 'hi')).rejects.toMatchObject({
+        name: 'PanelStoreError',
+        code: 'invalid',
+      })
+    }
+  })
+
+  it('CRLF normalizes; control/bidi characters are refused (invalid), \\t and \\n pass', async () => {
+    const s = surface()
+    await s.writeContent('alice', 'crlf', 'a\r\nb\tc')
+    expect((await s.readContent('alice', 'crlf'))!.markdown).toBe('a\nb\tc\n')
+    const bidi = 'x' + String.fromCharCode(0x202e) + 'y'
+    await expect(s.writeContent('alice', 'bad', bidi)).rejects.toMatchObject({ code: 'invalid' })
+    const ctrl = 'x' + String.fromCharCode(7) + 'y'
+    await expect(s.writeContent('alice', 'bad', ctrl)).rejects.toMatchObject({ code: 'invalid' })
+    expect(await s.readContent('alice', 'bad')).toBeNull()
+  })
+
+  it('size and file-count caps refuse loudly; overwriting an existing file always passes the count cap', async () => {
+    const s = surface()
+    await expect(s.writeContent('alice', 'big', 'x'.repeat(9000))).rejects.toMatchObject({
+      code: 'too_large',
+    })
+    for (let i = 0; i < 24; i++) await s.writeContent('alice', `f${i}`, `n${i}`)
+    await expect(s.writeContent('alice', 'f24', 'over')).rejects.toMatchObject({ code: 'too_large' })
+    await s.writeContent('alice', 'f0', 'rewritten') // overwrite ≠ new file
+    expect((await s.readContent('alice', 'f0'))!.markdown).toBe('rewritten\n')
+  })
+
+  it('delete via null; deleting a never-written id is a no-op', async () => {
+    const s = surface()
+    await s.writeContent('alice', 'gone', 'bye')
+    await s.writeContent('alice', 'gone', null)
+    expect(await s.readContent('alice', 'gone')).toBeNull()
+    await s.writeContent('alice', 'never-there', null)
+  })
+
+  it('reader ignores a hand-placed oversized file (warn, no quarantine, no slurp)', async () => {
+    const s = surface()
+    const dir = join(spaceDir, 'butler', 'ui', 'user', 'alice', 'content')
+    await mkdir(dir, { recursive: true })
+    await writeFile(join(dir, 'huge.md'), 'x'.repeat(8 * 8 * 1024 + 1), 'utf8')
+    expect(await s.readContent('alice', 'huge')).toBeNull()
+    expect(await readdir(dir)).toEqual(['huge.md']) // evidence untouched
+  })
+
+  it('content lives per member — one user cannot see another user\'s files', async () => {
+    const s = surface()
+    await s.writeContent('alice', 'connector.weather', '晴 32°C')
+    expect(await s.readContent('bob', 'connector.weather')).toBeNull()
+    expect(await s.listContent('bob')).toEqual([])
+  })
+})

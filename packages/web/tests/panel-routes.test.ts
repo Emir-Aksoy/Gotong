@@ -129,7 +129,20 @@ class StubPanelData implements MePanelDataSurface {
   }
 }
 
-async function boot(opts: { withSurface?: boolean; panelData?: MePanelDataSurface } = {}): Promise<Boot> {
+/** C1-c — the base StubPanel deliberately has NO readContent (older-host case). */
+class StubPanelWithContent extends StubPanel {
+  readonly askedContent: Array<{ userId: string; fileId: string }> = []
+  docs = new Map<string, { markdown: string; updatedAt: string }>()
+
+  async readContent(userId: string, fileId: string) {
+    this.askedContent.push({ userId, fileId })
+    return this.docs.get(fileId) ?? null
+  }
+}
+
+async function boot(
+  opts: { withSurface?: boolean; panelData?: MePanelDataSurface; stub?: StubPanel } = {},
+): Promise<Boot> {
   const withSurface = opts.withSurface ?? true
   const tmp = await mkdtemp(join(tmpdir(), 'gotong-me-panel-'))
   const init = await Space.init(tmp, { name: 'me-panel-test' })
@@ -147,7 +160,7 @@ async function boot(opts: { withSurface?: boolean; panelData?: MePanelDataSurfac
     role: 'member',
   })
 
-  const stub = withSurface ? new StubPanel() : undefined
+  const stub = opts.stub ?? (withSurface ? new StubPanel() : undefined)
   const server = await serveWeb(hub, {
     host: '127.0.0.1',
     port: 0,
@@ -424,6 +437,42 @@ describe('/api/me/panel — SDUI member panel config (M2 read + M3 write)', () =
       { userId: b.memberUserId, range: 'week' },
       { userId: b.memberUserId, range: 'month' },
       { userId: b.memberUserId, range: 'week' },
+    ])
+  })
+
+  // ---- C1-c content route --------------------------------------------------
+
+  it('content: missing ?id → 400; a host without readContent → {available:false}', async () => {
+    b = await boot()
+    expect((await req('GET', { path: '/api/me/panel/data/content' })).status).toBe(400)
+    const r = await req('GET', { path: '/api/me/panel/data/content?id=connector.weather' })
+    expect(r.status).toBe(200)
+    expect(r.json).toEqual({ available: false })
+  })
+
+  it('content: never-written → exists:false (honest cold start, not 404); written → doc; userId SESSION-pinned', async () => {
+    const stub = new StubPanelWithContent()
+    stub.docs.set('connector.weather', {
+      markdown: '# 今日天气\n晴,32°C',
+      updatedAt: '2026-07-27T06:00:00.000Z',
+    })
+    b = await boot({ stub })
+    const missing = await req('GET', { path: '/api/me/panel/data/content?id=briefing' })
+    expect(missing.status).toBe(200)
+    expect(missing.json).toEqual({ available: true, exists: false })
+    const hit = await req('GET', {
+      path: '/api/me/panel/data/content?id=connector.weather&userId=someone-else',
+    })
+    expect(hit.json).toEqual({
+      available: true,
+      exists: true,
+      markdown: '# 今日天气\n晴,32°C',
+      updatedAt: '2026-07-27T06:00:00.000Z',
+    })
+    // The query-string userId is ignored — the session decides.
+    expect(stub.askedContent).toEqual([
+      { userId: b.memberUserId, fileId: 'briefing' },
+      { userId: b.memberUserId, fileId: 'connector.weather' },
     ])
   })
 

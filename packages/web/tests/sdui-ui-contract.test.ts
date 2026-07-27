@@ -114,4 +114,26 @@ describe('sdui-ui.js ↔ panel-schema.ts contract', () => {
       expect(rendererSrc, `renderer branch for prefix '${prefix}'`).toContain(`a.indexOf('${prefix}') === 0`)
     }
   })
+
+  // C1-c — butler-written markdown reaches the DOM exclusively through
+  // textContent/createTextNode. One `innerHTML =` anywhere in the renderer
+  // would turn a compromised butler's display file into an XSS vector; this
+  // pins the whole file, not just the markdown path (comments may SAY the
+  // words, assignment may not).
+  it('the renderer never assigns innerHTML/outerHTML (safe-markdown discipline)', () => {
+    expect(rendererSrc).not.toMatch(/\.(inner|outer)HTML\s*=/)
+    expect(rendererSrc).not.toMatch(/insertAdjacentHTML/)
+  })
+
+  // C1-c — every schema source prefix family must have a relay/reader in the
+  // renderer: `content:` cards read the file named by the suffix, `connector:`
+  // cards read the `connector.<slot>` relay file. A prefix added to the schema
+  // without a renderer path = valid config rendering a dead card forever.
+  it("both schema source prefix families ('content:'/'connector:') have renderer readers", () => {
+    for (const prefix of extractArray(schemaSrc, 'export const PANEL_SOURCE_PREFIXES')) {
+      expect(rendererSrc, `renderer reader for source prefix '${prefix}'`).toContain(`'${prefix}'`)
+    }
+    // The relay file convention itself (connector:<slot> → connector.<slot>).
+    expect(rendererSrc).toContain("'connector.'")
+  })
 })
