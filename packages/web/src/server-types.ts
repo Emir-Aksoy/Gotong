@@ -35,7 +35,7 @@ import type {
   MeChatSessionSurface,
 } from './me-routes.js'
 import type { WorkflowWizardSurface } from './wizard-routes.js'
-import type { MePanelSurface } from './panel-routes.js'
+import type { MePanelDataSurface, MePanelSurface } from './panel-routes.js'
 import type {
   ConnectorSlotSink,
   LlmKeyProbe,
@@ -349,6 +349,8 @@ export interface WebServerOptions {
   meChatSession?: MeChatSessionSurface
   /** SDUI-M2/M3 — member panel config store; absent → /api/me/panel* 503. */
   mePanel?: MePanelSurface
+  /** SDUI-C1a — panel data projections; absent → /data/* answer {available:false}. */
+  panelData?: MePanelDataSurface
   /**
    * SDUI-M3 — durable sink for a template's panel presets (`panels[]`). The
    * host wires the SAME store object as `mePanel` (its `installPanels`); the

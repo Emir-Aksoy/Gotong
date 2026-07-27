@@ -5,6 +5,13 @@
  *   PUT /api/me/panel           body { libraryId } | { reset: true }
  *   GET /api/me/panel/library   →  { panels: [{ id, title, description? }] }
  *
+ *   GET /api/me/panel/data/schedules   C1a hub-internal named data sources —
+ *   GET /api/me/panel/data/tasks       read-only projections the renderer
+ *   GET /api/me/panel/data/status      fetches per component. Three-state
+ *   honest: surface absent (or the specific source unwired on this host) →
+ *   200 { available: false } — the renderer shows 「数据源未启用」, never a
+ *   broken card; wired → { available: true, schedules|tasks|cards: [...] }.
+ *
  *   PUT /api/admin/panel/users/:userId   same body — owner installs a shape
  *                                        for a member (fork D; the member can
  *                                        switch back any time via their own PUT)
@@ -53,8 +60,27 @@ export interface MePanelSurface {
   restoreSnapshot(userId: string): Promise<MePanelResult>
 }
 
+/** C1a — host `buildMePanelData` satisfies this (duck; web stays host-free).
+ * Each getter: null → that source is not wired on THIS host (renderer shows
+ * 「数据源未启用」); [] → wired but empty. Row shapes are host-owned DTOs the
+ * web layer passes through verbatim — the renderer is their only consumer. */
+export interface MePanelDataSurface {
+  schedulesForUser(userId: string): Promise<unknown[] | null>
+  tasksForUser(userId: string): Promise<unknown[] | null>
+  hubStatus(): Promise<unknown[] | null>
+}
+
 export interface MePanelRouteDeps {
   panel: MePanelSurface | undefined
+  /** Absent → every /data/* route answers { available: false } (never 500). */
+  panelData?: MePanelDataSurface
+}
+
+/** Exact-match table — unknown /data/* subpaths fall through to the site 404. */
+const PANEL_DATA_ROUTES: Record<string, 'schedules' | 'tasks' | 'status'> = {
+  '/api/me/panel/data/schedules': 'schedules',
+  '/api/me/panel/data/tasks': 'tasks',
+  '/api/me/panel/data/status': 'status',
 }
 
 function storeErrorStatus(err: unknown): number {
@@ -123,12 +149,31 @@ export async function handleMePanelRoute(
   path: string,
   userId: string,
 ): Promise<boolean> {
-  if (path !== '/api/me/panel' && path !== '/api/me/panel/library') return false
+  const dataKind = PANEL_DATA_ROUTES[path]
+  if (path !== '/api/me/panel' && path !== '/api/me/panel/library' && !dataKind) return false
   if (!deps.panel) {
     sendJson(res, { error: 'panel surface not enabled on this host' }, 503)
     return true
   }
   try {
+    if (dataKind) {
+      if (method !== 'GET') {
+        sendJson(res, { error: 'method not allowed' }, 405)
+        return true
+      }
+      const d = deps.panelData
+      if (dataKind === 'schedules') {
+        const rows = d ? await d.schedulesForUser(userId) : null
+        sendJson(res, rows === null ? { available: false } : { available: true, schedules: rows })
+      } else if (dataKind === 'tasks') {
+        const rows = d ? await d.tasksForUser(userId) : null
+        sendJson(res, rows === null ? { available: false } : { available: true, tasks: rows })
+      } else {
+        const cards = d ? await d.hubStatus() : null
+        sendJson(res, cards === null ? { available: false } : { available: true, cards })
+      }
+      return true
+    }
     if (path === '/api/me/panel/library') {
       if (method !== 'GET') {
         sendJson(res, { error: 'method not allowed' }, 405)

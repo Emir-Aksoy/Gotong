@@ -271,11 +271,173 @@
     return el('div', 'sdui-card sdui-placeholder', text)
   }
 
-  // The CLOSED registry — M2 ships chat / approval-inbox / divider live.
+  // ---- C1a data-driven components ------------------------------------------
+  // One fetch per named source per render (several components can share
+  // `schedules.mine`); loadPanel resets the cache so every tab flip is fresh.
+  // Three-state honesty mirrors the route: fetch failed → 加载失败;
+  // { available:false } (source unwired on this host) → 数据源未接入;
+  // { available:true } → real rows (empty state per component).
+  var dataPromises = {}
+  function fetchData(kind) {
+    if (!dataPromises[kind]) {
+      dataPromises[kind] = fetch('/api/me/panel/data/' + kind)
+        .then(function (r) { return r.ok ? r.json() : null })
+        .catch(function () { return null })
+    }
+    return dataPromises[kind]
+  }
+
+  function dataCard(cls, kind, onData) {
+    var card = el('div', 'sdui-card ' + cls)
+    var body = el('div', 'sdui-data-body', t('sduiLoading'))
+    card.appendChild(body)
+    fetchData(kind).then(function (j) {
+      body.replaceChildren()
+      if (!j) { body.appendChild(el('p', 'me-meta', t('sduiLoadFailed'))); return }
+      if (j.available !== true) { body.appendChild(el('p', 'me-meta', t('sduiSourceMissing'))); return }
+      onData(body, j)
+    })
+    return card
+  }
+
+  function componentParams(component) {
+    return component && typeof component.params === 'object' && component.params ? component.params : {}
+  }
+
+  // Cadence rendering — JS port of the SEN-M4 tool-face helpers (same honest
+  // encodings: hours are member-local per the schedule's own tz; daily/weekly
+  // fired marks ARE local dates, interval marks are epoch-ms shown as UTC).
+  function fmtTz(min) {
+    if (min === 0) return 'UTC'
+    var abs = Math.abs(min)
+    var rem = abs % 60
+    return 'UTC' + (min < 0 ? '-' : '+') + Math.floor(abs / 60) + (rem ? ':' + String(rem).padStart(2, '0') : '')
+  }
+  function hh(h) { return String(h).padStart(2, '0') + ':00' }
+  function everyText(ms) {
+    var min = Math.max(1, Math.round(ms / 60000))
+    return min >= 60 && min % 60 === 0 ? t('sduiEveryHours', min / 60) : t('sduiEveryMinutes', min)
+  }
+  function cadenceText(c) {
+    if (!c) return t('sduiScheduleInvalid')
+    if (c.kind === 'daily') return t('sduiCadenceDaily', hh(c.hour), fmtTz(c.tzOffsetMinutes))
+    if (c.kind === 'weekly') {
+      return t('sduiCadenceWeekly', t('sduiWeekday', c.weekday), hh(c.hour), fmtTz(c.tzOffsetMinutes))
+    }
+    return everyText(c.everyMs)
+  }
+  function firedText(c, mark) {
+    if (mark == null) return t('sduiScheduleNever')
+    if (c && c.kind === 'interval') {
+      var ms = Number(mark)
+      return Number.isFinite(ms)
+        ? t('sduiScheduleLast', new Date(ms).toISOString().slice(0, 16).replace('T', ' ') + ' UTC')
+        : t('sduiScheduleBadMark')
+    }
+    return t('sduiScheduleLast', String(mark))
+  }
+
+  function renderScheduleList(component) {
+    var params = componentParams(component)
+    var limit = typeof params.limit === 'number' ? params.limit : 10
+    return dataCard('sdui-schedules', 'schedules', function (body, j) {
+      var rows = Array.isArray(j.schedules) ? j.schedules : []
+      if (rows.length === 0) { body.appendChild(el('p', 'me-meta', t('sduiSchedulesEmpty'))); return }
+      rows.slice(0, limit).forEach(function (r) {
+        var row = el('div', 'sdui-sched-item')
+        var head = el('div', 'sdui-sched-head')
+        head.appendChild(el('strong', null, String(r.workflowId)))
+        if (!r.valid) head.appendChild(el('span', 'sdui-chip sdui-chip-red', t('sduiScheduleInvalid')))
+        else if (!r.enabled) head.appendChild(el('span', 'sdui-chip', t('sduiScheduleOff')))
+        row.appendChild(head)
+        var meta = r.valid
+          ? cadenceText(r.cadence) + ' · ' + firedText(r.cadence, r.lastFiredMark)
+          : firedText(r.cadence, r.lastFiredMark)
+        row.appendChild(el('p', 'me-meta', meta))
+        body.appendChild(row)
+      })
+    })
+  }
+
+  function renderCalendar(component) {
+    var src = component && typeof component.source === 'string' ? component.source : ''
+    // connector:* calendars need an external connector read seam (C1-c) —
+    // honest placeholder, never a fake grid.
+    if (src.indexOf('connector:') === 0) return placeholderCard(t('sduiConnectorSoon'))
+    var params = componentParams(component)
+    var view = params.view === 'day' || params.view === 'month' ? params.view : 'week'
+    return dataCard('sdui-calendar', 'schedules', function (body, j) {
+      var rows = Array.isArray(j.schedules) ? j.schedules : []
+      var active = rows.filter(function (r) { return r.enabled && r.valid && r.cadence })
+      if (active.length === 0) { body.appendChild(el('p', 'me-meta', t('sduiSchedulesEmpty'))); return }
+      if (view === 'month') body.appendChild(el('p', 'me-meta sdui-cal-note', t('sduiCalendarMonthNote')))
+      var browserTz = -new Date().getTimezoneOffset()
+      var days = view === 'day' ? 1 : 7
+      var grid = el('div', 'sdui-cal-grid' + (view === 'day' ? ' sdui-cal-one' : ''))
+      var today = new Date()
+      for (var i = 0; i < days; i++) {
+        var d = new Date(today.getFullYear(), today.getMonth(), today.getDate() + i)
+        var cell = el('div', 'sdui-cal-cell' + (i === 0 ? ' sdui-cal-today' : ''))
+        cell.appendChild(el('div', 'sdui-cal-head',
+          t('sduiWeekday', d.getDay()) + ' ' + (d.getMonth() + 1) + '/' + d.getDate()))
+        active.forEach(function (r) {
+          var c = r.cadence
+          if (c.kind !== 'daily' && !(c.kind === 'weekly' && c.weekday === d.getDay())) return
+          // The hour is member-local per the SCHEDULE's tz — flag it whenever
+          // that differs from the browser's, so the grid never quietly lies.
+          var tzNote = c.tzOffsetMinutes === browserTz ? '' : ' (' + fmtTz(c.tzOffsetMinutes) + ')'
+          cell.appendChild(el('div', 'sdui-cal-item', hh(c.hour) + tzNote + ' ' + r.workflowId))
+        })
+        grid.appendChild(cell)
+      }
+      body.appendChild(grid)
+      active.forEach(function (r) {
+        if (r.cadence.kind !== 'interval') return
+        body.appendChild(el('p', 'me-meta sdui-cal-interval', r.workflowId + ' · ' + everyText(r.cadence.everyMs)))
+      })
+    })
+  }
+
+  function renderTaskList(component) {
+    var params = componentParams(component)
+    var limit = typeof params.limit === 'number' ? params.limit : 20
+    return dataCard('sdui-tasks', 'tasks', function (body, j) {
+      var rows = Array.isArray(j.tasks) ? j.tasks : []
+      if (rows.length === 0) { body.appendChild(el('p', 'me-meta', t('sduiTasksEmpty'))); return }
+      rows.slice(0, limit).forEach(function (r) {
+        var row = el('div', 'sdui-task-item')
+        row.appendChild(el('span', 'sdui-task-title', String(r.title || r.id)))
+        row.appendChild(el('span', 'me-meta sdui-task-progress', t('sduiTaskProgress', r.stepsDone, r.stepsTotal)))
+        body.appendChild(row)
+      })
+    })
+  }
+
+  function renderStatusCard() {
+    // Content is the SEN-M1 patrol card face verbatim — same red/yellow
+    // authority the butler and the admin panel read; nothing here re-judges.
+    return dataCard('sdui-status', 'status', function (body, j) {
+      var cards = Array.isArray(j.cards) ? j.cards : []
+      if (cards.length === 0) { body.appendChild(el('p', 'sdui-status-good', t('sduiStatusAllGood'))); return }
+      cards.forEach(function (c) {
+        var row = el('div', 'sdui-status-item sdui-status-' + (c.severity === 'red' ? 'red' : 'yellow'))
+        row.appendChild(el('strong', null, String(c.label || c.id)))
+        row.appendChild(el('p', 'me-meta', String(c.fact || '')))
+        body.appendChild(row)
+      })
+    })
+  }
+
+  // The CLOSED registry — M2 shipped chat / approval-inbox / divider; C1a adds
+  // the four hub-internal data components (schedules / tasks / status).
   var REGISTRY = {
     divider: function () { return el('hr', 'sdui-divider') },
     chat: renderChat,
     'approval-inbox': function () { return renderApprovalInbox() },
+    'schedule-list': renderScheduleList,
+    calendar: renderCalendar,
+    list: renderTaskList,
+    'status-card': function () { return renderStatusCard() },
   }
 
   function renderComponent(component) {
@@ -517,6 +679,7 @@
     if (!host || loading) return
     loading = true
     agentPromise = null // re-discover on each visit (agents may have changed)
+    dataPromises = {} // C1a — every tab flip refetches the data sources too
     host.replaceChildren(el('p', 'me-meta', t('sduiLoading')))
     fetch('/api/me/panel')
       .then(function (r) {
@@ -546,6 +709,11 @@
       attributes: true,
       attributeFilter: ['data-active-tab'],
     })
+    // The observer only sees tab flips — a language toggle while ON the panel
+    // would otherwise leave stale-language content until the next flip.
+    if (window.Gotong && typeof window.Gotong.onLangChange === 'function') {
+      window.Gotong.onLangChange(maybeActivate)
+    }
     maybeActivate()
   }
 

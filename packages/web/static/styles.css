@@ -3745,3 +3745,47 @@ body[data-simple-mode="1"] section.adv-only { display: none !important; }
   border-top: 1px dashed #2a2a2a; padding-top: 0.6rem; }
 .sdui-shape-owner-title { width: 100%; margin: 0; font-size: 0.95rem; }
 .sdui-shape-owner select { max-width: 46%; }
+
+/* SDUI-C1a — data-driven components (schedules / calendar / tasks / status) */
+.sdui-data-body { display: flex; flex-direction: column; gap: 0.35rem; }
+.sdui-data-body > p.me-meta { margin: 0; }
+.sdui-sched-item { padding: 0.3rem 0; border-bottom: 1px solid #2a2a2a; }
+.sdui-sched-item:last-child { border-bottom: none; }
+.sdui-sched-head { display: flex; align-items: center; gap: 0.5rem; }
+.sdui-sched-item p { margin: 0.15rem 0 0; }
+.sdui-chip {
+  font-size: 0.78rem; padding: 0.08rem 0.5rem; border-radius: 999px;
+  border: 1px solid #666; opacity: 0.85;
+}
+.sdui-chip-red { border-color: #8a4040; background: #3a1d1d; opacity: 1; }
+.sdui-cal-grid {
+  display: grid; grid-template-columns: repeat(7, minmax(84px, 1fr));
+  gap: 0.4rem; overflow-x: auto;
+}
+.sdui-cal-one { grid-template-columns: 1fr; }
+.sdui-cal-cell {
+  border: 1px solid #2a2a2a; border-radius: 8px; padding: 0.35rem 0.45rem;
+  min-height: 3.6rem; font-size: 0.85rem;
+}
+.sdui-cal-today { border-color: #2f5a86; background: rgba(47, 90, 134, 0.12); }
+.sdui-cal-head { font-weight: 600; margin-bottom: 0.25rem; opacity: 0.9; }
+.sdui-cal-item { padding: 0.1rem 0; word-break: break-word; }
+.sdui-cal-note, .sdui-cal-interval { margin: 0.2rem 0 0; }
+.sdui-task-item {
+  display: flex; align-items: center; justify-content: space-between; gap: 0.6rem;
+  padding: 0.3rem 0; border-bottom: 1px solid #2a2a2a;
+}
+.sdui-task-item:last-child { border-bottom: none; }
+.sdui-task-title { word-break: break-word; }
+.sdui-task-progress { white-space: nowrap; }
+.sdui-status-item {
+  border-left: 3px solid #7a6420; padding: 0.3rem 0 0.3rem 0.6rem; margin: 0.2rem 0;
+}
+.sdui-status-item p { margin: 0.15rem 0 0; }
+.sdui-status-red { border-left-color: #c04545; }
+.sdui-status-yellow { border-left-color: #c9a227; }
+.sdui-status-good { margin: 0; color: #6fbf73; }
+
+@media (max-width: 720px) {
+  .sdui-cal-grid { grid-template-columns: repeat(7, minmax(72px, 1fr)); }
+}

@@ -23,7 +23,7 @@ import { Hub, Space } from '@gotong/core'
 import { openIdentityStore, type IdentityStore } from '@gotong/identity'
 
 import { serveWeb, type WebServerHandle } from '../src/server.js'
-import type { MePanelSurface } from '../src/panel-routes.js'
+import type { MePanelDataSurface, MePanelSurface } from '../src/panel-routes.js'
 
 const CFG = { schemaVersion: 1, sections: [{ components: [{ type: 'chat' }] }] }
 
@@ -102,7 +102,28 @@ interface Boot {
   stub: StubPanel | undefined
 }
 
-async function boot(opts: { withSurface?: boolean } = {}): Promise<Boot> {
+/** C1a — records the SERVER-pinned userId each getter was asked for. */
+class StubPanelData implements MePanelDataSurface {
+  readonly askedSchedules: string[] = []
+  readonly askedTasks: string[] = []
+  schedulesRows: unknown[] | null = null
+  tasksRows: unknown[] | null = null
+  statusCards: unknown[] | null = null
+
+  async schedulesForUser(userId: string) {
+    this.askedSchedules.push(userId)
+    return this.schedulesRows
+  }
+  async tasksForUser(userId: string) {
+    this.askedTasks.push(userId)
+    return this.tasksRows
+  }
+  async hubStatus() {
+    return this.statusCards
+  }
+}
+
+async function boot(opts: { withSurface?: boolean; panelData?: MePanelDataSurface } = {}): Promise<Boot> {
   const withSurface = opts.withSurface ?? true
   const tmp = await mkdtemp(join(tmpdir(), 'gotong-me-panel-'))
   const init = await Space.init(tmp, { name: 'me-panel-test' })
@@ -126,6 +147,7 @@ async function boot(opts: { withSurface?: boolean } = {}): Promise<Boot> {
     port: 0,
     identity,
     ...(stub ? { mePanel: stub } : {}),
+    ...(opts.panelData ? { panelData: opts.panelData } : {}),
   })
 
   const loginRes = await fetch(`${server.url}/api/admin/identity/login`, {
@@ -321,6 +343,49 @@ describe('/api/me/panel — SDUI member panel config (M2 read + M3 write)', () =
     })
     expect(res.status).toBe(401)
     expect(b.stub!.applied).toHaveLength(0)
+  })
+
+  // ---- C1a data routes ---------------------------------------------------
+
+  it('data routes without a panelData surface → 200 {available:false}, never 500', async () => {
+    b = await boot()
+    for (const kind of ['schedules', 'tasks', 'status']) {
+      const r = await req('GET', { path: `/api/me/panel/data/${kind}` })
+      expect(r.status).toBe(200)
+      expect(r.json).toEqual({ available: false })
+    }
+  })
+
+  it('a wired surface whose getter answers null → {available:false} (source unwired on this host)', async () => {
+    const data = new StubPanelData()
+    b = await boot({ panelData: data })
+    const r = await req('GET', { path: '/api/me/panel/data/schedules' })
+    expect(r.json).toEqual({ available: false })
+  })
+
+  it('schedules/tasks/status return their rows under the documented keys, userId SESSION-pinned', async () => {
+    const data = new StubPanelData()
+    data.schedulesRows = [{ workflowId: 'brief', enabled: true, valid: true }]
+    data.tasksRows = [{ id: 't1', title: '筹备', stepsDone: 1, stepsTotal: 2 }]
+    data.statusCards = [{ id: 'im:none', severity: 'yellow', label: 'x', fact: 'y' }]
+    b = await boot({ panelData: data })
+
+    const sched = await req('GET', { path: '/api/me/panel/data/schedules?userId=someone-else' })
+    expect(sched.json).toEqual({ available: true, schedules: data.schedulesRows })
+    const tasks = await req('GET', { path: '/api/me/panel/data/tasks' })
+    expect(tasks.json).toEqual({ available: true, tasks: data.tasksRows })
+    const status = await req('GET', { path: '/api/me/panel/data/status' })
+    expect(status.json).toEqual({ available: true, cards: data.statusCards })
+    // The query-string userId is ignored — the session decides.
+    expect(data.askedSchedules).toEqual([b.memberUserId])
+    expect(data.askedTasks).toEqual([b.memberUserId])
+  })
+
+  it('data routes: unauthenticated → 401, non-GET → 405, unknown subpath → 404', async () => {
+    b = await boot({ panelData: new StubPanelData() })
+    expect((await req('GET', { path: '/api/me/panel/data/tasks', auth: false })).status).toBe(401)
+    expect((await req('POST', { path: '/api/me/panel/data/tasks', body: {} })).status).toBe(405)
+    expect((await req('GET', { path: '/api/me/panel/data/bogus' })).status).toBe(404)
   })
 
   it('admin POST on the admin face → 405 (PUT only)', async () => {

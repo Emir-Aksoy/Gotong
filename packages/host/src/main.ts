@@ -160,6 +160,7 @@ import { AcpOutboundManager } from './acp-outbound.js'
 import { acpApprovalItemFor } from './acp-escalation.js'
 import { type ImBridgesHandle } from './im-bridge.js'
 import { armImBridgeWiring } from './im-bridge-wiring.js'
+import { buildMePanelData } from './me-panel-data.js'
 import { buildMePanelSurface } from './me-panel-surface.js'
 import { OidcClient } from './oidc-client.js'
 import { OidcLoginService } from './oidc-login-service.js'
@@ -1678,6 +1679,11 @@ async function main(): Promise<void> {
   const workflowSchedules = createWorkflowScheduleAdminSurface(
     { spaceDir: space.root, sweeper: workflowScheduleSweeper, logger: log })
   butlerSchedulesRef = buildButlerScheduleSurface({ admin: workflowSchedules })
+  // SDUI-C1a — member panel read-only data projections; lazy refs, onboarding.health 同款.
+  const mePanelData = buildMePanelData({
+    memoryRoot: butlerMemoryRoot,
+    schedules: () => butlerSchedulesRef, health: () => patrolHealthRef, logger: log,
+  })
 
   // Phase 18 C-M4 + Route B P1-M11b — outbound A2A agents. Each stored entry
   // (identity `a2a_outbound_agents`) becomes a local Participant, so a normal
@@ -2400,6 +2406,7 @@ async function main(): Promise<void> {
     // one validatePanelConfig choke point in the host store).
     mePanel: mePanelSurface,
     panelLibrary: mePanelSurface,
+    panelData: mePanelData,
     // SW-M9 A-M7 — the OPERATOR-console steward (site-wide twin); null on the same
     // conditions, in which case /api/admin/steward/{plan,apply} return 503.
     ...(operatorSteward ? { operatorSteward } : {}),
