@@ -80,4 +80,25 @@ describe('sdui-ui.js ↔ panel-schema.ts contract', () => {
     expect(rendererSrc).toContain('sduiUnknownComponent')
     expect(rendererSrc).toContain('sduiComingSoon')
   })
+
+  // SDUI butler priority — chat discovery must prefer the SERVER-computed
+  // isButler row; the first chat-capable row is only the fallback. With a
+  // multi-chat hub (双脑: 接待 + 专家) rows[0]-order luck must never decide
+  // which agent fronts the member's panel chat.
+  it('chat discovery prefers the isButler row over the first chat-capable row', () => {
+    expect(rendererSrc).toContain("isButler === true")
+    // The pick: pinned → butler or nothing; default → butler first, then the
+    // first chat row. Pinning the expression keeps the priority un-reorderable.
+    expect(rendererSrc).toMatch(/butlerOnly \? found\.butler : \(found\.butler \|\| found\.chat\)/)
+  })
+
+  it("source 'chat.butler' pins to the butler with an honest no-butler state, no fallback", () => {
+    // Renderer honors the ONE whitelisted chat source from the schema…
+    expect(rendererSrc).toContain("component.source === 'chat.butler'")
+    // …and the schema still whitelists exactly that literal for chat.
+    expect(schemaSrc).toMatch(/chat:\s*\{\s*source:\s*'optional',\s*sources:\s*\['chat\.butler'\]/)
+    // Butler-less hub + pinned chat = dedicated honest placeholder, not the
+    // generic no-agent copy and never a substitute row.
+    expect(rendererSrc).toContain('sduiChatNoButler')
+  })
 })

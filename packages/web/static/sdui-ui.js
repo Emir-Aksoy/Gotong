@@ -110,30 +110,47 @@
   }
 
   // ---- chat component ------------------------------------------------------
-  // Lazy agent discovery, shared across chat instances per render: first
-  // chat-capable row from GET /api/me/agents. No blind rows[0] fallback — a
-  // chat-less roster gets the honest "no agent" state, not a random expert
-  // that may ignore or mishandle free-form chat.
+  // Lazy agent discovery, shared across chat instances per render: one roster
+  // fetch from GET /api/me/agents, then per-component pick. The BUTLER row
+  // (server-computed isButler — never guessed client-side) wins over "first
+  // chat-capable row": with several chat agents (双脑: 接待 + 专家) the first
+  // row is return-order luck, and only the butler carries the member's session
+  // window. No blind rows[0] fallback — a chat-less roster gets the honest
+  // "no agent" state, not a random expert that may mishandle free-form chat.
   var agentPromise = null
-  function discoverAgent() {
+  function discoverRoster() {
     if (!agentPromise) {
       agentPromise = fetch('/api/me/agents')
         .then(function (r) { return r.ok ? r.json() : null })
         .then(function (j) {
           var rows = j && Array.isArray(j.agents) ? j.agents : []
+          var butler = null
+          var chat = null
           for (var i = 0; i < rows.length; i++) {
             var caps = Array.isArray(rows[i].capabilities) ? rows[i].capabilities : []
-            if (caps.indexOf('chat') >= 0) return rows[i]
+            if (caps.indexOf('chat') < 0) continue
+            if (!chat) chat = rows[i]
+            if (rows[i].isButler === true) { butler = rows[i]; break }
           }
-          return null
+          return { butler: butler, chat: chat }
         })
-        .catch(function () { return null })
+        .catch(function () { return { butler: null, chat: null } })
     }
     return agentPromise
+  }
+  // butlerOnly (source 'chat.butler') pins HARDER: butler or nothing — never
+  // a fallback row, so a pinned chat cannot silently talk to the wrong agent.
+  function discoverAgent(butlerOnly) {
+    return discoverRoster().then(function (found) {
+      return butlerOnly ? found.butler : (found.butler || found.chat)
+    })
   }
 
   function renderChat(component) {
     var params = component && typeof component.params === 'object' ? component.params : {}
+    // The one whitelisted chat source (panel-schema: sources ['chat.butler']).
+    // Honoring it means butler-or-honest-placeholder, never a random row.
+    var butlerOnly = !!(component && component.source === 'chat.butler')
     var card = el('div', 'sdui-card sdui-chat')
     var log = el('div', 'sdui-chat-log')
     var row = el('div', 'sdui-chat-row')
@@ -146,6 +163,15 @@
     row.appendChild(btn)
     card.appendChild(log)
     card.appendChild(row)
+    if (butlerOnly) {
+      // Pinned chat on a butler-less hub: swap the box for the honest
+      // placeholder up front (same cached roster fetch the send path shares).
+      discoverAgent(true).then(function (agent) {
+        if (agent && agent.id) return
+        card.className = 'sdui-card sdui-placeholder'
+        card.textContent = t('sduiChatNoButler')
+      })
+    }
 
     function bubble(kind, text) {
       var b = el('div', 'sdui-bubble sdui-bubble-' + kind, text)
@@ -166,10 +192,10 @@
       bubble('user', prompt)
       var reply = bubble('assistant', '…')
       try {
-        var agent = await discoverAgent()
+        var agent = await discoverAgent(butlerOnly)
         if (!agent || !agent.id) {
           reply.className = 'sdui-bubble sdui-bubble-error'
-          reply.textContent = t('sduiChatNoAgent')
+          reply.textContent = t(butlerOnly ? 'sduiChatNoButler' : 'sduiChatNoAgent')
           return
         }
         var r = await fetch('/api/me/agents/' + encodeURIComponent(agent.id) + '/chat', {

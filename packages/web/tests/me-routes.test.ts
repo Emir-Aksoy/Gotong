@@ -267,7 +267,7 @@ async function boot(
     /** Phase 14 — member-facing workflow catalog source. */
     workflows?: WorkflowSummary[]
     /** Phase 19 P1-M3 — sanitized agent directory for /api/me/agents. */
-    meAgents?: Array<{ id: string; label: string; capabilities: string[]; online: boolean; description?: string }>
+    meAgents?: Array<{ id: string; label: string; capabilities: string[]; online: boolean; description?: string; isButler?: boolean }>
     /** Phase 19 P1-M4 — wire an in-memory upload backing for /api/me/uploads. */
     withUploads?: boolean
     /** ease-of-use ①TC-ME — wire a recording fake LLM key probe for /api/me/test-llm-key. */
@@ -651,6 +651,27 @@ describe('/api/me/agents — sanitized agent directory (Phase 19 P1-M3)', () => 
       const r = await fetch(`${b2.baseUrl}/api/me/agents`, { headers: { cookie: b2.memberCookie } })
       expect(r.status).toBe(200)
       expect((await r.json() as { agents: unknown[] }).agents).toEqual([])
+    } finally {
+      await teardown(b2)
+    }
+  })
+
+  // SDUI butler priority — the host computes `isButler` per row (its own
+  // isButlerAgent gate, never a client guess); the route must pass the flag
+  // through so clients can prefer the butler over "first chat-capable row".
+  // Anti-rot against a future sanitizer silently stripping the field.
+  it('passes the server-computed isButler flag through per row', async () => {
+    const b2 = await boot({
+      meAgents: [
+        { id: 'expert', label: '专家', capabilities: ['chat'], online: true, isButler: false },
+        { id: 'atong', label: '阿同', capabilities: ['chat'], online: true, isButler: true },
+      ],
+    })
+    try {
+      const r = await fetch(`${b2.baseUrl}/api/me/agents`, { headers: { cookie: b2.memberCookie } })
+      expect(r.status).toBe(200)
+      const body = (await r.json()) as { agents: Array<Record<string, unknown>> }
+      expect(body.agents.map((a) => a.isButler)).toEqual([false, true])
     } finally {
       await teardown(b2)
     }

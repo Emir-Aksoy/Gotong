@@ -23,7 +23,9 @@
 // "上次复盘" line + its i18n key. Bumping forces returning members past the
 // stale-while-revalidate window so they get the new shell on the next activate,
 // not one load later.
-const CACHE = 'gotong-shell-v5'
+// v6: sdui-ui.js butler-first discovery + chat.butler pin, app-core.js
+// sduiChatNoButler key — the pinned-chat placeholder needs both files fresh.
+const CACHE = 'gotong-shell-v6'
 
 // Stable, role-agnostic static shell. app.html is excluded on purpose
 // (role-injected); admin.js / identity-ui.js etc. are left to the runtime

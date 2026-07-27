@@ -1284,14 +1284,17 @@ async function main(): Promise<void> {
     async listForMembers() {
       const recs = await space.agents()
       const liveIds = new Set(hub.participants().map((p) => p.id))
-      return recs.map((a) => ({
+      return Promise.all(recs.map(async (a) => ({
         id: a.id,
         label: a.displayName ?? a.id,
         capabilities: [...a.allowedCapabilities],
         online: liveIds.has(a.id),
+        // SDUI — server-computed butler flag (SESS 会话窗同一判定), so clients
+        // prefer the butler over "first chat row" when several agents chat.
+        isButler: await localAgents.isButlerAgent(a.id),
         // v5 D-M4 — expose only the on/off flag; interval + checklist stay host-side.
         ...(a.managed?.heartbeat?.enabled ? { heartbeat: { enabled: true } } : {}),
-      }))
+      })))
     },
   }
   butlerObserveAgentsRef = meAgentsSurface

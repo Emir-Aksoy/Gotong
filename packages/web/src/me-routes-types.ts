@@ -106,6 +106,14 @@ export interface MeAgentView {
    * checklist stay host-side, since a checklist can carry standing instructions.
    */
   heartbeat?: { enabled: boolean }
+  /**
+   * SDUI — SERVER-computed "this row is the resident butler" flag (the host's
+   * `isButlerAgent`, the same gate the quick-chat session window uses). Lets
+   * clients prefer the butler over "first chat-capable row" when several
+   * agents advertise `chat` (双脑: 接待 + 专家). Optional: absent on hosts
+   * predating the flag ⇒ treat as not-a-butler.
+   */
+  isButler?: boolean
 }
 
 export interface MeAgentListSurface {
