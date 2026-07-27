@@ -28,7 +28,10 @@
 // files must refresh together.
 // v9 (C1c): content/connector relay renderers (markdown-card / weather /
 // card-feed) + their app-core.js keys + styles.css classes.
-const CACHE = 'gotong-shell-v9'
+// v10 (PUSH-M3): this SW gains push/notificationclick/pushsubscriptionchange
+// handlers + the /me notification card (app.js/app-core.js/app.html) — the
+// shell must refresh so subscribe targets a SW that can actually show taps.
+const CACHE = 'gotong-shell-v10'
 
 // Stable, role-agnostic static shell. app.html is excluded on purpose
 // (role-injected); admin.js / identity-ui.js etc. are left to the runtime
@@ -98,4 +101,69 @@ self.addEventListener('fetch', (event) => {
       ),
     )
   }
+})
+
+/* ── Web Push (PUSH-M3) ───────────────────────────────────────────────────
+ * The payload is the hub's fixed low-info tap — defensive parsing only, and
+ * the fallback copy matches the hub's so a garbled payload still shows a
+ * truthful "you have a message" rather than nothing (push events without a
+ * shown notification get browsers to revoke the subscription).
+ */
+self.addEventListener('push', (event) => {
+  let data = {}
+  try {
+    data = event.data ? event.data.json() : {}
+  } catch {
+    /* non-JSON payload → fixed fallback copy below */
+  }
+  const title = typeof data.title === 'string' && data.title ? data.title : '阿同 · Gotong'
+  const body = typeof data.body === 'string' && data.body ? data.body : '有新消息,点开查看 · New message'
+  event.waitUntil(
+    self.registration.showNotification(title, {
+      body,
+      icon: '/icon.svg',
+      badge: '/icon.svg',
+      // One coalesced notification per member, not a pile-up of identical taps.
+      tag: 'gotong-butler',
+      data: { url: '/' },
+    }),
+  )
+})
+
+// Tap → focus an open /me tab if there is one, otherwise open the app.
+// 推送≠授权: the tap only OPENS the app; reading happens behind the login.
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close()
+  const target = (event.notification.data && event.notification.data.url) || '/'
+  event.waitUntil(
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((wins) => {
+      for (const win of wins) {
+        if ('focus' in win) return win.focus()
+      }
+      return self.clients.openWindow(target)
+    }),
+  )
+})
+
+// The push service rotated our subscription: re-subscribe with the same
+// applicationServerKey and best-effort re-register with the hub. If anything
+// fails the /me card's honest count lets the member re-enable by hand.
+self.addEventListener('pushsubscriptionchange', (event) => {
+  const oldSub = event.oldSubscription
+  if (!oldSub || !oldSub.options || !oldSub.options.applicationServerKey) return
+  event.waitUntil(
+    self.registration.pushManager
+      .subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: oldSub.options.applicationServerKey,
+      })
+      .then((sub) =>
+        fetch('/api/me/push/subscribe', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(sub.toJSON()),
+        }),
+      )
+      .catch(() => {}),
+  )
 })

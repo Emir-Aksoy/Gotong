@@ -906,9 +906,12 @@
     await loadMyCredentials()
     await loadButlerMemory()
     await loadMyImBindings()
+    await refreshPushCard()
     // WX-M3b — IM binding card: mint a 6-digit /bind code + manage bindings.
     bindOnce(document.getElementById('me-im-bind-btn'), 'click', mintImBindingCode)
     bindOnce(document.getElementById('me-im-bindings'), 'click', onImBindingsClick)
+    // PUSH-M3 — browser notification card (Web Push subscribe/unsubscribe).
+    bindOnce(document.getElementById('me-push-btn'), 'click', onPushToggle)
     bindOnce(document.getElementById('me-dispatch-btn'), 'click', submitDispatch)
     // SW-M7 — the hub steward ("管家"): one chat box drives plan → preview →
     // apply. The send button asks for a proposal; clicks inside the output area
@@ -1034,6 +1037,105 @@
     } catch (err) {
       const out = document.getElementById('me-im-bind-out')
       if (out) out.textContent = t('meImBindUnbindFailed', err?.message || err)
+    }
+  }
+
+  // --- Browser notifications (PUSH-M3) --------------------------------------
+  // The /me face of the Web Push fallback leg: subscribe this browser so 阿同
+  // can reach members who never bound an IM. The card shows only when BOTH
+  // the browser supports Push (iOS Safari: only inside an installed PWA — the
+  // feature check below covers that naturally) AND the hub opted in
+  // (GET /api/me/push → available). The tap itself is low-info by server-side
+  // construction; nothing here ever puts message content into a notification.
+
+  function pushSupported() {
+    return 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window
+  }
+
+  // applicationServerKey: base64url string → Uint8Array (subscribe() wants bytes).
+  function pushKeyToBytes(b64url) {
+    const pad = '='.repeat((4 - (b64url.length % 4)) % 4)
+    const raw = atob((b64url + pad).replace(/-/g, '+').replace(/_/g, '/'))
+    const bytes = new Uint8Array(raw.length)
+    for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i)
+    return bytes
+  }
+
+  let __pushState = null // { publicKey, count, subscribed } after refreshPushCard
+
+  async function refreshPushCard() {
+    const card = document.getElementById('me-push-card')
+    if (!card) return
+    if (!pushSupported()) { card.hidden = true; return }
+    try {
+      const r = await fetch('/api/me/push')
+      const j = await r.json().catch(() => null)
+      if (!r.ok || !j?.available) { card.hidden = true; return }
+      const reg = await navigator.serviceWorker.ready
+      const sub = await reg.pushManager.getSubscription()
+      __pushState = { publicKey: j.publicKey, count: j.count | 0, subscribed: !!sub }
+      card.hidden = false
+      renderPushCard()
+    } catch (_) {
+      card.hidden = true
+    }
+  }
+
+  function renderPushCard() {
+    const btn = document.getElementById('me-push-btn')
+    const out = document.getElementById('me-push-out')
+    if (!btn || !__pushState) return
+    btn.textContent = __pushState.subscribed ? t('mePushDisable') : t('mePushEnable')
+    if (out) {
+      out.textContent = __pushState.subscribed
+        ? t('mePushOn', __pushState.count)
+        : (Notification.permission === 'denied' ? t('mePushDenied') : '')
+    }
+  }
+
+  async function onPushToggle() {
+    const out = document.getElementById('me-push-out')
+    if (!__pushState) return
+    try {
+      const reg = await navigator.serviceWorker.ready
+      if (__pushState.subscribed) {
+        const sub = await reg.pushManager.getSubscription()
+        if (sub) {
+          // Tell the hub first, then drop the browser side — a failed hub call
+          // leaves the row for the 404/410 self-heal instead of orphaning it.
+          await fetch('/api/me/push/unsubscribe', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ endpoint: sub.endpoint }),
+          })
+          await sub.unsubscribe()
+        }
+      } else {
+        const perm = await Notification.requestPermission()
+        if (perm !== 'granted') { if (out) out.textContent = t('mePushDenied'); return }
+        const sub = await reg.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey: pushKeyToBytes(__pushState.publicKey),
+        })
+        const body = sub.toJSON()
+        body.ua = navigator.userAgent // display-only; server strips/bounds it
+        const r = await fetch('/api/me/push/subscribe', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(body),
+        })
+        if (!r.ok) {
+          // The hub refused the row — don't keep a browser subscription the
+          // hub will never send to.
+          await sub.unsubscribe().catch(() => {})
+          const j = await r.json().catch(() => null)
+          if (out) out.textContent = t('mePushFailed', j?.error || `HTTP ${r.status}`)
+          return
+        }
+      }
+      await refreshPushCard()
+    } catch (err) {
+      if (out) out.textContent = t('mePushFailed', err?.message || err)
     }
   }
 

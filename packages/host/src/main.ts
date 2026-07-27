@@ -268,6 +268,7 @@ import { butlerEmbedderFromEnv } from './butler-embedder.js'
 import { butlerHearingFromEnv } from './butler-hearing.js'
 import { butlerSeeingFromEnv } from './butler-seeing.js'
 import { butlerVoiceFromEnv } from './butler-voice.js'
+import { buildWebPushService } from './web-push-sender.js'
 import {
   buildOnboardingKeyCheck,
   type ButlerOnboardingKeyCheck,
@@ -965,6 +966,9 @@ async function main(): Promise<void> {
   if (butlerHearing) log.info(butlerHearing.disclosure, { dataLeavesBox: butlerHearing.dataLeavesBox })
   const butlerSeeing = butlerSeeingFromEnv()
   if (butlerSeeing) log.info(butlerSeeing.disclosure, { dataLeavesBox: butlerSeeing.dataLeavesBox })
+  // PUSH-M3 — opt-in Web Push 补位触达(GOTONG_WEBPUSH=RFC 8292 联系方式;未设 ⇒ 字节不变;payload E2E 加密但时序元数据经浏览器厂商推送服务=dataLeavesBox)。
+  const webPush = buildWebPushService(space.root, log)
+  if (webPush) log.info(webPush.disclosure, { dataLeavesBox: true })
   // BF-M7 — governed set(建/改/删自己的 agent+改工作流)逐项 park 到 /me;执行器=/me steward 同一服务(闸不越面);refs lazy 读,缺 ⇒ 纯记忆。
   let butlerGovernedAgentsRef: StewardAgentDirectory | undefined
   let butlerGovernedWorkflowEditorRef: StewardWorkflowEditor | undefined
@@ -2281,10 +2285,11 @@ async function main(): Promise<void> {
       spaceRoot: space.root,
       health: adminHealth,
       defaultLang: config.defaultLang,
-      // VOICE-M3/ASR-M3/VIS-M3 — opt-in 语音回复+收听+图片识别;未配 undefined = 字节不变。
+      // VOICE-M3/ASR-M3/VIS-M3/PUSH-M3 — opt-in 语音回复+收听+图片识别+Web Push 补位;未配 undefined = 字节不变。
       ...(butlerVoice ? { voice: butlerVoice } : {}),
       ...(butlerHearing ? { hearing: butlerHearing } : {}),
       ...(butlerSeeing ? { seeing: butlerSeeing } : {}),
+      ...(webPush ? { webPushFallback: webPush.fallback } : {}),
       // IMA-M2 — /inbox /approve /deny:读走 InboxStore、写走 HostInboxService(既有权威)。
       ...(inboxStore && inboxService ? { approvals: { store: inboxStore, inbox: inboxService } } : {}),
       // CARE-M5 — 恢复探活骑 onboarding key check 只读活体链;lazy ref 兜未就绪;status==='ok' 才算真恢复。
@@ -2315,6 +2320,8 @@ async function main(): Promise<void> {
     },
     // MR-M5 — per-candidate manual 「测试路由」 probe (reuses the pool's spawn-time key→factory chain; breaker-isolated).
     routingProbe: localAgents,
+    // PUSH-M2 — member Web Push subscription face; absent ⇒ honest {available:false}.
+    ...(webPush ? { webPush: webPush.surface } : {}),
     // FDE-M1b/M3 — durable sinks for template-declared connector slots and
     // schedule suggestions (recorded at import; absent → response-only).
     connectorSlots,

@@ -879,6 +879,31 @@ export function foldSeeingDescriber(
   }
 }
 
+/**
+ * PUSH-M3 — fold the Web Push tap under the IM push as the B1 补位腿 (fold
+ * family: {@link foldHearingTranscriber}). STRICTLY gap-filling: only
+ * `reason === 'unknown_member'` — "this member never bound an IM chat" — falls
+ * through to the tap. Members WITH an IM route (delivered, or transient
+ * no_bridge / send_failed) behave byte-for-byte as today, so IM stays the
+ * primary channel and nobody is ever double-notified. The tap callback takes
+ * NO text (low-info by shape); when it also fails, the ORIGINAL unknown_member
+ * result is returned so the outbox queues and retries the whole chain later.
+ * Exported for the anti-corrosion test — production reaches it only through
+ * {@link startImBridges}.
+ */
+export function foldWebPushIntoPush(
+  push: (userId: string, text: string) => Promise<ButlerPushResult>,
+  tap: ((userId: string) => Promise<ButlerPushResult>) | undefined,
+): (userId: string, text: string) => Promise<ButlerPushResult> {
+  if (!tap) return push
+  return async (userId, text) => {
+    const r = await push(userId, text)
+    if (r.delivered || r.reason !== 'unknown_member') return r
+    const t = await tap(userId)
+    return t.delivered ? t : r
+  }
+}
+
 export type ImHotStartResult =
   | { ok: true; platform: ImVaultPlatform; source: 'env' | 'vault' }
   | { ok: false; reason: 'already_running' | 'no_credentials' | 'start_failed'; detail?: string }
@@ -962,6 +987,13 @@ export interface StartImBridgesOptions {
    * (失败只记日志,与今天字节一致)。
    */
   outboxDir?: string
+  /**
+   * PUSH-M3 — B1 补位腿:reachable 判定成员**从没绑过 IM**(unknown_member)
+   * 时,退而发一记低信息 Web Push tap 叫醒 /me(签名不收 text=正文结构性
+   * 上不了通知;正文已由 deliverToMember 记进会话窗)。绑了 IM 的成员一律
+   * 不经它(行为字节不变);缺省 → 回落链不存在,与今天逐字节一致。
+   */
+  webPushFallback?: (userId: string) => Promise<ButlerPushResult>
   /**
    * CARE-M2 — 断供不失联接线。file 惯例 `<space>/runtime/llm-outage.json`;
    * butlerMemoryRoot 用来枚举 BE-M5 播报已同意的成员(骑同一份同意,零新
@@ -1178,15 +1210,23 @@ export async function startImBridges(
     await reachable.load()
   }
 
+  // PUSH-M3 — B1 补位腿折在 outbox **之下**:直投与 flush 补投走同一条
+  // 「IM 优先 → 无路线才 Web Push tap」链。tap 送达=delivered ⇒ outbox 不排队
+  // (tap 无正文,正文已在会话窗等着);tap 也失败 ⇒ 保留 unknown_member 原果
+  // ⇒ outbox 照旧排队,下次 flush 整链重试。
+  const rawPush: ((userId: string, text: string) => Promise<ButlerPushResult>) | undefined =
+    reachable
+      ? foldWebPushIntoPush((userId, text) => reachable!.push(userId, text), opts.webPushFallback)
+      : undefined
+
   // CARE-M8 — 持久化投递重投。仅当 reachable 在 AND 宿主给了 outboxDir 时包一层:
   // 投递失败入盘,成员下次说话(record → flush)或 cadence 巡检时补投。缺省 →
   // push 仍 best-effort(失败只记日志,与今天字节一致)。
   let outbox: ButlerOutbox | undefined
-  if (reachable && opts.outboxDir) {
-    const reg = reachable
+  if (rawPush && opts.outboxDir) {
     outbox = new ButlerOutbox({
       dir: opts.outboxDir,
-      push: (userId, text) => reg.push(userId, text),
+      push: rawPush,
       logger: opts.log,
     })
   }
@@ -1195,11 +1235,7 @@ export async function startImBridges(
   // 一切成员向投递(pushToMember、断供 announce)都走它,重试语义一处、齐整。
   // reachable 不在 → undefined(纯 env IM 没有出站推送面,字节不变)。
   const deliverRaw: ((userId: string, text: string) => Promise<ButlerPushResult>) | undefined =
-    reachable
-      ? outbox
-        ? (userId, text) => outbox!.deliver(userId, text)
-        : (userId, text) => reachable!.push(userId, text)
-      : undefined
+    rawPush ? (outbox ? (userId, text) => outbox!.deliver(userId, text) : rawPush) : undefined
   // 会话窗口:推送先记一笔 assistant 轮再投递(转派结果/播报也是「阿同说过
   // 的话」)。outbox 排队场景时序仍对——失联成员回来说话时 flush 先投旧信,
   // 新一轮读窗口已含它;flush 补投不经这里,不会重复记。append never-throws。

@@ -28,6 +28,7 @@ import type { IdentityStore } from '@gotong/identity'
 import { ButlerSessionWindow } from '@gotong/personal-butler'
 
 import type { AdminHealthSurface } from './admin-health.js'
+import type { ButlerPushResult } from './butler-reachable.js'
 import type { FailureLang } from './failure-translator.js'
 import { ImApprovalService, type ImApprovalServiceOptions } from './im-approval-service.js'
 import { startImBridges, type ImBridgesHandle, type ImLogger } from './im-bridge.js'
@@ -74,6 +75,13 @@ export interface ImBridgeWiringDeps {
    * 缺省 → 入站处理逐字节不变(图片消息保持空文本)。
    */
   seeing?: ImBridgeSeeing
+  /**
+   * PUSH-M3 — opt-in Web Push 补位腿(main.ts 构造 `buildWebPushService()`)。
+   * 给了它,reachable 判「成员从没绑过 IM」时退而发一记低信息 tap 叫醒 /me
+   * (签名不收 text=正文结构性上不了通知);绑了 IM 的成员行为字节不变;
+   * 缺省 → 回落链不存在,与今天逐字节一致。
+   */
+  webPushFallback?: (userId: string) => Promise<ButlerPushResult>
 }
 
 /** 窄鸭子:只要 synthesize 一面(butler-voice 的 ButlerVoice 天然满足)。 */
@@ -151,6 +159,8 @@ export async function armImBridgeWiring(deps: ImBridgeWiringDeps): Promise<ImBri
     ...(deps.hearing ? { hearing: deps.hearing } : {}),
     // VIS-M3 — opt-in 图片识别;未配 undefined = 入站逐字节不变。
     ...(deps.seeing ? { seeing: deps.seeing } : {}),
+    // PUSH-M3 — opt-in Web Push 补位腿;未配 undefined = 回落链不存在。
+    ...(deps.webPushFallback ? { webPushFallback: deps.webPushFallback } : {}),
     // CARE-M8 — 投递失败入盘、成员可达时重投的每成员 outbox。给了它,
     // reachable push 的失败不再只是一行日志(短暂失联的成员不漏播报/提醒)。
     outboxDir: join(deps.spaceRoot, 'butler', 'outbox'),

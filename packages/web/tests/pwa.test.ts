@@ -92,6 +92,20 @@ describe('PWA assets (Phase 12 M9)', () => {
     expect(src).toContain("addEventListener('fetch'")
   })
 
+  it('sw.js carries the PUSH-M3 trio and only ever shows the low-info tap', async () => {
+    const src = await (await fetch(`${b.baseUrl}/sw.js`)).text()
+    // The three Web Push handlers must all be present — a SW that subscribes
+    // but cannot show notifications gets its subscription revoked by browsers.
+    expect(src).toContain("addEventListener('push'")
+    expect(src).toContain("addEventListener('notificationclick'")
+    expect(src).toContain("addEventListener('pushsubscriptionchange'")
+    expect(src).toContain('showNotification')
+    // Low-info discipline: the fallback copy is the hub's fixed tap, and the
+    // click handler only OPENS the app (推送≠授权 — reading happens after login).
+    expect(src).toContain('有新消息,点开查看')
+    expect(src).toContain('openWindow')
+  })
+
   it('GET /icon.svg → image/svg+xml', async () => {
     const r = await fetch(`${b.baseUrl}/icon.svg`)
     expect(r.status).toBe(200)

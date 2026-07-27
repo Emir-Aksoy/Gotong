@@ -325,6 +325,18 @@
         <div id="me-im-bindings" class="me-meta"></div>
       </div>
 
+      <!-- PUSH-M3 — browser notification card. Hidden until app.js confirms
+           BOTH sides: the browser supports Push (serviceWorker + PushManager;
+           iOS Safari only inside an installed PWA) AND the hub opted in
+           (GET /api/me/push → available). The tap is deliberately low-info —
+           content stays in /me behind the login. -->
+      <div id="me-push-card" class="me-im-bind" hidden>
+        <h2 data-i18n="mePushTitle">浏览器通知</h2>
+        <p class="me-meta" data-i18n="mePushHint">没绑 IM 也能被叫到:阿同有话找你时,浏览器弹一条「有新消息」提醒(不含内容),点开进这里看。绑了 IM 的成员走 IM,不会重复打扰。</p>
+        <button id="me-push-btn" type="button" class="me-primary-btn" data-i18n="mePushEnable">开启通知</button>
+        <div id="me-push-out" class="me-status"></div>
+      </div>
+
       <!-- UI-A4 — the tooling cards (dispatch / explain / edit / create /
            runs / reports / agents / own-agents / keys / butler memory) fold
            behind one <details>. A parent's home page is butler + approvals;
