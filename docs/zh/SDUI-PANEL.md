@@ -281,6 +281,25 @@ export 共享给三个写入口。这属于 M3 的工作量,不是 M0 要拍的�
 | **M4 管家编排 ✅(2026-07-26)** | 按 E1 落地:benign `get_my_panel`(现状+库+**从 `PANEL_COMPONENT_CONTRACTS` 派生的组件契约小抄**,零手抄漂移)+ benign `set_panel_layout` 四写法互斥(config/libraryId/reset/undo)全走 M3 store 同一校验咽喉。三重安全网:①改不坏=校验拒后文件字节不变;②瞒不住=每次管家写都带 `by:'butler'` 落快照槽 → `GET /api/me/panel` 带 `lastChange` → SPA 结构性渲染「阿同调整了你的面板 [撤销][知道了]」横幅(与模型嘴上说什么无关);③退得回=改前快照单槽 **swap 语义**(连撤两次来回换,永不销毁状态)。userId 闭包进 builder=成员结构性只能动自己的面板;AFR 注册三件套过;两工具进目录层(改布局是偶发动作) | 全过:幻觉组件名被拒+字节不变(单测逐字节断言);保留区 approval-inbox 带 params 被拒零落盘;真浏览器 round-trip=真 toolset 换形态→横幅出现→点撤销真还原+横幅结构性解除(`by:'human'`)+console 零错误。**round-trip 抓到真 bug**:store `applyLibrary` 实现吞掉 opts 参数,管家最常用写法归因静默落 'human'=横幅不亮,已修+两条钉死测试(每种写法都断言归因,不只 config) |
 | **M5 壳与分发** | Capacitor 壳 + 全球商店 + 大陆 APK 直发(含演示形态过审) | 真机安装连自有 VPS round-trip |
 
+**Codex 交叉审收口(2026-07-26,gpt-5.6-sol 独立审 M1–M4 四 commit,0H/5M/5L)**:
+干净面先说——XSS(全 textContent 沉降)/路径穿越/鉴权绕过/其他被吞参数/徽章可移除,
+五个重点方向零发现。10 条属实发现收 8 修 1 部分 1 记档:①快照解析收严成**唯一严格
+解析器** `readPrevSnapshot`(槽文件缺 `config` 自有键=malformed:undo 响亮拒绝零触碰,
+横幅不亮——绝不把残缺槽读成「当时是默认」然后替成员清空面板);②库 id 上限 64 字符
+(id 即文件名,防 ENAMETOOLONG 中断安装循环);③`installPanels` 改**先写后清**+逐条
+try/catch(一条写失败绝不再连坐后面的条目;崩溃中途留新旧并存可恢复,不再是清完旧的
+写不进新的);④渲染器 chat 掉 `rows[0]` 盲回退(无 chat 能力=诚实「无 agent」态,
+不抓随机专家);⑤校验器三补:isPlainObject 钉原型(构造对象走原型链夹带字段被拒)+
+`HOSTILE_TEXT_RE` 拒控制字符/bidi 覆盖字符进 title/heading/字符串参数(内容仿冒面)+
+保留区组件每份配置**至多一枚**;⑥web PUT 改 exactly-one 模式+拒未知键(双模式并存
+不再静默按优先级挑赢家);⑦写者隔离扩到「可解析但非法」前任(证据不再被覆盖销毁);
+⑧工具层 libraryId 判定统一(`{config, libraryId:""}` 不再错路由拒绝)。**部分修**:
+M1 快照/写非事务窗口——不上锁(单进程 host+三写面共享 ONE store 实例,残余=崩在两写
+之间丢一层 undo,有界),但补**幻影横幅抑制**:快照所记与当前所服务 deep-equal 时不亮
+横幅(同形态重装/崩溃窗口两类幻影一起消)。**记档不修**:ack 毫秒时间戳理论撞车
+(L9,需 changeId 不值当)。验收:personal-butler 137(+3)/web 1505(+2)/host 2521+5
+skip(+8),四门 PASS(旋钮 115 零新增,main.ts 2725/2725)。
+
 **相关但独立的 track(不塞进 SDUI)**:PUSH(Web Push/VAPID 通知)、
 CARE-FAM(关怀节律引擎)、MED(跨成员调解披露治理)、HEALTH(HealthKit 原生插件,
 M5 之后)。SDUI 是终端骨架,它们是住进来的能力。
@@ -295,6 +314,15 @@ M5 之后)。SDUI 是终端骨架,它们是住进来的能力。
 - **第三方终端协议开放**:UI schema 稳定(≥两个大版本)后再谈,先不承诺。
 - **组件内任意 JS 表达式绑定**(Adaptive Cards 的 templating 语言):v1 params
   全静态,条件显隐等真实需求再议——每加一分表达力,校验器与保留区就多一分攻面。
+- **快照+写的全事务化**(Codex M1):单进程 host + 三写面共享同一 store 实例 +
+  per-user promise 链已消并发撕裂;剩的是崩溃窗口丢一层 undo(有界残余),幻影横幅
+  已由 deep-equal 抑制盖住。上文件锁只为这个窗口不值当,记档等多进程形态再议。
+- **模板 `template.id` 进库条目**(Codex M3):画廊是策展面,跨包同名 id 覆盖=
+  「文件名即寻址键」的记档设计,不加第二把钥匙。
+- **placeholder 白名单枚举化**(Codex M5):预设面刻意用自定义 placeholder 文案,
+  枚举化会杀掉它;敌意文本已由 HOSTILE_TEXT_RE 拒,内容仿冒残余接受。
+- **`lastChange` 加 changeId**(Codex L9):ack 毫秒戳同刻撞车是理论窗口,
+  多一个字段不值当。
 
 ---
 

@@ -263,6 +263,21 @@ describe('/api/me/panel — SDUI member panel config (M2 read + M3 write)', () =
     expect(b.stub!.resets).toHaveLength(0)
   })
 
+  it('PUT with two modes at once → 400, nothing executed (no silent priority pick)', async () => {
+    b = await boot()
+    expect((await req('PUT', { body: { restore: true, libraryId: 'farm' } })).status).toBe(400)
+    expect((await req('PUT', { body: { reset: true, restore: true } })).status).toBe(400)
+    expect(b.stub!.applied).toHaveLength(0)
+    expect(b.stub!.resets).toHaveLength(0)
+    expect(b.stub!.restores).toHaveLength(0)
+  })
+
+  it('PUT with a stray unknown key → 400 (fail-closed body contract)', async () => {
+    b = await boot()
+    expect((await req('PUT', { body: { libraryId: 'farm', junk: 1 } })).status).toBe(400)
+    expect(b.stub!.applied).toHaveLength(0)
+  })
+
   it('DELETE → 405 (only GET / PUT exist)', async () => {
     b = await boot()
     const r = await req('DELETE')

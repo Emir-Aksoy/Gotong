@@ -198,7 +198,9 @@ class ButlerPanelToolset implements LlmAgentToolset {
         await this.deps.surface.resetPanel(this.deps.userId, by)
         return text(`已恢复内置默认面板。${banner}`)
       }
-      if (typeof args.libraryId === 'string') {
+      // Same predicate as the mode count above — a bare typeof check would
+      // let {config, libraryId:""} route here and refuse instead of applying.
+      if (typeof args.libraryId === 'string' && args.libraryId.length > 0) {
         await this.deps.surface.applyLibrary(this.deps.userId, args.libraryId, by)
         return text(`已换上形态「${args.libraryId}」。${banner}`)
       }

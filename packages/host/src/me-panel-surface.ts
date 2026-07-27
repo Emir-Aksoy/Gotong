@@ -43,7 +43,9 @@ import { ownerDir } from '@gotong/service-memory-file'
 const log = createLogger('me-panel')
 
 /** Same charset as a KB slot / MCP server name — a library id IS a filename. */
-const LIBRARY_ID_RE = /^[a-zA-Z][a-zA-Z0-9_-]*$/
+// 64-char cap: the id becomes a FILENAME — an uncapped id reaches the fs and
+// dies as ENAMETOOLONG mid-install instead of being skipped up front.
+const LIBRARY_ID_RE = /^[a-zA-Z][a-zA-Z0-9_-]{0,63}$/
 
 /** Who performed a panel mutation. 'human' = the member or an admin (fork D:
  * humans get no AI-change gate); 'butler' drives the loud SPA banner. */
@@ -158,8 +160,15 @@ export function buildMePanelSurface(opts: { spaceDir: string }): MePanelSurfaceH
     })()
     // Attach attribution on EVERY source — a butler reset serves 'default' yet
     // must still arm the banner (the member sees what changed and can undo).
-    const lastChange = await readLastChange(userId)
-    if (lastChange) result.lastChange = lastChange
+    const snap = await readPrevSnapshot(userId)
+    if (snap !== null && snap !== 'malformed') {
+      // Suppress the banner when the recorded prior state equals what is being
+      // served now: nothing visibly changed, so "阿同调整了你的面板" would be a
+      // phantom (identical re-apply, or a crash between snapshot and write).
+      const servedMember = result.source === 'member' ? result.config : null
+      const noop = JSON.stringify(snap.config) === JSON.stringify(servedMember)
+      if (!noop) result.lastChange = { by: snap.by, at: snap.at }
+    }
     return result
   }
 
@@ -169,11 +178,18 @@ export function buildMePanelSurface(opts: { spaceDir: string }): MePanelSurfaceH
     if (bytes > PANEL_LIMITS.maxFileBytes) {
       throw new PanelStoreError('too_large', `panel config over ${PANEL_LIMITS.maxFileBytes} bytes`)
     }
-    // Writer-side quarantine: an unparseable predecessor is EVIDENCE — move it
-    // aside (never destroy) so the overwrite doesn't erase what went wrong.
-    // ENOENT / other read faults: nothing to quarantine, proceed to write.
+    // Writer-side quarantine: a broken predecessor is EVIDENCE — move it aside
+    // (never destroy) so the overwrite doesn't erase what went wrong. That
+    // covers parseable-but-invalid too (a hand-edit the reader was already
+    // falling back on), not just SyntaxError. ENOENT / other read faults:
+    // nothing to quarantine, proceed to write.
     try {
-      JSON.parse(await readFile(file, 'utf8'))
+      const prior = JSON.parse(await readFile(file, 'utf8'))
+      if (!validatePanelConfig(prior).ok) {
+        const quarantine = `${file}.corrupt-${Date.now()}`
+        await rename(file, quarantine).catch(() => undefined)
+        log.warn('quarantined invalid panel file before rewrite', { userId, quarantine })
+      }
     } catch (err) {
       if (err instanceof SyntaxError) {
         const quarantine = `${file}.corrupt-${Date.now()}`
@@ -262,17 +278,34 @@ export function buildMePanelSurface(opts: { spaceDir: string }): MePanelSurfaceH
     await writeJsonAtomic(file, { savedAt: new Date().toISOString(), by, config })
   }
 
-  async function readLastChange(userId: string): Promise<MePanelResult['lastChange'] | null> {
-    let doc: unknown
+  // The ONE snapshot parser (banner + undo read the same truth). Strict shape:
+  // `config` must be an OWN key — `{savedAt,by}` without it must not read as
+  // "was default", or a foreign/hand-edited slot would make undo erase the
+  // member's panel. null = no file; 'malformed' = present but unusable (no
+  // banner, and undo refuses loudly instead of guessing).
+  interface PrevSnapshot {
+    by: PanelActor
+    at: string
+    config: unknown
+  }
+  async function readPrevSnapshot(userId: string): Promise<PrevSnapshot | null | 'malformed'> {
+    let raw: string
     try {
-      doc = JSON.parse(await readFile(prevFile(userId), 'utf8'))
+      raw = await readFile(prevFile(userId), 'utf8')
     } catch {
       return null
     }
-    const d = doc as { savedAt?: unknown; by?: unknown } | null
-    if (!d || typeof d !== 'object' || typeof d.savedAt !== 'string') return null
+    let doc: unknown
+    try {
+      doc = JSON.parse(raw)
+    } catch {
+      return 'malformed'
+    }
+    if (typeof doc !== 'object' || doc === null || Array.isArray(doc)) return 'malformed'
+    const d = doc as Record<string, unknown>
+    if (typeof d.savedAt !== 'string' || !Object.hasOwn(d, 'config')) return 'malformed'
     // Unknown/missing attribution reads as 'human' — never a false banner.
-    return { by: d.by === 'butler' ? 'butler' : 'human', at: d.savedAt }
+    return { by: d.by === 'butler' ? 'butler' : 'human', at: d.savedAt, config: d.config }
   }
 
   async function setPanel(
@@ -309,13 +342,17 @@ export function buildMePanelSurface(opts: { spaceDir: string }): MePanelSurfaceH
 
     async restoreSnapshot(userId, opts) {
       return serialize(userId, async () => {
-        let doc: unknown
-        try {
-          doc = JSON.parse(await readFile(prevFile(userId), 'utf8'))
-        } catch {
+        const snap = await readPrevSnapshot(userId)
+        if (snap === null) {
           throw new PanelStoreError('not_found', 'no panel snapshot to restore')
         }
-        const recorded = (doc as { config?: unknown } | null)?.config ?? null
+        if (snap === 'malformed') {
+          // A slot that lost its `config` key (or is garbage) must NOT read as
+          // "was default" — undo would erase the member's panel. Refuse, touch
+          // nothing; the evidence stays on disk.
+          throw new PanelStoreError('invalid', 'panel snapshot malformed — nothing restored')
+        }
+        const recorded = snap.config ?? null
         let target: PanelConfig | null = null
         if (recorded !== null) {
           // Re-validate: the contract may have narrowed since the snapshot was
@@ -363,19 +400,10 @@ export function buildMePanelSurface(opts: { spaceDir: string }): MePanelSurfaceH
     async installPanels(pack, panels) {
       try {
         await mkdir(libraryDir, { recursive: true })
-        // Reinstall semantics (connector-slot mirror): drop this pack's old
-        // entries first, so a template that renamed/removed a preset doesn't
-        // leave stale shapes behind. [] therefore just clears.
-        for (const id of await libraryIds()) {
-          try {
-            const raw = JSON.parse(await readFile(join(libraryDir, `${id}.json`), 'utf8'))
-            if (raw && typeof raw === 'object' && (raw as { pack?: unknown }).pack === pack) {
-              await rm(join(libraryDir, `${id}.json`), { force: true })
-            }
-          } catch {
-            /* unreadable entry — leave it; listLibrary already skips it */
-          }
-        }
+        // Write the NEW entries first, each isolated — one bad write must not
+        // abort the rest, and a crash midway leaves old+new side by side
+        // (recoverable) instead of a cleared library.
+        const written = new Set<string>()
         for (const p of panels) {
           if (!LIBRARY_ID_RE.test(p.id)) {
             log.warn('panel preset id rejected — skipped', { pack, id: p.id })
@@ -393,14 +421,36 @@ export function buildMePanelSurface(opts: { spaceDir: string }): MePanelSurfaceH
             })
             continue
           }
-          await writeJsonAtomic(join(libraryDir, `${p.id}.json`), {
-            id: p.id,
-            title: p.title,
-            ...(p.description !== undefined ? { description: p.description } : {}),
-            pack,
-            installedAt: new Date().toISOString(),
-            config: v.config,
-          })
+          try {
+            await writeJsonAtomic(join(libraryDir, `${p.id}.json`), {
+              id: p.id,
+              title: p.title,
+              ...(p.description !== undefined ? { description: p.description } : {}),
+              pack,
+              installedAt: new Date().toISOString(),
+              config: v.config,
+            })
+            written.add(p.id)
+          } catch (err) {
+            log.warn('panel preset write failed — skipped', {
+              pack,
+              id: p.id,
+              err: err instanceof Error ? err.message : String(err),
+            })
+          }
+        }
+        // Reinstall semantics (connector-slot mirror): NOW drop this pack's
+        // stale ids the new template no longer ships. [] therefore clears.
+        for (const id of await libraryIds()) {
+          if (written.has(id)) continue
+          try {
+            const raw = JSON.parse(await readFile(join(libraryDir, `${id}.json`), 'utf8'))
+            if (raw && typeof raw === 'object' && (raw as { pack?: unknown }).pack === pack) {
+              await rm(join(libraryDir, `${id}.json`), { force: true })
+            }
+          } catch {
+            /* unreadable entry — leave it; listLibrary already skips it */
+          }
         }
       } catch (err) {
         // Best-effort sink: a panel fault must never fail the template import.

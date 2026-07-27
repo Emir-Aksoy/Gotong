@@ -170,6 +170,15 @@ describe('set_panel_layout (benign direct-write, E1 safety net)', () => {
     await expect(readFile(panelFile('member-1'), 'utf8')).rejects.toThrow()
   })
 
+  it('an empty-string libraryId does not shadow config mode (predicate parity)', async () => {
+    const { toolset } = build()
+    // Mode count sees one mode (config); the execution branch must agree —
+    // a bare typeof check would route to applyLibrary("") and refuse.
+    const out = await toolset.callTool('set_panel_layout', { config: CFG_B, libraryId: '' })
+    expect(out.isError).toBeUndefined()
+    expect(JSON.parse(await readFile(panelFile('member-1'), 'utf8'))).toEqual(CFG_B)
+  })
+
   it('unknown tool name → error text', async () => {
     const { toolset } = build()
     const out = await toolset.callTool('nope', {})

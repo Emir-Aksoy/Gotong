@@ -75,21 +75,36 @@ async function applyPanelWrite(
   const body = (await readJsonBody(req).catch(() => null)) as
     | { libraryId?: unknown; reset?: unknown; restore?: unknown }
     | null
+  // Fail-closed on ambiguity: exactly ONE mode, no stray keys. A priority
+  // union would silently pick a winner for {restore:true, libraryId:"x"} —
+  // whichever the caller meant, guessing writes the wrong panel.
+  const badRequest = (): void =>
+    sendJson(res, { error: 'body must be { libraryId }, { reset: true } or { restore: true }' }, 400)
+  if (!body || typeof body !== 'object') {
+    badRequest()
+    return
+  }
+  const unknownKey = Object.keys(body).some((k) => !['libraryId', 'reset', 'restore'].includes(k))
+  const modes = [
+    body.restore === true,
+    body.reset === true,
+    typeof body.libraryId === 'string' && body.libraryId.length > 0,
+  ].filter(Boolean).length
+  if (unknownKey || modes !== 1) {
+    badRequest()
+    return
+  }
   try {
-    if (body && body.restore === true) {
+    if (body.restore === true) {
       sendJson(res, await surface.restoreSnapshot(userId))
       return
     }
-    if (body && body.reset === true) {
+    if (body.reset === true) {
       await surface.resetPanel(userId)
       sendJson(res, await surface.panel(userId))
       return
     }
-    if (body && typeof body.libraryId === 'string' && body.libraryId.length > 0) {
-      sendJson(res, await surface.applyLibrary(userId, body.libraryId))
-      return
-    }
-    sendJson(res, { error: 'body must be { libraryId }, { reset: true } or { restore: true }' }, 400)
+    sendJson(res, await surface.applyLibrary(userId, body.libraryId as string))
   } catch (err) {
     sendJson(
       res,

@@ -304,3 +304,90 @@ describe('me-panel-surface — one-slot undo + attribution (SDUI-M4)', () => {
     expect((await s.panel('u1')).lastChange?.by).toBe('human')
   })
 })
+
+describe('me-panel-surface — hardening (Codex 收口)', () => {
+  const prevSlotFile = (userId: string): string =>
+    join(spaceDir, 'butler', 'ui', 'user', userId, 'panel-prev.json')
+
+  it('applyLibrary rejects an over-long id (64-char filename cap)', async () => {
+    const s = surface()
+    await expect(s.applyLibrary('u1', 'a'.repeat(65))).rejects.toMatchObject({ code: 'not_found' })
+  })
+
+  it('a snapshot slot missing its config key is malformed: undo refuses, nothing touched', async () => {
+    const s = surface()
+    await s.setPanel('u1', CFG_A)
+    // Hand-damaged slot: {savedAt,by} but NO config key. Reading it as "was
+    // default" would make undo erase the member's panel.
+    const damaged = JSON.stringify({ savedAt: '2026-07-26T00:00:00.000Z', by: 'butler' })
+    await writeFile(prevSlotFile('u1'), damaged, 'utf8')
+
+    await expect(s.restoreSnapshot('u1')).rejects.toMatchObject({ code: 'invalid' })
+    // Member panel intact, slot evidence intact, and NO banner from garbage.
+    expect(JSON.parse(await readFile(memberPanelFile('u1'), 'utf8'))).toEqual(CFG_A)
+    expect(await readFile(prevSlotFile('u1'), 'utf8')).toBe(damaged)
+    expect((await s.panel('u1')).lastChange).toBeUndefined()
+  })
+
+  it('an unparseable snapshot slot → typed invalid (not "restore to default")', async () => {
+    const s = surface()
+    await s.setPanel('u1', CFG_A)
+    await writeFile(prevSlotFile('u1'), '{ not json', 'utf8')
+    await expect(s.restoreSnapshot('u1')).rejects.toMatchObject({ code: 'invalid' })
+    expect(JSON.parse(await readFile(memberPanelFile('u1'), 'utf8'))).toEqual(CFG_A)
+  })
+
+  it('re-applying the identical config suppresses the banner (no visible change)', async () => {
+    const s = surface()
+    await s.setPanel('u1', CFG_A, { by: 'butler' })
+    expect((await s.panel('u1')).lastChange?.by).toBe('butler')
+    // Same shape again: the slot records CFG_A and CFG_A is served — phantom.
+    await s.setPanel('u1', CFG_A, { by: 'butler' })
+    expect((await s.panel('u1')).lastChange).toBeUndefined()
+    // A real change arms it again.
+    await s.setPanel('u1', CFG_B, { by: 'butler' })
+    expect((await s.panel('u1')).lastChange?.by).toBe('butler')
+  })
+
+  it('writer quarantines a parseable-but-INVALID predecessor too', async () => {
+    const s = surface()
+    await s.setPanel('u1', CFG_A)
+    const invalid = JSON.stringify({ schemaVersion: 99, sections: [] })
+    await writeFile(memberPanelFile('u1'), invalid, 'utf8')
+
+    await s.setPanel('u1', CFG_B)
+
+    const entries = await memberPanelDirEntries('u1')
+    const quarantined = entries.filter((n) => n.startsWith('panel.json.corrupt-'))
+    expect(quarantined.length).toBe(1)
+    expect(
+      await readFile(join(spaceDir, 'butler', 'ui', 'user', 'u1', quarantined[0]), 'utf8'),
+    ).toBe(invalid)
+    expect((await s.panel('u1')).config).toEqual(CFG_B)
+  })
+
+  it('installPanels: one failing WRITE does not abort the rest (per-entry isolation)', async () => {
+    const s = surface()
+    const libDir = join(spaceDir, 'butler', 'ui', 'library')
+    // A directory squatting on blocked.json makes that one write fail.
+    await mkdir(join(libDir, 'blocked.json'), { recursive: true })
+    await s.installPanels('pack-x', [
+      { id: 'blocked', title: '写不进', config: CFG_A },
+      { id: 'after', title: '后面的', config: CFG_B },
+    ])
+    // Under the old delete-then-write loop the throw aborted everything after.
+    expect((await s.listLibrary()).map((e) => e.id)).toEqual(['after'])
+  })
+
+  it('installPanels: reinstall overlap keeps the just-written entry (stale sweep skips written ids)', async () => {
+    const s = surface()
+    await s.installPanels('pack-x', [
+      { id: 'keep', title: '保留', config: CFG_A },
+      { id: 'drop', title: '要清', config: CFG_B },
+    ])
+    await s.installPanels('pack-x', [{ id: 'keep', title: '保留v2', config: CFG_B }])
+    const lib = await s.listLibrary()
+    expect(lib.map((e) => e.id)).toEqual(['keep'])
+    expect(lib[0]!.title).toBe('保留v2')
+  })
+})

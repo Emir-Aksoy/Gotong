@@ -201,7 +201,21 @@ export type PanelValidationResult =
   | { ok: false; errors: string[] }
 
 function isPlainObject(v: unknown): v is Record<string, unknown> {
-  return typeof v === 'object' && v !== null && !Array.isArray(v)
+  if (typeof v !== 'object' || v === null || Array.isArray(v)) return false
+  // Pin the prototype: an Object.create({schemaVersion:1,…}) shell passes
+  // own-key checks yet serializes to {} — inherited fields must not validate.
+  const proto = Object.getPrototypeOf(v)
+  return proto === Object.prototype || proto === null
+}
+
+// Display copy travels from config into member-facing UI verbatim. Control
+// chars and bidi overrides have no legitimate use there and are the raw
+// material of spoofing (RTL flips, invisible padding) — reject, don't strip.
+// eslint-disable-next-line no-control-regex
+const HOSTILE_TEXT_RE = /[\u0000-\u001F\u007F\u202A-\u202E\u2066-\u2069]/
+
+function hostileText(s: string): boolean {
+  return HOSTILE_TEXT_RE.test(s)
 }
 
 function validSource(source: string, allowed: readonly string[]): boolean {
@@ -247,6 +261,8 @@ export function validatePanelConfig(value: unknown): PanelValidationResult {
     if (typeof value.title !== 'string' || value.title.length === 0) err('title: must be a non-empty string')
     else if (value.title.length > PANEL_LIMITS.maxTitleChars) {
       err(`title: over ${PANEL_LIMITS.maxTitleChars} chars`)
+    } else if (hostileText(value.title)) {
+      err('title: control or bidi-override characters are not allowed')
     }
   }
 
@@ -257,6 +273,7 @@ export function validatePanelConfig(value: unknown): PanelValidationResult {
     err(`sections: over ${PANEL_LIMITS.maxSections}`)
   } else {
     let componentCount = 0
+    const reservedCounts = new Map<string, number>()
     sections.forEach((section, si) => {
       const at = `sections[${si}]`
       if (!isPlainObject(section)) {
@@ -271,6 +288,8 @@ export function validatePanelConfig(value: unknown): PanelValidationResult {
           err(`${at}.heading: must be a non-empty string`)
         } else if (section.heading.length > PANEL_LIMITS.maxHeadingChars) {
           err(`${at}.heading: over ${PANEL_LIMITS.maxHeadingChars} chars`)
+        } else if (hostileText(section.heading)) {
+          err(`${at}.heading: control or bidi-override characters are not allowed`)
         }
       }
       const components = section.components
@@ -281,10 +300,19 @@ export function validatePanelConfig(value: unknown): PanelValidationResult {
       componentCount += components.length
       components.forEach((component, ci) => {
         validateComponent(component, `${at}.components[${ci}]`, err)
+        const t = isPlainObject(component) ? component.type : undefined
+        if (typeof t === 'string' && (PANEL_RESERVED_TYPES as readonly string[]).includes(t)) {
+          reservedCounts.set(t, (reservedCounts.get(t) ?? 0) + 1)
+        }
       })
     })
     if (componentCount > PANEL_LIMITS.maxComponents) {
       err(`components: ${componentCount} total, over ${PANEL_LIMITS.maxComponents}`)
+    }
+    // Reserved-zone components carry system semantics — duplicates have no
+    // legitimate use and only serve visual-noise spoofing. At most one each.
+    for (const [t, n] of reservedCounts) {
+      if (n > 1) err(`components: reserved "${t}" may appear at most once (found ${n})`)
     }
   }
 
@@ -346,6 +374,7 @@ function validateParam(raw: unknown, rule: ParamRule, at: string, err: (msg: str
     case 'string':
       if (typeof raw !== 'string' || raw.length === 0) err(`${at}: must be a non-empty string`)
       else if (raw.length > rule.maxChars) err(`${at}: over ${rule.maxChars} chars`)
+      else if (hostileText(raw)) err(`${at}: control or bidi-override characters are not allowed`)
       return
     case 'int':
       if (typeof raw !== 'number' || !Number.isInteger(raw) || raw < rule.min || raw > rule.max) {

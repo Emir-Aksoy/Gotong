@@ -23,7 +23,7 @@
 // "上次复盘" line + its i18n key. Bumping forces returning members past the
 // stale-while-revalidate window so they get the new shell on the next activate,
 // not one load later.
-const CACHE = 'gotong-shell-v4'
+const CACHE = 'gotong-shell-v5'
 
 // Stable, role-agnostic static shell. app.html is excluded on purpose
 // (role-injected); admin.js / identity-ui.js etc. are left to the runtime

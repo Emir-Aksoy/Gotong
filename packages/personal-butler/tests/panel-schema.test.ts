@@ -182,3 +182,56 @@ describe('validatePanelConfig — fail-closed rejects', () => {
     if (!res.ok) expect(res.errors.length).toBeGreaterThanOrEqual(3)
   })
 })
+
+describe('validatePanelConfig — hardening (Codex 收口)', () => {
+  it('rejects prototype-inherited fields (own-property pin)', () => {
+    // A config whose load-bearing keys live on the prototype chain must not
+    // validate — JSON.parse output never has a custom prototype, so anything
+    // that does is a constructed object smuggling fields past hasOwn checks.
+    const viaProto = Object.create({
+      sections: [{ components: [{ type: 'chat' }] }],
+    }) as Record<string, unknown>
+    viaProto.schemaVersion = PANEL_SCHEMA_VERSION
+    expect(validatePanelConfig(viaProto).ok).toBe(false)
+
+    class Sneaky {
+      schemaVersion = PANEL_SCHEMA_VERSION
+      sections = [{ components: [{ type: 'chat' }] }]
+    }
+    expect(validatePanelConfig(new Sneaky()).ok).toBe(false)
+  })
+
+  it('rejects control and bidi-override characters in title / heading / string params', () => {
+    // Built via fromCharCode so no raw control bytes live in this source file.
+    const ctl = 'x' + String.fromCharCode(7) + 'y' // BEL
+    const bidi = 'x' + String.fromCharCode(0x202e) + 'y' // RLO override
+    expect(validatePanelConfig(minimal({ title: ctl } as never)).ok).toBe(false)
+    expect(
+      validatePanelConfig(
+        minimal({ sections: [{ heading: bidi, components: [{ type: 'chat' }] }] } as never),
+      ).ok,
+    ).toBe(false)
+    const res = validatePanelConfig(
+      minimal({ sections: [{ components: [{ type: 'chat', params: { placeholder: ctl } }] }] } as never),
+    )
+    expect(res.ok).toBe(false)
+    if (!res.ok) expect(res.errors.join('\n')).toContain('control or bidi')
+  })
+
+  it('reserved approval-inbox may appear at most once per config', () => {
+    const res = validatePanelConfig(
+      minimal({
+        sections: [
+          { components: [{ type: 'approval-inbox' }] },
+          { components: [{ type: 'approval-inbox' }] },
+        ],
+      } as never),
+    )
+    expect(res.ok).toBe(false)
+    if (!res.ok) expect(res.errors.join('\n')).toContain('at most once')
+    // A single reserved placement stays legal (bare, no source/params).
+    expect(
+      validatePanelConfig(minimal({ sections: [{ components: [{ type: 'approval-inbox' }] }] } as never)).ok,
+    ).toBe(true)
+  })
+})

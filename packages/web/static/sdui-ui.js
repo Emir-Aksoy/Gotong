@@ -111,7 +111,9 @@
 
   // ---- chat component ------------------------------------------------------
   // Lazy agent discovery, shared across chat instances per render: first
-  // chat-capable row from GET /api/me/agents (else the first row).
+  // chat-capable row from GET /api/me/agents. No blind rows[0] fallback — a
+  // chat-less roster gets the honest "no agent" state, not a random expert
+  // that may ignore or mishandle free-form chat.
   var agentPromise = null
   function discoverAgent() {
     if (!agentPromise) {
@@ -123,7 +125,7 @@
             var caps = Array.isArray(rows[i].capabilities) ? rows[i].capabilities : []
             if (caps.indexOf('chat') >= 0) return rows[i]
           }
-          return rows[0] || null
+          return null
         })
         .catch(function () { return null })
     }
