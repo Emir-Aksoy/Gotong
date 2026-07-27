@@ -1,8 +1,9 @@
-# PUSH — Web Push 触达 track(M0 计划)
+# PUSH — Web Push 触达 track(全完)
 
-> 状态:**M0 计划**(2026-07-27)。岔口 A/B 待用户拍板,拍板前不动代码。
+> 状态:**M0→M4 全完**(2026-07-27)。岔口已拍板:**A1 自实现** + **B1 补位腿**;
+> 落地记见 [§八](#八落地收口记m1m4)。§一~§七保留 M0 原文当设计出处。
 > 动线出处:SDUI track 收口时的既定顺序第三项(① C1 组件做实[已全收口] ② isButler
-> 票[已收口] ③ **PUSH** ④ M5 Capacitor 壳[用户门])。
+> 票[已收口] ③ **PUSH**[本 track] ④ M5 Capacitor 壳[用户门])。
 > 本文形制镜像 [`SDUI-PANEL.md`](SDUI-PANEL.md) M0:先侦察后设计,岔口显式摆给用户。
 
 ---
@@ -190,3 +191,94 @@ Capacitor 壳(远期)通知故事的前置——壳层将来只是把同一条�
 - **admin 广播 / 群发面** — 本 track 只做「管家 → 成员」既有消息流的新腿,不新增发声权。
 - **UnifiedPush 专门适配** — 标准 Web Push 端点天然兼容其网关,不做专门代码。
 - **per-notification 类别订阅偏好** — 与 B3 同理,等真实高频需求。
+
+---
+
+## 八、落地收口记(M1→M4)
+
+> 节奏兑现:一个 commit 一个里程碑。岔口拍板 **A1 自实现**(零外部依赖走 node:crypto,
+> STD-M1 判例)+ **B1 补位腿**(仅 `unknown_member` 回落,绑 IM 成员字节不变、零双发)。
+> 五边界(§三)逐条兑现证据见各刀;**旋钮 115→116(`GOTONG_WEBPUSH` 是本 track 唯一新增)**。
+
+### M1 纯核(`aeecd8c`,host)
+
+`web-push-protocol.ts`:`encryptWebPushPayload` = RFC 8291 完整链(ECDH P-256 →
+HKDF(auth) ikm → RFC 8188 cek/nonce → aes-128-gcm 单记录,头 `salt‖rs=4096‖idlen‖as_public`,
+`0x02` 定界);**承重测试=RFC 8291 §5 官方向量整体密文逐字节断言**(info 串 / HKDF 步 /
+头字段 / 定界任何一字节错都命不中),生产路径(随机瞬时钥+盐)由测试内「浏览器侧解密
+回放」证自洽。`buildVapidAuthorization` = ES256 JWT `{aud,exp,sub}` 寿命钳 24h,签名复用
+`@gotong/a2a` `es256Sign`;测试独立 `createVerify`(ieee-p1363)验签。`loadOrCreateWebPushKey`
+逐字镜像 agent-card-signing 姿态:space 根 PKCS#8 PEM 0600,**坏文件/非 EC 抛错绝不静默
+重建**——浏览器订阅全绑此公钥,静默换钥=无声废掉全部订阅。纯核纪律:除密钥文件零 I/O
+(防腐测试钉 no fetch / no node:http);坏订阅材料(p256dh 长度 / 非曲线点 / auth 长度 /
+明文超 3993 字节)一律响亮拒。
+
+### M2 订阅面(`de1c631`,host+web)
+
+host `web-push-store.ts`:订阅=「成员的另一条可达路线」,与 reachable/outbox 同族——
+扁平 `<space>/butler/push/<userId>.json`、`assertSafeOwnerId` 先于任何路径拼接、per-user
+promise 链串行读改写;订阅比 reachable 珍贵(撕裂=全设备作废须逐浏览器重订)故写走
+`writeJsonAtomic`。**唯一校验咽喉**(validatePanelConfig 判例):endpoint 强制 `https:` +
+拒 localhost/*.localhost + **拒一切 IP 字面量(v4/v6)**——hub 会向存进来的 endpoint 发
+POST,存什么就是 SSRF 边界;正规推送服务(FCM/Mozilla/Apple/WNS/自托管 UnifiedPush 网关)
+全是命名主机,私网 CIDR 清单只会腐。key 形状钉死(p256dh=65 字节 0x04 点 / auth=16 字节),
+ua 仅展示(去控制符+80 顶);5 设备顶丢最旧响亮 warn,同 endpoint 重订=原地更新;读者永不
+隔离(坏文件 warn+[] 证据原地留,坏条目逐条跳)。web `push-routes.ts`(panel-routes 判例,
+me-routes 单点转发控预算):`GET /api/me/push` 是 SPA 探测面(无 surface=200
+`{available:false}`;有=publicKey+count,**key 材料只进不出**,GET 永不吐 endpoint/keys);
+`POST subscribe/unsubscribe`(无 surface=503;session 钉 userId,query 带别人 id 无效=测试
+钉死);server.ts 穿线显式抬棘轮并注释理由。浏览器 `PushSubscription.toJSON()` 的多余键
+(expirationTime 等)被「只挑具名字段」自然忽略=前端可整体 POST。
+
+### M3 投递腿+SW+SPA(`8162284`,host+web,13 文件)
+
+- **发**:host `web-push-sender.ts` `WebPushSender.push(userId)` **签名不收 text**=正文
+  结构性上不了通知(锁屏可见面=IMA 同一披露纪律);固定双语 tap
+  `{title:'阿同 · Gotong', body:'有新消息,点开查看 · New message'}` 逐订阅 RFC 8291 加密;
+  VAPID JWT 按推送服务 origin 调用内缓存;`TTL:86400` + `Topic:gotong-butler-tap`(推送
+  服务侧折叠积压);2xx 记 lastOkAt,**404/410 剪订阅自愈**,其余 warn;≥1 成功=delivered,
+  全败=send_failed,无订阅=unknown_member。`buildWebPushService` 唯一装配点(镜像
+  butlerVoiceFromEnv):`GOTONG_WEBPUSH` 一钮双职(开关+RFC 8292 sub),形状不对 warn+OFF
+  fail-closed;**坏钥文件响亮拒启**;披露报 subject+公钥永不报私钥。
+- **fold(B1 严格补位)**:`foldWebPushIntoPush` 纯函数进 fold 家族(hearing/seeing 同区)
+  ——仅 `!delivered && reason==='unknown_member'` 才 tap;tap 也败**保留原 unknown_member**
+  使 outbox 排队整链重试;fold 在 outbox **之下**=直投与 flush 补投同链;tap 送达=
+  delivered ⇒ outbox 不排队(正文早已进 SESS 会话窗,§二1);无 tap 时返回**同一引用**
+  (测试 `toBe` 钉死绑 IM 成员字节不变)。
+- **收**:sw.js 三事件(push 防御性解析、兜底文案与 hub tap 逐字同句[不弹通知会被浏览器
+  吊销订阅]、tag 折叠;notificationclick=聚焦已开 tab 或 openWindow('/'),**推送≠授权只
+  开门**;pushsubscriptionchange 重订+best-effort 回报),CACHE v10。
+- **开关**:/me「浏览器通知」卡**双确认才显**(特性探针 serviceWorker+PushManager+
+  Notification[天然盖 iOS 未装主屏] AND `GET /api/me/push` available);订阅失败即退浏览器
+  订阅不留孤行;解绑先告 hub 再退本地(hub 失败留行给 404/410 自愈);i18n 双语 7 键。
+- 测试:host 新 12 例(**真 UA 侧 ECDH 解密**断言 tap 明文 / JWT aud=endpoint origin /
+  410 剪+存活照发 / fold 五例 / builder 三态含 PEM 零泄露)+ web pwa 测试 +1(三 handler+
+  低信息文案);main.ts 棘轮 2740→2750 显式抬。
+
+### M4 真机 round-trip + 收口(本 commit)
+
+真 host(`GOTONG_SPACE=/tmp/gotong-push-verify-m3`,`GOTONG_WEBPUSH=mailto:push-verify@example.net`,
+launch.json 新 `gotong-push-verify` 条目)全动线证:
+
+1. **披露行**:journal 抓到 `web push enabled (RFC 8291/8292): sub=mailto:push-verify@example.net
+   key=BBn2G_…GSzk`,`dataLeavesBox:true`,**无私钥**;
+2. 首跑向导四步(设密+Key/Agent/IM 三跳过)→ 登录 → Home;
+3. **双确认真机过**:特性探针三真 + `GET /api/me/push` 200 `{available:true, publicKey
+   87 字符(与披露行同钥), count:0}` → 卡渲染且未隐藏;
+4. **denied 诚实分支**:内嵌浏览器 Notification 权限被 embedder 钉死 `denied`(不弹窗)——
+   点「Enable notifications」→ mePushDenied 文案如实出现,**hub count 仍 0**(失败订阅不留
+   孤行);
+5. **双语**:切中文即时重渲染「浏览器通知」/ 低信息 hint(「弹一条『有新消息』提醒(不含
+   内容)」「绑了 IM 的成员走 IM,不会重复打扰」)/「开启通知」;
+6. SW 注册 active(`gotong-shell-v10`,三 push handler 在);**console 零错误**。
+
+诚实边界:内嵌浏览器面**授权→真锁屏通知**这半程结构性走不到(权限被宿主钉 denied,
+无 prompt 可点)——该半程的正确性由 M1 官方向量+M3 真 UA 解密单测盖(密文到浏览器侧
+能解出 tap 明文),真设备订阅动线留给用户在正常 Chrome/Android/iOS 主屏 PWA 上自然使用。
+验收:host **2592**+5skip / web **1527**,四门 PASS(旋钮 116 全登记,main.ts 2750 内)。
+
+### 显式推迟(落地过程新增,§七之外)
+
+- **审批提醒类第二文案**(「有 N 件事等你确认」计数 tap)——v1 单一 tap 文案已够叫醒,
+  分类文案等 B3 偏好面一起议;
+- **`lastOkAt` 面板可见化**(成员看自己哪台设备还活着)——等真实多设备使用信号。
