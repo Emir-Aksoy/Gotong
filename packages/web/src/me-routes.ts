@@ -45,6 +45,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http'
 import { readJsonBody, sendJson } from './http-helpers.js'
 import { handleMeWizardRoute, type WorkflowWizardSurface } from './wizard-routes.js'
 import { handleMePanelRoute, type MePanelDataSurface, type MePanelSurface } from './panel-routes.js'
+import { handleMeWebPushRoute, type MeWebPushSurface } from './push-routes.js'
 import { readRawBody } from './uploads-routes.js'
 
 import type { Hub } from '@gotong/core'
@@ -405,6 +406,7 @@ export interface HandleMeRouteCtx {
   /** SDUI-M2 — member panel config resolver; undefined → GET /api/me/panel 503. */
   mePanel: MePanelSurface | undefined
   panelData: MePanelDataSurface | undefined
+  webPush: MeWebPushSurface | undefined
   /**
    * ease-of-use ①TC-ME — member "test connection" probe for a BYO key. Same
    * object the setup/admin probe uses (server.ts `ctx.llmKeyTest`), inlined here
@@ -750,6 +752,8 @@ export async function handleMeRoute(
   if (path === '/api/me/panel' || path.startsWith('/api/me/panel/')) {
     if (await handleMePanelRoute({ panel: ctx.mePanel, panelData: ctx.panelData }, req, res, method, path, userId)) return
   }
+  // PUSH-M2 — Web Push subscriptions (implementation in push-routes.ts, 控预算).
+  if (path.startsWith('/api/me/push') && (await handleMeWebPushRoute({ webPush: ctx.webPush }, req, res, method, path, userId))) return
   {
     const m =
       method === 'POST' ? /^\/api\/me\/inbox\/([^/]+)\/resolve$/.exec(path) : null

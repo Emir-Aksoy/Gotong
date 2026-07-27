@@ -60,6 +60,7 @@ import {
   type MeChatSessionSurface,
 } from './me-routes.js'
 import { handleAdminPanelRoute, type MePanelDataSurface, type MePanelSurface } from './panel-routes.js'
+import type { MeWebPushSurface } from './push-routes.js'
 import {
   handleWorkflowRoute,
   type WorkflowGrantSink,
@@ -356,6 +357,7 @@ export function serveWeb(hub: Hub, opts: WebServerOptions = {}): Promise<WebServ
     meChatSession: opts.meChatSession,
     mePanel: opts.mePanel,
     panelData: opts.panelData,
+    webPush: opts.webPush,
     panelLibrary: opts.panelLibrary,
     operatorSteward: opts.operatorSteward,
     readinessGate: opts.readinessGate,
@@ -551,6 +553,8 @@ interface HandlerCtx {
   /** SDUI-M2/M3 — see WebServerOptions.mePanel / panelLibrary docs above. */
   mePanel: MePanelSurface | undefined
   panelData: MePanelDataSurface | undefined
+  /** PUSH-M2 — see WebServerOptions.webPush doc. */
+  webPush: MeWebPushSurface | undefined
   panelLibrary: WebServerOptions['panelLibrary']
   /** SW-M9 A-M6 — see WebServerOptions.operatorSteward doc above. */
   operatorSteward: MeHubStewardSurface | undefined
@@ -1200,6 +1204,7 @@ async function handle(
         meChatSession: ctx.meChatSession,
         mePanel: ctx.mePanel,
         panelData: ctx.panelData,
+        webPush: ctx.webPush,
         // ease-of-use ①TC-ME — member "test connection" for a BYO key; the SAME
         // probe surface the setup/admin routes use. undefined → /api/me/test-llm-key
         // returns 503. Member route is provider-restricted + no baseURL (no SSRF).
