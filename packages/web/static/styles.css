@@ -3786,6 +3786,26 @@ body[data-simple-mode="1"] section.adv-only { display: none !important; }
 .sdui-status-yellow { border-left-color: #c9a227; }
 .sdui-status-good { margin: 0; color: #6fbf73; }
 
+/* SDUI-C1b — chart (pure-CSS bars) + quick-actions */
+.sdui-chart-head { margin: 0 0 0.4rem; }
+.sdui-chart-row {
+  display: grid; grid-template-columns: 3.2rem 1fr auto; gap: 0.5rem;
+  align-items: center; margin: 0.2rem 0;
+}
+.sdui-chart-day { font-size: 0.82rem; opacity: 0.75; }
+.sdui-chart-bar-wrap { background: rgba(127, 127, 127, 0.15); border-radius: 3px; }
+.sdui-chart-bar { height: 0.7rem; border-radius: 3px; background: #5b8def; min-width: 2px; }
+.sdui-chart-meta { white-space: nowrap; }
+.sdui-qa-wrap { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+.sdui-qa-btn {
+  padding: 0.4rem 0.8rem; border: 1px solid #666; border-radius: 6px;
+  background: transparent; color: inherit; cursor: pointer;
+}
+.sdui-qa-btn:disabled { opacity: 0.5; cursor: default; }
+.sdui-qa-status { margin: 0.35rem 0 0; }
+.sdui-qa-status:empty { display: none; }
+
 @media (max-width: 720px) {
   .sdui-cal-grid { grid-template-columns: repeat(7, minmax(72px, 1fr)); }
+  .sdui-chart-meta { font-size: 0.78rem; }
 }

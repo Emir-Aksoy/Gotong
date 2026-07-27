@@ -101,4 +101,17 @@ describe('sdui-ui.js ↔ panel-schema.ts contract', () => {
     // generic no-agent copy and never a substitute row.
     expect(rendererSrc).toContain('sduiChatNoButler')
   })
+
+  // C1-b — every action verb the SCHEMA whitelists must have a renderer
+  // branch. A verb added to panel-schema without one here would validate fine
+  // yet render nothing (renderQuickActions skips unknown strings) — a valid
+  // config silently losing a button is exactly the rot this pins.
+  it('every whitelisted quick-action verb has a renderer branch', () => {
+    for (const verb of extractArray(schemaSrc, 'export const PANEL_FIXED_ACTIONS')) {
+      expect(rendererSrc, `renderer branch for action '${verb}'`).toContain(`a === '${verb}'`)
+    }
+    for (const prefix of extractArray(schemaSrc, 'export const PANEL_ACTION_PREFIXES')) {
+      expect(rendererSrc, `renderer branch for prefix '${prefix}'`).toContain(`a.indexOf('${prefix}') === 0`)
+    }
+  })
 })

@@ -18,6 +18,11 @@
  *    same cards through the benign `hub_health` tool; this is the same
  *    projection over HTTP, not a wider one. Full HealthSnapshot detail
  *    (agent rows, connector inventory) structurally stays out.
+ *  - `usage.mine` (C1-b) — this member's OWN ledger rows, day-bucketed. The
+ *    BE-M1 `ButlerUsageSurface` already discloses the same per-user roll-up
+ *    (by model, cumulative) to the member via `my_status`; this face is the
+ *    same filter (userId) on a different axis (UTC calendar day, windowed).
+ *    Other members' usage structurally stays out — the query pins userId.
  *
  * Every getter is three-state honest: surface not wired → null (the renderer
  * shows "source not enabled"), wired but empty → [], data → rows.
@@ -31,12 +36,22 @@ import type { AdminHealthSurface } from './admin-health.js'
 import { derivePatrolCards } from './personal-butler-patrol.js'
 import type { ButlerScheduleSurface } from './personal-butler-schedules.js'
 
+/** Day-bucketed slice of the identity ledger (aggregateLedger groupBy:'day'). */
+export interface PanelUsageSurface {
+  /** Rows for ONE user in `[since, now)`, keyed by UTC calendar day. */
+  dailyForUser(
+    userId: string,
+    since: number,
+  ): Array<{ key: string; calls: number; inputTokens: number; outputTokens: number; costMicros: number }>
+}
+
 export interface MePanelDataDeps {
   /** Butler memory root (`<space>/butler/memory`) — the TN notebook lives per-user under it. */
   memoryRoot: string
   /** Lazy — main.ts assigns these refs after construction (onboarding.health 同款惯例). */
   schedules: () => ButlerScheduleSurface | undefined
   health: () => AdminHealthSurface | undefined
+  usage?: () => PanelUsageSurface | undefined
   logger?: { warn: (msg: string, meta?: Record<string, unknown>) => void }
 }
 
@@ -67,10 +82,20 @@ export interface MePanelStatusCard {
   fact: string
 }
 
+export interface MePanelUsageDay {
+  /** UTC calendar day, `YYYY-MM-DD` (the ledger's own bucketing). */
+  day: string
+  calls: number
+  inputTokens: number
+  outputTokens: number
+  costMicros: number
+}
+
 export interface MePanelData {
   schedulesForUser(userId: string): Promise<MePanelScheduleRow[] | null>
   tasksForUser(userId: string): Promise<MePanelTaskRow[] | null>
   hubStatus(): Promise<MePanelStatusCard[] | null>
+  usageForUser(userId: string, range: 'week' | 'month'): Promise<MePanelUsageDay[] | null>
 }
 
 export function buildMePanelData(deps: MePanelDataDeps): MePanelData {
@@ -118,6 +143,29 @@ export function buildMePanelData(deps: MePanelDataDeps): MePanelData {
         // A failing health probe must not 500 the panel — the renderer's
         // "load failed" state is the honest answer.
         deps.logger?.warn('me-panel-data: health snapshot failed', { err })
+        return []
+      }
+    },
+
+    async usageForUser(userId, range) {
+      const surface = deps.usage?.()
+      if (!surface) return null
+      const days = range === 'month' ? 30 : 7
+      try {
+        // The ledger aggregate orders by cost DESC; a chart needs time order.
+        // Keys are `YYYY-MM-DD`, so a lexical sort IS chronological.
+        return surface
+          .dailyForUser(userId, Date.now() - days * 86_400_000)
+          .map((r) => ({
+            day: r.key,
+            calls: r.calls,
+            inputTokens: r.inputTokens,
+            outputTokens: r.outputTokens,
+            costMicros: r.costMicros,
+          }))
+          .sort((a, b) => (a.day < b.day ? -1 : a.day > b.day ? 1 : 0))
+      } catch (err) {
+        deps.logger?.warn('me-panel-data: usage aggregate failed', { err })
         return []
       }
     },

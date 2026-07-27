@@ -12,7 +12,9 @@
  *    unwired — the route's {available:false});
  *  - hubStatus projects derivePatrolCards over the SAME snapshot authority the
  *    patrol uses, and a failing probe degrades to [] (never throws into the
- *    route).
+ *    route);
+ *  - usageForUser (C1-b) windows the ledger aggregate to 7/30 days and
+ *    re-sorts chronologically (the SQL orders by cost DESC — chart order).
  */
 import { mkdir, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -161,6 +163,66 @@ describe('me-panel-data: hubStatus', () => {
       logger: { warn: (msg) => warns.push(msg) },
     })
     expect(await data.hubStatus()).toEqual([])
+    expect(warns.length).toBe(1)
+  })
+})
+
+describe('me-panel-data: usageForUser (C1-b)', () => {
+  it('surface unwired → null (route answers {available:false})', async () => {
+    expect(await build().usageForUser('alice', 'week')).toBeNull()
+  })
+
+  it('week → 7-day window, month → 30-day window, userId passed through', async () => {
+    const asked: Array<{ userId: string; since: number }> = []
+    const data = build({
+      usage: () => ({
+        dailyForUser: (userId, since) => {
+          asked.push({ userId, since })
+          return []
+        },
+      }),
+    })
+    const before = Date.now()
+    await data.usageForUser('alice', 'week')
+    await data.usageForUser('alice', 'month')
+    expect(asked.map((a) => a.userId)).toEqual(['alice', 'alice'])
+    // since ≈ now − N days (allow the test's own elapsed ms as slack).
+    expect(before - asked[0]!.since).toBeGreaterThanOrEqual(7 * 86_400_000 - 1000)
+    expect(Date.now() - asked[0]!.since).toBeLessThanOrEqual(7 * 86_400_000 + 1000)
+    expect(before - asked[1]!.since).toBeGreaterThanOrEqual(30 * 86_400_000 - 1000)
+    expect(Date.now() - asked[1]!.since).toBeLessThanOrEqual(30 * 86_400_000 + 1000)
+  })
+
+  it('maps key→day and re-sorts chronologically (ledger aggregate comes cost-DESC)', async () => {
+    const data = build({
+      usage: () => ({
+        dailyForUser: () => [
+          { key: '2026-07-25', calls: 9, inputTokens: 900, outputTokens: 90, costMicros: 5000 },
+          { key: '2026-07-23', calls: 1, inputTokens: 100, outputTokens: 10, costMicros: 200 },
+          { key: '2026-07-24', calls: 4, inputTokens: 400, outputTokens: 40, costMicros: 900 },
+        ],
+      }),
+    })
+    const rows = await data.usageForUser('alice', 'week')
+    expect(rows!.map((r) => r.day)).toEqual(['2026-07-23', '2026-07-24', '2026-07-25'])
+    expect(rows![2]).toEqual({
+      day: '2026-07-25',
+      calls: 9,
+      inputTokens: 900,
+      outputTokens: 90,
+      costMicros: 5000,
+    })
+  })
+
+  it('aggregate throw → warn + [] (never throws into the route)', async () => {
+    const warns: string[] = []
+    const data = build({
+      usage: () => ({
+        dailyForUser: () => { throw new Error('db locked') },
+      }),
+      logger: { warn: (msg) => warns.push(msg) },
+    })
+    expect(await data.usageForUser('alice', 'week')).toEqual([])
     expect(warns.length).toBe(1)
   })
 })

@@ -106,9 +106,11 @@ interface Boot {
 class StubPanelData implements MePanelDataSurface {
   readonly askedSchedules: string[] = []
   readonly askedTasks: string[] = []
+  readonly askedUsage: Array<{ userId: string; range: string }> = []
   schedulesRows: unknown[] | null = null
   tasksRows: unknown[] | null = null
   statusCards: unknown[] | null = null
+  usageDays: unknown[] | null = null
 
   async schedulesForUser(userId: string) {
     this.askedSchedules.push(userId)
@@ -120,6 +122,10 @@ class StubPanelData implements MePanelDataSurface {
   }
   async hubStatus() {
     return this.statusCards
+  }
+  async usageForUser(userId: string, range: 'week' | 'month') {
+    this.askedUsage.push({ userId, range })
+    return this.usageDays
   }
 }
 
@@ -386,6 +392,39 @@ describe('/api/me/panel — SDUI member panel config (M2 read + M3 write)', () =
     expect((await req('GET', { path: '/api/me/panel/data/tasks', auth: false })).status).toBe(401)
     expect((await req('POST', { path: '/api/me/panel/data/tasks', body: {} })).status).toBe(405)
     expect((await req('GET', { path: '/api/me/panel/data/bogus' })).status).toBe(404)
+  })
+
+  // ---- C1-b usage route ----------------------------------------------------
+
+  it('usage: unwired → {available:false}; wired → {available:true, days}', async () => {
+    b = await boot()
+    const off = await req('GET', { path: '/api/me/panel/data/usage' })
+    expect(off.status).toBe(200)
+    expect(off.json).toEqual({ available: false })
+
+    const data = new StubPanelData()
+    data.usageDays = [{ day: '2026-07-25', calls: 3, inputTokens: 300, outputTokens: 30, costMicros: 900 }]
+    // Manual mid-test teardown (afterEach only sees the LAST boot).
+    await b.server.close()
+    b.identity.close()
+    await rm(b.tmp, { recursive: true, force: true })
+    b = await boot({ panelData: data })
+    const on = await req('GET', { path: '/api/me/panel/data/usage' })
+    expect(on.json).toEqual({ available: true, days: data.usageDays })
+  })
+
+  it('usage: ?range= is whitelisted (month honored, junk → week) and userId stays SESSION-pinned', async () => {
+    const data = new StubPanelData()
+    data.usageDays = []
+    b = await boot({ panelData: data })
+    await req('GET', { path: '/api/me/panel/data/usage' })
+    await req('GET', { path: '/api/me/panel/data/usage?range=month' })
+    await req('GET', { path: '/api/me/panel/data/usage?range=EVIL&userId=someone-else' })
+    expect(data.askedUsage).toEqual([
+      { userId: b.memberUserId, range: 'week' },
+      { userId: b.memberUserId, range: 'month' },
+      { userId: b.memberUserId, range: 'week' },
+    ])
   })
 
   it('admin POST on the admin face → 405 (PUT only)', async () => {

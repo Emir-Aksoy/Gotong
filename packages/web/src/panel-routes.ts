@@ -8,9 +8,11 @@
  *   GET /api/me/panel/data/schedules   C1a hub-internal named data sources —
  *   GET /api/me/panel/data/tasks       read-only projections the renderer
  *   GET /api/me/panel/data/status      fetches per component. Three-state
- *   honest: surface absent (or the specific source unwired on this host) →
- *   200 { available: false } — the renderer shows 「数据源未启用」, never a
- *   broken card; wired → { available: true, schedules|tasks|cards: [...] }.
+ *   GET /api/me/panel/data/usage       honest: surface absent (or the specific
+ *   source unwired on this host) → 200 { available: false } — the renderer
+ *   shows 「数据源未启用」, never a broken card; wired → { available: true,
+ *   schedules|tasks|cards|days: [...] }. `usage` takes ?range=week|month
+ *   (whitelisted, default week — a display param; userId stays session-pinned).
  *
  *   PUT /api/admin/panel/users/:userId   same body — owner installs a shape
  *                                        for a member (fork D; the member can
@@ -68,6 +70,7 @@ export interface MePanelDataSurface {
   schedulesForUser(userId: string): Promise<unknown[] | null>
   tasksForUser(userId: string): Promise<unknown[] | null>
   hubStatus(): Promise<unknown[] | null>
+  usageForUser(userId: string, range: 'week' | 'month'): Promise<unknown[] | null>
 }
 
 export interface MePanelRouteDeps {
@@ -77,10 +80,11 @@ export interface MePanelRouteDeps {
 }
 
 /** Exact-match table — unknown /data/* subpaths fall through to the site 404. */
-const PANEL_DATA_ROUTES: Record<string, 'schedules' | 'tasks' | 'status'> = {
+const PANEL_DATA_ROUTES: Record<string, 'schedules' | 'tasks' | 'status' | 'usage'> = {
   '/api/me/panel/data/schedules': 'schedules',
   '/api/me/panel/data/tasks': 'tasks',
   '/api/me/panel/data/status': 'status',
+  '/api/me/panel/data/usage': 'usage',
 }
 
 function storeErrorStatus(err: unknown): number {
@@ -168,6 +172,12 @@ export async function handleMePanelRoute(
       } else if (dataKind === 'tasks') {
         const rows = d ? await d.tasksForUser(userId) : null
         sendJson(res, rows === null ? { available: false } : { available: true, tasks: rows })
+      } else if (dataKind === 'usage') {
+        // ?range= is a whitelisted DISPLAY param; anything else falls back to
+        // week. userId never comes from the query (session-pinned upstream).
+        const q = new URL(req.url ?? '/', 'http://x').searchParams.get('range')
+        const rows = d ? await d.usageForUser(userId, q === 'month' ? 'month' : 'week') : null
+        sendJson(res, rows === null ? { available: false } : { available: true, days: rows })
       } else {
         const cards = d ? await d.hubStatus() : null
         sendJson(res, cards === null ? { available: false } : { available: true, cards })

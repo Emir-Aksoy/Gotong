@@ -1679,10 +1679,13 @@ async function main(): Promise<void> {
   const workflowSchedules = createWorkflowScheduleAdminSurface(
     { spaceDir: space.root, sweeper: workflowScheduleSweeper, logger: log })
   butlerSchedulesRef = buildButlerScheduleSurface({ admin: workflowSchedules })
-  // SDUI-C1a — member panel read-only data projections; lazy refs, onboarding.health 同款.
+  // SDUI-C1a/C1-b — member panel read-only data projections; lazy refs, onboarding.health 同款.
   const mePanelData = buildMePanelData({
     memoryRoot: butlerMemoryRoot,
     schedules: () => butlerSchedulesRef, health: () => patrolHealthRef, logger: log,
+    usage: () => (identity ? {
+      dailyForUser: (userId, since) => identity!.aggregateLedger({ groupBy: 'day', userId, since }),
+    } : undefined),
   })
 
   // Phase 18 C-M4 + Route B P1-M11b — outbound A2A agents. Each stored entry

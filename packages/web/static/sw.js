@@ -23,10 +23,10 @@
 // "上次复盘" line + its i18n key. Bumping forces returning members past the
 // stale-while-revalidate window so they get the new shell on the next activate,
 // not one load later.
-// v7 (C1a): sdui-ui.js gains four data-driven renderers (schedule-list /
-// calendar / list / status-card) with new app-core.js keys + styles.css
-// classes — all three precached files must refresh together.
-const CACHE = 'gotong-shell-v7'
+// v8 (C1b): sdui-ui.js gains chart (usage.mine) + quick-actions renderers
+// with new app-core.js keys + styles.css classes — all three precached
+// files must refresh together.
+const CACHE = 'gotong-shell-v8'
 
 // Stable, role-agnostic static shell. app.html is excluded on purpose
 // (role-injected); admin.js / identity-ui.js etc. are left to the runtime

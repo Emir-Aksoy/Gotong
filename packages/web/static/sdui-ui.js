@@ -278,20 +278,23 @@
   // { available:false } (source unwired on this host) → 数据源未接入;
   // { available:true } → real rows (empty state per component).
   var dataPromises = {}
-  function fetchData(kind) {
-    if (!dataPromises[kind]) {
-      dataPromises[kind] = fetch('/api/me/panel/data/' + kind)
+  function fetchData(kind, qs) {
+    // qs is a display param (e.g. chart's range=month) — part of the cache key
+    // so a week chart and a month chart on one panel don't share a response.
+    var key = kind + (qs ? '?' + qs : '')
+    if (!dataPromises[key]) {
+      dataPromises[key] = fetch('/api/me/panel/data/' + key)
         .then(function (r) { return r.ok ? r.json() : null })
         .catch(function () { return null })
     }
-    return dataPromises[kind]
+    return dataPromises[key]
   }
 
-  function dataCard(cls, kind, onData) {
+  function dataCard(cls, kind, onData, qs) {
     var card = el('div', 'sdui-card ' + cls)
     var body = el('div', 'sdui-data-body', t('sduiLoading'))
     card.appendChild(body)
-    fetchData(kind).then(function (j) {
+    fetchData(kind, qs).then(function (j) {
       body.replaceChildren()
       if (!j) { body.appendChild(el('p', 'me-meta', t('sduiLoadFailed'))); return }
       if (j.available !== true) { body.appendChild(el('p', 'me-meta', t('sduiSourceMissing'))); return }
@@ -428,8 +431,118 @@
     })
   }
 
+  // ---- chart (usage.mine, C1-b) --------------------------------------------
+  // Mirror of the BE-M1 fmtCost — one cost idiom, 4 dp keeps sub-cent visible.
+  function fmtCost(micros) { return '$' + (micros / 1000000).toFixed(4) }
+
+  function renderChart(component) {
+    var params = componentParams(component)
+    var range = params.range === 'month' ? 'month' : 'week'
+    return dataCard('sdui-chart', 'usage', function (body, j) {
+      var days = Array.isArray(j.days) ? j.days : []
+      if (days.length === 0) { body.appendChild(el('p', 'me-meta', t('sduiUsageEmpty'))); return }
+      var calls = 0
+      var cost = 0
+      var max = 1
+      days.forEach(function (d) {
+        calls += d.calls || 0
+        cost += d.costMicros || 0
+        if ((d.calls || 0) > max) max = d.calls
+      })
+      // Buckets are UTC calendar days (the ledger's own axis) — the heading
+      // says so, so a UTC+8 member isn't surprised where midnight falls.
+      body.appendChild(el('p', 'me-meta sdui-chart-head',
+        t(range === 'month' ? 'sduiUsageMonth' : 'sduiUsageWeek') + ' · ' + t('sduiUsageTotal', calls, fmtCost(cost))))
+      days.forEach(function (d) {
+        var row = el('div', 'sdui-chart-row')
+        var label = el('span', 'sdui-chart-day', String(d.day || '').slice(5))
+        label.title = String(d.day || '')
+        row.appendChild(label)
+        var wrap = el('div', 'sdui-chart-bar-wrap')
+        var bar = el('div', 'sdui-chart-bar')
+        bar.style.width = Math.max(2, Math.round(((d.calls || 0) / max) * 100)) + '%'
+        wrap.appendChild(bar)
+        row.appendChild(wrap)
+        row.appendChild(el('span', 'me-meta sdui-chart-meta',
+          t('sduiUsageCalls', d.calls || 0) + ' · ' + fmtCost(d.costMicros || 0)))
+        body.appendChild(row)
+      })
+    }, 'range=' + range)
+  }
+
+  // ---- quick-actions (C1-b) ------------------------------------------------
+  // The config places WHITELISTED verbs only (panel-schema `actions` kind);
+  // the renderer maps each verb to behavior hard-coded here. An unrecognized
+  // verb renders nothing — never a dead button.
+  function focusPanelChat(prefill) {
+    var input = document.querySelector('#' + HOST_ID + ' .sdui-chat-input')
+    if (!input) return false
+    // compose_brief pre-fills but never auto-sends: the member sees exactly
+    // what will be asked and presses send themselves (no surprise LLM spend).
+    if (prefill && !input.value) input.value = prefill
+    input.focus()
+    if (typeof input.scrollIntoView === 'function') input.scrollIntoView({ block: 'center' })
+    return true
+  }
+
+  function startWorkflow(wfId, btn, status) {
+    btn.disabled = true
+    status.textContent = t('sduiActionStarting')
+    fetch('/api/me/dispatch', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ workflowId: wfId, payload: {} }),
+    })
+      .then(function (r) { return r.json().catch(function () { return {} }).then(function (j) { return { ok: r.ok, j: j } }) })
+      .then(function (out) {
+        if (out.ok) { status.textContent = t('sduiActionStarted', wfId); return }
+        status.textContent = out.j && out.j.code === 'workflow_not_allowed'
+          ? t('sduiActionNotAllowed')
+          : t('sduiActionFailed') + (out.j && out.j.error ? ': ' + out.j.error : '')
+      })
+      .catch(function (err) {
+        status.textContent = t('sduiActionFailed') + ': ' + (err && err.message ? err.message : String(err))
+      })
+      .then(function () { btn.disabled = false })
+  }
+
+  function renderQuickActions(component) {
+    var params = componentParams(component)
+    var actions = Array.isArray(params.actions) ? params.actions : []
+    var card = el('div', 'sdui-card sdui-qa')
+    var wrap = el('div', 'sdui-qa-wrap')
+    var status = el('p', 'me-meta sdui-qa-status', '')
+    actions.slice(0, 6).forEach(function (a) {
+      if (typeof a !== 'string') return
+      var btn
+      if (a === 'open_chat') {
+        btn = el('button', 'sdui-qa-btn', t('sduiActionOpenChat'))
+        btn.addEventListener('click', function () { if (!focusPanelChat()) gotoHome() })
+      } else if (a === 'open_inbox') {
+        btn = el('button', 'sdui-qa-btn', t('sduiActionOpenInbox'))
+        btn.addEventListener('click', gotoHome)
+      } else if (a === 'compose_brief') {
+        btn = el('button', 'sdui-qa-btn', t('sduiActionComposeBrief'))
+        btn.addEventListener('click', function () { if (!focusPanelChat(t('sduiBriefPrefill'))) gotoHome() })
+      } else if (a.indexOf('start_workflow:') === 0) {
+        var wfId = a.slice('start_workflow:'.length)
+        if (!wfId) return
+        btn = el('button', 'sdui-qa-btn', t('sduiActionStartWf', wfId))
+        btn.addEventListener('click', function () { startWorkflow(wfId, btn, status) })
+      } else {
+        return
+      }
+      btn.type = 'button'
+      wrap.appendChild(btn)
+    })
+    card.appendChild(wrap)
+    card.appendChild(status)
+    return card
+  }
+
   // The CLOSED registry — M2 shipped chat / approval-inbox / divider; C1a adds
-  // the four hub-internal data components (schedules / tasks / status).
+  // the four hub-internal data components (schedules / tasks / status); C1-b
+  // adds chart (usage.mine) + quick-actions.
   var REGISTRY = {
     divider: function () { return el('hr', 'sdui-divider') },
     chat: renderChat,
@@ -438,6 +551,8 @@
     calendar: renderCalendar,
     list: renderTaskList,
     'status-card': function () { return renderStatusCard() },
+    chart: renderChart,
+    'quick-actions': renderQuickActions,
   }
 
   function renderComponent(component) {
