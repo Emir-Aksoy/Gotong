@@ -6,7 +6,10 @@
 > 客户端与 hub 之间固定的只有 wire 协议 + UI schema 规范。同一个客户端,
 > 父亲打开是农事关怀面,母亲打开是本地新闻面,operator 打开是全家看板。
 >
-> Track 代号:**SDUI**(Server-Driven UI)。Status: **M1–M4 已落(2026-07-26),M5 壳与分发待启**。
+> Track 代号:**SDUI**(Server-Driven UI)。Status: **M1–M4 + C1 组件做实已落
+> (2026-07-26/27),13 个可摆组件全部接真数据**。原 M5「壳与分发」侦察后确认装不进
+> 一格,已展开成独立的 **SHELL track**,见 [`APP-SHELL.md`](APP-SHELL.md)
+> (形态拍板:真壳 = 本地资源 + `CapacitorHttp`)。
 > 拍板记录:A=14 组件首批清单照 §六 / B=新增成员可见 tab,home 原样保留 /
 > C=JSON / D=owner 直装、成员随时换回 / **E=E1 benign 直改+三重安全网**
 > (保留区硬保护+每改响亮播报+改前快照一键还原;E2 提议→确认不做,单成员
@@ -279,7 +282,7 @@ export 共享给三个写入口。这属于 M3 的工作量,不是 M0 要拍的�
 | **M2 渲染器** | web 配置驱动渲染器 + 首批组件(chat/approval-inbox/占位卡先行)+ `GET /api/me/panel`;挂点按岔口 B | 真浏览器 round-trip:无配置=默认面板;坏配置=默认+响亮;未知组件=占位卡;待批徽章配置不可移除(防腐测试) |
 | **M3 模板与归户** | per-member 配置文件 + 三预设模板 + 装入动线(owner 装/本人换) | 装模板→面板变形;复制 space=形态跟走 |
 | **M4 管家编排 ✅(2026-07-26)** | 按 E1 落地:benign `get_my_panel`(现状+库+**从 `PANEL_COMPONENT_CONTRACTS` 派生的组件契约小抄**,零手抄漂移)+ benign `set_panel_layout` 四写法互斥(config/libraryId/reset/undo)全走 M3 store 同一校验咽喉。三重安全网:①改不坏=校验拒后文件字节不变;②瞒不住=每次管家写都带 `by:'butler'` 落快照槽 → `GET /api/me/panel` 带 `lastChange` → SPA 结构性渲染「阿同调整了你的面板 [撤销][知道了]」横幅(与模型嘴上说什么无关);③退得回=改前快照单槽 **swap 语义**(连撤两次来回换,永不销毁状态)。userId 闭包进 builder=成员结构性只能动自己的面板;AFR 注册三件套过;两工具进目录层(改布局是偶发动作) | 全过:幻觉组件名被拒+字节不变(单测逐字节断言);保留区 approval-inbox 带 params 被拒零落盘;真浏览器 round-trip=真 toolset 换形态→横幅出现→点撤销真还原+横幅结构性解除(`by:'human'`)+console 零错误。**round-trip 抓到真 bug**:store `applyLibrary` 实现吞掉 opts 参数,管家最常用写法归因静默落 'human'=横幅不亮,已修+两条钉死测试(每种写法都断言归因,不只 config) |
-| **M5 壳与分发** | Capacitor 壳 + 全球商店 + 大陆 APK 直发(含演示形态过审) | 真机安装连自有 VPS round-trip |
+| ~~**M5 壳与分发**~~ | **已展开成独立 SHELL track** — 侦察发现它含 base URL 层、设备配对、schema 协商、渲染器解耦四件前置,装不进一格;见 [`APP-SHELL.md`](APP-SHELL.md) | 同上文档 M7 |
 
 **Codex 交叉审收口(2026-07-26,gpt-5.6-sol 独立审 M1–M4 四 commit,0H/5M/5L)**:
 干净面先说——XSS(全 textContent 沉降)/路径穿越/鉴权绕过/其他被吞参数/徽章可移除,

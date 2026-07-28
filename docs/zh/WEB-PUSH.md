@@ -22,8 +22,15 @@
 - 也就是说:装了 PWA 的手机,今天是个「哑终端」——审批过期、提醒过点,全靠成员自己想起来打开。
 
 Web Push(RFC 8030/8291/8292)补的就是这条腿:浏览器订阅 + VAPID 签名 + 端到端加密
-payload,**零 App、零商店、零第三方 SDK**,PWA 直接能被叫醒。这也是 SDUI-M5
-Capacitor 壳(远期)通知故事的前置——壳层将来只是把同一条投递腿换成原生通道。
+payload,**零 App、零商店、零第三方 SDK**,PWA 直接能被叫醒。
+
+> **与原生壳的关系(2026-07-28 核实后修正)**:初稿曾写「壳层将来只是把同一条投递腿
+> 换成原生通道」——**这句过度乐观**。WKWebView 明确不支持 Push API,Android WebView
+> 同样不支持(app 关闭时唤不醒),Capacitor 壳必须走 `@capacitor/push-notifications`
+> 接 FCM/APNs。**能复用的**是订阅存储的 per-member 文件形状、`foldWebPushIntoPush`
+> 的补位决策语义、`push(userId)` 不收 text 的低信息纪律、404/410 剪订阅的自愈模式;
+> **用不上的**是 sw.js 三事件、`PushSubscription`、RFC 8291 加密与 VAPID——原生通道
+> 拿的是 device token,加密与签名全不适用。详见 [`APP-SHELL.md`](APP-SHELL.md) §四第四档。
 
 平台真相(诚实边界):Android Chrome / 桌面全支持;**iOS 需 16.4+ 且「添加到主屏幕」
 后才有 Web Push**——恰好与 PWA 安装动线一致,文案如实引导即可,不冒充「所有手机都行」。
@@ -185,8 +192,9 @@ Capacitor 壳(远期)通知故事的前置——壳层将来只是把同一条�
 
 ## 七、显式不做(v1)
 
-- **原生 FCM / APNs 通道** — 那是 SDUI-M5 Capacitor 壳(用户门)的事,Web Push 这条腿
-  将来原样复用,只换传输。
+- **原生 FCM / APNs 通道** — 那是 SHELL track(壳)的事,见 [`APP-SHELL.md`](APP-SHELL.md) M6。
+  **不是「原样复用只换传输」**(初稿说法已于 2026-07-28 修正,见 §一注):WebView 不支持
+  Push API,原生通道要另接一套;可复用的只有订阅存储形状、补位决策与低信息纪律。
 - **富通知**(图片 / action 按钮 / 内联回复)— 低信息纪律 v1 钉死,富化等真实需求。
 - **admin 广播 / 群发面** — 本 track 只做「管家 → 成员」既有消息流的新腿,不新增发声权。
 - **UnifiedPush 专门适配** — 标准 Web Push 端点天然兼容其网关,不做专门代码。
