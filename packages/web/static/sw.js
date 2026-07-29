@@ -37,7 +37,13 @@
 // v13 (SHELL-M3): sdui-ui.js declares its schemaVersion and gained the
 // whole-panel downgrade; app-core.js carries its copy. A stale pair would put
 // the downgrade branch in one file and the notice copy in neither.
-const CACHE = 'gotong-shell-v13'
+// v14 (SHELL-M4): styles.css SHED its sdui block and app-core.js shed its 140
+// sdui* keys — both moved into the renderer's own files. A returning member on
+// a cached v13 shell would get a stripped styles.css/app-core.js, so the shell
+// must refresh. sdui-ui.css is deliberately NOT precached: it pairs with
+// sdui-ui.js, which is also not precached, so the pair stays on ONE cache path
+// and cannot go stale against each other the way M3's pair could.
+const CACHE = 'gotong-shell-v14'
 
 // Stable, role-agnostic static shell. app.html is excluded on purpose
 // (role-injected); admin.js / identity-ui.js etc. are left to the runtime

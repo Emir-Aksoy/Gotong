@@ -6,7 +6,7 @@
 > 发版、有原生推送、装了就在的 app。
 >
 > Track 代号:**SHELL**。Status: **M1 设备配对 ✅ · M2 base URL 层 ✅ ·
-> M3 契约做实 ✅(2026-07-29)**;M4 起未动工。
+> M3 契约做实 ✅ · M4 渲染器解耦 ✅(2026-07-29)**;M4.5 起未动工。
 > 本 track 是 [`SDUI-PANEL.md`](SDUI-PANEL.md) 里程碑表 M5 那一格的展开——
 > 侦察后确认它装不进一格(见 §四)。
 > 形态拍板:**真壳**(本地资源 + `CapacitorHttp` 走原生请求),而非瘦壳
@@ -284,7 +284,7 @@ hint([`static-routes.ts:244-246`](../../packages/web/src/static-routes.ts#L244))
 | **M1 设备配对签发** ✅ `4991bab` | 抄 IM 6 位码形状,成员自助兑换出 `aipk_`;补 expiresAt + 设备维度 + Bearer 限速;**二维码编码「地址 + 一次性码」**(岔口 C2) | 成员自助全程走通;码单次消费;过期拒;限速生效;二维码扫出的地址与码能直接建连 |
 | **M2 base URL 层** ✅ `1178901` | 一处咽喉收编全部 hub 请求 + EventSource + 设备凭证 | 默认空 ⇒ 与今天**逐字节一致**(防腐门);设了 ⇒ 全部 `/api` 请求指向远端并带 Bearer |
 | **M3 契约做实** ✅ `f6aa7be` | 客户端声明 schemaVersion(`?client=N`);服务端算判定;版本超出 ⇒ **整面板**降级 + 响亮提示;顺手退役 `image-card` 空转 | 旧客户端收到新 schema ⇒ 整面板降级不炸,徽章与形态选择器仍在;声明**永远改变不了配置字节**(四种声明同字节) |
-| **M4 渲染器解耦** | 五条硬耦合改注入点(i18n / tab 协议 / 宿主元素 / CSS / storage key) | `sdui-ui.js` 能在裸 HTML 里挂起来跑 |
+| **M4 渲染器解耦** ✅ | 五条硬耦合改注入点(i18n / tab 协议 / 宿主元素 / CSS / storage key)全部收进 `GotongPanel.mount(opts)`;**SPA 成为这个 API 的第一个调用者**而非特权侧门 | `sdui-standalone.html` 只加载渲染器三件套就渲染出真面板(真浏览器已证:3 段 5 卡 · `window.Gotong` undefined · console 零错误) |
 | **M4.5 骨架配置化** | **全部 17 个页签**纳入配置(岔口 B2):tabbar 配置驱动生成 + 15 个 admin bundle 改按需加载 | 两个成员打开 app 看到**不同的导航结构**,不只是不同的面板内容;**防腐门:配置驱动的 tabbar 不得成为提权路径**(member 配置里写 admin 页签仍拿不到 admin 面,服务端照样 403) |
 | **M5 壳工程** | `capacitor.config.ts`(`webDir` + `CapacitorHttp.enabled`)+ static 导出脚本 + PNG 图标集 | 真机装上、打得开、能连本机 hub |
 | **M6 原生推送** | `@capacitor/push-notifications` 接 FCM/APNs;复用订阅存储形状与 fold 决策。**大陆版按 A1 不接推送**(只轮询) | 真机锁屏收到低信息 tap;绑 IM 成员仍零双发 |
@@ -350,6 +350,58 @@ SW 只存在于服务它的那个源,它的 `/api/…` 按定义就是本 hub。
 选择器在;撤掉补丁后 3 段 5 卡照旧,console 零错误。
 
 **这一刀之后,「不做完 M3 协商就不发壳」这条前置条件已解除。**
+
+### M4 落地记(2026-07-29)
+
+M0 侦察点名的**第四硬骨头**:渲染器与宿主 SPA 有**五条硬耦合、零注入点**——
+i18n 词典在 `app-core.js`、tab 协议靠 `document.body.dataset.activeTab`、宿主
+元素写死 `#sdui-panel`、CSS 混在 `styles.css` 里、storage key 是文件内常量。
+壳里没有这个 SPA,所以五条里任何一条留着,渲染器就搬不走。
+
+**收法是一个公开 API,不是五个补丁**:`GotongPanel.mount(opts)` 收下
+`{host, lang, gotoHome, storageKey, render}`,渲染路径只读模块级 `CTX`,
+`window.Gotong` / `document.body` / `getElementById` 一律不再出现在渲染路径里
+(防腐门按 `boot()` 位置切开源码,逐个断言)。
+
+**最关键的一处判断:SPA 成为这个 API 的第一个调用者,而不是特权侧门。**
+自举块自己调 `mount()` 传三个选项,于是**每一次页面加载、每一条既有浏览器测试
+都在走壳将来要走的那条路**;若让 SPA 继续直接摸内部函数,壳那条路就只有一个
+demo 页面在覆盖——那正是「写完就腐」的形状。
+
+**i18n 是一刀切走,不是复制一份。** 140 个 `sdui*` 词条在 `app-core.js` 里
+**只有一个消费者**,所以搬进渲染器是**消灭**了一个漂移源而非新增一个。这类
+漂移已经真实咬过一次:`sduiShapeInstallBtn` 曾经发版时没有对应词条,按钮直接
+把 key 名渲染在界面上。现在两份词典同在一个文件,防腐门于是能做**双向**核对
+(每个用到的 key 中英都在 + 每个声明的 key 都有人用),顺手清掉了一个从
+SDUI-M2 起就没人用过的 `sduiMadeByAtong`。
+
+**刻意不算耦合的一条:`fetch('/api/...')` 保持根相对。** M2 的 `hub-target.js`
+是「连哪台 hub」的唯一咽喉,渲染器再答一次这个问题,正是 M2 明令禁止的第二处缝。
+
+**一页一个面板,是设计不是限制。** `mount()` 重绑模块级 `CTX` 而不是造
+per-instance 闭包:同页两个活面板不是壳或 SPA 需要的东西,而为它买单要把一个
+context 穿过约 40 个渲染函数。
+
+**验收面 `sdui-standalone.html`**——里程碑那句「能在裸 HTML 里挂起来跑」的
+可执行形式:只加载 `/sdui-ui.css`、`/hub-target.js`、`/sdui-ui.js`,宿主元素
+**故意不叫 `#sdui-panel`**(于是 SPA 自举在这页结构性是空转,屏幕上的面板只可能
+来自那次 `mount()` 调用)。它同时是 M5 的种子:Capacitor 的 `webDir` 里就是一张
+这个形状的页。防腐门把「不许把 SPA 拉回来」写成断言——`/styles.css`、
+`/app-core.js`、`/app.js` 一个都不许出现。
+
+**排错记一条(真踩到,已转成防腐门)**:那页第一版把 `mount()` 写在**内联
+`<script>`** 里,浏览器里一片空白且控制台不报错——hub 的 CSP 是
+`script-src 'self'`(没有 `'unsafe-inline'`),内联块根本不执行。这条策略是对的,
+不该为一个诊断页放宽;正确修法是把引导代码抽成 `sdui-standalone.js`。门因此
+多断言一条:**该页不得含内联 `<script>` 块**——真壳的 CSP 只会更严。
+(同期还确认了一件运维事实:host **在启动时**读嵌入静态资源表,改 `static/*`
+之后必须 `pnpm build` **并重启进程**,否则浏览器拿到的仍是旧字节。)
+
+**真机 round-trip 双向**:①SPA 侧无回归——面板页签仍 3 段 5 卡、徽章在、
+停在面板页切语言即时重渲染、`window.Gotong.t` 里 `sdui*` 词条**为 0**(证明
+文案确实来自渲染器自己那份)、`.sdui-card` 的圆角来自新的 `/sdui-ui.css`;
+②裸页侧——3 段 5 卡真数据、`window.Gotong` 为 `undefined`、页面自带的
+中英按钮即时切换、`#sdui-panel` 元素不存在;两侧 console 均零错误。
 
 ---
 

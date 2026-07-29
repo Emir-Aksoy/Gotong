@@ -33,6 +33,11 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="Gotong" />
     <link rel="stylesheet" href="/styles.css" />
+    <!-- SHELL-M4: the panel renderer travels with its own stylesheet so it can
+         mount in a page that never loaded styles.css (the native shell, or
+         /sdui-standalone.html). Loading both here is not a duplicate — the
+         sdui block was CUT out of styles.css, it lives in exactly one file. -->
+    <link rel="stylesheet" href="/sdui-ui.css" />
     <!-- SHELL-M2: the choke point that decides which hub this client talks to.
          Must run before anything that reaches the hub — it installs the fetch
          patch and owns hubUrl(). `defer` preserves document order. -->

@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<!--
+  SHELL-M4 — the acceptance criterion for "renderer decoupled", in executable form.
+
+  This page is bare HTML. It does NOT load styles.css, app-core.js, app.js, or
+  anything else the admin SPA carries. It loads exactly what the renderer needs
+  to travel: its own stylesheet, the M2 hub-target choke point, and itself.
+
+  Everything that used to be an implicit dependency on the host SPA now arrives
+  through the mount() options — that is the whole milestone:
+
+    i18n        → opts.lang        (here: a real toggle, not window.Gotong.lang)
+    tab 协议    → opts.render:true (here: no tabs at all, render immediately)
+    宿主元素    → opts.host        (here: #standalone-host, NOT #sdui-panel —
+                                    so the SPA autoboot is provably inert here)
+    CSS         → /sdui-ui.css     (shipped with the renderer, cut from styles.css)
+    storage key → opts.storageKey  (here: a page-local key, so this page's
+                                    "知道了" acks never touch the SPA's)
+
+  It is also the seed of SHELL-M5: the Capacitor shell's webDir will serve a
+  page shaped like this one off the device, with hub-target.js pointed at the
+  member's own VPS. Which is why the fetch calls inside the renderer stay
+  root-relative — hub-target.js is the ONE place that answers "which hub".
+-->
+<html lang="zh">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Gotong 面板 · 独立挂载 / standalone mount</title>
+    <link rel="stylesheet" href="/sdui-ui.css" />
+    <style>
+      /* Page chrome only — deliberately minimal, and deliberately NOT sdui-*.
+         Anything the panel itself needs must come from /sdui-ui.css, or the
+         proof is worthless. */
+      body {
+        margin: 0;
+        padding: 1rem;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+        background: #fafafa;
+        color: #222;
+      }
+      .bar {
+        display: flex;
+        gap: 0.6rem;
+        align-items: center;
+        margin-bottom: 1rem;
+        font-size: 0.85rem;
+        color: #666;
+      }
+      .bar button {
+        font: inherit;
+        padding: 0.25rem 0.7rem;
+        border: 1px solid #ccc;
+        border-radius: 6px;
+        background: #fff;
+        cursor: pointer;
+      }
+    </style>
+    <!-- Same order as app.html: the hub choke point runs before anything reaches
+         the hub. In the native shell this is where the paired device's base URL
+         comes from; served from a hub it stays unset and /api/* is relative. -->
+    <script src="/hub-target.js"></script>
+    <!-- Both deferred, same as app.html: deferred scripts run after parsing in
+         document order, so the renderer is loaded before its bootstrap and
+         #standalone-host exists by the time mount() is called. -->
+    <script src="/sdui-ui.js" defer></script>
+    <!-- The mount() call lives in its own file, not inline: the hub serves
+         `script-src 'self'` and a real shell page must survive a strict CSP. -->
+    <script src="/sdui-standalone.js" defer></script>
+  </head>
+  <body>
+    <div class="bar">
+      <strong>GotongPanel.mount()</strong>
+      <span id="version"></span>
+      <button id="lang-btn" type="button">EN</button>
+      <button id="reload-btn" type="button">重新渲染 / re-render</button>
+    </div>
+    <div id="standalone-host"></div>
+
+  </body>
+</html>

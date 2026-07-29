@@ -11,7 +11,9 @@
 > 于 SHELL-M3 退役——它是唯一从没长出渲染器的一项,见 §六)。原 M5「壳与分发」
 > 侦察后确认装不进一格,已展开成独立的 **SHELL track**,见
 > [`APP-SHELL.md`](APP-SHELL.md)(形态拍板:真壳 = 本地资源 + `CapacitorHttp`);
-> **§5.4 版本协商已由 SHELL-M3 做实**(`f6aa7be`)。
+> **§5.4 版本协商已由 SHELL-M3 做实**(`f6aa7be`);**SHELL-M4 起渲染器
+> 独立成件**——`sdui-ui.js` 自带词典与 `sdui-ui.css`,通过 `GotongPanel.mount(opts)`
+> 挂在任意宿主元素上,本 SPA 只是它的第一个调用者(裸页示例 `static/sdui-standalone.html`)。
 > 拍板记录:A=14 组件首批清单照 §六 / B=新增成员可见 tab,home 原样保留 /
 > C=JSON / D=owner 直装、成员随时换回 / **E=E1 benign 直改+三重安全网**
 > (保留区硬保护+每改响亮播报+改前快照一键还原;E2 提议→确认不做,单成员

@@ -26,8 +26,23 @@
  * packages/personal-butler/src/panel-schema.ts — an anti-rot test asserts the
  * two lists stay identical (tests/sdui-ui-contract.test.ts).
  *
- * i18n: reads the live dict off window.Gotong.t at call time (app-core.js
- * loads first); `sdui*` keys, function-form for interpolation.
+ * SHELL-M4 — FREE-STANDING. This file used to reach into the SPA for its
+ * strings, its host element, its language, and its navigation. It no longer
+ * does: everything it needs arrives through `GotongPanel.mount(opts)`, and
+ * the SPA is simply its first caller (see the autoboot block at the bottom).
+ * Mount it in a bare HTML page with a <div> and this file's stylesheet and it
+ * runs — that is the whole point, because a released shell has no app-core.js.
+ *
+ *   GotongPanel.mount({ host: document.getElementById('panel') })
+ *
+ * NOT a coupling: `fetch('/api/...')` stays root-relative on purpose. Which
+ * hub those go to is decided in ONE place — hub-target.js (SHELL-M2) — and
+ * duplicating that decision here is exactly what that milestone forbade.
+ *
+ * ONE PANEL PER PAGE, deliberately: mount() rebinds module-level state rather
+ * than building a per-instance closure. Two live panels in one document is not
+ * a thing the shell or the SPA needs, and paying for it would mean threading a
+ * context through every one of the ~40 render functions below.
  */
 ;(function () {
   'use strict'
@@ -35,8 +50,181 @@
   var PANEL_TAB = 'panel'
   var HOST_ID = 'sdui-panel'
 
+  // ---- strings (SHELL-M4) --------------------------------------------------
+  // The renderer OWNS its copy. These 70 keys lived in app-core.js until
+  // SHELL-M4; app-core was their only definer and this file their only
+  // consumer, so moving them is a cut, not a duplication — and it makes the
+  // failure that already bit once (a renderer shipping a key app-core never
+  // defined, so the button rendered the raw key) structurally impossible.
+  // A gate asserts every t() call here resolves in BOTH languages.
+  var DEFAULT_LANG = 'zh'
+  var STRINGS = {
+    zh: {
+      sduiBadgePending: (n) => `${n} 件待批`,
+      sduiBadgeOpen: '去处理',
+      sduiLoading: '加载中…',
+      sduiLoadFailed: '面板加载失败',
+      sduiUnavailable: '此 hub 未启用面板。',
+      sduiDegraded: '你的面板配置读不出来,已临时显示默认面板。',
+      sduiUnknownComponent: (t) => `组件「${t}」需要升级客户端才能显示。`,
+      sduiComingSoon: (t) => `组件「${t}」即将上线。`,
+      sduiClientOutdated: (s, c) =>
+        `这台 hub 的面板格式是 v${s}，这个客户端只认到 v${c}，先不显示内容以免显示错。升级 app 后即可正常显示；也可以在下面换一个形态。`,
+      sduiSourceMissing: '数据源未接入。',
+      sduiChatPlaceholder: '和阿同说点什么…',
+      sduiChatSend: '发送',
+      sduiChatSending: '发送中…',
+      sduiChatFailed: '发送失败',
+      sduiChatEmpty: '先输入内容再发送。',
+      sduiChatNoAgent: '这个 hub 还没有可对话的智能体——先在向导或管理面板创建一个。',
+      sduiChatNoButler: '这个对话框固定连管家,但 hub 里还没有管家——先在向导或管理面板把一个可对话智能体设为管家。',
+      sduiInboxEmpty: '没有等你处理的事项。',
+      sduiInboxItemOpen: '去处理',
+      // SDUI-M3 — 形态 picker (shape library / owner install)
+      sduiShapeHeading: '面板形态',
+      sduiShapeCurrentCustom: '当前是自定形态。',
+      sduiShapeReset: '恢复默认',
+      sduiShapeApply: '换上',
+      sduiShapeApplying: '应用中…',
+      sduiShapeApplied: '已换上,面板已刷新。',
+      sduiShapeInstalled: '已为该成员装上。TA 下次打开面板即生效,也随时可以自己换回。',
+      sduiShapeFailed: '操作失败',
+      sduiShapeEmpty: '还没有可换的形态——在管理面板的模板画廊装一个带面板的模板(如「家庭面板三件套」)。',
+      sduiShapeForMember: '给成员装形态(owner)',
+      sduiShapeInstallBtn: '装上',
+      sduiButlerChanged: '阿同调整了你的面板。',
+      sduiButlerUndo: '撤销',
+      sduiButlerUndone: '已撤销,面板已恢复。',
+      sduiButlerAck: '知道了',
+      // SDUI-C1a — data-driven components (schedules / tasks / status)
+      sduiSchedulesEmpty: '你名下没有定时工作流。',
+      sduiScheduleOff: '已停用',
+      sduiScheduleInvalid: '配置有误,没在跑',
+      sduiScheduleNever: '还没触发过',
+      sduiScheduleLast: (m) => `上次:${m}`,
+      sduiScheduleBadMark: '上次:(记录无法解析)',
+      sduiCadenceDaily: (hh, tz) => `每天 ${hh}(${tz})`,
+      sduiCadenceWeekly: (wd, hh, tz) => `每周${wd} ${hh}(${tz})`,
+      sduiEveryMinutes: (n) => `每 ${n} 分钟`,
+      sduiEveryHours: (n) => `每 ${n} 小时`,
+      sduiWeekday: (d) => ['日', '一', '二', '三', '四', '五', '六'][d] ?? String(d),
+      sduiTasksEmpty: '没有进行中的任务。',
+      sduiTaskProgress: (a, b) => `${a}/${b} 步`,
+      sduiStatusAllGood: '体检全绿,一切正常。',
+      sduiCalendarMonthNote: '月视图暂以本周展示。',
+      // SDUI-C1c — content:/connector: 中转卡(阿同整理,面板不直呼连接器)
+      sduiContentByButler: '阿同写的',
+      sduiContentCurated: '阿同整理',
+      sduiContentUpdated: (w) => `更新于 ${w}`,
+      sduiContentEmpty: '这里还没有内容——跟阿同说一句,让 TA 写上来。',
+      sduiConnectorEmpty: (slot) => `「${slot}」还没有内容——跟阿同说一声,TA 整理好就会显示在这里。`,
+      sduiCalendarRelayNote: '阿同整理的日历内容,按列表显示。',
+      // SDUI-C1b — chart (usage.mine) + quick-actions
+      sduiUsageEmpty: '这段时间还没有用量记录。',
+      sduiUsageWeek: '近 7 天用量(按 UTC 日)',
+      sduiUsageMonth: '近 30 天用量(按 UTC 日)',
+      sduiUsageTotal: (n, cost) => `共 ${n} 次 · ${cost}`,
+      sduiUsageCalls: (n) => `${n} 次`,
+      sduiActionOpenChat: '找管家聊',
+      sduiActionOpenInbox: '看待办',
+      sduiActionComposeBrief: '来份简报',
+      sduiActionStartWf: (id) => `启动 ${id}`,
+      sduiActionStarting: '发起中…',
+      sduiActionStarted: (id) => `已发起「${id}」,进展会出现在「我的」页。`,
+      sduiActionNotAllowed: '这个工作流没有对你开放。',
+      sduiActionFailed: '发起失败',
+      sduiBriefPrefill: '给我来一份今天的简报吧。',
+    },
+    en: {
+      sduiBadgePending: (n) => `${n} pending approval${n === 1 ? '' : 's'}`,
+      sduiBadgeOpen: 'Review',
+      sduiLoading: 'Loading…',
+      sduiLoadFailed: 'Panel failed to load',
+      sduiUnavailable: 'The panel is not enabled on this hub.',
+      sduiDegraded: 'Your panel config could not be read; showing the default panel for now.',
+      sduiUnknownComponent: (t) => `Component "${t}" needs a newer client to display.`,
+      sduiComingSoon: (t) => `Component "${t}" is coming soon.`,
+      sduiClientOutdated: (s, c) =>
+        `This hub's panel format is v${s}; this client only understands v${c}, so the contents are held back rather than shown wrong. Update the app to see it — or switch to another shape below.`,
+      sduiSourceMissing: 'Data source not connected.',
+      sduiChatPlaceholder: 'Say something to Atong…',
+      sduiChatSend: 'Send',
+      sduiChatSending: 'Sending…',
+      sduiChatFailed: 'Send failed',
+      sduiChatEmpty: 'Type a message first.',
+      sduiChatNoAgent: 'No chat-capable agent on this hub yet — create one in the wizard or admin console.',
+      sduiChatNoButler: 'This chat is pinned to the butler, but this hub has no butler yet — enable one on a chat-capable agent in the wizard or admin console.',
+      sduiInboxEmpty: 'Nothing waiting for you.',
+      sduiInboxItemOpen: 'Review',
+      // SDUI-M3 — 形态 picker (shape library / owner install)
+      sduiShapeHeading: 'Panel shapes',
+      sduiShapeCurrentCustom: 'You are on a custom shape.',
+      sduiShapeReset: 'Restore default',
+      sduiShapeApply: 'Use this',
+      sduiShapeApplying: 'Applying…',
+      sduiShapeApplied: 'Applied — panel refreshed.',
+      sduiShapeInstalled: 'Installed for that member. It shows on their next panel visit; they can switch back anytime.',
+      sduiShapeFailed: 'Action failed',
+      sduiShapeEmpty: 'No shapes installed yet — install a panel-carrying template from the admin gallery (e.g. "family-panel-trio").',
+      sduiShapeForMember: 'Install for a member (owner)',
+      sduiShapeInstallBtn: 'Install',
+      sduiButlerChanged: 'Atong adjusted your panel.',
+      sduiButlerUndo: 'Undo',
+      sduiButlerUndone: 'Undone — panel restored.',
+      sduiButlerAck: 'Got it',
+      // SDUI-C1a — data-driven components (schedules / tasks / status)
+      sduiSchedulesEmpty: 'No scheduled workflows under your name.',
+      sduiScheduleOff: 'off',
+      sduiScheduleInvalid: 'misconfigured — not running',
+      sduiScheduleNever: 'never fired',
+      sduiScheduleLast: (m) => `last: ${m}`,
+      sduiScheduleBadMark: 'last: (unreadable mark)',
+      sduiCadenceDaily: (hh, tz) => `Daily ${hh} (${tz})`,
+      sduiCadenceWeekly: (wd, hh, tz) => `Every ${wd} ${hh} (${tz})`,
+      sduiEveryMinutes: (n) => `Every ${n} min`,
+      sduiEveryHours: (n) => `Every ${n} h`,
+      sduiWeekday: (d) => ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][d] ?? String(d),
+      sduiTasksEmpty: 'No open tasks.',
+      sduiTaskProgress: (a, b) => `${a}/${b} steps`,
+      sduiStatusAllGood: 'All checks green.',
+      sduiCalendarMonthNote: 'Month view currently shows this week.',
+      // SDUI-C1c — content:/connector: relay cards (butler-curated; the panel never calls a connector)
+      sduiContentByButler: 'Written by Atong',
+      sduiContentCurated: 'Curated by Atong',
+      sduiContentUpdated: (w) => `updated ${w}`,
+      sduiContentEmpty: 'Nothing here yet — ask Atong to write it.',
+      sduiConnectorEmpty: (slot) => `No "${slot}" content yet — ask Atong and it will show up here.`,
+      sduiCalendarRelayNote: 'Butler-curated calendar notes, shown as a list.',
+      // SDUI-C1b — chart (usage.mine) + quick-actions
+      sduiUsageEmpty: 'No usage recorded in this window.',
+      sduiUsageWeek: 'Last 7 days (UTC days)',
+      sduiUsageMonth: 'Last 30 days (UTC days)',
+      sduiUsageTotal: (n, cost) => `${n} calls · ${cost}`,
+      sduiUsageCalls: (n) => `${n} calls`,
+      sduiActionOpenChat: 'Open chat',
+      sduiActionOpenInbox: 'Open inbox',
+      sduiActionComposeBrief: 'Compose brief',
+      sduiActionStartWf: (id) => `Run ${id}`,
+      sduiActionStarting: 'Starting…',
+      sduiActionStarted: (id) => `Started "${id}" — progress shows on your Home page.`,
+      sduiActionNotAllowed: 'This workflow is not enabled for you.',
+      sduiActionFailed: 'Failed to start',
+      sduiBriefPrefill: "Give me today's brief, please.",
+    },
+  }
+
+  // ---- host bindings (SHELL-M4) --------------------------------------------
+  // Everything the renderer needs from its host, defaulted so a bare mount
+  // works with `{ host }` alone. mount() overwrites; nothing else may.
+  var CTX = {
+    host: null,
+    lang: function () { return DEFAULT_LANG },
+    gotoHome: function () { window.location.hash = '#home' },
+    ackKey: 'gotong-sdui-change-ack',
+  }
+
   function t(key) {
-    var dict = (window.Gotong && window.Gotong.t) || {}
+    var dict = STRINGS[CTX.lang()] || STRINGS[DEFAULT_LANG]
     var v = dict[key]
     if (typeof v === 'function') return v.apply(null, [].slice.call(arguments, 1))
     return v != null ? v : key
@@ -49,10 +237,7 @@
     return n
   }
 
-  function gotoHome() {
-    if (window.Gotong && typeof window.Gotong.gotoTab === 'function') window.Gotong.gotoTab('home')
-    else window.location.hash = '#home'
-  }
+  function gotoHome() { CTX.gotoHome() }
 
   // The schema version THIS renderer understands (SHELL-M3). In-repo it always
   // equals the hub's PANEL_SCHEMA_VERSION — they ship together and a gate pins
@@ -255,7 +440,7 @@
         var items = j && Array.isArray(j.items) ? j.items : []
         list.replaceChildren()
         if (items.length === 0) {
-          list.appendChild(el('p', 'me-meta', t('sduiInboxEmpty')))
+          list.appendChild(el('p', 'sdui-meta', t('sduiInboxEmpty')))
           return
         }
         items.forEach(function (item) {
@@ -304,8 +489,8 @@
     card.appendChild(body)
     fetchData(kind, qs).then(function (j) {
       body.replaceChildren()
-      if (!j) { body.appendChild(el('p', 'me-meta', t('sduiLoadFailed'))); return }
-      if (j.available !== true) { body.appendChild(el('p', 'me-meta', t('sduiSourceMissing'))); return }
+      if (!j) { body.appendChild(el('p', 'sdui-meta', t('sduiLoadFailed'))); return }
+      if (j.available !== true) { body.appendChild(el('p', 'sdui-meta', t('sduiSourceMissing'))); return }
       onData(body, j)
     })
     return card
@@ -353,7 +538,7 @@
     var limit = typeof params.limit === 'number' ? params.limit : 10
     return dataCard('sdui-schedules', 'schedules', function (body, j) {
       var rows = Array.isArray(j.schedules) ? j.schedules : []
-      if (rows.length === 0) { body.appendChild(el('p', 'me-meta', t('sduiSchedulesEmpty'))); return }
+      if (rows.length === 0) { body.appendChild(el('p', 'sdui-meta', t('sduiSchedulesEmpty'))); return }
       rows.slice(0, limit).forEach(function (r) {
         var row = el('div', 'sdui-sched-item')
         var head = el('div', 'sdui-sched-head')
@@ -364,7 +549,7 @@
         var meta = r.valid
           ? cadenceText(r.cadence) + ' · ' + firedText(r.cadence, r.lastFiredMark)
           : firedText(r.cadence, r.lastFiredMark)
-        row.appendChild(el('p', 'me-meta', meta))
+        row.appendChild(el('p', 'sdui-meta', meta))
         body.appendChild(row)
       })
     })
@@ -380,8 +565,8 @@
     return dataCard('sdui-calendar', 'schedules', function (body, j) {
       var rows = Array.isArray(j.schedules) ? j.schedules : []
       var active = rows.filter(function (r) { return r.enabled && r.valid && r.cadence })
-      if (active.length === 0) { body.appendChild(el('p', 'me-meta', t('sduiSchedulesEmpty'))); return }
-      if (view === 'month') body.appendChild(el('p', 'me-meta sdui-cal-note', t('sduiCalendarMonthNote')))
+      if (active.length === 0) { body.appendChild(el('p', 'sdui-meta', t('sduiSchedulesEmpty'))); return }
+      if (view === 'month') body.appendChild(el('p', 'sdui-meta sdui-cal-note', t('sduiCalendarMonthNote')))
       var browserTz = -new Date().getTimezoneOffset()
       var days = view === 'day' ? 1 : 7
       var grid = el('div', 'sdui-cal-grid' + (view === 'day' ? ' sdui-cal-one' : ''))
@@ -404,7 +589,7 @@
       body.appendChild(grid)
       active.forEach(function (r) {
         if (r.cadence.kind !== 'interval') return
-        body.appendChild(el('p', 'me-meta sdui-cal-interval', r.workflowId + ' · ' + everyText(r.cadence.everyMs)))
+        body.appendChild(el('p', 'sdui-meta sdui-cal-interval', r.workflowId + ' · ' + everyText(r.cadence.everyMs)))
       })
     })
   }
@@ -414,11 +599,11 @@
     var limit = typeof params.limit === 'number' ? params.limit : 20
     return dataCard('sdui-tasks', 'tasks', function (body, j) {
       var rows = Array.isArray(j.tasks) ? j.tasks : []
-      if (rows.length === 0) { body.appendChild(el('p', 'me-meta', t('sduiTasksEmpty'))); return }
+      if (rows.length === 0) { body.appendChild(el('p', 'sdui-meta', t('sduiTasksEmpty'))); return }
       rows.slice(0, limit).forEach(function (r) {
         var row = el('div', 'sdui-task-item')
         row.appendChild(el('span', 'sdui-task-title', String(r.title || r.id)))
-        row.appendChild(el('span', 'me-meta sdui-task-progress', t('sduiTaskProgress', r.stepsDone, r.stepsTotal)))
+        row.appendChild(el('span', 'sdui-meta sdui-task-progress', t('sduiTaskProgress', r.stepsDone, r.stepsTotal)))
         body.appendChild(row)
       })
     })
@@ -433,7 +618,7 @@
       cards.forEach(function (c) {
         var row = el('div', 'sdui-status-item sdui-status-' + (c.severity === 'red' ? 'red' : 'yellow'))
         row.appendChild(el('strong', null, String(c.label || c.id)))
-        row.appendChild(el('p', 'me-meta', String(c.fact || '')))
+        row.appendChild(el('p', 'sdui-meta', String(c.fact || '')))
         body.appendChild(row)
       })
     })
@@ -448,7 +633,7 @@
     var range = params.range === 'month' ? 'month' : 'week'
     return dataCard('sdui-chart', 'usage', function (body, j) {
       var days = Array.isArray(j.days) ? j.days : []
-      if (days.length === 0) { body.appendChild(el('p', 'me-meta', t('sduiUsageEmpty'))); return }
+      if (days.length === 0) { body.appendChild(el('p', 'sdui-meta', t('sduiUsageEmpty'))); return }
       var calls = 0
       var cost = 0
       var max = 1
@@ -459,7 +644,7 @@
       })
       // Buckets are UTC calendar days (the ledger's own axis) — the heading
       // says so, so a UTC+8 member isn't surprised where midnight falls.
-      body.appendChild(el('p', 'me-meta sdui-chart-head',
+      body.appendChild(el('p', 'sdui-meta sdui-chart-head',
         t(range === 'month' ? 'sduiUsageMonth' : 'sduiUsageWeek') + ' · ' + t('sduiUsageTotal', calls, fmtCost(cost))))
       days.forEach(function (d) {
         var row = el('div', 'sdui-chart-row')
@@ -471,7 +656,7 @@
         bar.style.width = Math.max(2, Math.round(((d.calls || 0) / max) * 100)) + '%'
         wrap.appendChild(bar)
         row.appendChild(wrap)
-        row.appendChild(el('span', 'me-meta sdui-chart-meta',
+        row.appendChild(el('span', 'sdui-meta sdui-chart-meta',
           t('sduiUsageCalls', d.calls || 0) + ' · ' + fmtCost(d.costMicros || 0)))
         body.appendChild(row)
       })
@@ -483,7 +668,7 @@
   // the renderer maps each verb to behavior hard-coded here. An unrecognized
   // verb renders nothing — never a dead button.
   function focusPanelChat(prefill) {
-    var input = document.querySelector('#' + HOST_ID + ' .sdui-chat-input')
+    var input = CTX.host && CTX.host.querySelector('.sdui-chat-input')
     if (!input) return false
     // compose_brief pre-fills but never auto-sends: the member sees exactly
     // what will be asked and presses send themselves (no surprise LLM spend).
@@ -519,7 +704,7 @@
     var actions = Array.isArray(params.actions) ? params.actions : []
     var card = el('div', 'sdui-card sdui-qa')
     var wrap = el('div', 'sdui-qa-wrap')
-    var status = el('p', 'me-meta sdui-qa-status', '')
+    var status = el('p', 'sdui-meta sdui-qa-status', '')
     actions.slice(0, 6).forEach(function (a) {
       if (typeof a !== 'string') return
       var btn
@@ -620,14 +805,14 @@
     card.appendChild(body)
     fetchData('content', 'id=' + encodeURIComponent(fileId)).then(function (j) {
       body.replaceChildren()
-      if (!j) { body.appendChild(el('p', 'me-meta', t('sduiLoadFailed'))); return }
-      if (j.available !== true) { body.appendChild(el('p', 'me-meta', t('sduiSourceMissing'))); return }
+      if (!j) { body.appendChild(el('p', 'sdui-meta', t('sduiLoadFailed'))); return }
+      if (j.available !== true) { body.appendChild(el('p', 'sdui-meta', t('sduiSourceMissing'))); return }
       if (j.exists !== true || typeof j.markdown !== 'string') {
-        body.appendChild(el('p', 'me-meta', emptyText))
+        body.appendChild(el('p', 'sdui-meta', emptyText))
         return
       }
       // Fixed provenance stamp — rendered before any content, unconditionally.
-      body.appendChild(el('p', 'me-meta sdui-md-provenance',
+      body.appendChild(el('p', 'sdui-meta sdui-md-provenance',
         t(provKey) + ' · ' + t('sduiContentUpdated', fmtWhen(j.updatedAt))))
       renderBody(body, j.markdown)
     })
@@ -672,7 +857,7 @@
       t('sduiConnectorEmpty', slot), function (body, markdown) {
         // Relay content is butler-curated prose, not schedule rows — say so
         // instead of drawing a grid that would imply machine-read events.
-        body.appendChild(el('p', 'me-meta sdui-cal-note', t('sduiCalendarRelayNote')))
+        body.appendChild(el('p', 'sdui-meta sdui-cal-note', t('sduiCalendarRelayNote')))
         renderMarkdownInto(body, markdown)
       })
   }
@@ -738,18 +923,20 @@
   // honesty independent of whatever the model chose to say in chat. 撤销 hits
   // the one-slot restore; 知道了 acks THIS change only (keyed by timestamp in
   // localStorage) — the next butler change shows the banner again.
-  var ACK_KEY = 'gotong-sdui-change-ack'
+  // The key is CTX.ackKey (SHELL-M4): localStorage is one flat namespace per
+  // origin, and a host embedding the panel beside its own state deserves a way
+  // to say where the ack lives. Default is the SPA's historical key.
   function ackGet() {
-    try { return window.localStorage.getItem(ACK_KEY) } catch (_e) { return null }
+    try { return window.localStorage.getItem(CTX.ackKey) } catch (_e) { return null }
   }
   function ackSet(at) {
-    try { window.localStorage.setItem(ACK_KEY, at) } catch (_e) { /* private mode — banner just reappears */ }
+    try { window.localStorage.setItem(CTX.ackKey, at) } catch (_e) { /* private mode — banner just reappears */ }
   }
 
   function renderButlerBanner(host, lastChange) {
     var strip = el('div', 'sdui-butler-banner')
     strip.appendChild(el('span', 'sdui-butler-banner-text', t('sduiButlerChanged')))
-    var status = el('span', 'me-meta sdui-butler-banner-status', '')
+    var status = el('span', 'sdui-meta sdui-butler-banner-status', '')
     var undo = el('button', 'sdui-butler-undo', t('sduiButlerUndo'))
     undo.type = 'button'
     undo.addEventListener('click', function () {
@@ -795,7 +982,7 @@
     var config = data.config
     var sections = config && typeof config === 'object' ? config.sections : null
     if (!Array.isArray(sections)) {
-      host.appendChild(el('p', 'me-meta', t('sduiLoadFailed')))
+      host.appendChild(el('p', 'sdui-meta', t('sduiLoadFailed')))
       renderShapeSection(host, data.source)
       return
     }
@@ -854,10 +1041,10 @@
     details.appendChild(body)
     host.appendChild(details)
 
-    var status = el('p', 'me-meta sdui-shape-status', '')
+    var status = el('p', 'sdui-meta sdui-shape-status', '')
     if (source === 'member') {
       var row = el('div', 'sdui-shape-current')
-      row.appendChild(el('span', 'me-meta', t('sduiShapeCurrentCustom')))
+      row.appendChild(el('span', 'sdui-meta', t('sduiShapeCurrentCustom')))
       var resetBtn = el('button', 'sdui-shape-reset', t('sduiShapeReset'))
       resetBtn.type = 'button'
       resetBtn.addEventListener('click', function () {
@@ -878,14 +1065,14 @@
         var panels = j && Array.isArray(j.panels) ? j.panels : []
         list.replaceChildren()
         if (panels.length === 0) {
-          list.appendChild(el('p', 'me-meta', t('sduiShapeEmpty')))
+          list.appendChild(el('p', 'sdui-meta', t('sduiShapeEmpty')))
           return
         }
         panels.forEach(function (p) {
           var card = el('div', 'sdui-shape-item')
           var info = el('div', 'sdui-shape-info')
           info.appendChild(el('strong', null, String(p.title || p.id)))
-          if (p.description) info.appendChild(el('p', 'me-meta', String(p.description)))
+          if (p.description) info.appendChild(el('p', 'sdui-meta', String(p.description)))
           card.appendChild(info)
           var apply = el('button', 'sdui-shape-apply', t('sduiShapeApply'))
           apply.type = 'button'
@@ -951,17 +1138,17 @@
 
   var loading = false
   function loadPanel() {
-    var host = document.getElementById(HOST_ID)
+    var host = CTX.host
     if (!host || loading) return
     loading = true
     agentPromise = null // re-discover on each visit (agents may have changed)
     dataPromises = {} // C1a — every tab flip refetches the data sources too
-    host.replaceChildren(el('p', 'me-meta', t('sduiLoading')))
+    host.replaceChildren(el('p', 'sdui-meta', t('sduiLoading')))
     // Declare what this renderer speaks; the hub answers with the verdict.
     fetch('/api/me/panel?client=' + CLIENT_SCHEMA_VERSION)
       .then(function (r) {
         if (r.status === 503) {
-          host.replaceChildren(el('p', 'me-meta', t('sduiUnavailable')))
+          host.replaceChildren(el('p', 'sdui-meta', t('sduiUnavailable')))
           return null
         }
         if (!r.ok) throw new Error('HTTP ' + r.status)
@@ -971,21 +1158,66 @@
         if (j) renderPanel(host, j)
       })
       .catch(function () {
-        host.replaceChildren(el('p', 'me-meta', t('sduiLoadFailed')))
+        host.replaceChildren(el('p', 'sdui-meta', t('sduiLoadFailed')))
       })
       .then(function () { loading = false })
   }
 
-  function maybeActivate() {
-    if (document.body && document.body.dataset.activeTab === PANEL_TAB) loadPanel()
+  // ---- public API (SHELL-M4) ----------------------------------------------
+  // The renderer knows nothing about tabs. `render()` means "render now"; WHEN
+  // that is belongs to the host, which is why the SPA's tab observer lives in
+  // the autoboot block below rather than in here.
+  function mount(opts) {
+    var o = opts || {}
+    if (!o.host || typeof o.host.appendChild !== 'function') {
+      throw new Error('GotongPanel.mount: opts.host must be an element')
+    }
+    CTX.host = o.host
+    if (typeof o.lang === 'function') CTX.lang = o.lang
+    else if (typeof o.lang === 'string') CTX.lang = function () { return o.lang }
+    if (typeof o.gotoHome === 'function') CTX.gotoHome = o.gotoHome
+    if (typeof o.storageKey === 'string' && o.storageKey) CTX.ackKey = o.storageKey
+    var handle = {
+      host: o.host,
+      render: loadPanel,
+      // Only the SPA autoboot creates an observer, so only it has one to drop.
+      destroy: function () { if (handle._stop) handle._stop() },
+    }
+    if (o.render !== false) loadPanel()
+    return handle
   }
 
+  window.GotongPanel = {
+    mount: mount,
+    SCHEMA_VERSION: CLIENT_SCHEMA_VERSION,
+    // Exposed so a host can read the copy it is about to display (and so the
+    // contract gate can check both languages) — not so it can be mutated.
+    STRINGS: STRINGS,
+  }
+
+  // ---- SPA autoboot --------------------------------------------------------
+  // The SPA is the FIRST CALLER of the API above, not a privileged side door:
+  // every existing page load and every browser test exercises mount(). A host
+  // without `#sdui-panel` (a bare page, the shell) gets nothing and calls
+  // mount() itself.
   function boot() {
-    if (!document.getElementById(HOST_ID)) return
-    new MutationObserver(maybeActivate).observe(document.body, {
-      attributes: true,
-      attributeFilter: ['data-active-tab'],
+    var host = document.getElementById(HOST_ID)
+    if (!host) return
+    var handle = mount({
+      host: host,
+      lang: function () { return (window.Gotong && window.Gotong.lang) || DEFAULT_LANG },
+      gotoHome: function () {
+        if (window.Gotong && typeof window.Gotong.gotoTab === 'function') window.Gotong.gotoTab('home')
+        else window.location.hash = '#home'
+      },
+      render: false, // maybeActivate below decides — the panel tab may not be open
     })
+    function maybeActivate() {
+      if (document.body && document.body.dataset.activeTab === PANEL_TAB) handle.render()
+    }
+    var obs = new MutationObserver(maybeActivate)
+    obs.observe(document.body, { attributes: true, attributeFilter: ['data-active-tab'] })
+    handle._stop = function () { obs.disconnect() }
     // The observer only sees tab flips — a language toggle while ON the panel
     // would otherwise leave stale-language content until the next flip.
     if (window.Gotong && typeof window.Gotong.onLangChange === 'function') {

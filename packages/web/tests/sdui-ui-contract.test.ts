@@ -12,6 +12,11 @@
  *    arguments, so no config entry can reach that renderer;
  *  - fixed badge: renderPanel calls renderBadge before it ever looks at the
  *    config, so no panel.json can remove or occlude the pending strip.
+ *
+ * SHELL-M4 added a second job: the renderer is now free-standing (it mounts in
+ * a bare page via GotongPanel.mount), so the gates below also pin that it
+ * carries everything it renders with — its own strings, its own stylesheet,
+ * its own host element — and reaches the SPA only through mount() options.
  */
 
 import { describe, expect, it } from 'vitest'
@@ -22,10 +27,55 @@ const rendererSrc = readFileSync(
   fileURLToPath(new URL('../static/sdui-ui.js', import.meta.url)),
   'utf8',
 )
+const rendererCss = readFileSync(
+  fileURLToPath(new URL('../static/sdui-ui.css', import.meta.url)),
+  'utf8',
+)
+const appCoreSrc = readFileSync(
+  fileURLToPath(new URL('../static/app-core.js', import.meta.url)),
+  'utf8',
+)
+const stylesSrc = readFileSync(
+  fileURLToPath(new URL('../static/styles.css', import.meta.url)),
+  'utf8',
+)
+const standaloneSrc = readFileSync(
+  fileURLToPath(new URL('../static/sdui-standalone.html', import.meta.url)),
+  'utf8',
+)
+const standaloneBootSrc = readFileSync(
+  fileURLToPath(new URL('../static/sdui-standalone.js', import.meta.url)),
+  'utf8',
+)
 const schemaSrc = readFileSync(
   fileURLToPath(new URL('../../personal-butler/src/panel-schema.ts', import.meta.url)),
   'utf8',
 )
+
+/**
+ * Drops whole-line comments. Same principle as the innerHTML gate below:
+ * prose may SAY `document.getElementById`, code may not — the header comment
+ * documents the mount() call site on purpose.
+ */
+function codeOnly(src: string): string {
+  return src
+    .split('\n')
+    .filter((line) => {
+      const t = line.trim()
+      return !(t.startsWith('*') || t.startsWith('//') || t.startsWith('/*'))
+    })
+    .join('\n')
+}
+
+/** Keys declared in one language block of the renderer's STRINGS table. */
+function stringKeys(lang: 'zh' | 'en'): Set<string> {
+  const open = rendererSrc.indexOf(`    ${lang}: {`)
+  expect(open, `STRINGS.${lang} block not found`).toBeGreaterThanOrEqual(0)
+  const close = rendererSrc.indexOf('\n    },', open)
+  expect(close, `STRINGS.${lang} block not closed`).toBeGreaterThan(open)
+  const body = rendererSrc.slice(open, close)
+  return new Set([...body.matchAll(/^ {6}([A-Za-z0-9_]+):/gm)].map((m) => m[1]!))
+}
 
 /** Extracts the quoted string items of the first `NAME = [ ... ]` literal. */
 function extractArray(src: string, name: string): string[] {
@@ -193,5 +243,100 @@ describe('sdui-ui.js ↔ panel-schema.ts contract', () => {
     }
     // The relay file convention itself (connector:<slot> → connector.<slot>).
     expect(rendererSrc).toContain("'connector.'")
+  })
+
+  // ── SHELL-M4: the renderer stands on its own ────────────────────────────
+  //
+  // This exact bug already shipped once: `sduiShapeInstallBtn` went out with
+  // no app-core.js key and the install button rendered its raw key name. Back
+  // then the strings lived in a DIFFERENT file from the code that used them,
+  // so nothing could check them together. Now they are one file — and this
+  // gate is the reason moving them was a cut, not a duplication.
+  it('every sdui* string the renderer names resolves in BOTH languages', () => {
+    const zh = stringKeys('zh')
+    const en = stringKeys('en')
+    expect(zh.size).toBeGreaterThan(50)
+    const used = new Set([...rendererSrc.matchAll(/'(sdui[A-Za-z0-9_]*)'/g)].map((m) => m[1]!))
+    expect(used.size).toBeGreaterThan(50)
+    for (const key of used) {
+      expect(zh.has(key), `zh copy for '${key}'`).toBe(true)
+      expect(en.has(key), `en copy for '${key}'`).toBe(true)
+    }
+    // …and the reverse, same reasoning as the ghost-component gate: a key with
+    // no caller is a promise nobody keeps, and it rots quietly.
+    for (const key of zh) expect(used.has(key), `'${key}' is declared but never used`).toBe(true)
+    expect([...zh].sort()).toEqual([...en].sort())
+  })
+
+  it('the host SPA no longer carries a second copy of the sdui strings', () => {
+    // Two copies is how the raw-key bug became possible. One file owns them.
+    expect(appCoreSrc).not.toMatch(/^\s+sdui[A-Za-z0-9_]*:/m)
+  })
+
+  it('the renderer stylesheet was CUT out of styles.css, not copied', () => {
+    expect(rendererCss).toMatch(/\.sdui-card\b/)
+    // A single `sdui` anywhere in the SPA stylesheet means the two copies are
+    // back and can drift — which class wins would then depend on load order.
+    expect(stylesSrc).not.toMatch(/sdui/)
+  })
+
+  it('the renderer only ever names its own classes (no host-SPA CSS reach-in)', () => {
+    // Every class literal it writes into the DOM must be sdui-*, or mounting
+    // in a page without styles.css would silently lose styling.
+    const classLiterals = [
+      ...rendererSrc.matchAll(/(?:className\s*=|classList\.add\(|classList\.remove\()\s*'([^']+)'/g),
+      // The el(tag, cls, text) helper is how most nodes get their class.
+      ...rendererSrc.matchAll(/\bel\('[a-z0-9]+',\s*'([^']+)'/g),
+    ].map((m) => m[1]!)
+    expect(classLiterals.length).toBeGreaterThan(40)
+    for (const literal of classLiterals) {
+      for (const cls of literal.split(/\s+/).filter(Boolean)) {
+        expect(cls.startsWith('sdui-'), `class '${cls}' is not the renderer's own`).toBe(true)
+      }
+    }
+  })
+
+  it('the SPA autoboot is the FIRST CALLER of mount(), not a privileged side door', () => {
+    // If the SPA reached past mount() into internals, every page load and every
+    // browser test would exercise a path the shell can never take — and the
+    // bare-page path would only be covered by this file. Keeping the SPA on the
+    // public API means the shell's path is the one already being exercised.
+    const bootAt = rendererSrc.indexOf('function boot()')
+    expect(bootAt).toBeGreaterThanOrEqual(0)
+    const boot = rendererSrc.slice(bootAt)
+    expect(boot).toMatch(/mount\(\{/)
+    // The five injection points must be options, not globals reached from the
+    // render path. `window.Gotong` may appear ONLY inside boot() (the glue).
+    const beforeBoot = codeOnly(rendererSrc.slice(0, bootAt))
+    // (window.GotongPanel is the renderer's OWN export, hence the negative
+    // lookahead — what must not appear is a reach into the host SPA.)
+    expect(/window\.Gotong(?!Panel)/.test(beforeBoot)).toBe(false)
+    expect(beforeBoot.includes('document.body')).toBe(false)
+    expect(beforeBoot.includes('getElementById')).toBe(false)
+    for (const opt of ['host', 'lang', 'gotoHome', 'storageKey']) {
+      expect(rendererSrc, `mount() must accept opts.${opt}`).toContain(`o.${opt}`)
+    }
+    expect(rendererSrc).toContain('window.GotongPanel')
+  })
+
+  it('the bare-HTML page proves the mount contract with none of the SPA', () => {
+    // The executable form of the acceptance criterion. If someone “fixes” this
+    // page by pulling in styles.css/app-core.js, the proof evaporates — so the
+    // absence is the assertion.
+    expect(standaloneBootSrc).toContain('GotongPanel.mount(')
+    expect(standaloneSrc).toContain('/sdui-standalone.js')
+    expect(standaloneSrc).toContain('/sdui-ui.css')
+    // The bootstrap must stay in a FILE. The hub serves `script-src 'self'`
+    // (no 'unsafe-inline'), so an inline block is silently never executed —
+    // found the hard way, and the native shell will be at least as strict.
+    expect(standaloneSrc).not.toMatch(/<script>/)
+    // M2's choke point still decides which hub — the shell needs exactly this.
+    expect(standaloneSrc).toContain('/hub-target.js')
+    expect(standaloneSrc).not.toContain('/styles.css')
+    expect(standaloneSrc).not.toContain('/app-core.js')
+    expect(standaloneSrc).not.toContain('/app.js')
+    // A host element that is NOT #sdui-panel, so the autoboot is provably
+    // inert here and the panel on screen came from the mount() call.
+    expect(standaloneSrc).not.toContain('id="sdui-panel"')
   })
 })
