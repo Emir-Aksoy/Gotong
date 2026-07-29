@@ -43,11 +43,69 @@ function extractArray(src: string, name: string): string[] {
 }
 
 describe('sdui-ui.js ↔ panel-schema.ts contract', () => {
+  // REPO HYGIENE, not a protocol requirement. In-repo the renderer really does
+  // ship inside the hub, so a roster that drifts is a bug. SHELL-M3 made the
+  // PROTOCOL stop depending on this equality (that is what the schemaVersion
+  // handshake below is for) — a released shell may legitimately carry an older
+  // roster. This check keeps the two copies in THIS artifact honest.
   it('KNOWN_TYPES mirrors PANEL_COMPONENT_TYPES exactly (order included)', () => {
     const rendererTypes = extractArray(rendererSrc, 'var KNOWN_TYPES')
     const schemaTypes = extractArray(schemaSrc, 'export const PANEL_COMPONENT_TYPES')
     expect(rendererTypes.length).toBeGreaterThan(0)
     expect(rendererTypes).toEqual(schemaTypes)
+  })
+
+  // SHELL-M3 — the image-card class of bug: a type listed as KNOWN with no
+  // renderer validates fine, renders 「即将上线」 forever, and gets advertised
+  // to the butler as usable. Staging a type one commit ahead of its renderer
+  // is legitimate, so this gate forces that to be a DELIBERATE act rather than
+  // something that quietly survives a release.
+  it('every KNOWN_TYPE has a real renderer in the registry (no ghost components)', () => {
+    const registryStart = rendererSrc.indexOf('var REGISTRY = {')
+    expect(registryStart).toBeGreaterThanOrEqual(0)
+    const registrySrc = rendererSrc.slice(registryStart)
+    for (const type of extractArray(rendererSrc, 'var KNOWN_TYPES')) {
+      // Registry keys appear either quoted ('approval-inbox':) or bare (chat:).
+      const declared =
+        registrySrc.includes(`'${type}':`) || new RegExp(`\\n    ${type}:`).test(registrySrc)
+      expect(declared, `registry entry for KNOWN_TYPE '${type}'`).toBe(true)
+    }
+  })
+
+  // SHELL-M3 — the renderer declares which schema it speaks, and the hub
+  // answers with a verdict. In-repo the two versions must match (they ship in
+  // one artifact); the mechanism's real job starts when a released shell
+  // freezes its number while the hub moves on.
+  it('the renderer declares a schemaVersion and it matches the hub schema', () => {
+    const declared = /var CLIENT_SCHEMA_VERSION = (\d+)/.exec(rendererSrc)
+    expect(declared, 'CLIENT_SCHEMA_VERSION not found in the renderer').not.toBeNull()
+    const server = /export const PANEL_SCHEMA_VERSION = (\d+)/.exec(schemaSrc)
+    expect(server, 'PANEL_SCHEMA_VERSION not found in the schema').not.toBeNull()
+    expect(declared![1]).toBe(server![1])
+    // …and it actually goes on the wire, not just sits in a constant.
+    expect(rendererSrc).toContain("'/api/me/panel?client=' + CLIENT_SCHEMA_VERSION")
+  })
+
+  // SHELL-M3 — a schema newer than this build must NOT be rendered
+  // best-effort: fields we know by name may have changed meaning. The badge
+  // (fixed) and the shape picker (the way out) must survive the downgrade —
+  // a version mismatch must never become a way to hide the pending strip.
+  it('an outdated client degrades the WHOLE panel, keeping the badge and a way out', () => {
+    const fnStart = rendererSrc.indexOf('function renderPanel')
+    expect(fnStart).toBeGreaterThanOrEqual(0)
+    const body = rendererSrc.slice(fnStart)
+    const badge = body.indexOf('renderBadge(host)')
+    const downgrade = body.indexOf("contract.verdict === 'client_outdated'")
+    const configRead = body.indexOf('data.config')
+    expect(downgrade).toBeGreaterThanOrEqual(0)
+    // Badge first, downgrade decision second, config only if we got past it.
+    expect(badge).toBeLessThan(downgrade)
+    expect(downgrade).toBeLessThan(configRead)
+    // The branch itself: loud notice + shape picker + stop.
+    const branch = body.slice(downgrade, configRead)
+    expect(branch).toContain('sduiClientOutdated')
+    expect(branch).toContain('renderShapeSection(host, data.source)')
+    expect(branch).toContain('return')
   })
 
   it('every reserved-zone type has a real renderer (never a placeholder card)', () => {

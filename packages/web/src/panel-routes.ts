@@ -1,7 +1,10 @@
 /**
  * panel-routes.ts — SDUI-M2/M3. The member panel's HTTP face.
  *
- *   GET /api/me/panel           →  { schemaVersion, config, source }
+ *   GET /api/me/panel[?client=N] →  { schemaVersion, config, source, contract }
+ *                               `?client=` is the renderer's own schemaVersion
+ *                               (SHELL-M3). Advisory: it changes the `contract`
+ *                               verdict the client is handed, never the config.
  *   PUT /api/me/panel           body { libraryId } | { reset: true }
  *   GET /api/me/panel/library   →  { panels: [{ id, title, description? }] }
  *
@@ -68,6 +71,18 @@ export interface MePanelSurface {
    * makes /data/content answer { available:false }. null = never written
    * (or invalid id): the renderer's honest cold-start state, never a 404. */
   readContent?(userId: string, fileId: string): Promise<{ markdown: string; updatedAt: string } | null>
+  /** SHELL-M3 version negotiation, computed host-side (personal-butler owns
+   * the verdict; web must not import it). Optional — an older host simply
+   * sends no `contract` block and clients treat that as today's behaviour. */
+  contract?(clientDeclared?: unknown): PanelContract
+}
+
+/** Mirror of personal-butler's `PanelContract` (duck; web stays host-free). */
+export interface PanelContract {
+  server: number
+  client: number
+  verdict: 'ok' | 'client_outdated' | 'client_ahead'
+  componentTypes: readonly string[]
 }
 
 /** C1a — host `buildMePanelData` satisfies this (duck; web stays host-free).
@@ -221,7 +236,15 @@ export async function handleMePanelRoute(
       return true
     }
     if (method === 'GET') {
-      sendJson(res, await deps.panel.panel(userId))
+      const result = await deps.panel.panel(userId)
+      // SHELL-M3: `?client=` is the renderer's schemaVersion declaration. It is
+      // ADVISORY — the config below is byte-identical whatever it says (or
+      // doesn't); only the contract block, which tells the client whether it
+      // can trust its own rendering, moves. Filtering the config by a
+      // client-supplied claim would silently narrow the member's own panel.
+      const declared = new URL(req.url ?? '/', 'http://x').searchParams.get('client')
+      const contract = deps.panel.contract?.(declared ?? undefined)
+      sendJson(res, contract ? { ...result, contract } : result)
       return true
     }
     if (method === 'PUT') {

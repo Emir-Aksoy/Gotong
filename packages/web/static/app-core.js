@@ -1963,6 +1963,8 @@
       sduiDegraded: '你的面板配置读不出来,已临时显示默认面板。',
       sduiUnknownComponent: (t) => `组件「${t}」需要升级客户端才能显示。`,
       sduiComingSoon: (t) => `组件「${t}」即将上线。`,
+      sduiClientOutdated: (s, c) =>
+        `这台 hub 的面板格式是 v${s}，这个客户端只认到 v${c}，先不显示内容以免显示错。升级 app 后即可正常显示；也可以在下面换一个形态。`,
       sduiSourceMissing: '数据源未接入。',
       sduiChatPlaceholder: '和阿同说点什么…',
       sduiChatSend: '发送',
@@ -4121,6 +4123,8 @@
       sduiDegraded: 'Your panel config could not be read; showing the default panel for now.',
       sduiUnknownComponent: (t) => `Component "${t}" needs a newer client to display.`,
       sduiComingSoon: (t) => `Component "${t}" is coming soon.`,
+      sduiClientOutdated: (s, c) =>
+        `This hub's panel format is v${s}; this client only understands v${c}, so the contents are held back rather than shown wrong. Update the app to see it — or switch to another shape below.`,
       sduiSourceMissing: 'Data source not connected.',
       sduiChatPlaceholder: 'Say something to Atong…',
       sduiChatSend: 'Send',

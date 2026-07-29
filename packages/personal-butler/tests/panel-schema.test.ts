@@ -2,11 +2,14 @@ import { describe, expect, it } from 'vitest'
 
 import {
   DEFAULT_PANEL,
+  PANEL_BASELINE_CLIENT_SCHEMA_VERSION,
   PANEL_COMPONENT_CONTRACTS,
   PANEL_COMPONENT_TYPES,
   PANEL_LIMITS,
   PANEL_RESERVED_TYPES,
   PANEL_SCHEMA_VERSION,
+  panelContract,
+  panelContractVerdict,
   validatePanelConfig,
   type PanelConfig,
 } from '../src/panel-schema.js'
@@ -233,5 +236,61 @@ describe('validatePanelConfig — hardening (Codex 收口)', () => {
     expect(
       validatePanelConfig(minimal({ sections: [{ components: [{ type: 'approval-inbox' }] }] } as never)).ok,
     ).toBe(true)
+  })
+})
+
+// SHELL-M3 — version negotiation. The shell ships on its own clock, so these
+// verdicts are what stands between "old app renders a schema it half-knows"
+// and an honest downgrade.
+describe('panelContract — version negotiation', () => {
+  it('same version = ok', () => {
+    const c = panelContract(PANEL_SCHEMA_VERSION)
+    expect(c).toEqual({
+      server: PANEL_SCHEMA_VERSION,
+      client: PANEL_SCHEMA_VERSION,
+      verdict: 'ok',
+      componentTypes: PANEL_COMPONENT_TYPES,
+    })
+  })
+
+  // THE case the milestone exists for, and the one the constant server version
+  // makes unreachable through panelContract() today: a shell frozen at v1
+  // meeting a hub that has moved to v2. Tested on the rule directly so it is
+  // covered before the divergence can happen in the field.
+  it('client behind the hub = client_outdated (the whole-panel downgrade case)', () => {
+    expect(panelContractVerdict(2, 1)).toBe('client_outdated')
+    expect(panelContractVerdict(9, 3)).toBe('client_outdated')
+  })
+
+  it('client ahead of the hub renders normally — a newer renderer must read older configs', () => {
+    expect(panelContractVerdict(1, 2)).toBe('client_ahead')
+    expect(panelContract(PANEL_SCHEMA_VERSION + 5).verdict).toBe('client_ahead')
+  })
+
+  it('equal versions are ok at every pair', () => {
+    for (const v of [1, 2, 17]) expect(panelContractVerdict(v, v)).toBe('ok')
+  })
+
+  it('absent or garbled declarations fall back to the baseline, never to a crash', () => {
+    for (const bad of [undefined, null, '', 'abc', '1.5', 0, -3, Infinity, NaN, {}, []]) {
+      const c = panelContract(bad)
+      expect(c.client, `declaration ${JSON.stringify(bad)}`).toBe(
+        PANEL_BASELINE_CLIENT_SCHEMA_VERSION,
+      )
+    }
+  })
+
+  it('accepts the string form a query param actually arrives as', () => {
+    expect(panelContract('1').client).toBe(1)
+    expect(panelContract('7').client).toBe(7)
+  })
+
+  it('every advertised component type has a contract entry (the catalog IS the promise)', () => {
+    // SHELL-M3 dropped image-card precisely because it was advertised without a
+    // renderer. The catalog a client is handed must never list a ghost again.
+    for (const type of panelContract().componentTypes) {
+      expect(PANEL_COMPONENT_CONTRACTS[type], `contract for '${type}'`).toBeDefined()
+    }
+    expect(panelContract().componentTypes).not.toContain('image-card')
   })
 })

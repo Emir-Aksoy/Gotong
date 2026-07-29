@@ -34,7 +34,10 @@
 // v12 (SHELL-M2): hub-target.js joins the shell and app-core.js now depends on
 // it at boot — a returning member must not get the new app-core with a cached
 // shell that has no hub-target.js in it.
-const CACHE = 'gotong-shell-v12'
+// v13 (SHELL-M3): sdui-ui.js declares its schemaVersion and gained the
+// whole-panel downgrade; app-core.js carries its copy. A stale pair would put
+// the downgrade branch in one file and the notice copy in neither.
+const CACHE = 'gotong-shell-v13'
 
 // Stable, role-agnostic static shell. app.html is excluded on purpose
 // (role-injected); admin.js / identity-ui.js etc. are left to the runtime

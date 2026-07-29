@@ -54,6 +54,15 @@
     else window.location.hash = '#home'
   }
 
+  // The schema version THIS renderer understands (SHELL-M3). In-repo it always
+  // equals the hub's PANEL_SCHEMA_VERSION — they ship together and a gate pins
+  // that. Inside a released shell it is frozen at build time while the hub
+  // moves on, which is the whole reason it goes on the wire: the hub answers
+  // with a verdict, and a config newer than this number is NOT rendered
+  // best-effort (unknown fields could change the meaning of known ones) but
+  // degraded whole-panel with a loud notice.
+  var CLIENT_SCHEMA_VERSION = 1
+
   // Mirror of PANEL_COMPONENT_TYPES (personal-butler panel-schema.ts).
   var KNOWN_TYPES = [
     'divider',
@@ -68,7 +77,6 @@
     'status-card',
     'schedule-list',
     'quick-actions',
-    'image-card',
   ]
 
   // ---- NDJSON reader (verbatim semantics of app.js readNdjsonStream) ------
@@ -672,7 +680,9 @@
   // The CLOSED registry — M2 shipped chat / approval-inbox / divider; C1a adds
   // the four hub-internal data components (schedules / tasks / status); C1-b
   // adds chart (usage.mine) + quick-actions; C1-c adds the content/relay trio
-  // (markdown-card / weather / card-feed). Still placeholder: image-card.
+  // (markdown-card / weather / card-feed). SHELL-M3: every KNOWN_TYPE now has
+  // an entry here, and a gate keeps it that way — a type listed as known with
+  // no renderer is a promise the panel cannot keep.
   var REGISTRY = {
     divider: function () { return el('hr', 'sdui-divider') },
     chat: renderChat,
@@ -692,6 +702,10 @@
     var type = component && typeof component.type === 'string' ? component.type : ''
     var impl = Object.prototype.hasOwnProperty.call(REGISTRY, type) ? REGISTRY[type] : null
     if (impl) return impl(component)
+    // Belt-and-braces: the KNOWN-but-unimplemented branch is unreachable while
+    // the gate holds. It stays for the legitimate staging case (a type landing
+    // in the roster one commit before its renderer) — the answer must never be
+    // a crash or a blank.
     if (KNOWN_TYPES.indexOf(type) >= 0) return placeholderCard(t('sduiComingSoon', type))
     return placeholderCard(t('sduiUnknownComponent', type || '?'))
   }
@@ -763,6 +777,20 @@
     }
     if (data.source === 'fallback') {
       host.appendChild(el('div', 'sdui-notice', t('sduiDegraded')))
+    }
+    // SHELL-M3 whole-panel downgrade. The hub says its schema is newer than
+    // this build understands, so we stop BEFORE the config: a field we know by
+    // name may not mean what it used to, and a half-understood panel is worse
+    // than an honest blocked one. The badge above and the shape picker below
+    // still render — the member keeps the pending strip and keeps a way out
+    // (switch to another shape) even when the layout itself is unreadable.
+    var contract = data.contract
+    if (contract && contract.verdict === 'client_outdated') {
+      host.appendChild(
+        el('div', 'sdui-notice', t('sduiClientOutdated', contract.server, contract.client)),
+      )
+      renderShapeSection(host, data.source)
+      return
     }
     var config = data.config
     var sections = config && typeof config === 'object' ? config.sections : null
@@ -929,7 +957,8 @@
     agentPromise = null // re-discover on each visit (agents may have changed)
     dataPromises = {} // C1a — every tab flip refetches the data sources too
     host.replaceChildren(el('p', 'me-meta', t('sduiLoading')))
-    fetch('/api/me/panel')
+    // Declare what this renderer speaks; the hub answers with the verdict.
+    fetch('/api/me/panel?client=' + CLIENT_SCHEMA_VERSION)
       .then(function (r) {
         if (r.status === 503) {
           host.replaceChildren(el('p', 'me-meta', t('sduiUnavailable')))

@@ -34,7 +34,16 @@ export const PANEL_SCHEMA_VERSION = 1
 /**
  * Closed component catalog (plan doc §六). `section`/`heading` from that table
  * are expressed as top-level structure (`sections[].heading`), not component
- * types — so the catalog here is the 13 placeable types.
+ * types — so the catalog here is the 12 placeable types.
+ *
+ * SHELL-M3 dropped `image-card`: the validator accepted it, the renderer
+ * answered with 「即将上线」 and the butler's cheat-sheet (derived from
+ * {@link PANEL_COMPONENT_CONTRACTS}) advertised it as usable — a closed set
+ * that promises something no renderer delivers. Implementing it properly needs
+ * an image-bytes store with content-type and size validation, which is a
+ * milestone rather than a footnote; nothing in the repo referenced it, so the
+ * honest fix is to stop listing it. Every entry below has a real renderer, and
+ * `sdui-ui-contract.test.ts` now keeps it that way.
  */
 export const PANEL_COMPONENT_TYPES = [
   'divider',
@@ -49,7 +58,6 @@ export const PANEL_COMPONENT_TYPES = [
   'status-card',
   'schedule-list',
   'quick-actions',
-  'image-card',
 ] as const
 
 export type PanelComponentType = (typeof PANEL_COMPONENT_TYPES)[number]
@@ -200,7 +208,6 @@ export const PANEL_COMPONENT_CONTRACTS: Readonly<Record<PanelComponentType, Comp
     params: { limit: { kind: 'int', min: 1, max: 10 } },
   },
   'quick-actions': { source: 'forbidden', params: { actions: { kind: 'actions' } } },
-  'image-card': { source: 'required', sources: ['content:', 'connector:'] },
 }
 
 export type PanelValidationResult =
@@ -409,6 +416,98 @@ function validateParam(raw: unknown, rule: ParamRule, at: string, err: (msg: str
       })
       return
     }
+  }
+}
+
+/* ── Version negotiation (SHELL-M3) ────────────────────────────────────────
+ *
+ * Until the shell exists, renderer and hub ship in the same artifact and the
+ * version number is decoration. From SHELL-M5 on, the app is released on its
+ * own clock and the hub upgrades on the operator's — so `schemaVersion` has to
+ * start carrying weight BEFORE the first shell is built (plan §五 边界③:
+ * 契约先于第二渲染器).
+ *
+ * Two rules define the protocol:
+ *
+ *   1. A renderer MUST render any config whose schemaVersion is ≤ its own.
+ *      That is what the number buys: newer renderers stay backwards
+ *      compatible, so `client_ahead` is a normal, fully-working state.
+ *   2. A renderer MUST NOT guess at a config NEWER than its own. Same-major
+ *      unknown COMPONENTS already degrade one card at a time (placeholder
+ *      cards); an unknown SCHEMA can change the meaning of fields it does
+ *      recognise, so the honest answer is a whole-panel downgrade + a loud
+ *      notice, not a best-effort render.
+ *
+ * The verdict is computed HERE — server-side, one authority — rather than left
+ * to each renderer, mirroring how severity (derivePatrolCards) and isButler are
+ * server-computed elsewhere. A client that lies about its version only changes
+ * what IT is told, never what it is served.
+ *
+ * Deliberately NOT part of the declaration: the client's component list. The
+ * server has no use for it — unknown components already degrade locally, and
+ * the butler's cheat-sheet is built at spawn time from the hub's own catalog,
+ * so a per-request declaration could not reach it anyway (and a member may be
+ * on two clients at once). Version only keeps the surface one integer wide.
+ */
+
+/** What an absent/garbled declaration is assumed to be: the oldest renderer
+ * that exists. 「协商缺席时按最低集」 = judge against the least capable client,
+ * NOT serve it a narrowed config (see {@link panelContract}). */
+export const PANEL_BASELINE_CLIENT_SCHEMA_VERSION = 1
+
+export type PanelContractVerdict =
+  /** Client can render this schema (client ≥ server). */
+  | 'ok'
+  /** Server schema is newer than the client — whole-panel downgrade. */
+  | 'client_outdated'
+  /** Client is newer than this hub. Renders normally (rule 1); reported so the
+   * member can be told which side is behind if anything looks off. */
+  | 'client_ahead'
+
+export interface PanelContract {
+  /** Schema version this hub writes and validates. */
+  server: number
+  /** Echo of the normalized client declaration (baseline when absent). */
+  client: number
+  verdict: PanelContractVerdict
+  /** The hub's closed catalog — lets a client name what it could not render. */
+  componentTypes: readonly PanelComponentType[]
+}
+
+/**
+ * The rule itself, over an arbitrary version pair.
+ *
+ * Split out from {@link panelContract} because the server side is a constant:
+ * while PANEL_SCHEMA_VERSION is 1 and declarations normalize to ≥1, the
+ * `client_outdated` branch is unreachable through the public entry point — yet
+ * it is the branch the whole milestone exists for. Taking both versions as
+ * arguments makes the v2-hub-vs-v1-shell case testable years before a v2 hub
+ * exists, which is the point: the mechanism has to be proven while divergence
+ * is still hypothetical.
+ */
+export function panelContractVerdict(server: number, client: number): PanelContractVerdict {
+  if (client < server) return 'client_outdated'
+  if (client > server) return 'client_ahead'
+  return 'ok'
+}
+
+/**
+ * Compute the contract block for one panel response.
+ *
+ * The declaration NEVER filters the served config. Dropping components the
+ * client didn't claim would silently show the member less than they configured
+ * — the opposite of the placeholder-card discipline (「永不空白」) — and would
+ * put a client-supplied claim in the path of what data the hub serves. The
+ * config bytes are identical for every declared version; only the verdict moves.
+ */
+export function panelContract(clientDeclared?: unknown): PanelContract {
+  const n = Number(clientDeclared)
+  const client = Number.isInteger(n) && n >= 1 ? n : PANEL_BASELINE_CLIENT_SCHEMA_VERSION
+  return {
+    server: PANEL_SCHEMA_VERSION,
+    client,
+    verdict: panelContractVerdict(PANEL_SCHEMA_VERSION, client),
+    componentTypes: PANEL_COMPONENT_TYPES,
   }
 }
 

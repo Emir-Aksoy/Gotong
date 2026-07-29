@@ -36,8 +36,10 @@ import {
   PANEL_ID_RE,
   PANEL_LIMITS,
   PANEL_SCHEMA_VERSION,
+  panelContract,
   validatePanelConfig,
   type PanelConfig,
+  type PanelContract,
 } from '@gotong/personal-butler'
 import { ownerDir } from '@gotong/service-memory-file'
 
@@ -130,6 +132,13 @@ export interface MePanelSurfaceHost {
   /** markdown null = delete. The butler toolset is the only writer in v1
    * (userId closed over there); every write runs the per-user serial chain. */
   writeContent(userId: string, fileId: string, markdown: string | null): Promise<void>
+  /**
+   * SHELL-M3 version negotiation. Pure and per-request: takes whatever the
+   * client declared (`?client=`) and answers the server-computed verdict. It
+   * does NOT touch the config — a client declaration can never change what is
+   * served, only what the client is told about it.
+   */
+  contract(clientDeclared?: unknown): PanelContract
 }
 
 export function buildMePanelSurface(opts: { spaceDir: string }): MePanelSurfaceHost {
@@ -453,6 +462,9 @@ export function buildMePanelSurface(opts: { spaceDir: string }): MePanelSurfaceH
     readContent,
     listContent,
     writeContent,
+    // Straight delegation: the schema package owns the verdict so the butler's
+    // view, the HTTP face and any future renderer can never disagree about it.
+    contract: panelContract,
 
     async resetPanel(userId, opts) {
       await serialize(userId, async () => {

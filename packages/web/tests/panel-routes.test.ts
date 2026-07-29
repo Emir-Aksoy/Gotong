@@ -129,6 +129,27 @@ class StubPanelData implements MePanelDataSurface {
   }
 }
 
+/** SHELL-M3 — the base StubPanel deliberately has NO contract (older-host
+ * case: no block on the wire, and clients treat that as today's behaviour). */
+class StubPanelWithContract extends StubPanel {
+  readonly declared: unknown[] = []
+
+  contract(clientDeclared?: unknown) {
+    this.declared.push(clientDeclared)
+    const n = Number(clientDeclared)
+    const client = Number.isInteger(n) && n >= 1 ? n : 1
+    return {
+      server: 1,
+      client,
+      verdict: (client < 1 ? 'client_outdated' : client > 1 ? 'client_ahead' : 'ok') as
+        | 'ok'
+        | 'client_outdated'
+        | 'client_ahead',
+      componentTypes: ['chat', 'divider'],
+    }
+  }
+}
+
 /** C1-c — the base StubPanel deliberately has NO readContent (older-host case). */
 class StubPanelWithContent extends StubPanel {
   readonly askedContent: Array<{ userId: string; fileId: string }> = []
@@ -228,6 +249,51 @@ describe('/api/me/panel — SDUI member panel config (M2 read + M3 write)', () =
     const r = await req('GET')
     expect(r.status).toBe(200)
     expect(r.json.source).toBe('fallback')
+  })
+
+  // SHELL-M3 — the shell declares what it can render; the hub answers with a
+  // verdict. The security property is that the declaration is ADVISORY.
+  it('?client= reaches the surface verbatim and the verdict comes back', async () => {
+    const stub = new StubPanelWithContract()
+    b = await boot({ stub })
+    const r = await req('GET', { path: '/api/me/panel?client=1' })
+    expect(r.status).toBe(200)
+    expect(stub.declared).toEqual(['1'])
+    expect(r.json.contract).toEqual({
+      server: 1,
+      client: 1,
+      verdict: 'ok',
+      componentTypes: ['chat', 'divider'],
+    })
+  })
+
+  it('a client declaration can NEVER change what is served — only the verdict', async () => {
+    const stub = new StubPanelWithContract()
+    b = await boot({ stub })
+    const [none, low, high, junk] = await Promise.all([
+      req('GET'),
+      req('GET', { path: '/api/me/panel?client=1' }),
+      req('GET', { path: '/api/me/panel?client=99' }),
+      req('GET', { path: '/api/me/panel?client=../../etc/passwd' }),
+    ])
+    const bytes = (r: { json: any }): string => JSON.stringify(r.json.config)
+    // Identical config bytes across every declaration, including none at all.
+    // Filtering by a client-supplied claim would silently narrow the member's
+    // own panel AND put untrusted input in the path of what data is served.
+    expect(new Set([bytes(none!), bytes(low!), bytes(high!), bytes(junk!)]).size).toBe(1)
+    expect(low!.json.contract.verdict).toBe('ok')
+    expect(high!.json.contract.verdict).toBe('client_ahead')
+    // Garbage normalizes to the baseline rather than 400ing — an unparseable
+    // declaration is the same situation as no declaration: assume the oldest.
+    expect(junk!.json.contract.client).toBe(1)
+  })
+
+  it('an older host without contract() sends no block (clients keep today’s behaviour)', async () => {
+    b = await boot()
+    const r = await req('GET', { path: '/api/me/panel?client=1' })
+    expect(r.status).toBe(200)
+    expect(r.json.contract).toBeUndefined()
+    expect(r.json.config.sections).toHaveLength(1)
   })
 
   it('no surface wired → 503 (setting-ops posture)', async () => {
