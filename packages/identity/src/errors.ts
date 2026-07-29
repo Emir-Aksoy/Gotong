@@ -165,6 +165,24 @@ export type IdentityErrorCode =
    * a friendlier "this code expired; ask for a new one" message.
    */
   | 'im_binding_code_expired'
+  // SHELL-M1 — device pairing.
+  /**
+   * `claimDevicePairingCode` was called with a code no row matches —
+   * already redeemed (single-shot), mistyped past what normalisation
+   * can fold, or swept. Deliberately indistinguishable from "wrong
+   * code" so a public endpoint can't be used to probe which codes are
+   * live. UX: ask the member to reissue from the web UI.
+   */
+  | 'device_pairing_code_invalid'
+  /**
+   * `claimDevicePairingCode` matched a row but `expires_at < now`. The
+   * row is NOT deleted here — the surrounding transaction rolls back
+   * when we re-throw, so the DELETE would be undone anyway. It lingers
+   * until the next reissue (DELETE-by-user) or the periodic sweep, same
+   * as the IM twin. Distinct from `_invalid` because the remedy
+   * differs: the member had the right code, just too late.
+   */
+  | 'device_pairing_code_expired'
 
 export interface IdentityErrorOptions {
   code: IdentityErrorCode

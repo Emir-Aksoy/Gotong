@@ -31,7 +31,7 @@
 // v10 (PUSH-M3): this SW gains push/notificationclick/pushsubscriptionchange
 // handlers + the /me notification card (app.js/app-core.js/app.html) — the
 // shell must refresh so subscribe targets a SW that can actually show taps.
-const CACHE = 'gotong-shell-v10'
+const CACHE = 'gotong-shell-v11'
 
 // Stable, role-agnostic static shell. app.html is excluded on purpose
 // (role-injected); admin.js / identity-ui.js etc. are left to the runtime

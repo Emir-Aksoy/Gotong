@@ -907,9 +907,13 @@
     await loadButlerMemory()
     await loadMyImBindings()
     await refreshPushCard()
+    await loadMyDevices()
     // WX-M3b — IM binding card: mint a 6-digit /bind code + manage bindings.
     bindOnce(document.getElementById('me-im-bind-btn'), 'click', mintImBindingCode)
     bindOnce(document.getElementById('me-im-bindings'), 'click', onImBindingsClick)
+    // SHELL-M1 — phone app pairing: mint a QR + revoke a paired device.
+    bindOnce(document.getElementById('me-device-btn'), 'click', mintPairingCode)
+    bindOnce(document.getElementById('me-devices'), 'click', onDevicesClick)
     // PUSH-M3 — browser notification card (Web Push subscribe/unsubscribe).
     bindOnce(document.getElementById('me-push-btn'), 'click', onPushToggle)
     bindOnce(document.getElementById('me-dispatch-btn'), 'click', submitDispatch)
@@ -1059,6 +1063,150 @@
     const bytes = new Uint8Array(raw.length)
     for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i)
     return bytes
+  }
+
+  // --- Phone app pairing (SHELL-M1) -----------------------------------------
+  // One scan carries both halves — WHICH hub, and a one-shot code — because
+  // the alternative is asking someone to type a hostname on a phone keyboard.
+  // Built with DOM APIs rather than innerHTML: this card renders a data-URI
+  // image right beside a live credential, and a template string is the wrong
+  // place to be careful.
+
+  // The last minted code, kept so a language switch can REPAINT it rather than
+  // mint again — minting rotates the previous code out, so re-running the
+  // request to get fresh copy would invalidate the code the member is at that
+  // moment typing into their phone.
+  let __pairing = null
+
+  async function loadMyDevices() {
+    const card = document.getElementById('me-device-card')
+    const box = document.getElementById('me-devices')
+    if (!card || !box) return
+    try {
+      const r = await fetch('/api/me/devices')
+      const j = await r.json().catch(() => null)
+      // available:false is a host without the surface wired — hide the card
+      // rather than offer a button whose only possible answer is 503.
+      if (!r.ok || !j?.available) { card.hidden = true; return }
+      card.hidden = false
+      renderDeviceRows(box, Array.isArray(j.devices) ? j.devices : [])
+      // renderHome re-runs on the language toggle (REL-7), which is what gets
+      // the displayed code back into the member's language.
+      const out = document.getElementById('me-device-out')
+      if (out && __pairing) renderPairingCode(out, __pairing)
+    } catch {
+      card.hidden = true
+    }
+  }
+
+  function renderDeviceRows(box, rows) {
+    box.textContent = ''
+    if (rows.length === 0) { box.textContent = t('meDeviceNone'); return }
+    const head = document.createElement('div')
+    head.textContent = t('meDeviceListTitle')
+    box.appendChild(head)
+    for (const d of rows) {
+      const row = document.createElement('div')
+      const name = document.createElement('strong')
+      name.textContent = String(d.label || '')
+      row.appendChild(name)
+      const meta = document.createElement('span')
+      // Three states, all honest: a long-lived key an owner issued (no expiry
+      // — it is listed here because it can act as you, and this is the one
+      // place you can cut it), a live device, and an expired one. Expired rows
+      // stay visible so "why did the app stop working" has a visible answer.
+      const exp = typeof d.expiresAt === 'number' ? d.expiresAt : null
+      meta.textContent =
+        exp === null
+          ? ' · ' + t('meDeviceNoExpiry')
+          : exp < Date.now()
+            ? ' · ' + t('meDeviceExpired')
+            : ' · ' + t('meDeviceUntil', new Date(exp).toLocaleDateString())
+      row.appendChild(meta)
+      const btn = document.createElement('button')
+      btn.type = 'button'
+      btn.className = 'me-secondary-btn'
+      btn.dataset.deviceRevoke = String(d.credentialId || '')
+      btn.textContent = t('meDeviceRevoke')
+      row.appendChild(document.createTextNode(' '))
+      row.appendChild(btn)
+      box.appendChild(row)
+    }
+  }
+
+  async function mintPairingCode() {
+    const out = document.getElementById('me-device-out')
+    // Dropped before the request, not after: the old code is rotated out
+    // server-side either way, so a failed mint must not leave a dead code on
+    // screen for the member to keep typing.
+    __pairing = null
+    if (out) out.textContent = t('meDeviceMinting')
+    try {
+      const r = await fetch('/api/me/devices/pairing-code', { method: 'POST' })
+      const j = await r.json().catch(() => null)
+      if (!r.ok || !j?.ok) {
+        if (out) out.textContent = t('meDeviceMintFailed', j?.error || `HTTP ${r.status}`)
+        return
+      }
+      __pairing = j
+      if (out) renderPairingCode(out, j)
+    } catch (err) {
+      if (out) out.textContent = t('meDeviceMintFailed', err?.message || err)
+    }
+  }
+
+  function renderPairingCode(out, j) {
+    out.textContent = ''
+    if (j.qrDataUri) {
+      const img = document.createElement('img')
+      img.src = String(j.qrDataUri)
+      img.alt = t('meDeviceQrAlt')
+      img.width = 220
+      img.height = 220
+      img.style.imageRendering = 'pixelated'
+      out.appendChild(img)
+    }
+    // The grouped code is not a fallback for a failed QR — it is the path for
+    // a phone that can't scan at all, so it is always shown, never hidden
+    // behind "having trouble?".
+    const typed = document.createElement('div')
+    const code = document.createElement('strong')
+    code.style.fontSize = '1.3em'
+    code.style.letterSpacing = '.15em'
+    code.textContent = String(j.display || j.code || '')
+    typed.appendChild(code)
+    out.appendChild(typed)
+    const left = Number(j.expiresAt) - Date.now()
+    const note = document.createElement('div')
+    note.className = 'me-meta'
+    // A repaint can happen long after the mint (language toggle, revoke), so
+    // the note must be able to say the code is dead rather than round its way
+    // up to a reassuring "valid 1 min".
+    note.textContent = left > 0 ? t('meDeviceCodeMsg', Math.max(1, Math.round(left / 60000))) : t('meDeviceExpired')
+    out.appendChild(note)
+  }
+
+  async function onDevicesClick(ev) {
+    const btn = ev.target.closest('button[data-device-revoke]')
+    if (!btn) return
+    const out = document.getElementById('me-device-out')
+    try {
+      const r = await fetch(`/api/me/devices/${encodeURIComponent(btn.dataset.deviceRevoke)}`, {
+        method: 'DELETE',
+      })
+      if (!r.ok) {
+        const j = await r.json().catch(() => null)
+        // The failure shares the box with the minted code, so the code has to
+        // give way — otherwise loadMyDevices' repaint would wipe the error.
+        __pairing = null
+        if (out) out.textContent = t('meDeviceRevokeFailed', j?.error || `HTTP ${r.status}`)
+        return
+      }
+      await loadMyDevices()
+    } catch (err) {
+      __pairing = null
+      if (out) out.textContent = t('meDeviceRevokeFailed', err?.message || err)
+    }
   }
 
   let __pushState = null // { publicKey, count, subscribed } after refreshPushCard

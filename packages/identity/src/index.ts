@@ -125,6 +125,11 @@ export type {
   ClaimImBindingCodeInput,
   ClaimImBindingResult,
   ListImBindingsQuery,
+  // SHELL-M1 — device pairing.
+  IssueDevicePairingCodeInput,
+  DevicePairingCode,
+  ClaimDevicePairingCodeInput,
+  ClaimedDevice,
   WorkflowGrant,
   SetWorkflowGrantInput,
   WorkflowPerm,

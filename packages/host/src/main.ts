@@ -279,6 +279,7 @@ import { armButlerSweeps } from './personal-butler-sweeps.js'
 import { createWorkflowScheduleAdminSurface } from './workflow-schedule-admin.js'
 import { WorkflowScheduleSweeper } from './workflow-schedule-sweeper.js'
 import { HostMeImService } from './me-im-service.js'
+import { HostMeDeviceService } from './me-device-service.js'
 import { ApprovalGatedParticipant } from './outbound-approval.js'
 import { armHeartbeatEngine } from './heartbeat-engine.js'
 import { FileInboxStore, HumanInboxParticipant, HUMAN_CAPABILITY } from '@gotong/inbox'
@@ -1862,6 +1863,11 @@ async function main(): Promise<void> {
     ? new HostMeImService({ identity, isEnabled: () => (imBridges?.bridges.length ?? 0) > 0 })
     : undefined
 
+  // SHELL-M1 — app device pairing. Pure identity, no new store: the code table
+  // and the credential expiry both live there, so this is only present when
+  // identity is (the /me routes then answer {available:false}).
+  const meDevices = identity ? new HostMeDeviceService({ identity }) : undefined
+
   // v5 A-M4 — member agent access-grant sharing (an owner shares their agent
   // with other principals). Grants live in identity's resource_grants table, so
   // this is wired only when identity is present; /api/me/agents/:id/grants 503s
@@ -2383,6 +2389,7 @@ async function main(): Promise<void> {
     butlerMemory,
     // GO-LIVE GL-1c — member IM-account linking (undefined → 503).
     ...(meIm ? { meIm } : {}),
+    ...(meDevices ? { devices: meDevices } : {}),
     // Phase 16 — member task inbox; undefined when identity is unwired, in
     // which case /me/inbox degrades (empty list / 503).
     ...(inboxService ? { inbox: inboxService } : {}),

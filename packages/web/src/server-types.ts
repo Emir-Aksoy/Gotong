@@ -37,6 +37,7 @@ import type {
 import type { WorkflowWizardSurface } from './wizard-routes.js'
 import type { MePanelDataSurface, MePanelSurface } from './panel-routes.js'
 import type { MeWebPushSurface } from './push-routes.js'
+import type { MeDeviceSurface } from './device-routes.js'
 import type {
   ConnectorSlotSink,
   LlmKeyProbe,
@@ -354,6 +355,12 @@ export interface WebServerOptions {
   panelData?: MePanelDataSurface
   /** PUSH-M2 — Web Push subscriptions; absent → GET {available:false}, POSTs 503. */
   webPush?: MeWebPushSurface
+  /**
+   * SHELL-M1 — app device pairing (`/api/me/devices*` + the PUBLIC
+   * `/api/devices/claim`). Absent → GET answers {available:false} and the
+   * pairing card stays hidden; the claim endpoint 503s.
+   */
+  devices?: MeDeviceSurface
   /**
    * SDUI-M3 — durable sink for a template's panel presets (`panels[]`). The
    * host wires the SAME store object as `mePanel` (its `installPanels`); the

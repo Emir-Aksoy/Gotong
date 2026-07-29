@@ -1250,6 +1250,39 @@ const MIGRATIONS: Migration[] = [
       ALTER TABLE peers ADD COLUMN trust_tier TEXT;
     `,
   },
+  {
+    // SHELL-M1 — device pairing. Two additive changes, both invisible to
+    // every existing row.
+    //
+    // `credentials.expires_at`: NULL means "never expires", which is
+    // exactly what every credential issued before today already was
+    // (issueApiKey/issueAdminToken never wrote an expiry). Only the
+    // device-pairing path sets it. `authenticateToken` enforces it —
+    // a column nobody checks is worse than no column, because it reads
+    // like a guarantee that isn't there.
+    //
+    // `device_pairing_codes` deliberately does NOT reuse
+    // `im_binding_codes`. Both are "single code per user, single-shot,
+    // short TTL", but they redeem into different things and each issue
+    // clears the user's prior row — sharing one table would make
+    // generating a device code silently invalidate a pending IM bind.
+    version: 38,
+    name: 'device-pairing',
+    sql: `
+      ALTER TABLE credentials ADD COLUMN expires_at INTEGER;
+
+      CREATE TABLE IF NOT EXISTS device_pairing_codes (
+        code        TEXT PRIMARY KEY,
+        user_id     TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        expires_at  INTEGER NOT NULL,
+        created_at  INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_device_pairing_codes_user
+        ON device_pairing_codes(user_id);
+      CREATE INDEX IF NOT EXISTS idx_device_pairing_codes_expires
+        ON device_pairing_codes(expires_at);
+    `,
+  },
 ]
 
 /**

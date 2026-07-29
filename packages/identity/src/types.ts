@@ -76,6 +76,14 @@ export interface Credential {
   label: string | null
   createdAt: number
   lastUsedAt: number | null
+  /**
+   * SHELL-M1 — epoch ms after which this credential no longer
+   * authenticates, or null for "never expires". null is what every
+   * credential minted before device pairing existed carries, and
+   * remains the default for owner-issued API keys; only the device
+   * pairing flow sets a real expiry. Enforced in `authenticateToken`.
+   */
+  expiresAt: number | null
 }
 
 export interface CreateUserInput {
@@ -1983,6 +1991,75 @@ export interface ClaimImBindingResult {
 export interface ListImBindingsQuery {
   /** Filter by platform; omit for "all platforms". */
   platform?: string
+}
+
+// ---------------------------------------------------------------------------
+// Device pairing (SHELL-M1)
+//
+// The flow a member walks: signed into the web UI they ask for a pairing
+// code; the app scans it (or they retype it) and POSTs it to a PUBLIC
+// endpoint, which trades it for an `aipk_` API key bound to that device.
+// From then on the app authenticates with `Authorization: Bearer` — the
+// path `resolveV4Auth` already accepts, so no second auth mechanism is
+// introduced.
+//
+// Shape notes vs the IM binding code it is modelled on: the code is 16
+// Crockford-base32 chars rather than 6 digits (its redemption endpoint is
+// public — see `tokens.ts`), and redeeming mints a credential rather than
+// linking an identity.
+// ---------------------------------------------------------------------------
+
+export interface IssueDevicePairingCodeInput {
+  userId: string
+  /**
+   * TTL in ms. Defaults to 10 minutes; clamped to [60_000, 3_600_000],
+   * same bounds and same rationale as {@link IssueImBindingCodeInput}.
+   */
+  ttlMs?: number
+  /** Explicit code, for test determinism. Must normalise to canonical form. */
+  code?: string
+}
+
+export interface DevicePairingCode {
+  /** Canonical (normalised) code — what goes in the QR and what we compare. */
+  code: string
+  /**
+   * The same code grouped for a human to read off a screen and retype
+   * (`ABCD-EFGH-JKMN-PQRS`). Computed here rather than in the SPA because
+   * `tokens.ts` is an internal module the web layer can't import, and one
+   * definition of the grouping beats two that can drift.
+   */
+  display: string
+  userId: string
+  expiresAt: number
+  createdAt: number
+}
+
+export interface ClaimDevicePairingCodeInput {
+  /** As typed or scanned; normalised before lookup. */
+  code: string
+  /**
+   * Device name shown in the member's device list ("Emir's iPhone").
+   * Trimmed and length-capped by the store; falls back to a generic
+   * label when absent, so a device is never nameless in the revoke UI.
+   */
+  deviceLabel?: string | null
+  /**
+   * Lifetime of the minted key in ms. Defaults to 90 days; clamped to
+   * [1 h, 365 d]. Deliberately finite: an app credential that never
+   * expires is a permanent bearer secret on a device that can be lost,
+   * and 7-day cookies are the friction this whole track exists to
+   * remove. Re-pairing is a QR scan.
+   */
+  keyTtlMs?: number
+}
+
+export interface ClaimedDevice {
+  /** The `aipk_` key. Returned exactly once, never retrievable again. */
+  key: string
+  credentialId: string
+  userId: string
+  expiresAt: number
 }
 
 // ---------------------------------------------------------------------------

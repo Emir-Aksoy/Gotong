@@ -58,3 +58,55 @@ export function newId(): string {
   const rand = randomBytes(12).toString('hex')
   return `${time}-${rand}`
 }
+
+// =====================================================================
+// SHELL-M1 — device pairing codes
+//
+// Deliberately NOT the shape of the IM binding code (6 decimal digits,
+// `store.ts` issueImBindingCode). That one is safe because its only
+// redemption path is an IM bridge calling in-process, behind whatever
+// rate limiting the chat platform already imposes. A device pairing
+// code is redeemed over a PUBLIC HTTP endpoint — the client has no
+// credential yet, that's the whole point — so 10^6 is not a defensible
+// search space: a patient attacker gets more than a million attempts in
+// a month even under modest rate limiting.
+//
+// 16 chars of Crockford base32 = 80 bits. The alphabet drops I, L, O
+// and U so nothing reads ambiguously on a phone screen, and
+// `normalizeDevicePairingCode` folds the mistakes a human actually
+// makes when re-typing (case, I/L -> 1, O -> 0, grouping separators).
+// Codes are stored normalized; only the UI groups them for display.
+const PAIRING_ALPHABET = '0123456789ABCDEFGHJKMNPQRSTVWXYZ'
+export const DEVICE_PAIRING_CODE_LENGTH = 16
+
+export function newDevicePairingCode(): string {
+  // Rejection-free: 32 divides 256, so byte % 32 is uniform.
+  const bytes = randomBytes(DEVICE_PAIRING_CODE_LENGTH)
+  let out = ''
+  for (const b of bytes) out += PAIRING_ALPHABET[b % 32]
+  return out
+}
+
+/**
+ * Fold a human-typed pairing code back to its canonical form, or null
+ * when it cannot be one. Accepts any grouping (`ABCD-EFGH`, spaces),
+ * any case, and the classic transcription confusions. Returning null
+ * rather than throwing keeps callers' shape checks in one place.
+ */
+export function normalizeDevicePairingCode(raw: unknown): string | null {
+  if (typeof raw !== 'string') return null
+  let out = ''
+  for (const ch of raw.toUpperCase()) {
+    if (ch === '-' || ch === ' ') continue
+    // Crockford's documented confusions, applied before alphabet check.
+    const folded = ch === 'I' || ch === 'L' ? '1' : ch === 'O' ? '0' : ch
+    if (!PAIRING_ALPHABET.includes(folded)) return null
+    out += folded
+  }
+  return out.length === DEVICE_PAIRING_CODE_LENGTH ? out : null
+}
+
+/** `ABCD-EFGH-JKMN-PQRS` — display only; never what we store or compare. */
+export function formatDevicePairingCode(code: string): string {
+  return code.replace(/(.{4})(?=.)/g, '$1-')
+}

@@ -61,6 +61,7 @@ import {
 } from './me-routes.js'
 import { handleAdminPanelRoute, type MePanelDataSurface, type MePanelSurface } from './panel-routes.js'
 import type { MeWebPushSurface } from './push-routes.js'
+import { handleDeviceClaimRoute, type MeDeviceSurface } from './device-routes.js'
 import {
   handleWorkflowRoute,
   type WorkflowGrantSink,
@@ -299,6 +300,11 @@ export function serveWeb(hub: Hub, opts: WebServerOptions = {}): Promise<WebServ
     workerLimitOpts.max,
     workerLimitOpts.windowSec * 1000,
   )
+  // SHELL-M1 — the pairing-code claim endpoint is public by necessity, so
+  // it gets its own (tighter) budget rather than sharing the login one:
+  // a member pairing a phone types one code, and 10/min per IP is already
+  // generous for that while being nowhere near enough to search 80 bits.
+  const deviceClaimLimiter = new RateLimiter(10, 60_000)
   const sseClients = new Set<SseClient>()
 
   const unsubscribe = hub.onEvent((event) => {
@@ -358,6 +364,8 @@ export function serveWeb(hub: Hub, opts: WebServerOptions = {}): Promise<WebServ
     mePanel: opts.mePanel,
     panelData: opts.panelData,
     webPush: opts.webPush,
+    devices: opts.devices,
+    deviceClaimLimiter,
     panelLibrary: opts.panelLibrary,
     operatorSteward: opts.operatorSteward,
     readinessGate: opts.readinessGate,
@@ -555,6 +563,9 @@ interface HandlerCtx {
   panelData: MePanelDataSurface | undefined
   /** PUSH-M2 — see WebServerOptions.webPush doc. */
   webPush: MeWebPushSurface | undefined
+  devices: MeDeviceSurface | undefined
+  /** SHELL-M1 — per-IP budget for the PUBLIC pairing-code claim endpoint. */
+  deviceClaimLimiter: RateLimiter
   panelLibrary: WebServerOptions['panelLibrary']
   /** SW-M9 A-M6 — see WebServerOptions.operatorSteward doc above. */
   operatorSteward: MeHubStewardSurface | undefined
@@ -863,6 +874,23 @@ async function handle(
   // C-M2-M3 — public outbound OAuth connect callback (state-protected; the
   // begin half is admin-gated below). Pre-CSRF like the OIDC callback.
   if (await handleOAuthConnectCallbackRoute({ oauthConnect: ctx.oauthConnect }, req, res, method, path)) {
+    return
+  }
+
+  // SHELL-M1 — public device pairing claim. Pre-CSRF and outside requireAdmin
+  // for the same reason as the callbacks above: a native shell posting from
+  // `capacitor://` sends no browser-shaped Origin, and it has no session yet —
+  // acquiring one is the request. The 80-bit code plus the per-IP limiter are
+  // what stand in for auth here; the member half stays behind /api/me/*.
+  if (
+    await handleDeviceClaimRoute(
+      { devices: ctx.devices, allowClaim: () => ctx.deviceClaimLimiter.check(clientIp(ctx, req)) },
+      req,
+      res,
+      method,
+      path,
+    )
+  ) {
     return
   }
 
@@ -1205,6 +1233,10 @@ async function handle(
         mePanel: ctx.mePanel,
         panelData: ctx.panelData,
         webPush: ctx.webPush,
+        devices: ctx.devices,
+        // SHELL-M1 — the pairing QR encodes the address the member reached us
+        // on, so it needs the same proxy-trust switch the agent card uses.
+        trustProxy: ctx.trustProxy,
         // ease-of-use ①TC-ME — member "test connection" for a BYO key; the SAME
         // probe surface the setup/admin routes use. undefined → /api/me/test-llm-key
         // returns 503. Member route is provider-restricted + no baseURL (no SSRF).

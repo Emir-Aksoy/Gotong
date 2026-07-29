@@ -337,6 +337,20 @@
         <div id="me-push-out" class="me-status"></div>
       </div>
 
+      <!-- SHELL-M1 — pair the phone app. The QR carries BOTH the hub address
+           and a one-shot code, so pairing is one scan rather than "type this
+           hostname, then type this code". The grouped form under it is the
+           fallback for a phone that can't scan. The code is single-use and
+           short-lived; the key it becomes lives on the device only, and this
+           list is where the member can cut it off. -->
+      <div id="me-device-card" class="me-im-bind" hidden>
+        <h2 data-i18n="meDeviceTitle">连接手机 app</h2>
+        <p class="me-meta" data-i18n="meDeviceHint">在手机 app 里扫下面的二维码,就能连上这台 hub。二维码里同时带了地址和一次性配对码,10 分钟内有效;重新生成会作废旧的。扫不了就手输下面那串码。</p>
+        <button id="me-device-btn" type="button" class="me-primary-btn" data-i18n="meDeviceMint">生成配对码</button>
+        <div id="me-device-out" class="me-status"></div>
+        <div id="me-devices" class="me-meta"></div>
+      </div>
+
       <!-- UI-A4 — the tooling cards (dispatch / explain / edit / create /
            runs / reports / agents / own-agents / keys / butler memory) fold
            behind one <details>. A parent's home page is butler + approvals;

@@ -46,6 +46,7 @@ import { readJsonBody, sendJson } from './http-helpers.js'
 import { handleMeWizardRoute, type WorkflowWizardSurface } from './wizard-routes.js'
 import { handleMePanelRoute, type MePanelDataSurface, type MePanelSurface } from './panel-routes.js'
 import { handleMeWebPushRoute, type MeWebPushSurface } from './push-routes.js'
+import { handleMeDeviceRoute, type MeDeviceSurface } from './device-routes.js'
 import { readRawBody } from './uploads-routes.js'
 
 import type { Hub } from '@gotong/core'
@@ -407,6 +408,10 @@ export interface HandleMeRouteCtx {
   mePanel: MePanelSurface | undefined
   panelData: MePanelDataSurface | undefined
   webPush: MeWebPushSurface | undefined
+  /** SHELL-M1 — app device pairing; undefined → GET {available:false}, POSTs 503. */
+  devices: MeDeviceSurface | undefined
+  /** SHELL-M1 — proxy-trust switch; the pairing QR encodes a request-derived origin. */
+  trustProxy: boolean
   /**
    * ease-of-use ①TC-ME — member "test connection" probe for a BYO key. Same
    * object the setup/admin probe uses (server.ts `ctx.llmKeyTest`), inlined here
@@ -754,6 +759,8 @@ export async function handleMeRoute(
   }
   // PUSH-M2 — Web Push subscriptions (implementation in push-routes.ts, 控预算).
   if (path.startsWith('/api/me/push') && (await handleMeWebPushRoute({ webPush: ctx.webPush }, req, res, method, path, userId))) return
+  // SHELL-M1 — app device pairing (implementation in device-routes.ts, 控预算).
+  if (path.startsWith('/api/me/devices') && (await handleMeDeviceRoute({ devices: ctx.devices, trustProxy: ctx.trustProxy }, req, res, method, path, userId))) return
   {
     const m =
       method === 'POST' ? /^\/api\/me\/inbox\/([^/]+)\/resolve$/.exec(path) : null

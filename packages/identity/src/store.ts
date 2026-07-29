@@ -42,11 +42,14 @@ import {
   verifyPassword,
 } from './credentials.js'
 import {
+  formatDevicePairingCode,
   newAdminToken,
   newApiKey,
+  newDevicePairingCode,
   newId,
   newInvitationToken,
   newSessionToken,
+  normalizeDevicePairingCode,
 } from './tokens.js'
 import { IdentityError } from './errors.js'
 import { VaultStore, type VaultMutationReason } from './vault-store.js'
@@ -165,6 +168,10 @@ import {
   type IssueImBindingCodeInput,
   type ClaimImBindingCodeInput,
   type ClaimImBindingResult,
+  type DevicePairingCode,
+  type IssueDevicePairingCodeInput,
+  type ClaimDevicePairingCodeInput,
+  type ClaimedDevice,
   type ListImBindingsQuery,
   // Phase 19 P2-M5 — workflow grants (resource RBAC).
   type SetWorkflowGrantInput,
@@ -256,6 +263,8 @@ interface CredentialRow {
   label: string | null
   created_at: number
   last_used_at: number | null
+  /** SHELL-M1, schema v38. NULL = never expires (every pre-v38 row). */
+  expires_at: number | null
 }
 interface MembershipRow {
   id: string
@@ -406,6 +415,11 @@ function rowToCredential(r: CredentialRow): Credential {
     label: r.label,
     createdAt: r.created_at,
     lastUsedAt: r.last_used_at,
+    // `?? null` rather than `r.expires_at`: rows read back through an
+    // older driver path (or a hand-rolled row in a test fixture) can
+    // legitimately lack the column, and "absent" means the same thing
+    // as NULL here — never expires.
+    expiresAt: r.expires_at ?? null,
   }
 }
 function rowToMembership(r: MembershipRow): Membership {
@@ -475,6 +489,7 @@ export class IdentityStore {
   private readonly stmtCountUsers: SqliteStmt
 
   private readonly stmtInsertCredential: SqliteStmt
+  private readonly stmtInsertCredentialWithExpiry: SqliteStmt
   private readonly stmtFindCredByKindIdent: SqliteStmt
   private readonly stmtFindTokenCredByIdent: SqliteStmt
   private readonly stmtCredsByUser: SqliteStmt
@@ -567,6 +582,11 @@ export class IdentityStore {
   private readonly stmtImBindingCodeGetByCode: SqliteStmt
   private readonly stmtImBindingCodeDeleteByCode: SqliteStmt
   private readonly stmtImBindingCodeDeleteByUser: SqliteStmt
+  private readonly stmtDevicePairingCodeInsert: SqliteStmt
+  private readonly stmtDevicePairingCodeGetByCode: SqliteStmt
+  private readonly stmtDevicePairingCodeDeleteByCode: SqliteStmt
+  private readonly stmtDevicePairingCodeDeleteByUser: SqliteStmt
+  private readonly stmtDevicePairingCodeDeleteExpired: SqliteStmt
   private readonly stmtImBindingCodeDeleteExpired: SqliteStmt
 
   constructor(
@@ -630,6 +650,14 @@ export class IdentityStore {
     this.stmtInsertCredential = db.prepare(
       `INSERT INTO credentials(id, user_id, kind, identifier, secret_hash, label, created_at, last_used_at)
        VALUES(?, ?, ?, ?, ?, ?, ?, NULL)`,
+    )
+    // SHELL-M1 — deliberately a SECOND statement rather than widening the
+    // one above. Seven call sites insert credentials that never expire;
+    // widening would touch all of them to pass a NULL they already get by
+    // column default. Only the device-pairing path needs an expiry.
+    this.stmtInsertCredentialWithExpiry = db.prepare(
+      `INSERT INTO credentials(id, user_id, kind, identifier, secret_hash, label, created_at, last_used_at, expires_at)
+       VALUES(?, ?, ?, ?, ?, ?, ?, NULL, ?)`,
     )
     this.stmtFindCredByKindIdent = db.prepare(
       'SELECT * FROM credentials WHERE kind = ? AND identifier = ?',
@@ -790,6 +818,25 @@ export class IdentityStore {
     )
     this.stmtImBindingCodeDeleteExpired = db.prepare(
       `DELETE FROM im_binding_codes WHERE expires_at < ?`,
+    )
+    // SHELL-M1 — device pairing codes. Same five-statement shape as the
+    // IM codes above; separate table so issuing one kind never clears a
+    // pending code of the other kind (both are single-code-per-user).
+    this.stmtDevicePairingCodeInsert = db.prepare(
+      `INSERT INTO device_pairing_codes(code, user_id, expires_at, created_at)
+       VALUES(?, ?, ?, ?)`,
+    )
+    this.stmtDevicePairingCodeGetByCode = db.prepare(
+      `SELECT * FROM device_pairing_codes WHERE code = ?`,
+    )
+    this.stmtDevicePairingCodeDeleteByCode = db.prepare(
+      `DELETE FROM device_pairing_codes WHERE code = ?`,
+    )
+    this.stmtDevicePairingCodeDeleteByUser = db.prepare(
+      `DELETE FROM device_pairing_codes WHERE user_id = ?`,
+    )
+    this.stmtDevicePairingCodeDeleteExpired = db.prepare(
+      `DELETE FROM device_pairing_codes WHERE expires_at < ?`,
     )
   }
 
@@ -1238,6 +1285,24 @@ export class IdentityStore {
         code: 'authentication_failed',
         message: 'invalid token',
       })
+    }
+    // SHELL-M1 — expiry is enforced HERE, at the one place a bearer token
+    // becomes a session. NULL (every credential minted before device
+    // pairing, and every owner-issued API key since) means never expires,
+    // so this branch is dead for them and the path is byte-identical.
+    //
+    // The row is deliberately NOT deleted: unlike a single-shot pairing
+    // code, a device credential is a thing the member named and can see
+    // in their device list. Having it vanish the first time the app
+    // retries after expiry is more confusing than showing it as expired
+    // and letting them revoke or re-pair.
+    if (cred.expires_at !== null && cred.expires_at !== undefined) {
+      if (cred.expires_at <= Date.now()) {
+        throw new IdentityError({
+          code: 'authentication_failed',
+          message: 'token expired',
+        })
+      }
     }
     return this.beginSession(
       cred.user_id,
@@ -3212,6 +3277,215 @@ export class IdentityStore {
       })
     }
     const info = this.stmtImBindingCodeDeleteExpired.run(now)
+    return Number(info.changes)
+  }
+
+  // =====================================================================
+  // Device pairing (SHELL-M1)
+  // =====================================================================
+
+  /**
+   * Mint a pairing code for a signed-in member. Same rotate-on-issue
+   * semantics as `issueImBindingCode`: any outstanding code for this
+   * user dies in the same transaction, so a code left on a screen the
+   * member walked away from stops working the moment they reissue.
+   *
+   * Auto-mint retries 5× on PK collision. With an 80-bit space and at
+   * most one live code per user, a collision is not a thing that
+   * happens — the retry exists so a freak one degrades to a retry
+   * rather than a 500.
+   */
+  issueDevicePairingCode(input: IssueDevicePairingCodeInput): DevicePairingCode {
+    if (!input || typeof input.userId !== 'string' || input.userId.length === 0) {
+      throw new IdentityError({
+        code: 'invalid_input',
+        message: 'issueDevicePairingCode: userId is required',
+      })
+    }
+    const user = this.stmtUserById.get(input.userId) as { id: string } | undefined
+    if (!user) {
+      throw new IdentityError({
+        code: 'user_not_found',
+        message: `issueDevicePairingCode: user ${input.userId} not found`,
+      })
+    }
+    const rawTtl = input.ttlMs ?? 10 * 60_000
+    if (typeof rawTtl !== 'number' || !Number.isFinite(rawTtl)) {
+      throw new IdentityError({
+        code: 'invalid_input',
+        message: `issueDevicePairingCode: ttlMs must be a finite number; got ${rawTtl}`,
+      })
+    }
+    const ttlMs = Math.max(60_000, Math.min(3_600_000, Math.floor(rawTtl)))
+    const now = Date.now()
+    const expiresAt = now + ttlMs
+
+    // An explicit code (tests) must survive normalisation unchanged —
+    // otherwise the caller would store one string and claim another.
+    let explicit: string | null = null
+    if (input.code !== undefined) {
+      explicit = normalizeDevicePairingCode(input.code)
+      if (explicit === null) {
+        throw new IdentityError({
+          code: 'invalid_input',
+          message:
+            'issueDevicePairingCode: explicit code is not a valid pairing code',
+        })
+      }
+    }
+
+    return transaction(this.db, () => {
+      this.stmtDevicePairingCodeDeleteByUser.run(input.userId)
+      if (explicit !== null) {
+        try {
+          this.stmtDevicePairingCodeInsert.run(explicit, input.userId, expiresAt, now)
+        } catch (err) {
+          throw new IdentityError({
+            code: 'invalid_input',
+            message: `issueDevicePairingCode: explicit code conflict (${(err as Error).message})`,
+            cause: err,
+          })
+        }
+        return {
+          code: explicit,
+          display: formatDevicePairingCode(explicit),
+          userId: input.userId,
+          expiresAt,
+          createdAt: now,
+        }
+      }
+      for (let i = 0; i < 5; i++) {
+        const code = newDevicePairingCode()
+        try {
+          this.stmtDevicePairingCodeInsert.run(code, input.userId, expiresAt, now)
+          return {
+            code,
+            display: formatDevicePairingCode(code),
+            userId: input.userId,
+            expiresAt,
+            createdAt: now,
+          }
+        } catch (err) {
+          const msg = (err as Error).message ?? ''
+          if (!msg.includes('UNIQUE')) throw err
+        }
+      }
+      throw new IdentityError({
+        code: 'invalid_input',
+        message: 'issueDevicePairingCode: 5 random codes all collided',
+      })
+    })
+  }
+
+  /**
+   * Trade a pairing code for a device-bound `aipk_` key. Called from a
+   * PUBLIC endpoint — the app has no credential yet, which is the whole
+   * point — so this method is the security boundary and everything it
+   * does is single-shot and rate-limitable by the caller.
+   *
+   * Consume + mint happen in ONE transaction: two apps racing the same
+   * code cannot both walk away with a key.
+   *
+   * Failure modes:
+   *   - `invalid_input` — code isn't a pairing-code shape at all
+   *   - `device_pairing_code_invalid` — normalised fine, no row matches
+   *   - `device_pairing_code_expired` — row found but past `expires_at`
+   *
+   * The first two are deliberately hard to tell apart from outside: both
+   * mean "that didn't work", and a public endpoint shouldn't help an
+   * attacker learn which halves of the code space are live.
+   */
+  claimDevicePairingCode(input: ClaimDevicePairingCodeInput): ClaimedDevice {
+    if (!input) {
+      throw new IdentityError({
+        code: 'invalid_input',
+        message: 'claimDevicePairingCode: input is required',
+      })
+    }
+    const code = normalizeDevicePairingCode(input.code)
+    if (code === null) {
+      throw new IdentityError({
+        code: 'invalid_input',
+        message: 'claimDevicePairingCode: code is not a valid pairing code',
+      })
+    }
+    if (input.deviceLabel !== undefined && input.deviceLabel !== null) {
+      if (typeof input.deviceLabel !== 'string') {
+        throw new IdentityError({
+          code: 'invalid_input',
+          message: 'claimDevicePairingCode: deviceLabel must be string or null',
+        })
+      }
+    }
+    const rawKeyTtl = input.keyTtlMs ?? 90 * 24 * 3_600_000
+    if (typeof rawKeyTtl !== 'number' || !Number.isFinite(rawKeyTtl)) {
+      throw new IdentityError({
+        code: 'invalid_input',
+        message: `claimDevicePairingCode: keyTtlMs must be a finite number; got ${rawKeyTtl}`,
+      })
+    }
+    const keyTtlMs = Math.max(
+      3_600_000,
+      Math.min(365 * 24 * 3_600_000, Math.floor(rawKeyTtl)),
+    )
+    // The label is attacker-supplied (public endpoint) and lands in the
+    // member's device list. Trim, cap, and never let it be empty — a
+    // nameless row in a revoke UI is a row nobody dares revoke.
+    const rawLabel = (input.deviceLabel ?? '').trim().slice(0, 64)
+    const label = rawLabel.length > 0 ? rawLabel : 'Paired device'
+
+    return transaction(this.db, () => {
+      const row = this.stmtDevicePairingCodeGetByCode.get(code) as
+        | { code: string; user_id: string; expires_at: number; created_at: number }
+        | undefined
+      if (!row) {
+        throw new IdentityError({
+          code: 'device_pairing_code_invalid',
+          message: 'claimDevicePairingCode: code does not exist',
+        })
+      }
+      const now = Date.now()
+      if (row.expires_at < now) {
+        // Same reasoning as the IM twin: DELETE here would be rolled
+        // back by the re-throw. Reissue or sweep collects it.
+        throw new IdentityError({
+          code: 'device_pairing_code_expired',
+          message: `claimDevicePairingCode: code expired at ${new Date(row.expires_at).toISOString()}`,
+        })
+      }
+      this.stmtDevicePairingCodeDeleteByCode.run(code)
+
+      const key = newApiKey()
+      const identifier = hashToken(key)
+      const credentialId = newId()
+      const expiresAt = now + keyTtlMs
+      this.stmtInsertCredentialWithExpiry.run(
+        credentialId,
+        row.user_id,
+        'api_key',
+        identifier,
+        identifier,
+        label,
+        now,
+        expiresAt,
+      )
+      return { key, credentialId, userId: row.user_id, expiresAt }
+    })
+  }
+
+  /**
+   * Housekeeping twin of `sweepExpiredImBindingCodes`. Note this sweeps
+   * unredeemed CODES, not expired device credentials — those stay
+   * queryable (and revocable) so the member can see what expired.
+   */
+  sweepExpiredDevicePairingCodes(now: number = Date.now()): number {
+    if (!Number.isFinite(now)) {
+      throw new IdentityError({
+        code: 'invalid_input',
+        message: `sweepExpiredDevicePairingCodes: invalid now=${now}`,
+      })
+    }
+    const info = this.stmtDevicePairingCodeDeleteExpired.run(now)
     return Number(info.changes)
   }
 
