@@ -7,9 +7,11 @@
 > 父亲打开是农事关怀面,母亲打开是本地新闻面,operator 打开是全家看板。
 >
 > Track 代号:**SDUI**(Server-Driven UI)。Status: **M1–M4 + C1 组件做实已落
-> (2026-07-26/27),13 个可摆组件全部接真数据**。原 M5「壳与分发」侦察后确认装不进
-> 一格,已展开成独立的 **SHELL track**,见 [`APP-SHELL.md`](APP-SHELL.md)
-> (形态拍板:真壳 = 本地资源 + `CapacitorHttp`)。
+> (2026-07-26/27),12 个可摆组件全部接真数据**(原 13 项中 `image-card`
+> 于 SHELL-M3 退役——它是唯一从没长出渲染器的一项,见 §六)。原 M5「壳与分发」
+> 侦察后确认装不进一格,已展开成独立的 **SHELL track**,见
+> [`APP-SHELL.md`](APP-SHELL.md)(形态拍板:真壳 = 本地资源 + `CapacitorHttp`);
+> **§5.4 版本协商已由 SHELL-M3 做实**(`f6aa7be`)。
 > 拍板记录:A=14 组件首批清单照 §六 / B=新增成员可见 tab,home 原样保留 /
 > C=JSON / D=owner 直装、成员随时换回 / **E=E1 benign 直改+三重安全网**
 > (保留区硬保护+每改响亮播报+改前快照一键还原;E2 提议→确认不做,单成员
@@ -19,7 +21,7 @@
 > M3=per-member store+三预设+画廊「面板」资源类(`packages/host/src/me-panel-surface.ts`)/
 > M4=管家编排一对工具+快照撤销+归因横幅(`packages/host/src/personal-butler-panel.ts`,
 > 见 §九 M4 行)。
-> Last updated: 2026-07-26
+> Last updated: 2026-07-29
 
 ---
 
@@ -179,18 +181,35 @@
 
 ### 5.4 版本协商与降级
 
+> **落地成色(SHELL-M3 `f6aa7be`,2026-07-29)**:三条全部做实,两处与本节
+> 原文有出入,以落地为准——见每条后的 ✅ 注。
+
 - `GET /api/me/panel` 返回 `{ schemaVersion, config }`;客户端在请求头/参数里
   声明自己支持的 schemaVersion 与组件集版本。
+  ✅ 落成 `?client=N` query,响应多一个 `contract` 块
+  `{server, client, verdict, componentTypes}`。**组件集刻意不声明**:服务端
+  用不上它(未知组件本地降级;管家小抄是 spawn 时构建的,per-request 声明够
+  不到;同一成员可能同时开着两个版本的客户端)。协商面只有**一个整数**宽。
 - 客户端遇未知组件类型 ⇒ 占位卡(组件名 + 「需升级客户端」),其余照常渲染
-  (Adaptive Cards「ignore & continue」的诚实版)。
+  (Adaptive Cards「ignore & continue」的诚实版)。✅ SDUI-M2 起即如此。
 - schemaVersion 高于客户端支持 ⇒ 整面板降级为默认面板 + 顶部响亮提示,绝不崩。
+  ✅ 落成**不渲染任何配置**(连默认面板也不渲染)——降级的理由正是「这个客户端
+  对该 schema 下的字段含义没有把握」,退回默认面板等于用同一套不确定的理解去
+  渲染另一份配置。保留的是**渲染器自己固定的两件**:待批徽章(保留区纪律)与
+  形态选择器(成员的退路)。
+
+**判定服务端算,一处权威**:`panelContract()` 由 `panel-schema.ts` 独占,管家
+视图 / HTTP 面 / 将来任何渲染器不可能各说各话。**声明是 advisory 的**——它改
+变客户端**被告知什么**,永远改变不了它**被服务什么**(四种声明下 config 字节
+完全相同,路由测试与真机各钉一道)。让客户端自报的值去过滤配置会悄悄削窄
+**成员自己配的**面板,与「占位卡是设计内一等公民,永不空白」正相反。
 
 ---
 
 ## 六、组件目录 v1(拍板清单,岔口 A)
 
-首批 **14 个**(布局原语 2 + 数据组件 11 + 保留区 1),覆盖三个家庭预设面板的
-全部需要:
+首批拍板 **14 个**(布局原语 2 + 数据组件 11 + 保留区 1),覆盖三个家庭预设面板
+的全部需要。**现存 13 项**——第 14 项 `image-card` 已于 SHELL-M3 退役,见表下注:
 
 | # | type | 一句话 | 数据源 |
 |---|---|---|---|
@@ -207,7 +226,14 @@
 | 11 | `status-card` | hub/管家状态一眼 | status.hub |
 | 12 | `schedule-list` | 定时流列表 | schedules.mine |
 | 13 | `quick-actions` | 快捷动作按钮 | 动作白名单(见下) |
-| 14 | `image-card` | 图片卡 | uploads / connector 相册 |
+| ~~14~~ | ~~`image-card`~~ | **已退役**(SHELL-M3 `f6aa7be`) | — |
+
+**`image-card` 为什么被退役**:它是这张表里**唯一**从没长出渲染器的一项——
+校验器放行、渲染器永远答「即将上线」、管家的组件小抄还广告它可用。一个闭集
+承诺了没人兑现的东西,比少一个组件更糟。真做它要图片字节存储 + content-type +
+尺寸校验,那是一个里程碑不是一个脚注;全仓无人引用,诚实的修法是不再列它。
+闭集自此 **13 → 12**(表内 1–13 项,其中 `section`/`heading` 以顶层结构表达),
+并立了防腐门:**每个 KNOWN_TYPE 必须有真渲染器**。
 
 **quick-actions 的动作白名单**:按钮动作只能是预定义动词
 (`open_chat` / `start_workflow:<id>` / `open_inbox` / `compose_brief`…),
