@@ -4526,7 +4526,9 @@
 
   function connectStream(onEvent) {
     setConn('pending', t.connecting)
-    const es = new EventSource('/api/stream')
+    // The one egress the fetch patch can't reach (SHELL-M2) — EventSource has
+    // its own constructor, so it has to ask the choke point for the URL itself.
+    const es = new EventSource(window.GotongHub.hubUrl('/api/stream'))
     es.addEventListener('open', () => setConn('open', t.connected))
     es.addEventListener('error', () => setConn('error', t.reconnecting))
     const handler = (e) => {

@@ -5,6 +5,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Gotong — Worker</title>
     <link rel="stylesheet" href="/styles.css" />
+    <!-- SHELL-M2: app-core's connectStream calls hubUrl(), so the choke point
+         has to be in place first. -->
+    <script src="/hub-target.js" defer></script>
     <script src="/app-core.js" defer></script>
     <script src="/worker.js" defer></script>
   </head>

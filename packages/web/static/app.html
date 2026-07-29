@@ -33,10 +33,14 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="Gotong" />
     <link rel="stylesheet" href="/styles.css" />
+    <!-- SHELL-M2: the choke point that decides which hub this client talks to.
+         Must run before anything that reaches the hub — it installs the fetch
+         patch and owns hubUrl(). `defer` preserves document order. -->
+    <script src="/hub-target.js" defer></script>
     <!-- Shared workflow-graph SVG renderer (workflow-architect ARCH-M4):
          attaches window.GotongWorkflowGraph, consumed by the member SPA
          (app.js) AND the admin console (admin.js, injected later by app.js).
-         Loads first so the global exists before any consumer runs. -->
+         Loads before any consumer so the global exists when they run. -->
     <script src="/workflow-graph.js" defer></script>
     <script src="/app-core.js" defer></script>
     <script src="/app.js" defer></script>

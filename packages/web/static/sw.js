@@ -31,13 +31,17 @@
 // v10 (PUSH-M3): this SW gains push/notificationclick/pushsubscriptionchange
 // handlers + the /me notification card (app.js/app-core.js/app.html) — the
 // shell must refresh so subscribe targets a SW that can actually show taps.
-const CACHE = 'gotong-shell-v11'
+// v12 (SHELL-M2): hub-target.js joins the shell and app-core.js now depends on
+// it at boot — a returning member must not get the new app-core with a cached
+// shell that has no hub-target.js in it.
+const CACHE = 'gotong-shell-v12'
 
 // Stable, role-agnostic static shell. app.html is excluded on purpose
 // (role-injected); admin.js / identity-ui.js etc. are left to the runtime
 // stale-while-revalidate path so install stays fast and role-neutral.
 const PRECACHE = [
   '/styles.css',
+  '/hub-target.js',
   '/app-core.js',
   '/app.js',
   '/icon.svg',
@@ -145,6 +149,12 @@ self.addEventListener('notificationclick', (event) => {
   )
 })
 
+// NB the SHELL-M2 fetch patch does NOT reach this file — a service worker is a
+// separate global, and `hub-target.js` never runs here. That is correct rather
+// than an oversight: a service worker only exists on the same origin that
+// served it, so its `/api/…` is by definition this hub. The native shell has no
+// service worker at all (its push leg goes native in SHELL-M6).
+//
 // The push service rotated our subscription: re-subscribe with the same
 // applicationServerKey and best-effort re-register with the hub. If anything
 // fails the /me card's honest count lets the member re-enable by hand.

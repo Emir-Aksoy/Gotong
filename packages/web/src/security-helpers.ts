@@ -68,6 +68,30 @@ export function clientIp(ctx: SecurityCtx, req: IncomingMessage): string {
 }
 
 /**
+ * The origin a client actually reached us on — `<proto>://<host>`.
+ *
+ * Request-derived on purpose: whichever address the client is talking to is
+ * the one we should hand back when we have to name ourselves (the A2A agent
+ * card's `url`, the pairing QR's target). A hard-coded origin would be wrong
+ * for every deployment that isn't the one it was configured for.
+ *
+ * `trustProxy` guards the forwarded protocol exactly as `clientIp` guards the
+ * forwarded address: off means a request that arrived over plain HTTP is
+ * described as plain HTTP no matter what it claims to be. There is one such
+ * switch, not one per caller.
+ *
+ * SHELL-M2 folded the two copies of this together. Whoever needs a third
+ * "what is my address" answer calls this — the client-side "which hub do I
+ * talk to" question is a different one and lives in `static/hub-target.js`.
+ */
+export function requestOrigin(req: IncomingMessage, trustProxy: boolean): string {
+  const xfProto = req.headers['x-forwarded-proto']
+  const fwd = (Array.isArray(xfProto) ? xfProto[0] : xfProto)?.split(',')[0]?.trim()
+  const proto = (trustProxy && fwd) || 'http'
+  return `${proto}://${req.headers.host ?? 'localhost'}`
+}
+
+/**
  * Reject cross-origin state-changing requests. Defence in depth on top of
  * SameSite cookies: a misconfigured browser or a same-site subdomain
  * attacker can sometimes get around SameSite=Lax for top-level POST. The

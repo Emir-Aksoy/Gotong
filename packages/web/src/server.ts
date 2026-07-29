@@ -7,6 +7,7 @@ import {
   clientIp,
   checkOrigin,
   readBearerToken,
+  requestOrigin,
   constantTimeEqual,
 } from './security-helpers.js'
 
@@ -812,10 +813,7 @@ async function handle(
     // Request-derived base URL so the card's `url` reflects how the client
     // actually reached us (correct behind a reverse proxy that sets
     // X-Forwarded-Proto). Falls back to http on direct connections.
-    const xfProto = req.headers['x-forwarded-proto']
-    const fwdProto = (Array.isArray(xfProto) ? xfProto[0] : xfProto)?.split(',')[0]?.trim()
-    const proto = (ctx.trustProxy && fwdProto) || 'http'
-    const baseUrl = `${proto}://${req.headers.host ?? 'localhost'}`
+    const baseUrl = requestOrigin(req, ctx.trustProxy)
     res.writeHead(200, {
       'content-type': 'application/json; charset=utf-8',
       'cache-control': 'public, max-age=300',

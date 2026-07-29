@@ -32,6 +32,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http'
 
 import { readJsonBody, sendJson } from './http-helpers.js'
 import { qrSvgDataUri } from './qr.js'
+import { requestOrigin } from './security-helpers.js'
 
 /**
  * Host-side device surface (duck-typed; web stays host-free).
@@ -90,23 +91,6 @@ function surfaceErrStatus(err: unknown): number {
     if (typeof s === 'number' && s >= 400 && s < 600) return s
   }
   return 500
-}
-
-/**
- * The origin the member reached us on, mirroring how the A2A agent card
- * derives its own base URL (server.ts). It is request-derived on purpose:
- * whichever address the member's browser is actually talking to is the one
- * their phone should be told to talk to.
- *
- * SHELL-M2 will replace this with the single choke point that decides "which
- * hub" for every client — this is the first caller that needs an answer, and
- * it should be folded into that seam rather than grow a second one.
- */
-function pairingOrigin(req: IncomingMessage, trustProxy: boolean): string {
-  const xfProto = req.headers['x-forwarded-proto']
-  const fwd = (Array.isArray(xfProto) ? xfProto[0] : xfProto)?.split(',')[0]?.trim()
-  const proto = (trustProxy && fwd) || 'http'
-  return `${proto}://${req.headers.host ?? 'localhost'}`
 }
 
 /**
@@ -170,7 +154,9 @@ export async function handleMeDeviceRoute(
       const issued = await deps.devices.issueCode(userId)
       // `code` is what goes in the QR; `display` is what the member reads
       // aloud or retypes. Both describe the same secret.
-      const pairingUrl = pairingPayload(pairingOrigin(req, deps.trustProxy), issued.code)
+      // The origin the member reached us on IS the one to send their phone to
+      // — same request-derived answer the A2A card gives, from one helper.
+      const pairingUrl = pairingPayload(requestOrigin(req, deps.trustProxy), issued.code)
       // A QR that won't fit is not a failed pairing — the grouped code still
       // works by hand. So the image is best-effort and its absence is a
       // documented state the card renders around, never a 500.
