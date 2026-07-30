@@ -93,6 +93,59 @@ export const PANEL_FIXED_ACTIONS = ['open_chat', 'open_inbox', 'compose_brief'] 
 export const PANEL_ACTION_PREFIXES = ['start_workflow:'] as const
 
 /**
+ * Closed tab catalog (SHELL-M4.5 骨架配置化, fork B2: ALL tabs config-driven,
+ * not just the member-visible three). A config's optional `tabs` array picks
+ * WHICH of these appear in the client's navigation and in WHAT order; the
+ * first usable entry is the landing screen. Closed set for the same reason
+ * components are: the skeleton is part of the wire contract ("固定的是连接
+ * VPS 的格式规范"), and a client can only ever *render* tabs it ships.
+ *
+ * Tab ids are render-hint vocabulary, NOT capability grants. The client
+ * intersects this list with its own role baseline before rendering, and every
+ * admin API stays server-gated — a member config listing 'users' produces no
+ * button, loads no bundle, and the server 403s regardless (the M4.5
+ * anti-privilege-escalation gate pins all three layers).
+ *
+ * Kept at schemaVersion 1 on purpose: `tabs` is additive and ignorable — a
+ * client that predates it renders its default skeleton and every field it
+ * DOES know keeps its meaning, which is exactly the SHELL-M3 rule for when a
+ * bump is NOT warranted (bump only when known-field semantics change).
+ */
+export const PANEL_TAB_IDS = [
+  'home',
+  'panel',
+  'overview',
+  'agents',
+  'workflows',
+  'tasks',
+  'activity',
+  'services',
+  'mcp',
+  'reallife',
+  'users',
+  'quotas',
+  'usage',
+  'reputation',
+  'federation',
+  'oidc',
+  'saml',
+  'settings',
+] as const
+
+export type PanelTabId = (typeof PANEL_TAB_IDS)[number]
+
+/**
+ * Reserved-zone tabs — the floor a config cannot remove (it may only reorder
+ * them). Same discipline as the fixed approval badge: `home` carries the
+ * pending-approvals inbox (the A1 probe's UI twin), `panel` carries the
+ * member's own escape hatch (shape selector + butler-change undo banner),
+ * `settings` carries language/password/logout. Clients append any missing
+ * reserved tab to the effective list unconditionally — a config that tried to
+ * strip the member's approvals view or their way back simply doesn't get to.
+ */
+export const PANEL_RESERVED_TABS = ['home', 'panel', 'settings'] as const
+
+/**
  * Identifier shape for prefixed source/action suffixes. Deliberately strict:
  * no `/`, no `..` (single dots allowed but not consecutive), no whitespace —
  * suffixes end up as ids handed to hub APIs, never as paths or URLs.
@@ -139,6 +192,13 @@ export interface PanelSection {
 export interface PanelConfig {
   schemaVersion: typeof PANEL_SCHEMA_VERSION
   title?: string
+  /**
+   * Optional navigation skeleton (SHELL-M4.5): which tabs the client shows, in
+   * order; the first usable one is the landing screen. Absent = the client's
+   * role-default skeleton, byte-identical to pre-M4.5 behaviour. Render hint
+   * only — clients intersect with their role baseline, never widen from it.
+   */
+  tabs?: PanelTabId[]
   sections: PanelSection[]
 }
 
@@ -266,7 +326,9 @@ export function validatePanelConfig(value: unknown): PanelValidationResult {
   if (!isPlainObject(value)) return { ok: false, errors: ['config: must be a JSON object'] }
 
   for (const k of Object.keys(value)) {
-    if (k !== 'schemaVersion' && k !== 'title' && k !== 'sections') err(`config: unknown key "${k}"`)
+    if (k !== 'schemaVersion' && k !== 'title' && k !== 'tabs' && k !== 'sections') {
+      err(`config: unknown key "${k}"`)
+    }
   }
   if (value.schemaVersion !== PANEL_SCHEMA_VERSION) {
     err(`schemaVersion: must be ${PANEL_SCHEMA_VERSION}`)
@@ -277,6 +339,25 @@ export function validatePanelConfig(value: unknown): PanelValidationResult {
       err(`title: over ${PANEL_LIMITS.maxTitleChars} chars`)
     } else if (hostileText(value.title)) {
       err('title: control or bidi-override characters are not allowed')
+    }
+  }
+
+  if (value.tabs !== undefined) {
+    const tabs = value.tabs
+    if (!Array.isArray(tabs) || tabs.length === 0) {
+      err('tabs: must be a non-empty array when present')
+    } else if (tabs.length > PANEL_TAB_IDS.length) {
+      err(`tabs: over ${PANEL_TAB_IDS.length} entries`)
+    } else {
+      const seen = new Set<string>()
+      tabs.forEach((tab, ti) => {
+        if (typeof tab !== 'string' || !(PANEL_TAB_IDS as readonly string[]).includes(tab)) {
+          err(`tabs[${ti}]: unknown tab (allowed: ${PANEL_TAB_IDS.join(', ')})`)
+          return
+        }
+        if (seen.has(tab)) err(`tabs[${ti}]: duplicate "${tab}"`)
+        seen.add(tab)
+      })
     }
   }
 

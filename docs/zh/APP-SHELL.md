@@ -6,7 +6,8 @@
 > 发版、有原生推送、装了就在的 app。
 >
 > Track 代号:**SHELL**。Status: **M1 设备配对 ✅ · M2 base URL 层 ✅ ·
-> M3 契约做实 ✅ · M4 渲染器解耦 ✅(2026-07-29)**;M4.5 起未动工。
+> M3 契约做实 ✅ · M4 渲染器解耦 ✅(2026-07-29) · M4.5 骨架配置化 ✅
+> (2026-07-30)**;M5 壳工程起未动工。
 > 本 track 是 [`SDUI-PANEL.md`](SDUI-PANEL.md) 里程碑表 M5 那一格的展开——
 > 侦察后确认它装不进一格(见 §四)。
 > 形态拍板:**真壳**(本地资源 + `CapacitorHttp` 走原生请求),而非瘦壳
@@ -14,7 +15,7 @@
 > 岔口拍板(2026-07-28):**A1** 大陆推送先不做只轮询 / **B2 骨架配置化画到全部
 > 17 个页签**(未取推荐的 B1 三页签,理由见 §七)/ **C2+C1** 二维码编码
 > 「地址 + 一次性码」、6 位码兜底。
-> Last updated: 2026-07-29
+> Last updated: 2026-07-30
 
 ---
 
@@ -285,7 +286,7 @@ hint([`static-routes.ts:244-246`](../../packages/web/src/static-routes.ts#L244))
 | **M2 base URL 层** ✅ `1178901` | 一处咽喉收编全部 hub 请求 + EventSource + 设备凭证 | 默认空 ⇒ 与今天**逐字节一致**(防腐门);设了 ⇒ 全部 `/api` 请求指向远端并带 Bearer |
 | **M3 契约做实** ✅ `f6aa7be` | 客户端声明 schemaVersion(`?client=N`);服务端算判定;版本超出 ⇒ **整面板**降级 + 响亮提示;顺手退役 `image-card` 空转 | 旧客户端收到新 schema ⇒ 整面板降级不炸,徽章与形态选择器仍在;声明**永远改变不了配置字节**(四种声明同字节) |
 | **M4 渲染器解耦** ✅ | 五条硬耦合改注入点(i18n / tab 协议 / 宿主元素 / CSS / storage key)全部收进 `GotongPanel.mount(opts)`;**SPA 成为这个 API 的第一个调用者**而非特权侧门 | `sdui-standalone.html` 只加载渲染器三件套就渲染出真面板(真浏览器已证:3 段 5 卡 · `window.Gotong` undefined · console 零错误) |
-| **M4.5 骨架配置化** | **全部 17 个页签**纳入配置(岔口 B2):tabbar 配置驱动生成 + 15 个 admin bundle 改按需加载 | 两个成员打开 app 看到**不同的导航结构**,不只是不同的面板内容;**防腐门:配置驱动的 tabbar 不得成为提权路径**(member 配置里写 admin 页签仍拿不到 admin 面,服务端照样 403) |
+| **M4.5 骨架配置化** ✅ | **全部 17 个页签**纳入配置(岔口 B2;落地时实为 18——M0 数的 17 + SDUI-M2 的「面板」页签):tabbar 配置驱动生成 + 15 个 admin bundle 改按需加载 | 两个成员打开 app 看到**不同的导航结构**,不只是不同的面板内容;**防腐门:配置驱动的 tabbar 不得成为提权路径**(member 配置里写 admin 页签仍拿不到 admin 面,服务端照样 403)——真机三层全证 |
 | **M5 壳工程** | `capacitor.config.ts`(`webDir` + `CapacitorHttp.enabled`)+ static 导出脚本 + PNG 图标集 | 真机装上、打得开、能连本机 hub |
 | **M6 原生推送** | `@capacitor/push-notifications` 接 FCM/APNs;复用订阅存储形状与 fold 决策。**大陆版按 A1 不接推送**(只轮询) | 真机锁屏收到低信息 tap;绑 IM 成员仍零双发 |
 | **M7 真机 round-trip** | 装壳 → 输地址 → agent-card 验身份 → 配对拿 token → 面板渲染 → 推送送达 | 全链路一次跑通,console 零错误 |
@@ -402,6 +403,83 @@ context 穿过约 40 个渲染函数。
 文案确实来自渲染器自己那份)、`.sdui-card` 的圆角来自新的 `/sdui-ui.css`;
 ②裸页侧——3 段 5 卡真数据、`window.Gotong` 为 `undefined`、页面自带的
 中英按钮即时切换、`#sdui-panel` 元素不存在;两侧 console 均零错误。
+
+### M4.5 落地记(2026-07-30)
+
+M0 侦察点名的**形态天花板**(tabbar 硬编码、只有 `#sdui-panel` 一格配置驱动
+=「一个页签内部可变」)收口:导航骨架本身进配置。落地按岔口 B2 画到**全部
+页签**——实为 **18** 个而非 M0 数的 17(SDUI-M2 加的成员可见「面板」页签也在
+册,它没有理由是特例;「一套机制」正是 B2 当初胜出的理由)。
+
+**骨架只有一个真相源:`TAB_REGISTRY`。** app.js 里 18 条 `{ id, i18n, roles }`,
+role 基线逐条照抄改造前 `data-roles` 的字面值(owner-only 的 users/quotas/
+usage/reputation/federation/oidc/saml 一个不松);`app.html` 的
+`<nav id="admin-tabbar">` **出厂为空**——一个写死在 markup 里的按钮会同时绕过
+角色过滤与配置,把它从骨架里物理移除是比「记得过滤」强得多的形状(防腐门直接
+断言 served bytes 里零按钮,注释也不许含按钮 class 字面量——M4「散文可以说、
+代码不许写」同一姿态)。
+
+**提权门是一次交集,不是一串检查。** `effectiveTabs()` = 配置序 ∩ 角色基线,
+再把保留区地板补到尾部——这是配置与角色**唯一**相遇的地方,交集运算只能收窄
+不能放宽,于是「member 配置里写 `users` 也拿不到 admin 面」不是被某个 if 挡住
+的,是**结构性不可表达**的。三层门:①按钮不渲染 ②bundle 不加载 ③服务端照样
+拒(实测是 **403** 不是 401——member 会话是真身份,`requireAdmin` 拒的是权限,
+两层测试各钉各的)。
+
+**保留区地板 `['home','panel','settings']` 镜像 schema 的
+`PANEL_RESERVED_TABS`**,配置漏了也补回:home 装着待批收件箱(藏起它=藏起
+审批,保留区纪律的直接推论)、panel 是成员的形态选择器与 undo 退路(M3 降级
+分支保的同一件东西)、settings 是语言与登出。防腐门双向核对两份名单同序。
+
+**首屏纳入配置**:`defaultTab()` = 配置里第一个可用页签(无配置=角色默认,
+与改造前逐字节同行为);hash 深链仍然赢。「对不同的人不同形态」自此包含
+**打开 app 落在哪一屏**。
+
+**wire 是 additive 的一个可选键,schemaVersion 不跳。** `PanelConfig.tabs?`
+进 M1 校验器(非空、≤18、known id、无重复),按 M3 规则①「additive + 可忽略」
+留在 v1;**它只是渲染提示**——服务端不解释、不过滤,任何客户端拿到的 config
+字节相同(M3「声明改变不了被服务什么」纪律原样适用)。管家小抄从
+`PANEL_TAB_IDS` 运行时派生(零手抄=零漂移)。骨架读者自带
+`SKELETON_SCHEMA_VERSION` 与面板渲染器锁步(防腐门钉死),hub schemaVersion
+更新 ⇒ 忽略 tabs 回落角色默认——这个回落**天然无害**:角色默认只会在角色内
+显示**更多**,永远不会越过角色显示不该显示的。
+
+**15 个 admin bundle 改按需加载(B2 的主要增量)**:`CORE_ADMIN_BUNDLES`
+(admin.js + wf-assist)在任一 admin 页签幸存时装,其余 15 个按
+`TAB_BUNDLES` 映射(overview→steward/setting-ops,users→identity-ui,
+federation→peer 三件+a2a+acp,……)只装配置里出现过的。**按配置选,不按
+simple-mode 选**——simple mode 是 localStorage 活开关,关掉的瞬间 bundle 必须
+已经在场;而配置变更走整页重载,是安全的选择时机。**boot 顺序因此是刻意的**:
+`await resolveTabConfig()`(4s AbortController 有界,失败 fail-soft 角色默认)
+先于 wireTabs 与 loadAdminBundles——script 标签注入了就收不回来,配置必须先
+落定。admin-src 里三处 `.tabbar-btn[data-tab=…]` 消费者(任务徽章/services/
+reallife)各自带缺席守卫,页签被配置移除时优雅空转。
+
+**防腐门 `skeleton-config-contract.test.ts`(19 例)双半**:文本半用响亮解析
+(`must()`——解析不到就红,不会静默变绿)钉注册表↔`PANEL_TAB_IDS` 双向同序、
+保留区镜像、版本锁步、role 基线逐条字面值、app.html 零按钮、每 id 有 section、
+每 i18n 键双语在、15 bundle 无重复且 src 都真实存在;VM 半把**真 app.js** 跑
+在 DOM stub 里逐条证行为——member 提权配置 ⇒ 恰好三页签 + `injectedSrcs` 为
+空、owner 裁剪配置 ⇒ 只装核心对、重排+hash 深链、新 schema 忽略、fetch 失败
+fail-soft。**六处锚点逐一变异测试**(M4 那次「锚点不存在门假绿」的教训:每个
+变异先断言真的改动了文件):假注册表条目/静态按钮回填/users 基线放宽/交集
+破坏/bundle 无视配置/版本跳号——六次全按预期变红,复原后 byte-identical。
+
+**真机 round-trip 全动线**(fresh space,SW v15 + caches 先清):owner 默认
+= 18 个生成按钮按注册表序、首屏 overview(改造前同款)→ 库区种入带 `tabs` 的
+形态、走**真实 `PUT {libraryId}` 动线**换上 ⇒ 重载后 5 页签按配置序 + 首屏落
+**workflows**;切中文生成按钮即时重渲染(工作流/智能体/我的/面板/设置)→
+owner 经 admin 直装面(岔口 D 路由)给 member 装「提权尝试形态」
+(`tabs:['users','federation','home']`)⇒ member 登录:hub 如实服务该配置,
+渲染恰好 `['home','panel','settings']`、admin bundle 加载数 **0**(仅 5 个核心
+脚本)、admin API 探针 **403**——**两个成员看到的导航结构真的不同,且不同不
+出角色**;member 面板页签正常渲染(带 `tabs` 键的配置零降级)、member 自己
+`{reset:true}` 一步回默认(D 岔口「随时换回」对骨架同样成立);两侧 console
+零错误。
+
+**sw.js CACHE v14→v15**:app.html 永不缓存(角色 meta),但预缓存的 app.js
+若停在 v14,对上新的空 nav markup 会**一个 tabbar 都渲染不出来**——壳必须
+整体刷新。
 
 ---
 

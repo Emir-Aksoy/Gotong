@@ -29,6 +29,8 @@ import {
   PANEL_COMPONENT_CONTRACTS,
   PANEL_FIXED_ACTIONS,
   PANEL_LIMITS,
+  PANEL_RESERVED_TABS,
+  PANEL_TAB_IDS,
 } from '@gotong/personal-butler'
 
 /** 店面窄鸭子(host 的 MePanelSurfaceHost 结构性满足;web 面不经这里)。 */
@@ -147,7 +149,12 @@ export function renderPanelContractCheatsheet(): string {
     lines.push(`- ${type}(${bits.join(';')})`)
   }
   lines.push(
-    '顶层结构: { "schemaVersion": 1, "title"?: string, "sections": [{ "heading"?: string, "components": [{ "type", "source"?, "params"? }] }] }',
+    '顶层结构: { "schemaVersion": 1, "title"?: string, "tabs"?: string[], "sections": [{ "heading"?: string, "components": [{ "type", "source"?, "params"? }] }] }',
+  )
+  // SHELL-M4.5 — tabs 也从 schema 常量现场派生,同一条零手抄纪律。
+  lines.push(
+    `tabs(可选,导航骨架): 从 [${PANEL_TAB_IDS.join(', ')}] 里挑并排序,第一个是打开 app 的首屏;` +
+      `${PANEL_RESERVED_TABS.join('/')} 是保留区(删了客户端也会补回);写了角色够不着的页签不会出现也不会给权限。`,
   )
   return lines.join('\n')
 }

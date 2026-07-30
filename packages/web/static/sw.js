@@ -43,7 +43,12 @@
 // must refresh. sdui-ui.css is deliberately NOT precached: it pairs with
 // sdui-ui.js, which is also not precached, so the pair stays on ONE cache path
 // and cannot go stale against each other the way M3's pair could.
-const CACHE = 'gotong-shell-v14'
+// v15 (SHELL-M4.5): app.html shed its 18 static tabbar buttons; app.js now
+// GENERATES them (TAB_REGISTRY ∩ role ∩ panel-config) and loads admin bundles
+// by config. app.html itself is never cached (role meta), but a stale v14
+// app.js against the new empty-nav markup would render no tabbar at all —
+// the precached app.js must refresh in lockstep with the markup change.
+const CACHE = 'gotong-shell-v15'
 
 // Stable, role-agnostic static shell. app.html is excluded on purpose
 // (role-injected); admin.js / identity-ui.js etc. are left to the runtime

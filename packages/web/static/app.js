@@ -738,22 +738,120 @@
   // overview. Now setActiveTab dispatches `gotong:tabchange` and admin.js
   // just listens for its per-tab side effects. See window.Gotong.gotoTab.
   //
-  // ADMIN_TABS must list EVERY admin-shell tabbar button so the router can
-  // activate it. `quotas` / `reputation` are real tabs whose sections are
-  // populated by the lazy-loaded quotas-ui.js / reputation-ui.js bundles
-  // (they observe <body data-active-tab> and refresh when it flips to their
-  // name). Neither router used to include them, so clicking those buttons
-  // just fell through to overview — R14b folds them into the one router.
-  const C1_TABS = new Set(['home', 'panel', 'settings'])
-  // Every admin-shell tabbar button must be listed or the router falls the
-  // click through to overview. mcp/usage/federation were added to app.html
-  // after R14b folded quotas/reputation in but never registered here — so
-  // they were silently unreachable; restored alongside the new oidc (SSO) tab.
-  const ADMIN_TABS = new Set([
-    'overview', 'agents', 'workflows', 'tasks', 'activity', 'services',
-    'mcp', 'reallife', 'users', 'quotas', 'usage', 'reputation', 'federation', 'oidc',
-    'saml',
-  ])
+  // SHELL-M4.5 — the tab registry IS the skeleton (fork B2: ALL tabs, not just
+  // the member three). app.html no longer carries static tabbar buttons; they
+  // are generated from this table, in this order, filtered by role. The `id`
+  // list must mirror PANEL_TAB_IDS in personal-butler's panel-schema.ts (the
+  // wire contract) — the skeleton-config contract test pins the two rosters
+  // against each other, and every id must have a `<section data-tab=…>`.
+  //
+  // `roles` is the RENDER-HINT baseline (same client-renders/server-enforces
+  // rule as the old data-roles markup, which generated buttons still carry).
+  // A member's panel config may pick WHICH of these appear and in what order,
+  // but only ever within this baseline — the intersection in effectiveTabs()
+  // is the anti-privilege-escalation gate B2 demanded: a member config listing
+  // 'users' produces no button, loads no bundle, and the server 403s anyway.
+  const ALL_ROLES = ['owner', 'admin', 'member', 'viewer']
+  const ADMIN_ROLES = ['owner', 'admin']
+  const TAB_REGISTRY = [
+    { id: 'home', i18n: 'tabHome', roles: ALL_ROLES },
+    { id: 'panel', i18n: 'tabPanel', roles: ALL_ROLES },
+    { id: 'overview', i18n: 'tabOverview', roles: ADMIN_ROLES },
+    { id: 'agents', i18n: 'tabAgents', roles: ADMIN_ROLES },
+    { id: 'workflows', i18n: 'tabWorkflows', roles: ADMIN_ROLES },
+    { id: 'tasks', i18n: 'tabTasks', roles: ADMIN_ROLES },
+    { id: 'activity', i18n: 'tabActivity', roles: ADMIN_ROLES },
+    { id: 'services', i18n: 'tabServices', roles: ADMIN_ROLES },
+    { id: 'mcp', i18n: 'tabMcp', roles: ADMIN_ROLES },
+    { id: 'reallife', i18n: 'tabReallife', roles: ADMIN_ROLES },
+    { id: 'users', i18n: 'tabUsers', roles: ['owner'] },
+    { id: 'quotas', i18n: 'tabQuotas', roles: ['owner'] },
+    { id: 'usage', i18n: 'tabUsage', roles: ['owner'] },
+    { id: 'reputation', i18n: 'tabReputation', roles: ['owner'] },
+    { id: 'federation', i18n: 'tabFederation', roles: ['owner'] },
+    { id: 'oidc', i18n: 'tabOidc', roles: ['owner'] },
+    { id: 'saml', i18n: 'tabSaml', roles: ['owner'] },
+    { id: 'settings', i18n: 'tabSettings', roles: ALL_ROLES },
+  ]
+  // Reserved floor — config may reorder these, never remove them (mirrors
+  // PANEL_RESERVED_TABS in the schema): home carries the approvals inbox,
+  // panel carries the member's own undo/shape escape hatch, settings carries
+  // language/password/logout. applyTabConfig appends any missing one.
+  const RESERVED_TABS = ['home', 'panel', 'settings']
+  // The two router families, derived from the ONE registry (R14b kept these
+  // as the router's validity sets; quotas/reputation/mcp/usage/federation
+  // history in git — the registry supersedes the hand-kept lists).
+  const C1_TABS = new Set(TAB_REGISTRY.filter((e) => e.roles.includes('member')).map((e) => e.id))
+  const ADMIN_TABS = new Set(TAB_REGISTRY.filter((e) => !e.roles.includes('member')).map((e) => e.id))
+
+  // The member's configured skeleton: an ordered array of tab ids, or null =
+  // no config = the role-default skeleton (byte-identical pre-M4.5). Set only
+  // by resolveTabConfig() before the shell wires up.
+  let configTabs = null
+
+  // The skeleton reader's own schema understanding. Must stay in lockstep with
+  // PANEL_SCHEMA_VERSION in personal-butler's panel-schema.ts (the contract
+  // test pins this text). SHELL-M3 discipline, skeleton edition: we render
+  // configs at OUR version or older; a NEWER schema may have changed what
+  // `tabs` means, so we ignore it and fall back to the role-default skeleton —
+  // which only ever SHOWS MORE within the role, never less, so the safe
+  // fallback is also the harmless one.
+  const SKELETON_SCHEMA_VERSION = 1
+
+  // Boot-time skeleton resolve. Bounded + fail-soft: offline / timeout /
+  // non-2xx / newer schema / malformed tabs all leave configTabs null (role
+  // default). Runs BEFORE wireTabs + loadAdminBundles on purpose — the tabbar
+  // is generated from the answer and the bundle set is chosen from it, so
+  // resolving first means no flash of the wrong skeleton and no bundle is
+  // fetched only to have its tab vanish (a script tag can't be un-injected).
+  async function resolveTabConfig() {
+    try {
+      const ctl = typeof AbortController === 'function' ? new AbortController() : null
+      const timer = ctl ? setTimeout(() => ctl.abort(), 4000) : null
+      const r = await fetch('/api/me/panel', ctl ? { signal: ctl.signal } : undefined)
+      if (timer) clearTimeout(timer)
+      if (!r.ok) return
+      const j = await r.json().catch(() => null)
+      if (!j || typeof j.schemaVersion !== 'number') return
+      if (j.schemaVersion > SKELETON_SCHEMA_VERSION) return
+      const tabs = j.config && typeof j.config === 'object' ? j.config.tabs : undefined
+      if (Array.isArray(tabs) && tabs.length > 0 && tabs.every((x) => typeof x === 'string')) {
+        configTabs = tabs
+      }
+    } catch (_) {
+      /* fail-soft → role-default skeleton */
+    }
+  }
+
+  /** Registry entries the CURRENT role may ever see, in registry order. */
+  function roleAllowedTabs() {
+    if (!SIGNED_IN) return []
+    return TAB_REGISTRY.filter((e) => e.roles.includes(role)).map((e) => e.id)
+  }
+
+  /**
+   * The ordered effective tab list: config order ∩ role baseline, reserved
+   * floor appended. This is the ONLY place config and role meet — narrowing
+   * composes by intersection, so config can never widen past the role.
+   */
+  function effectiveTabs() {
+    const allowed = roleAllowedTabs()
+    if (!configTabs) return allowed
+    const allowedSet = new Set(allowed)
+    const out = []
+    for (const id of configTabs) {
+      if (allowedSet.has(id) && !out.includes(id)) out.push(id)
+    }
+    for (const id of RESERVED_TABS) {
+      if (allowedSet.has(id) && !out.includes(id)) out.push(id)
+    }
+    return out
+  }
+
+  /** Config filter for the router: absent config allows everything. */
+  function configAllows(name) {
+    return !configTabs || effectiveTabs().includes(name)
+  }
 
   // ⑤-M1 — Simple mode (progressive disclosure). A per-device, user-controlled
   // toggle (localStorage) that trims the admin shell to a curated tab subset so
@@ -779,14 +877,33 @@
     return 'home'
   }
 
+  // Is `name` activatable right now? Role family (admin/C1) ∩ simple mode ∩
+  // config — the config filter composes by AND, so it can only ever narrow.
+  function tabUsable(name) {
+    const validAdminTab = ADMIN_OR_OWNER && effectiveAdminTabs().has(name)
+    const validC1Tab = C1_TABS.has(name)
+    return (validAdminTab || validC1Tab) && configAllows(name)
+  }
+
+  // SHELL-M4.5 首屏纳入配置 — with a config the FIRST usable entry is the
+  // landing screen; without one this is exactly the pre-M4.5 role default.
+  // The reserved floor guarantees 'home' stays usable, so the final fallback
+  // can never itself be config-excluded.
+  function defaultTab() {
+    if (configTabs) {
+      const first = effectiveTabs().find(tabUsable)
+      if (first) return first
+    }
+    const roleDefault = defaultTabForRole()
+    return tabUsable(roleDefault) ? roleDefault : 'home'
+  }
+
   // Single-source-of-truth tab switcher. Toggles `.tab-hidden` on every
   // `<section data-tab=…>` and `.active` on each tabbar button. Matches
   // admin.js's setActiveTab contract exactly (we coexist in the same DOM).
   function setActiveTab(name) {
-    const validAdminTab = ADMIN_OR_OWNER && effectiveAdminTabs().has(name)
-    const validC1Tab = C1_TABS.has(name)
-    if (!validAdminTab && !validC1Tab) {
-      name = defaultTabForRole()
+    if (!tabUsable(name)) {
+      name = defaultTab()
     }
     $$('section[data-tab]').forEach((sec) => {
       const matches = (sec.dataset.tab || '') === name
@@ -804,9 +921,8 @@
 
   function currentTabFromHash() {
     const h = (window.location.hash || '').slice(1)
-    if (ADMIN_OR_OWNER && effectiveAdminTabs().has(h)) return h
-    if (C1_TABS.has(h)) return h
-    return defaultTabForRole()
+    if (tabUsable(h)) return h
+    return defaultTab()
   }
 
   // Programmatic navigation. Mirrors a tabbar click: set the hash
@@ -847,7 +963,10 @@
     const box = $('#settings-simple-mode')
     if (box) box.checked = on
     if (on && ADMIN_OR_OWNER && !effectiveAdminTabs().has(document.body.dataset.activeTab || '')) {
-      gotoTab('overview')
+      // SHELL-M4.5 — retreat target must itself be usable: with a config that
+      // excludes overview, defaultTab() lands on the config's first usable
+      // entry instead (pre-M4.5 this was always 'overview').
+      gotoTab(defaultTab())
     }
   }
 
@@ -864,18 +983,50 @@
     })
   }
 
+  // SHELL-M4.5 — generate the tabbar from the effective skeleton. app.html
+  // ships an EMPTY <nav>: a static button there would bypass both the role
+  // filter and the config, so the skeleton contract test asserts the markup
+  // carries none. Generated buttons keep the exact shape the old static ones
+  // had (type/class/data-tab/data-roles/data-i18n) — CSS, simple-mode tagging,
+  // and app-core's [data-i18n] language walker all keep working unchanged.
+  function renderTabbar() {
+    const nav = document.getElementById('admin-tabbar')
+    if (!nav) return
+    nav.textContent = ''
+    const byId = new Map(TAB_REGISTRY.map((e) => [e.id, e]))
+    for (const id of effectiveTabs()) {
+      const entry = byId.get(id)
+      if (!entry) continue
+      const btn = document.createElement('button')
+      btn.type = 'button'
+      btn.className = 'tabbar-btn'
+      btn.dataset.tab = entry.id
+      btn.dataset.roles = entry.roles.join(',')
+      btn.setAttribute('data-i18n', entry.i18n)
+      // Self-translate at creation: app-core's initial applyStaticI18n walk
+      // already ran; the next setLang re-walk picks these up via data-i18n.
+      btn.textContent = t(entry.i18n)
+      nav.appendChild(btn)
+    }
+  }
+
   function wireTabs() {
+    // Generate the buttons FIRST — markAdvancedTabs tags .tabbar-btn elements,
+    // so they must exist before it runs. resolveTabConfig has already settled
+    // by the time boot calls us, so this is the one and only render.
+    renderTabbar()
     // ⑤-M1 — tag advanced tabs + reflect the stored simple-mode pref onto
     // <body> BEFORE the first resolve, so currentTabFromHash already rejects a
     // stale #federation hash and lands on overview.
     markAdvancedTabs()
     wireSimpleMode()
     if (isSimpleMode()) document.body.dataset.simpleMode = '1'
-    $$('.tabbar-btn:not([hidden])').forEach((btn) => {
-      btn.addEventListener('click', () => {
-        const name = btn.dataset.tab
-        if (name) gotoTab(name)
-      })
+    // Clicks are DELEGATED on the nav (not bound per-button) so the wiring is
+    // independent of when/what renderTabbar generated.
+    document.getElementById('admin-tabbar')?.addEventListener('click', (ev) => {
+      const btn = ev.target instanceof Element ? ev.target.closest('.tabbar-btn') : null
+      const name = btn?.dataset.tab
+      if (name) gotoTab(name)
     })
     window.addEventListener('hashchange', () => setActiveTab(currentTabFromHash()))
     setActiveTab(currentTabFromHash())
@@ -4118,14 +4269,57 @@
     }
   }
 
-  // ---- Dynamic load of admin.js + identity-ui.js -----------------------
+  // ---- Dynamic load of admin.js + satellite bundles --------------------
   //
   // Loaded only when role permits — these bundles target #managed-agents
   // / #users-panel DOM verbatim and their init paths assume the admin
   // shell is real. Loading them for member/viewer would either no-op
   // silently (best case) or throw on missing DOM (worst case).
+  //
+  // SHELL-M4.5 (fork B2's main increment) — the serial everything-chain is now
+  // BY-CONFIG: a satellite loads only when its owning tab survived
+  // effectiveTabs(). This is the second layer of the no-privilege-escalation
+  // gate: a member config listing 'users' renders no button (effectiveTabs ∩
+  // role) AND — for an admin whose config drops 'users' — identity-ui.js is
+  // never even fetched. The server 403s regardless (layer three).
+  //
+  // Chosen by CONFIG, not by simple mode: simple mode is a live localStorage
+  // toggle (no reload), so the bundles behind its hidden tabs must already be
+  // there when it flips off — same semantics as before.
+  //
+  // The core pair is shared by the whole admin family: admin.js owns the
+  // overview/agents/workflows/tasks/activity/services/mcp/reallife tabs plus
+  // the `gotong:tabchange` side-effect listener, and admin-wf-assist.js MUST
+  // precede it (it registers window.Gotong.installWorkflowAssist, which
+  // admin.js calls at IIFE init). Satellites stay in the historical order.
+  const CORE_ADMIN_BUNDLES = ['/admin-wf-assist.js', '/admin.js']
+  const TAB_BUNDLES = [
+    // SW-M9 A-M8 operator-steward + setting-ops M4 console both live on the
+    // overview tab; self-contained (window.Gotong + own DOM) like the rest.
+    { tab: 'overview', srcs: ['/operator-steward-ui.js', '/setting-ops-ui.js'] },
+    { tab: 'users', srcs: ['/identity-ui.js'] },
+    { tab: 'quotas', srcs: ['/quotas-ui.js'] },
+    { tab: 'reputation', srcs: ['/reputation-ui.js'] },
+    { tab: 'usage', srcs: ['/usage-ui.js'] },
+    {
+      tab: 'federation',
+      srcs: ['/peer-admin-ui.js', '/peer-manifest-ui.js', '/peer-summary-ui.js', '/a2a-ui.js', '/acp-ui.js'],
+    },
+    { tab: 'oidc', srcs: ['/oidc-ui.js'] },
+    { tab: 'saml', srcs: ['/saml-ui.js'] },
+  ]
+
   function loadAdminBundles() {
     if (!ADMIN_OR_OWNER) return
+    const tabs = new Set(effectiveTabs())
+    // No admin-family tab in the skeleton (config trimmed them all) → the
+    // whole admin layer stays unfetched; home/panel/settings are app.js/
+    // sdui-ui territory and need none of it.
+    if (![...tabs].some((id) => ADMIN_TABS.has(id))) return
+    const srcs = [...CORE_ADMIN_BUNDLES]
+    for (const entry of TAB_BUNDLES) {
+      if (tabs.has(entry.tab)) srcs.push(...entry.srcs)
+    }
     const inject = (src) => new Promise((resolve, reject) => {
       const s = document.createElement('script')
       s.src = src
@@ -4133,31 +4327,8 @@
       s.onerror = reject
       document.head.appendChild(s)
     })
-    // Order matters: admin.js depends on window.Gotong from app-core.js
-    // (already loaded via the synchronous <script defer> tag above us);
-    // admin-wf-assist.js registers window.Gotong.installWorkflowAssist
-    // which admin.js then calls at IIFE init time — so it MUST load before
-    // admin.js; identity-ui.js depends on the users-panel DOM that
-    // admin.html declares. We just chain.
-    inject('/admin-wf-assist.js')
-      .then(() => inject('/admin.js'))
-      // SW-M9 A-M8 — operator-console steward panel (overview tab). Self-contained
-      // like the federation panels; only needs window.Gotong + its own DOM.
-      .then(() => inject('/operator-steward-ui.js'))
-      // setting-ops M4 — unified deterministic "运维 / 设置" console (overview tab).
-      // Self-contained; loads its catalog on overview-tab focus, self-hides on 503.
-      .then(() => inject('/setting-ops-ui.js'))
-      .then(() => inject('/identity-ui.js'))
-      .then(() => inject('/quotas-ui.js'))
-      .then(() => inject('/reputation-ui.js'))
-      .then(() => inject('/usage-ui.js'))
-      .then(() => inject('/peer-admin-ui.js'))
-      .then(() => inject('/peer-manifest-ui.js'))
-      .then(() => inject('/peer-summary-ui.js'))
-      .then(() => inject('/a2a-ui.js'))
-      .then(() => inject('/acp-ui.js'))
-      .then(() => inject('/oidc-ui.js'))
-      .then(() => inject('/saml-ui.js'))
+    srcs
+      .reduce((p, src) => p.then(() => inject(src)), Promise.resolve())
       .catch((err) => {
         console.error('[app] failed to load admin bundles', err)
       })
@@ -4198,7 +4369,13 @@
       const wizardStarted = await maybeStartSetupWizard()
       if (wizardStarted) return
     }
-    // Signed in — reveal tabbar and wire everything.
+    // Signed in — resolve the skeleton config, then reveal tabbar and wire
+    // everything. SHELL-M4.5: the await is deliberate (bounded at 4s,
+    // fail-soft to the role default) — the tabbar is GENERATED from the
+    // answer and loadAdminBundles picks its set from it, so resolving first
+    // means no wrong-skeleton flash and no bundle fetched for a tab the
+    // config removed.
+    await resolveTabConfig()
     show($('#admin-tabbar'))
     wireTabs()
     attachLogout()

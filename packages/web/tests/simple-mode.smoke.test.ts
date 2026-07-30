@@ -23,8 +23,10 @@
  * in a `node:vm` context with a stubbed DOM — `node --check` and route tests
  * can't see the boot-time tab filtering. The closures (effectiveAdminTabs,
  * markAdvancedTabs, …) aren't exported, so we drive them through boot: app.js
- * registers a deferred `DOMContentLoaded` handler which (signed-in branch) runs
- * `wireTabs()` synchronously before any await.
+ * registers a deferred `DOMContentLoaded` handler; the signed-in branch first
+ * awaits the SHELL-M4.5 skeleton-config fetch (GET /api/me/panel — the stub
+ * resolves it immediately), then runs `wireTabs()`, so `fireDomReady` must be
+ * awaited before asserting.
  */
 
 import { describe, expect, it } from 'vitest'
@@ -90,13 +92,18 @@ interface Boot {
   checkbox: Record<string, any>
   store: Map<string, string>
   location: { hash: string; href: string }
-  /** Invoke the captured DOMContentLoaded handler. */
-  fireDomReady: () => void
+  /** Invoke the captured DOMContentLoaded handler and await its completion. */
+  fireDomReady: () => Promise<void>
 }
 
 /** Build a fresh VM context + stubbed DOM, evaluate app.js, return handles. */
 function bootApp(opts: { role?: string; simpleMode?: '1' | '0' | null; hash?: string } = {}): Boot {
   const role = opts.role ?? 'owner'
+  // SHELL-M4.5 — the signed-in boot awaits GET /api/me/panel before wiring
+  // the tabbar. No `tabs` in the default response → configTabs stays null →
+  // the role-default skeleton, i.e. the exact pre-M4.5 behaviour these
+  // simple-mode assertions were written against.
+  const panelResponse = { schemaVersion: 1, config: { schemaVersion: 1, sections: [] }, source: 'default' }
 
   // One element per tab name for buttons and sections; dataset.tab carries the
   // name so the router's `btn.dataset.tab` reads resolve.
@@ -170,7 +177,13 @@ function bootApp(opts: { role?: string; simpleMode?: '1' | '0' | null; hash?: st
     clearTimeout: () => {},
     setInterval: () => 0,
     clearInterval: () => {},
-    fetch: () => new Promise(() => {}), // never resolves — suspend async render paths
+    // SHELL-M4.5 — the boot AWAITS /api/me/panel (skeleton config resolve),
+    // so that one URL must resolve or fireDomReady would hang forever; every
+    // other fetch stays never-resolving to suspend the async render paths.
+    fetch: (url: unknown) =>
+      String(url).startsWith('/api/me/panel')
+        ? Promise.resolve({ ok: true, status: 200, json: async () => panelResponse })
+        : new Promise(() => {}),
     CustomEvent: class { type: string; detail: unknown; constructor(type: string, init?: any) { this.type = type; this.detail = init?.detail } },
     EventSource: class { close() {} },
   }
@@ -179,13 +192,15 @@ function bootApp(opts: { role?: string; simpleMode?: '1' | '0' | null; hash?: st
 
   return {
     body, buttons, sections, checkbox, store, location,
-    fireDomReady: () => {
+    fireDomReady: async () => {
       const cb = domListeners.DOMContentLoaded
       if (typeof cb !== 'function') throw new Error('app.js did not register a DOMContentLoaded handler')
-      // The handler is async; the signed-in branch runs wireTabs() synchronously
-      // before its first await. Ignore the returned promise (fire-and-forget
-      // render paths suspend on the never-resolving fetch).
-      void cb()
+      // The handler is async: the signed-in branch awaits resolveTabConfig()
+      // (the stubbed /api/me/panel resolves immediately) and only then runs
+      // wireTabs(), so completion must be awaited before asserting. The
+      // fire-and-forget render paths inside (.catch'd) suspend on the
+      // never-resolving fetch stub and don't block the handler.
+      await (cb() as unknown as Promise<void>)
     },
   }
 }
@@ -195,9 +210,9 @@ describe('static/app.js — ⑤-M1 simple mode smoke', () => {
     expect(() => bootApp()).not.toThrow()
   })
 
-  it('simple mode on: tags advanced tabs and lands a stale #federation hash on overview', () => {
+  it('simple mode on: tags advanced tabs and lands a stale #federation hash on overview', async () => {
     const app = bootApp({ role: 'owner', simpleMode: '1', hash: '#federation' })
-    expect(() => app.fireDomReady()).not.toThrow()
+    await app.fireDomReady()
 
     // body flag set
     expect(app.body.dataset.simpleMode).toBe('1')
@@ -219,9 +234,9 @@ describe('static/app.js — ⑤-M1 simple mode smoke', () => {
     expect(app.sections.federation._classes.has('tab-hidden')).toBe(true)
   })
 
-  it('simple mode off: #federation resolves to federation (advanced tabs still reachable)', () => {
+  it('simple mode off: #federation resolves to federation (advanced tabs still reachable)', async () => {
     const app = bootApp({ role: 'owner', simpleMode: null, hash: '#federation' })
-    app.fireDomReady()
+    await app.fireDomReady()
 
     expect(app.body.dataset.simpleMode).toBeUndefined()
     expect(app.body.dataset.activeTab).toBe('federation')
@@ -231,9 +246,9 @@ describe('static/app.js — ⑤-M1 simple mode smoke', () => {
     expect(app.buttons.federation._classes.has('adv-only')).toBe(true)
   })
 
-  it('toggling the settings switch persists the flag and re-applies the body class live', () => {
+  it('toggling the settings switch persists the flag and re-applies the body class live', async () => {
     const app = bootApp({ role: 'owner', simpleMode: null, hash: '#overview' })
-    app.fireDomReady()
+    await app.fireDomReady()
     expect(app.body.dataset.simpleMode).toBeUndefined()
 
     const onChange = app.checkbox._listeners.change

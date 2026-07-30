@@ -136,8 +136,12 @@
 {
   "schemaVersion": 1,
   "title": "爸爸的面板",            // 可选,顶栏标题
-  "sections": [                      // 纵向分组;v1 不做 tabs,减复杂度
-    {
+  "tabs": ["workflows", "home"],    // 可选(SHELL-M4.5 additive):导航骨架提示——
+                                     // 客户端渲染 配置序 ∩ 角色基线 + 保留区地板
+                                     // (home/panel/settings 删不掉);服务端不解释
+                                     // 不过滤,写角色够不着的页签不出现也不给权限
+  "sections": [                      // 纵向分组(M0 草案原写「v1 不做 tabs」,
+    {                                //  SHELL-M4.5 以 additive 可选键推翻)
       "heading": "今天",             // 可选
       "components": [
         { "type": "weather",  "source": "connector:weather", "params": { "days": 3 } },

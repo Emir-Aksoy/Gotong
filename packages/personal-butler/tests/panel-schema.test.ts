@@ -6,8 +6,10 @@ import {
   PANEL_COMPONENT_CONTRACTS,
   PANEL_COMPONENT_TYPES,
   PANEL_LIMITS,
+  PANEL_RESERVED_TABS,
   PANEL_RESERVED_TYPES,
   PANEL_SCHEMA_VERSION,
+  PANEL_TAB_IDS,
   panelContract,
   panelContractVerdict,
   validatePanelConfig,
@@ -56,6 +58,50 @@ describe('validatePanelConfig — accepts', () => {
 
   it('every component type in the catalog has a contract (two-way roster)', () => {
     expect(Object.keys(PANEL_COMPONENT_CONTRACTS).sort()).toEqual([...PANEL_COMPONENT_TYPES].sort())
+  })
+})
+
+describe('validatePanelConfig — tabs (SHELL-M4.5 skeleton)', () => {
+  it('accepts an ordered subset of the closed tab catalog', () => {
+    const res = validatePanelConfig(minimal({ tabs: ['panel', 'home', 'settings'] }))
+    expect(res.ok).toBe(true)
+    if (res.ok) expect(res.config.tabs).toEqual(['panel', 'home', 'settings'])
+  })
+
+  it('accepts the full catalog in any order (B2: admin tabs are just entries)', () => {
+    const res = validatePanelConfig(minimal({ tabs: [...PANEL_TAB_IDS].reverse() }))
+    expect(res.ok).toBe(true)
+  })
+
+  it('absent tabs = valid (the client renders its role-default skeleton)', () => {
+    // DEFAULT_PANEL deliberately carries no tabs — 未配 = 字节不变.
+    expect('tabs' in DEFAULT_PANEL).toBe(false)
+    expect(validatePanelConfig(minimal()).ok).toBe(true)
+  })
+
+  it('rejects unknown tab ids — the skeleton vocabulary is a closed set', () => {
+    const res = validatePanelConfig(minimal({ tabs: ['home', 'evil-tab'] as never }))
+    expect(res.ok).toBe(false)
+    if (!res.ok) expect(res.errors.join('\n')).toContain('tabs[1]: unknown tab')
+  })
+
+  it('rejects duplicates, empties and non-arrays', () => {
+    for (const bad of [['home', 'home'], [], 'home', 42, {}] as const) {
+      const res = validatePanelConfig(minimal({ tabs: bad as never }))
+      expect(res.ok, `tabs=${JSON.stringify(bad)}`).toBe(false)
+    }
+  })
+
+  it('refuses loudly over the catalog-size cap (hostile long arrays)', () => {
+    const res = validatePanelConfig(minimal({ tabs: Array(200).fill('home') as never }))
+    expect(res.ok).toBe(false)
+    if (!res.ok) expect(res.errors.join('\n')).toContain(`over ${PANEL_TAB_IDS.length}`)
+  })
+
+  it('reserved floor is a subset of the catalog (roster sanity)', () => {
+    for (const t of PANEL_RESERVED_TABS) {
+      expect(PANEL_TAB_IDS as readonly string[]).toContain(t)
+    }
   })
 })
 
