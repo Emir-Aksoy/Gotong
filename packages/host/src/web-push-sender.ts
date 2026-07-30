@@ -45,8 +45,10 @@ const PUSH_TTL_SECONDS = 24 * 3600
  * Fixed v1 tap copy (bilingual, content-free). The push service cannot read
  * it (RFC 8291), but the LOCK SCREEN can — same shoulder-surfing surface the
  * IMA web-only discipline protects, hence no member content ever.
+ * Exported for the SHELL-M6 APNs leg — one copy, two legs (a second copy
+ * would drift, the i18n lesson).
  */
-const TAP_PAYLOAD = { title: '阿同 · Gotong', body: '有新消息,点开查看 · New message' }
+export const TAP_PAYLOAD = { title: '阿同 · Gotong', body: '有新消息,点开查看 · New message' }
 
 export interface WebPushSenderOptions {
   key: WebPushKey

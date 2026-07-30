@@ -269,6 +269,7 @@ import { butlerHearingFromEnv } from './butler-hearing.js'
 import { butlerSeeingFromEnv } from './butler-seeing.js'
 import { butlerVoiceFromEnv } from './butler-voice.js'
 import { buildWebPushService } from './web-push-sender.js'
+import { buildApnsPushService, composeTapFallback } from './apns-push.js'
 import {
   buildOnboardingKeyCheck,
   type ButlerOnboardingKeyCheck,
@@ -970,6 +971,10 @@ async function main(): Promise<void> {
   // PUSH-M3 — opt-in Web Push 补位触达(GOTONG_WEBPUSH=RFC 8292 联系方式;未设 ⇒ 字节不变;payload E2E 加密但时序元数据经浏览器厂商推送服务=dataLeavesBox)。
   const webPush = buildWebPushService(space.root, log)
   if (webPush) log.info(webPush.disclosure, { dataLeavesBox: true })
+  // SHELL-M6 — opt-in APNs 原生腿(`<space>/apns.json` 文件即开关,file-first 非旋钮;缺席 ⇒ 字节不变;token+时序元数据经 Apple ⇒ dataLeavesBox)。
+  const apnsPush = buildApnsPushService(space.root, log)
+  if (apnsPush) log.info(apnsPush.disclosure, { dataLeavesBox: true })
+  const tapFallback = composeTapFallback(webPush?.fallback, apnsPush?.fallback)
   // BF-M7 — governed set(建/改/删自己的 agent+改工作流)逐项 park 到 /me;执行器=/me steward 同一服务(闸不越面);refs lazy 读,缺 ⇒ 纯记忆。
   let butlerGovernedAgentsRef: StewardAgentDirectory | undefined
   let butlerGovernedWorkflowEditorRef: StewardWorkflowEditor | undefined
@@ -2295,7 +2300,7 @@ async function main(): Promise<void> {
       ...(butlerVoice ? { voice: butlerVoice } : {}),
       ...(butlerHearing ? { hearing: butlerHearing } : {}),
       ...(butlerSeeing ? { seeing: butlerSeeing } : {}),
-      ...(webPush ? { webPushFallback: webPush.fallback } : {}),
+      ...(tapFallback ? { webPushFallback: tapFallback } : {}),
       // IMA-M2 — /inbox /approve /deny:读走 InboxStore、写走 HostInboxService(既有权威)。
       ...(inboxStore && inboxService ? { approvals: { store: inboxStore, inbox: inboxService } } : {}),
       // CARE-M5 — 恢复探活骑 onboarding key check 只读活体链;lazy ref 兜未就绪;status==='ok' 才算真恢复。
@@ -2326,8 +2331,9 @@ async function main(): Promise<void> {
     },
     // MR-M5 — per-candidate manual 「测试路由」 probe (reuses the pool's spawn-time key→factory chain; breaker-isolated).
     routingProbe: localAgents,
-    // PUSH-M2 — member Web Push subscription face; absent ⇒ honest {available:false}.
+    // PUSH-M2 / SHELL-M6 — member push faces; absent ⇒ honest {available:false}.
     ...(webPush ? { webPush: webPush.surface } : {}),
+    ...(apnsPush ? { nativePush: apnsPush.surface } : {}),
     // FDE-M1b/M3 — durable sinks for template-declared connector slots and
     // schedule suggestions (recorded at import; absent → response-only).
     connectorSlots,

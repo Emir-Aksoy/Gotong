@@ -61,7 +61,7 @@ import {
   type MeChatSessionSurface,
 } from './me-routes.js'
 import { handleAdminPanelRoute, type MePanelDataSurface, type MePanelSurface } from './panel-routes.js'
-import type { MeWebPushSurface } from './push-routes.js'
+import type { MeNativePushSurface, MeWebPushSurface } from './push-routes.js'
 import { handleDeviceClaimRoute, type MeDeviceSurface } from './device-routes.js'
 import {
   handleWorkflowRoute,
@@ -365,6 +365,7 @@ export function serveWeb(hub: Hub, opts: WebServerOptions = {}): Promise<WebServ
     mePanel: opts.mePanel,
     panelData: opts.panelData,
     webPush: opts.webPush,
+    nativePush: opts.nativePush,
     devices: opts.devices,
     deviceClaimLimiter,
     panelLibrary: opts.panelLibrary,
@@ -562,8 +563,9 @@ interface HandlerCtx {
   /** SDUI-M2/M3 — see WebServerOptions.mePanel / panelLibrary docs above. */
   mePanel: MePanelSurface | undefined
   panelData: MePanelDataSurface | undefined
-  /** PUSH-M2 — see WebServerOptions.webPush doc. */
+  /** PUSH-M2 / SHELL-M6 — see WebServerOptions.webPush / nativePush docs. */
   webPush: MeWebPushSurface | undefined
+  nativePush: MeNativePushSurface | undefined
   devices: MeDeviceSurface | undefined
   /** SHELL-M1 — per-IP budget for the PUBLIC pairing-code claim endpoint. */
   deviceClaimLimiter: RateLimiter
@@ -1231,6 +1233,7 @@ async function handle(
         mePanel: ctx.mePanel,
         panelData: ctx.panelData,
         webPush: ctx.webPush,
+        nativePush: ctx.nativePush,
         devices: ctx.devices,
         // SHELL-M1 — the pairing QR encodes the address the member reached us
         // on, so it needs the same proxy-trust switch the agent card uses.

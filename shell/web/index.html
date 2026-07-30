@@ -41,6 +41,12 @@
         <button id="disconnect-btn" type="button" data-s="disconnect"></button>
       </span>
     </header>
+    <!-- SHELL-M6:通知行。只在「原生平台 + hub 真开了 APNs」时由 shell.js 显示;
+         绝不在启动时自动弹权限——开启是成员按按钮的动作。 -->
+    <div id="notify-row" class="notify-row" hidden>
+      <span id="notify-state" class="notify-state"></span>
+      <button id="notify-btn" type="button"></button>
+    </div>
     <div id="shell-host"></div>
     <p id="panel-note" class="shell-note" role="status" hidden></p>
   </main>

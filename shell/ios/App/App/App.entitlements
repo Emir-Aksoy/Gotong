@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- SHELL-M6 —— APNs 注册需要的唯一 entitlement。debug 构建=development
+	     (sandbox token);App Store/TestFlight 分发时 Xcode 自动改写为 production。
+	     模拟器不强制它,真机(M7)必须有。 -->
+	<key>aps-environment</key>
+	<string>development</string>
+</dict>
+</plist>

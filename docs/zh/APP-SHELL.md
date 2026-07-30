@@ -7,8 +7,9 @@
 >
 > Track 代号:**SHELL**。Status: **M1 设备配对 ✅ · M2 base URL 层 ✅ ·
 > M3 契约做实 ✅ · M4 渲染器解耦 ✅(2026-07-29) · M4.5 骨架配置化 ✅
-> (2026-07-30) · M5 壳工程 ✅(2026-07-30,iOS 模拟器全动线;真机=M7)**;
-> M6 原生推送起未动工。
+> (2026-07-30) · M5 壳工程 ✅(2026-07-30,iOS 模拟器全动线;真机=M7) ·
+> M6 原生推送 ✅(2026-07-30,APNs 直连;真 APNs 送达=M7)**;仅余 M7 真机
+> round-trip(用户运维前置:域名+TLS + Apple Developer 账号)。
 > 本 track 是 [`SDUI-PANEL.md`](SDUI-PANEL.md) 里程碑表 M5 那一格的展开——
 > 侦察后确认它装不进一格(见 §四)。
 > 形态拍板:**真壳**(本地资源 + `CapacitorHttp` 走原生请求),而非瘦壳
@@ -289,13 +290,15 @@ hint([`static-routes.ts:244-246`](../../packages/web/src/static-routes.ts#L244))
 | **M4 渲染器解耦** ✅ | 五条硬耦合改注入点(i18n / tab 协议 / 宿主元素 / CSS / storage key)全部收进 `GotongPanel.mount(opts)`;**SPA 成为这个 API 的第一个调用者**而非特权侧门 | `sdui-standalone.html` 只加载渲染器三件套就渲染出真面板(真浏览器已证:3 段 5 卡 · `window.Gotong` undefined · console 零错误) |
 | **M4.5 骨架配置化** ✅ | **全部 17 个页签**纳入配置(岔口 B2;落地时实为 18——M0 数的 17 + SDUI-M2 的「面板」页签):tabbar 配置驱动生成 + 15 个 admin bundle 改按需加载 | 两个成员打开 app 看到**不同的导航结构**,不只是不同的面板内容;**防腐门:配置驱动的 tabbar 不得成为提权路径**(member 配置里写 admin 页签仍拿不到 admin 面,服务端照样 403)——真机三层全证 |
 | **M5 壳工程** ✅ | `capacitor.config.ts`(`webDir` + `CapacitorHttp.enabled`)+ static 导出脚本(兼防腐门)+ PNG 图标集;顶层 `shell/` 刻意不进 pnpm workspace | 装上、打得开、能连本机 hub 三条在 iOS 模拟器全过:**机内**配对(HID 真点真打)→ claim 换 `aipk_` → 面板渲染真巡检数据;重启直落连接态;`gotong://` 深链预填不自提交。真机 + 生产 VPS = M7 |
-| **M6 原生推送** | `@capacitor/push-notifications` 接 FCM/APNs;复用订阅存储形状与 fold 决策。**大陆版按 A1 不接推送**(只轮询) | 真机锁屏收到低信息 tap;绑 IM 成员仍零双发 |
+| **M6 原生推送** ✅ | **APNs 直连**(host `apns-push.ts`:node:http2 + ES256 provider token,零新依赖零中央中转);凭证 file-first `<space>/apns.json` + p8 **非旋钮**;壳侧 `@capacitor/push-notifications` 按钮开启绝不启动自动弹权限;**FCM 随 Android 壳一起推迟**,大陆 A1 只轮询不变 | 模拟器全动线十段(开启→真 160-hex token 注册→前台/锁屏横幅→点开只回面板→断开先注销);绑 IM 成员字节不变(`composeTapFallback` 并两腿后仍只在 `unknown_member` 回落);**真 APNs 送达=M7**(需 Apple Developer p8;发送器由 20 单测含真 h2 wire 逐字节盖) |
 | **M7 真机 round-trip** | 装壳 → 输地址 → agent-card 验身份 → 配对拿 token → 面板渲染 → 推送送达 | 全链路一次跑通,console 零错误 |
 | *分发* | 商店上架 / 演示形态过审 / APK 签名 / 大陆直发 | **用户门,不进 track** |
 
-**前置条件(用户运维动作,阻塞 M7)**:VPS 需要域名 + TLS + 公网入口。
+**前置条件(用户运维动作,阻塞 M7)**:①VPS 需要域名 + TLS + 公网入口。
 `deploy/Caddyfile.baremetal` 模板已备,要做的是买域名、配 DNS、`cp` 模板、
 把 `GOTONG_ALLOWED_HOSTS` 对齐、`systemctl reload caddy`。约半天,不写代码。
+②M6 后新增:**Apple Developer 账号**(出真 p8 APNs key + 真机签名)——没有它
+真 APNs 送达与真机安装都验不了。
 
 ### M2 落地时对计划的两处修正(2026-07-29)
 
@@ -572,6 +575,96 @@ WebView console 未接 Web Inspector,以「渲染结果 + hub 侧行为」双向
 Android 显式不做脚手架(写完不能验证=写完就腐,待构建环境再 `cap add`)。
 边界五条全守:`packages/*` 本刀**零改动**、旋钮 **116 冻结零新增**、四门
 PASS——壳是第 N 个渲染器,装 app 不多一分权限。
+
+### M6 落地记(2026-07-30)
+
+**一句话**:hub 长出一条 **APNs 直连**投递腿(operator 自己的 Apple 凭证,
+零中央中转——宪章「零中央节点」在推送上的形状),壳长出一行「开启通知」;
+绑 IM 成员逐字节不变,纯壳成员从「打开 app 才知道」变「锁屏被低信息 tap
+叫醒」。**FCM/Android 刻意不做**(Android 壳本身不存在,写完不能验证=写完
+就腐,M5 同一判断);大陆 A1 只轮询不变。§四第四档预判的「PUSH-M1 纯核在
+壳里是死代码」如实兑现——RFC 8291 加密与 VAPID 一行都没用上,复用的恰是
+当时点名的四样:per-member 文件形状、fold 补位语义、不收 text 低信息纪律、
+404/410 剪订阅自愈(在 APNs 侧=410 `Unregistered` 剪 token)。
+
+**凭证是 file-first 数据不是旋钮(116 冻结零新增)**:`<space>/apns.json`
+`{keyId, teamId, bundleId, environment:'sandbox'|'production', keyFile?}` +
+p8 私钥(默认 `apns-key.p8`,相对路径以 space 根解析),与 `agent-card.json`
+同族——「这台 hub 用哪份 Apple 凭证」是空间里的运营数据,不是部署环境开关。
+三态合同:**缺席=OFF 字节不变;形状不对=warn+OFF;形状对但 key 读不了或
+不是 EC P-256=boot 抛错拒启**——写下合法配置的人明确想开推送,静默降级
+等于把「没开」谎报成「开了」(web-push 坏钥响亮拒同一姿态)。启动披露一行
+`apns push enabled: topic=… env=… keyId=… teamId=…` 且 `dataLeavesBox`
+(推送时序元数据经 Apple),永不打印 key 字节。
+
+**发送器 `host/src/apns-push.ts` 零新依赖**:node:http2 直连
+`api.push.apple.com` / `api.sandbox.push.apple.com`,node:crypto ES256
+provider token(45 分钟内缓存复用);`apns-push-type: alert` + `apns-topic`
++ TTL;**403 `ExpiredProviderToken` 丢缓存重铸一次**;**410 `Unregistered`
+剪 token 自愈**。20 单测的承重形状=**起真 h2c HTTP/2 mock 服务器逐字节断言
+wire**(`:path` 含 token/`apns-topic` 头/JWT 用独立 `createVerify` 验签/
+payload 字节)+ 403 重铸重发 + 410 剪掉后存活 token 照发。
+
+**文案一份两腿**:`TAP_PAYLOAD` 常量从 `web-push-sender.ts` 导出(标题
+「阿同 · Gotong」/正文「有新消息,点开查看 · New message」),web 腿与 APNs
+腿共用同一常量=两腿文案漂移结构性不可能;`push(userId)` 签名仍不收 text=
+正文结构性上不了锁屏(PUSH-M3 纪律原样)。**fold 语义**:新
+`composeTapFallback(a, b)` 把两条 tap 腿并成一条(并行发,≥1 送达=
+delivered;单腿=原样透传恒等),外层仍是 `foldWebPushIntoPush` **仅
+`unknown_member` 回落**——绑 IM 成员字节不变零双发,B1 严格补位语义原封。
+
+**token 存储 per-user 不 per-credential(诚实边界)**:
+`<space>/butler/push-native/<userId>.json` `{tokens:[{token, platform,
+createdAt, lastOkAt?}]}`,5 设备顶丢最旧、同 token 重注册原地更新、
+`assertSafeOwnerId` 先于拼接、per-user promise 链(镜像 web-push-store 全
+形状);token 校验 **16–200 hex**——**模拟器实测发 160 hex**(比真机的 64
+长,上限当时就留对了)。网页端撤销设备凭证**立即**断数据面,但推送 token 要
+等壳注销或 Apple 410 才剪——所以壳的「断开」**先 best-effort POST
+unregister 再 clearTarget**(顺序承重:凭证一忘就再也发不出注销),UI 红字
+如实注明网页端撤销后通知可能仍短暂到达。web 面三路由骑 push-routes(鸭子
+`MeNativePushSurface`,session 钉 userId):GET 探测三态诚实(无 surface=
+`native.available:false`)/POST register 收 `{token, platform:'ios'}` 白
+名单/POST unregister;坏 token 400。
+
+**壳侧五条 UX 纪律(全部实机化验证)**:①**绝不启动自动弹权限**——通知行
+只在「原生平台 + 已连接 + hub `native.available:true`(懒 GET 探测)」才
+显示,系统权限框是成员按「开启通知」的动作;②权限已授过再开启**不弹框**
+直接注册;③boot 时此前开过=**静默重注册**(token 轮换自愈,零打扰);
+④推送点开=只回到面板(**推送≠授权**,PUSH-M3 同句);⑤
+`presentationOptions:['banner','sound']`——前台也出横幅,否则「开了通知却
+看不到」像 bug。
+
+**验证(iPhone 17 Pro 模拟器,hub 带测试 apns.json[临时 EC 钥,非生产凭证],
+十段全绿)**:①全新装 boot 落配对屏,无通知行无叠影;②idb 机内配对→面板真
+数据;③通知行出现——它只可能来自懒探测打到 `native.available:true`(证壳→
+hub-target 重写→Bearer→native surface 全链);④点「开启通知」→ iOS 系统
+权限框(仅此刻出现);⑤允许→模拟器发**真 160-hex token**→hub `count:1` +
+盘上 per-user 文件落地;⑥`simctl push` TAP 字节同款 payload→**前台横幅**
+(presentationOptions 生效);⑦HOME 后台→锁屏面横幅;⑧点横幅(横幅约 5s
+自灭,须 2s 内点到)→app 回面板,不多一分权限;⑨断开→确认框→hub 侧
+`count:0`(**注销先于忘凭证**已证)+ 红字诚实注;⑩重配对→再开启**不弹框**
+→ terminate + relaunch →**静默重注册**(entry createdAt 刷新,零提示)。
+hub 侧另以 curl 独立证:GET 三态 / register / unregister round-trip / 坏
+token 400。
+
+**诚实边界**:真 APNs 送达(hub→Apple→设备)**结构性验证不了**——无 Apple
+Developer 账号拿不到真 p8,模拟器也不连真 APNs;`simctl push` 只证**设备侧**
+显示/点按半程,hub 侧发送器由 20 单测(真 h2 wire 逐字节 + 独立验签 +
+403/410)盖。真机 + 真 p8 = M7 前置(用户门)。存储 token 上 `lastOkAt`
+缺席也是诚实态——只有真送达才写。
+
+**验证环境排错记(续 M5)**:MCP 模拟器工具在 macOS 26 误检 xcode-select
+依旧,全程仍用通用工具(simctl + idb);/tmp 验证环境被系统清理→space、
+hub、idb companion 全重建(companion 走 GitHub release tar 直下);**新坑**:
+companion 启动命令接了 `| head` 管道,head 收满即杀长跑进程,窗口内的 idb
+tap/text **静默失败**(`2>/dev/null` 又吞了报错)——教训:**长跑进程绝不接
+会提前关闭的管道**,输出要么落文件要么后台任务。
+
+验收:host **2618** + 5 skip(+20 apns)/ web **1612**(+3 native 路由),
+四门 PASS(**旋钮 116 冻结零新增**;main.ts 2758/2760)。`packages/*` 改动
+=host 发送腿 + web 三路由,渲染器/schema/治理闸零触碰——推送是投递腿不是
+新权威点。下一步 **M7 真机 round-trip**(用户运维前置:VPS 域名+TLS+公网
+入口,及 Apple Developer 账号出真 p8)。
 
 ---
 

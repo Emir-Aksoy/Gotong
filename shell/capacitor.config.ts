@@ -17,6 +17,9 @@ const config: CapacitorConfig = {
   webDir: 'www',
   plugins: {
     CapacitorHttp: { enabled: true },
+    // SHELL-M6 —— 前台收到推送也显示横幅:tap 是低信息的(正文永不上通知),
+    // 前台压掉横幅只会让「测试推送没反应」多一种解释,不省任何隐私。
+    PushNotifications: { presentationOptions: ['badge', 'sound', 'alert'] },
   },
 }
 

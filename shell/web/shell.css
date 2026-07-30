@@ -135,6 +135,30 @@ html, body {
   border: 1px solid var(--shell-line);
   border-radius: 8px;
 }
+/* ---- SHELL-M6:通知行 ---- */
+.notify-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin: 8px 14px 0;
+  padding: 8px 12px;
+  background: var(--shell-card);
+  border: 1px solid var(--shell-line);
+  border-radius: 9px;
+}
+.notify-row[hidden] { display: none; }
+.notify-state { font-size: 13px; color: var(--shell-muted); }
+.notify-row button {
+  flex-shrink: 0;
+  padding: 6px 12px;
+  font-size: 13px;
+  color: var(--shell-fg);
+  background: var(--shell-bg);
+  border: 1px solid var(--shell-line);
+  border-radius: 8px;
+}
+
 #shell-host { padding: 4px 14px 20px; }
 .shell-note {
   margin: 0 14px;

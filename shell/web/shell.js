@@ -34,6 +34,13 @@
       errNet: '连不上这个地址:检查网络与端口;若是在浏览器里打开本页,跨源请求只有装进壳 app 才通。',
       noHome: '壳里没有主页页签。',
       connectedPrefix: '已连接',
+      notifyOn: '开启通知',
+      notifyOff: '关闭',
+      notifyStateOff: '有新消息时提醒这台设备',
+      notifyStateOn: '通知已开启',
+      notifyDenied: '系统未授权通知 —— 到 iOS 设置里为 Gotong 打开后再试。',
+      notifyErrHub: '这台 hub 未启用原生推送(服务端没配 apns.json)。',
+      notifyErrReg: '开启失败,稍后再试。',
     },
     en: {
       lead: 'Connect your own hub: generate a pairing code under "Me → Devices" on the web, scan the QR or type both fields below.',
@@ -51,6 +58,13 @@
       errNet: 'Cannot reach that address: check network and port; cross-origin only works inside the shell app, not a plain browser tab.',
       noHome: 'No home tab in the shell.',
       connectedPrefix: 'Connected',
+      notifyOn: 'Enable notifications',
+      notifyOff: 'Disable',
+      notifyStateOff: 'Alert this device on new messages',
+      notifyStateOn: 'Notifications on',
+      notifyDenied: 'Notifications not authorized — enable Gotong in iOS Settings, then retry.',
+      notifyErrHub: 'This hub has no native push (no apns.json on the server).',
+      notifyErrReg: 'Could not enable — try again later.',
     },
   }
 
@@ -104,6 +118,7 @@
     $('screen-pair').hidden = true
     $('screen-panel').hidden = false
     renderStrings()
+    renderNotify()
     if (!handle) {
       handle = window.GotongPanel.mount({
         host: $('shell-host'),
@@ -240,10 +255,155 @@
     } catch (_) {}
   }
 
+  // --- 通知(SHELL-M6) ----------------------------------------------------
+  //
+  // 纪律三条:①绝不在启动时自动弹权限 —— 「开启」是成员按按钮的动作;②通知
+  // 永远是低信息 tap(正文在 hub 侧结构性上不了推送),收到只代表「有新消息」;
+  // ③断开前先尽力把 token 从 hub 删掉 —— 设备凭证按 userId 存 token,不删的话
+  // 要等 Apple 答 410 才会被 hub 剪掉。
+
+  var NOTIFY_KEY = 'gotong-shell-notify'
+  var NOTIFY_TOKEN_KEY = 'gotong-shell-push-token'
+
+  function pushPlugin() {
+    var cap = window.Capacitor
+    if (!cap || typeof cap.isNativePlatform !== 'function' || !cap.isNativePlatform()) return null
+    return (cap.Plugins && cap.Plugins.PushNotifications) || null
+  }
+
+  function notifyEnabled() {
+    try {
+      return localStorage.getItem(NOTIFY_KEY) === '1'
+    } catch (_) {
+      return false
+    }
+  }
+
+  function setNotify(on, token) {
+    try {
+      if (on) localStorage.setItem(NOTIFY_KEY, '1')
+      else localStorage.removeItem(NOTIFY_KEY)
+      if (token) localStorage.setItem(NOTIFY_TOKEN_KEY, token)
+      else if (!on) localStorage.removeItem(NOTIFY_TOKEN_KEY)
+    } catch (_) {}
+  }
+
+  function renderNotify() {
+    var row = $('notify-row')
+    row.hidden = true
+    if (!pushPlugin() || !window.GotongHub.base()) return
+    // 行只在 hub 真开了 APNs 时出现:探一次 GET /api/me/push 的 additive
+    // native 键。探不到/答 available:false ⇒ 行保持隐藏,不摆按不动的按钮。
+    fetch('/api/me/push')
+      .then(function (res) {
+        return res.ok ? res.json() : null
+      })
+      .then(function (d) {
+        if (!d || !d.native || !d.native.available) return
+        row.hidden = false
+        $('notify-state').textContent = notifyEnabled() ? t('notifyStateOn') : t('notifyStateOff')
+        $('notify-btn').textContent = notifyEnabled() ? t('notifyOff') : t('notifyOn')
+      })
+      .catch(function () {})
+  }
+
+  /** registration 事件的唯一出口:把 token 交给 hub。失败即回退开关,不留半态。 */
+  function onPushToken(token) {
+    fetch('/api/me/push/native/register', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ token: token, platform: 'ios' }),
+    })
+      .then(function (res) {
+        if (res.status === 503) throw { kind: 'hub' }
+        if (!res.ok) throw { kind: 'reg' }
+        setNotify(true, token)
+        renderNotify()
+      })
+      .catch(function (err) {
+        setNotify(false)
+        renderNotify()
+        note(err && err.kind === 'hub' ? t('notifyErrHub') : t('notifyErrReg'))
+      })
+  }
+
+  function wirePush() {
+    var push = pushPlugin()
+    if (!push) return
+    try {
+      push.addListener('registration', function (ev) {
+        if (ev && ev.value) onPushToken(ev.value)
+      })
+      push.addListener('registrationError', function () {
+        setNotify(false)
+        renderNotify()
+        note(t('notifyErrReg'))
+      })
+      // 推送到达/被点开 ⇒ 只刷新面板数据(推送≠授权:除了「去看一眼」什么都不做)。
+      var refresh = function () {
+        if (handle && !$('screen-panel').hidden) handle.render()
+      }
+      push.addListener('pushNotificationReceived', refresh)
+      push.addListener('pushNotificationActionPerformed', refresh)
+      // 已开启过的设备:静默重注册(APNs token 会轮换,权限早已给过不会弹窗)。
+      if (notifyEnabled() && window.GotongHub.base()) {
+        push.register().catch(function () {})
+      }
+    } catch (_) {}
+  }
+
+  function toggleNotify() {
+    var push = pushPlugin()
+    if (!push) return
+    if (notifyEnabled()) {
+      var tok = null
+      try {
+        tok = localStorage.getItem(NOTIFY_TOKEN_KEY)
+      } catch (_) {}
+      if (tok) {
+        fetch('/api/me/push/native/unregister', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ token: tok }),
+        }).catch(function () {})
+      }
+      if (typeof push.unregister === 'function') push.unregister().catch(function () {})
+      setNotify(false)
+      renderNotify()
+      return
+    }
+    push
+      .requestPermissions()
+      .then(function (r) {
+        if (!r || r.receive !== 'granted') {
+          note(t('notifyDenied'))
+          return
+        }
+        return push.register()
+      })
+      .catch(function () {
+        note(t('notifyErrReg'))
+      })
+  }
+
   // --- 断开 ---------------------------------------------------------------
 
   function doDisconnect() {
     if (!window.confirm(t('confirmDisconnect'))) return
+    // 尽力先把推送 token 从 hub 删掉(fire-and-forget):token 按 userId 存,
+    // 光在网页端撤设备凭证停不掉它,要等 Apple 答 410 才自愈。
+    var tok = null
+    try {
+      tok = localStorage.getItem(NOTIFY_TOKEN_KEY)
+    } catch (_) {}
+    if (tok) {
+      fetch('/api/me/push/native/unregister', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ token: tok }),
+      }).catch(function () {})
+    }
+    setNotify(false)
     // 只忘本机。撤销凭证是 hub 侧「我的 → 设备」的事 —— 壳拿不到自己的
     // credentialId(claim 刻意不返回它),而且「设备丢了去网页端踢它」这条
     // 路本来就必须独立于设备本身存在。
@@ -258,16 +418,21 @@
     if (ev.key === 'Enter') doPair()
   })
   $('disconnect-btn').addEventListener('click', doDisconnect)
+  $('notify-btn').addEventListener('click', toggleNotify)
   $('lang-btn').addEventListener('click', function () {
     lang = lang === 'zh' ? 'en' : 'zh'
     try {
       localStorage.setItem(LANG_KEY, lang)
     } catch (_) {}
     renderStrings()
-    if (handle && !$('screen-panel').hidden) handle.render()
+    if (!$('screen-panel').hidden) {
+      renderNotify()
+      if (handle) handle.render()
+    }
   })
 
   wireDeepLink()
+  wirePush()
   renderStrings()
 
   var expiresAt = window.GotongHub.expiresAt()

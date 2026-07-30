@@ -45,7 +45,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http'
 import { readJsonBody, sendJson } from './http-helpers.js'
 import { handleMeWizardRoute, type WorkflowWizardSurface } from './wizard-routes.js'
 import { handleMePanelRoute, type MePanelDataSurface, type MePanelSurface } from './panel-routes.js'
-import { handleMeWebPushRoute, type MeWebPushSurface } from './push-routes.js'
+import { handleMeWebPushRoute, type MeNativePushSurface, type MeWebPushSurface } from './push-routes.js'
 import { handleMeDeviceRoute, type MeDeviceSurface } from './device-routes.js'
 import { readRawBody } from './uploads-routes.js'
 
@@ -408,6 +408,8 @@ export interface HandleMeRouteCtx {
   mePanel: MePanelSurface | undefined
   panelData: MePanelDataSurface | undefined
   webPush: MeWebPushSurface | undefined
+  /** SHELL-M6 — native (APNs) tokens; undefined → GET native.available:false, POSTs 503. */
+  nativePush: MeNativePushSurface | undefined
   /** SHELL-M1 — app device pairing; undefined → GET {available:false}, POSTs 503. */
   devices: MeDeviceSurface | undefined
   /** SHELL-M1 — proxy-trust switch; the pairing QR encodes a request-derived origin. */
@@ -757,8 +759,8 @@ export async function handleMeRoute(
   if (path === '/api/me/panel' || path.startsWith('/api/me/panel/')) {
     if (await handleMePanelRoute({ panel: ctx.mePanel, panelData: ctx.panelData }, req, res, method, path, userId)) return
   }
-  // PUSH-M2 — Web Push subscriptions (implementation in push-routes.ts, 控预算).
-  if (path.startsWith('/api/me/push') && (await handleMeWebPushRoute({ webPush: ctx.webPush }, req, res, method, path, userId))) return
+  // PUSH-M2 + SHELL-M6 — Web Push 订阅与原生 token (implementation in push-routes.ts, 控预算).
+  if (path.startsWith('/api/me/push') && (await handleMeWebPushRoute({ webPush: ctx.webPush, nativePush: ctx.nativePush }, req, res, method, path, userId))) return
   // SHELL-M1 — app device pairing (implementation in device-routes.ts, 控预算).
   if (path.startsWith('/api/me/devices') && (await handleMeDeviceRoute({ devices: ctx.devices, trustProxy: ctx.trustProxy }, req, res, method, path, userId))) return
   {

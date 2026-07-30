@@ -31,6 +31,9 @@ payload,**零 App、零商店、零第三方 SDK**,PWA 直接能被叫醒。
 > 的补位决策语义、`push(userId)` 不收 text 的低信息纪律、404/410 剪订阅的自愈模式;
 > **用不上的**是 sw.js 三事件、`PushSubscription`、RFC 8291 加密与 VAPID——原生通道
 > 拿的是 device token,加密与签名全不适用。详见 [`APP-SHELL.md`](APP-SHELL.md) §四第四档。
+> **SHELL-M6 已兑现(2026-07-30)**:原生腿落地为 host `apns-push.ts`(APNs 直连),
+> tap 文案走本文件导出的 `TAP_PAYLOAD` 一份常量两腿共用,两腿由 `composeTapFallback`
+> 并成一条仍只在 `unknown_member` 回落——B1 严格补位语义原封,绑 IM 成员字节不变。
 
 平台真相(诚实边界):Android Chrome / 桌面全支持;**iOS 需 16.4+ 且「添加到主屏幕」
 后才有 Web Push**——恰好与 PWA 安装动线一致,文案如实引导即可,不冒充「所有手机都行」。

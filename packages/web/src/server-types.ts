@@ -36,7 +36,7 @@ import type {
 } from './me-routes.js'
 import type { WorkflowWizardSurface } from './wizard-routes.js'
 import type { MePanelDataSurface, MePanelSurface } from './panel-routes.js'
-import type { MeWebPushSurface } from './push-routes.js'
+import type { MeNativePushSurface, MeWebPushSurface } from './push-routes.js'
 import type { MeDeviceSurface } from './device-routes.js'
 import type {
   ConnectorSlotSink,
@@ -355,6 +355,8 @@ export interface WebServerOptions {
   panelData?: MePanelDataSurface
   /** PUSH-M2 — Web Push subscriptions; absent → GET {available:false}, POSTs 503. */
   webPush?: MeWebPushSurface
+  /** SHELL-M6 — native (APNs) device tokens; absent → GET native.available:false, POSTs 503. */
+  nativePush?: MeNativePushSurface
   /**
    * SHELL-M1 — app device pairing (`/api/me/devices*` + the PUBLIC
    * `/api/devices/claim`). Absent → GET answers {available:false} and the
