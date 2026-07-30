@@ -1,0 +1,6 @@
+node_modules/
+# www/ 由 scripts/export-webdir.mjs 现装(渲染器三件 + 壳三件),永不手改、永不提交
+# —— 提交它就是第二份渲染器源,会漂移。
+www/
+# 构建落地物(Capacitor 8 走 SPM,依赖解析进 DerivedData,不落仓)。
+ios/DerivedData/

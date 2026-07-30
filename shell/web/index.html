@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="zh">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <!-- 与 hub 同姿态的 CSP:script-src 'self' 无 inline —— export 门对此有断言。
+       connect-src * 是诚实的:壳的存在意义就是连成员自己选的 hub;「明文 http 只在
+       回环」这条规矩由 hub-target 的 normalizeHubBase 一处咽喉裁决,不靠 CSP。 -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src *; base-uri 'none'; form-action 'none'">
+  <meta name="color-scheme" content="light dark">
+  <meta name="theme-color" content="#1a1a1a">
+  <title>Gotong</title>
+  <link rel="stylesheet" href="sdui-ui.css">
+  <link rel="stylesheet" href="shell.css">
+</head>
+<body>
+  <!-- 配对屏:公开 claim 换 aipk_ 设备凭证。宿主元素刻意不叫 #sdui-panel ——
+       与 sdui-standalone 同一手法,面板只可能来自 shell.js 那次显式 mount()。 -->
+  <main id="screen-pair" hidden>
+    <section class="pair-card">
+      <h1 class="pair-title">Gotong</h1>
+      <p class="pair-lead" data-s="lead"></p>
+      <label class="pair-field">
+        <span data-s="addrLabel"></span>
+        <input id="pair-addr" type="url" inputmode="url" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="https://hub.example.com">
+      </label>
+      <label class="pair-field">
+        <span data-s="codeLabel"></span>
+        <input id="pair-code" type="text" autocapitalize="characters" autocorrect="off" spellcheck="false" placeholder="ABCD-EFGH-JKMN-PQRS">
+      </label>
+      <button id="pair-btn" type="button" data-s="connect"></button>
+      <p id="pair-err" class="pair-err" role="alert" aria-live="polite"></p>
+    </section>
+  </main>
+
+  <main id="screen-panel" hidden>
+    <header class="shell-bar">
+      <span id="conn-info" class="conn-info"></span>
+      <span class="shell-bar-btns">
+        <button id="lang-btn" type="button">EN</button>
+        <button id="disconnect-btn" type="button" data-s="disconnect"></button>
+      </span>
+    </header>
+    <div id="shell-host"></div>
+    <p id="panel-note" class="shell-note" role="status" hidden></p>
+  </main>
+
+  <script src="hub-target.js"></script>
+  <script src="sdui-ui.js"></script>
+  <script src="shell.js"></script>
+</body>
+</html>

@@ -1,0 +1,20 @@
+{
+  "name": "gotong-shell",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Gotong 真壳 —— Capacitor 工程,把 SDUI 渲染器装进设备本地、经 CapacitorHttp 直连自有 hub(SHELL-M5)。刻意不在 pnpm workspace 里:它不是可发布包,version-gate / publish-readiness-gate 只枚举 packages/*,壳的依赖面(Capacitor)也不该混进内核的依赖图。",
+  "type": "module",
+  "scripts": {
+    "export": "node scripts/export-webdir.mjs",
+    "sync": "pnpm run export && cap sync ios"
+  },
+  "dependencies": {
+    "@capacitor/app": "^8.1.1",
+    "@capacitor/core": "^8.4.2",
+    "@capacitor/ios": "^8.4.2"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^8.4.2",
+    "typescript": "^5.9.3"
+  }
+}

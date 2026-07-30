@@ -7,7 +7,8 @@
 >
 > Track 代号:**SHELL**。Status: **M1 设备配对 ✅ · M2 base URL 层 ✅ ·
 > M3 契约做实 ✅ · M4 渲染器解耦 ✅(2026-07-29) · M4.5 骨架配置化 ✅
-> (2026-07-30)**;M5 壳工程起未动工。
+> (2026-07-30) · M5 壳工程 ✅(2026-07-30,iOS 模拟器全动线;真机=M7)**;
+> M6 原生推送起未动工。
 > 本 track 是 [`SDUI-PANEL.md`](SDUI-PANEL.md) 里程碑表 M5 那一格的展开——
 > 侦察后确认它装不进一格(见 §四)。
 > 形态拍板:**真壳**(本地资源 + `CapacitorHttp` 走原生请求),而非瘦壳
@@ -287,7 +288,7 @@ hint([`static-routes.ts:244-246`](../../packages/web/src/static-routes.ts#L244))
 | **M3 契约做实** ✅ `f6aa7be` | 客户端声明 schemaVersion(`?client=N`);服务端算判定;版本超出 ⇒ **整面板**降级 + 响亮提示;顺手退役 `image-card` 空转 | 旧客户端收到新 schema ⇒ 整面板降级不炸,徽章与形态选择器仍在;声明**永远改变不了配置字节**(四种声明同字节) |
 | **M4 渲染器解耦** ✅ | 五条硬耦合改注入点(i18n / tab 协议 / 宿主元素 / CSS / storage key)全部收进 `GotongPanel.mount(opts)`;**SPA 成为这个 API 的第一个调用者**而非特权侧门 | `sdui-standalone.html` 只加载渲染器三件套就渲染出真面板(真浏览器已证:3 段 5 卡 · `window.Gotong` undefined · console 零错误) |
 | **M4.5 骨架配置化** ✅ | **全部 17 个页签**纳入配置(岔口 B2;落地时实为 18——M0 数的 17 + SDUI-M2 的「面板」页签):tabbar 配置驱动生成 + 15 个 admin bundle 改按需加载 | 两个成员打开 app 看到**不同的导航结构**,不只是不同的面板内容;**防腐门:配置驱动的 tabbar 不得成为提权路径**(member 配置里写 admin 页签仍拿不到 admin 面,服务端照样 403)——真机三层全证 |
-| **M5 壳工程** | `capacitor.config.ts`(`webDir` + `CapacitorHttp.enabled`)+ static 导出脚本 + PNG 图标集 | 真机装上、打得开、能连本机 hub |
+| **M5 壳工程** ✅ | `capacitor.config.ts`(`webDir` + `CapacitorHttp.enabled`)+ static 导出脚本(兼防腐门)+ PNG 图标集;顶层 `shell/` 刻意不进 pnpm workspace | 装上、打得开、能连本机 hub 三条在 iOS 模拟器全过:**机内**配对(HID 真点真打)→ claim 换 `aipk_` → 面板渲染真巡检数据;重启直落连接态;`gotong://` 深链预填不自提交。真机 + 生产 VPS = M7 |
 | **M6 原生推送** | `@capacitor/push-notifications` 接 FCM/APNs;复用订阅存储形状与 fold 决策。**大陆版按 A1 不接推送**(只轮询) | 真机锁屏收到低信息 tap;绑 IM 成员仍零双发 |
 | **M7 真机 round-trip** | 装壳 → 输地址 → agent-card 验身份 → 配对拿 token → 面板渲染 → 推送送达 | 全链路一次跑通,console 零错误 |
 | *分发* | 商店上架 / 演示形态过审 / APK 签名 / 大陆直发 | **用户门,不进 track** |
@@ -480,6 +481,97 @@ owner 经 admin 直装面(岔口 D 路由)给 member 装「提权尝试形态」
 **sw.js CACHE v14→v15**:app.html 永不缓存(角色 meta),但预缓存的 app.js
 若停在 v14,对上新的空 nav markup 会**一个 tabbar 都渲染不出来**——壳必须
 整体刷新。
+
+### M5 落地记(2026-07-30)
+
+**工程落点:顶层 `shell/`,刻意不进 pnpm workspace。**它不是可发布包,
+version-gate / publish-readiness-gate / line-budget-gate 只枚举 `packages/*`
+(逐一核过),Capacitor 的原生工具链依赖也不该混进内核依赖图——壳在结构上站在
+全部四门之外,靠 `pnpm --ignore-workspace install` 独立装依赖,`.npmrc`
+`node-linker=hoisted`(原生工具按路径引 `node_modules`,要平铺)。
+
+**`capacitor.config.ts` 三行就是里程碑本体**:`webDir: 'www'` +
+`plugins.CapacitorHttp.enabled: true`。后者把 `window.fetch` 换到原生层执行
+——原生请求**没有浏览器 Origin**,CORS 问题域整个消失,这就是 M0 拍板「真壳」
+的技术根基。与 M2 的 hub-target 补丁**任意先后可共存**:补丁只改 URL 和头再把
+活交给当时的 fetch(M2 已单测钉死绝对 URL 原样放行)。
+
+**`scripts/export-webdir.mjs` 是导出脚本兼防腐门**。`www/` 永远现装:渲染器
+三件(`hub-target.js` / `sdui-ui.js` / `sdui-ui.css`)从 `packages/web/static`
+**逐字节拷贝**(copy 不 fork)+ 壳三件(`index.html` / `shell.js` /
+`shell.css`);`www/` 进 `.gitignore`——提交它就是第二份渲染器源,会漂移。
+门的断言:**SPA 七件禁入**(app.js / app-core.js / styles.css / sw.js /
+admin.js / app.html / manifest,M4「壳里没有这个 SPA」的可执行形式);页面
+**不得含内联 `<script>`**(hub 的 CSP `script-src 'self'` 会无声吞掉它——
+M4 排错记①原坑);脚本顺序钉死 hub-target → sdui-ui → shell.js(咽喉先于
+消费者);标记物在位(`GotongHub` / `GotongPanel` / `CLIENT_SCHEMA_VERSION`)。
+**壳刻意没有 service worker**:本地资源无需缓存层,M3/M4 两次踩过的「SW 喂
+陈旧字节」坑在壳里结构性不存在;推送走 M6 原生通道。
+
+**壳三件的几处承重判断**:①配对屏 `POST /api/devices/claim` 用**绝对 URL +
+`credentials:'omit'`** 直发——此刻 target 还不存在,码就是全部凭证,这一发
+**刻意绕过** hub-target 补丁(它只重写根相对路径);拿到 `aipk_` 后交给
+`GotongHub.setTarget()`,「连哪台 hub」仍只有 M2 那一处咽喉,壳自己绝不另存
+一份。②面板挂载走 `GotongPanel.mount({host, lang, gotoHome, storageKey})`
+——M4 那个公开 API 的**第二个真实调用者**(第一个是 SPA 自举),宿主元素刻意
+不叫 `#sdui-panel`(sdui-standalone 同手法)。③**深链只预填,绝不自动提交**
+:`gotong://pair?u=…&c=…` 打开后地址和码进输入框、按钮留给人按——连接是把
+设备凭证交出去的动作,被构造的恶意链接不能把设备静默绑到攻击者的 hub;真机
+实测深链也**不动既有连接**(预填后重启,连接原样)。④断开=本机忘记;真撤销
+在网页端「我的 → 设备」——claim 响应本就不含 credentialId,设备侧拿不到
+撤销句柄是设计不是缺口。⑤裸主机便利层(输 `127.0.0.1:3135` 自动试
+https/http 前缀)每个候选都过 `normalizeHubBase` 单裁决,明文 http 只在回环
+——便利层永不放宽咽喉。
+
+**iOS 工程事实**(M7 会再用到,记档):Capacitor 8 走 **SPM 不是 CocoaPods**
+(`CapApp-SPM/Package.swift` 引 GitHub `capacitor-swift-pm` 8.4.2 + 本地
+`node_modules` 路径 ⇒ `pnpm install` 必须先于首次构建);CLI 要 **Node ≥22**
+(nvm 装 22.23.2,仓库其余仍 v20)且与 **TypeScript 7 不兼容**(配置加载器抛
+`Cannot read properties of undefined (reading 'CommonJS')`,壳内 devDep 钉
+`typescript@^5`);图标零新依赖:`qlmanage -t -s 1024` 把 `icon.svg` 栅格成
+PNG,alpha 通道走 JPEG q100 往返剥离(**BMP 往返剥不掉**,实测),启动屏
+`sips --padColor 1a1a1a` 铺 2732;`Info.plist` 注册 `gotong://`
+(CFBundleURLTypes)= M1 注释「custom scheme 由壳认领」的兑现。
+
+**抓到并修一个真 bug(M2 同型第二次出现)**:`#screen-pair { display:flex }`
+的 ID 选择器把 UA 的 `[hidden]{display:none}` 压掉——boot 判定已连接走
+showPanel 后,配对屏照常渲染,两屏叠影。修 =
+`#screen-pair[hidden], #screen-panel[hidden] { display:none }` 显式夺回。
+教训升一级:**任何带 display 的选择器,配 hidden 属性用时都要显式夺回**;
+且这类 bug 只有渲染面能抓(逻辑测试全绿,叠影在截图里)。
+
+**验证(iPhone 17 Pro 模拟器 / iOS 26.5,验收行「真机」按模拟器如实降级,
+真设备=M7)**:①装上(`simctl install`)②打得开(本地资源+CSP+三脚本,配对
+屏像素级正常)③**能连本机 hub——机内全动线**:idb HID 真点真打(地址
+`http://127.0.0.1:3135` + 80-bit 一次性码)→ 点「连接」→ claim 换 `aipk_`
+→ `setTarget` → 面板挂载渲染**真数据**(「IM 通道全无」黄牌来自
+`derivePatrolCards` 真巡检——fresh space 没挂 IM 桥,这张卡只可能来自 API;
+聊天卡/审批空态/任务空态/定时流空态/形态选择器全在);hub 侧设备表新行
+createdAt 与点按钮时刻吻合、`lastUsedAt` 随面板取数持续更新。④重启存活:
+terminate + relaunch 直落连接态,面板数据重新拉取。⑤深链:`simctl openurl`
+弹系统对话框「在 "Gotong" 中打开?」(= iOS 已把 scheme 解析到本 app)→ 打开
+→ 预填 + 不提交 + 不动既有连接。⑥同码二次兑换在 M1 已证 400,此处不重复。
+
+**验证环境排错记(给 M7 与后来者)**:MCP 模拟器面板工具在 macOS 26 上**误检**
+xcode-select——报「Xcode is installed but not selected」并要求
+`sudo xcode-select -s /Applications/Xcode.app/Contents/Developer`,实际
+`xcode-select -p` 已是该路径、xcodebuild 正常,根源疑似它检查的
+`/var/db/xcode_select_link` 在 macOS 26 不存在;sudo 在本机被禁,故全程改用
+通用工具(headless `xcodebuild` + `simctl` + Simulator.app 窗口给用户看)。
+模拟器合成输入三条路全死:AppleScript keystrokes 被 TCC 拒(1002)/`simctl`
+无 tap 子命令/往 legacy `WebsiteData/LocalStorage` 种 localStorage 被现代
+WebKit 无视(注:那份种子在模拟器**重启后**反而被 WebKit 迁移进新存储——
+「以为失败的种子」可能延迟生效,勿当无害丢弃)。解法 = Meta **idb**:
+`fb-idb` 1.1.7 客户端 + GitHub release 预编译 `idb_companion` v1.1.8
+(2022 年构建在 macOS 26 仍工作),直连 CoreSimulator 打 HID,**无需辅助功能
+权限**;brew 装 `idb-companion` 会卡死在 auto-update 拉镜像,绕法 = release
+tar 直下 + `HOMEBREW_NO_AUTO_UPDATE=1`。
+
+**诚实边界**:模拟器证不了真机(推送、真网络、商店签名全在 M7 之后);机内
+WebView console 未接 Web Inspector,以「渲染结果 + hub 侧行为」双向证;
+Android 显式不做脚手架(写完不能验证=写完就腐,待构建环境再 `cap add`)。
+边界五条全守:`packages/*` 本刀**零改动**、旋钮 **116 冻结零新增**、四门
+PASS——壳是第 N 个渲染器,装 app 不多一分权限。
 
 ---
 

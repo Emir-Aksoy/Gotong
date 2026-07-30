@@ -1,0 +1,147 @@
+/* SHELL-M5 —— 壳皮。面板本体的样式在 sdui-ui.css(与 hub 同一份字节);这里只有
+ * 壳自己的两屏:配对卡与顶栏。刘海/圆角屏的安全区用 env() 留出。 */
+
+:root {
+  --shell-bg: #f5f5f4;
+  --shell-fg: #1a1a1a;
+  --shell-muted: #6b7280;
+  --shell-card: #ffffff;
+  --shell-line: #e5e5e3;
+  --shell-accent: #5b9bd5;
+  --shell-err: #b91c1c;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --shell-bg: #161615;
+    --shell-fg: #ececea;
+    --shell-muted: #9ca3af;
+    --shell-card: #232322;
+    --shell-line: #3a3a38;
+    --shell-err: #f87171;
+  }
+}
+
+html, body {
+  margin: 0;
+  padding: 0;
+  background: var(--shell-bg);
+  color: var(--shell-fg);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ID 选择器的 display 会压过 UA 的 [hidden]{display:none}(M2 在 .sdui-badge 上
+ * 踩过同一坑)—— 两屏的 hidden 必须显式夺回,否则配对屏和面板屏会叠着渲染。 */
+#screen-pair[hidden], #screen-panel[hidden] { display: none; }
+
+/* ---- 配对屏 ---- */
+#screen-pair {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: calc(env(safe-area-inset-top, 0px) + 24px) 16px calc(env(safe-area-inset-bottom, 0px) + 24px);
+  box-sizing: border-box;
+}
+.pair-card {
+  width: 100%;
+  max-width: 380px;
+  background: var(--shell-card);
+  border: 1px solid var(--shell-line);
+  border-radius: 14px;
+  padding: 28px 22px;
+  box-sizing: border-box;
+}
+.pair-title {
+  margin: 0 0 6px;
+  font-size: 26px;
+  letter-spacing: 0.5px;
+}
+.pair-lead {
+  margin: 0 0 18px;
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--shell-muted);
+}
+.pair-field {
+  display: block;
+  margin-bottom: 14px;
+  font-size: 13px;
+  color: var(--shell-muted);
+}
+.pair-field input {
+  display: block;
+  width: 100%;
+  margin-top: 5px;
+  padding: 10px 12px;
+  font-size: 16px; /* iOS:小于 16px 聚焦时会整页放大 */
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: var(--shell-fg);
+  background: var(--shell-bg);
+  border: 1px solid var(--shell-line);
+  border-radius: 9px;
+  box-sizing: border-box;
+}
+#pair-btn {
+  width: 100%;
+  margin-top: 6px;
+  padding: 12px;
+  font-size: 16px;
+  color: #fff;
+  background: var(--shell-accent);
+  border: none;
+  border-radius: 10px;
+}
+#pair-btn:disabled { opacity: 0.55; }
+.pair-err {
+  min-height: 1.2em;
+  margin: 12px 0 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--shell-err);
+}
+
+/* ---- 面板屏 ---- */
+#screen-panel {
+  min-height: 100vh;
+  box-sizing: border-box;
+  padding: calc(env(safe-area-inset-top, 0px)) 0 calc(env(safe-area-inset-bottom, 0px) + 8px);
+}
+.shell-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--shell-line);
+  position: sticky;
+  top: 0;
+  background: var(--shell-bg);
+  z-index: 5;
+}
+.conn-info {
+  font-size: 12px;
+  color: var(--shell-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.shell-bar-btns { display: flex; gap: 8px; flex-shrink: 0; }
+.shell-bar button {
+  padding: 6px 12px;
+  font-size: 13px;
+  color: var(--shell-fg);
+  background: var(--shell-card);
+  border: 1px solid var(--shell-line);
+  border-radius: 8px;
+}
+#shell-host { padding: 4px 14px 20px; }
+.shell-note {
+  margin: 0 14px;
+  padding: 10px 12px;
+  font-size: 13px;
+  color: var(--shell-muted);
+  background: var(--shell-card);
+  border: 1px solid var(--shell-line);
+  border-radius: 9px;
+}
