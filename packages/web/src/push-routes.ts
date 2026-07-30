@@ -4,7 +4,7 @@
  *   GET  /api/me/push                    → { available, publicKey?, count?, native }
  *   POST /api/me/push/subscribe          body = PushSubscription.toJSON()
  *   POST /api/me/push/unsubscribe        body = { endpoint }
- *   POST /api/me/push/native/register    body = { token, platform: 'ios' }
+ *   POST /api/me/push/native/register    body = { token, platform: 'ios'|'android' }
  *   POST /api/me/push/native/unregister  body = { token }
  *
  * GET is the SPA's/shell's feature detect: no surface wired (knob off / older
@@ -12,13 +12,16 @@
  * same honesty contract as the panel /data/* routes. The POSTs answer 503
  * without their surface (setting-ops posture). The two surfaces are
  * INDEPENDENT: a hub can run APNs without GOTONG_WEBPUSH and vice versa, so
- * `native` is an additive key on GET (the pre-M6 SPA ignores it). Key
- * material travels IN only: GET discloses device counts, never endpoints,
+ * `native` is an additive key on GET (the pre-M6 SPA ignores it). SHELL-M6A:
+ * `native.platforms` lists which legs are configured (apns.json ⇒ 'ios',
+ * fcm.json ⇒ 'android') — the shell shows its enable button only when ITS
+ * platform is served, so an iOS device never registers into an FCM-only hub.
+ * Key material travels IN only: GET discloses device counts, never endpoints,
  * keys or tokens — each device already knows its own registration.
  *
  * Validation (web: https-only endpoint / no IP literals = the SSRF boundary;
- * native: hex token shape) lives in the HOST stores — the one choke point;
- * this layer only maps the duck-typed `code:'invalid'` refusal to a 400.
+ * native: per-platform token shape) lives in the HOST stores — the one choke
+ * point; this layer only maps the duck-typed `code:'invalid'` refusal to a 400.
  * Auth: /api/me/* callers are resolved by handleMeRoute's session gate, so
  * `userId` is server-pinned and any userId in the query string is ignored.
  */
@@ -37,11 +40,13 @@ export interface MeWebPushSurface {
   remove(userId: string, endpoint: string): Promise<{ removed: boolean }>
 }
 
-/** Host `buildApnsPushService().surface` satisfies this (duck, SHELL-M6). */
+/** Host `buildNativePushService().surface` satisfies this (duck, SHELL-M6/M6A). */
 export interface MeNativePushSurface {
   count(userId: string): Promise<number>
   add(userId: string, input: unknown): Promise<{ count: number; replaced: boolean }>
   remove(userId: string, token: string): Promise<{ removed: boolean }>
+  /** Configured legs ('ios' | 'android') — the shell gates its button on this. */
+  platforms(): string[]
 }
 
 export interface MeWebPushRouteDeps {
@@ -62,8 +67,12 @@ export async function handleMeWebPushRoute(
     // `native` is additive (SHELL-M6): pre-M6 clients ignore it, the shell
     // reads only it. Either surface may exist without the other.
     const native = deps.nativePush
-      ? { available: true, count: await deps.nativePush.count(userId) }
-      : { available: false }
+      ? {
+          available: true,
+          count: await deps.nativePush.count(userId),
+          platforms: deps.nativePush.platforms(),
+        }
+      : { available: false, platforms: [] }
     if (!deps.webPush) {
       sendJson(res, { available: false, native })
       return true

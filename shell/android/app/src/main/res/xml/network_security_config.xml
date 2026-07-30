@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 与 M2 咽喉 normalizeHubBase 同一条策略在原生层的镜像:明文 http 只对回环放行。
+     Android 9+ 默认全局禁明文(iOS 的 ATS 则默认豁免回环,故 M5 无需动 ATS);
+     这里只开 127.0.0.1 / localhost(含 *.localhost)/ ::1,绝不开全局
+     usesCleartextTraffic——非回环明文在 JS 咽喉与系统策略两层都过不去。
+     (咽喉还放行 127.0.0.0/8 其余地址;security config 表达不了 CIDR,
+     开发流用 127.0.0.1 足够,刻意收窄不放宽。) -->
+<network-security-config>
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">127.0.0.1</domain>
+        <domain includeSubdomains="true">localhost</domain>
+        <domain includeSubdomains="false">::1</domain>
+    </domain-config>
+</network-security-config>

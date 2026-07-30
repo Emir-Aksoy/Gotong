@@ -255,12 +255,14 @@
     } catch (_) {}
   }
 
-  // --- 通知(SHELL-M6) ----------------------------------------------------
+  // --- 通知(SHELL-M6/M6A) -------------------------------------------------
   //
   // 纪律三条:①绝不在启动时自动弹权限 —— 「开启」是成员按按钮的动作;②通知
   // 永远是低信息 tap(正文在 hub 侧结构性上不了推送),收到只代表「有新消息」;
   // ③断开前先尽力把 token 从 hub 删掉 —— 设备凭证按 userId 存 token,不删的话
-  // 要等 Apple 答 410 才会被 hub 剪掉。
+  // 要等 Apple/Google 答「token 已死」才会被 hub 剪掉。
+  // 同一份代码跑 iOS(APNs)与 Android(FCM):平台自报 Capacitor.getPlatform(),
+  // hub 只收自己有腿的平台(native.platforms 守门)。
 
   var NOTIFY_KEY = 'gotong-shell-notify'
   var NOTIFY_TOKEN_KEY = 'gotong-shell-push-token'
@@ -269,6 +271,12 @@
     var cap = window.Capacitor
     if (!cap || typeof cap.isNativePlatform !== 'function' || !cap.isNativePlatform()) return null
     return (cap.Plugins && cap.Plugins.PushNotifications) || null
+  }
+
+  /** 'ios' | 'android' —— pushPlugin() 非空才有意义(web 平台拿不到插件)。 */
+  function shellPlatform() {
+    var cap = window.Capacitor
+    return cap && typeof cap.getPlatform === 'function' ? cap.getPlatform() : 'web'
   }
 
   function notifyEnabled() {
@@ -292,14 +300,18 @@
     var row = $('notify-row')
     row.hidden = true
     if (!pushPlugin() || !window.GotongHub.base()) return
-    // 行只在 hub 真开了 APNs 时出现:探一次 GET /api/me/push 的 additive
-    // native 键。探不到/答 available:false ⇒ 行保持隐藏,不摆按不动的按钮。
+    // 行只在 hub 真有本平台的腿时出现:探一次 GET /api/me/push 的 additive
+    // native 键。探不到/答 available:false/platforms 不含本平台 ⇒ 行保持隐藏,
+    // 不摆按不动的按钮(iOS 壳对 FCM-only hub 不该看到开关,反之亦然)。
+    // platforms 键缺席 = M6 时代的旧 hub(只有 APNs 腿),按 ios 兜底判。
     fetch('/api/me/push')
       .then(function (res) {
         return res.ok ? res.json() : null
       })
       .then(function (d) {
         if (!d || !d.native || !d.native.available) return
+        var served = Array.isArray(d.native.platforms) ? d.native.platforms : ['ios']
+        if (served.indexOf(shellPlatform()) < 0) return
         row.hidden = false
         $('notify-state').textContent = notifyEnabled() ? t('notifyStateOn') : t('notifyStateOff')
         $('notify-btn').textContent = notifyEnabled() ? t('notifyOff') : t('notifyOn')
@@ -312,7 +324,7 @@
     fetch('/api/me/push/native/register', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ token: token, platform: 'ios' }),
+      body: JSON.stringify({ token: token, platform: shellPlatform() }),
     })
       .then(function (res) {
         if (res.status === 503) throw { kind: 'hub' }
@@ -391,7 +403,7 @@
   function doDisconnect() {
     if (!window.confirm(t('confirmDisconnect'))) return
     // 尽力先把推送 token 从 hub 删掉(fire-and-forget):token 按 userId 存,
-    // 光在网页端撤设备凭证停不掉它,要等 Apple 答 410 才自愈。
+    // 光在网页端撤设备凭证停不掉它,要等 Apple/Google 答「token 已死」才自愈。
     var tok = null
     try {
       tok = localStorage.getItem(NOTIFY_TOKEN_KEY)

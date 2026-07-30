@@ -291,6 +291,7 @@ hint([`static-routes.ts:244-246`](../../packages/web/src/static-routes.ts#L244))
 | **M4.5 骨架配置化** ✅ | **全部 17 个页签**纳入配置(岔口 B2;落地时实为 18——M0 数的 17 + SDUI-M2 的「面板」页签):tabbar 配置驱动生成 + 15 个 admin bundle 改按需加载 | 两个成员打开 app 看到**不同的导航结构**,不只是不同的面板内容;**防腐门:配置驱动的 tabbar 不得成为提权路径**(member 配置里写 admin 页签仍拿不到 admin 面,服务端照样 403)——真机三层全证 |
 | **M5 壳工程** ✅ | `capacitor.config.ts`(`webDir` + `CapacitorHttp.enabled`)+ static 导出脚本(兼防腐门)+ PNG 图标集;顶层 `shell/` 刻意不进 pnpm workspace | 装上、打得开、能连本机 hub 三条在 iOS 模拟器全过:**机内**配对(HID 真点真打)→ claim 换 `aipk_` → 面板渲染真巡检数据;重启直落连接态;`gotong://` 深链预填不自提交。真机 + 生产 VPS = M7 |
 | **M6 原生推送** ✅ | **APNs 直连**(host `apns-push.ts`:node:http2 + ES256 provider token,零新依赖零中央中转);凭证 file-first `<space>/apns.json` + p8 **非旋钮**;壳侧 `@capacitor/push-notifications` 按钮开启绝不启动自动弹权限;**FCM 随 Android 壳一起推迟**,大陆 A1 只轮询不变 | 模拟器全动线十段(开启→真 160-hex token 注册→前台/锁屏横幅→点开只回面板→断开先注销);绑 IM 成员字节不变(`composeTapFallback` 并两腿后仍只在 `unknown_member` 回落);**真 APNs 送达=M7**(需 Apple Developer p8;发送器由 20 单测含真 h2 wire 逐字节盖) |
+| **M6A 安卓线** ✅ | Android 壳(`cap add android`,AGP 8.13/Gradle 8.14.3/SDK 36 官方基线)+ hub **FCM v1 发送腿**(`native-push.ts` 共核:APNs/FCM 两腿骑同一 per-user token store;凭证 file-first `<space>/fcm.json` **非旋钮**;404 `UNREGISTERED` 剪 token)+ **明文只回环**的 network security config(M2 咽喉在原生层的镜像) | Android 模拟器八段全绿:机内配对(`adb reverse`,咽喉拒非回环 `10.0.2.2` 实证)→面板真数据;设备行 `Gotong 壳 (android)`;通知行按 `platforms()` 门控隐藏;深链只预填不动既有连接;断开=本机忘记。**FCM 端到端=用户门**(Firebase 项目 + google-services.json;发送腿 24 单测盖) |
 | **M7 真机 round-trip** | 装壳 → 输地址 → agent-card 验身份 → 配对拿 token → 面板渲染 → 推送送达 | 全链路一次跑通,console 零错误 |
 | *分发* | 商店上架 / 演示形态过审 / APK 签名 / 大陆直发 | **用户门,不进 track** |
 
@@ -665,6 +666,93 @@ tap/text **静默失败**(`2>/dev/null` 又吞了报错)——教训:**长跑进
 =host 发送腿 + web 三路由,渲染器/schema/治理闸零触碰——推送是投递腿不是
 新权威点。下一步 **M7 真机 round-trip**(用户运维前置:VPS 域名+TLS+公网
 入口,及 Apple Developer 账号出真 p8)。
+
+### M6A 落地记:安卓线(2026-07-30)
+
+**一句话**:用户拍板试验设备「混合都有」且 Apple Developer 注册未完成→
+**先走安卓**——M6 那句「FCM/Android 刻意不做=壳不存在写完就腐」在壳存在
+的当天即刻兑现补齐:hub 长出 FCM 发送腿,`cap add android` 长出真壳,
+模拟器机内配对全动线八段全绿。分发姿态与「数人试验型产品」对齐:debug
+APK 直装,不进商店。
+
+**hub 侧:共核重构不是第二份实现**。`apns-push.ts`(309 行)把 per-user
+token store 抽出进新 `native-push.ts`(640 行)共核——`assertSafeOwnerId`
+先于拼接/5 设备顶/同 token 原地更新/per-user promise 链,APNs 腿原样骑上,
+FCM 腿平级长出:file-first `<space>/fcm.json` 指向 service account JSON
+(**非旋钮,116 冻结零新增**,与 `apns.json` 同族三态合同:缺席=OFF 字节
+不变/形状不对=warn+OFF/形状对 key 坏=boot 拒启),OAuth2 RS256 JWT 换
+access token(内缓存),`POST /v1/projects/{pid}/messages:send`,**404
+`UNREGISTERED` 剪 token 自愈**(APNs 410 同型)。`TAP_PAYLOAD` 一份三腿
+(web/APNs/FCM),`push(userId)` 仍不收 text。token 校验按平台分形:ios=
+16–200 hex,android=FCM 不定长非 hex 形状故走长度+字符白名单。web 路由
+`platforms()` 鸭子:GET 探测答**可用平台列表**(有 apns.json 报 ios、有
+fcm.json 报 android),壳侧 `shellPlatform()` 读 Capacitor 平台名与列表求
+交——iOS 壳连 FCM-only hub 时通知行诚实不显示,反之亦然。24 单测(mock
+FCM 端点:OAuth 换发/wire 形状/404 剪/store 平台校验)。
+
+**工具链三幕(给下一个在慢链路上装安卓工具链的人)**:幕一 pin-down
+(AGP 8.7.3+SDK 35 全用本地缓存)被硬事实杀死——capacitor-android 8.4.2
+的 androidx 依赖(core-ktx 1.17 等 6 项 AAR metadata)**强制 compileSdk
+36,而 AGP ≤8.7 顶配 35**,降级路线结构性不存在;幕二 恢复官方基线
+**AGP 8.13.0 + Gradle 8.14.3 + compileSdk/targetSdk 36**(minSdk 24,
+JDK=Android Studio 内置 JBR 21),大件改从**腾讯镜像**
+`mirrors.cloud.tencent.com/AndroidSDK/`(SDK 组件)与 `…/gradle/`(dist)
+直连(`--noproxy "*"` 实测 >6MB/s;dl.google.com 经代理滴流停摆,jstack
+两次坐实卡死在 SSL read——**滴流字节能骗过 per-read 超时**,杀不掉只能
+换源);gradle wrapper 种缓存=官方 URL 不动,zip 放
+`~/.gradle/wrapper/dists/<dist>/<hash>/`(hash 由官方 URL 派生)wrapper
+本地验完直接解压零下载;幕三 maven 依赖仍滴流→**阿里云镜像 init 脚本**
+(`-I` 本机专用,google()/mavenCentral()/plugins 三源换
+`maven.aliyun.com`,**不进仓**——仓里 build.gradle 保持官方源,镜像是
+本机链路补丁不是工程事实)→ **BUILD SUCCESSFUL in 67s**,APK 5.6MB。
+
+**明文一坑(安卓独有,真 bug 真修)**:首次连接失败,logcat 坐实
+`Cleartext HTTP traffic to 127.0.0.1 not permitted`——**Android 9+ 默认
+全局禁明文**(iOS 的 ATS 默认豁免回环,故 M5 没撞);同一条 logcat 顺带
+证明 CapacitorHttp 的 fetch patch 在安卓活着(claim 请求 16.7ms 走原生层
+=M0「CORS 问题域消失」的安卓实证)。修=新
+`app/src/main/res/xml/network_security_config.xml` **只对回环放行**
+(127.0.0.1/localhost 含子域/::1),manifest 挂 `networkSecurityConfig`
+——与 M2 咽喉同一条策略在原生层的镜像,**绝不开全局
+`usesCleartextTraffic`**;非回环明文自此 JS 咽喉与系统策略两层都过不去。
+
+**模拟器网络事实(与 iOS 相反)**:Android 模拟器 NAT 隔离,设备
+`127.0.0.1`=设备自身,宿主回环别名是 `10.0.2.2`——但它**不是回环**,咽喉
+如约红字拒绝(「地址没被接受:要 https://…」=M2 咽喉在安卓壳活着的第一个
+实证);正道=**`adb reverse tcp:3135 tcp:3135`** 把设备回环映射到宿主,
+`http://127.0.0.1:3135` 直用,**零策略放宽**。(iOS 模拟器共享宿主网络栈
+故 M5 直连即通;这条差异记档免下次再撞。)
+
+**模拟器验证八段全绿**(自建 AVD `Gotong_API35`,android-35 google_apis
+arm64;fresh space 真 hub :3135,adb input 真点真打):①装上打得开,配对屏
+像素级同 iOS,无叠影;②咽喉拒 `10.0.2.2`(见上);③reverse 后机内配对全
+动线——claim→`aipk_`→面板渲染**真数据**(「IM 通道全无」黄牌=
+derivePatrolCards 真巡检,只可能来自 API);④hub 侧设备行 label
+**`Gotong 壳 (android)`**(平台检测正确),lastUsedAt 比 createdAt 晚
+163ms=凭证到手即取数;⑤**通知行不显示**——hub 无 apns.json/fcm.json,
+`platforms()` 答空,按钮按平台门控如约隐藏;⑥`am force-stop`+重启直落
+连接态(localStorage 持久);⑦深链 `gotong://pair?u=攻击者地址&c=假码`
+系统解析到本 app(manifest scheme 生效),**只预填绝不提交**,重启后仍连
+原 hub=**不动既有连接**;⑧断开→确认框→回配对屏+红字诚实指路「真正
+失效请到网页端移除」,hub 侧设备行仍在(断开=本机忘记,撤销权在网页,
+设计原样)。
+
+**诚实边界**:FCM 端到端(hub→Google→设备横幅)**结构性验证不了**——
+需用户 Firebase 项目出 `google-services.json`(app/build.gradle 模板自带
+条件挂载:文件就位才 apply google-services 插件,零 gradle 改动),且注册
+要 Play services=`google_apis_playstore` 镜像(本 AVD 是 google_apis);
+发送腿由 24 单测(mock 端点逐字节)盖,壳侧「开启通知」按钮在 hub 配
+fcm.json 前根本不显示故按钮动线同属用户门。大陆 A1 不变:无 Google 服务
+设备 register() 失败按钮回落,不崩。**真机安装+真 FCM=M7 安卓半**(用户
+门:Firebase 项目;真机 USB 调试直装 debug APK 即可,无签名年费)。
+
+验收:host **2633** + 5 skip(+24 native-push,含 apns 迁移)/ web
+**1612**(+platforms 三态)四门 PASS(**旋钮 116 冻结零新增**);
+`shell/android/` 54 文件进仓=工程本体(gradle+manifest+资源+
+network_security_config),**产物/`assets/public` 拷贝/生成配置全被模板
+gitignore 挡住**(iOS `App/App/public` 同款「第二份渲染器源不进仓」纪律,
+Capacitor 安卓模板自带);`capacitor.settings.gradle` 引本地 node_modules
+路径=iOS Package.swift 同款事实(pnpm install 必须先于首次构建)。
 
 ---
 

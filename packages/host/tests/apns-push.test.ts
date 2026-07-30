@@ -1,5 +1,7 @@
 /**
- * SHELL-M6 — the native (APNs) push leg.
+ * SHELL-M6 — the APNs (iOS) half of the native push leg. The shared token
+ * store, the FCM half, composeTapFallback and the assembly point are pinned
+ * in native-push.test.ts (SHELL-M6A split).
  *
  * Pins, in order:
  *   - loadApnsConfig: absent file ⇒ OFF; broken opt-in signal (bad JSON /
@@ -7,36 +9,22 @@
  *   - buildApnsJwt verified INDEPENDENTLY with node:crypto createVerify
  *     (ieee-p1363) — the same "an outside verifier can check our bytes"
  *     posture as the VAPID tests;
- *   - the token store's validator/cap/prune/reader disciplines (mirrors
- *     web-push-store);
  *   - ApnsSender against a REAL node:http2 h2c mock: exact path/headers, the
  *     body is the fixed low-info TAP (no member text can exist — push() has
- *     no text parameter), 410/BadDeviceToken prunes, 403 drops the JWT cache,
- *     all-fail = send_failed, no tokens = unknown_member;
- *   - composeTapFallback merge semantics (parallel legs, ≥1 ok, honest
- *     reasons);
- *   - buildApnsPushService: no file ⇒ undefined; disclosure never contains
- *     key bytes.
+ *     no text parameter), android rows are invisible to this leg,
+ *     410/BadDeviceToken prunes, 403 drops the JWT cache, all-fail =
+ *     send_failed, no ios tokens = unknown_member.
  */
 
 import { afterEach, describe, expect, it } from 'vitest'
 import { createServer, type Http2Server } from 'node:http2'
 import { createVerify, generateKeyPairSync } from 'node:crypto'
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import type { ButlerPushResult } from '../src/butler-reachable.js'
-import {
-  ApnsSender,
-  NativePushTokenStore,
-  buildApnsJwt,
-  buildApnsPushService,
-  composeTapFallback,
-  loadApnsConfig,
-  validateNativeToken,
-  type ApnsConfig,
-} from '../src/apns-push.js'
+import { ApnsSender, buildApnsJwt, loadApnsConfig, type ApnsConfig } from '../src/apns-push.js'
+import { NativePushTokenStore } from '../src/native-push.js'
 import { TAP_PAYLOAD } from '../src/web-push-sender.js'
 
 const dirs: string[] = []
@@ -135,6 +123,7 @@ const CFG = {
 } satisfies ApnsConfig
 const TOKEN_A = 'a'.repeat(64)
 const TOKEN_B = 'b'.repeat(64)
+const DROID = 'dEvIcE:' + 'x'.repeat(40)
 
 describe('loadApnsConfig', () => {
   it('absent file ⇒ undefined (OFF, byte-identical hub)', () => {
@@ -219,64 +208,16 @@ describe('buildApnsJwt', () => {
   })
 })
 
-describe('validateNativeToken / NativePushTokenStore', () => {
-  it('pins platform=ios and a 16–200 hex token, stored lowercase', () => {
-    expect(() => validateNativeToken({ token: TOKEN_A, platform: 'android' }, 1)).toThrow(/platform/)
-    expect(() => validateNativeToken({ token: 'zzzz', platform: 'ios' }, 1)).toThrow(/hex/)
-    expect(() => validateNativeToken({ token: 'abc', platform: 'ios' }, 1)).toThrow(/hex/)
-    const t = validateNativeToken({ token: ' ' + TOKEN_A.toUpperCase() + ' ', platform: 'ios' }, 7)
-    expect(t).toEqual({ token: TOKEN_A, platform: 'ios', createdAt: 7 })
-  })
-
-  it('upserts by token, caps at 5 dropping the oldest loudly, removes idempotently', async () => {
-    const store = new NativePushTokenStore({ dir: join(tempDir(), 'pn'), logger, now: () => 1 })
-    for (let i = 0; i < 5; i++) {
-      await store.add('u1', { token: String(i).repeat(32), platform: 'ios' })
-    }
-    const again = await store.add('u1', { token: '4'.repeat(32), platform: 'ios' })
-    expect(again.replaced).toBe(true)
-    expect(again.count).toBe(5)
-    const sixth = await store.add('u1', { token: 'f'.repeat(32), platform: 'ios' })
-    expect(sixth.dropped).toBe(1)
-    expect(warns.some((w) => w.includes('cap reached'))).toBe(true)
-    const list = await store.list('u1')
-    expect(list).toHaveLength(5)
-    expect(list.some((t) => t.token === '0'.repeat(32))).toBe(false)
-
-    expect(await store.remove('u1', 'f'.repeat(32))).toEqual({ removed: true })
-    expect(await store.remove('u1', 'f'.repeat(32))).toEqual({ removed: false })
-  })
-
-  it('reader never quarantines: bad file ⇒ warn + [], bad entries skipped', async () => {
-    const dir = join(tempDir(), 'pn')
-    const store = new NativePushTokenStore({ dir, logger })
-    await store.add('u1', { token: TOKEN_A, platform: 'ios' })
-    writeFileSync(join(dir, 'u2.json'), 'not json')
-    expect(await store.list('u2')).toEqual([])
-    expect(warns.some((w) => w.includes('not valid JSON'))).toBe(true)
-    writeFileSync(
-      join(dir, 'u3.json'),
-      JSON.stringify({ tokens: [{ token: 'zz', platform: 'ios' }, { token: TOKEN_B, platform: 'ios', createdAt: 3 }] }),
-    )
-    const rows = await store.list('u3')
-    expect(rows).toHaveLength(1)
-    expect(rows[0]!.token).toBe(TOKEN_B)
-  })
-
-  it('refuses hostile userIds before any path assembly', async () => {
-    const store = new NativePushTokenStore({ dir: join(tempDir(), 'pn'), logger })
-    await expect(store.list('../../etc')).rejects.toThrow()
-  })
-})
-
 describe('ApnsSender (real h2c HTTP/2 mock)', () => {
-  it('POSTs the fixed low-info tap with exact headers; 200 ⇒ delivered + lastOkAt', async () => {
+  it('POSTs the fixed low-info tap with exact headers; android rows invisible; 200 ⇒ delivered + lastOkAt', async () => {
     const { origin, seen } = await mockApns(() => ({ status: 200 }))
     const dir = tempDir()
     const pem = writeConfig(dir)
     const loaded = loadApnsConfig(dir, logger)!
     const store = new NativePushTokenStore({ dir: join(dir, 'pn'), logger })
     await store.add('u1', { token: TOKEN_A, platform: 'ios' })
+    // An android row on the same member must never reach APNs.
+    await store.add('u1', { token: DROID, platform: 'android' })
     const sender = new ApnsSender({
       config: loaded.config,
       privateKey: loaded.privateKey,
@@ -309,7 +250,8 @@ describe('ApnsSender (real h2c HTTP/2 mock)', () => {
     expect(ok).toBe(true)
 
     const rows = await store.list('u1')
-    expect(rows[0]!.lastOkAt).toBeGreaterThan(0)
+    expect(rows.find((r) => r.platform === 'ios')!.lastOkAt).toBeGreaterThan(0)
+    expect(rows.find((r) => r.platform === 'android')!.lastOkAt).toBeUndefined()
   })
 
   it('410/BadDeviceToken prunes that token; a surviving device still delivers', async () => {
@@ -336,7 +278,7 @@ describe('ApnsSender (real h2c HTTP/2 mock)', () => {
     expect(infos.some((m) => m.includes('pruned'))).toBe(true)
   })
 
-  it('no tokens ⇒ unknown_member; all refused ⇒ send_failed', async () => {
+  it('no ios tokens (none, or android-only) ⇒ unknown_member; all refused ⇒ send_failed', async () => {
     const { origin } = await mockApns(() => ({ status: 500 }))
     const dir = tempDir()
     writeConfig(dir)
@@ -349,6 +291,8 @@ describe('ApnsSender (real h2c HTTP/2 mock)', () => {
       logger,
       originOverride: origin,
     })
+    expect(await sender.push('u1')).toEqual({ delivered: false, reason: 'unknown_member' })
+    await store.add('u1', { token: DROID, platform: 'android' })
     expect(await sender.push('u1')).toEqual({ delivered: false, reason: 'unknown_member' })
     await store.add('u1', { token: TOKEN_A, platform: 'ios' })
     expect(await sender.push('u1')).toEqual({ delivered: false, reason: 'send_failed' })
@@ -383,68 +327,5 @@ describe('ApnsSender (real h2c HTTP/2 mock)', () => {
     nowMs += 60_000 // well under the 45min refresh — only the 403 explains a new mint
     expect(await sender.push('u1')).toEqual({ delivered: true })
     expect(seen[0]!.headers.authorization).not.toBe(seen[1]!.headers.authorization)
-  })
-})
-
-describe('composeTapFallback', () => {
-  const delivered = async (): Promise<ButlerPushResult> => ({ delivered: true })
-  const unknown = async (): Promise<ButlerPushResult> => ({ delivered: false, reason: 'unknown_member' })
-  const failed = async (): Promise<ButlerPushResult> => ({ delivered: false, reason: 'send_failed' })
-  const boom = async (): Promise<ButlerPushResult> => {
-    throw new Error('boom')
-  }
-
-  it('absent legs pass through untouched (single leg = identity)', () => {
-    expect(composeTapFallback(undefined, undefined)).toBeUndefined()
-    expect(composeTapFallback(delivered, undefined)).toBe(delivered)
-    expect(composeTapFallback(undefined, delivered)).toBe(delivered)
-  })
-
-  it('≥1 delivered wins; send_failed beats unknown_member; both-unknown stays unknown', async () => {
-    expect(await composeTapFallback(unknown, delivered)!('u')).toEqual({ delivered: true })
-    expect(await composeTapFallback(failed, unknown)!('u')).toEqual({
-      delivered: false,
-      reason: 'send_failed',
-    })
-    expect(await composeTapFallback(unknown, unknown)!('u')).toEqual({
-      delivered: false,
-      reason: 'unknown_member',
-    })
-  })
-
-  it('a throwing leg never sinks the other; alone it counts as send_failed', async () => {
-    expect(await composeTapFallback(boom, delivered)!('u')).toEqual({ delivered: true })
-    expect(await composeTapFallback(boom, unknown)!('u')).toEqual({
-      delivered: false,
-      reason: 'send_failed',
-    })
-  })
-})
-
-describe('buildApnsPushService', () => {
-  it('no apns.json ⇒ undefined (the hub stays byte-identical)', () => {
-    expect(buildApnsPushService(tempDir(), logger)).toBeUndefined()
-  })
-
-  it('valid file ⇒ surface round-trip; disclosure names ids, never key bytes', async () => {
-    const dir = tempDir()
-    const pem = writeConfig(dir)
-    const svc = buildApnsPushService(dir, logger)!
-    expect(svc.disclosure).toContain('app.gotong.shell')
-    expect(svc.disclosure).toContain('sandbox')
-    expect(svc.disclosure).toContain('ABC123DEF4')
-    expect(svc.disclosure).not.toContain('PRIVATE KEY')
-    // No line of the PEM body may appear in the disclosure.
-    for (const line of pem.split('\n')) {
-      if (line.trim().length > 8) expect(svc.disclosure).not.toContain(line.trim())
-    }
-
-    const r = await svc.surface.add('u1', { token: TOKEN_A, platform: 'ios' })
-    expect(r.count).toBe(1)
-    expect(await svc.surface.count('u1')).toBe(1)
-    expect(await svc.surface.remove('u1', TOKEN_A)).toEqual({ removed: true })
-    expect(await svc.surface.count('u1')).toBe(0)
-    // The store landed under <space>/butler/push-native — file-first, visible.
-    expect(readFileSync(join(dir, 'butler', 'push-native', 'u1.json'), 'utf8')).toContain('tokens')
   })
 })

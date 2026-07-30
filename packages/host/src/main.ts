@@ -269,7 +269,7 @@ import { butlerHearingFromEnv } from './butler-hearing.js'
 import { butlerSeeingFromEnv } from './butler-seeing.js'
 import { butlerVoiceFromEnv } from './butler-voice.js'
 import { buildWebPushService } from './web-push-sender.js'
-import { buildApnsPushService, composeTapFallback } from './apns-push.js'
+import { buildNativePushService, composeTapFallback } from './native-push.js'
 import {
   buildOnboardingKeyCheck,
   type ButlerOnboardingKeyCheck,
@@ -971,10 +971,10 @@ async function main(): Promise<void> {
   // PUSH-M3 — opt-in Web Push 补位触达(GOTONG_WEBPUSH=RFC 8292 联系方式;未设 ⇒ 字节不变;payload E2E 加密但时序元数据经浏览器厂商推送服务=dataLeavesBox)。
   const webPush = buildWebPushService(space.root, log)
   if (webPush) log.info(webPush.disclosure, { dataLeavesBox: true })
-  // SHELL-M6 — opt-in APNs 原生腿(`<space>/apns.json` 文件即开关,file-first 非旋钮;缺席 ⇒ 字节不变;token+时序元数据经 Apple ⇒ dataLeavesBox)。
-  const apnsPush = buildApnsPushService(space.root, log)
-  if (apnsPush) log.info(apnsPush.disclosure, { dataLeavesBox: true })
-  const tapFallback = composeTapFallback(webPush?.fallback, apnsPush?.fallback)
+  // SHELL-M6/M6A — opt-in 原生腿(`<space>/apns.json`+`<space>/fcm.json` 文件即开关,file-first 非旋钮;缺席 ⇒ 字节不变;token+时序元数据经 Apple/Google ⇒ dataLeavesBox)。
+  const nativePush = buildNativePushService(space.root, log)
+  for (const line of nativePush?.disclosures ?? []) log.info(line, { dataLeavesBox: true })
+  const tapFallback = composeTapFallback(webPush?.fallback, nativePush?.fallback)
   // BF-M7 — governed set(建/改/删自己的 agent+改工作流)逐项 park 到 /me;执行器=/me steward 同一服务(闸不越面);refs lazy 读,缺 ⇒ 纯记忆。
   let butlerGovernedAgentsRef: StewardAgentDirectory | undefined
   let butlerGovernedWorkflowEditorRef: StewardWorkflowEditor | undefined
@@ -2333,7 +2333,7 @@ async function main(): Promise<void> {
     routingProbe: localAgents,
     // PUSH-M2 / SHELL-M6 — member push faces; absent ⇒ honest {available:false}.
     ...(webPush ? { webPush: webPush.surface } : {}),
-    ...(apnsPush ? { nativePush: apnsPush.surface } : {}),
+    ...(nativePush ? { nativePush: nativePush.surface } : {}),
     // FDE-M1b/M3 — durable sinks for template-declared connector slots and
     // schedule suggestions (recorded at import; absent → response-only).
     connectorSlots,

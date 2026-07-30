@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Gotong</string>
+    <string name="title_activity_main">Gotong</string>
+    <string name="package_name">app.gotong.shell</string>
+    <string name="custom_url_scheme">app.gotong.shell</string>
+</resources>

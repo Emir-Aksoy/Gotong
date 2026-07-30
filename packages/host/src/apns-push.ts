@@ -1,11 +1,12 @@
 /**
- * apns-push.ts — SHELL-M6: the native (APNs) push leg for the shell app.
+ * apns-push.ts — SHELL-M6: the APNs (iOS) half of the native push leg.
  *
- * iOS only, APNs DIRECT: the operator's own Apple credentials talk straight to
- * Apple — no relay service in between, because a shared push relay would be
- * exactly the central node the charter forbids (same ruling as the rejected
- * central identity anchor). Android/FCM is deferred with the Android shell
- * itself: a leg nothing can exercise rots the day it is written.
+ * APNs DIRECT: the operator's own Apple credentials talk straight to Apple —
+ * no relay service in between, because a shared push relay would be exactly
+ * the central node the charter forbids (same ruling as the rejected central
+ * identity anchor). The shared token store, the FCM (Android) half and the
+ * one assembly point (`buildNativePushService`) live in native-push.ts
+ * (SHELL-M6A); this file owns only what is APNs-specific.
  *
  * Config is FILE-FIRST, not env knobs (the 116-knob registry stays frozen —
  * agents.json / agent-card.json precedent): `<space>/apns.json` names the
@@ -22,11 +23,6 @@
  * acceptable only BECAUSE the payload is content-free by construction; token
  * + timing metadata transit Apple either way (dataLeavesBox disclosure).
  *
- * Native tokens are MORE devices on the SAME tap leg, not a second leg:
- * `composeTapFallback` merges web-push and APNs into the one fallback the IM
- * bridge already folds on `unknown_member` — IM-bound members stay
- * byte-identical, and every subscribed device buzzes (≥1 ok = delivered).
- *
  * Tokens are stored PER USER, not per device credential: `resolveV4Auth`
  * does not surface which aipk_ credential authenticated (extending the
  * identity session face is out of this milestone's blast radius). Revoking a
@@ -38,16 +34,14 @@
 
 import { connect } from 'node:http2'
 import { createPrivateKey, type KeyObject } from 'node:crypto'
-import { existsSync, mkdirSync, readFileSync } from 'node:fs'
-import { readFile } from 'node:fs/promises'
+import { existsSync, readFileSync } from 'node:fs'
 import { isAbsolute, join } from 'node:path'
 
 import { es256Sign } from '@gotong/a2a'
-import { writeJsonAtomic } from '@gotong/core'
-import { assertSafeOwnerId } from '@gotong/services-sdk'
 
 import type { ButlerPushResult } from './butler-reachable.js'
 import type { ImLogger } from './im-bridge.js'
+import type { NativePushToken, NativePushTokenStore } from './native-push.js'
 import { TAP_PAYLOAD } from './web-push-sender.js'
 
 // ─── Config (file-first; `<space>/apns.json`) ───────────────────────────────
@@ -152,197 +146,6 @@ export function buildApnsJwt(opts: ApnsJwtOpts): string {
   return `${input}.${es256Sign(opts.privateKey, Buffer.from(input, 'utf8')).toString('base64url')}`
 }
 
-// ─── Token store (mirrors WebPushSubscriptionStore's disciplines) ───────────
-
-/** Devices per member — the 6th registration drops the oldest, loudly. */
-export const NATIVE_PUSH_MAX_TOKENS = 5
-
-export interface NativePushToken {
-  /** APNs device token, lowercase hex. Opaque to us beyond the shape check. */
-  token: string
-  platform: 'ios'
-  createdAt: number
-  lastOkAt?: number
-}
-
-/** Loud, typed refusal — routes map `code:'invalid'` to a 400. */
-export class NativePushStoreError extends Error {
-  constructor(
-    readonly code: 'invalid',
-    message: string,
-  ) {
-    super(message)
-    this.name = 'NativePushStoreError'
-  }
-}
-
-export interface NativePushStoreOptions {
-  /** `<space>/butler/push-native` — per-member token files live here. */
-  dir: string
-  logger: ImLogger
-  now?: () => number
-  maxTokens?: number
-}
-
-export class NativePushTokenStore {
-  private readonly dir: string
-  private readonly log: ImLogger
-  private readonly now: () => number
-  private readonly max: number
-  /** Per-userId serialize chain — same-member read-modify-writes never race. */
-  private readonly locks = new Map<string, Promise<unknown>>()
-
-  constructor(opts: NativePushStoreOptions) {
-    this.dir = opts.dir
-    this.log = opts.logger
-    this.now = opts.now ?? Date.now
-    this.max = opts.maxTokens ?? NATIVE_PUSH_MAX_TOKENS
-  }
-
-  async list(userId: string): Promise<NativePushToken[]> {
-    assertSafeOwnerId(userId)
-    return this.read(userId)
-  }
-
-  /** Validate + upsert one device token; re-registering updates in place. */
-  async add(
-    userId: string,
-    input: unknown,
-  ): Promise<{ count: number; replaced: boolean; dropped: number }> {
-    assertSafeOwnerId(userId)
-    const row = validateNativeToken(input, this.now())
-    return this.withLock(userId, async () => {
-      const tokens = await this.read(userId)
-      const existing = tokens.findIndex((t) => t.token === row.token)
-      if (existing >= 0) tokens.splice(existing, 1)
-      tokens.push(row)
-      const overflow = tokens.length - this.max
-      if (overflow > 0) {
-        tokens.splice(0, overflow)
-        this.log.warn('apns: token cap reached, dropped oldest', {
-          userId,
-          dropped: overflow,
-          max: this.max,
-        })
-      }
-      await this.write(userId, tokens)
-      return { count: tokens.length, replaced: existing >= 0, dropped: Math.max(overflow, 0) }
-    })
-  }
-
-  /** Remove by token — idempotent; serves both unregister and the 410 prune. */
-  async remove(userId: string, token: string): Promise<{ removed: boolean }> {
-    assertSafeOwnerId(userId)
-    const needle = String(token).trim().toLowerCase()
-    return this.withLock(userId, async () => {
-      const tokens = await this.read(userId)
-      const next = tokens.filter((t) => t.token !== needle)
-      if (next.length === tokens.length) return { removed: false }
-      await this.write(userId, next)
-      return { removed: true }
-    })
-  }
-
-  /** Best-effort `lastOkAt` stamp from the delivery leg — never throws. */
-  async markDelivered(userId: string, token: string): Promise<void> {
-    try {
-      assertSafeOwnerId(userId)
-      await this.withLock(userId, async () => {
-        const tokens = await this.read(userId)
-        const hit = tokens.find((t) => t.token === token)
-        if (!hit) return
-        hit.lastOkAt = this.now()
-        await this.write(userId, tokens)
-      })
-    } catch (err) {
-      this.log.warn('apns: failed to stamp delivery', {
-        userId,
-        err: err instanceof Error ? err.message : String(err),
-      })
-    }
-  }
-
-  private pathFor(userId: string): string {
-    return join(this.dir, `${userId}.json`)
-  }
-
-  private withLock<T>(userId: string, fn: () => Promise<T>): Promise<T> {
-    const prev = this.locks.get(userId) ?? Promise.resolve()
-    const next = prev.then(fn, fn)
-    this.locks.set(
-      userId,
-      next.catch(() => undefined),
-    )
-    return next
-  }
-
-  /** Reader never quarantines: bad file → warn + [], evidence left in place. */
-  private async read(userId: string): Promise<NativePushToken[]> {
-    let raw: string
-    try {
-      raw = await readFile(this.pathFor(userId), 'utf8')
-    } catch {
-      return []
-    }
-    try {
-      const parsed = JSON.parse(raw) as { tokens?: unknown }
-      const rows = Array.isArray(parsed?.tokens) ? parsed.tokens : []
-      const good: NativePushToken[] = []
-      let skipped = 0
-      for (const row of rows) {
-        const t = parseStoredToken(row)
-        if (t) good.push(t)
-        else skipped++
-      }
-      if (skipped > 0) this.log.warn('apns: skipped malformed token entries', { userId, skipped })
-      return good
-    } catch (err) {
-      this.log.warn('apns: token file is not valid JSON, serving none', {
-        userId,
-        err: err instanceof Error ? err.message : String(err),
-      })
-      return []
-    }
-  }
-
-  private async write(userId: string, tokens: NativePushToken[]): Promise<void> {
-    mkdirSync(this.dir, { recursive: true })
-    await writeJsonAtomic(this.pathFor(userId), { tokens })
-  }
-}
-
-/**
- * Validate a shell registration `{ token, platform }`. APNs tokens are
- * documented as opaque, but every real one is hex — pinning the alphabet
- * (16..200 chars, stored lowercase) rejects garbage without guessing length.
- */
-export function validateNativeToken(input: unknown, createdAt: number): NativePushToken {
-  if (typeof input !== 'object' || input === null || Array.isArray(input)) {
-    throw new NativePushStoreError('invalid', 'registration must be an object')
-  }
-  const o = input as Record<string, unknown>
-  if (o.platform !== 'ios') {
-    throw new NativePushStoreError('invalid', 'registration.platform must be "ios"')
-  }
-  const raw = typeof o.token === 'string' ? o.token.trim() : ''
-  if (!/^[0-9a-fA-F]{16,200}$/.test(raw)) {
-    throw new NativePushStoreError('invalid', 'registration.token must be 16–200 hex chars')
-  }
-  return { token: raw.toLowerCase(), platform: 'ios', createdAt }
-}
-
-/** Stored rows re-validated on read; a hand-edited bad row is skipped. */
-function parseStoredToken(v: unknown): NativePushToken | null {
-  if (typeof v !== 'object' || v === null) return null
-  const o = v as Record<string, unknown>
-  try {
-    const t = validateNativeToken(o, typeof o.createdAt === 'number' ? o.createdAt : 0)
-    return { ...t, ...(typeof o.lastOkAt === 'number' ? { lastOkAt: o.lastOkAt } : {}) }
-  } catch {
-    return null
-  }
-}
-
 // ─── Sender (HTTP/2 to APNs; low-info tap only) ─────────────────────────────
 
 const APNS_TIMEOUT_MS = 10_000
@@ -400,11 +203,11 @@ export class ApnsSender {
     return this.jwtCache.value
   }
 
-  /** Deliver one low-info tap to every device the member registered. */
+  /** Deliver one low-info tap to every IOS device the member registered. */
   async push(userId: string): Promise<ButlerPushResult> {
     let tokens: NativePushToken[]
     try {
-      tokens = await this.store.list(userId)
+      tokens = (await this.store.list(userId)).filter((t) => t.platform === 'ios')
     } catch {
       return { delivered: false, reason: 'unknown_member' }
     }
@@ -504,73 +307,3 @@ export class ApnsSender {
   }
 }
 
-// ─── Tap-leg composition ────────────────────────────────────────────────────
-
-type TapLeg = (userId: string) => Promise<ButlerPushResult>
-
-/**
- * Merge the web-push and APNs legs into the ONE tap fallback the IM bridge
- * folds on `unknown_member`. Both run in parallel — native tokens are more
- * devices, not a precedence chain — and ≥1 delivery counts. Reasons merge
- * honestly: any attempted-but-failed leg yields `send_failed` (the outbox
- * keeps retrying); `unknown_member` only when NO device is registered anywhere.
- */
-export function composeTapFallback(a: TapLeg | undefined, b: TapLeg | undefined): TapLeg | undefined {
-  if (!a || !b) return a ?? b
-  const safe = (leg: TapLeg, userId: string): Promise<ButlerPushResult> =>
-    leg(userId).catch(() => ({ delivered: false, reason: 'send_failed' as const }))
-  return async (userId) => {
-    const [ra, rb] = await Promise.all([safe(a, userId), safe(b, userId)])
-    if (ra.delivered || rb.delivered) return { delivered: true }
-    if (ra.reason === 'send_failed' || rb.reason === 'send_failed') {
-      return { delivered: false, reason: 'send_failed' }
-    }
-    return { delivered: false, reason: 'unknown_member' }
-  }
-}
-
-// ─── Assembly (file → service), mirrors buildWebPushService ─────────────────
-
-export interface ApnsPushService {
-  /** Duck for the web layer's MeNativePushSurface. */
-  surface: {
-    count(userId: string): Promise<number>
-    add(userId: string, input: unknown): Promise<{ count: number; replaced: boolean }>
-    remove(userId: string, token: string): Promise<{ removed: boolean }>
-  }
-  /** The native half of the tap leg — composed via `composeTapFallback`. */
-  fallback: TapLeg
-  /** Startup disclosure — ids and endpoint choice, NEVER key bytes. */
-  disclosure: string
-}
-
-export function buildApnsPushService(
-  spaceRoot: string,
-  logger: ImLogger,
-  opts: { now?: () => number; originOverride?: string } = {},
-): ApnsPushService | undefined {
-  const loaded = loadApnsConfig(spaceRoot, logger)
-  if (!loaded) return undefined
-  const store = new NativePushTokenStore({
-    dir: join(spaceRoot, 'butler', 'push-native'),
-    logger,
-    ...(opts.now ? { now: opts.now } : {}),
-  })
-  const sender = new ApnsSender({
-    config: loaded.config,
-    privateKey: loaded.privateKey,
-    store,
-    logger,
-    ...(opts.now ? { now: opts.now } : {}),
-    ...(opts.originOverride ? { originOverride: opts.originOverride } : {}),
-  })
-  return {
-    surface: {
-      count: async (userId) => (await store.list(userId)).length,
-      add: (userId, input) => store.add(userId, input),
-      remove: (userId, token) => store.remove(userId, token),
-    },
-    fallback: (userId) => sender.push(userId),
-    disclosure: `apns push enabled: topic=${loaded.config.bundleId} env=${loaded.config.environment} keyId=${loaded.config.keyId} teamId=${loaded.config.teamId}`,
-  }
-}

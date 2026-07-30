@@ -34,6 +34,9 @@ class StubNativePush implements MeNativePushSurface {
   async count() {
     return this.countValue
   }
+  platforms() {
+    return ['ios', 'android']
+  }
   async add(userId: string, input: unknown) {
     const token = (input as { token?: unknown } | null)?.token
     if (typeof token !== 'string' || !/^[0-9a-f]{16,}$/.test(token)) {
@@ -161,7 +164,7 @@ describe('/api/me/push — Web Push subscription face (PUSH-M2)', () => {
     b = await boot({ withSurface: false })
     const g = await req('GET')
     expect(g.status).toBe(200)
-    expect(g.json).toEqual({ available: false, native: { available: false } })
+    expect(g.json).toEqual({ available: false, native: { available: false, platforms: [] } })
     expect((await req('POST', { path: '/api/me/push/subscribe', body: {} })).status).toBe(503)
     expect(
       (await req('POST', { path: '/api/me/push/unsubscribe', body: { endpoint: 'x' } })).status,
@@ -183,7 +186,7 @@ describe('/api/me/push — Web Push subscription face (PUSH-M2)', () => {
       available: true,
       publicKey: 'BTESTPUBLICKEY',
       count: 2,
-      native: { available: false },
+      native: { available: false, platforms: [] },
     })
     expect(b.stub!.askedCount).toEqual([b.memberUserId])
   })
@@ -191,7 +194,11 @@ describe('/api/me/push — Web Push subscription face (PUSH-M2)', () => {
   it('native surface is independent: web OFF + native ON is honest both ways (SHELL-M6)', async () => {
     b = await boot({ withSurface: false, withNative: true })
     const g = await req('GET')
-    expect(g.json).toEqual({ available: false, native: { available: true, count: 1 } })
+    // `platforms` (SHELL-M6A) lets the shell gate its button on ITS platform.
+    expect(g.json).toEqual({
+      available: false,
+      native: { available: true, count: 1, platforms: ['ios', 'android'] },
+    })
   })
 
   it('native register forwards the SESSION userId (query ignored); duck invalid → 400', async () => {
