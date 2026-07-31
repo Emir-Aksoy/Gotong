@@ -114,6 +114,7 @@ pnpm demo                          # = hello-collab（官方第一步，见 QUIC
 | [`smart-home-hub`](../../examples/smart-home-hub) | 智能家居 hub 的一个小可跑样例 | 零 |
 | [`morning-brief-hub`](../../examples/morning-brief-hub) | 我的晨报：模板装晨报员 + 晨报流，补一条「定时」即每早自动跑、管家播到 IM（调度环零 LLM） | 装模板 + 填 key |
 | [`family-hub`](../../examples/family-hub) | 家庭 hub 开箱包：家人在 `/me` 发起「让 AI 帮家里办件事」→ 停在指定家长的审批步（时刻 C 照按钮点出）+ 家庭晨报 + 3 个可选生活连接器槽位 | 装模板 + 填 key |
+| [`agri-assist`](../../examples/agri-assist) | 农业辅助（家庭菜园/果园）：画廊第一个「分身+工作流+面板」组合包——菜园顾问 + 本周农事安排/病虫害问诊两条流 + 菜园照看面（SDUI 形态，配真壳 app 就是手机上的农事助手）；农药红线=只说类型绝不给剂量 | 装模板 + 填 key |
 
 ## ⑦ 模板 / 压测 / 参考
 

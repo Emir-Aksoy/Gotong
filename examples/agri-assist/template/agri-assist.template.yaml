@@ -1,0 +1,251 @@
+# 农业辅助(家庭菜园/果园) — gotong.template/v1
+#
+# AGRI-M1:画廊第一个「分身 + 工作流 + 面板」三类资源同装的组合包 ——
+# 装完一个包,hub 里同时多出:
+#   - garden-advisor  菜园顾问分身(capability: garden.advise)
+#   - 两条 /me 工作流:garden-weekly-plan 本周农事安排 / garden-diagnose 病虫害问诊
+#   - 一张 garden-care 菜园照看面(SDUI 形态,落 <space>/butler/ui/library/)
+# 面向的是家庭菜园/果园尺度(阳台盆栽到几分地果树),不是大田农业。
+#
+# ── 设计注释(给读模板的人) ──────────────────────────────────────────────
+#   * 顾问刻意不带 chat capability:面板 chat 卡的契约只有 chat.butler
+#     (panel-schema PANEL_COMPONENT_CONTRACTS),对话入口永远是管家阿同;
+#     顾问走工作流按 capability 派发,阿同也能用 ask_my_agent 随手请教它。
+#     给顾问加 chat 会让它被当成第二个管家(SESS 窗/记忆/工具面全套),
+#     那不是「专家分身」该有的重量。
+#   * 面板 calendar/schedule-list 绑 schedules.mine:装完在「定时」卡补人
+#     启用周六建议后,农事周历里就是真实的触发标记,不是装饰。
+#   * 模板预填 DeepSeek(画廊惯例);接自己的模型(如 LongCat)= 装完在
+#     管理面板改 agent 的 baseURL/model,key 走面板或 apiKeyEnv,模板不点名。
+#
+# ── 诚实边界 ────────────────────────────────────────────────────────────
+#   * 顾问只给参考建议:农药/兽药绝不给具体剂量配比(一律看产品包装说明、
+#     问当地农技站/农资店),人畜疑似误食农药立即就医 —— 红线写死在
+#     system prompt 里,也写在这里。
+#   * 顾问没有实时天气/土壤数据,不编造;天气卡走可选 weather 连接器,
+#     不挂时如实显示未接入,面板其余部分照常工作。
+#   * 建议文本不执行真实动作:真要对外操作(下单买资材等)由挂了连接器的
+#     agent 逐次过审批闸,与本包无关(接入 ≠ 授权行动)。
+schema: gotong.template/v1
+template:
+  name: 农业辅助(家庭菜园/果园)
+  description: |-
+    照看家庭菜园/果园的开箱包:菜园顾问分身 + 两条工作流(本周农事安排/
+    病虫害问诊)+ 一张菜园照看面(SDUI 形态)。安排流配好定时每周六早自动送;
+    问诊流描述症状就给可能原因与处理步骤,农药只说类型不给剂量,拿不准就
+    指路当地农技站。天气连接器可选,不挂照样用。导入时填一次 API key。
+
+  version: 1
+
+  # ── 1 个分身:菜园顾问 ──────────────────────────────────────────────────
+  agents:
+    - id: garden-advisor
+      displayName: 菜园顾问
+      capabilities: [garden.advise]
+      kind: llm
+      provider: openai-compatible
+      baseURL: https://api.deepseek.com/v1
+      providerLabel: DeepSeek
+      model: deepseek-chat
+      system: |
+        你是家庭菜园/果园的「菜园顾问」,面向阳台盆栽到几分地果树的家庭
+        尺度,不是大田农业。一次只被派两种活,按任务 payload 里的 step
+        字段区分。全程中文,口吻像懂行的邻居,不寒暄、不解释你在做什么。
+
+        【step = weekly_plan 本周农事安排】输入:crops(种着什么)、
+        location(地点或气候,可能为空)、focus(本周想重点弄什么,可能为空)。
+        输出一页本周安排,固定三节、节标题一字不改(全文 ≤ 400 字):
+        1. 本周要做 —— 3-5 条,按轻重排,逐条对着 crops 里的具体作物说;
+        2. 浇水施肥 —— 按作物给节律建议(几天一次/看什么信号浇),不知道
+           品种习性就说通用规律并注明「按你那株的实际状态调整」;
+        3. 病虫害提防 —— 当下该防什么(location 给了就按那个气候说,没给
+           就按通用规律并注明「以你当地实际为准」),重点是早发现的信号。
+        focus 有值就把它排进「本周要做」前列。
+
+        【step = diagnose 病虫害问诊】输入:crop(哪种作物)、symptom(症状
+        描述)。输出固定三节、节标题一字不改:
+        1. 可能是什么 —— 1-3 个可能原因,按可能性从高到低,每个一句话说
+           判断依据(symptom 里哪个细节指向它);
+        2. 怎么处理 —— 先给不用药的措施(摘除病叶/隔离/清园/调整水肥),
+           确实要用药只说药剂类型(如"含铜杀菌剂"),绝不给剂量;
+        3. 什么时候要找人 —— 什么信号说明该带样品去当地农技站/农资店,
+           或该整株拔除止损。
+        症状描述太模糊就先列出你最需要补充的 1-2 个观察点,再按最可能的
+        方向给建议,不硬猜。
+
+        红线(最重要,任何情况不破):
+        - 农药/兽药**绝不给具体剂量、配比、兑水倍数** —— 一律指向产品
+          包装说明和当地农技站/农资店;剧毒、禁用农药直接劝阻并说明为什么。
+        - 有人或动物疑似误食/接触农药中毒 → 只说「立即就医/就诊,带上
+          农药包装」,不给任何医疗处置建议。
+        - 你没有实时天气、土壤、市场数据,**没有的就不要编**;涉及时效的
+          判断注明「以你当地观察为准」。
+
+  # ── 2 条声明式工作流 ─────────────────────────────────────────────────────
+  workflows:
+    # 旗舰流:说清种着什么 → 顾问出一页本周安排。无人值守可跑(golden-run
+    # 就验它);配好定时后每周六早自动送,跑完管家播到 IM(BE-M5)。
+    - id: garden-weekly-plan
+      name: 本周农事安排
+      description: 说清种着什么,菜园顾问给一页本周安排(本周要做/浇水施肥/病虫害提防);配好定时后每周六早自动送。
+      governance:
+        data_sensitivity: internal
+        required_credentials: [deepseek]
+        notes: 开箱零外部系统;产出是建议文本,真实对外动作不在本流内(逐次另过审批闸)。
+      trigger:
+        capability: garden.plan.request
+        payload_schema:
+          - id: crops
+            label: 地里/盆里现在种着什么?(顿号或换行分开)
+            type: textarea
+            rows: 2
+            required: true
+          - id: location
+            label: 地点或气候(比如「马来西亚,常年湿热」,可不填)
+            type: text
+            required: false
+          - id: focus
+            label: 本周想重点弄什么?(可不填)
+            type: text
+            required: false
+      surface:
+        me:
+          enabled: true
+          label: 来一份本周农事安排
+          description: 顾问按你种的东西给一页本周安排;配好定时后每周六早自动送到 IM。
+          allowed_roles: [owner, admin, member]
+          user_scope_field: reader_id
+      steps:
+        - id: compose
+          description: 菜园顾问写本周农事安排(固定三节:本周要做/浇水施肥/病虫害提防)。
+          dispatch:
+            strategy: { kind: capability, capabilities: [garden.advise] }
+            title: 写本周农事安排
+            payload:
+              step: weekly_plan
+              crops: $trigger.payload.crops
+              location: $trigger.payload.location
+              focus: $trigger.payload.focus
+      output:
+        plan: $compose.output
+
+    # 问诊流:描述症状 → 可能原因 + 处理步骤 + 升级线。也是无人值守流;
+    # 刻意不进 acceptance —— 症状诊断没有稳定的"标准答案"节奏,golden-run
+    # 只放输出结构可钉死的安排流。
+    - id: garden-diagnose
+      name: 病虫害问诊
+      description: 描述症状,顾问给可能原因与处理步骤;农药只说类型不给剂量,拿不准就指路当地农技站。
+      governance:
+        data_sensitivity: internal
+        required_credentials: [deepseek]
+        notes: 顾问只给参考建议;农药剂量一律看包装说明/问当地农技站,人畜误食立即就医。
+      trigger:
+        capability: garden.diagnose.request
+        payload_schema:
+          - id: crop
+            label: 哪种作物出问题了?
+            type: text
+            required: true
+          - id: symptom
+            label: 看到什么症状?(叶/茎/果哪里不对、持续几天,越细越好)
+            type: textarea
+            rows: 4
+            required: true
+      surface:
+        me:
+          enabled: true
+          label: 菜出问题了,问一下
+          description: 描述症状,顾问给可能原因、处理步骤和该找人的信号。
+          allowed_roles: [owner, admin, member]
+          user_scope_field: requester_id
+      steps:
+        - id: diagnose
+          description: 菜园顾问按症状给可能原因与处理建议(固定三节:可能是什么/怎么处理/什么时候要找人)。
+          dispatch:
+            strategy: { kind: capability, capabilities: [garden.advise] }
+            title: 病虫害问诊
+            payload:
+              step: diagnose
+              crop: $trigger.payload.crop
+              symptom: $trigger.payload.symptom
+      output:
+        advice: $diagnose.output
+
+  # ── 1 张 SDUI 形态:菜园照看面 ───────────────────────────────────────────
+  # 落形态库,成员在「面板」标签底部自己换上,随时换回默认;owner 也可
+  # 替家人直接装上(对方随时可换掉)。每张 config 都被防腐门用真
+  # validatePanelConfig 钉死(packages/host/tests/agri-assist-template.test.ts)。
+  panels:
+    - id: garden-care
+      title: 菜园照看面
+      description: 天气 + 农事周历 + 农活清单 + 顾问笔记 + 一键出本周安排,给照看菜园/果园的人。
+      config:
+        schemaVersion: 1
+        title: "菜园照看"
+        sections:
+          - heading: "天时"
+            components:
+              - type: weather
+                source: "connector:weather"
+                params: { days: 3 }
+              - type: calendar
+                source: "schedules.mine"
+                params: { view: week }
+          - heading: "地里的事"
+            components:
+              - type: schedule-list
+                source: "schedules.mine"
+                params: { limit: 5 }
+              - type: list
+                source: "tasks.mine"
+                params: { limit: 8 }
+              - type: markdown-card
+                source: "content:garden-notes"
+          - heading: "问一问"
+            components:
+              - type: chat
+                params: { placeholder: "问问阿同:番茄叶子发黄是怎么回事?" }
+              - type: quick-actions
+                params:
+                  actions:
+                    - "start_workflow:garden-weekly-plan"
+                    - "start_workflow:garden-diagnose"
+                    - open_inbox
+
+  # ── FDE-M1:天气连接器槽位 —— 可选,不挂照样跑 ──────────────────────────
+  requires:
+    connectors:
+      - id: weather
+        kind: mcp
+        optional: true
+        capability: weather.read
+        hint: 连接器目录任选天气后端, server 名用 weather;不挂时面板天气卡如实显示未接入,其余照常
+
+  # ── FDE-M2:黄金验收 —— 只放输出结构钉得死的安排流 ──────────────────────
+  # 三节标题是顾问 system prompt 里「节标题一字不改」钉死的输出结构。
+  acceptance:
+    - id: smoke-garden-weekly-plan
+      workflowId: garden-weekly-plan
+      trigger:
+        crops: 番茄、辣椒、香蕉两棵
+        location: 马来西亚,常年湿热
+      assert:
+        contains: [本周要做, 浇水施肥, 病虫害提防]
+        forbid: [作为一个AI, 我无法访问]
+      note: 开箱无连接器状态下也必须绿(顾问没有实时数据也要给出结构完整的安排)
+
+  # ── FDE-M3:定时建议 —— 只带节奏不带人;装完「定时」卡补人启用 ───────────
+  # inputs 里的 crops 是样例:补人启用时改成你家真种的东西。
+  schedules:
+    - workflowId: garden-weekly-plan
+      cadence: { kind: weekly, weekday: 6, hour: 7 }
+      inputs:
+        crops: 番茄、辣椒、空心菜(启用时改成你家种的)
+      note: 装完在「定时」卡补人启用, 每周六早 7 点自动出本周安排;记得把 crops 改成自家作物
+
+  # ── 一键:导入时提示填一次 API key, 自动应用到顾问 ────────────────────────
+  defaults:
+    apiKeyPrompt:
+      provider: openai-compatible
+      baseURL: https://api.deepseek.com/v1
+      label: DeepSeek

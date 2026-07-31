@@ -38,6 +38,7 @@ const EXPECTED_IDS = [
   'smart-home-hub',
   'family-hub',
   'family-panel-trio',
+  'agri-assist',
   'cafe-ops',
   'bar-ops',
   'warband-club',
