@@ -244,6 +244,7 @@ import type {
   MeHubStewardSurface,
   MeChatStreamSurface,
   MeChatSessionSurface,
+  MeButlerChatSurface,
 } from './me-routes-types.js'
 export type {
   MeWorkflowSummaryLike,
@@ -288,6 +289,7 @@ export type {
   MeHubStewardSurface,
   MeChatStreamSurface,
   MeChatSessionSurface,
+  MeButlerChatSurface,
 } from './me-routes-types.js'
 
 export interface HandleMeRouteCtx {
@@ -404,6 +406,11 @@ export interface HandleMeRouteCtx {
    * when the host wired no window; quick-chat payload is then byte-identical.
    */
   meChatSession: MeChatSessionSurface | undefined
+  /**
+   * BUTLER-CHAT — butler-row exemption from the quick-chat grant gate (see the
+   * surface doc). Undefined → the gate applies to every row, byte-identical.
+   */
+  meButlerChat: MeButlerChatSurface | undefined
   /** SDUI-M2 — member panel config resolver; undefined → GET /api/me/panel 503. */
   mePanel: MePanelSurface | undefined
   panelData: MePanelDataSurface | undefined
@@ -2421,14 +2428,33 @@ async function handleMeChatAgent(
     sendJson(res, { error: 'agent chat unavailable (agent surface not wired)' }, 503)
     return
   }
-  // Ownership gate — the ONLY access decision. read() throws (status 403/404)
-  // if the caller doesn't hold at least 'viewer', so a non-grantee can neither
-  // chat with nor enumerate ids.
-  try {
-    await ctx.meAgentAdmin.read(userId, agentId)
-  } catch (err) {
-    sendJson(res, { error: err instanceof Error ? err.message : String(err) }, meAgentErrStatus(err))
-    return
+  // BUTLER-CHAT — the resident butler is exempt from the grant gate below: it
+  // is every member's interface (the IM free-text case already dispatches for
+  // any bound member with no grant row, into the SAME session window), and the
+  // directory shows every row to every member anyway, so the 404 here protects
+  // nothing — it only turns the panel chat card into a dishonest red bubble
+  // for everyone but the row's creator. Host-computed and fail-closed (unknown
+  // id / corrupt agents.json / a thrown probe → false → the gate holds), and
+  // `isButlerAgent` only passes rows that exist with a managed spec, so the
+  // read() existence check is subsumed. Chat is the ONLY exempted verb.
+  let isButler = false
+  if (ctx.meButlerChat) {
+    try {
+      isButler = (await ctx.meButlerChat.isButlerAgent(agentId)) === true
+    } catch {
+      /* fail-closed: probe error ⇒ not a butler ⇒ grant gate applies */
+    }
+  }
+  // Ownership gate for every other row — the ONLY access decision. read()
+  // throws (status 403/404) if the caller doesn't hold at least 'viewer', so a
+  // non-grantee can neither chat with nor enumerate ids.
+  if (!isButler) {
+    try {
+      await ctx.meAgentAdmin.read(userId, agentId)
+    } catch (err) {
+      sendJson(res, { error: err instanceof Error ? err.message : String(err) }, meAgentErrStatus(err))
+      return
+    }
   }
   const body = (await readJsonBody(req).catch(() => ({}))) as Record<string, unknown>
   const prompt = typeof body.prompt === 'string' ? body.prompt.trim() : ''

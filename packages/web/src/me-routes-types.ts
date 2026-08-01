@@ -777,3 +777,21 @@ export interface MeChatSessionSurface {
   history(userId: string, agentId: string): Promise<Array<{ role: 'user' | 'assistant'; content: string }>>
   append(userId: string, agentId: string, role: 'user' | 'assistant', text: string): Promise<void>
 }
+
+/**
+ * BUTLER-CHAT — "is this agent id the resident butler?", asked by the
+ * quick-chat route to decide whether the E4-M1 grant gate applies. The butler
+ * is every member's interface — the IM bridge's free-text case already
+ * dispatches for any bound member with no grant row, and web quick-chat shares
+ * that same session window — so the SAME conversation must not 404 on the
+ * web/panel face just because nobody seeded a per-member grant (only the
+ * CREATOR is ever seeded). HOST-computed, the same fail-closed judgment the
+ * session window uses (unknown id / corrupt agents.json → false → gate holds);
+ * never a client claim. Chat is the ONLY exempted verb — config read / update
+ * / remove / grant admin all keep the grant ladder, so the butler's system
+ * prompt stays as private as before. Undefined → every row keeps today's
+ * gate, byte-identical.
+ */
+export interface MeButlerChatSurface {
+  isButlerAgent(agentId: string): Promise<boolean>
+}

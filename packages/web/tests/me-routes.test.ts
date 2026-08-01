@@ -47,7 +47,7 @@ import {
 // ②TC-ME — the member quick-chat route's ownership gate is `MeAgentAdminSurface`;
 // `server.ts` only imports these (doesn't re-export), so pull them straight from
 // the route module where they're declared.
-import type { MeAgentAdminSurface, MeChatSessionSurface, MeChatStreamSurface, MeOwnedAgentView } from '../src/me-routes.js'
+import type { MeAgentAdminSurface, MeButlerChatSurface, MeChatSessionSurface, MeChatStreamSurface, MeOwnedAgentView } from '../src/me-routes.js'
 
 /**
  * ease-of-use ①TC-ME — a recording fake for the member key probe. Captures
@@ -278,6 +278,8 @@ async function boot(
     meChatStream?: MeChatStreamSurface
     /** SESS — wire a fake session window for quick-chat continuity. */
     meChatSession?: MeChatSessionSurface
+    /** BUTLER-CHAT — wire a fake butler judgment for the chat-gate exemption. */
+    meButlerChat?: MeButlerChatSurface
   } = {},
 ): Promise<BootResult> {
   const withGrowthReports = opts.withGrowthReports ?? true
@@ -337,6 +339,7 @@ async function boot(
     ...(opts.meAgentAdmin ? { meAgentAdmin: opts.meAgentAdmin } : {}),
     ...(opts.meChatStream ? { meChatStream: opts.meChatStream } : {}),
     ...(opts.meChatSession ? { meChatSession: opts.meChatSession } : {}),
+    ...(opts.meButlerChat ? { meButlerChat: opts.meButlerChat } : {}),
     ...(opts.adminLoginRateLimit
       ? { adminLoginRateLimit: opts.adminLoginRateLimit }
       : {}),
@@ -1433,6 +1436,101 @@ describe('POST /api/me/agents/:id/chat — member quick-chat (②TC-ME)', () => 
         body: JSON.stringify({ prompt: 'hi' }),
       })
       expect(r.status).toBe(503)
+    } finally {
+      await teardown(noSurface)
+    }
+  })
+})
+
+// ---------------------------------------------------------------------------
+// BUTLER-CHAT — butler-row exemption from the quick-chat grant gate
+//
+// The resident butler is every member's interface: the IM bridge's free-text
+// case dispatches for any bound member with no grant row, into the SAME
+// session window web quick-chat shares. Only the row's CREATOR is ever seeded
+// a grant, so without the exemption every other member's panel chat card is a
+// permanent 404 red bubble against a butler the directory openly lists to
+// them. The exemption is host-judged (fail-closed) and chat-verb-only.
+// ---------------------------------------------------------------------------
+
+const BUTLER_AGENT_ID = 'resident-butler'
+
+/** BUTLER-CHAT — a fake butler judgment: ids in `butlers` are butler rows;
+ * a configured error makes the probe throw (the fail-closed case). */
+class StubButlerChat implements MeButlerChatSurface {
+  throwErr: Error | undefined
+  constructor(private readonly butlers: Set<string>) {}
+  async isButlerAgent(agentId: string): Promise<boolean> {
+    if (this.throwErr) throw this.throwErr
+    return this.butlers.has(agentId)
+  }
+}
+
+describe('POST /api/me/agents/:id/chat — butler-row grant-gate exemption (BUTLER-CHAT)', () => {
+  let b: BootResult
+  let butlerStub: StubChatAgent
+  let butlerCheck: StubButlerChat
+
+  beforeEach(async () => {
+    // The member owns NOTHING — every id 404s at the grant gate, so any reply
+    // that gets through below got through on the butler exemption alone.
+    butlerCheck = new StubButlerChat(new Set([BUTLER_AGENT_ID]))
+    b = await boot({
+      meAgentAdmin: new StubMeAgentAdmin(new Set()),
+      meButlerChat: butlerCheck,
+    })
+    butlerStub = new StubChatAgent(BUTLER_AGENT_ID, okChatReply('hello from the butler'))
+    b.hub.register(butlerStub)
+  })
+  afterEach(async () => {
+    await teardown(b)
+  })
+
+  const post = (agentId: string) =>
+    fetch(`${b.baseUrl}/api/me/agents/${agentId}/chat`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', cookie: b.memberCookie },
+      body: JSON.stringify({ prompt: 'hi' }),
+    })
+
+  it('lets a grant-less member chat with the butler row, per-user origin intact', async () => {
+    const r = await post(BUTLER_AGENT_ID)
+    expect(r.status).toBe(200)
+    const j = await r.json()
+    expect(j.ok).toBe(true)
+    expect(j.result?.output?.text).toBe('hello from the butler')
+    // The exemption skips the GATE, not the attribution: the dispatch still
+    // carries the member's per-user origin (quota debits the caller).
+    expect(butlerStub.received.length).toBe(1)
+    expect(butlerStub.received[0]?.origin?.userId).toBe(b.memberUserId)
+    expect(butlerStub.received[0]?.origin?.orgId).toBe('local')
+  })
+
+  it('keeps the 404 gate for a non-butler row the member holds no grant on', async () => {
+    const other = new StubChatAgent('expert-agent', okChatReply('should never run'))
+    b.hub.register(other)
+    const r = await post('expert-agent')
+    expect(r.status).toBe(404)
+    expect(other.received.length).toBe(0)
+  })
+
+  it('fails closed when the butler probe throws — gate applies, 404', async () => {
+    butlerCheck.throwErr = new Error('agents.json unreadable')
+    const r = await post(BUTLER_AGENT_ID)
+    expect(r.status).toBe(404)
+    expect(butlerStub.received.length).toBe(0)
+  })
+
+  it('keeps the 404 gate when no butler surface is wired (old hosts)', async () => {
+    // Re-boot WITHOUT meButlerChat → the exemption never consults anything.
+    const noSurface = await boot({ meAgentAdmin: new StubMeAgentAdmin(new Set()) })
+    try {
+      const r = await fetch(`${noSurface.baseUrl}/api/me/agents/${BUTLER_AGENT_ID}/chat`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', cookie: noSurface.memberCookie },
+        body: JSON.stringify({ prompt: 'hi' }),
+      })
+      expect(r.status).toBe(404)
     } finally {
       await teardown(noSurface)
     }

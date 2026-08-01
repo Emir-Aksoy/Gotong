@@ -59,6 +59,7 @@ import {
   type MeHubStewardSurface,
   type MeChatStreamSurface,
   type MeChatSessionSurface,
+  type MeButlerChatSurface,
 } from './me-routes.js'
 import { handleAdminPanelRoute, type MePanelDataSurface, type MePanelSurface } from './panel-routes.js'
 import type { MeNativePushSurface, MeWebPushSurface } from './push-routes.js'
@@ -362,6 +363,7 @@ export function serveWeb(hub: Hub, opts: WebServerOptions = {}): Promise<WebServ
     hubSteward: opts.hubSteward,
     meChatStream: opts.meChatStream,
     meChatSession: opts.meChatSession,
+    meButlerChat: opts.meButlerChat,
     mePanel: opts.mePanel,
     panelData: opts.panelData,
     webPush: opts.webPush,
@@ -560,6 +562,8 @@ interface HandlerCtx {
   meChatStream: MeChatStreamSurface | undefined
   /** Session window — see WebServerOptions.meChatSession doc above. */
   meChatSession: MeChatSessionSurface | undefined
+  /** BUTLER-CHAT — see WebServerOptions.meButlerChat doc above. */
+  meButlerChat: MeButlerChatSurface | undefined
   /** SDUI-M2/M3 — see WebServerOptions.mePanel / panelLibrary docs above. */
   mePanel: MePanelSurface | undefined
   panelData: MePanelDataSurface | undefined
@@ -1230,6 +1234,7 @@ async function handle(
         // NA-M6b — quick-chat stream sinks; undefined → stream:true falls to JSON.
         meChatStream: ctx.meChatStream,
         meChatSession: ctx.meChatSession,
+        meButlerChat: ctx.meButlerChat,
         mePanel: ctx.mePanel,
         panelData: ctx.panelData,
         webPush: ctx.webPush,

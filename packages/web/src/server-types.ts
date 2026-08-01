@@ -33,6 +33,7 @@ import type {
   MeHubStewardSurface,
   MeChatStreamSurface,
   MeChatSessionSurface,
+  MeButlerChatSurface,
 } from './me-routes.js'
 import type { WorkflowWizardSurface } from './wizard-routes.js'
 import type { MePanelDataSurface, MePanelSurface } from './panel-routes.js'
@@ -349,6 +350,12 @@ export interface WebServerOptions {
    * bridge). When absent, quick-chat dispatches today's payload byte-identical.
    */
   meChatSession?: MeChatSessionSurface
+  /**
+   * BUTLER-CHAT — butler-row exemption from the quick-chat grant gate (the
+   * host's fail-closed `isButlerAgent`). When absent, every row keeps the
+   * E4-M1 gate, byte-identical.
+   */
+  meButlerChat?: MeButlerChatSurface
   /** SDUI-M2/M3 — member panel config store; absent → /api/me/panel* 503. */
   mePanel?: MePanelSurface
   /** SDUI-C1a — panel data projections; absent → /data/* answer {available:false}. */

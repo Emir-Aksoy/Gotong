@@ -2417,6 +2417,9 @@ async function main(): Promise<void> {
     ...(hubSteward ? { hubSteward } : {}),
     // NA-M6b — quick-chat NDJSON typing preview; the sinks live on the pool.
     meChatStream: { register: (s) => localAgents.registerChatChunkSink(s), release: (k) => localAgents.releaseChatChunkSink(k) },
+    // BUTLER-CHAT — chat-gate exemption asks the SAME fail-closed butler
+    // judgment the session window uses: one source for "who is the butler".
+    meButlerChat: { isButlerAgent: (a: string) => localAgents.isButlerAgent(a) },
     // 对话连续性 — quick-chat 与 IM 共用 im-bridge-wiring 构造的同一会话窗;
     // 仅管家行有窗(专家等其他 agent 读空写弃),窗 ≠ 记忆 ≠ 授权。
     ...(imBridges?.sessions
