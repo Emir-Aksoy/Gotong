@@ -6,7 +6,7 @@
 > 面板「体检 → 自愈历史」看得到,问阿同「你昨晚是不是挂了」它用
 > `restart_history` 工具答得出。
 >
-> Last updated: 2026-07-31 · 状态:M1 hub 侧 + M2 deploy 三件套已落,M3 生产安装在途
+> Last updated: 2026-08-01 · 状态:**全完**(M1 hub 侧 + M2 deploy 三件套 + M3 生产安装,SIGSTOP 卡死演练 2026-08-01 生产实测通过:冻结→1/3→2/3→3/3→自动拉起全程 2 分 40 秒,台账三行齐)
 
 ---
 
@@ -84,10 +84,16 @@ sudo kill -STOP $(systemctl show -p MainPID --value gotong)   # 冻结进程
 journalctl -u gotong-watchdog -f                              # 看 1/3 → 2/3 → 3/3 → restart
 ```
 
-约 3–4 分钟内看门狗应完成:三次失败计数 → 落账 → `systemctl restart`
-(restart 会 SIGKILL 冻结的进程)→ hub 重启。之后验证三处一致:
-台账里有 `watchdog-restart` 行 + 紧随的 `boot` 行(`prev` 因 SIGKILL 为
-`unclean`);面板「自愈历史」显示这两行;问阿同「最近重启过吗」答得出。
+约 3–4 分钟内看门狗应完成:三次失败计数 → 落账 → `systemctl restart` →
+hub 重启(生产实测 2026-08-01:冻结到拉起全程 2 分 40 秒)。之后验证三处
+一致:台账里有 `watchdog-restart` 行(带 journalTail)+ 紧随的 `boot` 行;
+面板「自愈历史」显示这两行;问阿同「最近重启过吗」答得出。
+
+> 恢复行的 `prev` 大概率是 **`clean`** 而非 unclean——systemd 默认在 SIGTERM
+> 后补发 SIGCONT 唤醒被冻结的进程,干净关停路径(含停止标记)照常跑完
+> (实测 `prev:'clean'`,`downMs` 2 秒级=关停到开机的间隙)。这不削弱演练:
+> 「卡」的证据在 `watchdog-restart` 行,不在 boot 分类。只有 drain 真卡死
+> 超 `TimeoutStopSec`(默认 90s)被 SIGKILL,恢复行才是 `unclean`。
 
 ## 六、可测门(会红的)
 
