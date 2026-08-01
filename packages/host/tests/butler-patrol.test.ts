@@ -32,8 +32,11 @@ import {
   outageEscalationCard,
   patrolAppearMessage,
   patrolRecoverMessage,
+  selectAnnounceableSelfHeal,
+  selfHealAnnounceMessage,
 } from '../src/personal-butler-patrol.js'
 import { writeButlerRunBroadcastConfig } from '../src/personal-butler-run-broadcast.js'
+import type { SelfHealEntry } from '../src/self-heal-log.js'
 
 const silentLogger: Logger = { trace() {}, debug() {}, info() {}, warn() {}, error() {} }
 
@@ -403,5 +406,197 @@ describe('CARE-M6 E2E — 长断供升级卡(巡检读断供文件,恢复静默)
     expect(pushes).toEqual([])
     const state = JSON.parse(readFileSync(stateFile, 'utf8')) as { cards: Record<string, unknown> }
     expect(state.cards).toEqual({})
+  })
+})
+
+describe('HEAL-M4 纯函数核 — 自愈行选取与文案', () => {
+  it('选行:只认看门狗两类 + unclean boot;clean/none boot 与未知 kind 排除;严格 > 高水位;升序', () => {
+    const entries: SelfHealEntry[] = [
+      { at: '2026-08-03T00:00:00.000Z', kind: 'boot', prev: 'clean', downMs: 2000 },
+      { at: '2026-08-02T00:00:00.000Z', kind: 'watchdog-restart', reason: 'healthz-fail', fails: 3 },
+      { at: '2026-08-04T00:00:00.000Z', kind: 'boot', prev: 'unclean', downMs: 300_000 },
+      { at: '2026-08-01T00:00:00.000Z', kind: 'watchdog-throttled', reason: 'restart-cap' },
+      { at: '2026-08-05T00:00:00.000Z', kind: 'boot', prev: 'none' },
+      { at: '2026-08-06T00:00:00.000Z', kind: 'future-kind' },
+    ]
+    // 高水位在 08-01 之后:throttled(=高水位当条,严格 > 排除)不选,restart/unclean 选中且升序。
+    const rows = selectAnnounceableSelfHeal(entries, '2026-08-01T00:00:00.000Z')
+    expect(rows.map((e) => e.kind)).toEqual(['watchdog-restart', 'boot'])
+    // 空高水位 = 全史可选(三类全中,仍升序)。
+    expect(selectAnnounceableSelfHeal(entries, '').map((e) => e.at)).toEqual([
+      '2026-08-01T00:00:00.000Z',
+      '2026-08-02T00:00:00.000Z',
+      '2026-08-04T00:00:00.000Z',
+    ])
+  })
+
+  it('文案:三类行各自形状;journalTail 不进 IM;涓流帽指路面板', () => {
+    const msg = selfHealAnnounceMessage([
+      { at: '2026-08-01T05:42:12.000Z', kind: 'watchdog-restart', fails: 3, journalTail: 'SECRET-TAIL' },
+      { at: '2026-08-01T06:00:00.000Z', kind: 'watchdog-throttled', restartsInLastHour: 3 },
+      { at: '2026-08-01T07:00:00.000Z', kind: 'boot', prev: 'unclean', downMs: 5 * 60_000 },
+    ])
+    expect(msg).toContain('🩺 自愈记录:')
+    expect(msg).toContain('连续 3 次不应答')
+    expect(msg).toContain('看门狗已自动重启救回')
+    expect(msg).toContain('一小时内已重启 3 次')
+    expect(msg).toContain('暂停了自动重启')
+    expect(msg).toContain('非正常停止')
+    expect(msg).toContain('约 5 分钟')
+    expect(msg).toContain('回「为什么」我展开')
+    expect(msg).not.toContain('SECRET-TAIL') // 日志尾巴归面板/工具,IM 低信息
+    // 涓流帽:5 条只详述 3 条,溢出行指路面板。
+    const many = selfHealAnnounceMessage(
+      Array.from({ length: 5 }, (_, i) => ({
+        at: `2026-08-0${i + 1}T00:00:00.000Z`,
+        kind: 'watchdog-restart',
+        fails: 3,
+      })),
+    )
+    expect(many).toContain('还有 2 条')
+    expect(many).toContain('体检 → 自愈历史')
+    // 缺可选字段(宽容读者的另一半):照样渲染,不撒谎具体次数。
+    expect(selfHealAnnounceMessage([{ at: 'garbage-at', kind: 'watchdog-restart' }])).toContain(
+      '健康探针不应答',
+    )
+  })
+})
+
+describe('HEAL-M4 E2E — 首见基线不倒灌 + 高水位 dedup + 事后叙述', () => {
+  let dir: string
+  let memoryRoot: string
+  let stateFile: string
+  let pushes: Array<{ userId: string; text: string }>
+  let snapshot: HealthSnapshot
+  let health: AdminHealthSurface
+  let selfHealFn: () => Promise<SelfHealEntry[]>
+
+  const makeSweeper = (now: () => number): ButlerPatrolSweeper =>
+    new ButlerPatrolSweeper({
+      stateFile,
+      memoryRoot,
+      health: () => health,
+      push: async (userId, text) => {
+        pushes.push({ userId, text })
+        return { delivered: true }
+      },
+      logger: silentLogger,
+      now,
+      selfHealRecent: () => selfHealFn(),
+    })
+
+  const readState = () =>
+    JSON.parse(readFileSync(stateFile, 'utf8')) as {
+      cards: Record<string, unknown>
+      selfHealAnnouncedThrough?: string
+    }
+
+  beforeEach(async () => {
+    dir = mkdtempSync(join(tmpdir(), 'gotong-patrol-heal-'))
+    memoryRoot = join(dir, 'butler', 'memory')
+    stateFile = join(dir, 'butler', 'patrol-state.json')
+    pushes = []
+    snapshot = greenSnapshot({ imBridges: [{ platform: 'telegram' }] })
+    health = { snapshot: async () => snapshot }
+    selfHealFn = async () => []
+    await writeButlerRunBroadcastConfig(memoryRoot, 'alice', { enabled: true, announcedMax: 0 })
+  })
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('首见只立标不播(生产旧账不倒灌);新看门狗行恰一次播;clean boot 永不播;不重播', async () => {
+    // 台账里已有历史(功能上线前的演练):首见基线,零播报。
+    const R1: SelfHealEntry = {
+      at: '2026-08-01T05:42:12.000Z', kind: 'watchdog-restart', reason: 'healthz-fail', fails: 3,
+    }
+    const B1: SelfHealEntry = { at: '2026-08-01T05:42:21.000Z', kind: 'boot', prev: 'clean', downMs: 2002 }
+    selfHealFn = async () => [B1, R1] // recent() 新的在前
+    const sweeper = makeSweeper(() => 1_000)
+    await sweeper.runOnce()
+    expect(pushes).toEqual([])
+    expect(readState().selfHealAnnouncedThrough).toBe(B1.at)
+
+    // 新事件:看门狗又救了一次(restart 行 + 随后的 clean boot 行)。
+    const R2: SelfHealEntry = {
+      at: '2026-08-02T01:00:00.000Z', kind: 'watchdog-restart', reason: 'healthz-fail', fails: 3, journalTail: 'TAIL-R2',
+    }
+    const B2: SelfHealEntry = { at: '2026-08-02T01:00:09.000Z', kind: 'boot', prev: 'clean', downMs: 9000 }
+    selfHealFn = async () => [B2, R2, B1, R1]
+    await sweeper.runOnce()
+    expect(pushes).toHaveLength(1)
+    expect(pushes[0]!.userId).toBe('alice')
+    expect(pushes[0]!.text).toContain('自愈记录')
+    expect(pushes[0]!.text).toContain('看门狗已自动重启救回')
+    expect(pushes[0]!.text).not.toContain('非正常停止') // clean boot 不播
+    expect(pushes[0]!.text).not.toContain('TAIL-R2') // 日志尾巴不进 IM
+    expect(readState().selfHealAnnouncedThrough).toBe(B2.at) // 标推进到最新一行(含不播的 clean)
+
+    // 同一台账再巡一轮:不重播。
+    await sweeper.runOnce()
+    expect(pushes).toHaveLength(1)
+  })
+
+  it('unclean boot 与 throttled 各自播报;事后叙述跨两轮各恰一次', async () => {
+    const sweeper = makeSweeper(() => 2_000)
+    await sweeper.runOnce() // 空台账首见:标 = ''(此后每行都算新)
+    expect(readState().selfHealAnnouncedThrough).toBe('')
+
+    selfHealFn = async () => [
+      { at: '2026-08-03T00:05:00.000Z', kind: 'boot', prev: 'unclean', downMs: 5 * 60_000 },
+    ]
+    await sweeper.runOnce()
+    expect(pushes).toHaveLength(1)
+    expect(pushes[0]!.text).toContain('非正常停止')
+    expect(pushes[0]!.text).toContain('约 5 分钟')
+
+    selfHealFn = async () => [
+      { at: '2026-08-03T02:00:00.000Z', kind: 'watchdog-throttled', reason: 'restart-cap', restartsInLastHour: 3 },
+      { at: '2026-08-03T00:05:00.000Z', kind: 'boot', prev: 'unclean', downMs: 5 * 60_000 },
+    ]
+    await sweeper.runOnce()
+    expect(pushes).toHaveLength(2)
+    expect(pushes[1]!.text).toContain('暂停了自动重启')
+    expect(pushes[1]!.text).toContain('一小时内已重启 3 次')
+  })
+
+  it('台账读失败:标不动、牌面照常工作、不崩', async () => {
+    const sweeper = makeSweeper(() => 3_000)
+    selfHealFn = async () => {
+      throw new Error('ledger unreadable')
+    }
+    snapshot = greenSnapshot({ imBridges: [] }) // 同轮拨出一张黄牌证明 tick 活着
+    await sweeper.runOnce()
+    expect(pushes).toHaveLength(1)
+    expect(pushes[0]!.text).toContain('IM 通道')
+    expect('selfHealAnnouncedThrough' in readState()).toBe(false) // 标未落=下轮仍首见
+  })
+
+  it('零同意成员:不发但标照推进(以后开播报不翻旧账)', async () => {
+    rmSync(join(memoryRoot, 'user', 'alice'), { recursive: true, force: true })
+    const sweeper = makeSweeper(() => 4_000)
+    await sweeper.runOnce() // 首见基线
+    selfHealFn = async () => [
+      { at: '2026-08-04T00:00:00.000Z', kind: 'watchdog-restart', fails: 3 },
+    ]
+    await sweeper.runOnce()
+    expect(pushes).toEqual([])
+    expect(readState().selfHealAnnouncedThrough).toBe('2026-08-04T00:00:00.000Z')
+  })
+
+  it('状态损坏同一轮两种姿态并存:牌面宁重不漏(重播),自愈标宁漏不刷(重基线不倒灌)', async () => {
+    const R: SelfHealEntry = { at: '2026-08-05T00:00:00.000Z', kind: 'watchdog-restart', fails: 3 }
+    selfHealFn = async () => [R]
+    snapshot = greenSnapshot({ imBridges: [] })
+    const sweeper = makeSweeper(() => 5_000)
+    await sweeper.runOnce() // 首见:黄牌播,自愈基线(不播 R)
+    expect(pushes).toHaveLength(1)
+
+    writeFileSync(stateFile, 'not json at all', 'utf8') // 状态整文件损坏
+    await sweeper.runOnce()
+    expect(pushes).toHaveLength(2)
+    expect(pushes[1]!.text).toContain('IM 通道') // 牌当新牌重播 — 状况宁重不漏
+    expect(pushes[1]!.text).not.toContain('自愈记录') // R 不倒灌 — 事件宁漏不刷
+    expect(readState().selfHealAnnouncedThrough).toBe(R.at) // 重新基线
   })
 })

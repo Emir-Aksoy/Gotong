@@ -1674,9 +1674,9 @@ async function main(): Promise<void> {
       intervalMs: BUTLER_PATROL_INTERVAL_MS,
       stateFile: join(space.root, 'butler', 'patrol-state.json'),
       health: () => patrolHealthRef,
-      // CARE-M6 — 同 CARE-M2 那份断供状态文件;巡检读它,持续断供超阈值升级红牌
-      // (恢复静默,交给 CARE-M2/M5 的即时「✅ 恢复了」)。
+      // CARE-M6 断供文件(持续超阈值升级红牌;恢复静默交给 CARE-M2/M5)。
       outageFile: join(space.root, 'runtime', 'llm-outage.json'),
+      selfHealRecent: () => selfHealLog.recent(30), // HEAL-M4 自愈事件事后播报
     },
     // TN-M2 — 卡壳任务提醒骑管家总开关;零 LLM 纯时间戳分诊,节律常量零新旋钮。
     taskNudge: { on: butlerDefaultOn },

@@ -33,6 +33,17 @@
  * 骑 BE-M5 的同一份 per-member 同意(`run-broadcast.json` enabled),
  * 枚举 `<memoryRoot>/user/*`——开了运行播报的成员才收巡检,零新旋钮、
  * 零新文件(CARE-M2 断供播报也是这份同意)。
+ *
+ * ── HEAL-M4 自愈台账播报 ─────────────────────────────────────────────
+ * 看门狗重启/非正常停止是**事件**不是**状况**:牌面模型(出现→播,消失→播
+ * 恢复)套不上一瞬即逝的事。所以走高水位标:状态文件记「播到哪条 at」
+ * (ISO 字典序即时序),每轮把标以上的 watchdog-restart / watchdog-throttled /
+ * unclean boot 讲一遍(clean/none boot=日常部署重启/首跑,播它们=每次发版
+ * 都吵人)。**首见只立标不播**——功能上线时台账里的旧账留在面板,不倒灌
+ * IM;标损坏同首见=重新基线,事件侧「宁漏不刷」与牌面侧「宁重不漏」刻意
+ * 相反(牌是仍在的状况重播无害,事件倒灌历史就是刷屏)。这条播报天然是
+ * **事后叙述**:hub 卡死时它自己发不出任何东西(看门狗零凭证也不会发 IM),
+ * 恢复后的下一轮巡检才补告——文案全部过去时。
  */
 
 import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises'
@@ -45,6 +56,7 @@ import { translateLlmFailureKind } from './failure-translator.js'
 import { readOutageSnapshotFile, type LlmOutageSnapshot } from './llm-outage.js'
 import { guideBreadcrumb } from './personal-butler-guide.js'
 import { readButlerRunBroadcastConfig } from './personal-butler-run-broadcast.js'
+import type { SelfHealEntry } from './self-heal-log.js'
 
 /** 默认巡检节奏 — 10 分钟。本轮不加旋钮:要更密/更疏等真实需求出现。 */
 export const BUTLER_PATROL_INTERVAL_MS = 10 * 60 * 1000
@@ -58,6 +70,9 @@ export const OUTAGE_ESCALATION_MS = 30 * 60 * 1000
 
 /** 一条播报里最多点名几张牌——首轮巡检可能一次冒一堆,给个涓流帽。 */
 const MAX_CARDS_PER_MESSAGE = 5
+
+/** HEAL-M4 — 自愈播报涓流帽:详述最多 3 条,其余指路面板「自愈历史」。 */
+const MAX_SELF_HEAL_PER_MESSAGE = 3
 
 export type PatrolSeverity = 'yellow' | 'red'
 
@@ -159,6 +174,72 @@ export function outageEscalationCard(
 }
 
 // ---------------------------------------------------------------------------
+// HEAL-M4 — 自愈台账播报的纯核(选行 + 文案),导出给单测。
+// ---------------------------------------------------------------------------
+
+/**
+ * 台账里值得主动说的行:看门狗动过手(restart/throttled)与非正常停止
+ * (unclean boot)。clean/none boot 结构性排除——那是部署重启/首跑的日常。
+ * 高水位比较是严格 `>`(ISO 字典序即时序);两写入方跨秒落笔,同毫秒撞 at
+ * 实际不可能,真撞了漏一条也只是少一句事后叙述(面板里仍在)。
+ */
+export function selectAnnounceableSelfHeal(
+  entries: readonly SelfHealEntry[],
+  announcedThrough: string,
+): SelfHealEntry[] {
+  return entries
+    .filter(
+      (e) =>
+        e.at > announcedThrough &&
+        (e.kind === 'watchdog-restart' ||
+          e.kind === 'watchdog-throttled' ||
+          (e.kind === 'boot' && e.prev === 'unclean')),
+    )
+    .sort((a, b) => (a.at < b.at ? -1 : 1))
+}
+
+/** ISO → 部署时区的「MM-DD HH:mm」(时区以部署环境为准,clock probe 同一立场);解析不动原样返回。 */
+function fmtSelfHealAt(at: string): string {
+  const d = new Date(at)
+  if (Number.isNaN(d.getTime())) return at
+  const p = (n: number) => String(n).padStart(2, '0')
+  return `${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`
+}
+
+/**
+ * 自愈播报文案 — 确定性模板零 LLM,全部过去时(事后叙述:hub 卡死期间自己
+ * 发不出,恢复后才补告)。journalTail 刻意不进 IM(低信息纪律——日志尾巴在
+ * 面板与 restart_history 工具里);「回『为什么』」有真实兜底:阿同的
+ * restart_history 工具读的就是同一份台账。
+ */
+export function selfHealAnnounceMessage(rows: readonly SelfHealEntry[]): string {
+  const shown = rows.slice(0, MAX_SELF_HEAL_PER_MESSAGE)
+  const lines = shown.map((e) => {
+    const t = fmtSelfHealAt(e.at)
+    if (e.kind === 'watchdog-restart') {
+      const fails = typeof e.fails === 'number' ? `连续 ${e.fails} 次不应答` : '不应答'
+      return `🛠 ${t} hub 曾卡死(健康探针${fails}),看门狗已自动重启救回。`
+    }
+    if (e.kind === 'watchdog-throttled') {
+      const n = typeof e.restartsInLastHour === 'number' ? `一小时内已重启 ${e.restartsInLastHour} 次、` : ''
+      return `🔴 ${t} hub 当时反复卡死,${n}看门狗暂停了自动重启等人处理——反复挂说明重启治不了,得查根因。`
+    }
+    const dur =
+      typeof e.downMs === 'number'
+        ? e.downMs < 60_000
+          ? '不到 1 分钟'
+          : `约 ${Math.round(e.downMs / 60_000)} 分钟`
+        : '未知时长'
+    return `🛠 ${t} hub 曾非正常停止(疑似崩溃/强杀/断电),已自动恢复,停机${dur}。`
+  })
+  const overflow =
+    rows.length > shown.length
+      ? `\n……还有 ${rows.length - shown.length} 条,管理页「体检 → 自愈历史」里全都在。`
+      : ''
+  return `🩺 自愈记录:\n${lines.join('\n')}${overflow}\n回「为什么」我展开。`
+}
+
+// ---------------------------------------------------------------------------
 // 状态文件 — 上次牌面,损坏当空。
 // ---------------------------------------------------------------------------
 
@@ -170,6 +251,9 @@ interface StoredCard {
 
 interface PatrolState {
   cards: Record<string, StoredCard>
+  /** HEAL-M4 — 自愈播报高水位(播到哪条 at)。undefined=从未见过台账 ⇒ 首见
+   * 只立标不播;整文件损坏也回到 undefined ⇒ 重新基线(事件宁漏不刷)。 */
+  selfHealAnnouncedThrough?: string
 }
 
 function emptyState(): PatrolState {
@@ -200,7 +284,8 @@ export async function loadPatrolState(file: string): Promise<PatrolState> {
         since: typeof cc.since === 'number' && Number.isFinite(cc.since) ? cc.since : 0,
       }
     }
-    return { cards }
+    const through = (v as Partial<PatrolState>).selfHealAnnouncedThrough
+    return { cards, ...(typeof through === 'string' ? { selfHealAnnouncedThrough: through } : {}) }
   } catch {
     return emptyState() // 损坏当空 — 大不了多播一次,绝不崩
   }
@@ -275,6 +360,12 @@ export interface ButlerPatrolSweeperOptions {
   outageFile?: string
   /** 断供升级门槛;默认 {@link OUTAGE_ESCALATION_MS}(30 分钟)。 */
   outageEscalationMs?: number
+  /**
+   * HEAL-M4 — 自愈台账最近行(`SelfHealLog.recent`,永不抛的读者)。给了它,
+   * 巡检把高水位以上的看门狗/非正常停止行事后播报一遍。缺省 → 不读不播,
+   * 状态文件也不长新字段(pre-HEAL 调用点字节不变)。
+   */
+  selfHealRecent?: () => Promise<SelfHealEntry[]>
 }
 
 export class ButlerPatrolSweeper {
@@ -287,6 +378,8 @@ export class ButlerPatrolSweeper {
   private readonly now: () => number
   private readonly outageFile?: string
   private readonly outageEscalationMs: number
+
+  private readonly selfHealRecent?: () => Promise<SelfHealEntry[]>
 
   private timer?: ReturnType<typeof setInterval>
   private running = false
@@ -301,6 +394,7 @@ export class ButlerPatrolSweeper {
     this.now = opts.now ?? Date.now
     if (opts.outageFile) this.outageFile = opts.outageFile
     this.outageEscalationMs = opts.outageEscalationMs ?? OUTAGE_ESCALATION_MS
+    if (opts.selfHealRecent) this.selfHealRecent = opts.selfHealRecent
   }
 
   /** 与姊妹 sweep 同姿态:不在启动瞬间跑,首 tick 一个 interval 之后。 */
@@ -347,6 +441,33 @@ export class ButlerPatrolSweeper {
       const prev = await loadPatrolState(this.stateFile)
       const { appeared, recovered } = diffPatrolCards(prev.cards, currentAll)
 
+      // HEAL-M4 — 自愈台账:首见只立高水位不播(旧账不倒灌);之后播标以上的
+      // 看门狗/非正常停止行。台账读失败 = 标不动本轮跳过,下轮再看。标推进
+      // 与推送解耦(fire=attempt,同牌面姿态):零同意成员也推进——事件的
+      // 存档处是面板,IM 只负责「事发后尽快告一声」,不负责补历史课。
+      let selfHealMsg: string | null = null
+      let selfHealThrough = prev.selfHealAnnouncedThrough
+      if (this.selfHealRecent) {
+        try {
+          const entries = await this.selfHealRecent()
+          const newest = entries.reduce<string | undefined>(
+            (m, e) => (m === undefined || e.at > m ? e.at : m),
+            undefined,
+          )
+          if (selfHealThrough === undefined) {
+            selfHealThrough = newest ?? '' // 空台账也立标:此后每一行都算新
+          } else {
+            const rows = selectAnnounceableSelfHeal(entries, selfHealThrough)
+            if (rows.length > 0) selfHealMsg = selfHealAnnounceMessage(rows)
+            if (newest !== undefined && newest > selfHealThrough) selfHealThrough = newest
+          }
+        } catch (err) {
+          this.log.warn('butler patrol: self-heal ledger read failed', {
+            err: err instanceof Error ? err.message : String(err),
+          })
+        }
+      }
+
       // 无边沿:静默把 severity/label 漂移写回(一张牌一场事,不重播)。
       const nextCards: Record<string, StoredCard> = {}
       for (const c of currentAll) {
@@ -356,18 +477,22 @@ export class ButlerPatrolSweeper {
           since: prev.cards[c.id]?.since ?? this.now(),
         }
       }
-      await this.saveState({ cards: nextCards })
+      await this.saveState({
+        cards: nextCards,
+        ...(selfHealThrough !== undefined ? { selfHealAnnouncedThrough: selfHealThrough } : {}),
+      })
 
       // CARE-M6 — 断供牌的**恢复**交给 CARE-M2/M5 的即时「✅ 恢复了」:断供文件
       // 只被 onProviderSuccess 清,而它清时必播恢复,巡检再播一次恒冗余(还晚一个
       // 节律)。这里静默过滤它的恢复文案;状态照常 diff/落盘,bookkeeping 不变。
       // (升级牌的**出现**照常播——那正是升级的价值。)
       const recoveredSpoken = recovered.filter((c) => c.id !== OUTAGE_CARD_ID)
-      if (appeared.length === 0 && recoveredSpoken.length === 0) return
+      if (appeared.length === 0 && recoveredSpoken.length === 0 && !selfHealMsg) return
 
       const messages: string[] = []
       if (appeared.length > 0) messages.push(patrolAppearMessage(appeared))
       if (recoveredSpoken.length > 0) messages.push(patrolRecoverMessage(recoveredSpoken))
+      if (selfHealMsg) messages.push(selfHealMsg)
       const reachable = await this.listConsentingUserIds()
       if (reachable.length === 0) {
         this.log.info('butler patrol: edge detected but no member opted into broadcasts', {

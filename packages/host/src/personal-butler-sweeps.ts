@@ -34,6 +34,7 @@ import {
 } from './personal-butler-proactive.js'
 import { ButlerRunBroadcastSweeper } from './personal-butler-run-broadcast.js'
 import { ButlerTaskNudgeSweeper } from './personal-butler-task-nudge.js'
+import type { SelfHealEntry } from './self-heal-log.js'
 
 export interface ButlerSweepsOptions {
   /** Butler memory root (`<space>/butler/memory`) — namespaces + opt-in files. */
@@ -64,6 +65,9 @@ export interface ButlerSweepsOptions {
     health: () => AdminHealthSurface | undefined
     /** CARE-M6 — 断供状态文件;给了它,巡检持续断供超阈值会升级一张红牌。 */
     outageFile?: string
+    /** HEAL-M4 — 自愈台账读者(SelfHealLog.recent);给了它,看门狗重启/
+     *  非正常停止会被事后播报(首见基线不倒灌)。缺省 ⇒ 不读不播。 */
+    selfHealRecent?: () => Promise<SelfHealEntry[]>
   }
   /**
    * TN-M2 stalled-task nudge: gate only (cadence is a constant — the stall
@@ -140,6 +144,7 @@ export function armButlerSweeps(opts: ButlerSweepsOptions): ButlerSweepsHandle {
       logger: opts.logger,
       intervalMs: opts.patrol.intervalMs,
       ...(opts.patrol.outageFile ? { outageFile: opts.patrol.outageFile } : {}),
+      ...(opts.patrol.selfHealRecent ? { selfHealRecent: opts.patrol.selfHealRecent } : {}),
     })
     patrol.start()
   }
