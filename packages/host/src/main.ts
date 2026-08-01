@@ -205,6 +205,7 @@ function findOwnerUserId(identity: IdentityStore): string | null {
 // registration block lives in main() where identity is in scope.
 
 import { createAdminHealthService, type AdminHealthSurface } from './admin-health.js'
+import { startSelfHealLog } from './self-heal-log.js'
 import { RoutingHealthTracker } from './routing-health.js'
 import { readOutageSnapshotFile } from './llm-outage.js'
 import { BUTLER_PATROL_INTERVAL_MS } from './personal-butler-patrol.js'
@@ -1046,6 +1047,8 @@ async function main(): Promise<void> {
     : undefined
   // SDUI-M3/M4 — ONE panel store shared by web routes / template sink / butler.
   const mePanelSurface = buildMePanelSurface({ spaceDir: space.root })
+  // HEAL-M1 — 自愈台账(开机分类+心跳);看门狗是 deploy 层的另一写入方。
+  const selfHealLog = startSelfHealLog({ runtimeDir: join(space.root, 'runtime'), logger: log })
   // Per-user butler assembly lives in personal-butler-factory.ts (GUARD
   // extraction); refs() reads the forward-declared refs at butler-build time.
   const butlerFactory: ButlerFactory = buildButlerFactory({
@@ -1089,6 +1092,7 @@ async function main(): Promise<void> {
       lang: config.defaultLang,
     },
     ...(butlerBackupOps ? { backupOps: butlerBackupOps } : {}),
+    selfHeal: () => selfHealLog, // HEAL-M1 restart_history 台账切片
     // SEN-M5 — 成员名单投影源(岔口 A 全员见名+角色+id;email 结构性不进投影)。
     ...(identityForBackup
       ? { members: { users: () => identityForBackup.listUsers(),
@@ -2222,6 +2226,7 @@ async function main(): Promise<void> {
     routingHealth: () => routingHealth.snapshot(),
     // B② — new-version notice from the opt-in probe (knob off ⇒ undefined ⇒ absent).
     readUpdateAvailable: () => versionCheck?.latest(),
+    selfHealRecent: () => selfHealLog.recent(10), // HEAL-M1 自愈台账最近 10 条
   })
   patrolHealthRef = adminHealth
 
@@ -2563,6 +2568,7 @@ async function main(): Promise<void> {
   const shutdown = async (sig: string) => {
     if (shuttingDown) return
     shuttingDown = true
+    selfHealLog.markCleanStop() // HEAL-M1 — 先落停止标记:drain 卡死被 SIGKILL 也不误判崩溃
     log.info('shutdown signal received — draining', { signal: sig })
     // Stop the peer registry FIRST — it owns outbound HubLinks that
     // need a clean close handshake before we yank the underlying ws
@@ -2597,14 +2603,9 @@ async function main(): Promise<void> {
     if (services) {
       try { await services.shutdownAll() } catch (err) { log.error('services shutdown error', { err }) }
     }
-    if (identityCleanupTimer) {
-      clearInterval(identityCleanupTimer)
-      identityCleanupTimer = undefined
-    }
-    if (usageSweepTimer) {
-      clearInterval(usageSweepTimer)
-      usageSweepTimer = undefined
-    }
+    selfHealLog.stop()
+    if (identityCleanupTimer) { clearInterval(identityCleanupTimer); identityCleanupTimer = undefined }
+    if (usageSweepTimer) { clearInterval(usageSweepTimer); usageSweepTimer = undefined }
     if (orgQuotaSweepTimer) {
       clearInterval(orgQuotaSweepTimer)
       orgQuotaSweepTimer = undefined

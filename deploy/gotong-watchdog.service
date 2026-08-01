@@ -1,0 +1,30 @@
+# ── Gotong 看门狗 oneshot 模板(HEAL-M2) ──
+#
+# 与 gotong-watchdog.timer 成对使用(timer 每分钟拉一次本 unit):
+#   sudo cp deploy/gotong-watchdog.service deploy/gotong-watchdog.timer /etc/systemd/system/
+#   sudo $EDITOR /etc/systemd/system/gotong-watchdog.service   # 改 ExecStart 三处路径
+#   sudo systemctl daemon-reload && sudo systemctl enable --now gotong-watchdog.timer
+#   journalctl -u gotong-watchdog -f    # 每分钟一行 ok / 失败计数 / 重启记录
+#
+# 它只治「卡」(unit active 而 /healthz 连续 3 次不应答才 systemctl restart):
+#   - 进程退出由 gotong.service 里的 Restart=always 秒级接住,不归它;
+#   - 巡检红黄牌是重启治不了的病,不归它;
+#   - `systemctl stop gotong` 维护停机它看得懂(unit 非 active 即不数失败),不抢拉起。
+# 重启限流每小时 3 次,打满只在台账记一条 watchdog-throttled 等人来。
+# 台账在 <space>/runtime/self-heal-log.jsonl,面板「自愈历史」与阿同
+# restart_history 工具读的就是它。设计细节:docs/zh/SELF-HEAL.md。
+
+[Unit]
+Description=Gotong hub watchdog (restart on liveness failure)
+
+[Service]
+Type=oneshot
+# 按真实部署改三处:
+#   --url    hub 的 healthz(host 监听哪就探哪;生产 loopback 常见 :3000)
+#   --space  host 空间根 —— 下面有 runtime/、butler/ 的那层目录
+#            (与 gotong.service 环境里 GOTONG_SPACE 的解析结果一致,ls 确认)
+#   --unit   要重启的 unit 名(默认 gotong.service,同名可省)
+# 脚本路径按 checkout 位置改(cloud-quickstart 布局是 /opt/gotong)。
+ExecStart=/usr/bin/env node /opt/gotong/deploy/gotong-watchdog.mjs --url http://127.0.0.1:3000/healthz --space /srv/gotong-data/.gotong --unit gotong.service
+# oneshot 默认 root 跑:要 root 才能 systemctl restart;脚本会把台账文件
+# chown 回数据目录属主,hub 进程照常可写。

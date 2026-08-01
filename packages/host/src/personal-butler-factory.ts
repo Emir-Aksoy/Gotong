@@ -86,7 +86,12 @@ import { buildButlerPeersToolset, type ButlerPeerSurface } from './personal-butl
 import { buildButlerLlmsToolset, type ButlerLlmSurface } from './personal-butler-llms.js'
 import { buildButlerLlmCatalogToolset } from './personal-butler-llm-catalog.js'
 import { buildButlerGuideToolset } from './personal-butler-guide.js'
-import { buildButlerHubSenseProbe, buildButlerHubHealthToolset } from './personal-butler-hub-sense.js'
+import {
+  buildButlerHubSenseProbe,
+  buildButlerHubHealthToolset,
+  buildButlerRestartHistoryToolset,
+} from './personal-butler-hub-sense.js'
+import type { SelfHealLog } from './self-heal-log.js'
 import { buildButlerPanelToolset, type ButlerPanelSurface } from './personal-butler-panel.js'
 import { buildButlerSelfStatusToolset } from './personal-butler-self-status.js'
 import {
@@ -231,6 +236,12 @@ export interface ButlerFactoryDeps {
    * set_panel_layout 都不装。写路径带 by:'butler' 归因 = 横幅播报的数据源。
    */
   panel?: ButlerPanelSurface
+  /**
+   * HEAL-M1 — 自愈台账切片(main.ts 传 selfHealLog 的 recent;缺席 ⇒
+   * restart_history 不装)。hub 级只读事实同 hub_health,台账无密可泄。
+   * getter 只为镜像兄弟面姿态——main.ts 里它先于 factory 构造。
+   */
+  selfHeal?: () => Pick<SelfHealLog, 'recent'> | undefined
 }
 
 export function buildButlerFactory(deps: ButlerFactoryDeps): ButlerFactory {
@@ -444,6 +455,10 @@ export function buildButlerFactory(deps: ButlerFactoryDeps): ButlerFactory {
         const hubHealthToolset = deps.onboarding
           ? buildButlerHubHealthToolset({ health: deps.onboarding.health, logger: log })
           : undefined
+        // HEAL-M1 — benign 重启历史:自愈台账只读投影(开机分类+看门狗记录)。
+        const restartHistoryToolset = deps.selfHeal
+          ? buildButlerRestartHistoryToolset({ selfHeal: deps.selfHeal, logger: log })
+          : undefined
         // SEN-M4 — benign "我名下有哪些定时工作流": admin list 同源投影 filter
         // 归属本人(sweeper 就按这个 userId 走成员闸派发,自见自的行零新披露);
         // inputs/id 结构性不进投影。surface 未接(sweeper 没起)⇒ 不装。
@@ -570,6 +585,7 @@ export function buildButlerFactory(deps: ButlerFactoryDeps): ButlerFactory {
           ...(llmsToolset ? [llmsToolset] : []),
           ...(backupStatusToolset ? [backupStatusToolset] : []),
           ...(hubHealthToolset ? [hubHealthToolset] : []),
+          ...(restartHistoryToolset ? [restartHistoryToolset] : []),
           ...(schedulesToolset ? [schedulesToolset] : []),
           ...(membersToolset ? [membersToolset] : []),
           ...(panelToolset ? [panelToolset] : []),
@@ -593,6 +609,7 @@ export function buildButlerFactory(deps: ButlerFactoryDeps): ButlerFactory {
           ...(llmsToolset ? [llmsToolset] : []),
           ...(backupStatusToolset ? [backupStatusToolset] : []),
           ...(hubHealthToolset ? [hubHealthToolset] : []),
+          ...(restartHistoryToolset ? [restartHistoryToolset] : []),
           ...(schedulesToolset ? [schedulesToolset] : []),
           ...(membersToolset ? [membersToolset] : []),
           ...(panelToolset ? [panelToolset] : []),

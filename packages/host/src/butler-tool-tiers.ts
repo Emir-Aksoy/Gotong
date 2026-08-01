@@ -80,6 +80,8 @@ export const BUTLER_DIRECTORY_BENIGN = [
   // SEN-M1 hub 体检只读 — 低频按需自省(「hub 现在正常吗」);尾卡探针文案
   // 刻意不点名它(指路指空原则),渲染里点名的 list_my_llms 同在目录内部
   'hub_health',
+  // HEAL-M1 自愈台账只读 — 低频(「昨晚是不是挂了」);同域 hub_health 一对
+  'restart_history',
   // SEN-M3 自我状态一卡 — 低频按需自省(「你还好吗」);渲染里点名的
   // list_my_llms 同在目录内部(LSA-M1 先例,模式连续)
   'my_status',

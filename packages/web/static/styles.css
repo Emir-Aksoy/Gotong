@@ -1647,6 +1647,46 @@ body.admin[data-active-tab="settings"] main.admin-grid {
   color: #667085;
 }
 
+/* HEAL-M1 — self-heal history block (boot classification + watchdog rows).
+   History, not a live signal: bad rows carry their own tint instead of a
+   panel-wide yellow that would linger for weeks after one old crash. */
+.hub-health .hh-heal {
+  border-top: 1px solid #eceef1;
+  margin-top: 12px;
+  padding-top: 12px;
+}
+.hub-health .hh-heal-title {
+  margin: 0 0 6px;
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: #475467;
+}
+.hub-health .hh-heal-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.hub-health .hh-heal-row { font-size: 0.78rem; line-height: 1.5; color: #475467; }
+.hub-health .hh-heal-row.hh-heal-bad { color: #b42318; }
+.hub-health .hh-heal-when { color: #98a2b3; font-variant-numeric: tabular-nums; margin-right: 4px; }
+.hub-health .hh-heal-tail summary { cursor: pointer; font-size: 0.74rem; color: #667085; }
+.hub-health .hh-heal-tail pre {
+  margin: 4px 0 0;
+  padding: 6px 8px;
+  background: #f9fafb;
+  border: 1px solid #eceef1;
+  border-radius: 6px;
+  font-size: 0.7rem;
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 180px;
+  overflow: auto;
+  color: #475467;
+}
+
 /* scripted steward demo overlay (appended to <body>, not under .start-here) */
 .sh-demo-overlay {
   position: fixed;

@@ -1483,7 +1483,36 @@ import { createWorkflows } from './workflows.js'
             </li>`).join('')}
         </ul>
       </div>`
-    return head + signalList + nextHtml + roster + renderHealthAdaptationsHtml(lastAdaptations)
+    return head + signalList + nextHtml + roster + renderSelfHealHtml(snap) + renderHealthAdaptationsHtml(lastAdaptations)
+  }
+
+  // HEAL-M1 — 自愈历史块(非当下信号:一次旧崩溃不该让面板黄 30 天,历史行
+  // 自带 ⚠ 着色即可)。三态:字段缺席(host 未接台账)/空(读不出)→ 不渲染;
+  // 有行 → 新的在前。boot 行按 prev 三态走 i18n;其余(看门狗 restart/
+  // throttled 及未来 kind)按原样印 kind+reason,journal 尾巴折进 <details>
+  // ——原始事实呈现,呈现层不猜语义。时间走浏览器 locale(全仓惯例)。
+  function renderSelfHealHtml(snap) {
+    const rows = snap?.selfHeal
+    if (!Array.isArray(rows) || rows.length === 0) return ''
+    const items = rows.map((r) => {
+      const when = escapeHtml(new Date(r.at).toLocaleString())
+      if (r.kind === 'boot') {
+        const mins = typeof r.downMs === 'number' ? Math.max(1, Math.round(r.downMs / 60000)) : null
+        const text = r.prev === 'clean' ? t.healthSelfHealBootClean(mins)
+          : r.prev === 'unclean' ? t.healthSelfHealBootUnclean(mins)
+          : t.healthSelfHealBootFirst
+        return `<li class="hh-heal-row${r.prev === 'unclean' ? ' hh-heal-bad' : ''}"><span class="hh-heal-when">${when}</span> ${escapeHtml(text)}</li>`
+      }
+      const label = `${r.kind}${r.reason ? `:${r.reason}` : ''}`
+      const tail = typeof r.journalTail === 'string' && r.journalTail.trim()
+        ? `<details class="hh-heal-tail"><summary>${escapeHtml(t.healthSelfHealTail)}</summary><pre>${escapeHtml(r.journalTail)}</pre></details>`
+        : ''
+      return `<li class="hh-heal-row hh-heal-bad"><span class="hh-heal-when">${when}</span> 🔴 ${escapeHtml(label)}${tail}</li>`
+    }).join('')
+    return `<div class="hh-heal">
+      <h3 class="hh-heal-title">${escapeHtml(t.healthSelfHealTitle)}</h3>
+      <ul class="hh-heal-list">${items}</ul>
+    </div>`
   }
 
   // RES-M4 — the always-on plain-language entrance for resource adaptation. The

@@ -179,6 +179,9 @@ GOTONG_ADMIN_DISPLAY_NAME=Operator
 > 现成模板可直接复制：[`deploy/gotong.service`](../../deploy/gotong.service)
 >（与下面逐字一致，三种可选 ExecStart 已作注释收在文件里）；master key 的
 > drop-in 模板见 [`deploy/gotong.service.d/50-master-key.conf`](../../deploy/gotong.service.d/50-master-key.conf)。
+> 可选加装外部看门狗（卡死自动重启 + 自愈台账）：
+> [`deploy/gotong-watchdog.service`](../../deploy/gotong-watchdog.service) /
+> [`.timer`](../../deploy/gotong-watchdog.timer)，装法见 [`SELF-HEAL.md`](SELF-HEAL.md)。
 
 `/etc/systemd/system/gotong.service`：
 

@@ -1108,6 +1108,12 @@
         const ago = mins > 0 ? ` 约 ${mins} 分钟` : ''
         return `路由降级:智能体「${agentId}」的候选「${candidate}」${st[state] || state}${why}${ago} — 已切下一候选,服务未中断`
       },
+      // --- HEAL-M1 — 自愈历史(独立历史块;开机分类 + 看门狗记录) ---
+      healthSelfHealTitle: '自愈历史',
+      healthSelfHealBootClean: (mins) => `开机 · 上次干净退出${mins !== null ? `(停机约 ${mins} 分钟)` : ''}`,
+      healthSelfHealBootUnclean: (mins) => `开机 · ⚠ 上次疑似崩溃/强杀/断电${mins !== null ? `(停机约 ${mins} 分钟)` : ''}`,
+      healthSelfHealBootFirst: '开机 · 首跑(无更早记录)',
+      healthSelfHealTail: '当时日志尾巴',
       healthRosterTitle: (online, total) => `智能体(${online}/${total} 在线)`,
       healthTest: '测连接',
       healthOffline: '未上线',
@@ -3191,6 +3197,12 @@
         const ago = mins > 0 ? ` ~${mins} min` : ''
         return `Routing degraded: agent "${agentId}" candidate "${candidate}" ${st[state] || state}${why}${ago} — failed over to the next candidate, service uninterrupted`
       },
+      // --- HEAL-M1 — self-heal history (its own block; boot classification + watchdog rows) ---
+      healthSelfHealTitle: 'Self-heal history',
+      healthSelfHealBootClean: (mins) => `Boot · previous stop was clean${mins !== null ? ` (down ~${mins} min)` : ''}`,
+      healthSelfHealBootUnclean: (mins) => `Boot · ⚠ previous stop looks like a crash/kill/power loss${mins !== null ? ` (down ~${mins} min)` : ''}`,
+      healthSelfHealBootFirst: 'Boot · first run (no earlier records)',
+      healthSelfHealTail: 'journal tail at the time',
       healthRosterTitle: (online, total) => `Agents (${online}/${total} online)`,
       healthTest: 'Test',
       healthOffline: 'Offline',

@@ -43,7 +43,10 @@ import {
   buildButlerBackupPackToolset,
   buildButlerBackupStatusToolset,
 } from '../src/personal-butler-backup.js'
-import { buildButlerHubHealthToolset } from '../src/personal-butler-hub-sense.js'
+import {
+  buildButlerHubHealthToolset,
+  buildButlerRestartHistoryToolset,
+} from '../src/personal-butler-hub-sense.js'
 import { buildButlerMembersToolset } from '../src/personal-butler-members.js'
 import { buildButlerSchedulesToolset } from '../src/personal-butler-schedules.js'
 import { buildButlerSelfStatusToolset } from '../src/personal-butler-self-status.js'
@@ -111,6 +114,7 @@ const MEASURED_BUILDERS: Record<string, string> = {
   'backup-status': 'buildButlerBackupStatusToolset',
   'backup-pack': 'buildButlerBackupPackToolset',
   'hub-sense': 'buildButlerHubHealthToolset',
+  'restart-history': 'buildButlerRestartHistoryToolset',
   'self-status': 'buildButlerSelfStatusToolset',
   schedules: 'buildButlerSchedulesToolset',
   members: 'buildButlerMembersToolset',
@@ -280,6 +284,12 @@ function buildFullFace(): ToolFaceEntry[] {
       module: 'hub-sense',
       kind: 'benign',
       toolset: buildButlerHubHealthToolset({ health: () => undefined }),
+    },
+    // HEAL-M1 重启历史:benign 只读,自愈台账投影。
+    {
+      module: 'restart-history',
+      kind: 'benign',
+      toolset: buildButlerRestartHistoryToolset({ selfHeal: () => undefined }),
     },
     // SEN-M3 自我状态一卡:benign 只读,六块既有投影的再组合。
     {

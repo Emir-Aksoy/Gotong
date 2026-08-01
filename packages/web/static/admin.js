@@ -3954,7 +3954,26 @@
             </li>`).join("")}
         </ul>
       </div>`;
-      return head + signalList + nextHtml + roster + renderHealthAdaptationsHtml(lastAdaptations);
+      return head + signalList + nextHtml + roster + renderSelfHealHtml(snap) + renderHealthAdaptationsHtml(lastAdaptations);
+    }
+    function renderSelfHealHtml(snap) {
+      const rows = snap?.selfHeal;
+      if (!Array.isArray(rows) || rows.length === 0) return "";
+      const items = rows.map((r) => {
+        const when = escapeHtml6(new Date(r.at).toLocaleString());
+        if (r.kind === "boot") {
+          const mins = typeof r.downMs === "number" ? Math.max(1, Math.round(r.downMs / 6e4)) : null;
+          const text = r.prev === "clean" ? t6.healthSelfHealBootClean(mins) : r.prev === "unclean" ? t6.healthSelfHealBootUnclean(mins) : t6.healthSelfHealBootFirst;
+          return `<li class="hh-heal-row${r.prev === "unclean" ? " hh-heal-bad" : ""}"><span class="hh-heal-when">${when}</span> ${escapeHtml6(text)}</li>`;
+        }
+        const label = `${r.kind}${r.reason ? `:${r.reason}` : ""}`;
+        const tail = typeof r.journalTail === "string" && r.journalTail.trim() ? `<details class="hh-heal-tail"><summary>${escapeHtml6(t6.healthSelfHealTail)}</summary><pre>${escapeHtml6(r.journalTail)}</pre></details>` : "";
+        return `<li class="hh-heal-row hh-heal-bad"><span class="hh-heal-when">${when}</span> 🔴 ${escapeHtml6(label)}${tail}</li>`;
+      }).join("");
+      return `<div class="hh-heal">
+      <h3 class="hh-heal-title">${escapeHtml6(t6.healthSelfHealTitle)}</h3>
+      <ul class="hh-heal-list">${items}</ul>
+    </div>`;
     }
     function renderHealthAdaptationsHtml(proposals) {
       const applicable = (proposals || []).filter((p) => p && p.applicable === true);

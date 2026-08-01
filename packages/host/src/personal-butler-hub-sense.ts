@@ -29,6 +29,7 @@ import type { LlmAgentToolset, LlmErrorKind, LlmToolCallResult, LlmToolDefinitio
 
 import type { AdminHealthSurface, HealthSnapshot } from './admin-health.js'
 import { translateLlmFailureKind, type FailureLang } from './failure-translator.js'
+import type { SelfHealEntry, SelfHealLog } from './self-heal-log.js'
 import {
   BUTLER_PATROL_INTERVAL_MS,
   derivePatrolCards,
@@ -216,4 +217,98 @@ class ButlerHubHealthToolset implements LlmAgentToolset {
 /** benign 只读 hub 体检。hub 级事实同 backup_status:全员可读,读不出密。 */
 export function buildButlerHubHealthToolset(deps: ButlerHubHealthDeps): LlmAgentToolset {
   return new ButlerHubHealthToolset(deps)
+}
+
+// ─── HEAL-M1 benign restart_history ──────────────────────────────────────────
+
+const RESTART_TOOL: LlmToolDefinition = {
+  name: 'restart_history',
+  description:
+    '看这台 hub 的自愈台账:历次开机是干净退出还是疑似崩溃、停机多久、看门狗有没有因 hub 死/卡动手重启(带当时的日志尾巴)。成员问「hub 昨晚是不是挂了/重启过吗」时用它。只读台账,不触发任何重启。',
+  inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+}
+
+function fmtDownMs(ms: number): string {
+  const mins = Math.round(ms / 60_000)
+  if (mins < 1) return '不足 1 分钟'
+  if (mins < 60) return `约 ${mins} 分钟`
+  return `约 ${(mins / 60).toFixed(1)} 小时`
+}
+
+/**
+ * 纯投影渲染:台账行 → 中文历史卡。行是宽容形状——boot 行按 prev 三态措辞,
+ * 其余(看门狗 restart/throttled 及将来新 kind)走同一通用分支:印 kind +
+ * reason(有则)+ journalTail 截 400(台账原文不动;截断只属于这张嘴)。
+ * 疑似崩溃≠确证崩溃:strong 措辞留给「标记不在但心跳在」的分类本义。
+ */
+export function renderRestartHistory(entries: readonly SelfHealEntry[]): string {
+  if (entries.length === 0) {
+    return '自愈台账还没有记录(台账随本机制上线,此前的重启不在册)。'
+  }
+  const lines: string[] = [`自愈台账最近 ${entries.length} 条(新的在前):`, '']
+  let unclean = 0
+  let external = 0
+  for (const e of entries) {
+    if (e.kind === 'boot') {
+      const down = typeof e.downMs === 'number' ? `,停机${fmtDownMs(e.downMs)}` : ''
+      if (e.prev === 'clean') lines.push(`- ${e.at} 开机(上次是干净退出${down})`)
+      else if (e.prev === 'unclean') {
+        unclean++
+        lines.push(`- ${e.at} 开机(⚠️ 上次疑似崩溃/强杀/断电${down})`)
+      } else lines.push(`- ${e.at} 开机(首跑,没有更早记录)`)
+    } else {
+      external++
+      const reason = typeof e.reason === 'string' && e.reason ? `:${e.reason}` : ''
+      lines.push(`- ${e.at} 🔴 ${e.kind}${reason}`)
+      if (typeof e.journalTail === 'string' && e.journalTail.trim()) {
+        const tail = e.journalTail.trim()
+        lines.push(`  当时日志尾巴:${tail.slice(0, 400)}${tail.length > 400 ? '…' : ''}`)
+      }
+    }
+  }
+  lines.push(
+    '',
+    unclean === 0 && external === 0
+      ? '窗口内没有崩溃或看门狗动手的记录。'
+      : `窗口内:疑似崩溃开机 ${unclean} 次,看门狗/外部记录 ${external} 条。`,
+  )
+  return lines.join('\n')
+}
+
+export interface ButlerRestartHistoryDeps {
+  /** 惰性台账面(SelfHealLog.recent 切片,永不抛)。 */
+  selfHeal: () => Pick<SelfHealLog, 'recent'> | undefined
+  logger?: Pick<Logger, 'warn'>
+}
+
+class ButlerRestartHistoryToolset implements LlmAgentToolset {
+  constructor(private readonly deps: ButlerRestartHistoryDeps) {}
+
+  listTools(): LlmToolDefinition[] {
+    return [RESTART_TOOL]
+  }
+
+  async callTool(name: string): Promise<LlmToolCallResult> {
+    if (name !== RESTART_TOOL.name) {
+      return { content: [{ type: 'text', text: `未知工具:${name}` }], isError: true }
+    }
+    const log = this.deps.selfHeal()
+    if (!log) {
+      return {
+        content: [{ type: 'text', text: '自愈台账未接入(host 没启用这块),看不到重启历史。' }],
+        isError: true,
+      }
+    }
+    try {
+      return { content: [{ type: 'text', text: renderRestartHistory(await log.recent()) }] }
+    } catch (err) {
+      this.deps.logger?.warn('butler hub-sense: self-heal recent failed', { err })
+      return { content: [{ type: 'text', text: '暂时读不到自愈台账,稍后再试。' }], isError: true }
+    }
+  }
+}
+
+/** benign 只读重启历史。hub 级事实同 hub_health:全员可读,台账无密可泄。 */
+export function buildButlerRestartHistoryToolset(deps: ButlerRestartHistoryDeps): LlmAgentToolset {
+  return new ButlerRestartHistoryToolset(deps)
 }

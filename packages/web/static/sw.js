@@ -48,7 +48,7 @@
 // by config. app.html itself is never cached (role meta), but a stale v14
 // app.js against the new empty-nav markup would render no tabbar at all —
 // the precached app.js must refresh in lockstep with the markup change.
-const CACHE = 'gotong-shell-v15'
+const CACHE = 'gotong-shell-v16'
 
 // Stable, role-agnostic static shell. app.html is excluded on purpose
 // (role-injected); admin.js / identity-ui.js etc. are left to the runtime

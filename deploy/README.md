@@ -13,6 +13,7 @@
 | [`Caddyfile.baremetal`](Caddyfile.baremetal) | **T2/T3** VPS 裸机 | 复制到 `/etc/caddy/Caddyfile` 改两处域名即用：Web + WS 双域名、SSE flush、XFF 防伪造注释、HSTS。compose 蓝图**别**用它，用 [`caddy/Caddyfile`](../caddy/Caddyfile)。 |
 | [`gotong.service`](gotong.service) | **T2/T3** VPS 裸机 | systemd unit：复制到 `/etc/systemd/system/` 即用；`EnvironmentFile=/etc/gotong.env` + 沙箱加固 + 三种可选 ExecStart 注释在文件里。 |
 | [`gotong.service.d/50-master-key.conf`](gotong.service.d/50-master-key.conf) | **T2/T3** VPS 裸机 | master key drop-in：真 key 进 root 专读的 systemd drop-in（不进明文 env、不进 git），文件头有生成/权限/离线备份三步纪律。 |
+| [`gotong-watchdog.mjs`](gotong-watchdog.mjs) + [`.service`](gotong-watchdog.service) / [`.timer`](gotong-watchdog.timer) | **T2/T3** VPS 裸机 | 外部看门狗三件套（HEAL）：每分钟探 `/healthz`，连续 3 次不应答才 `systemctl restart` 并落自愈台账（只治「卡」；进程退出归 unit 的 `Restart=always`）。装法/演练见 [`docs/zh/SELF-HEAL.md`](../docs/zh/SELF-HEAL.md)。 |
 | [`Gotong.command`](Gotong.command) | 桌面双击（macOS） | Finder 双击即起本机 host，起好后 host 自己开浏览器。零配置、不读凭证。 |
 | [`Gotong.sh`](Gotong.sh) | 桌面/通用（Linux） | `Gotong.command` 的孪生，给 Linux / 任意 POSIX shell；`chmod +x` 后运行或 `scp` 到机器上。 |
 

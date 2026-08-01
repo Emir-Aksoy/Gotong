@@ -75,6 +75,7 @@
 - [`PUBLISH-RUNBOOK.md`](PUBLISH-RUNBOOK.md) — 发布 runbook（npm 37 包 + PyPI；发布前门 / OTP / 回滚=deprecate 纪律）
 - [`VERSIONING.md`](VERSIONING.md) — **版本号怎么管**：37 包 lockstep 共用一个号（`workspace:*` 发布时被改写成精确钉版，独立版本在这张依赖图下走不通）；根 `package.json` 唯一真相源 + `bump-version.mjs` + `check:version` 门
 - [`DEPLOY.md`](DEPLOY.md) · [`PORTABLE-BUNDLE.md`](PORTABLE-BUNDLE.md) — 部署 / 便携包分发
+- [`SELF-HEAL.md`](SELF-HEAL.md) — **自检自愈（HEAL）**：外部看门狗每分钟探 `/healthz`，连续 3 次不应答才重启（只治「卡」，红黄牌不归它）+ 自愈台账（面板「自愈历史」/ 阿同 `restart_history` 同源可查）
 - [`PROD-HARDENING-RUNBOOK.md`](PROD-HARDENING-RUNBOOK.md) · [`PRE-LAUNCH-TEST-PLAN.md`](PRE-LAUNCH-TEST-PLAN.md) · [`REAL-WORLD-TESTING.md`](REAL-WORLD-TESTING.md) — 生产加固 / 上线前测试 / 真机测试
 - [`CLOUD-RESOURCE-FOOTPRINT.md`](CLOUD-RESOURCE-FOOTPRINT.md) — 云资源占用
 - [`FEDERATION.md`](FEDERATION.md) · [`FEDERATION-RUNBOOK.md`](FEDERATION-RUNBOOK.md) · [`HUB-MESH.md`](HUB-MESH.md) — 跨 hub 联邦（两机操作员）

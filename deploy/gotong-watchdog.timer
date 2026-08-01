@@ -1,0 +1,16 @@
+# ── Gotong 看门狗 timer 模板(HEAL-M2) ──
+#
+# 每分钟拉一次 gotong-watchdog.service(安装步骤见那份文件头)。
+# 分钟级是刻意的:配合 --fails 3,从「卡死」到「被拉起」最坏约 3-4 分钟;
+# 更快的秒级探活留给 unit 自带的 Restart=always(它管进程退出)。
+# systemd 同名 unit 不会叠跑:上一轮还没结束时本轮自动顺延,无并发写。
+
+[Unit]
+Description=Run gotong-watchdog every minute
+
+[Timer]
+OnCalendar=*-*-* *:*:00
+AccuracySec=5s
+
+[Install]
+WantedBy=timers.target

@@ -14,8 +14,10 @@ import {
   PATROL_STATE_FRESH_MS,
   buildButlerHubSenseProbe,
   buildButlerHubHealthToolset,
+  buildButlerRestartHistoryToolset,
   buildHubSenseCard,
   renderHubHealth,
+  renderRestartHistory,
 } from '../src/personal-butler-hub-sense.js'
 
 let root: string
@@ -220,5 +222,75 @@ describe('SEN-M1 — hub_health 工具(惰性面 + 失败姿态)', () => {
     const text = JSON.stringify(r.content)
     expect(text).toContain('hub 体检(与管理面板同一份快照)')
     expect(text).toContain('空间目录写不进了')
+  })
+})
+
+describe('HEAL-M1 — renderRestartHistory(宽容行 → 中文历史卡)', () => {
+  it('空台账 → 诚实「还没有记录」', () => {
+    expect(renderRestartHistory([])).toContain('还没有记录')
+  })
+
+  it('boot 三态措辞 + downMs 折分钟/小时;汇总行计数疑似崩溃', () => {
+    const text = renderRestartHistory([
+      { at: '2026-07-31T08:00:00Z', kind: 'boot', prev: 'unclean', downMs: 5_400_000 },
+      { at: '2026-07-31T07:00:00Z', kind: 'boot', prev: 'clean', downMs: 120_000 },
+      { at: '2026-07-30T07:00:00Z', kind: 'boot', prev: 'none' },
+    ])
+    expect(text).toContain('疑似崩溃/强杀/断电,停机约 1.5 小时')
+    expect(text).toContain('干净退出,停机约 2 分钟')
+    expect(text).toContain('首跑')
+    expect(text).toContain('疑似崩溃开机 1 次')
+  })
+
+  it('看门狗行:kind+reason 原样印,journal 尾巴截 400 加省略号', () => {
+    const longTail = 'x'.repeat(450)
+    const text = renderRestartHistory([
+      { at: '2026-07-31T03:00:00Z', kind: 'watchdog-restart', reason: 'healthz-fail', journalTail: longTail },
+    ])
+    expect(text).toContain('🔴 watchdog-restart:healthz-fail')
+    expect(text).toContain('当时日志尾巴:' + 'x'.repeat(400) + '…')
+    expect(text).not.toContain('x'.repeat(401))
+    expect(text).toContain('看门狗/外部记录 1 条')
+  })
+})
+
+describe('HEAL-M1 — restart_history 工具(惰性面 + 失败姿态)', () => {
+  it('listTools 只有 restart_history;未知名 → isError', async () => {
+    const ts = buildButlerRestartHistoryToolset({ selfHeal: () => undefined })
+    expect(ts.listTools().map((t) => t.name)).toEqual(['restart_history'])
+    expect((await ts.callTool('nope', {})).isError).toBe(true)
+  })
+
+  it('台账未接 → 诚实话术 isError', async () => {
+    const ts = buildButlerRestartHistoryToolset({ selfHeal: () => undefined })
+    const r = await ts.callTool('restart_history', {})
+    expect(r.isError).toBe(true)
+    expect(JSON.stringify(r.content)).toContain('未接入')
+  })
+
+  it('recent 抛错 → 失败话术 isError + warn(合同外的防御)', async () => {
+    const warns: string[] = []
+    const ts = buildButlerRestartHistoryToolset({
+      selfHeal: () => ({ recent: async () => { throw new Error('boom') } }),
+      logger: { warn: (m) => void warns.push(m) },
+    })
+    expect((await ts.callTool('restart_history', {})).isError).toBe(true)
+    expect(warns.length).toBe(1)
+  })
+
+  it('正常:渲染台账行(boot + 看门狗混排)', async () => {
+    const ts = buildButlerRestartHistoryToolset({
+      selfHeal: () => ({
+        recent: async () => [
+          { at: '2026-07-31T08:00:00Z', kind: 'boot', prev: 'unclean', downMs: 60_000 },
+          { at: '2026-07-31T07:59:00Z', kind: 'watchdog-restart', reason: 'healthz-fail' },
+        ],
+      }),
+    })
+    const r = await ts.callTool('restart_history', {})
+    expect(r.isError).toBeUndefined()
+    const text = JSON.stringify(r.content)
+    expect(text).toContain('自愈台账最近 2 条')
+    expect(text).toContain('watchdog-restart:healthz-fail')
   })
 })

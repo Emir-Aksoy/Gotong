@@ -148,6 +148,8 @@ function buildButler(provider: LlmProvider, root: string, singleTier?: boolean) 
     ...(singleTier === undefined ? {} : { singleTierToolFace: singleTier }),
     backupOps: fakeBackupOps,
     members: { users: () => [], membershipRole: () => null },
+    // HEAL-M1 — 最大脸必须带自愈台账切片,restart_history 才在(surface 缺席由工具自答「未接入」)。
+    selfHeal: () => undefined,
     // SDUI-M4 — 最大脸必须带面板店面,get_my_panel / set_panel_layout 才在。
     panel: {
       panel: async () => ({ schemaVersion: 1, config: {}, source: 'default' as const }),

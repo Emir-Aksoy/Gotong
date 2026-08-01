@@ -127,6 +127,13 @@ export interface HealthSnapshot {
    * a human running `gotong update`).
    */
   updateAvailable?: { current: string; latest: string } | null
+  /**
+   * HEAL-M1 — 最近的自愈台账行(开机分类 + 看门狗重启),喂体检面板「自愈
+   * 历史」块。三态同 `routing`:字段缺席 → host 未接台账(诚实未知);`[]` →
+   * 接了但还没有记录/读不出;有行 → 新的在前。行是 `runtime/self-heal-log
+   * .jsonl` 的窄投影(见 HealthSelfHealRow),`journalTail` 在 host 侧截断。
+   */
+  selfHeal?: HealthSelfHealRow[]
   /** ISO timestamp the snapshot was taken. */
   checkedAt: string
 }
@@ -146,6 +153,25 @@ export interface HealthImRow {
 export interface HealthLlmOutageRow {
   kind: string
   since: number
+}
+
+/**
+ * HEAL-M1 — 自愈台账一行的窄投影。台账行本体是宽容形状(只钉 at/kind),这里
+ * 只挑面板认识的键、逐键验型:boot 行带 prev/downMs,看门狗行带 reason/
+ * journalTail。未知 kind 照样过(渲染层按 kind 分支,认不出就只显示 at+kind
+ * ——台账格式将来长新行,旧面板降级显示而非丢行)。
+ */
+export interface HealthSelfHealRow {
+  at: string
+  kind: string
+  /** boot 行:上次退出分类('clean' | 'unclean' | 'none')。 */
+  prev?: string
+  /** boot 行:停机时长(ms,±一个心跳节律的误差)。 */
+  downMs?: number
+  /** 看门狗行:因何动手(如 'healthz-fail')。 */
+  reason?: string
+  /** 看门狗行:重启当时的 journal 尾巴(host 侧截 800 字符)。 */
+  journalTail?: string
 }
 
 /**
@@ -247,6 +273,13 @@ export interface AdminHealthDeps {
    * off or no probe has succeeded yet → field absent (honest unknown).
    */
   readUpdateAvailable?(): { current: string; latest: string } | null | undefined
+  /**
+   * HEAL-M1 — 读自愈台账最近几条(host 注入 `selfHeal.recent(10)`)。可选:
+   * absent → snapshot 不含 selfHeal(host 未接台账的诚实「未知」)。实现体
+   * 自身永不抛(SelfHealLog.recent 的合同);这里仍套 try 只为镜像兄弟字段
+   * 的降级姿态。行是宽容形状,投影(挑键+验型+截断)在本服务做。
+   */
+  selfHealRecent?(): Promise<readonly Record<string, unknown>[]>
 }
 
 /** The duck-typed surface injected into `serveWeb`. */
@@ -405,6 +438,26 @@ export function createAdminHealthService(deps: AdminHealthDeps): AdminHealthSurf
         }
       }
 
+      // HEAL-M1 — 自愈台账窄投影。dep 在但抛错 → [](接了、暂无可读),绝不
+      // 因台账读盘失败拖垮整张快照。逐键验型:台账行是宽容形状,面板只挑它
+      // 认识的键;journalTail 在这截 800(台账原文不动,截断只是 DTO 的事)。
+      let selfHeal: HealthSelfHealRow[] | undefined
+      if (deps.selfHealRecent) {
+        try {
+          selfHeal = (await deps.selfHealRecent()).flatMap((e) => {
+            if (typeof e.at !== 'string' || typeof e.kind !== 'string') return []
+            const row: HealthSelfHealRow = { at: e.at, kind: e.kind }
+            if (typeof e.prev === 'string') row.prev = e.prev
+            if (typeof e.downMs === 'number') row.downMs = e.downMs
+            if (typeof e.reason === 'string') row.reason = e.reason
+            if (typeof e.journalTail === 'string') row.journalTail = e.journalTail.slice(0, 800)
+            return [row]
+          })
+        } catch {
+          selfHeal = []
+        }
+      }
+
       return {
         agents: rows,
         agentsMissingKey: rows.filter((r) => r.missingKey).length,
@@ -426,6 +479,7 @@ export function createAdminHealthService(deps: AdminHealthDeps): AdminHealthSurf
         ...(llmOutage !== undefined ? { llmOutage } : {}),
         ...(routing !== undefined ? { routing } : {}),
         ...(updateAvailable !== undefined ? { updateAvailable } : {}),
+        ...(selfHeal !== undefined ? { selfHeal } : {}),
         checkedAt: new Date().toISOString(),
       }
     },

@@ -42,6 +42,8 @@ function svc(opts: {
   routingHealth?: () => HealthRoutingRow[]
   // B② — new-version notice; same optional-dep contract.
   readUpdateAvailable?: () => { current: string; latest: string } | null | undefined
+  // HEAL-M1 — 自愈台账读取;same optional-dep contract.
+  selfHealRecent?: () => Promise<Record<string, unknown>[]>
 }) {
   return createAdminHealthService({
     listAgents: async () => opts.agents,
@@ -57,6 +59,7 @@ function svc(opts: {
     ...(opts.readLlmOutage ? { readLlmOutage: opts.readLlmOutage } : {}),
     ...(opts.routingHealth ? { routingHealth: opts.routingHealth } : {}),
     ...(opts.readUpdateAvailable ? { readUpdateAvailable: opts.readUpdateAvailable } : {}),
+    ...(opts.selfHealRecent ? { selfHealRecent: opts.selfHealRecent } : {}),
   })
 }
 
@@ -419,5 +422,40 @@ describe('createAdminHealthService.snapshot', () => {
       expect('updateAvailable' in s).toBe(false)
       expect(s.managedCount).toBe(1)
     })
+  })
+})
+
+describe('selfHeal (HEAL-M1)', () => {
+  it('absent dep → snapshot has no selfHeal field (honest unknown)', async () => {
+    const s = await svc({ agents: [] }).snapshot()
+    expect('selfHeal' in s).toBe(false)
+  })
+
+  it('projects tolerant ledger rows: picks known keys, type-checks, truncates journalTail to 800', async () => {
+    const s = await svc({
+      agents: [],
+      selfHealRecent: async () => [
+        { at: '2026-07-31T08:00:00Z', kind: 'boot', prev: 'unclean', downMs: 60_000, extra: 'dropped' },
+        { at: '2026-07-31T07:59:00Z', kind: 'watchdog-restart', reason: 'healthz-fail', journalTail: 'y'.repeat(900), fails: 3 },
+        { at: 5, kind: 'boot' }, // at 非 string → 整行丢弃
+        { at: '2026-07-31T07:00:00Z', kind: 'boot', prev: 42, downMs: 'soon' }, // 键型不对 → 键丢行留
+      ],
+    }).snapshot()
+    expect(s.selfHeal).toEqual([
+      { at: '2026-07-31T08:00:00Z', kind: 'boot', prev: 'unclean', downMs: 60_000 },
+      { at: '2026-07-31T07:59:00Z', kind: 'watchdog-restart', reason: 'healthz-fail', journalTail: 'y'.repeat(800) },
+      { at: '2026-07-31T07:00:00Z', kind: 'boot' },
+    ])
+  })
+
+  it('dep fault degrades to [] (wired-but-unreadable), never blocks the snapshot', async () => {
+    const s = await svc({
+      agents: [],
+      selfHealRecent: async () => {
+        throw new Error('boom')
+      },
+    }).snapshot()
+    expect(s.selfHeal).toEqual([])
+    expect(s.checkedAt).toBeTruthy()
   })
 })
