@@ -188,15 +188,23 @@ function storeCode(err: unknown): string | null {
 }
 
 class ButlerPanelToolset implements LlmAgentToolset {
-  constructor(private readonly deps: ButlerPanelDeps) {}
+  // contentOnly — 晨报小刀(2026-08-02)的无人值守面:只有内容三件,布局两件
+  // (get_my_panel/set_panel_layout)连 callTool 都拒 —— 无人值守循环可以刷新
+  // 卡片内容,永远不能重排面板(重排有快照/横幅/撤销一整套会话语境,sweep 没有)。
+  constructor(
+    private readonly deps: ButlerPanelDeps,
+    private readonly contentOnly = false,
+  ) {}
 
   listTools(): LlmToolDefinition[] {
-    return [GET_TOOL, SET_TOOL, LIST_CONTENT_TOOL, READ_CONTENT_TOOL, WRITE_CONTENT_TOOL]
+    return this.contentOnly
+      ? [LIST_CONTENT_TOOL, READ_CONTENT_TOOL, WRITE_CONTENT_TOOL]
+      : [GET_TOOL, SET_TOOL, LIST_CONTENT_TOOL, READ_CONTENT_TOOL, WRITE_CONTENT_TOOL]
   }
 
   async callTool(name: string, args: Record<string, unknown>): Promise<LlmToolCallResult> {
-    if (name === GET_TOOL.name) return this.getPanel()
-    if (name === SET_TOOL.name) return this.setLayout(args)
+    if (!this.contentOnly && name === GET_TOOL.name) return this.getPanel()
+    if (!this.contentOnly && name === SET_TOOL.name) return this.setLayout(args)
     if (name === LIST_CONTENT_TOOL.name) return this.listContent()
     if (name === READ_CONTENT_TOOL.name) return this.readContent(args)
     if (name === WRITE_CONTENT_TOOL.name) return this.writeContent(args)
@@ -348,4 +356,14 @@ class ButlerPanelToolset implements LlmAgentToolset {
  */
 export function buildButlerPanelToolset(deps: ButlerPanelDeps): LlmAgentToolset {
   return new ButlerPanelToolset(deps)
+}
+
+/**
+ * 晨报小刀(2026-08-02) — 内容-only 面板工具面,给无人值守的晨报 enrich 循环:
+ * 只有 list/read/write_panel_content 三件(写的是仅本人可见的展示文本,benign
+ * 三段式论证与会话面同一套),布局两件结构性不在 —— 不只是不 advertise,
+ * callTool 按名点它们也拒。与会话工具面共享同一批工具定义与执行体,零漂移。
+ */
+export function buildButlerPanelContentToolset(deps: ButlerPanelDeps): LlmAgentToolset {
+  return new ButlerPanelToolset(deps, true)
 }

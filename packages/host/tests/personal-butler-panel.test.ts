@@ -17,6 +17,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import { buildMePanelSurface } from '../src/me-panel-surface.js'
 import {
+  buildButlerPanelContentToolset,
   buildButlerPanelToolset,
   renderPanelContractCheatsheet,
 } from '../src/personal-butler-panel.js'
@@ -266,5 +267,45 @@ describe('panel content tools (C1-c, butler relay — benign)', () => {
     const miss = await toolset.callTool('read_panel_content', { fileId: 'briefing' })
     expect(miss.isError).toBeUndefined()
     expect(textOf(miss)).toContain('没有')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 晨报写面板卡小刀 — the content-only face for the unattended brief loop
+// ---------------------------------------------------------------------------
+
+describe('buildButlerPanelContentToolset (content-only, for the unattended brief)', () => {
+  function buildContentOnly(userId = 'member-1') {
+    const surface = buildMePanelSurface({ spaceDir })
+    return { surface, toolset: buildButlerPanelContentToolset({ userId, surface }) }
+  }
+
+  it('advertises exactly the content trio — no layout tools', () => {
+    const { toolset } = buildContentOnly()
+    const names = (toolset.listTools() as { name: string }[]).map((t) => t.name)
+    expect(names).toEqual(['list_panel_content', 'read_panel_content', 'write_panel_content'])
+  })
+
+  it('refuses the layout tools even when called BY NAME (structural, not advisory)', async () => {
+    const { surface, toolset } = buildContentOnly()
+    const get = await toolset.callTool('get_my_panel', {})
+    expect(get.isError).toBe(true)
+    expect(textOf(get)).toContain('未知工具')
+    const set = await toolset.callTool('set_panel_layout', { reset: true })
+    expect(set.isError).toBe(true)
+    expect(textOf(set)).toContain('未知工具')
+    // The refused set_panel_layout must not have touched the member's panel.
+    expect((await surface.panel('member-1')).source).toBe('default')
+  })
+
+  it('the content trio still works and stays pinned to the closed-over userId', async () => {
+    const { surface, toolset } = buildContentOnly('alice')
+    const w = await toolset.callTool('write_panel_content', {
+      fileId: 'connector.weather',
+      markdown: '今天吉隆坡 晴 32°C',
+    })
+    expect(w.isError).toBeUndefined()
+    expect((await surface.readContent('alice', 'connector.weather'))?.markdown).toContain('32°C')
+    expect(await surface.readContent('member-1', 'connector.weather')).toBeNull()
   })
 })

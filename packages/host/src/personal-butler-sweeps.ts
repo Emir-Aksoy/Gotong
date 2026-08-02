@@ -50,6 +50,8 @@ export interface ButlerSweepsOptions {
     intervalMs: number
     buildProvider: ButlerBriefProviderBuilder
     mcpReadTools?: () => Promise<LlmAgentToolset | null>
+    /** 晨报写面板卡小刀 — 内容-only 面板工具面(见 ButlerBriefComposerOptions)。 */
+    panelContentTools?: (userId: string) => LlmAgentToolset | null
   }
   /** BE-M5 run broadcast: gate, cadence, the BE-M1 runs projection (undefined = unwired ⇒ off). */
   runBroadcast: { on: boolean; intervalMs: number; runs: ButlerRunSurface | undefined }
@@ -95,6 +97,7 @@ export function armButlerSweeps(opts: ButlerSweepsOptions): ButlerSweepsHandle {
         buildProvider: opts.proactive.buildProvider,
         logger: opts.logger,
         ...(opts.proactive.mcpReadTools ? { mcpReadTools: opts.proactive.mcpReadTools } : {}),
+        ...(opts.proactive.panelContentTools ? { panelContentTools: opts.proactive.panelContentTools } : {}),
       }),
       push: opts.push,
       logger: opts.logger,

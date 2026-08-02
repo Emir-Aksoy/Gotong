@@ -265,6 +265,7 @@ import { HostButlerMemoryService } from './butler-memory-service.js'
 // Assembly lives in personal-butler-factory.ts; main.ts only wires refs.
 import { buildButlerBackupOps } from './personal-butler-backup.js'
 import { buildButlerFactory } from './personal-butler-factory.js'
+import { buildButlerPanelContentToolset } from './personal-butler-panel.js'
 import { butlerEmbedderFromEnv } from './butler-embedder.js'
 import { butlerHearingFromEnv } from './butler-hearing.js'
 import { butlerSeeingFromEnv } from './butler-seeing.js'
@@ -1662,6 +1663,8 @@ async function main(): Promise<void> {
       intervalMs: butlerProactiveMs,
       buildProvider: () => localAgents.buildButlerProvider(),
       mcpReadTools: () => localAgents.butlerMcpReadToolset(), // B2 — connectors for enriched brief
+      // 晨报写面板卡小刀 — 内容-only 面(布局工具结构性不进无人值守循环)。
+      panelContentTools: (userId) => buildButlerPanelContentToolset({ userId, surface: mePanelSurface, logger: log }),
     },
     runBroadcast: {
       on: butlerRunBroadcastOn,

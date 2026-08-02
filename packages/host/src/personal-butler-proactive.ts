@@ -46,6 +46,7 @@ import { join } from 'node:path'
 
 import type { Logger } from '@gotong/core'
 import {
+  ComposedToolset,
   drainStream,
   type LlmAgentToolset,
   type LlmContentBlock,
@@ -227,9 +228,33 @@ const BRIEF_ENRICH_SYSTEM = [
   '绝不要编造数字或日程。最多查两三次就给出最终问候。',
 ].join('\n')
 
+/**
+ * 晨报写面板卡小刀(2026-08-02) — the panel-content addendum, appended only when
+ * the panel-content toolset actually rode this loop. The write is display text
+ * for the member's OWN panel (provenance + timestamp rendered by the panel, not
+ * promised by the model), so "don't fabricate" carries over verbatim: an empty
+ * look-up means no card write, never an invented one.
+ */
+const BRIEF_ENRICH_PANEL_SYSTEM = [
+  BRIEF_ENRICH_SYSTEM,
+  '',
+  '查到的真实信息除了融进问候,还可以顺手整理进成员的面板展示卡(write_panel_content):',
+  '天气写 connector.weather;其他内容优先更新 list_panel_content 里已有的文件。',
+  '写卡只是给本人看的展示文本,卡上会自动标注整理时间。没查到就不写,绝不编造;最多写一两份,然后给出最终问候。',
+].join('\n')
+
 /** Max provider round-trips for an enriched brief (tool calls + the final text).
  *  A morning brief needs one round of look-ups then the greeting; 3 is generous. */
 const BRIEF_MAX_TOOL_ROUNDS = 3
+
+/** Round cap when the panel-content tools ride along — look-ups, then a card
+ *  write or two, then the greeting needs more headroom than read-only's 3. */
+const BRIEF_MAX_TOOL_ROUNDS_WITH_PANEL = 5
+
+/** Per-call token cap on the panel-enabled path — a `write_panel_content` call
+ *  carries a whole markdown card in its input, which the read-only 300 would
+ *  truncate mid-JSON. The read-only path keeps its historical 300. */
+const BRIEF_PANEL_MAX_TOKENS = 800
 
 /** Cap a single tool result's text so a chatty connector can't blow the brief's
  *  context (weather/calendar payloads are tiny; this only bounds a pathological one). */
@@ -251,6 +276,19 @@ export interface ButlerBriefComposerOptions {
    * unattended brief can look but never act. Absent ⇒ enrichment simply never runs.
    */
   mcpReadTools?: () => Promise<LlmAgentToolset | null>
+  /**
+   * 晨报写面板卡小刀(2026-08-02) — resolve the member's panel display-content
+   * toolset (`list/read/write_panel_content` only), or null when the panel store
+   * isn't wired. Only consulted on the ENRICHED path: a live read connector stays
+   * the gate — refreshing cards is a bonus ON TOP of enrichment, never its own
+   * mode (nothing read ⇒ nothing worth persisting). The write is benign by the
+   * conversational tool's own three-part argument (member's OWN display text /
+   * no real-world action / referenced actions still individually gated), which
+   * is why it may ride an unattended sweep at all; the LAYOUT tools are
+   * deliberately NOT in this face — a sweep may refresh cards, never rearrange
+   * the panel. Absent ⇒ the enriched loop is the historical read-only face.
+   */
+  panelContentTools?: (userId: string) => LlmAgentToolset | null
   /** Per-request model / token overrides for the brief call. */
   model?: string
   maxTokens?: number
@@ -284,6 +322,7 @@ async function composeEnrichedBrief(
   facts: string,
   toolset: LlmAgentToolset,
   opts: ButlerBriefComposerOptions,
+  withPanel = false,
 ): Promise<string | null> {
   let tools: LlmToolDefinition[]
   try {
@@ -291,6 +330,7 @@ async function composeEnrichedBrief(
   } catch {
     tools = []
   }
+  const maxRounds = withPanel ? BRIEF_MAX_TOOL_ROUNDS_WITH_PANEL : BRIEF_MAX_TOOL_ROUNDS
   const messages: LlmMessage[] = [
     {
       role: 'user',
@@ -298,12 +338,12 @@ async function composeEnrichedBrief(
     },
   ]
   let lastText = ''
-  for (let round = 0; round < BRIEF_MAX_TOOL_ROUNDS; round++) {
+  for (let round = 0; round < maxRounds; round++) {
     const res = await drainStream(
       provider.stream({
-        system: BRIEF_ENRICH_SYSTEM,
+        system: withPanel ? BRIEF_ENRICH_PANEL_SYSTEM : BRIEF_ENRICH_SYSTEM,
         messages,
-        maxTokens: opts.maxTokens ?? 300,
+        maxTokens: opts.maxTokens ?? (withPanel ? BRIEF_PANEL_MAX_TOKENS : 300),
         ...(tools.length > 0 ? { tools } : {}),
         ...(opts.model ? { model: opts.model } : {}),
       }),
@@ -384,7 +424,24 @@ export function buildButlerBriefComposer(
           err: err instanceof Error ? err.message : String(err),
         })
       }
-      if (readTools) return composeEnrichedBrief(provider, facts, readTools, opts)
+      if (readTools) {
+        // 小刀 — panel content tools ride along when the store is wired; a
+        // resolver throw/null degrades to the historical read-only loop (the
+        // panel is a bonus on the bonus, never a gate on the brief itself).
+        let panelTools: LlmAgentToolset | null = null
+        if (opts.panelContentTools) {
+          try {
+            panelTools = opts.panelContentTools(userId)
+          } catch (err) {
+            opts.logger.warn('butler brief: resolve panel tools failed — read-only brief', {
+              userId,
+              err: err instanceof Error ? err.message : String(err),
+            })
+          }
+        }
+        const toolset = panelTools ? ComposedToolset.of(readTools, panelTools) : readTools
+        return composeEnrichedBrief(provider, facts, toolset, opts, panelTools !== null)
+      }
     }
 
     const res = await drainStream(
