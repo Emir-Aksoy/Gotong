@@ -46,11 +46,18 @@
   --sdui-card-bg: rgba(255, 255, 255, 0.03);
   --sdui-muted: #a3a3ab;
   --sdui-accent: #5b8def;
+  /* Filled-button accent is a SEPARATE token (POLISH-M4): a stroke/tick accent
+   * must stay bright against dark chrome, while white-on-fill needs a darker
+   * fill to clear WCAG 4.5:1 — one value cannot serve both. #3468c8 puts white
+   * text at 5.3:1; #5b8def was 3.2:1. */
+  --sdui-accent-fill: #3468c8;
   --sdui-accent-border: #2f5a86;
   --sdui-accent-bg: #16283a;
   --sdui-warn-bg: #2b2413;
   --sdui-warn-border: #7a6420;
-  --sdui-danger: #c04545;
+  /* 5.6:1 on #161615 (was #c04545 at 3.6:1) — error text is exactly what an
+   * elderly member must be able to read. */
+  --sdui-danger: #d97070;
   --sdui-danger-bg: #3a1d1d;
   --sdui-danger-border: #8a4040;
   --sdui-yellow: #c9a227;
@@ -84,6 +91,7 @@
   --sdui-card-bg: #ffffff;
   --sdui-muted: #5c5c66;
   --sdui-accent: #3f6fd1;
+  --sdui-accent-fill: #3f6fd1; /* white on it: 4.8:1 — light accent doubles as fill */
   --sdui-accent-border: #9dbef0;
   --sdui-accent-bg: #e7effb;
   --sdui-warn-bg: #fbf3d9;
@@ -132,10 +140,10 @@
  * (filled accent), quick-actions are secondary (tinted). Extra .sdui-root
  * prefix so these win over the generic `.sdui-root button:active` press. */
 .sdui-root .sdui-chat-send {
-  background: var(--sdui-accent); border-color: var(--sdui-accent);
+  background: var(--sdui-accent-fill); border-color: var(--sdui-accent-fill);
   color: var(--sdui-on-accent); font-weight: 600;
 }
-.sdui-root .sdui-chat-send:active { background: var(--sdui-accent); opacity: 0.82; }
+.sdui-root .sdui-chat-send:active { background: var(--sdui-accent-fill); opacity: 0.82; }
 .sdui-root .sdui-qa-btn {
   background: var(--sdui-accent-bg); border-color: var(--sdui-accent-border);
 }

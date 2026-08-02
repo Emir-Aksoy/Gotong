@@ -10,7 +10,9 @@
   --shell-muted: #6b7280;
   --shell-card: #ffffff;
   --shell-line: #e5e5e3;
-  --shell-accent: #5b9bd5;
+  /* 白字压得住的主按钮蓝:4.9:1(原 #5b9bd5 只有 3.0,差着 4.5 的正文线;
+   * 配对按钮是新用户的第一个动作,更是老龄基线的正中)。深浅两壳共用。 */
+  --shell-accent: #3573b5;
   --shell-err: #b91c1c;
   --shell-press: rgba(60, 60, 80, 0.12); /* 与 --sdui-press 同手法:按压=半透明遮罩 */
 }

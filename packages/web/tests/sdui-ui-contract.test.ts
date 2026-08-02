@@ -373,9 +373,18 @@ describe('sdui-ui.js ↔ panel-schema.ts contract', () => {
   })
 
   it('the light theme is HOST-opt-in (mount option), and the config cannot reach it', () => {
-    // Stylesheet carries the override block; mount() is the only writer.
+    // Stylesheet carries the override block; applyTheme() is the only writer
+    // (POLISH-M4: shared by mount() and handle.setTheme(), which restamps a
+    // LIVE panel without re-rendering — a system light/dark flip must not eat
+    // the chat draft).
     expect(rendererCss).toContain('[data-sdui-theme="light"]')
-    expect(rendererSrc).toContain("o.theme === 'light'")
+    expect(rendererSrc).toContain('function applyTheme(host, theme)')
+    expect(rendererSrc).toContain("theme === 'light'")
+    expect(rendererSrc).toContain('applyTheme(o.host, o.theme)')
+    expect(rendererSrc).toContain('setTheme: function (theme) { applyTheme(o.host, theme) }')
+    // Exactly one setAttribute call site — a second writer would be a config
+    // side door into the theme.
+    expect(rendererSrc.split("setAttribute('data-sdui-theme'").length - 1).toBe(1)
     // The light-chromed standalone page is the first real consumer — without
     // this the dark-hardcoded bubbles were nearly unreadable there.
     expect(standaloneBootSrc).toContain("theme: 'light'")

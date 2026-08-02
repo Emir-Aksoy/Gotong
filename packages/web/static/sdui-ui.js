@@ -561,12 +561,20 @@
     var body = el('div', 'sdui-data-body')
     skeletonInto(body)
     card.appendChild(body)
-    fetchData(kind, qs).then(function (j) {
-      settleBody(body)
-      if (!j) { body.appendChild(errorState()); return }
-      if (j.available !== true) { body.appendChild(missingState()); return }
-      onData(body, j)
-    })
+    fetchData(kind, qs)
+      .then(function (j) {
+        settleBody(body)
+        if (!j) { body.appendChild(errorState()); return }
+        if (j.available !== true) { body.appendChild(missingState()); return }
+        onData(body, j)
+      })
+      .catch(function () {
+        // The renderer itself threw on bad-shaped data. A blank settled card is
+        // the one state the three-state contract forbids — land on the error
+        // face (approval-inbox's discipline, applied to every data card).
+        settleBody(body)
+        body.appendChild(errorState())
+      })
     return card
   }
 
@@ -879,19 +887,25 @@
     var body = el('div', 'sdui-data-body')
     skeletonInto(body)
     card.appendChild(body)
-    fetchData('content', 'id=' + encodeURIComponent(fileId)).then(function (j) {
-      settleBody(body)
-      if (!j) { body.appendChild(errorState()); return }
-      if (j.available !== true) { body.appendChild(missingState()); return }
-      if (j.exists !== true || typeof j.markdown !== 'string') {
-        body.appendChild(emptyState(emptyIcon, emptyText))
-        return
-      }
-      // Fixed provenance stamp — rendered before any content, unconditionally.
-      body.appendChild(el('p', 'sdui-meta sdui-md-provenance',
-        t(provKey) + ' · ' + t('sduiContentUpdated', fmtWhen(j.updatedAt))))
-      renderBody(body, j.markdown)
-    })
+    fetchData('content', 'id=' + encodeURIComponent(fileId))
+      .then(function (j) {
+        settleBody(body)
+        if (!j) { body.appendChild(errorState()); return }
+        if (j.available !== true) { body.appendChild(missingState()); return }
+        if (j.exists !== true || typeof j.markdown !== 'string') {
+          body.appendChild(emptyState(emptyIcon, emptyText))
+          return
+        }
+        // Fixed provenance stamp — rendered before any content, unconditionally.
+        body.appendChild(el('p', 'sdui-meta sdui-md-provenance',
+          t(provKey) + ' · ' + t('sduiContentUpdated', fmtWhen(j.updatedAt))))
+        renderBody(body, j.markdown)
+      })
+      .catch(function () {
+        // Same as dataCard: renderBody threw → error face, never a blank card.
+        settleBody(body)
+        body.appendChild(errorState())
+      })
     return card
   }
 
@@ -1266,6 +1280,17 @@
   // The renderer knows nothing about tabs. `render()` means "render now"; WHEN
   // that is belongs to the host, which is why the SPA's tab observer lives in
   // the autoboot block below rather than in here.
+  // Theme is HOST chrome's decision, never the config's: dark is the default
+  // (the native shell is dark chrome); light-chromed hosts — the SPA's white
+  // content area, the standalone page — each opt in with { theme: 'light' }.
+  // Restamping alone re-themes a LIVE panel (every color flows from tokens
+  // keyed off this attribute), which is why handle.setTheme() below never
+  // re-renders: a system light/dark flip must not eat the chat draft.
+  function applyTheme(host, theme) {
+    if (theme === 'light') host.setAttribute('data-sdui-theme', 'light')
+    else host.removeAttribute('data-sdui-theme')
+  }
+
   function mount(opts) {
     var o = opts || {}
     if (!o.host || typeof o.host.appendChild !== 'function') {
@@ -1274,12 +1299,8 @@
     CTX.host = o.host
     // POLISH-M1 — root class at mount time too, so the pre-render loading text
     // already sits inside the token scope (renderPanel re-adds, harmlessly).
-    // Theme is HOST chrome's decision, never the config's: dark is the default
-    // (the native shell is dark chrome); light-chromed hosts — the SPA's white
-    // content area, the standalone page — each opt in with { theme: 'light' }.
     if (typeof o.host.classList === 'object' && o.host.classList) o.host.classList.add('sdui-root')
-    if (o.theme === 'light') o.host.setAttribute('data-sdui-theme', 'light')
-    else o.host.removeAttribute('data-sdui-theme')
+    applyTheme(o.host, o.theme)
     if (typeof o.lang === 'function') CTX.lang = o.lang
     else if (typeof o.lang === 'string') CTX.lang = function () { return o.lang }
     if (typeof o.gotoHome === 'function') CTX.gotoHome = o.gotoHome
@@ -1287,6 +1308,9 @@
     var handle = {
       host: o.host,
       render: loadPanel,
+      // Restamp only, no re-render — see applyTheme. Chat draft / scroll /
+      // expanded cards all survive a theme flip.
+      setTheme: function (theme) { applyTheme(o.host, theme) },
       // Only the SPA autoboot creates an observer, so only it has one to drop.
       destroy: function () { if (handle._stop) handle._stop() },
     }

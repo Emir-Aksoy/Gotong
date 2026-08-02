@@ -86,16 +86,51 @@ const sdui = read('sdui-ui.js')
 if (!sdui.includes('GotongPanel') || !sdui.includes('CLIENT_SCHEMA_VERSION')) {
   errors.push('sdui-ui.js 里找不到 GotongPanel/CLIENT_SCHEMA_VERSION —— 拷错文件了?')
 }
-// POLISH-M3 —— 壳 chrome 的两条不许回退:①安全区处理(刘海/圆角屏的顶栏与配对屏
-// 都靠 env() 留出,丢了它顶栏会钻进状态栏区);②壳里出现的任何 @keyframes 动效
-// 必须同文件带 prefers-reduced-motion 守卫(M2 渲染器同一条纪律 —— 壳没有 vitest
-// 跑者,门守在这里)。
-const shellCss = read('shell.css')
-if (!shellCss.includes('env(safe-area-inset-top')) {
-  errors.push('shell.css 丢了 env(safe-area-inset-top …) —— 安全区处理不许回退')
+// POLISH-M3/M4 —— 壳 chrome 的两条不许回退。初版是全文 includes(),Codex 变异
+// 实证可假绿(删掉顶栏那处安全区,配对屏那处让门照样绿;加一条守卫外的动画,
+// 旧守卫串也让门照样绿)—— 改成结构性断言。注释里的字样不算数,先剥注释
+// (换成等长空白,不动坐标)再判。
+const shellCssRaw = read('shell.css')
+const shellCss = shellCssRaw.replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, ' '))
+// ①安全区:顶栏与配对屏「各自」都要接管 env(safe-area-inset-top)。逐块断言 ——
+//   全文含一处不够(sticky 顶栏丢了它会钻进状态栏区,配对屏那处救不了它)。
+for (const [label, re] of [
+  ['.shell-bar', /(?:^|\n)\.shell-bar\s*\{([^}]*)\}/],
+  ['#screen-pair', /(?:^|\n)#screen-pair\s*\{([^}]*)\}/],
+]) {
+  const m = shellCss.match(re)
+  if (!m || !m[1].includes('env(safe-area-inset-top')) {
+    errors.push(`shell.css 的 ${label} 块丢了 env(safe-area-inset-top …) —— 安全区处理不许回退`)
+  }
 }
-if (shellCss.includes('@keyframes') && !shellCss.includes('prefers-reduced-motion')) {
-  errors.push('shell.css 有 @keyframes 却没有 prefers-reduced-motion 守卫(M2 纪律)')
+// ②动效:每一条 animation 声明都必须落在 @media (prefers-reduced-motion:
+//   no-preference) 块内(M2 渲染器同一条纪律 —— 壳没有 vitest 跑者,门守在
+//   这里)。@keyframes 本身不动画,套上它的 animation: 才动,所以数的是声明。
+const guarded = []
+{
+  const re = /@media[^{]*prefers-reduced-motion:\s*no-preference[^{]*\{/g
+  let m
+  while ((m = re.exec(shellCss))) {
+    let depth = 1
+    let i = re.lastIndex
+    while (i < shellCss.length && depth > 0) {
+      if (shellCss[i] === '{') depth++
+      else if (shellCss[i] === '}') depth--
+      i++
+    }
+    guarded.push([m.index, i])
+  }
+}
+{
+  const re = /animation(?:-name)?\s*:/g
+  let m
+  let loose = 0
+  while ((m = re.exec(shellCss))) {
+    if (!guarded.some(([a, b]) => m.index > a && m.index < b)) loose++
+  }
+  if (loose > 0) {
+    errors.push(`shell.css 有 ${loose} 处 animation 声明落在 prefers-reduced-motion: no-preference 守卫之外(M2 纪律)`)
+  }
 }
 
 if (errors.length) {

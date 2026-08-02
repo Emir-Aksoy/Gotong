@@ -55,7 +55,7 @@
 // v18 (POLISH-M2): renderer grew skeleton/empty/error state blocks + an SVG
 // icon registry; the css grew their rules (.sdui-skel/.sdui-state/.sdui-icon).
 // A stale half would shimmer nothing or drop icons — same pair, same reason.
-const CACHE = 'gotong-shell-v18'
+const CACHE = 'gotong-shell-v19'
 
 // Stable, role-agnostic static shell. app.html is excluded on purpose
 // (role-injected); admin.js / identity-ui.js etc. are left to the runtime

@@ -44,6 +44,7 @@
       pullDown: '下拉刷新',
       pullRelease: '松开刷新',
       pullBusy: '刷新中…',
+      refresh: '刷新',
     },
     en: {
       lead: 'Connect your own hub: generate a pairing code under "Me → Devices" on the web, scan the QR or type both fields below.',
@@ -71,6 +72,7 @@
       pullDown: 'Pull to refresh',
       pullRelease: 'Release to refresh',
       pullBusy: 'Refreshing…',
+      refresh: 'Refresh',
     },
   }
 
@@ -122,39 +124,58 @@
 
   /* POLISH-M3 —— 主题是壳 chrome 的决定(mount 合同原话):壳皮跟系统明暗走
    * (shell.css 的 prefers-color-scheme),面板必须跟壳皮同色,否则浅色手机上
-   * 是白壳配黑面板。matchMedia 探不到时回落 dark = 渲染器的原生默认。 */
+   * 是白壳配黑面板。matchMedia 探不到时回落 light —— 与壳皮同判:CSS 的 dark
+   * 块同样只在媒体查询命中时生效,探不到=壳皮落浅色,面板必须跟着落浅色
+   * (回落 dark 会正好造出「白壳配黑面板」)。 */
   function prefersDark() {
     try {
       return !!(window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches)
     } catch (_) {
-      return true
+      return false
     }
   }
 
   var mountedTheme = null
+
+  function mountPanel(theme) {
+    mountedTheme = theme
+    handle = window.GotongPanel.mount({
+      host: $('shell-host'),
+      theme: theme,
+      lang: function () {
+        return lang
+      },
+      gotoHome: function () {
+        note(t('noHome'))
+      },
+      storageKey: 'gotong-shell-ack',
+    })
+  }
+
+  /* 系统明暗中途翻转(手机日落自动切换):只重打主题戳,不重渲染 —— 重挂会把
+   * 聊天框里打了一半的草稿、滚动位置一并吃掉(POLISH-M4 Codex H1)。setTheme
+   * 缺席(理论上到不了:www/ 三件同批导出,不存在版本错配)才退回重挂兜底 ——
+   * 错色比丢草稿更糟。 */
+  function applyPanelTheme() {
+    var theme = prefersDark() ? 'dark' : 'light'
+    if (!handle || mountedTheme === theme) return
+    if (typeof handle.setTheme === 'function') {
+      mountedTheme = theme
+      handle.setTheme(theme)
+    } else {
+      mountPanel(theme)
+    }
+  }
 
   function showPanel() {
     $('screen-pair').hidden = true
     $('screen-panel').hidden = false
     renderStrings()
     renderNotify()
-    // 系统明暗中途翻转(手机日落自动切换)时 mount 重挂重打主题戳;没翻就只
-    // 重渲染。mount 对同一宿主本就是重绑语义(一页一面板是设计)。
-    var theme = prefersDark() ? 'dark' : 'light'
-    if (!handle || mountedTheme !== theme) {
-      mountedTheme = theme
-      handle = window.GotongPanel.mount({
-        host: $('shell-host'),
-        theme: theme,
-        lang: function () {
-          return lang
-        },
-        gotoHome: function () {
-          note(t('noHome'))
-        },
-        storageKey: 'gotong-shell-ack',
-      })
+    if (!handle) {
+      mountPanel(prefersDark() ? 'dark' : 'light')
     } else {
+      applyPanelTheme()
       handle.render()
     }
   }
@@ -164,7 +185,7 @@
       var mq = window.matchMedia('(prefers-color-scheme: dark)')
       if (mq && typeof mq.addEventListener === 'function') {
         mq.addEventListener('change', function () {
-          if (!$('screen-panel').hidden) showPanel()
+          if (!$('screen-panel').hidden) applyPanelTheme()
         })
       }
     } catch (_) {}
@@ -542,6 +563,12 @@
   })
   $('disconnect-btn').addEventListener('click', doDisconnect)
   $('notify-btn').addEventListener('click', toggleNotify)
+  // 手势之外的刷新正路(POLISH-M4 Codex H2):老龄用户稳定拖拽 70px 并不容易,
+  // WCAG 2.5.1 也要求路径手势有单点替代 —— 按钮才是正路,下拉是加分项。
+  // 加载反馈就是渲染器 M2 的骨架屏,不再叠一层指示条。
+  $('refresh-btn').addEventListener('click', function () {
+    if (handle && !$('screen-panel').hidden) handle.render()
+  })
   $('lang-btn').addEventListener('click', function () {
     lang = lang === 'zh' ? 'en' : 'zh'
     try {
