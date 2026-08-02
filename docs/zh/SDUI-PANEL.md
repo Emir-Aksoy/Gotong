@@ -10,7 +10,9 @@
 > (2026-07-26/27),12 个可摆组件全部接真数据**(原 13 项中 `image-card`
 > 于 SHELL-M3 退役——它是唯一从没长出渲染器的一项,见 §六)。原 M5「壳与分发」
 > 侦察后确认装不进一格,已展开成独立的 **SHELL track**,见
-> [`APP-SHELL.md`](APP-SHELL.md)(形态拍板:真壳 = 本地资源 + `CapacitorHttp`);
+> [`APP-SHELL.md`](APP-SHELL.md)(形态拍板:真壳 = 本地资源 + `CapacitorHttp`;
+> **⏸ 壳 app 方向 2026-08-02 已搁置**,声明与恢复路径见该文档顶部——**本 track
+> 的网页端面板不受影响**,渲染器/组件/管家编排在生产网页端继续服役);
 > **§5.4 版本协商已由 SHELL-M3 做实**(`f6aa7be`);**SHELL-M4 起渲染器
 > 独立成件**——`sdui-ui.js` 自带词典与 `sdui-ui.css`,通过 `GotongPanel.mount(opts)`
 > 挂在任意宿主元素上,本 SPA 只是它的第一个调用者(裸页示例 `static/sdui-standalone.html`)。
