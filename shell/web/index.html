@@ -8,7 +8,10 @@
        回环」这条规矩由 hub-target 的 normalizeHubBase 一处咽喉裁决,不靠 CSP。 -->
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src *; base-uri 'none'; form-action 'none'">
   <meta name="color-scheme" content="light dark">
-  <meta name="theme-color" content="#1a1a1a">
+  <!-- POLISH-M3:theme-color 跟系统明暗走(与 shell.css 的 --shell-bg 同值),
+       状态栏区不再永远压深色。 -->
+  <meta name="theme-color" media="(prefers-color-scheme: light)" content="#f5f5f4">
+  <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#161615">
   <title>Gotong</title>
   <link rel="stylesheet" href="sdui-ui.css">
   <link rel="stylesheet" href="shell.css">
@@ -47,6 +50,9 @@
       <span id="notify-state" class="notify-state"></span>
       <button id="notify-btn" type="button"></button>
     </div>
+    <!-- POLISH-M3:下拉刷新指示条。纯提示层(pointer-events:none),手势与
+         触发都在 shell.js;加载反馈交棒给渲染器的骨架屏。 -->
+    <div id="pull-hint" class="pull-hint" hidden aria-hidden="true"><span id="pull-hint-text" class="pull-hint-pill"></span></div>
     <div id="shell-host"></div>
     <p id="panel-note" class="shell-note" role="status" hidden></p>
   </main>

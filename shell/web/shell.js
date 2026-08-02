@@ -41,6 +41,9 @@
       notifyDenied: '系统未授权通知 —— 到 iOS 设置里为 Gotong 打开后再试。',
       notifyErrHub: '这台 hub 未启用原生推送(服务端没配 apns.json)。',
       notifyErrReg: '开启失败,稍后再试。',
+      pullDown: '下拉刷新',
+      pullRelease: '松开刷新',
+      pullBusy: '刷新中…',
     },
     en: {
       lead: 'Connect your own hub: generate a pairing code under "Me → Devices" on the web, scan the QR or type both fields below.',
@@ -65,6 +68,9 @@
       notifyDenied: 'Notifications not authorized — enable Gotong in iOS Settings, then retry.',
       notifyErrHub: 'This hub has no native push (no apns.json on the server).',
       notifyErrReg: 'Could not enable — try again later.',
+      pullDown: 'Pull to refresh',
+      pullRelease: 'Release to refresh',
+      pullBusy: 'Refreshing…',
     },
   }
 
@@ -114,14 +120,32 @@
     $('pair-err').textContent = msg || ''
   }
 
+  /* POLISH-M3 —— 主题是壳 chrome 的决定(mount 合同原话):壳皮跟系统明暗走
+   * (shell.css 的 prefers-color-scheme),面板必须跟壳皮同色,否则浅色手机上
+   * 是白壳配黑面板。matchMedia 探不到时回落 dark = 渲染器的原生默认。 */
+  function prefersDark() {
+    try {
+      return !!(window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches)
+    } catch (_) {
+      return true
+    }
+  }
+
+  var mountedTheme = null
+
   function showPanel() {
     $('screen-pair').hidden = true
     $('screen-panel').hidden = false
     renderStrings()
     renderNotify()
-    if (!handle) {
+    // 系统明暗中途翻转(手机日落自动切换)时 mount 重挂重打主题戳;没翻就只
+    // 重渲染。mount 对同一宿主本就是重绑语义(一页一面板是设计)。
+    var theme = prefersDark() ? 'dark' : 'light'
+    if (!handle || mountedTheme !== theme) {
+      mountedTheme = theme
       handle = window.GotongPanel.mount({
         host: $('shell-host'),
+        theme: theme,
         lang: function () {
           return lang
         },
@@ -133,6 +157,17 @@
     } else {
       handle.render()
     }
+  }
+
+  function wireScheme() {
+    try {
+      var mq = window.matchMedia('(prefers-color-scheme: dark)')
+      if (mq && typeof mq.addEventListener === 'function') {
+        mq.addEventListener('change', function () {
+          if (!$('screen-panel').hidden) showPanel()
+        })
+      }
+    } catch (_) {}
   }
 
   // --- 配对 ---------------------------------------------------------------
@@ -398,6 +433,78 @@
       })
   }
 
+  // --- 下拉刷新(POLISH-M3) -------------------------------------------------
+  //
+  // 壳里没有浏览器刷新按钮,「重新拉一次面板数据」需要一个手势。三条边界:
+  // ①全程被动监听零 preventDefault —— 绝不挡正常滚动,iOS 橡皮筋/Android 顶部
+  // 光晕照常,指示条只是叠上去的提示层;②只在页面已滚到顶时武装(橡皮筋期间
+  // scrollTop 会是负数,判 <=0);③触发即 handle.render() —— 加载反馈交棒给
+  // 渲染器 M2 的骨架屏,指示条短暂示意后收场。
+
+  var PULL_TRIGGER = 70
+
+  function wirePullRefresh() {
+    var startY = 0
+    var pulling = false
+    var busy = false
+    function atTop() {
+      var el = document.scrollingElement || document.documentElement
+      return (el ? el.scrollTop : 0) <= 0
+    }
+    function reset() {
+      pulling = false
+      $('pull-hint').hidden = true
+      $('pull-hint-text').style.transform = ''
+    }
+    window.addEventListener(
+      'touchstart',
+      function (ev) {
+        if (busy || $('screen-panel').hidden || !ev.touches || ev.touches.length !== 1) return
+        if (!atTop()) return
+        startY = ev.touches[0].clientY
+        pulling = true
+      },
+      { passive: true },
+    )
+    window.addEventListener(
+      'touchmove',
+      function (ev) {
+        if (!pulling || busy || !ev.touches || !ev.touches.length) return
+        var d = ev.touches[0].clientY - startY
+        if (d < 12 || !atTop()) {
+          $('pull-hint').hidden = true
+          return
+        }
+        $('pull-hint').hidden = false
+        $('pull-hint-text').textContent = t(d > PULL_TRIGGER ? 'pullRelease' : 'pullDown')
+        $('pull-hint-text').style.transform = 'translateY(' + Math.min(d / 2.5, 48) + 'px)'
+      },
+      { passive: true },
+    )
+    window.addEventListener(
+      'touchend',
+      function (ev) {
+        if (!pulling || busy) return
+        var y = ev.changedTouches && ev.changedTouches[0] ? ev.changedTouches[0].clientY : startY
+        if (y - startY > PULL_TRIGGER && atTop() && handle) {
+          busy = true
+          $('pull-hint').hidden = false
+          $('pull-hint-text').textContent = t('pullBusy')
+          $('pull-hint-text').style.transform = 'translateY(20px)'
+          handle.render()
+          setTimeout(function () {
+            busy = false
+            reset()
+          }, 700)
+        } else {
+          reset()
+        }
+      },
+      { passive: true },
+    )
+    window.addEventListener('touchcancel', reset, { passive: true })
+  }
+
   // --- 断开 ---------------------------------------------------------------
 
   function doDisconnect() {
@@ -445,6 +552,8 @@
 
   wireDeepLink()
   wirePush()
+  wireScheme()
+  wirePullRefresh()
   renderStrings()
 
   var expiresAt = window.GotongHub.expiresAt()

@@ -86,6 +86,17 @@ const sdui = read('sdui-ui.js')
 if (!sdui.includes('GotongPanel') || !sdui.includes('CLIENT_SCHEMA_VERSION')) {
   errors.push('sdui-ui.js 里找不到 GotongPanel/CLIENT_SCHEMA_VERSION —— 拷错文件了?')
 }
+// POLISH-M3 —— 壳 chrome 的两条不许回退:①安全区处理(刘海/圆角屏的顶栏与配对屏
+// 都靠 env() 留出,丢了它顶栏会钻进状态栏区);②壳里出现的任何 @keyframes 动效
+// 必须同文件带 prefers-reduced-motion 守卫(M2 渲染器同一条纪律 —— 壳没有 vitest
+// 跑者,门守在这里)。
+const shellCss = read('shell.css')
+if (!shellCss.includes('env(safe-area-inset-top')) {
+  errors.push('shell.css 丢了 env(safe-area-inset-top …) —— 安全区处理不许回退')
+}
+if (shellCss.includes('@keyframes') && !shellCss.includes('prefers-reduced-motion')) {
+  errors.push('shell.css 有 @keyframes 却没有 prefers-reduced-motion 守卫(M2 纪律)')
+}
 
 if (errors.length) {
   console.error('export-webdir: 拒绝出货 ——')

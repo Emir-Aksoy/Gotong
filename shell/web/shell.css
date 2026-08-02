@@ -1,5 +1,8 @@
 /* SHELL-M5 —— 壳皮。面板本体的样式在 sdui-ui.css(与 hub 同一份字节);这里只有
- * 壳自己的两屏:配对卡与顶栏。刘海/圆角屏的安全区用 env() 留出。 */
+ * 壳自己的两屏:配对卡与顶栏。刘海/圆角屏的安全区用 env() 留出。
+ * POLISH-M3 —— 壳 chrome 收拾:配对屏按老龄化基线放大(sdui 的 17px/48px 在壳
+ * 第一屏同样适用)、sticky 顶栏自己接管顶部安全区(否则滚动后钻进刘海区)、横屏
+ * 左右 inset、两屏切换过渡(带 reduced-motion 守卫)、下拉刷新指示条。 */
 
 :root {
   --shell-bg: #f5f5f4;
@@ -34,85 +37,112 @@ html, body {
  * 踩过同一坑)—— 两屏的 hidden 必须显式夺回,否则配对屏和面板屏会叠着渲染。 */
 #screen-pair[hidden], #screen-panel[hidden] { display: none; }
 
-/* ---- 配对屏 ---- */
+/* 屏幕切换过渡:hidden↔显示走 display 翻转,重新显示即从头播一遍(display:none
+ * 会重置 CSS 动画)。M2 渲染器同一条纪律:动效必须配 reduced-motion,这里直接
+ * 整段包进 no-preference。 */
+@media (prefers-reduced-motion: no-preference) {
+  #screen-pair:not([hidden]), #screen-panel:not([hidden]) {
+    animation: shell-screen-in 0.22s ease-out;
+  }
+}
+@keyframes shell-screen-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: none; }
+}
+
+/* ---- 配对屏 ----
+ * 老龄化基线:这是新用户见到的第一屏,输入地址与配对码正是最费眼的动作,
+ * 字号/触控只能比面板更大不能更小(输入框 ≥52px、主按钮 ≥56px)。 */
 #screen-pair {
   min-height: 100vh;
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: calc(env(safe-area-inset-top, 0px) + 24px) 16px calc(env(safe-area-inset-bottom, 0px) + 24px);
+  padding: calc(env(safe-area-inset-top, 0px) + 24px)
+    calc(env(safe-area-inset-right, 0px) + 16px)
+    calc(env(safe-area-inset-bottom, 0px) + 24px)
+    calc(env(safe-area-inset-left, 0px) + 16px);
   box-sizing: border-box;
 }
 .pair-card {
   width: 100%;
-  max-width: 380px;
+  max-width: 420px;
   background: var(--shell-card);
   border: 1px solid var(--shell-line);
-  border-radius: 14px;
-  padding: 28px 22px;
+  border-radius: 16px;
+  padding: 30px 24px;
   box-sizing: border-box;
 }
 .pair-title {
-  margin: 0 0 6px;
-  font-size: 26px;
+  margin: 0 0 8px;
+  font-size: 30px;
   letter-spacing: 0.5px;
 }
 .pair-lead {
-  margin: 0 0 18px;
-  font-size: 14px;
+  margin: 0 0 20px;
+  font-size: 17px;
   line-height: 1.6;
   color: var(--shell-muted);
 }
 .pair-field {
   display: block;
-  margin-bottom: 14px;
-  font-size: 13px;
+  margin-bottom: 16px;
+  font-size: 16px;
   color: var(--shell-muted);
 }
 .pair-field input {
   display: block;
   width: 100%;
-  margin-top: 5px;
-  padding: 10px 12px;
-  font-size: 16px; /* iOS:小于 16px 聚焦时会整页放大 */
+  margin-top: 6px;
+  padding: 13px 14px;
+  min-height: 52px;
+  font-size: 18px; /* iOS:小于 16px 聚焦时会整页放大;老龄化再抬一档 */
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   color: var(--shell-fg);
   background: var(--shell-bg);
   border: 1px solid var(--shell-line);
-  border-radius: 9px;
+  border-radius: 10px;
   box-sizing: border-box;
 }
 #pair-btn {
   width: 100%;
-  margin-top: 6px;
-  padding: 12px;
-  font-size: 16px;
+  margin-top: 8px;
+  padding: 14px;
+  min-height: 56px;
+  font-size: 19px;
+  font-weight: 600;
   color: #fff;
   background: var(--shell-accent);
   border: none;
-  border-radius: 10px;
+  border-radius: 12px;
 }
 #pair-btn:disabled { opacity: 0.55; }
 .pair-err {
   min-height: 1.2em;
-  margin: 12px 0 0;
-  font-size: 13px;
+  margin: 14px 0 0;
+  font-size: 15px;
   line-height: 1.5;
   color: var(--shell-err);
 }
 
-/* ---- 面板屏 ---- */
+/* ---- 面板屏 ----
+ * 顶部安全区归 sticky 顶栏自己:padding 挂在容器上时,滚动后 sticky 在
+ * top:0 的顶栏会钻进刘海/状态栏区且盖不住底下滚过的内容 —— 让顶栏自己
+ * 垫出这段并带背景,才是「状态栏区永远是栏的一部分」。左右 inset 挂容器
+ * (横屏刘海),gutter 露出的是 body 同色背景,视觉无缝。 */
 #screen-panel {
   min-height: 100vh;
   box-sizing: border-box;
-  padding: calc(env(safe-area-inset-top, 0px)) 0 calc(env(safe-area-inset-bottom, 0px) + 8px);
+  padding: 0 env(safe-area-inset-right, 0px)
+    calc(env(safe-area-inset-bottom, 0px) + 8px)
+    env(safe-area-inset-left, 0px);
 }
 .shell-bar {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  padding: 10px 14px;
+  padding: calc(env(safe-area-inset-top, 0px) + 10px) 14px 10px;
   border-bottom: 1px solid var(--shell-line);
   position: sticky;
   top: 0;
@@ -120,20 +150,23 @@ html, body {
   z-index: 5;
 }
 .conn-info {
-  font-size: 12px;
+  font-size: 14px;
   color: var(--shell-muted);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .shell-bar-btns { display: flex; gap: 8px; flex-shrink: 0; }
+/* 壳 chrome 按钮 44px = 触控底线(HIG 最小值);面板内容自己的 48px 基线在
+ * sdui-ui.css,chrome 是次级动作但同样不许小到按不准。 */
 .shell-bar button {
-  padding: 6px 12px;
-  font-size: 13px;
+  padding: 9px 14px;
+  min-height: 44px;
+  font-size: 15px;
   color: var(--shell-fg);
   background: var(--shell-card);
   border: 1px solid var(--shell-line);
-  border-radius: 8px;
+  border-radius: 9px;
 }
 /* ---- SHELL-M6:通知行 ---- */
 .notify-row {
@@ -148,22 +181,47 @@ html, body {
   border-radius: 9px;
 }
 .notify-row[hidden] { display: none; }
-.notify-state { font-size: 13px; color: var(--shell-muted); }
+.notify-state { font-size: 15px; color: var(--shell-muted); }
 .notify-row button {
   flex-shrink: 0;
-  padding: 6px 12px;
-  font-size: 13px;
+  padding: 9px 14px;
+  min-height: 44px;
+  font-size: 15px;
   color: var(--shell-fg);
   background: var(--shell-bg);
   border: 1px solid var(--shell-line);
-  border-radius: 8px;
+  border-radius: 9px;
+}
+
+/* ---- 下拉刷新指示条(POLISH-M3) ----
+ * 纯提示层:pointer-events:none,永不参与手势;位移由 shell.js 逐帧驱动
+ * (transform 上不挂 transition,避免和逐帧更新打架)。 */
+.pull-hint {
+  position: fixed;
+  top: calc(env(safe-area-inset-top, 0px) + 58px);
+  left: 0;
+  right: 0;
+  display: flex;
+  justify-content: center;
+  pointer-events: none;
+  z-index: 4;
+}
+.pull-hint[hidden] { display: none; }
+.pull-hint-pill {
+  padding: 8px 16px;
+  font-size: 15px;
+  color: var(--shell-muted);
+  background: var(--shell-card);
+  border: 1px solid var(--shell-line);
+  border-radius: 999px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
 }
 
 #shell-host { padding: 4px 14px 20px; }
 .shell-note {
   margin: 0 14px;
   padding: 10px 12px;
-  font-size: 13px;
+  font-size: 15px;
   color: var(--shell-muted);
   background: var(--shell-card);
   border: 1px solid var(--shell-line);
