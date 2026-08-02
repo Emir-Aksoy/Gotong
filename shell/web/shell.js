@@ -459,7 +459,11 @@
     window.addEventListener(
       'touchstart',
       function (ev) {
-        if (busy || $('screen-panel').hidden || !ev.touches || ev.touches.length !== 1) return
+        if (busy) return
+        // 兜底:上一轮手势若因异常没走到 end/cancel(pill 残留在屏上),新触摸
+        // 一落指就清掉 —— 提示层绝不许卡住。busy 态除外(那是刷新反馈)。
+        reset()
+        if ($('screen-panel').hidden || !ev.touches || ev.touches.length !== 1) return
         if (!atTop()) return
         startY = ev.touches[0].clientY
         pulling = true

@@ -12,6 +12,7 @@
   --shell-line: #e5e5e3;
   --shell-accent: #5b9bd5;
   --shell-err: #b91c1c;
+  --shell-press: rgba(60, 60, 80, 0.12); /* 与 --sdui-press 同手法:按压=半透明遮罩 */
 }
 @media (prefers-color-scheme: dark) {
   :root {
@@ -21,6 +22,7 @@
     --shell-card: #232322;
     --shell-line: #3a3a38;
     --shell-err: #f87171;
+    --shell-press: rgba(127, 127, 127, 0.18);
   }
 }
 
@@ -116,6 +118,7 @@ html, body {
   border: none;
   border-radius: 12px;
 }
+#pair-btn:active { opacity: 0.82; } /* 填充主按钮的按压反馈,与面板发送按钮同款 */
 #pair-btn:disabled { opacity: 0.55; }
 .pair-err {
   min-height: 1.2em;
@@ -168,6 +171,8 @@ html, body {
   border: 1px solid var(--shell-line);
   border-radius: 9px;
 }
+/* 按压反馈:老龄用户「我按到了吗」的确认感(面板内按钮 M2 已有,壳补齐)。 */
+.shell-bar button:active, .notify-row button:active { background: var(--shell-press); }
 /* ---- SHELL-M6:通知行 ---- */
 .notify-row {
   display: flex;
