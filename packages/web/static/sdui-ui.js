@@ -432,15 +432,19 @@
   // renderer. List content comes solely from GET /api/me/inbox.
   function renderApprovalInbox() {
     var card = el('div', 'sdui-card sdui-inbox')
-    var list = el('div', 'sdui-inbox-list', t('sduiLoading'))
+    var list = el('div', 'sdui-inbox-list')
+    skeletonInto(list)
     card.appendChild(list)
     fetch('/api/me/inbox')
       .then(function (r) { return r.ok ? r.json() : null })
       .then(function (j) {
-        var items = j && Array.isArray(j.items) ? j.items : []
-        list.replaceChildren()
+        settleBody(list)
+        // A non-OK answer is an ERROR, not an empty inbox — "nothing waiting"
+        // on a 500 would be false calm (POLISH-M2 fixed this long-standing bias).
+        if (!j || !Array.isArray(j.items)) { list.appendChild(errorState()); return }
+        var items = j.items
         if (items.length === 0) {
-          list.appendChild(el('p', 'sdui-meta', t('sduiInboxEmpty')))
+          list.appendChild(emptyState('check', t('sduiInboxEmpty')))
           return
         }
         items.forEach(function (item) {
@@ -454,7 +458,8 @@
         })
       })
       .catch(function () {
-        list.textContent = t('sduiLoadFailed')
+        settleBody(list)
+        list.appendChild(errorState())
       })
     return card
   }
@@ -463,6 +468,74 @@
   function placeholderCard(text) {
     return el('div', 'sdui-card sdui-placeholder', text)
   }
+
+  // ---- icons (POLISH-M2) ---------------------------------------------------
+  // Hand-built 24×24 stroke icons (Feather-style geometry), constructed with
+  // createElementNS — never markup strings (the innerHTML gate forbids the
+  // sink, and icons must not become a second injection surface). Table-driven
+  // so the contract test can double-check every icon-name call site against
+  // this registry: a typo'd name must fail a gate, not render an empty box.
+  var SVG_NS = 'http://www.w3.org/2000/svg'
+  var ICON_PATHS = {
+    alert: ['M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z', 'M12 9v4', 'M12 17h.01'],
+    off: ['M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20z', 'M4.93 4.93l14.14 14.14'],
+    check: ['M22 11.08V12a10 10 0 1 1-5.93-9.14', 'M22 4 12 14.01l-3 3'],
+    clock: ['M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20z', 'M12 6v6l4 2'],
+    calendar: ['M19 4H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2z', 'M16 2v4', 'M8 2v4', 'M3 10h18'],
+    chart: ['M18 20V10', 'M12 20V4', 'M6 20v-6'],
+    doc: ['M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z', 'M14 2v6h6', 'M16 13H8', 'M16 17H8'],
+    cloud: ['M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z'],
+    feed: ['M12 2 2 7l10 5 10-5-10-5z', 'M2 17l10 5 10-5', 'M2 12l10 5 10-5'],
+    shield: ['M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z', 'm9 12 2 2 4-4'],
+  }
+  function svgIcon(name) {
+    var svg = document.createElementNS(SVG_NS, 'svg')
+    svg.setAttribute('viewBox', '0 0 24 24')
+    svg.setAttribute('fill', 'none')
+    svg.setAttribute('stroke', 'currentColor')
+    svg.setAttribute('stroke-width', '2')
+    svg.setAttribute('stroke-linecap', 'round')
+    svg.setAttribute('stroke-linejoin', 'round')
+    svg.setAttribute('aria-hidden', 'true')
+    svg.setAttribute('class', 'sdui-icon')
+    var paths = ICON_PATHS[name] || []
+    for (var i = 0; i < paths.length; i++) {
+      var p = document.createElementNS(SVG_NS, 'path')
+      p.setAttribute('d', paths[i])
+      svg.appendChild(p)
+    }
+    return svg
+  }
+
+  // ---- async-card states (POLISH-M2) ---------------------------------------
+  // Every data-backed card shares three visual states: a shimmer skeleton
+  // while loading (no bare-text flash), an icon+text empty state, an icon+text
+  // error state. Pure decoration on the existing three-state honesty contract
+  // (failed / unwired / rows) — the texts and the decision points are exactly
+  // the ones that were already there.
+  function skeletonInto(body) {
+    body.replaceChildren()
+    body.setAttribute('aria-busy', 'true')
+    var widths = [62, 88, 74]
+    for (var i = 0; i < widths.length; i++) {
+      var bar = el('div', 'sdui-skel')
+      bar.style.width = widths[i] + '%'
+      body.appendChild(bar)
+    }
+  }
+  function settleBody(body) {
+    body.replaceChildren()
+    body.removeAttribute('aria-busy')
+  }
+  function stateBlock(kind, icon, text) {
+    var box = el('div', 'sdui-state sdui-state-' + kind)
+    box.appendChild(svgIcon(icon))
+    box.appendChild(el('p', 'sdui-state-text', text))
+    return box
+  }
+  function emptyState(icon, text) { return stateBlock('empty', icon, text) }
+  function errorState() { return stateBlock('error', 'alert', t('sduiLoadFailed')) }
+  function missingState() { return stateBlock('empty', 'off', t('sduiSourceMissing')) }
 
   // ---- C1a data-driven components ------------------------------------------
   // One fetch per named source per render (several components can share
@@ -485,12 +558,13 @@
 
   function dataCard(cls, kind, onData, qs) {
     var card = el('div', 'sdui-card ' + cls)
-    var body = el('div', 'sdui-data-body', t('sduiLoading'))
+    var body = el('div', 'sdui-data-body')
+    skeletonInto(body)
     card.appendChild(body)
     fetchData(kind, qs).then(function (j) {
-      body.replaceChildren()
-      if (!j) { body.appendChild(el('p', 'sdui-meta', t('sduiLoadFailed'))); return }
-      if (j.available !== true) { body.appendChild(el('p', 'sdui-meta', t('sduiSourceMissing'))); return }
+      settleBody(body)
+      if (!j) { body.appendChild(errorState()); return }
+      if (j.available !== true) { body.appendChild(missingState()); return }
       onData(body, j)
     })
     return card
@@ -538,7 +612,7 @@
     var limit = typeof params.limit === 'number' ? params.limit : 10
     return dataCard('sdui-schedules', 'schedules', function (body, j) {
       var rows = Array.isArray(j.schedules) ? j.schedules : []
-      if (rows.length === 0) { body.appendChild(el('p', 'sdui-meta', t('sduiSchedulesEmpty'))); return }
+      if (rows.length === 0) { body.appendChild(emptyState('clock', t('sduiSchedulesEmpty'))); return }
       rows.slice(0, limit).forEach(function (r) {
         var row = el('div', 'sdui-sched-item')
         var head = el('div', 'sdui-sched-head')
@@ -565,7 +639,7 @@
     return dataCard('sdui-calendar', 'schedules', function (body, j) {
       var rows = Array.isArray(j.schedules) ? j.schedules : []
       var active = rows.filter(function (r) { return r.enabled && r.valid && r.cadence })
-      if (active.length === 0) { body.appendChild(el('p', 'sdui-meta', t('sduiSchedulesEmpty'))); return }
+      if (active.length === 0) { body.appendChild(emptyState('calendar', t('sduiSchedulesEmpty'))); return }
       if (view === 'month') body.appendChild(el('p', 'sdui-meta sdui-cal-note', t('sduiCalendarMonthNote')))
       var browserTz = -new Date().getTimezoneOffset()
       var days = view === 'day' ? 1 : 7
@@ -599,7 +673,7 @@
     var limit = typeof params.limit === 'number' ? params.limit : 20
     return dataCard('sdui-tasks', 'tasks', function (body, j) {
       var rows = Array.isArray(j.tasks) ? j.tasks : []
-      if (rows.length === 0) { body.appendChild(el('p', 'sdui-meta', t('sduiTasksEmpty'))); return }
+      if (rows.length === 0) { body.appendChild(emptyState('check', t('sduiTasksEmpty'))); return }
       rows.slice(0, limit).forEach(function (r) {
         var row = el('div', 'sdui-task-item')
         row.appendChild(el('span', 'sdui-task-title', String(r.title || r.id)))
@@ -614,7 +688,7 @@
     // authority the butler and the admin panel read; nothing here re-judges.
     return dataCard('sdui-status', 'status', function (body, j) {
       var cards = Array.isArray(j.cards) ? j.cards : []
-      if (cards.length === 0) { body.appendChild(el('p', 'sdui-status-good', t('sduiStatusAllGood'))); return }
+      if (cards.length === 0) { body.appendChild(stateBlock('good', 'shield', t('sduiStatusAllGood'))); return }
       cards.forEach(function (c) {
         var row = el('div', 'sdui-status-item sdui-status-' + (c.severity === 'red' ? 'red' : 'yellow'))
         row.appendChild(el('strong', null, String(c.label || c.id)))
@@ -633,7 +707,7 @@
     var range = params.range === 'month' ? 'month' : 'week'
     return dataCard('sdui-chart', 'usage', function (body, j) {
       var days = Array.isArray(j.days) ? j.days : []
-      if (days.length === 0) { body.appendChild(el('p', 'sdui-meta', t('sduiUsageEmpty'))); return }
+      if (days.length === 0) { body.appendChild(emptyState('chart', t('sduiUsageEmpty'))); return }
       var calls = 0
       var cost = 0
       var max = 1
@@ -798,17 +872,19 @@
   }
 
   // Shared scaffold: fetch one content file, then badge + body. `provKey`
-  // distinguishes 「阿同写的」 (authored) from 「阿同整理」 (connector relay).
-  function relayCard(cls, fileId, provKey, emptyText, renderBody) {
+  // distinguishes 「阿同写的」 (authored) from 「阿同整理」 (connector relay);
+  // `emptyIcon` gives each relay species its own cold-start face.
+  function relayCard(cls, fileId, provKey, emptyIcon, emptyText, renderBody) {
     var card = el('div', 'sdui-card ' + cls)
-    var body = el('div', 'sdui-data-body', t('sduiLoading'))
+    var body = el('div', 'sdui-data-body')
+    skeletonInto(body)
     card.appendChild(body)
     fetchData('content', 'id=' + encodeURIComponent(fileId)).then(function (j) {
-      body.replaceChildren()
-      if (!j) { body.appendChild(el('p', 'sdui-meta', t('sduiLoadFailed'))); return }
-      if (j.available !== true) { body.appendChild(el('p', 'sdui-meta', t('sduiSourceMissing'))); return }
+      settleBody(body)
+      if (!j) { body.appendChild(errorState()); return }
+      if (j.available !== true) { body.appendChild(missingState()); return }
       if (j.exists !== true || typeof j.markdown !== 'string') {
-        body.appendChild(el('p', 'sdui-meta', emptyText))
+        body.appendChild(emptyState(emptyIcon, emptyText))
         return
       }
       // Fixed provenance stamp — rendered before any content, unconditionally.
@@ -821,12 +897,12 @@
 
   function renderMarkdownCard(component) {
     var fileId = contentSuffix(component, 'content:')
-    return relayCard('sdui-md', fileId, 'sduiContentByButler', t('sduiContentEmpty'), renderMarkdownInto)
+    return relayCard('sdui-md', fileId, 'sduiContentByButler', 'doc', t('sduiContentEmpty'), renderMarkdownInto)
   }
 
   function renderWeather(component) {
     var slot = contentSuffix(component, 'connector:')
-    return relayCard('sdui-weather', 'connector.' + slot, 'sduiContentCurated',
+    return relayCard('sdui-weather', 'connector.' + slot, 'sduiContentCurated', 'cloud',
       t('sduiConnectorEmpty', slot), renderMarkdownInto)
   }
 
@@ -834,7 +910,7 @@
     var params = componentParams(component)
     var limit = typeof params.limit === 'number' ? params.limit : 20
     var slot = contentSuffix(component, 'connector:')
-    return relayCard('sdui-feed', 'connector.' + slot, 'sduiContentCurated',
+    return relayCard('sdui-feed', 'connector.' + slot, 'sduiContentCurated', 'feed',
       t('sduiConnectorEmpty', slot), function (body, markdown) {
         // Top-level list items become feed cards; anything else renders as one
         // prose card. Honest split, no pretend per-item metadata.
@@ -853,7 +929,7 @@
 
   function renderCalendarRelay(component) {
     var slot = contentSuffix(component, 'connector:')
-    return relayCard('sdui-cal-relay', 'connector.' + slot, 'sduiContentCurated',
+    return relayCard('sdui-cal-relay', 'connector.' + slot, 'sduiContentCurated', 'calendar',
       t('sduiConnectorEmpty', slot), function (body, markdown) {
         // Relay content is butler-curated prose, not schedule rows — say so
         // instead of drawing a grid that would imply machine-read events.
@@ -1145,6 +1221,20 @@
       .catch(function () { /* not an owner (403) — block never appears */ })
   }
 
+  // Whole-panel loading face (POLISH-M2): two skeleton cards instead of a bare
+  // text line — the very first thing a member sees on every panel visit.
+  function panelSkeleton() {
+    var frag = document.createDocumentFragment()
+    for (var i = 0; i < 2; i++) {
+      var card = el('div', 'sdui-card')
+      var body = el('div', 'sdui-data-body')
+      skeletonInto(body)
+      card.appendChild(body)
+      frag.appendChild(card)
+    }
+    return frag
+  }
+
   var loading = false
   function loadPanel() {
     var host = CTX.host
@@ -1152,7 +1242,7 @@
     loading = true
     agentPromise = null // re-discover on each visit (agents may have changed)
     dataPromises = {} // C1a — every tab flip refetches the data sources too
-    host.replaceChildren(el('p', 'sdui-meta', t('sduiLoading')))
+    host.replaceChildren(panelSkeleton())
     // Declare what this renderer speaks; the hub answers with the verdict.
     fetch('/api/me/panel?client=' + CLIENT_SCHEMA_VERSION)
       .then(function (r) {

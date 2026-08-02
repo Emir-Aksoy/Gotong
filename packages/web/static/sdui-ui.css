@@ -61,6 +61,8 @@
   --sdui-press: rgba(127, 127, 127, 0.18);
   --sdui-bar-track: rgba(127, 127, 127, 0.15);
   --sdui-feed-bg: rgba(127, 127, 127, 0.07);
+  --sdui-shadow: rgba(0, 0, 0, 0.35);
+  --sdui-on-accent: #ffffff;
 
   font-size: var(--sdui-font);
   line-height: 1.6;
@@ -97,6 +99,8 @@
   --sdui-press: rgba(60, 60, 80, 0.12);
   --sdui-bar-track: rgba(60, 60, 80, 0.12);
   --sdui-feed-bg: rgba(60, 60, 80, 0.06);
+  --sdui-shadow: rgba(25, 25, 50, 0.08);
+  --sdui-on-accent: #ffffff;
 }
 
 /* ---- shared controls (老龄基线: every tap target ≥ --sdui-touch) --------- */
@@ -124,8 +128,45 @@
   outline: 2px solid var(--sdui-accent);
   outline-offset: 2px;
 }
+/* POLISH-M2 button hierarchy: the chat send is the panel's PRIMARY action
+ * (filled accent), quick-actions are secondary (tinted). Extra .sdui-root
+ * prefix so these win over the generic `.sdui-root button:active` press. */
+.sdui-root .sdui-chat-send {
+  background: var(--sdui-accent); border-color: var(--sdui-accent);
+  color: var(--sdui-on-accent); font-weight: 600;
+}
+.sdui-root .sdui-chat-send:active { background: var(--sdui-accent); opacity: 0.82; }
+.sdui-root .sdui-qa-btn {
+  background: var(--sdui-accent-bg); border-color: var(--sdui-accent-border);
+}
 
 .sdui-meta { color: var(--sdui-muted); font-size: 0.9em; margin: 0.3em 0; }
+
+/* ---- POLISH-M2: async-card states (skeleton / empty / error) + icons ----- */
+.sdui-icon { width: 1.6em; height: 1.6em; flex: none; }
+.sdui-state {
+  display: flex; flex-direction: column; align-items: center; gap: 0.3em;
+  padding: 0.8em 0.5em; text-align: center; color: var(--sdui-muted);
+}
+.sdui-state-text { margin: 0; font-size: 0.95em; }
+.sdui-state-error { color: var(--sdui-danger); }
+.sdui-state-good { color: var(--sdui-ok); }
+.sdui-skel {
+  height: 0.95em; border-radius: 6px; margin: 0.3em 0;
+  background: linear-gradient(90deg,
+    var(--sdui-bar-track) 25%, var(--sdui-press) 50%, var(--sdui-bar-track) 75%);
+  background-size: 200% 100%;
+  animation: sdui-shimmer 1.2s ease-in-out infinite;
+}
+@keyframes sdui-shimmer {
+  from { background-position: 200% 0; }
+  to { background-position: -200% 0; }
+}
+/* The shimmer is the renderer's first animation — it MUST respect the OS
+ * "reduce motion" setting (vestibular safety; a gate pins this pairing). */
+@media (prefers-reduced-motion: reduce) {
+  .sdui-skel { animation: none; }
+}
 
 /* ---- SDUI member panel (sdui-ui.js, SDUI-M2) ----------------------------- */
 /* Chrome only — component CONTENT is API-driven; the config chose layout. */
@@ -156,11 +197,22 @@
 .sdui-butler-undo { margin-left: auto; border-color: var(--sdui-accent-border); }
 .sdui-title { margin: 0.2em 0 0.6em; }
 .sdui-section { margin-bottom: 1.1em; }
-.sdui-heading { margin: 0.4em 0; opacity: 0.85; }
+/* POLISH-M2 card hierarchy: section headings carry an accent tick so a page
+ * of same-width cards still scans as titled groups, and cards float on a soft
+ * shadow instead of sitting flat on the border alone. */
+.sdui-heading {
+  display: flex; align-items: center; gap: 0.45em;
+  margin: 0.4em 0; font-size: 1.05em;
+}
+.sdui-heading::before {
+  content: ''; width: 4px; height: 1em; border-radius: 2px;
+  background: var(--sdui-accent); flex: none;
+}
 .sdui-card {
   border: 1px solid var(--sdui-border); border-radius: var(--sdui-radius);
   padding: 0.8em 0.95em;
   margin-bottom: 0.7em; background: var(--sdui-card-bg);
+  box-shadow: 0 1px 3px var(--sdui-shadow);
 }
 .sdui-placeholder { opacity: 0.7; font-size: 0.94em; }
 .sdui-divider { border: none; border-top: 1px solid var(--sdui-border); margin: 0.8em 0; }

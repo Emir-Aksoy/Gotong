@@ -52,7 +52,10 @@
 // and sdui-ui.js now stamps that class + data-sdui-scale. The pair shares one
 // runtime cache path — a stale one of the two would render an unstyled or
 // unscalable panel, so both must refresh together.
-const CACHE = 'gotong-shell-v17'
+// v18 (POLISH-M2): renderer grew skeleton/empty/error state blocks + an SVG
+// icon registry; the css grew their rules (.sdui-skel/.sdui-state/.sdui-icon).
+// A stale half would shimmer nothing or drop icons — same pair, same reason.
+const CACHE = 'gotong-shell-v18'
 
 // Stable, role-agnostic static shell. app.html is excluded on purpose
 // (role-injected); admin.js / identity-ui.js etc. are left to the runtime

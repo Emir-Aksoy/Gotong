@@ -391,4 +391,46 @@ describe('sdui-ui.js ↔ panel-schema.ts contract', () => {
     const fnEnd = rendererSrc.indexOf('\n  }', rendererSrc.indexOf('renderShapeSection(host, data.source)', fnStart))
     expect(rendererSrc.slice(fnStart, fnEnd)).not.toContain('data-sdui-theme')
   })
+
+  // ---- POLISH-M2: state blocks + icon registry ------------------------------
+
+  it('every icon-name call site names a real ICON_PATHS entry — both ways', () => {
+    const tableStart = rendererSrc.indexOf('var ICON_PATHS = {')
+    expect(tableStart).toBeGreaterThan(-1)
+    const tableSrc = rendererSrc.slice(tableStart, rendererSrc.indexOf('\n  }', tableStart))
+    const declared = new Set([...tableSrc.matchAll(/^ {4}([a-z-]+):/gm)].map((m) => m[1]))
+    expect(declared.size).toBeGreaterThan(0)
+    // Call sites: direct svgIcon / emptyState / stateBlock literals, plus the
+    // relayCard scaffold's 4th positional arg (its emptyIcon).
+    const used = [
+      ...rendererSrc.matchAll(/svgIcon\('([a-z-]+)'\)/g),
+      ...rendererSrc.matchAll(/emptyState\('([a-z-]+)'/g),
+      ...rendererSrc.matchAll(/stateBlock\('[a-z]+', '([a-z-]+)'/g),
+      ...rendererSrc.matchAll(/relayCard\('[^']*', [^,]*, '[A-Za-z]*', '([a-z-]+)'/g),
+    ].map((m) => m[1])
+    expect(used.length).toBeGreaterThan(0)
+    for (const name of used) {
+      expect(declared.has(name), `icon '${name}' used but not in ICON_PATHS`).toBe(true)
+    }
+    // Reverse: an icon nobody renders is dead weight that will silently rot.
+    for (const name of declared) {
+      expect(used.includes(name), `icon '${name}' declared but never used`).toBe(true)
+    }
+  })
+
+  it('the shimmer animation ships with a prefers-reduced-motion guard', () => {
+    expect(rendererCss).toContain('@keyframes sdui-shimmer')
+    const reduce = rendererCss.indexOf('prefers-reduced-motion: reduce')
+    expect(reduce).toBeGreaterThan(-1)
+    expect(rendererCss.slice(reduce)).toContain('animation: none')
+  })
+
+  it('skeleton loading pairs aria-busy set/remove (screen readers see the load)', () => {
+    const skel = rendererSrc.indexOf('function skeletonInto')
+    const settle = rendererSrc.indexOf('function settleBody')
+    expect(skel).toBeGreaterThan(-1)
+    expect(settle).toBeGreaterThan(skel)
+    expect(rendererSrc.slice(skel, settle)).toContain("setAttribute('aria-busy'")
+    expect(rendererSrc.slice(settle)).toContain("removeAttribute('aria-busy')")
+  })
 })
