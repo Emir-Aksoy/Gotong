@@ -13,6 +13,10 @@
 
   var handle = window.GotongPanel.mount({
     host: document.getElementById('standalone-host'),
+    // POLISH-M1 — this page's chrome is light (#fafafa body), so it opts into
+    // the light token set; before tokens existed the dark-hardcoded bubbles
+    // were nearly unreadable here. Theme is the HOST's call, not the config's.
+    theme: 'light',
     lang: function () {
       return lang
     },

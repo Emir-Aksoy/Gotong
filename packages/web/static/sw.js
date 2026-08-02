@@ -48,7 +48,11 @@
 // by config. app.html itself is never cached (role meta), but a stale v14
 // app.js against the new empty-nav markup would render no tabbar at all —
 // the precached app.js must refresh in lockstep with the markup change.
-const CACHE = 'gotong-shell-v16'
+// v17 (POLISH-M1): sdui-ui.css became a token system scoped to `.sdui-root`
+// and sdui-ui.js now stamps that class + data-sdui-scale. The pair shares one
+// runtime cache path — a stale one of the two would render an unstyled or
+// unscalable panel, so both must refresh together.
+const CACHE = 'gotong-shell-v17'
 
 // Stable, role-agnostic static shell. app.html is excluded on purpose
 // (role-injected); admin.js / identity-ui.js etc. are left to the runtime

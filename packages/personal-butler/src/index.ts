@@ -124,6 +124,7 @@ export {
   PANEL_ID_RE,
   PANEL_TAB_IDS,
   PANEL_RESERVED_TABS,
+  PANEL_SCALES,
   DEFAULT_PANEL,
   panelContract,
   panelContractVerdict,
@@ -135,5 +136,6 @@ export {
   type PanelComponent,
   type PanelComponentType,
   type PanelTabId,
+  type PanelScale,
   type PanelValidationResult,
 } from './panel-schema.js'

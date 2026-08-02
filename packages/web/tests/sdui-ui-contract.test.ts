@@ -339,4 +339,56 @@ describe('sdui-ui.js ↔ panel-schema.ts contract', () => {
     // inert here and the panel on screen came from the mount() call.
     expect(standaloneSrc).not.toContain('id="sdui-panel"')
   })
+
+  // ── POLISH-M1: tokens + scale + theme ───────────────────────────────────
+
+  // A scale tier the schema validates but no stylesheet implements would be a
+  // valid config that changes nothing — the image-card class of rot, for
+  // sizing. Every non-default tier must exist in all three places: schema
+  // enum, renderer stamp, stylesheet token block.
+  it('every schema scale tier has a renderer stamp and a stylesheet block', () => {
+    const scales = extractArray(schemaSrc, 'export const PANEL_SCALES')
+    expect(scales[0]).toBe('default')
+    expect(scales.length).toBeGreaterThan(1)
+    for (const tier of scales.slice(1)) {
+      expect(rendererSrc, `renderer stamp for scale '${tier}'`).toContain(`'${tier}'`)
+      expect(rendererCss, `stylesheet block for scale '${tier}'`).toContain(
+        `[data-sdui-scale="${tier}"]`,
+      )
+    }
+    // The stamp mechanism itself, and the token scope it depends on.
+    expect(rendererSrc).toContain("host.setAttribute('data-sdui-scale'")
+    expect(rendererSrc).toContain("classList.add('sdui-root')")
+    expect(rendererCss).toMatch(/\.sdui-root\s*\{/)
+    // Downgrade discipline: a stale attribute must be cleared before the
+    // config is read, and the stamp may only happen after it — renderPanel
+    // must not read scale from a schema it does not speak.
+    const fnStart = rendererSrc.indexOf('function renderPanel')
+    const clear = rendererSrc.indexOf("removeAttribute('data-sdui-scale')", fnStart)
+    const stamp = rendererSrc.indexOf("setAttribute('data-sdui-scale'", fnStart)
+    const configRead = rendererSrc.indexOf('data.config', fnStart)
+    expect(clear).toBeGreaterThanOrEqual(0)
+    expect(clear).toBeLessThan(configRead)
+    expect(stamp).toBeGreaterThan(configRead)
+  })
+
+  it('the light theme is HOST-opt-in (mount option), and the config cannot reach it', () => {
+    // Stylesheet carries the override block; mount() is the only writer.
+    expect(rendererCss).toContain('[data-sdui-theme="light"]')
+    expect(rendererSrc).toContain("o.theme === 'light'")
+    // The light-chromed standalone page is the first real consumer — without
+    // this the dark-hardcoded bubbles were nearly unreadable there.
+    expect(standaloneBootSrc).toContain("theme: 'light'")
+    // The SPA's content area is ALSO light chrome (white body under a dark
+    // site header) — its autoboot must declare that, or dark-default tokens
+    // paint invisible cards and washed-out muted text on the white page.
+    const bootStart = rendererSrc.indexOf('function boot()')
+    expect(bootStart).toBeGreaterThan(-1)
+    expect(rendererSrc.slice(bootStart)).toContain("theme: 'light'")
+    // renderPanel never touches the theme attribute: theme is host chrome,
+    // not per-render state, and must never come from data.config.
+    const fnStart = rendererSrc.indexOf('function renderPanel')
+    const fnEnd = rendererSrc.indexOf('\n  }', rendererSrc.indexOf('renderShapeSection(host, data.source)', fnStart))
+    expect(rendererSrc.slice(fnStart, fnEnd)).not.toContain('data-sdui-theme')
+  })
 })

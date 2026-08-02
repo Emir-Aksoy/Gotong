@@ -958,6 +958,14 @@
 
   function renderPanel(host, data) {
     host.replaceChildren()
+    // POLISH-M1 — the renderer's own root hooks. The class scopes the design
+    // tokens in sdui-ui.css; the scale attribute persists across renders (host
+    // element attrs are not cleared by replaceChildren), so it is REMOVED here
+    // and re-stamped only after the config is known readable — switching back
+    // from a large shape must actually shrink, and the client_outdated branch
+    // must not read a field from a schema it does not speak.
+    host.classList.add('sdui-root')
+    host.removeAttribute('data-sdui-scale')
     renderBadge(host)
     if (data.lastChange && data.lastChange.by === 'butler' && ackGet() !== data.lastChange.at) {
       renderButlerBanner(host, data.lastChange)
@@ -986,6 +994,7 @@
       renderShapeSection(host, data.source)
       return
     }
+    if (config.scale === 'large') host.setAttribute('data-sdui-scale', 'large')
     if (typeof config.title === 'string' && config.title) {
       host.appendChild(el('h2', 'sdui-title', config.title))
     }
@@ -1173,6 +1182,14 @@
       throw new Error('GotongPanel.mount: opts.host must be an element')
     }
     CTX.host = o.host
+    // POLISH-M1 — root class at mount time too, so the pre-render loading text
+    // already sits inside the token scope (renderPanel re-adds, harmlessly).
+    // Theme is HOST chrome's decision, never the config's: dark is the default
+    // (the native shell is dark chrome); light-chromed hosts — the SPA's white
+    // content area, the standalone page — each opt in with { theme: 'light' }.
+    if (typeof o.host.classList === 'object' && o.host.classList) o.host.classList.add('sdui-root')
+    if (o.theme === 'light') o.host.setAttribute('data-sdui-theme', 'light')
+    else o.host.removeAttribute('data-sdui-theme')
     if (typeof o.lang === 'function') CTX.lang = o.lang
     else if (typeof o.lang === 'string') CTX.lang = function () { return o.lang }
     if (typeof o.gotoHome === 'function') CTX.gotoHome = o.gotoHome
@@ -1205,6 +1222,10 @@
     if (!host) return
     var handle = mount({
       host: host,
+      // The SPA's content area is light-chromed (styles.css white body under a
+      // dark site header) — dark-default tokens would paint invisible cards and
+      // washed-out muted text there, so the SPA declares its chrome.
+      theme: 'light',
       lang: function () { return (window.Gotong && window.Gotong.lang) || DEFAULT_LANG },
       gotoHome: function () {
         if (window.Gotong && typeof window.Gotong.gotoTab === 'function') window.Gotong.gotoTab('home')

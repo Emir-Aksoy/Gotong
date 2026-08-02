@@ -30,6 +30,7 @@ import {
   PANEL_FIXED_ACTIONS,
   PANEL_LIMITS,
   PANEL_RESERVED_TABS,
+  PANEL_SCALES,
   PANEL_TAB_IDS,
 } from '@gotong/personal-butler'
 
@@ -149,12 +150,16 @@ export function renderPanelContractCheatsheet(): string {
     lines.push(`- ${type}(${bits.join(';')})`)
   }
   lines.push(
-    '顶层结构: { "schemaVersion": 1, "title"?: string, "tabs"?: string[], "sections": [{ "heading"?: string, "components": [{ "type", "source"?, "params"? }] }] }',
+    '顶层结构: { "schemaVersion": 1, "title"?: string, "tabs"?: string[], "scale"?: string, "sections": [{ "heading"?: string, "components": [{ "type", "source"?, "params"? }] }] }',
   )
   // SHELL-M4.5 — tabs 也从 schema 常量现场派生,同一条零手抄纪律。
   lines.push(
     `tabs(可选,导航骨架): 从 [${PANEL_TAB_IDS.join(', ')}] 里挑并排序,第一个是打开 app 的首屏;` +
       `${PANEL_RESERVED_TABS.join('/')} 是保留区(删了客户端也会补回);写了角色够不着的页签不会出现也不会给权限。`,
+  )
+  // POLISH-M1 — 同一条零手抄纪律:成员说「字太小/按钮太小」时,改的就是这个键。
+  lines.push(
+    `scale(可选,显示档): ${PANEL_SCALES.join(' | ')};large=大字大按钮(老人/视力不便),只改这位成员自己看到的大小,不改数据。`,
   )
   return lines.join('\n')
 }

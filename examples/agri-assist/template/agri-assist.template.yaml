@@ -182,6 +182,8 @@ template:
       config:
         schemaVersion: 1
         title: "菜园照看"
+        # 老龄友好:大字大按钮档(POLISH-M1 枚举,只改显示大小不改数据)。
+        scale: large
         sections:
           - heading: "天时"
             components:

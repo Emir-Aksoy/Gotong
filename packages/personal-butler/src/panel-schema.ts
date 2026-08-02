@@ -146,6 +146,19 @@ export type PanelTabId = (typeof PANEL_TAB_IDS)[number]
 export const PANEL_RESERVED_TABS = ['home', 'panel', 'settings'] as const
 
 /**
+ * Display scale tiers (POLISH-M1 老龄友好). `large` bumps the renderer's font
+ * and touch-target tokens (≈20px / 56px vs the 17px / 48px base) for members
+ * who need bigger everything — an ENUM the config picks, never free-form
+ * styling: the closed-set boundary ("绝不下发代码") applies to CSS exactly as
+ * it does to components. Additive and ignorable (an older client renders the
+ * base scale and every known field keeps its meaning), so schemaVersion stays
+ * 1 per the SHELL-M3 bump rule.
+ */
+export const PANEL_SCALES = ['default', 'large'] as const
+
+export type PanelScale = (typeof PANEL_SCALES)[number]
+
+/**
  * Identifier shape for prefixed source/action suffixes. Deliberately strict:
  * no `/`, no `..` (single dots allowed but not consecutive), no whitespace —
  * suffixes end up as ids handed to hub APIs, never as paths or URLs.
@@ -199,6 +212,13 @@ export interface PanelConfig {
    * only — clients intersect with their role baseline, never widen from it.
    */
   tabs?: PanelTabId[]
+  /**
+   * Optional display scale (POLISH-M1): 'large' asks the renderer for its
+   * big-type / big-touch-target tier. Absent = 'default'. Render hint only —
+   * it changes token values in the client's OWN stylesheet, never what data
+   * is served.
+   */
+  scale?: PanelScale
   sections: PanelSection[]
 }
 
@@ -326,7 +346,7 @@ export function validatePanelConfig(value: unknown): PanelValidationResult {
   if (!isPlainObject(value)) return { ok: false, errors: ['config: must be a JSON object'] }
 
   for (const k of Object.keys(value)) {
-    if (k !== 'schemaVersion' && k !== 'title' && k !== 'tabs' && k !== 'sections') {
+    if (k !== 'schemaVersion' && k !== 'title' && k !== 'tabs' && k !== 'scale' && k !== 'sections') {
       err(`config: unknown key "${k}"`)
     }
   }
@@ -339,6 +359,15 @@ export function validatePanelConfig(value: unknown): PanelValidationResult {
       err(`title: over ${PANEL_LIMITS.maxTitleChars} chars`)
     } else if (hostileText(value.title)) {
       err('title: control or bidi-override characters are not allowed')
+    }
+  }
+
+  if (value.scale !== undefined) {
+    if (
+      typeof value.scale !== 'string' ||
+      !(PANEL_SCALES as readonly string[]).includes(value.scale)
+    ) {
+      err(`scale: must be one of ${PANEL_SCALES.join(', ')}`)
     }
   }
 

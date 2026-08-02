@@ -8,6 +8,7 @@ import {
   PANEL_LIMITS,
   PANEL_RESERVED_TABS,
   PANEL_RESERVED_TYPES,
+  PANEL_SCALES,
   PANEL_SCHEMA_VERSION,
   PANEL_TAB_IDS,
   panelContract,
@@ -101,6 +102,29 @@ describe('validatePanelConfig — tabs (SHELL-M4.5 skeleton)', () => {
   it('reserved floor is a subset of the catalog (roster sanity)', () => {
     for (const t of PANEL_RESERVED_TABS) {
       expect(PANEL_TAB_IDS as readonly string[]).toContain(t)
+    }
+  })
+})
+
+describe('validatePanelConfig — scale (POLISH-M1 老龄友好)', () => {
+  it('accepts every catalog tier — the enum IS the whole styling surface', () => {
+    for (const scale of PANEL_SCALES) {
+      const res = validatePanelConfig(minimal({ scale }))
+      expect(res.ok, `scale=${scale}`).toBe(true)
+      if (res.ok) expect(res.config.scale).toBe(scale)
+    }
+  })
+
+  it('absent scale = valid (base tier; 未配 = 字节不变)', () => {
+    expect('scale' in DEFAULT_PANEL).toBe(false)
+    expect(validatePanelConfig(minimal()).ok).toBe(true)
+  })
+
+  it('rejects free-form styling smuggled through scale — closed set, no CSS', () => {
+    for (const bad of ['huge', 'font-size:40px', '', 40, { large: true }, ['large']] as const) {
+      const res = validatePanelConfig(minimal({ scale: bad as never }))
+      expect(res.ok, `scale=${JSON.stringify(bad)}`).toBe(false)
+      if (!res.ok) expect(res.errors.join('\n')).toContain('scale: must be one of')
     }
   })
 })
