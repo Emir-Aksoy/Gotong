@@ -34,7 +34,7 @@
   },
   "dependencies": {
     "@gotong/im-adapter": "workspace:*",
-    "@larksuiteoapi/node-sdk": "^1.71.1"
+    "@larksuiteoapi/node-sdk": "^1.72.0"
   },
   "devDependencies": {
     "vitest": "^4.1.10"

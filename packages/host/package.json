@@ -102,7 +102,7 @@
     "@gotong/web": "workspace:*",
     "@gotong/workflow": "workspace:*",
     "@gotong/workflow-assistant": "workspace:*",
-    "@anthropic-ai/sdk": "^0.112.3",
+    "@anthropic-ai/sdk": "^0.115.0",
     "openai": "^6.48.0",
     "better-sqlite3": "^12.11.1",
     "ws": "^8.21.1"

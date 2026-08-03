@@ -45,7 +45,7 @@
     "@gotong/protocol": "workspace:*",
     "@gotong/workflow": "workspace:*",
     "qrcode-terminal": "^0.12.0",
-    "tar": "^7.5.20",
+    "tar": "^7.5.22",
     "ws": "^8.21.1"
   },
   "devDependencies": {
