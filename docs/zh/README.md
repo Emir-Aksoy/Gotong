@@ -100,6 +100,7 @@
 - **设计出处（建之前的 RFC / DESIGN）**：[`PERSONAL-BUTLER-DESIGN.md`](PERSONAL-BUTLER-DESIGN.md) · [`MEMORY-DREAMING-SKILLS-DESIGN.md`](MEMORY-DREAMING-SKILLS-DESIGN.md) · [`PERSONAL-HUB-RFC.md`](PERSONAL-HUB-RFC.md) · [`TECH-DEBT-2026-05.md`](TECH-DEBT-2026-05.md)
 - **逐里程碑账本（52 篇）** → [`ledger/`](ledger/README.md)（v4 phases / v5 streams / v6 route-B / 审计 / 能力深潜）
 - **全部里程碑逐字散文索引** → [`PROGRESS-LEDGER.md`](PROGRESS-LEDGER.md)
+- **周期性项目状态快照（每次大版本更新一篇，可读、非流水账）** → [`releases/`](releases/README.md)（想知道「现在」整体状态，直接读最新一篇）
 
 ---
 
