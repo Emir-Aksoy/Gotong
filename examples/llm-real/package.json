@@ -13,7 +13,7 @@
     "@gotong/llm": "workspace:*",
     "@gotong/llm-anthropic": "workspace:*",
     "@gotong/llm-openai": "workspace:*",
-    "@anthropic-ai/sdk": "^0.112.3",
+    "@anthropic-ai/sdk": "^0.115.0",
     "openai": "^6.48.0"
   }
 }
