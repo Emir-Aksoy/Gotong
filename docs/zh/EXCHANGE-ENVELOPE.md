@@ -1,6 +1,6 @@
 # EXCH · 标准交付物信封与人肉中继(`gotong.envelope/v1`)
 
-> Status: **M0 完(计划+schema 定稿) · M1 完(hub 导入/导出缝) · M2 完(pi 规范包) · M3 完(dsh 规范包,2026-08-14)** · M4 WorkBuddy 包 待做
+> Status: **M0 完(计划+schema 定稿) · M1 完(hub 导入/导出缝) · M2 完(pi 规范包) · M3 完(dsh 规范包) · M4 WorkBuddy 包本体完(2026-08-14)** · M4 四步实机验证=用户门待做
 > Last updated: 2026-08-14
 >
 > 一句话:把「两个 hub 之间的一条联邦边」降级成「一份标准 JSON 文件 + 一个转发文件的人」,
@@ -228,10 +228,37 @@ hub 侧不落这两个目录——hub 的进出走 `<space>/exchange/`(M1,file-f
   `DEEPSEEK_API_KEY`,本机无 key,**归 M4 实机验证**(dsh 无 key fail-fast
   MISSING_CREDENTIAL,且无机器可读输出格式——M4 验收以盘上产物为准);识别探针是直调
   provider 类,非 dsh 进程内跑。host 2772+5skip(+29),四门 PASS(旋钮 116 冻结)。
-- **M4 WorkBuddy 技能包**(`packs/workbuddy/`):zip(SKILL.md+`scripts/validate.py`+
-  references 字段表)+ **四步实机验证清单(用户门,需装 WorkBuddy 的机器)**:①手写
-  SKILL.md 进 `~/.workbuddy/skills/` 看认不认 ②按 schema 产出并跑通校验脚本 ③微信发
-  `.json` 文件给助理看能否读入 ④产出文件能否投回微信(官方文档回避,不实测不定案)。
+- **M4 WorkBuddy 技能包 — 包本体完(2026-08-14);四步实机验证=用户门待做**
+  (`packs/workbuddy/skills/gotong-envelope/`,四文件:SKILL.md+`scripts/validate.py`+
+  references schema 逐字节拷贝+包 README)。**形状=SKILL.md+纯 stdlib Python 3.9+ 单文件
+  CLI**(`emit`/`ingest`/新增 `validate <path>` 只读子命令=四步验证②的机器检查;zip 用时
+  现打不进仓,README 给命令已冒烟)。**Python 移植的刻意决定**(全部门钉):①错误串与 hub
+  校验器**逐字节同**——长度检查按 **UTF-16 code unit**(JS `.length` 语义,
+  `len(s.encode('utf-16-le'))//2`)、payload 字节按 `json.dumps(separators=(',',':'))`、
+  正则文本硬编码 JS `String(re)` 形;唯一例外='not json' 类的引擎附注(V8 与 Python 的
+  JSON 报错文本不同),门对那类只拍前缀 `file: not valid JSON (`;②`json.loads` 配
+  `parse_constant` **补拒 NaN/Infinity**(JS `JSON.parse` 本就拒,Python 默认收——不补就是
+  静默放宽);③JSON null 与缺键在 Python 里都易混成 None,全部在场检查走 `_ABSENT` 哨兵
+  (JS undefined vs null 语义保真);④**签名三态诚实降级** `unsigned|invalid|unverified`:
+  纯 stdlib 做不了 ES256 数学验签,但 **RFC 7638 kid 绑定核验在 Python 侧存活**(hashlib
+  重算 `sig.jwk` 指纹并对拍 `sig.kid`+`from.kid`,撒谎-JWK → invalid);最强正向结论只到
+  `◐ 结构完好、kid 绑定一致`,**绝不出「完整性有效」**(门反向断言),payload 篡改本机
+  如实测不出(门钉 unverified 非 valid 非 invalid)——签名本就只证完整性不证发件人,
+  hub 才是执法点,信任模型零承重件受损;⑤Windows 防呆:stdin/stdout 钉 UTF-8(WorkBuddy
+  受众含 Windows 中文码页)。**防漂移门** `packages/host/tests/exchange-pack-workbuddy.test.ts`
+  30 例,全程 spawn 真 `python3`(本机 3.9.6=事实上的 3.9 兼容门):schema 逐字节同+11 类
+  共享 fixture **整错误数组对拍**+'not json' 前缀拍+超限同文案+hub 真钥签→unverified 且
+  kid=重算值/撒谎-JWK→invalid/篡改→unverified 三针+compose→hub 接受+CLI 契约(emit 幂等/
+  草稿未知键 exit 1/裸文件名穿越拒/validate 子命令三态/用法 exit 2)+卫生(stdlib-only
+  import 白名单/源码零裸控制字节/frontmatter 多宿主契约)。**变异测试实证门有牙**:改坏
+  一条错误串→3 例即红,复原 byte-identical 后全绿。**四步实机验证清单(用户门,需装
+  WorkBuddy 的机器)**:①技能导入认不认(zip 拖拽为主路;不认试 `~/.workbuddy/skills/`
+  目录拷贝或补 `.claude-plugin/` 清单再打包) ②按 schema 产出并跑通
+  `python3 …/validate.py validate <文件>` ③微信发 `.json` 文件给助理看能否读入
+  ④产出文件能否投回微信(官方文档回避,不实测不定案)。**诚实残余**:WorkBuddy 侧
+  「zip 拖拽导入/兼容 Claude Code 技能规范/助理可收文件消息」全部来自 2026-08-13 文档
+  侦察(二手),本包在 WorkBuddy 实机的识别与运行**未验证**——README 成色说明如实标注,
+  实机验证后按事实改写。host 2802+5skip(+30),四门 PASS(旋钮 116 冻结)。
 
 ## 七、显式不做(v1)
 

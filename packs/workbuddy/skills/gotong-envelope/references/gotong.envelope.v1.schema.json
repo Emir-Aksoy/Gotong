@@ -1,0 +1,211 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/Emir-Aksoy/Gotong/blob/main/packages/host/src/gotong.envelope.v1.schema.json",
+  "title": "gotong.envelope/v1",
+  "description": "Standard exchange envelope for human-relayed delivery between Gotong hubs and host agents (pi / dsh / WorkBuddy / Claude Code / ...). One file = one request or one result; the filename MUST be `<id>.json`; the whole file MUST be <= 262144 UTF-8 bytes and `payload` MUST serialize to <= 204800 bytes (byte caps are enforced by validators, not expressible here). Readers are fail-closed: unknown keys reject, and a reader NEVER guesses a schema version newer than this one. Spec: docs/zh/EXCHANGE-ENVELOPE.md.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "id",
+    "kind",
+    "createdAt",
+    "from",
+    "title",
+    "payload"
+  ],
+  "properties": {
+    "schema": {
+      "const": "gotong.envelope/v1"
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^exg-[a-z0-9][a-z0-9-]{7,59}$",
+      "description": "Exchange id \u2014 the idempotency key; also the filename stem."
+    },
+    "kind": {
+      "enum": [
+        "request",
+        "result"
+      ]
+    },
+    "replyTo": {
+      "type": "string",
+      "pattern": "^exg-[a-z0-9][a-z0-9-]{7,59}$",
+      "description": "Required on kind=result (the request id it answers); forbidden on kind=request."
+    },
+    "createdAt": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d{1,9})?Z$",
+      "description": "ISO-8601 UTC (Z). Display-honest only; never a timing judgment."
+    },
+    "from": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120,
+          "pattern": "^[^\\u0000-\\u001f\\u007f\\u202a-\\u202e\\u2066-\\u2069]+$"
+        },
+        "hub": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200,
+          "pattern": "^[^\\u0000-\\u001f\\u007f\\u202a-\\u202e\\u2066-\\u2069]+$"
+        },
+        "kid": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{43}$",
+          "description": "RFC 7638 thumbprint of the signing key. Required (and equal to sig.kid) when sig is present."
+        }
+      }
+    },
+    "to": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120,
+          "pattern": "^[^\\u0000-\\u001f\\u007f\\u202a-\\u202e\\u2066-\\u2069]+$"
+        }
+      },
+      "description": "Routing hint FOR THE HUMAN relay only \u2014 machines make no decision from it."
+    },
+    "capability": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9._-]{1,63}$",
+      "description": "Requested capability, same grammar as hub dispatch. Recommended on requests; when absent the importing human picks the target."
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200,
+      "pattern": "^[^\\u0000-\\u001f\\u007f\\u202a-\\u202e\\u2066-\\u2069]+$"
+    },
+    "payload": {
+      "type": "object",
+      "description": "kind=request: task input (free-form JSON object). kind=result: exactly { ok: boolean, output?: any, error?: string }."
+    },
+    "sig": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "alg",
+        "kid",
+        "jwk",
+        "signature"
+      ],
+      "properties": {
+        "alg": {
+          "const": "ES256"
+        },
+        "kid": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{43}$",
+          "description": "MUST equal the RFC 7638 thumbprint recomputed from sig.jwk, and equal from.kid (lying-JWK defense: verifiers trust only the recomputed fingerprint)."
+        },
+        "jwk": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kty",
+            "crv",
+            "x",
+            "y"
+          ],
+          "properties": {
+            "kty": {
+              "const": "EC"
+            },
+            "crv": {
+              "const": "P-256"
+            },
+            "x": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{43}$"
+            },
+            "y": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{43}$"
+            }
+          },
+          "description": "The signing PUBLIC key itself, so any receiver can verify offline. A signature nobody can check would be worse than none."
+        },
+        "signature": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{86}$",
+          "description": "base64url(ES256 ieee-p1363 raw r||s) over the RFC 8785 (JCS) canonical UTF-8 bytes of the envelope WITHOUT its sig key."
+        }
+      },
+      "description": "Optional, advisory. A valid signature proves integrity + key binding, never sender identity; execution approval always stays with a human."
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "result"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "replyTo"
+        ],
+        "properties": {
+          "payload": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "ok"
+            ],
+            "properties": {
+              "ok": {
+                "type": "boolean"
+              },
+              "output": {},
+              "error": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
+      "else": {
+        "not": {
+          "required": [
+            "replyTo"
+          ]
+        }
+      }
+    },
+    {
+      "if": {
+        "required": [
+          "sig"
+        ]
+      },
+      "then": {
+        "properties": {
+          "from": {
+            "required": [
+              "name",
+              "kid"
+            ]
+          }
+        }
+      }
+    }
+  ]
+}
