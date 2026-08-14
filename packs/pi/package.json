@@ -1,0 +1,34 @@
+{
+  "name": "@gotong/envelope-pi",
+  "version": "0.1.0",
+  "description": "Gotong 标准交付物信封 (gotong.envelope/v1) 的 pi 规范包:emit/ingest 工具 + 技能 + /命令。人经 IM 转发文件,协议不降级只降传输层。",
+  "type": "module",
+  "license": "MIT",
+  "keywords": [
+    "pi-package",
+    "pi-extension",
+    "gotong",
+    "gotong-envelope"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Emir-Aksoy/Gotong.git",
+    "directory": "packs/pi"
+  },
+  "pi": {
+    "extensions": [
+      "./extensions/envelope.ts"
+    ],
+    "skills": [
+      "./skills"
+    ],
+    "prompts": [
+      "./prompts"
+    ]
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-ai": "*",
+    "@earendil-works/pi-coding-agent": "*",
+    "typebox": "*"
+  }
+}
