@@ -1,6 +1,6 @@
 # EXCH · 标准交付物信封与人肉中继(`gotong.envelope/v1`)
 
-> Status: **M0 完(计划+schema 定稿) · M1 完(hub 导入/导出缝) · M2 完(pi 规范包,2026-08-14)** · M3 dsh 包 → M4 WorkBuddy 包 待做
+> Status: **M0 完(计划+schema 定稿) · M1 完(hub 导入/导出缝) · M2 完(pi 规范包) · M3 完(dsh 规范包,2026-08-14)** · M4 WorkBuddy 包 待做
 > Last updated: 2026-08-14
 >
 > 一句话:把「两个 hub 之间的一条联邦边」降级成「一份标准 JSON 文件 + 一个转发文件的人」,
@@ -196,9 +196,38 @@ hub 侧不落这两个目录——hub 的进出走 `<space>/exchange/`(M1,file-f
   本机无 pi 可用 key,**归 M4 实机验证**;jiti 冒烟是镜像 alias 直调工具,非 pi 进程
   内跑。host 2743+5skip(+26),四门 PASS(旋钮 116 冻结;packs/ 在 workspace 外,行数/
   发布门零触碰)。npm 发布=用户门。
-- **M3 dsh 规范包**(`packs/dsh/`):SKILL.md 按 `~/.agents/skills/` 共享形状 + 可选
-  强约束插件(`outputSchema` 档)。验收=`dsh --profile headless` 真跑产出合法信封
-  (Node 22 via nvm;dsh 版本钉死)。
+- **M3 dsh 规范包** ✅(2026-08-14,`packs/dsh/`,workspace 外;对 `@deepseek-ai/dsh`
+  **0.1.0-rc.6** 本地验证——dsh 处于 developer preview,官方明言会有破坏性变更,4 天
+  6 个 rc,故 README 钉死版本+「大版本后先本地重验」):四文件=README +
+  `skills/gotong-envelope/`(SKILL.md + `scripts/envelope.mjs` + `references/` schema
+  逐字节拷贝)。**形状=SKILL.md + 零依赖单文件脚本**(非原生工具):校验器全量移植且
+  错误串与 host 逐字节同,CLI 三命令 emit(草稿 JSON 走 stdin,未知草稿键 fail-closed)/
+  ingest 列箱/ingest 读单封,出码 0/1/2;**结构性校验落在脚本边界**——「信封只能经脚本
+  产出」,手写 JSON 过不了校验对方 hub 会拒收;副作用=任何能跑 shell 的 agent 都能用
+  (「一份规范包多宿主」的字面兑现)。**dsh 侧硬事实**(0.1.0-rc.6 源码一手核,Opus 侦察):
+  ①技能发现 6 个按 rank 排序的根,`~/.agents/skills/` 是用户级共享根(rank 500),
+  **只扫一层不递归**——嵌套技能静默不可见,一层扁平是 pi/dsh 双宿主唯一布局;②frontmatter
+  `name`+`description` 硬必填(缺则 warn+静默跳过),name 只认 kebab,**camelCase 调用键
+  (`disableModelInvocation` 等)会让整个技能被拒**——三约束全数钉进防腐门;③路由只看
+  description(目录截 500 字符);④`scripts/` 不自动加载,模型按技能 base 目录解析相对
+  路径按需读——SKILL.md 据此写定位句;⑤项目级 `.agents/skills/` 同名压过用户级(README
+  已注)。**纠偏二手记录**:插件强约束是 per-tool `output.schema`(嵌套键,**无顶层
+  `outputSchema`**),schema 不合格产出=contained isError 结果非进程错误。**刻意不做
+  Cordis 插件**:插件 API 随 developer preview 高频变动(写了就腐),脚本边界已完整达成
+  结构性校验,插件只是重复同一道闸——dsh 1.0 后按需另起。**防漂移门**
+  `packages/host/tests/exchange-pack-dsh.test.ts` 29 例:schema 逐字节同+12 类共享
+  fixture 整错误数组对拍+签名互通(hub 真钥签→'valid' 且 kid 绑定;篡改/撒谎-JWK→
+  invalid)+compose→hub 接受+emit 幂等/穿越拒+**CLI spawn 契约**(真 spawn 脚本:stdin
+  emit→hub 校验器接受产出字节/人肉一跳 ingest 框架文案/草稿 typo 键 exit 1/缺
+  reply_to 拒/篡改文件拒/坏命令 exit 2 用法)+包卫生(node:-only import+frontmatter
+  三约束)。**真识别验证**(零 LLM 双宿主):包拷进 `~/.agents/skills/` 后,dsh 真
+  `FileSystemSkillProvider`(dsh 实际挂载的 provider,ctx/control stub 直调)list 出
+  `gotong-envelope` 且 description 完整过路由面、get 到脚本指针;**pi 0.84.1 真
+  `loadSkillsFromDir` 同目录同认**(baseDir 正确)——「一份技能两宿主认」有一手证据;
+  验完即清理。**诚实残余**:`dsh --profile headless` 真 LLM 跑(模型真调起脚本)需
+  `DEEPSEEK_API_KEY`,本机无 key,**归 M4 实机验证**(dsh 无 key fail-fast
+  MISSING_CREDENTIAL,且无机器可读输出格式——M4 验收以盘上产物为准);识别探针是直调
+  provider 类,非 dsh 进程内跑。host 2772+5skip(+29),四门 PASS(旋钮 116 冻结)。
 - **M4 WorkBuddy 技能包**(`packs/workbuddy/`):zip(SKILL.md+`scripts/validate.py`+
   references 字段表)+ **四步实机验证清单(用户门,需装 WorkBuddy 的机器)**:①手写
   SKILL.md 进 `~/.workbuddy/skills/` 看认不认 ②按 schema 产出并跑通校验脚本 ③微信发
