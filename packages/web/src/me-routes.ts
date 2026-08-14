@@ -47,6 +47,7 @@ import { handleMeWizardRoute, type WorkflowWizardSurface } from './wizard-routes
 import { handleMePanelRoute, type MePanelDataSurface, type MePanelSurface } from './panel-routes.js'
 import { handleMeWebPushRoute, type MeNativePushSurface, type MeWebPushSurface } from './push-routes.js'
 import { handleMeDeviceRoute, type MeDeviceSurface } from './device-routes.js'
+import { handleMeExchangeRoute, type MeExchangeSurface } from './exchange-routes.js'
 import { readRawBody } from './uploads-routes.js'
 
 import type { Hub } from '@gotong/core'
@@ -209,6 +210,18 @@ async function resolveMeWorkflow(
   const summary = summaries.find((s) => s.id === workflowId)
   if (!summary) return null
   return evaluateMeSurface(summary, role)
+}
+
+/** EXCH-M1 — every workflow runnable by this member (envelope preview target
+ * list). Fail-closed like resolveMeWorkflow: unwired / list() error → []. */
+async function resolveAllMeWorkflows(ctx: HandleMeRouteCtx, role: string): Promise<ResolvedMeWorkflow[]> {
+  if (!ctx.workflows) return []
+  try {
+    const summaries = await ctx.workflows.list()
+    return summaries.map((s) => evaluateMeSurface(s, role)).filter((w): w is ResolvedMeWorkflow => w !== null)
+  } catch {
+    return []
+  }
 }
 
 // ── Declaration set extracted to ./me-routes-types.ts (assembly-layer
@@ -419,6 +432,8 @@ export interface HandleMeRouteCtx {
   nativePush: MeNativePushSurface | undefined
   /** SHELL-M1 — app device pairing; undefined → GET {available:false}, POSTs 503. */
   devices: MeDeviceSurface | undefined
+  /** EXCH-M1 — envelope import/export; undefined → GET {available:false}, POSTs 503. */
+  meExchange: MeExchangeSurface | undefined
   /** SHELL-M1 — proxy-trust switch; the pairing QR encodes a request-derived origin. */
   trustProxy: boolean
   /**
@@ -770,6 +785,19 @@ export async function handleMeRoute(
   if (path.startsWith('/api/me/push') && (await handleMeWebPushRoute({ webPush: ctx.webPush, nativePush: ctx.nativePush }, req, res, method, path, userId))) return
   // SHELL-M1 — app device pairing (implementation in device-routes.ts, 控预算).
   if (path.startsWith('/api/me/devices') && (await handleMeDeviceRoute({ devices: ctx.devices, trustProxy: ctx.trustProxy }, req, res, method, path, userId))) return
+  // EXCH-M1 — 标准交付物信封导入/导出 (implementation in exchange-routes.ts, 控预算).
+  // The import target resolves through the SAME resolveMeWorkflow gate dispatch
+  // uses. Narrowing on v4.role does not survive into the closures — capture it
+  // (a null role degrades to '' = matches no allowedRoles = fail-closed).
+  if (path.startsWith('/api/me/exchange')) {
+    const role = v4.role ?? ''
+    if (await handleMeExchangeRoute({
+      exchange: ctx.meExchange,
+      resolveWorkflow: (id) => resolveMeWorkflow(ctx, id, role),
+      listWorkflows: () => resolveAllMeWorkflows(ctx, role),
+      limit: (action) => checkMeRateLimit(ctx, userId, action),
+    }, req, res, method, path, userId)) return
+  }
   {
     const m =
       method === 'POST' ? /^\/api\/me\/inbox\/([^/]+)\/resolve$/.exec(path) : null

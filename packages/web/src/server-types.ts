@@ -39,6 +39,7 @@ import type { WorkflowWizardSurface } from './wizard-routes.js'
 import type { MePanelDataSurface, MePanelSurface } from './panel-routes.js'
 import type { MeNativePushSurface, MeWebPushSurface } from './push-routes.js'
 import type { MeDeviceSurface } from './device-routes.js'
+import type { MeExchangeSurface } from './exchange-routes.js'
 import type {
   ConnectorSlotSink,
   LlmKeyProbe,
@@ -370,6 +371,13 @@ export interface WebServerOptions {
    * pairing card stays hidden; the claim endpoint 503s.
    */
   devices?: MeDeviceSurface
+  /**
+   * EXCH-M1 — standard exchange-envelope import/export (`/api/me/exchange*`).
+   * Absent → the probe answers {available:false} (SPA hides the card) and the
+   * confirm/import POSTs 503. The host wires buildMeExchange (file-first
+   * archive under `<space>/exchange/`, dispatch AS the importing member).
+   */
+  meExchange?: MeExchangeSurface
   /**
    * SDUI-M3 — durable sink for a template's panel presets (`panels[]`). The
    * host wires the SAME store object as `mePanel` (its `installPanels`); the

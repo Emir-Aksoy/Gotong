@@ -162,6 +162,7 @@ import { type ImBridgesHandle } from './im-bridge.js'
 import { armImBridgeWiring } from './im-bridge-wiring.js'
 import { buildMePanelData } from './me-panel-data.js'
 import { buildMePanelSurface } from './me-panel-surface.js'
+import { buildMeExchange } from './me-exchange-service.js'
 import { OidcClient } from './oidc-client.js'
 import { OidcLoginService } from './oidc-login-service.js'
 import { createOAuthConnectSurface } from './oauth-connect-service.js'
@@ -2404,6 +2405,8 @@ async function main(): Promise<void> {
     // GO-LIVE GL-1c — member IM-account linking (undefined → 503).
     ...(meIm ? { meIm } : {}),
     ...(meDevices ? { devices: meDevices } : {}),
+    // EXCH-M1 — envelope import/export; lazy archive under <space>/exchange/.
+    meExchange: buildMeExchange({ spaceRoot: space.root, hub }),
     // Phase 16 — member task inbox; undefined when identity is unwired, in
     // which case /me/inbox degrades (empty list / 503).
     ...(inboxService ? { inbox: inboxService } : {}),

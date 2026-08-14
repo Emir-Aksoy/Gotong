@@ -1059,12 +1059,16 @@
     await loadMyImBindings()
     await refreshPushCard()
     await loadMyDevices()
+    await loadMeExchange()
     // WX-M3b — IM binding card: mint a 6-digit /bind code + manage bindings.
     bindOnce(document.getElementById('me-im-bind-btn'), 'click', mintImBindingCode)
     bindOnce(document.getElementById('me-im-bindings'), 'click', onImBindingsClick)
     // SHELL-M1 — phone app pairing: mint a QR + revoke a paired device.
     bindOnce(document.getElementById('me-device-btn'), 'click', mintPairingCode)
     bindOnce(document.getElementById('me-devices'), 'click', onDevicesClick)
+    // EXCH-M1 — deliverable-envelope import: preview on pick, confirmed import.
+    bindOnce(document.getElementById('me-exchange-file'), 'change', onExchangeFilePicked)
+    bindOnce(document.getElementById('me-exchange-import-btn'), 'click', submitExchangeImport)
     // PUSH-M3 — browser notification card (Web Push subscribe/unsubscribe).
     bindOnce(document.getElementById('me-push-btn'), 'click', onPushToggle)
     bindOnce(document.getElementById('me-dispatch-btn'), 'click', submitDispatch)
@@ -1358,6 +1362,219 @@
       __pairing = null
       if (out) out.textContent = t('meDeviceRevokeFailed', err?.message || err)
     }
+  }
+
+  // ── EXCH-M1 — deliverable-envelope import (gotong.envelope/v1) ──
+  // A friend's local agent wrote the file; a human relayed it over IM; this
+  // card is the confirm gate. State survives renderHome re-runs (language
+  // toggle) so a parsed preview / running import REPAINTS in the new language
+  // without re-posting the file.
+  let __exchange = null // { raw, view } after a preview
+  let __exchangeImport = null // { id, view } after a confirmed import
+
+  async function loadMeExchange() {
+    const card = document.getElementById('me-exchange-card')
+    if (!card) return
+    try {
+      const r = await fetch('/api/me/exchange')
+      const j = await r.json().catch(() => null)
+      // available:false is a host without the surface wired — hide the card
+      // rather than offer a picker whose only possible answer is 503.
+      if (!r.ok || !j?.available) { card.hidden = true; return }
+      card.hidden = false
+      if (__exchange) renderExchangePreview(__exchange)
+      if (__exchangeImport) renderExchangeResult(__exchangeImport.view, __exchangeImport.id)
+    } catch {
+      card.hidden = true
+    }
+  }
+
+  async function onExchangeFilePicked(ev) {
+    const file = ev.target?.files?.[0]
+    const status = document.getElementById('me-exchange-status')
+    if (!file) return
+    __exchange = null
+    __exchangeImport = null
+    const resultBox = document.getElementById('me-exchange-result')
+    if (resultBox) resultBox.textContent = ''
+    if (status) status.textContent = t('meExchangePreviewing')
+    let raw
+    try {
+      raw = await file.text()
+    } catch {
+      if (status) status.textContent = t('meExchangeReadFailed')
+      return
+    }
+    try {
+      const r = await fetch('/api/me/exchange/preview', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ raw }),
+      })
+      const j = await r.json().catch(() => null)
+      if (!r.ok || !j) {
+        if (status) status.textContent = t('meExchangeFailed', j?.error || `HTTP ${r.status}`)
+        return
+      }
+      if (status) status.textContent = ''
+      __exchange = { raw, view: j }
+      renderExchangePreview(__exchange)
+    } catch (err) {
+      if (status) status.textContent = t('meExchangeFailed', err?.message || err)
+    }
+  }
+
+  function renderExchangePreview(st) {
+    const box = document.getElementById('me-exchange-preview')
+    const targetsWrap = document.getElementById('me-exchange-targets')
+    const select = document.getElementById('me-exchange-target-select')
+    if (!box || !targetsWrap || !select) return
+    box.textContent = ''
+    targetsWrap.hidden = true
+    select.textContent = ''
+    const v = st.view
+    if (!v.valid) {
+      const head = document.createElement('div')
+      head.textContent = t('meExchangeInvalid')
+      box.appendChild(head)
+      for (const e of Array.isArray(v.errors) ? v.errors : []) {
+        const row = document.createElement('div')
+        row.textContent = '· ' + String(e)
+        box.appendChild(row)
+      }
+      return
+    }
+    const s = v.summary || {}
+    const lines = [
+      [t('meExchangeFrom'), String(s.fromName || '') + (s.fromHub ? ` @ ${s.fromHub}` : '')],
+      [t('meExchangeTitleLabel'), String(s.title || '')],
+    ]
+    if (s.capability) lines.push([t('meExchangeCapability'), String(s.capability)])
+    for (const [k, val] of lines) {
+      const row = document.createElement('div')
+      const strong = document.createElement('strong')
+      strong.textContent = k + ': '
+      row.appendChild(strong)
+      row.appendChild(document.createTextNode(val))
+      box.appendChild(row)
+    }
+    // Signature verdict — INTEGRITY only, never sender identity. The honest
+    // anchor for "who is this from" stays the chat the file arrived in.
+    const sig = document.createElement('div')
+    const sv = v.signature || { state: 'unsigned' }
+    sig.textContent =
+      sv.state === 'valid' ? t('meExchangeSigValid')
+        : sv.state === 'invalid' ? t('meExchangeSigInvalid', sv.reason || '')
+          : t('meExchangeSigUnsigned')
+    box.appendChild(sig)
+    if (v.replay?.imported) {
+      // Already imported — no second import offer (the archive is the truth).
+      const row = document.createElement('div')
+      row.textContent = v.replay.mine
+        ? t('meExchangeReplayMine', v.replay.status || '?')
+        : t('meExchangeReplayTheirs')
+      box.appendChild(row)
+      return
+    }
+    if (!v.dispatchable) {
+      const row = document.createElement('div')
+      row.textContent = t('meExchangeIsResult')
+      box.appendChild(row)
+      return
+    }
+    const targets = Array.isArray(v.targets) ? v.targets : []
+    if (targets.length === 0) {
+      const row = document.createElement('div')
+      row.textContent = t('meExchangeNoTargets')
+      box.appendChild(row)
+      return
+    }
+    for (const w of targets) {
+      const opt = document.createElement('option')
+      opt.value = String(w.workflowId)
+      opt.textContent = `${w.label} (${w.workflowId})`
+      select.appendChild(opt)
+    }
+    targetsWrap.hidden = false
+  }
+
+  async function submitExchangeImport() {
+    const status = document.getElementById('me-exchange-status')
+    const select = document.getElementById('me-exchange-target-select')
+    if (!__exchange || !select?.value) return
+    if (status) status.textContent = t('meExchangeImporting')
+    try {
+      const r = await fetch('/api/me/exchange/import', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ raw: __exchange.raw, workflowId: select.value }),
+      })
+      const j = await r.json().catch(() => null)
+      if (!r.ok || !j?.ok) {
+        if (status) status.textContent = t('meExchangeFailed', j?.error || `HTTP ${r.status}`)
+        return
+      }
+      if (status) status.textContent = ''
+      const targetsWrap = document.getElementById('me-exchange-targets')
+      if (targetsWrap) targetsWrap.hidden = true
+      __exchangeImport = { id: j.id, view: { status: 'running' } }
+      renderExchangeResult(__exchangeImport.view, j.id)
+      pollExchangeResult(j.id, 10)
+    } catch (err) {
+      if (status) status.textContent = t('meExchangeFailed', err?.message || err)
+    }
+  }
+
+  async function refreshExchangeResult(id) {
+    try {
+      const r = await fetch(`/api/me/exchange/${encodeURIComponent(id)}/result`)
+      const j = await r.json().catch(() => null)
+      if (!r.ok || !j) return null
+      __exchangeImport = { id, view: j }
+      renderExchangeResult(j, id)
+      return j
+    } catch {
+      return null
+    }
+  }
+
+  function pollExchangeResult(id, tries) {
+    // Short capped poll — a golden run settles in seconds. Suspended means a
+    // HUMAN step (hours, maybe); stop there and let the refresh button carry
+    // it rather than hammer the hub all afternoon.
+    if (tries <= 0) return
+    setTimeout(async () => {
+      const j = await refreshExchangeResult(id)
+      if (!j || j.status === 'running') pollExchangeResult(id, tries - 1)
+    }, 3000)
+  }
+
+  function renderExchangeResult(view, id) {
+    const box = document.getElementById('me-exchange-result')
+    if (!box) return
+    box.textContent = ''
+    const line = document.createElement('div')
+    if (view.status === 'done') {
+      line.textContent = t('meExchangeDone')
+      box.appendChild(line)
+      const a = document.createElement('a')
+      // The download is the EXACT archived signed bytes — what the member
+      // forwards back over IM. Re-rendering must never re-serialize it.
+      a.href = `/api/me/exchange/${encodeURIComponent(id)}/result?download=1`
+      a.textContent = t('meExchangeDownload')
+      a.setAttribute('download', '')
+      box.appendChild(a)
+      return
+    }
+    line.textContent =
+      view.status === 'suspended' ? t('meExchangeSuspended', view.note || '') : t('meExchangeRunning')
+    box.appendChild(line)
+    const btn = document.createElement('button')
+    btn.type = 'button'
+    btn.className = 'me-secondary-btn'
+    btn.textContent = t('meExchangeRefresh')
+    btn.addEventListener('click', () => refreshExchangeResult(id))
+    box.appendChild(btn)
   }
 
   let __pushState = null // { publicKey, count, subscribed } after refreshPushCard

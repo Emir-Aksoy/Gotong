@@ -1,6 +1,6 @@
 # EXCH · 标准交付物信封与人肉中继(`gotong.envelope/v1`)
 
-> Status: **M0 完(计划+schema 定稿)** · M1 hub 缝 → M2 pi 包 → M3 dsh 包 → M4 WorkBuddy 包 待做
+> Status: **M0 完(计划+schema 定稿) · M1 完(hub 导入/导出缝,2026-08-14)** · M2 pi 包 → M3 dsh 包 → M4 WorkBuddy 包 待做
 > Last updated: 2026-08-14
 >
 > 一句话:把「两个 hub 之间的一条联邦边」降级成「一份标准 JSON 文件 + 一个转发文件的人」,
@@ -67,7 +67,7 @@ Claude Code / OpenClaw 五家都认。规范包的核心文本只维护一份。
 | `capability` | request 建议 | `^[a-z][a-z0-9._-]{1,63}$` | 请求的能力名,与 hub 派发同语义(如 `market.analysis`);缺席=导入时人从可用能力里选 |
 | `title` | ✅ | string(1..200) | 人类可读一行(预览确认页的主角) |
 | `payload` | ✅ | object,≤ 200KB(序列化后) | request=任务输入;result=`{ ok: boolean, output?: any, error?: string }` |
-| `sig` | ⬜ | `{ alg: "ES256", kid: string(43), signature: base64url }` | 可选签名,见 3.2 |
+| `sig` | ⬜ | `{ alg: "ES256", kid: string(43), jwk: { kty:"EC", crv:"P-256", x, y }, signature: base64url }` | 可选签名,见 3.2。`jwk`=签名公钥本体(带 sig 时必填——没有公钥的签名谁也验不了,比没签名更糟) |
 
 **全局约束**:整文件 UTF-8 ≤ **256KB**(IM 文件转发友好;附件机制显式推迟,人可以随
 信封另发别的文件,机器约定 v1 不管);**未知键一律拒**(fail-closed,镜像 panel-schema);
@@ -78,8 +78,14 @@ Claude Code / OpenClaw 五家都认。规范包的核心文本只维护一份。
 
 - 签名对象 = **去掉 `sig` 键后的信封对象**,经 RFC 8785 JCS 正规化(`jcsCanonicalize`)
   的 UTF-8 字节。
-- `alg` 恒 `ES256`(P-256);`kid` = 签名公钥的 RFC 7638 thumbprint(`ecThumbprint`),
-  且必须与 `from.kid` 一致——kid 不一致=验签失败。
+- `alg` 恒 `ES256`(P-256);`sig.jwk` 携带签名公钥本体(自包含,收端离线可验——这是
+  M1 开工时对 M0 初稿的设计修正:只有 kid 没有公钥时,收端结构性无法验签,「best-effort
+  验证」会是空头支票);`kid` = 从 **`sig.jwk` 重算**的 RFC 7638 thumbprint
+  (`ecThumbprint`),且必须同时等于 `sig.kid` 与 `from.kid`——任何一处不一致=验签失败
+  (撒谎-JWK 防御,STD-M2b-1 同型:绝不信标签,只信从公钥重算的指纹)。
+- **验签语义如实**:`✓完整性` 只证明「内容自签名以来未被改动,且绑定到这个 kid」;
+  攻击者整封重签(连 `from.kid` 一起改)后同样能验过——**验的是完整性与钥的一致性,
+  不是发件方身份**。身份靠人(IM 熟人信道)或将来的 kid PIN。
 - hub 侧签名钥复用 STD-M1 的 `agent-card-signing.key`(hub 身份钥,坏钥抛错绝不静默
   重建);宿主侧规范包 v1 **不生成钥不签名**(无钥可管),只在收到带签名的信封时做
   best-effort 验证并如实报「✓完整性/⚠无法验/未签名」——**验签结果永不改变「要不要
@@ -118,7 +124,12 @@ M1 落地为 `packages/host/src/exchange-envelope.ts` 内的校验器 + 同目�
   "from": { "name": "Gotong hub", "kid": "…43字符…" },
   "title": "AI 芯片行业周度分析(完成)",
   "payload": { "ok": true, "output": { "text": "…正文…" } },
-  "sig": { "alg": "ES256", "kid": "…43字符…", "signature": "…" }
+  "sig": {
+    "alg": "ES256",
+    "kid": "…43字符…",
+    "jwk": { "kty": "EC", "crv": "P-256", "x": "…", "y": "…" },
+    "signature": "…"
+  }
 }
 ```
 
@@ -148,11 +159,18 @@ hub 侧不落这两个目录——hub 的进出走 `<space>/exchange/`(M1,file-f
 ## 六、里程碑
 
 - **M0(本篇)** 计划+schema 定稿。纯 docs。✅
-- **M1 hub 导入/导出缝**:host 纯核 `exchange-envelope.ts`(fail-closed 校验器+JCS 签名
-  /验签+result 组装;零 I/O 可单测)+ `<space>/exchange/` 存档 + web `exchange-routes.ts`
-  (/me 伞下:导入预览[零副作用]→确认[session 钉 userId 派发]→run 完成后下载 result
-  信封);幂等拒重放;敌意信封收集式拒。验收=单测(含官方例子逐字节验签 round-trip)+
-  真机 round-trip + 四门 PASS(旋钮 116 零新增)。
+- **M1 hub 导入/导出缝** ✅(2026-08-14):host 纯核 `exchange-envelope.ts`(fail-closed
+  校验器+JCS 签名/验签+result 组装;零 I/O 可单测,40 单测含篡改即败/撒谎-JWK 防御)+
+  `me-exchange-service.ts`(`<space>/exchange/` 存档:`<id>.json` 原始请求字节+
+  `.meta.json` 归属/状态+`.result.json` 签名结果;wx-claim 幂等拒重放;签名钥懒加载
+  STD-M1 hub 钥,坏钥 warn+不签绝不静默重建)+ web `exchange-routes.ts`(/me 伞下:
+  preview[零副作用]→import[**过 resolveMeWorkflow 同一道成员派发闸**,payload 白名单
+  到 inputFieldIds,userScopeField 强制钉 session 本人]→result 下载=存档原字节永不
+  重序列化;16 路由测)+ SPA 卡(更多工具区,选文件→预览[来自/标题/能力/签名三态]→
+  确认导入→轮询→下载;25 i18n 键,sw v20)。真机 round-trip 全过(预览/导入/done/
+  下载字节含 ES256 签名/replay 拒二次导入/中英重画/网络零错)。**诚实残余**:挂起
+  (human 步)不编造结果=状态如实 suspended;重启丢在途 promise=状态停 running 需
+  重导入;claim→meta 崩溃窗=not_found 可重试。四门 PASS(旋钮 116 零新增)。
 - **M2 pi 规范包**(`packs/pi/`,**刻意不进 pnpm workspace**,shell/ 先例):SKILL.md +
   `prompts/gotong-deliver.md`/`gotong-ingest.md` + `extensions/envelope.ts`
   (`gotong_emit`/`gotong_ingest` TypeBox 校验工具)+ 防漂移门。验收=本地 `pi install

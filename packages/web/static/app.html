@@ -363,6 +363,29 @@
         <div id="me-dispatch-status" class="me-status"></div>
       </div>
 
+      <!-- EXCH-M1 — standard deliverable envelope (gotong.envelope/v1). A
+           friend's LOCAL agent (pi / dsh / WorkBuddy) writes a small JSON
+           file; the human forwards it over IM; the member imports it here.
+           Two-step confirm: PREVIEW is zero side-effect (parse + signature
+           verdict + replay check + eligible targets), IMPORT is the confirmed
+           step and goes through the SAME /me dispatch gate as the card above.
+           The finished result is a signed envelope file the member downloads
+           and sends back — the human IS the transport, on purpose. -->
+      <div id="me-exchange-card" class="me-dispatch" hidden>
+        <h2 data-i18n="meExchangeTitle">导入交付物文件</h2>
+        <p class="me-meta" data-i18n="meExchangeHint">朋友的本机 AI(pi / WorkBuddy 等)按标准生成的交付物 .json 文件,聊天里收到后在这里导入:先预览核对,再选一个工作流处理。处理完把结果文件下载下来,聊天里发回给对方就算送达。</p>
+        <input id="me-exchange-file" type="file" accept="application/json,.json" />
+        <div id="me-exchange-preview" class="me-meta"></div>
+        <div id="me-exchange-targets" hidden>
+          <label><span data-i18n="meExchangeTarget">用哪个工作流处理</span>
+            <select id="me-exchange-target-select"></select>
+          </label>
+          <button id="me-exchange-import-btn" type="button" class="me-primary-btn" data-i18n="meExchangeImportBtn">确认导入</button>
+        </div>
+        <div id="me-exchange-status" class="me-status"></div>
+        <div id="me-exchange-result" class="me-meta"></div>
+      </div>
+
       <!-- ARCH-M7 — workflow architect: EXPLAIN the selected workflow at an
            adjustable depth (一句话/简要/详细) + draw its flowchart. Operates on
            the #me-wf-select above (same as the editor's load button). The graph

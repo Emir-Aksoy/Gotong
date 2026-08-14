@@ -64,6 +64,7 @@ import {
 import { handleAdminPanelRoute, type MePanelDataSurface, type MePanelSurface } from './panel-routes.js'
 import type { MeNativePushSurface, MeWebPushSurface } from './push-routes.js'
 import { handleDeviceClaimRoute, type MeDeviceSurface } from './device-routes.js'
+import type { MeExchangeSurface } from './exchange-routes.js'
 import {
   handleWorkflowRoute,
   type WorkflowGrantSink,
@@ -369,6 +370,7 @@ export function serveWeb(hub: Hub, opts: WebServerOptions = {}): Promise<WebServ
     webPush: opts.webPush,
     nativePush: opts.nativePush,
     devices: opts.devices,
+    meExchange: opts.meExchange,
     deviceClaimLimiter,
     panelLibrary: opts.panelLibrary,
     operatorSteward: opts.operatorSteward,
@@ -571,6 +573,8 @@ interface HandlerCtx {
   webPush: MeWebPushSurface | undefined
   nativePush: MeNativePushSurface | undefined
   devices: MeDeviceSurface | undefined
+  /** EXCH-M1 — envelope import/export; absent → probe {available:false}, POSTs 503. */
+  meExchange: MeExchangeSurface | undefined
   /** SHELL-M1 — per-IP budget for the PUBLIC pairing-code claim endpoint. */
   deviceClaimLimiter: RateLimiter
   panelLibrary: WebServerOptions['panelLibrary']
@@ -1240,6 +1244,7 @@ async function handle(
         webPush: ctx.webPush,
         nativePush: ctx.nativePush,
         devices: ctx.devices,
+        meExchange: ctx.meExchange,
         // SHELL-M1 — the pairing QR encodes the address the member reached us
         // on, so it needs the same proxy-trust switch the agent card uses.
         trustProxy: ctx.trustProxy,
