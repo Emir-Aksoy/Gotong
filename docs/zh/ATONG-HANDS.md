@@ -1,7 +1,8 @@
 # 阿同执行能力 track（HANDS）— 给阿同一双关在监狱里的手，配置动作搬到手机上
 
-> Status: **M0 计划落档（2026-08-15）**——侦察 + 威胁模型 + 四档策略 + 五岔口拍板 +
-> 里程碑 M1→M7。**除 M1/M2 外的里程碑都是方向性规划，实现前按 M0 惯例重新细化。**
+> Status: **M0 计划落档 + M1 四档策略纯核落地（2026-08-15）**——侦察 + 威胁模型 + 四档策略 +
+> 五岔口拍板 + 里程碑 M1→M7；M1 见 §九。**M2 及之后的里程碑都是方向性规划，实现前按 M0 惯例
+> 重新细化。**
 > Last updated: 2026-08-15
 >
 > 用户诉求（2026-08-15 原话）：「我们要增强 atong 的执行能力，比如说增加手机可执行
@@ -204,3 +205,50 @@ IM 通道即在；**至少一次网页触碰不可避免也不该避免**（owne
 additive）；四门 PASS 全程；每个新 builder 过 AFR 注册三件套（tiers 名单 / toolface tripwire /
 门）；真机 round-trip 以「盘上产物 + 审计行」为准；安全承重刀（M2/M3）Codex 交叉审后才 commit
 收口。
+
+---
+
+## 九、M1 落地记录（2026-08-15）
+
+`packages/personal-butler/src/hands-policy.ts`（host-free 纯核，30 单测）：
+
+- **形状**：`classifyHandsAction(action, ctx) → {tier, verdict, code, resolvedPath?, net?}`，`verdict`
+  直接是 `GovernedVerdict`；`handsGovernedClassifier(ctx)` 是给 `GovernedActionToolset.classify` 的
+  适配器（`(name, args) → verdict`，未知名/坏形状 → refuse）；`classifyHandsToolCall` 给执行器用（多回
+  `resolvedPath`/`net`）；`resolveWorkspacePath` 单独导出——**M2 执行器每次文件操作都必须过它**，且用
+  它回的绝对路径，绝不重新解析模型给的串。`HANDS_LIMITS`（120s/32KB/512MB/1024 字符/256 argv/8KB
+  参数/1MB 写/256KB 读/并发 1）是唯一真相，执行器只执行不另定。
+- **文件动作**：形状门（绝对路径/`~`/反斜杠/控制字节/空/超长 → `path_invalid`）→ 词法 `isInsideRoots`
+  （复用 core，`..` → `path_escape`）→ **realpath 锚定**（最深存在祖先 realpath + 未存在尾巴回接，
+  结果仍须在根内；指向外的符号链接目录/文件 → `path_escape`）→ **变更动作拒经符号链接终点**（write/rm
+  遇终点是链接一律 `path_symlink`，**悬空链接也拒**——否则 `writeFile` 会顺着悬空链接在工作区外「创建
+  穿透」）。指回工作区内的链接照常可读（pnpm `node_modules/.pnpm` 布局依赖这点）。根自身按 realpath
+  比（macOS `/tmp`→`/private/tmp` 那类不匹配不会把整个工作区误拒）。探针抛异常 → refuse 绝不 allow。
+- **执行动作**：argv 形状门（空/非串/>256 项/单项 >8KB/含 `\t\n\r` 以外控制字节 → `run_invalid`）→
+  **拒绝表按 argv[0] basename**（sudo/su/doas/pkexec · apt/dpkg/yum/dnf/apk/pacman/brew/snap ·
+  systemctl/service/systemd-run/reboot… · docker/podman/bwrap/sandbox-exec/unshare/nsenter/chroot/
+  mount · crontab/at/launchctl · osascript/open/xdg-open → `run_forbidden` tier 3，全路径与大小写
+  照抓）→ cwd 过同一解析器 → **`net` 决定 1/2 档**：`net:true` 或按表推断为联网（curl/wget/ssh/
+  scp/rsync/gh 恒联网；git clone/fetch/pull/push/ls-remote/submodule；npm/pnpm/yarn install|add|ci|
+  update|publish|audit|…；pip/uv/poetry/cargo/go/gem/bundle/composer 装包类）→ tier 2 approve，理由
+  带命令名与「按命令推断」；否则 tier 1 allow。**推断只是 UX**：推错的命令在断网监狱里失败一次，模型
+  加 `net:true` 重来（那才是审批点）；`npx`/`pnpm dlx` 刻意不列（开发区多跑本地 bin，逢用必批太吵）；
+  显式 `net:false` 赢过推断（离线跑无害）。**解释器/shell 不 park**——与 layer-1 `jailArgv` 相反，
+  因为手 A 有 layer-2 内核监狱兜底。
+- **变异测试三门全红**（去掉终点链接拒 → 2 例红；去掉 realpath 越界拒 → 3 例红；关掉联网推断 → 3 例
+  红），复原 byte-identical。四门 PASS（旋钮 116 零新增）；personal-butler 184（+30）。
+
+**M1 期间钉下的 M2 前置备忘**（写在这里免得实现时忘）：
+1. TOCTOU：hub 进程做文件操作，监狱内子进程理论上可在检查与写之间把目录换成链接。M2 靠三件缩窗：
+   每成员并发 1 + 每次 `hands_run` 结束即杀整个进程树（Linux 补 `--unshare-pid`——`--die-with-parent`
+   `buildBwrapArgs` 已有——使后台进程活不过一次运行；macOS 无 pid 命名空间，`setsid` 双 fork 的守护
+   进程是**如实残余**）+
+   写文件用 `O_NOFOLLOW`（终点原子拒链接；祖先目录换链接仍是残余，Node 无 `openat`）。
+2. `--ro-bind / /` 会让 `<space>` 在监狱内可读——M2 必须 `--tmpfs <space>` 盖掉再把工作区 bind
+   回去（bind 按顺序处理，后者盖前者），门=监狱内 `cat <space>/gotong.env` 失败；macOS seatbelt
+   profile 要补 `(deny file-read* (subpath "<space>"))` 例外工作区 + `(deny network*)`（当前
+   `buildSeatbeltProfile` 只限写不限读不限网）。
+3. `unshareNet` 与上面两条都是 `wrapWithFsJail` 的可选新参数（additive，既有 cli-agent/acp-agent
+   调用者字节不变）；这是本 track 唯一的 core 触碰。
+4. 备份：`gotong backup` 会把工作区（可能含 `node_modules`）打进档案——M2 决定是否排除
+   `butler/hands/**/workspace/node_modules`（倾向排除并在档案 note 里写明）。

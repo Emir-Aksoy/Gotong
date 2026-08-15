@@ -111,6 +111,30 @@ export {
 } from './knowledge-librarian.js'
 
 export {
+  classifyHandsAction,
+  classifyHandsToolCall,
+  handsGovernedClassifier,
+  parseHandsToolCall,
+  resolveWorkspacePath,
+  inferNeedsNet,
+  nodeHandsFsProbe,
+  HANDS_LIMITS,
+  HANDS_TOOL_NAMES,
+  HANDS_FORBIDDEN_COMMANDS,
+  HANDS_NET_COMMANDS,
+  type HandsTier,
+  type HandsToolName,
+  type HandsAction,
+  type HandsFileAction,
+  type HandsFileKind,
+  type HandsRunAction,
+  type HandsPolicyCode,
+  type HandsPolicyDecision,
+  type HandsPolicyContext,
+  type HandsFsProbe,
+} from './hands-policy.js'
+
+export {
   validatePanelConfig,
   PANEL_SCHEMA_VERSION,
   PANEL_COMPONENT_TYPES,
