@@ -8,6 +8,10 @@
  * the task id), and the terminate seam (onTaskCancelled → failed).
  */
 
+import { existsSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+
 import type { Task, TaskId } from '@gotong/core'
 import { describe, expect, it } from 'vitest'
 
@@ -102,6 +106,49 @@ describe('CliParticipant — outbound shell-out adapter', () => {
     const result = await p.onTask(makeTask({ prompt: 'x' }))
     expect(result.kind).toBe('failed')
     if (result.kind === 'failed') expect(result.error).toMatch(/command not found/)
+  })
+})
+
+// HANDS-M2b — a participant outlives any single spawn, so a perimeter/env
+// frozen at construction is one that quietly goes stale (a socket installed
+// after boot stops being hidden) while `jailed: true` still reads the same.
+describe('CliParticipant — per-spawn env / fsJail thunks', () => {
+  it('calls the env thunk before EVERY spawn (not once at construction)', async () => {
+    let calls = 0
+    const p = new CliParticipant({
+      id: 'coder',
+      capabilities: ['code'],
+      command: NODE,
+      args: ['-e', "process.stdout.write(process.env.TICK ?? 'none')"],
+      env: () => {
+        calls += 1
+        return { TICK: `t${calls}` }
+      },
+      envMode: 'replace',
+    })
+    const first = await p.onTask(makeTask({ prompt: 'x' }, 't-env-1'))
+    const second = await p.onTask(makeTask({ prompt: 'x' }, 't-env-2'))
+    expect(calls).toBe(2)
+    expect(first).toMatchObject({ output: { text: 't1' } })
+    expect(second).toMatchObject({ output: { text: 't2' } })
+  })
+
+  it('a throwing fsJail thunk fails the turn instead of spawning unconfined', async () => {
+    const marker = join(tmpdir(), `gotong-cli-perspawn-${process.pid}.txt`)
+    rmSync(marker, { force: true })
+    const p = new CliParticipant({
+      id: 'coder',
+      capabilities: ['code'],
+      command: NODE,
+      args: ['-e', "require('fs').writeFileSync(process.argv[1],'ran')", marker],
+      fsJail: () => {
+        throw new Error('perimeter unavailable')
+      },
+    })
+    const result = await p.onTask(makeTask({ prompt: 'x' }, 't-jail-1'))
+    expect(result.kind).toBe('failed')
+    // The point of the case: the child never ran.
+    expect(existsSync(marker)).toBe(false)
   })
 })
 

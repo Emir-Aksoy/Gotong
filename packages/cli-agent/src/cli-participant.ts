@@ -43,6 +43,23 @@ import { runCliCommand, type CliChunk, type CliRunResult } from './cli-runner.js
 
 const PROMPT_TOKEN = '{prompt}'
 
+/**
+ * A value that may be **recomputed before every spawn**.
+ *
+ * A participant is long-lived; a jail perimeter and an env are not. What has to
+ * be hidden changes while the process runs (a docker socket installed after
+ * boot, a `/run/user/<uid>` that appears when the operator ssh's in), so a
+ * perimeter frozen at construction is a perimeter that quietly gets weaker —
+ * and it still reports itself as a jail. Hand it a thunk and it is derived at
+ * the moment it is enforced. A thunk that throws fails the turn: refusing to
+ * spawn is the correct answer when the perimeter can't be established.
+ */
+export type PerSpawn<T> = T | (() => T)
+
+function perSpawn<T>(v: PerSpawn<T> | undefined): T | undefined {
+  return typeof v === 'function' ? (v as () => T)() : v
+}
+
 export interface CliParticipantOptions {
   /** Local participant id (what `result.by` shows). */
   id: ParticipantId
@@ -60,8 +77,14 @@ export interface CliParticipantOptions {
   promptVia?: 'stdin' | 'arg'
   /** Working directory — the repo the agent operates on. */
   cwd?: string
-  /** Extra env (e.g. the CLI's own API key). `undefined` value deletes a key. */
-  env?: Record<string, string | undefined>
+  /**
+   * Extra env (e.g. the CLI's own API key). `undefined` value deletes a key.
+   * Pass a thunk to build it per spawn; pair with `envMode: 'replace'` when the
+   * child should get exactly this env and inherit nothing.
+   */
+  env?: PerSpawn<Record<string, string | undefined>>
+  /** See {@link CliRunOptions.envMode} — `'replace'` means `env` IS the child env. */
+  envMode?: 'inherit' | 'replace'
   /** Hard per-invocation timeout. A wedged CLI is killed and the task fails. */
   timeoutMs?: number
   /**
@@ -99,7 +122,7 @@ export interface CliParticipantOptions {
    * can only write inside the roots — the real FS boundary. `kind: 'none'` runs
    * unconfined; pair it with `gate`/`takeover` and log the degradation warning.
    */
-  fsJail?: FsJailSpec
+  fsJail?: PerSpawn<FsJailSpec>
 }
 
 export class CliParticipant extends AgentParticipant {
@@ -107,14 +130,15 @@ export class CliParticipant extends AgentParticipant {
   protected readonly args: readonly string[]
   protected readonly promptVia: 'stdin' | 'arg'
   protected readonly cwd: string | undefined
-  protected readonly env: Record<string, string | undefined> | undefined
+  protected readonly env: PerSpawn<Record<string, string | undefined>> | undefined
+  protected readonly envMode: 'inherit' | 'replace' | undefined
   protected readonly timeoutMs: number | undefined
   protected readonly onChunk: ((taskId: TaskId, chunk: CliChunk) => void) | undefined
   protected readonly maxTurns: number
   protected readonly gate: ((ctx: CliTurnContext) => CliGateVerdict) | undefined
   protected readonly next: ((result: CliRunResult, ctx: CliTurnContext) => string | null) | undefined
   protected readonly takeover: TakeoverController | undefined
-  protected readonly fsJail: FsJailSpec | undefined
+  protected readonly fsJail: PerSpawn<FsJailSpec> | undefined
 
   /** Live abort handles per running task → `onTaskCancelled` kills the child. */
   private readonly running = new Map<TaskId, AbortController>()
@@ -126,6 +150,7 @@ export class CliParticipant extends AgentParticipant {
     this.promptVia = opts.promptVia ?? 'stdin'
     this.cwd = opts.cwd
     this.env = opts.env
+    this.envMode = opts.envMode
     this.timeoutMs = opts.timeoutMs
     this.onChunk = opts.onChunk
     this.maxTurns = opts.maxTurns && opts.maxTurns > 0 ? opts.maxTurns : 1
@@ -243,16 +268,22 @@ export class CliParticipant extends AgentParticipant {
 
   /** One bounded CLI invocation; throws on abort / timeout / non-zero exit. */
   private async invoke(ctx: CliTurnContext, ac: AbortController): Promise<CliRunResult> {
+    // Resolved HERE, not in the constructor: see `PerSpawn`. A thunk that throws
+    // propagates out of the turn — the task fails instead of spawning behind a
+    // perimeter we could not establish.
+    const env = perSpawn(this.env)
+    const fsJail = perSpawn(this.fsJail)
     const result = await runCliCommand({
       command: this.command,
       args: ctx.args,
       signal: ac.signal,
       ...(this.cwd ? { cwd: this.cwd } : {}),
-      ...(this.env ? { env: this.env } : {}),
+      ...(env ? { env } : {}),
+      ...(this.envMode ? { envMode: this.envMode } : {}),
       ...(this.promptVia === 'stdin' ? { input: ctx.prompt } : {}),
       ...(this.timeoutMs ? { timeoutMs: this.timeoutMs } : {}),
       ...(this.onChunk ? { onChunk: (c: CliChunk) => this.onChunk!(ctx.taskId, c) } : {}),
-      ...(this.fsJail ? { fsJail: this.fsJail } : {}),
+      ...(fsJail ? { fsJail } : {}),
     })
     if (result.aborted) throw new Error('task cancelled')
     if (result.timedOut) throw new Error(`CLI '${this.command}' timed out after ${this.timeoutMs}ms`)

@@ -36,6 +36,18 @@ export interface CliRunOptions {
    */
   env?: Record<string, string | undefined>
   /**
+   * `'inherit'` (default) — `env` is layered on top of the parent process env,
+   * byte-identical to every call site written before this option existed.
+   *
+   * `'replace'` — `env` **is** the child env; nothing is inherited. For a jailed
+   * child this is the honest contract: a caller that builds the env from zero
+   * (HANDS-M2 `childEnv`) otherwise has to enumerate the parent's keys and
+   * delete them one by one, and a key that appears in the parent after that
+   * enumeration silently rides along. What the child gets should be stated,
+   * not reconstructed by subtraction.
+   */
+  envMode?: 'inherit' | 'replace'
+  /**
    * Text written to the child's stdin, which is then closed. When omitted,
    * stdin is closed immediately so a CLI that reads stdin doesn't hang.
    */
@@ -79,8 +91,11 @@ const KILL_GRACE_MS = 2000
 const EXIT_DRAIN_GRACE_MS = 500
 
 /** Merge parent env with overrides; an `undefined` override deletes the key. */
-function buildEnv(overrides?: Record<string, string | undefined>): NodeJS.ProcessEnv {
-  const env: NodeJS.ProcessEnv = { ...process.env }
+function buildEnv(
+  overrides?: Record<string, string | undefined>,
+  mode: 'inherit' | 'replace' = 'inherit',
+): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = mode === 'replace' ? {} : { ...process.env }
   if (!overrides) return env
   for (const [k, v] of Object.entries(overrides)) {
     if (v === undefined) delete env[k]
@@ -118,7 +133,7 @@ export async function runCliCommand(opts: CliRunOptions): Promise<CliRunResult> 
     try {
       child = spawn(command, args, {
         cwd: opts.cwd,
-        env: buildEnv(opts.env),
+        env: buildEnv(opts.env, opts.envMode),
         stdio: ['pipe', 'pipe', 'pipe'],
         // Own process group (POSIX) so the kill ladder can signal the whole
         // tree — a CLI that spawned helpers must not leave them orphaned

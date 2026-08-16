@@ -13,7 +13,14 @@
  */
 
 export * from './cli-runner.js'
-export { CliParticipant, payloadToText, type CliParticipantOptions } from './cli-participant.js'
+export {
+  CliParticipant,
+  payloadToText,
+  type CliParticipantOptions,
+  // HANDS-M2b — 「每次 spawn 现算」的值(围墙 / 环境)。长活的参与者 + 定死的围墙
+  // = 悄悄变弱的围墙,而它照样自称是监狱。
+  type PerSpawn,
+} from './cli-participant.js'
 export {
   TakeoverController,
   dangerousCommandGate,

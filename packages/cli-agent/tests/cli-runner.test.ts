@@ -128,6 +128,25 @@ describe('runCliCommand — spawn engine', () => {
     expect(r.stdout).toBe('gone')
   })
 
+  // HANDS-M2b — a jailed child's env should be STATED, not reconstructed by
+  // subtracting the parent's keys one at a time (a key that appears in the
+  // parent afterwards would then ride along unnoticed).
+  it("envMode 'replace': the child env is exactly what was passed — nothing inherited", async () => {
+    process.env.GOTONG_CLI_TEST_LEAK = 'leaked'
+    const script = "process.stdout.write(JSON.stringify(process.env))"
+    const r = await runCliCommand({
+      command: NODE,
+      args: ['-e', script],
+      env: { ONLY: 'this' },
+      envMode: 'replace',
+    })
+    delete process.env.GOTONG_CLI_TEST_LEAK
+    const seen = JSON.parse(r.stdout) as Record<string, string>
+    expect(seen.ONLY).toBe('this')
+    expect(seen.GOTONG_CLI_TEST_LEAK).toBeUndefined()
+    expect(seen.PATH).toBeUndefined() // not even PATH — 'replace' means replace
+  })
+
   it('throws "command not found" when the executable is missing', async () => {
     await expect(runCliCommand({ command: 'gotong-no-such-cmd-xyz', args: [] })).rejects.toThrow(
       /command not found/,

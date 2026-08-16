@@ -414,6 +414,73 @@ export interface ButlerHandsHost {
   readonly logger: Logger
 }
 
+/** {@link handsHardening} 的入参——把「围墙长什么样」这件事拆出闭包,好让手 B 共用。 */
+export interface HandsHardeningInput {
+  hands: ButlerHandsHost
+  /** 这次 spawn 允不允许联网(手 A 按四档策略逐条决定;手 B 恒 true——它得连自己的模型)。 */
+  net: boolean
+  /** 监狱里 HOME 的未 realpath 写法。 */
+  homeRaw: string
+  /** 同一个 HOME 的 realpath 写法——两种写法都要在只读层里放开。 */
+  homeReal: string
+}
+
+/**
+ * 一圈围墙,三个住客共用:手 A 的命令、手 A 的文件小助手、手 B 的外驱 coding
+ * agent(M2b)。**刻意导出**——手 B 若自己再推一遍「该藏什么」,那就是第二圈墙,
+ * 两圈墙迟早不一样,而不一样的那天没有人会收到通知。
+ *
+ * 藏什么**每次现算**:arm 时的 shape 是 boot 那一刻的快照,而 docker 可能是
+ * hub 起来之后才装的、`/run/user/<uid>` 是操作者 ssh 进来才出现的、
+ * `hands.json` 点名的路径可能当时还不存在(arm 时只 warn 跳过)。存在性一变,
+ * 上次算好的清单就少一条特权入口。几次 statSync 对一次 spawn 是零头。
+ */
+export function handsHardening(args: HandsHardeningInput): FsJailHardening {
+  const { hands, net, homeRaw, homeReal } = args
+  const dirs = new Set(hands.shape.hiddenDirs)
+  const files = new Set(hands.shape.hiddenFiles)
+  // HOME 也现问一次:它不在下面那两张常量表里(`jailShapeFor` 从 `probe.homedir()`
+  // 单独取),arm 时若它还不存在(容器里家目录后建、账号切换)就没进 shape,
+  // 只补常量表等于永远补不回来它。
+  const home = hands.probe.homedir()
+  // 现问回来的 HOME 也要**现判死**(Codex 四轮 M5):arm 时判过的是 boot 那一刻的
+  // 值,而这里重问的意义就在于它会变。变成 `/`、空、或相对路径 ⇒ 下面那个循环会
+  // 静默跳过它(`v === '/'` continue / resolve 出别的东西),命令照跑而家目录没藏——
+  // 恰好是 arm 时判死要避免的那个状态,只是晚了一步发生。停手,不装作藏好了。
+  if (home === '' || !path.isAbsolute(home) || variants(path.resolve(home)).some((v) => v === '/')) {
+    throw new Error(`家目录现在解析成「${home === '' ? '(空)' : home}」——藏不住它,这一步停手`)
+  }
+  for (const p of [home, ...DEFAULT_HIDDEN_DIRS, ...DEFAULT_HIDDEN_FILES, ...(hands.config.hidden ?? [])]) {
+    if (p === '') continue
+    const k = hands.probe.kind(p)
+    if (k === null) continue
+    for (const v of variants(p)) {
+      if (v === '/' || v === '') continue
+      if (k === 'dir') dirs.add(v)
+      else files.add(v)
+    }
+  }
+  // 监狱里的 HOME 是一个只读空目录——它落在被藏起来的 `<space>` 里,靠 core 的
+  // 深度分层在藏之上再开一层只读把它露出来(与工作区可写层同一个机制)。
+  //
+  // **不能少这一层**:少了它 HOME 落在藏起来的那块里,bwrap 那边是块空 tmpfs
+  // (`mkdir -p $HOME` 能成 → 点文件又能写了,只是活不过这条命令),seatbelt 那边
+  // 是彻底读不了(工具直接报错)。两个执法者两种脾气,而只读空目录在两边**行为
+  // 一致**:存在、可读、空、写不进去。所以没建出来就停手,不装作 HOME 是安全的。
+  //
+  // 与 `hardeningProblem` 禁止操作者用 `readOnly` 碰 `<space>` 不矛盾:那条禁的是
+  // **操作者点名**的路径(`<space>/agents.json` 之类);这一条是 hub 自己建的、
+  // 保持为空的一个叶子目录,里面结构上没有东西可读。
+  return {
+    unshareNet: !net,
+    unsharePid: true,
+    hiddenPaths: [...dirs],
+    hiddenFiles: [...files],
+    readOnlyRoots: [...hands.shape.readOnlyRoots, ...variants(homeRaw, homeReal)],
+    denySharedTmp: true,
+  }
+}
+
 export interface ButlerHands {
   /** 只有真装上时才有;factory 据此决定装不装五工具。 */
   host?: ButlerHandsHost
@@ -820,56 +887,11 @@ export function buildButlerHandsToolset(deps: ButlerHandsToolsetDeps): GovernedA
   }
 
   /**
-   * 每次 spawn 都同一份 hardening——命令与文件小助手不许各说各话。
-   *
-   * 藏什么**每次现算**:arm 时的 shape 是 boot 那一刻的快照,而 docker 可能是
-   * hub 起来之后才装的、`/run/user/<uid>` 是操作者 ssh 进来才出现的、
-   * `hands.json` 点名的路径可能当时还不存在(arm 时只 warn 跳过)。存在性一变,
-   * 上次算好的清单就少一条特权入口。几次 statSync 对一次 spawn 是零头。
+   * 每次 spawn 都同一份 hardening——命令与文件小助手不许各说各话。手 B(M2b)
+   * 走的是同一个 `handsHardening`,所以它拿到的也**只能是**同一圈围墙。
    */
   function hardening(net: boolean): FsJailHardening {
-    const dirs = new Set(hands.shape.hiddenDirs)
-    const files = new Set(hands.shape.hiddenFiles)
-    // HOME 也现问一次:它不在下面那两张常量表里(`jailShapeFor` 从 `probe.homedir()`
-    // 单独取),arm 时若它还不存在(容器里家目录后建、账号切换)就没进 shape,
-    // 只补常量表等于永远补不回来它。
-    const home = hands.probe.homedir()
-    // 现问回来的 HOME 也要**现判死**(Codex 四轮 M5):arm 时判过的是 boot 那一刻的
-    // 值,而这里重问的意义就在于它会变。变成 `/`、空、或相对路径 ⇒ 下面那个循环会
-    // 静默跳过它(`v === '/'` continue / resolve 出别的东西),命令照跑而家目录没藏——
-    // 恰好是 arm 时判死要避免的那个状态,只是晚了一步发生。停手,不装作藏好了。
-    if (home === '' || !path.isAbsolute(home) || variants(path.resolve(home)).some((v) => v === '/')) {
-      throw new Error(`家目录现在解析成「${home === '' ? '(空)' : home}」——藏不住它,这一步停手`)
-    }
-    for (const p of [home, ...DEFAULT_HIDDEN_DIRS, ...DEFAULT_HIDDEN_FILES, ...(cfg.hidden ?? [])]) {
-      if (p === '') continue
-      const k = hands.probe.kind(p)
-      if (k === null) continue
-      for (const v of variants(p)) {
-        if (v === '/' || v === '') continue
-        if (k === 'dir') dirs.add(v)
-        else files.add(v)
-      }
-    }
-    // 监狱里的 HOME 是一个只读空目录——它落在被藏起来的 `<space>` 里,靠 core 的
-    // 深度分层在藏之上再开一层只读把它露出来(与工作区可写层同一个机制)。
-    //
-    // **不能少这一层**:少了它 HOME 落在藏起来的那块里,bwrap 那边是块空 tmpfs
-    // (`mkdir -p $HOME` 能成 → 点文件又能写了,只是活不过这条命令),seatbelt 那边
-    // 是彻底读不了(工具直接报错)。两个执法者两种脾气,而只读空目录在两边**行为
-    // 一致**:存在、可读、空、写不进去。所以没建出来就停手,不装作 HOME 是安全的。
-    //
-    // 与 `hardeningProblem` 禁止操作者用 `readOnly` 碰 `<space>` 不矛盾:那条禁的是
-    // **操作者点名**的路径(`<space>/agents.json` 之类);这一条是 hub 自己建的、
-    // 保持为空的一个叶子目录,里面结构上没有东西可读。
-    return {
-      unshareNet: !net,
-      unsharePid: true,
-      hiddenPaths: [...dirs],
-      hiddenFiles: [...files],
-      readOnlyRoots: [...hands.shape.readOnlyRoots, ...variants(homeRaw, jailHome())],
-      denySharedTmp: true,
-    }
+    return handsHardening({ hands, net, homeRaw, homeReal: jailHome() })
   }
 
   const tools: GovernedToolSpec[] = [
