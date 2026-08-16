@@ -133,8 +133,32 @@ export interface InboxItem {
    * writer — stays web-only with zero registration needed. Deciding this at
    * WRITE time (not at IM-read time) keeps the risk call in one authoritative
    * place; the IM surface only ever reads the flag.
+   *
+   * "Whitelist" binds the WRITERS, and a writer that serves a whole tool family
+   * owes the same discipline INSIDE itself: the butler park once excluded a few
+   * tool-name shapes and let everything else through, so a later milestone's
+   * five new tools opted themselves in without anyone deciding (Codex 九轮).
+   * `IM_APPROVABLE_TOOLS` in `personal-butler-escalation.ts` is that inner list.
    */
   imApprovable?: true
+  /**
+   * IMA — does `prompt` already say what `title` says? Set by writers that
+   * BUILD the prompt out of the title (the butler park embeds the action title
+   * verbatim in its sentence), so a one-line renderer can print the prompt
+   * alone instead of `title · prompt` and waste budget saying it twice.
+   *
+   * Structural on purpose (Codex 九轮). The renderer used to work this out by
+   * looking for the framework's own 「title」 delimiters in the body, on the
+   * theory that untrusted text has had its 「」 downgraded. That holds for the
+   * butler writer — and only for it: `HumanInboxParticipant` stores `prompt` /
+   * `title` byte-for-byte, and a workflow human step's prompt can be `$ref`-
+   * inlined model output. So the body's delimiters were forgeable, and forging
+   * them dropped the human-authored title off the row. The writer knows this
+   * fact for certain; the renderer can only guess at it.
+   *
+   * Unset = "no claim" — render both. Never trust it to mean the opposite.
+   */
+  titleInPrompt?: true
   status: 'pending' | 'resolved'
   /** Set once resolved — the decision the member submitted. */
   decision?: InboxDecision

@@ -57,6 +57,17 @@ export interface SuspendedTaskLookup {
   ): { agentId: string; state: unknown; taskJson: string; corrupt?: boolean } | null
   removeSuspendedTask(taskId: string): number
   /**
+   * R9 — compare-and-set claim (`SET claimed_at WHERE task_id=? AND claimed_at
+   * IS NULL`). Returns true iff THIS caller won it.
+   *
+   * REQUIRED, not optional (unlike the two sinks below): it is the mutex that
+   * keeps two sibling human steps of one workflow run from resuming that run
+   * twice (Codex 九轮 H1b). An optional method a test double may omit is a
+   * security gate a test double may silently switch off — every real caller
+   * passes the IdentityStore, which has had this since R9.
+   */
+  claimSuspendedTask(taskId: string, claimedAt: number): boolean
+  /**
    * inbox-gov M1 — optional governance audit sink. The real IdentityStore
    * satisfies it; tests can omit it. Resolve writes one `inbox_resolve` row so
    * the generic audit query/export surfaces "who decided this human step". An
@@ -394,6 +405,30 @@ export class HostInboxService {
       parentTask = JSON.parse(row.taskJson) as Task
     } catch (err) {
       this.log?.error('inbox resolve: parent task_json corrupt', { itemId: item.itemId, err })
+      return
+    }
+    // MUTEX (Codex 九轮 H1b). The child resume is protected — one item, one
+    // per-item lock in the store, one `already_resolved` guard. The PARENT is
+    // not: a workflow run with two parallel human steps parks ONE row that
+    // BOTH items point at, and two members resolving their own steps at the
+    // same second each read that row, each pass every check above, and each
+    // call `resumeTask` — the run advances twice off one parking.
+    //
+    // The claim is the same compare-and-set the resume sweep uses, so the two
+    // paths exclude each other as well (a due sweep can't re-enter a run an
+    // inbox resolve is already resuming). Losing the claim is not an error:
+    // somebody else owns this resume.
+    //
+    // No release on the failure path — deliberately the same posture as the
+    // sweep: a claimant that dies between claim and terminal-remove leaves the
+    // row claimed, and `reclaimStaleSuspendedClaims` (wired in main.ts, runs
+    // over ALL claimed rows, not just due ones) returns it to the pool. Adding
+    // a release here would be a second, weaker copy of that mechanism.
+    if (!this.identity.claimSuspendedTask(parent.taskId, Date.now())) {
+      this.log?.warn('inbox resolve: parent resume already claimed; skipping', {
+        itemId: item.itemId,
+        parentTaskId: parent.taskId,
+      })
       return
     }
     const result = await this.hub.resumeTask(parent.by, parentTask, row.state)

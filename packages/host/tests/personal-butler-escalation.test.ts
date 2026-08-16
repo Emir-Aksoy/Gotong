@@ -177,10 +177,11 @@ describe('butlerApprovalItemFor — 审批文案的清洗与定界(H1)', () => {
   })
 })
 
-// IMA-M2 — the plan-b whitelist: hub-INTERNAL actions get `imApprovable`,
-// cross-hub egress (`ask_peer`) and MCP connector actions (`<server>__<tool>`)
-// stay web-only. The gate is by NAME SHAPE, anchored to the tool-use the
-// approvedId actually points at — never a sibling in the same round.
+// IMA-M2 — the plan-b whitelist: hub-INTERNAL config actions get `imApprovable`;
+// everything else stays web-only. Since Codex 九轮 H1 the gate is an ENUMERATED
+// list (`IM_APPROVABLE_TOOLS`), not a name-shape exclusion — a new tool family
+// (HANDS-M2 shipped five at once) must not be able to walk in unasked. Still
+// anchored to the tool-use the approvedId actually points at, never a sibling.
 describe('butlerApprovalItemFor — imApprovable whitelist (IMA-M2)', () => {
   function stateFor(toolName: string, opts: { approvedId?: string } = {}) {
     return butlerGateState({
@@ -210,6 +211,24 @@ describe('butlerApprovalItemFor — imApprovable whitelist (IMA-M2)', () => {
     for (const name of ['gmail__send_email', 'todoist__create_task']) {
       expect(shape(name)!.imApprovable).toBeUndefined()
     }
+  })
+
+  it('does NOT mark the five hands tools (Codex 九轮 H1)', () => {
+    // 一行 IM 读不全一次手部动作:argv 只渲染前 4 段各 60 字、stdin 预览 240 字,
+    // 而一行的预算是 80 码点。今天它们落在网页侧是因为**那把尺子**恰好量不下 ——
+    // 把 agent id 改短、把框架那句话缩一缩,这道门就静默打开了。名单才是那道门。
+    for (const name of ['hands_run', 'hands_write', 'hands_read', 'hands_list', 'hands_rm']) {
+      expect(shape(name)!.imApprovable, name).toBeUndefined()
+    }
+  })
+
+  it('does NOT mark pack_backup (身份档含 hub 签名钥 = 凭证级)', () => {
+    expect(shape('pack_backup')!.imApprovable).toBeUndefined()
+  })
+
+  it('名单是列举不是排除:一个从没见过的 governed 名字默认落网页侧', () => {
+    // 老的排除法对这个名字会放行(不是 ask_peer、没有 `__`)。
+    expect(shape('some_future_governed_tool')!.imApprovable).toBeUndefined()
   })
 
   it('anchors to the APPROVED tool, not a benign sibling in the round', () => {

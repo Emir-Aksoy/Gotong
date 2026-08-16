@@ -30,6 +30,8 @@ describe('HostInboxService — two-step resume', () => {
   let service: HostInboxService
   let parentResumes: Array<{ task: Task; state: unknown }>
   let parentSuspendAgain: boolean
+  /** Held open by the sibling-race test to keep the first parent resume in flight. */
+  let parentGate: Promise<void> | null
 
   beforeEach(async () => {
     tmp = mkdtempSync(join(tmpdir(), 'host-inbox-svc-'))
@@ -59,6 +61,7 @@ describe('HostInboxService — two-step resume', () => {
     // Stub "workflow" parent — never dispatched-to, only resumed.
     parentResumes = []
     parentSuspendAgain = false
+    parentGate = null
     const stubWorkflow: Participant = {
       id: 'workflow:demo',
       kind: 'agent',
@@ -68,6 +71,7 @@ describe('HostInboxService — two-step resume', () => {
       },
       async onResume(task, state) {
         parentResumes.push({ task, state })
+        if (parentGate) await parentGate
         if (parentSuspendAgain) throw new SuspendTaskError({ resumeAt: NEVER_RESUME_AT, state })
         return { kind: 'ok', taskId: task.id, output: 'parent-resumed', by: 'workflow:demo', ts: 1 }
       },
@@ -135,6 +139,52 @@ describe('HostInboxService — two-step resume', () => {
     expect(parentResumes).toHaveLength(1)
     expect(parentResumes[0]!.state).toMatchObject({ kind: 'workflow_step_suspended' })
     expect((await store.get(childId))!.status).toBe('resolved')
+  })
+
+  it('两个兄弟人步同时批,父 run 只被 resume 一次(Codex 九轮 H1b)', async () => {
+    // 并行分支的两个 human 步各自 park 自己的待批项,但 `parent.taskId` 是**同一
+    // 个** run。两人同一秒各批各的:两条 resolve 各自过完自己那把 per-item 锁、
+    // 各自读到同一行还在,于是同一次 parking 被 resume 两次 —— run 白白往前走两步。
+    //
+    // 闸是 `claimSuspendedTask` 这把 CAS。测试把第一次父 resume 卡在门里(parentGate)
+    // 撑开那个窗口:没有 CAS 的话第二条一定挤进来。
+    const a = await park({ assignee: 'user-a', kind: 'approval', prompt: 'a?' })
+    const b = await park({ assignee: 'user-b', kind: 'approval', prompt: 'b?' })
+    expect(a).not.toBe(b)
+    parkParent() // 一个 run,两个兄弟项都指向它
+
+    let release!: () => void
+    parentGate = new Promise<void>((r) => {
+      release = r
+    })
+
+    const both = Promise.all([
+      service.resolve({ itemId: a, userId: 'user-a', decision: { kind: 'approval', approved: true } }),
+      service.resolve({ itemId: b, userId: 'user-b', decision: { kind: 'approval', approved: true } }),
+    ])
+    // 等到窗口真的撑开了再放行:一条已经进了父 resume(卡在门里),另一条的子任务
+    // 也已经 resume 完(它下一步就是 resumeParent)。**不能只数 setImmediate**——
+    // 落盘是线程池 I/O,空转 20 个 tick 的真实耗时接近 0,两条都还没走到父那一步,
+    // 于是「窗口没开」被误读成「闸有效」(这道门第一版就是这么假绿的)。
+    const deadline = Date.now() + 3000
+    while (
+      Date.now() < deadline &&
+      !(parentResumes.length > 0 && hub.taskResult(a) && hub.taskResult(b))
+    ) {
+      await new Promise((r) => setTimeout(r, 1))
+    }
+    for (let i = 0; i < 20; i++) await new Promise((r) => setImmediate(r))
+    release()
+    await both
+
+    // 两个子任务都各自 resume 完了(闸只管父,不连累子)。
+    expect(hub.taskResult(a)?.kind).toBe('ok')
+    expect(hub.taskResult(b)?.kind).toBe('ok')
+    expect((await store.get(a))!.status).toBe('resolved')
+    expect((await store.get(b))!.status).toBe('resolved')
+    // 而父 run 恰好一次。
+    expect(parentResumes).toHaveLength(1)
+    expect(identity.getSuspendedTask('wf-trigger')).toBeNull()
   })
 
   it('writes an inbox_resolve audit row + item history on resolve (inbox-gov M1)', async () => {

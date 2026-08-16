@@ -32,6 +32,7 @@ import {
   BUTLER_FIRST_CLASS_BENIGN,
 } from '../src/butler-tool-tiers.js'
 import { estimateTokens } from '../src/butler-toolface-report.js'
+import { IM_APPROVABLE_TOOLS } from '../src/personal-butler-escalation.js'
 
 const silentLogger: Logger = {
   trace() {},
@@ -289,6 +290,45 @@ describe('AFR-M3 — 工具面分层名单防腐门(真工厂)', () => {
     await buildButler(armed, root).onTask(task('t-armed', 'u-armed', '你好。'))
     const armedFace = armed.faces[0]!.map((t) => t.name).filter((n) => !n.startsWith('hands_')).sort()
     expect(faces[0]).toEqual(armedFace)
+  })
+
+  it('IMA 名单双向核对:每个 governed 工具恰好落在「IM 可批」或「网页 only」一侧', async () => {
+    // Codex 九轮 H1 —— `imApprovable` 原本是**排除法**(不是 ask_peer、名字没有
+    // `__` 就放行),那条纪律管住了新的写入方、管不住新的工具族:HANDS-M2 一次挂
+    // 上五件 `hands_*`,一个字没改就全落进了「手机可批」一侧。
+    //
+    // 这道门要的是**表态**:新增一个 governed 工具,它必须出现在下面两张名单之一,
+    // 否则这里红。名单不是「文档说了什么」,是从真工厂拼出来的脸上量的。
+    const WEB_ONLY_TOOLS = [
+      'ask_peer', // 跨 hub 出网
+      'pack_backup', // 身份档含 hub 签名钥 = 凭证级
+      'hands_run', // 五件手部动作:一行 IM 读不全(argv/stdin 远超 80 码点预算)
+      'hands_write',
+      'hands_read',
+      'hands_list',
+      'hands_rm',
+    ] as const
+
+    const provider = new TierScriptProvider([])
+    await buildButler(provider, root).onTask(task('t-ima', 'u-ima', '你好。'))
+    const face = new Set(provider.faces[0]!.map((t) => t.name))
+
+    // ① 名单里的名字都真的在脸上(死条目 / 拼错 → 红)。
+    for (const name of IM_APPROVABLE_TOOLS) {
+      expect(face.has(name), `${name} 在 IM 可批名单上,却不在真实工具面上`).toBe(true)
+    }
+    for (const name of WEB_ONLY_TOOLS) {
+      expect(face.has(name), `${name} 在网页 only 名单上,却不在真实工具面上`).toBe(true)
+    }
+    // ② benign 工具不得混进 IM 名单(名单只对 governed 动作有意义)。
+    for (const name of IM_APPROVABLE_TOOLS) {
+      expect(GOVERNED_TOOLS as readonly string[], `${name} 不是 governed 工具`).toContain(name)
+    }
+    // ③ 每个 governed 工具恰好被表态一次:并集覆盖全集、交集为空。
+    const imSide = [...IM_APPROVABLE_TOOLS].sort()
+    const webSide = [...WEB_ONLY_TOOLS].sort()
+    expect(imSide.filter((n) => webSide.includes(n))).toEqual([])
+    expect([...imSide, ...webSide].sort()).toEqual([...GOVERNED_TOOLS].sort())
   })
 
   it('指路不指空:留在脸上的工具 schema 不得点名任何目录工具(两把门除外)', async () => {

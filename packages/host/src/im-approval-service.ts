@@ -44,8 +44,6 @@ import { dirname, join } from 'node:path'
 import type { InboxDecision, InboxItem } from '@gotong/inbox'
 
 import {
-  APPROVAL_CLOSE,
-  APPROVAL_OPEN,
   clipApprovalText,
   hasVisibleContent,
   sanitizeApprovalText,
@@ -316,17 +314,20 @@ export class ImApprovalService {
  * `…敏感动作:「<title>」。` 正是这一种),攻击者拼不出这个条件。
  */
 function imRowText(item: InboxItem): { text: string; complete: boolean } {
-  // 锚点在**洗之前**看,这是承重的顺序:写入方存进来的正文里,不可信文本的
-  // `「」` 已经被降级成 `『』` 了(见 `buildButlerApprovalPrompt`),所以此刻正文里
-  // 的 `「」` 只可能是框架自己放的。而下面这次洗会把框架的那对也降级成 `『』`
-  // ——洗完再找就分不出「这对是谁放的」,攻击者在正文里写一对 `『』` 就能冒充。
   const rawTitle = item.title?.trim() ?? ''
   const rawBody = item.prompt.trim()
-  const framed = `${APPROVAL_OPEN}${rawTitle}${APPROVAL_CLOSE}`
-  // 两种去重都不可伪造:①正文与标题**完全相同**(那就只有一份内容,说一遍即可,
-  // 攻击者这么做也只是把自己那段话少印一次);②正文里出现框架亲手加的
-  // `「<title>」`。**子串包含**不在此列 —— 那是攻击者两头都能写的关系。
-  const embedded = rawTitle !== '' && (rawBody === rawTitle || rawBody.includes(framed))
+  // 去重靠**写入方的结构性声明**,不靠在正文里找框架的定界符(Codex 九轮 A-H1)。
+  //
+  // 上一版的判据是「正文里出现框架亲手加的 `「<title>」`」,前提是「不可信文本里
+  // 的 `「」` 已经被降级过」——那对**管家写入方**成立,而且只对它成立:
+  // `HumanInboxParticipant` 把 prompt/title 逐字节存下来,工作流 human 步的 prompt
+  // 还可以 `$ref` 内联上一步的模型输出。于是那对定界符是可以被伪造的,伪造成功
+  // 的效果是**把人写的标题从这行字里抹掉**。写入方知道这件事,渲染层只能猜。
+  //
+  // 另一条仍留着,因为它不可伪造:正文与标题完全相同 ⇒ 只有一份内容,说一遍即可
+  // (攻击者这么做也只是把自己那段话少印一次)。**子串包含**永远不在此列 —— 那是
+  // 攻击者两头都能写的关系。
+  const embedded = rawTitle !== '' && (item.titleInPrompt === true || rawBody === rawTitle)
   const title = sanitizeApprovalText(rawTitle)
   const body = sanitizeApprovalText(rawBody)
   const clean = rawTitle === '' || embedded ? body : `${title} · ${body}`
