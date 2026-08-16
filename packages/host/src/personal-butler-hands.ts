@@ -89,11 +89,26 @@ export interface HandsConfig {
   maxRunSec: number
   maxOutputBytes: number
   maxWorkspaceBytes: number
+  /**
+   * 谁有手 —— 归属角色白名单,默认**只有 owner/admin**。
+   *
+   * 手是这台 hub 上最锋利的能力(tier 1 命令免审批、在监狱里任意执行),而
+   * 「成员」这个角色的门槛在别处低得多(邀请一个人进来聊天 ≠ 给他一台能跑代码
+   * 的机器)。默认收在 owner/admin 与 `pack_backup` 同姿态;要给成员手,得在
+   * `hands.json` 里把 `member` 写出来——那一刻是一次明确的决定,不是默认值。
+   */
+  allowRoles: string[]
   /** 追加藏起来的绝对路径(目录或文件;不存在的 arm 时 warn 后跳过)。 */
   hidden?: string[]
   /** 藏起来的目录里再放开只读的绝对路径(操作者自己的工具链,如 ~/.cargo)。 */
   readOnly?: string[]
 }
+
+/** 归属角色闭集(镜像 identity 的 `Role`;host 侧刻意不 import 那个类型)。 */
+const HANDS_ROLE_NAMES = Object.freeze(['owner', 'admin', 'member', 'viewer'] as const)
+
+/** `allowRoles` 缺省值——只有 owner/admin 有手。 */
+export const HANDS_DEFAULT_ALLOW_ROLES: readonly string[] = Object.freeze(['owner', 'admin'])
 
 /** 可调区间(闭区间)。越界 = 形状不对 = warn + 不装,绝不 clamp 后静默装上。 */
 export const HANDS_CONFIG_BOUNDS = Object.freeze({
@@ -106,12 +121,13 @@ export const HANDS_CONFIG_BOUNDS = Object.freeze({
 export const HANDS_CONFIG_PATH_LIST_MAX = 32
 const HANDS_CONFIG_PATH_MAX_LEN = 1024
 
-const HANDS_CONFIG_KEYS = ['enabled', 'maxRunSec', 'maxOutputBytes', 'maxWorkspaceBytes', 'hidden', 'readOnly'] as const
+const HANDS_CONFIG_KEYS = ['enabled', 'maxRunSec', 'maxOutputBytes', 'maxWorkspaceBytes', 'allowRoles', 'hidden', 'readOnly'] as const
 
 const DEFAULT_CONFIG: HandsConfig = Object.freeze({
   maxRunSec: HANDS_LIMITS.maxRunSec,
   maxOutputBytes: HANDS_LIMITS.maxOutputBytes,
   maxWorkspaceBytes: HANDS_LIMITS.maxWorkspaceBytes,
+  allowRoles: HANDS_DEFAULT_ALLOW_ROLES as string[],
 })
 
 /**
@@ -167,6 +183,16 @@ export function loadHandsConfig(spaceRoot: string, logger: Pick<Logger, 'info' |
     }
     out[key] = v
   }
+  if (obj.allowRoles !== undefined) {
+    const bad = roleListProblem(obj.allowRoles)
+    if (bad) {
+      // 拼错一个角色名(members / Admin)在白名单里是**静默收紧**——手看起来装上了,
+      // 每个人却都被拒;而写错的人以为自己刚把手交给了谁。闭集之外一律不装。
+      logger.warn('hands: hands.json allowRoles invalid — hands stay OFF', { file, problem: bad, allowed: HANDS_ROLE_NAMES })
+      return undefined
+    }
+    out.allowRoles = obj.allowRoles as string[]
+  }
   for (const key of ['hidden', 'readOnly'] as const) {
     const v = obj[key]
     if (v === undefined) continue
@@ -178,6 +204,20 @@ export function loadHandsConfig(spaceRoot: string, logger: Pick<Logger, 'info' |
     out[key] = v as string[]
   }
   return out
+}
+
+/** `allowRoles` 形状门:非空字符串数组、每条来自角色闭集、不重复。 */
+function roleListProblem(v: unknown): string | undefined {
+  if (!Array.isArray(v)) return 'must be an array of role names'
+  // 空数组 = 谁都没有手 = 就是「没开」,但它长得像「开了」。要关就 enabled:false。
+  if (v.length === 0) return 'empty — use "enabled": false to turn hands off'
+  const seen = new Set<string>()
+  for (const r of v) {
+    if (typeof r !== 'string' || !(HANDS_ROLE_NAMES as readonly string[]).includes(r)) return `unknown role: ${JSON.stringify(r)}`
+    if (seen.has(r)) return `duplicate role: ${r}`
+    seen.add(r)
+  }
+  return undefined
 }
 
 /** `hidden`/`readOnly` 形状门:字符串数组、每条绝对路径、无控制字节、有上限。 */
@@ -365,6 +405,12 @@ export interface ButlerHandsHost {
    * 后长出来的特权入口在监狱里裸着(shape 是快照,这个才是当下)。
    */
   readonly probe: JailShapeProbe
+  /**
+   * 这个成员有没有手 —— **classify 与 execute 各问一遍,不缓存**:park 可能挂几
+   * 小时,期间他可能被降权;缓存下来的「他当时是 admin」会让一次过期的批准照样
+   * 兑现。`pack_backup` 两端各查一次是同一个理由。
+   */
+  readonly allowed: (userId: string) => boolean
   readonly logger: Logger
 }
 
@@ -377,6 +423,13 @@ export interface ButlerHands {
 export interface ArmButlerHandsOptions {
   spaceRoot: string
   logger: Logger
+  /**
+   * 谁是谁 —— 归属角色查询(identity)。**不给 = 不装手**:`allowRoles` 说了
+   * 只有 owner/admin 有手,而没有归属就答不出「他是不是 owner」;装上一双每次
+   * 调用都得 fail-closed 拒的手,读起来像 bug,不如响亮地不装、说清原因。与
+   * 「监狱缺席不装」同姿态,也与 `pack_backup` 在 identity 缺席时整个不装一致。
+   */
+  membershipRole?: (userId: string) => string | null | undefined
   /** 测试缝:不给 = 读 `<space>/hands.json`。 */
   config?: HandsConfig | undefined
   /** 测试缝:不给 = 真 `detectFsJail()`。 */
@@ -397,6 +450,13 @@ export async function armButlerHands(opts: ArmButlerHandsOptions): Promise<Butle
   const config = 'config' in opts ? opts.config : loadHandsConfig(spaceRoot, opts.logger)
   if (!config) {
     return { status: { armed: false, reason: `未开启(<space>/${HANDS_CONFIG_FILE} 缺席或未 enabled)` } }
+  }
+  const membershipRole = opts.membershipRole
+  if (!membershipRole) {
+    opts.logger.warn('hands: hands.json enabled but no membership lookup — hands NOT installed (fail-closed)', {
+      allowRoles: config.allowRoles,
+    })
+    return { status: { armed: false, reason: '查不到成员角色(identity 缺席)——手只给 ' + config.allowRoles.join('/') + ',查不到就不装' } }
   }
   const cap = await (opts.detect ?? detectFsJail)()
   if (cap.kind === 'none') {
@@ -427,10 +487,23 @@ export async function armButlerHands(opts: ArmButlerHandsOptions): Promise<Butle
     config,
     shape,
     probe,
+    allowed: (userId) => {
+      let role: string | null | undefined
+      try {
+        role = membershipRole(userId)
+      } catch (err) {
+        // 查不出来就是没有——归属库读不了的时候「谁都放行」会把这道门变成
+        // 一次数据库抖动就能绕过的东西。
+        opts.logger.warn('hands: membership lookup failed — treating as no hands', { userId, err: String(err) })
+        return false
+      }
+      return typeof role === 'string' && config.allowRoles.includes(role)
+    },
     logger: opts.logger,
   }
   opts.logger.info('hands: armed', {
     jail: cap.kind,
+    allowRoles: config.allowRoles,
     maxRunSec: config.maxRunSec,
     maxOutputBytes: config.maxOutputBytes,
     maxWorkspaceBytes: config.maxWorkspaceBytes,
@@ -527,6 +600,20 @@ const AUDIT_ARGV_CHARS = HANDS_LIMITS.maxArgvTotalChars
 export const HANDS_MAX_WORKSPACE_ENTRIES = 100_000
 /** 工作区里给监狱内命令当 TMPDIR 的子目录(算配额,不自动清)。 */
 export const HANDS_TMP_SUBDIR = '.hands-tmp'
+/** 工作区里给包管理器当缓存根的子目录(HOME 只读之后缓存的落点;算配额)。 */
+export const HANDS_CACHE_SUBDIR = '.hands-cache'
+
+/**
+ * 不够格时给模型的那句话——**说清楚是资格问题、别让它重试**,并指一条真出路
+ * (把步骤写给成员)。名单从配置现拼:操作者把 `member` 加进 `allowRoles` 之后,
+ * 这句话不能还在说「只开给 owner/admin」。`pack_backup` 同姿态。
+ */
+export function handsRefuseRole(allowRoles: readonly string[]): string {
+  return (
+    `你在这台 hub 上没有动手的权限(手只开给 ${allowRoles.join('/')};这不是重试能解决的)。` +
+    '把要做的步骤写清楚交给成员,由有权限的人来跑。'
+  )
+}
 
 interface Busy {
   what: string
@@ -550,22 +637,49 @@ export function buildButlerHandsToolset(deps: ButlerHandsToolsetDeps): GovernedA
   const cfg = hands.config
   const memberRoot = ownerDir(hands.handsRoot, { kind: 'user', id: userId })
   const workspaceRaw = path.join(memberRoot, 'workspace')
+  /**
+   * 监狱里的 HOME —— 一个**永远空、永远只读**的目录,不是工作区。
+   *
+   * 让 HOME 指向工作区看起来省事(缓存有地方落),代价是**在工作区里写文件是
+   * tier 1 免审批的**:模型可以先无声地写一份 `~/.gitconfig`(`core.pager` 挂个
+   * 命令)或 `~/.npmrc`(换个 registry),再请成员批准一条看起来人畜无害的
+   * `npm install`。审批卡上那行字是真的,行为却在批准之前就被改写了。
+   *
+   * 环境配置是**看不见的**,工作区里的文件是这次活儿**看得见的一部分**——这条
+   * 线就画在这里:HOME 只读到根本放不进点文件,缓存另给明确的落点(见 childEnv)。
+   */
+  const homeRaw = path.join(memberRoot, 'home')
   const auditPath = path.join(memberRoot, 'audit.jsonl')
   const busyKey = `${path.resolve(hands.handsRoot)}::${userId}`
 
   let workspaceReal: string | undefined
+  let homeReal: string | undefined
 
   function ensureWorkspace(): { ok: true; root: string } | { ok: false; reason: string } {
     if (workspaceReal) return { ok: true, root: workspaceReal }
     try {
       mkdirSync(workspaceRaw, { recursive: true, mode: 0o700 })
+      // HOME 与工作区同生:监狱要它当挂载点(bwrap 得有个真目录),而它必须先
+      // 存在、后被 ro-bind——反过来就是「HOME 不存在 → 只读层被静默跳过 →
+      // HOME 落回被藏起来的 <space> 里的某个路径」。
+      mkdirSync(homeRaw, { recursive: true, mode: 0o700 })
       workspaceReal = realpathSync.native(workspaceRaw)
+      homeReal = realpathSync.native(homeRaw)
       return { ok: true, root: workspaceReal }
     } catch (err) {
       const reason = `工作区建不起来:${errMsg(err)}`
       log.warn('hands: workspace unavailable', { userId, dir: workspaceRaw, err: String(err) })
       return { ok: false, reason }
     }
+  }
+
+  /**
+   * 监狱里的 HOME —— 一处回答,两个消费者(jail 的只读层与子进程 env)。少了它就
+   * 停手:两边任一边偷偷回落,HOME 就落回被藏起来的那块地方(见 `hardening`)。
+   */
+  function jailHome(): string {
+    if (!homeReal) throw new Error('监狱里的 HOME 还没建出来——这一步停手(不拿藏起来的路径当家目录)')
+    return homeReal
   }
 
   function ctx(root: string): HandsPolicyContext {
@@ -623,6 +737,11 @@ export function buildButlerHandsToolset(deps: ButlerHandsToolsetDeps): GovernedA
       if (call) call.recorded = true
       return true
     } catch (err) {
+      // 还没有工作区的人(没有手的成员、工作区建不起来)不该因为一次**拒绝**就被建出
+      // 目录来:这不是「台账写不进去」,是「还没有台账」。两个到得了这里的调用点都是
+      // 动手之前的拒绝,拒绝本身已经回给了模型;真动手的那两行(begin/execute)永远在
+      // `ensureWorkspace()` 成功之后,那时 memberRoot 必然在——所以这条静音不遮任何事。
+      if ((err as NodeJS.ErrnoException)?.code === 'ENOENT' && !existsSync(memberRoot)) return false
       log.warn('hands: audit append failed', { userId, err: String(err) })
       return false
     }
@@ -732,12 +851,23 @@ export function buildButlerHandsToolset(deps: ButlerHandsToolsetDeps): GovernedA
         else files.add(v)
       }
     }
+    // 监狱里的 HOME 是一个只读空目录——它落在被藏起来的 `<space>` 里,靠 core 的
+    // 深度分层在藏之上再开一层只读把它露出来(与工作区可写层同一个机制)。
+    //
+    // **不能少这一层**:少了它 HOME 落在藏起来的那块里,bwrap 那边是块空 tmpfs
+    // (`mkdir -p $HOME` 能成 → 点文件又能写了,只是活不过这条命令),seatbelt 那边
+    // 是彻底读不了(工具直接报错)。两个执法者两种脾气,而只读空目录在两边**行为
+    // 一致**:存在、可读、空、写不进去。所以没建出来就停手,不装作 HOME 是安全的。
+    //
+    // 与 `hardeningProblem` 禁止操作者用 `readOnly` 碰 `<space>` 不矛盾:那条禁的是
+    // **操作者点名**的路径(`<space>/agents.json` 之类);这一条是 hub 自己建的、
+    // 保持为空的一个叶子目录,里面结构上没有东西可读。
     return {
       unshareNet: !net,
       unsharePid: true,
       hiddenPaths: [...dirs],
       hiddenFiles: [...files],
-      readOnlyRoots: hands.shape.readOnlyRoots,
+      readOnlyRoots: [...hands.shape.readOnlyRoots, ...variants(homeRaw, jailHome())],
       denySharedTmp: true,
     }
   }
@@ -749,7 +879,8 @@ export function buildButlerHandsToolset(deps: ButlerHandsToolsetDeps): GovernedA
         `在你的监狱工作区里执行一条命令(argv 数组,不经 shell;要管道/重定向就 argv:["sh","-c","…"])。` +
         `离线命令直接跑;要联网的(npm/pip/git 拉取、curl…)设 net:true 或按命令名自动推断→每次都先请成员确认。` +
         `cwd 相对工作区(默认根);stdin 可选(成员在审批时会看到摘要);timeoutSec 最多 ${cfg.maxRunSec}。` +
-        `命令看不到 hub 的配置与凭证(<space>、hub 用户的家目录整个不可见),只能写工作区(HOME/TMPDIR 也指向工作区,缓存会落在这里)。` +
+        `命令看不到 hub 的配置与凭证(<space>、hub 用户的家目录整个不可见),只能写工作区(TMPDIR 与包管理器缓存都在工作区里)。` +
+        `HOME 是一个只读空目录——点文件(~/.npmrc、~/.gitconfig…)写不进去,要改工具行为请用命令行参数,或在这一条命令里临时设环境变量。` +
         `输出只回最后 ${fmtBytes(cfg.maxOutputBytes)}——长输出请重定向到文件再 hands_read。` +
         `不能做的:sudo/装系统包/管服务/容器/定时任务这类系统级动作(会被拒,请把步骤写给成员)。`,
       inputSchema: {
@@ -819,6 +950,8 @@ export function buildButlerHandsToolset(deps: ButlerHandsToolsetDeps): GovernedA
     // 服务端权威分级——M1 策略是唯一权威;这里只叠两件执行器才知道的事实:
     // 工作区建不起来(refuse)、要 park 的联网命令先看配额(超了就别浪费成员一次审批)。
     classify: (name, args): GovernedVerdict => {
+      // 「他有没有手」排在最前面:不够格的成员连工作区目录都不该被建出来。
+      if (!hands.allowed(userId)) return { decision: 'refuse', reason: denied('classify', name, 'role', handsRefuseRole(cfg.allowRoles)) }
       const ws = ensureWorkspace()
       if (!ws.ok) return { decision: 'refuse', reason: denied('classify', name, 'workspace_unavailable', ws.reason) }
       const d = classifyHandsToolCall(name, args, ctx(ws.root))
@@ -867,6 +1000,9 @@ export function buildButlerHandsToolset(deps: ButlerHandsToolsetDeps): GovernedA
     // 整个 execute 跑在 `CALL` 的作用域里,兜底那格状态才跟着**这一趟**走。
     execute: async (name, args) =>
       CALL.run({ recorded: false }, async () => {
+      // 再问一遍(不是复述 classify 的答案):park 挂着的这几小时里他可能被降权,
+      // 而批准是对**那一刻够格的他**发的。
+      if (!hands.allowed(userId)) return err(denied('execute', name, 'role', handsRefuseRole(cfg.allowRoles)))
       const ws = ensureWorkspace()
       if (!ws.ok) return err(denied('execute', name, 'workspace_unavailable', ws.reason))
       // 执行前重跑同一份策略(TOCTOU 缩窗 + 拿 resolvedPath/net)。refuse → isError,
@@ -975,7 +1111,7 @@ export function buildButlerHandsToolset(deps: ButlerHandsToolsetDeps): GovernedA
     const started = now()
     const result = await spawnJailed(wrapped.command, wrapped.args, {
       cwd,
-      env: childEnv(root, net, { pathEnv: hands.shape.pathEnv }),
+      env: childEnv(root, net, { home: jailHome(), pathEnv: hands.shape.pathEnv }),
       stdin,
       timeoutMs: timeoutSec * 1000,
       tailBytes: cfg.maxOutputBytes,
@@ -1050,7 +1186,7 @@ export function buildButlerHandsToolset(deps: ButlerHandsToolsetDeps): GovernedA
     if (!wrapped.jailed) return { ok: false, code: 'nojail', message: '监狱包不上文件小助手(kind none)——手不动' }
     const r = await spawnJailed(wrapped.command, wrapped.args, {
       cwd: root,
-      env: childEnv(root, false, { pathEnv: hands.shape.pathEnv }),
+      env: childEnv(root, false, { home: jailHome(), pathEnv: hands.shape.pathEnv }),
       stdin,
       timeoutMs: HELPER_TIMEOUT_MS,
       tailBytes: HELPER_TAIL_BYTES,
@@ -1400,22 +1536,36 @@ export const HANDS_ENV_MARKER = 'ATONG_HANDS'
 const PROXY_VARS = ['HTTP_PROXY', 'HTTPS_PROXY', 'NO_PROXY', 'ALL_PROXY', 'http_proxy', 'https_proxy', 'no_proxy', 'all_proxy']
 
 export interface ChildEnvOptions {
+  /**
+   * 监狱里的 HOME —— 那个只读空目录(**必填**:少传就退回「HOME=工作区」,
+   * 而那正是要堵的洞;让类型系统在编译期问这个问题,别让它变成谁记不记得住)。
+   */
+  home: string
   /** 监狱里的 PATH(arm 时算好的过滤结果);不给 = hub 的 PATH 原样。 */
   pathEnv?: string
   /** 测试缝:代替 process.env 读代理/USER。 */
   source?: NodeJS.ProcessEnv
 }
 
-export function childEnv(workspace: string, net: boolean, opts: ChildEnvOptions = {}): Record<string, string> {
+export function childEnv(workspace: string, net: boolean, opts: ChildEnvOptions): Record<string, string> {
   const src = opts.source ?? process.env
+  const cache = path.join(workspace, HANDS_CACHE_SUBDIR)
   const env: Record<string, string> = {
     PATH: opts.pathEnv ?? src.PATH ?? '/usr/local/bin:/usr/bin:/bin',
-    HOME: workspace,
+    HOME: opts.home,
     TMPDIR: path.join(workspace, HANDS_TMP_SUBDIR),
+    // HOME 只读之后缓存得另有落点,否则每次 `npm i` 都栽在 EROFS 上。缓存放工作区
+    // 里是安全的:**缓存不改行为,配置才改行为**——这条线正是 HOME 只读要画的那条。
+    // 这张表天生列不全(每个工具一个变量名),但它现在站在**方便**那一侧而不是安全
+    // 那一侧:漏掉一个,那个工具当场报错,模型自己 `sh -c 'FOO=$PWD/... cmd'` 就能
+    // 绕过去(tier 1,不花成员一次审批)。漏掉一条的代价是一次失败,不是一个洞。
+    XDG_CACHE_HOME: cache,
+    NPM_CONFIG_CACHE: path.join(cache, 'npm'),
+    PIP_CACHE_DIR: path.join(cache, 'pip'),
+    [HANDS_ENV_MARKER]: '1',
     LANG: src.LANG ?? 'C.UTF-8',
     TERM: 'dumb',
     NO_COLOR: '1',
-    [HANDS_ENV_MARKER]: '1',
   }
   for (const k of ['USER', 'LOGNAME'] as const) {
     const v = src[k]

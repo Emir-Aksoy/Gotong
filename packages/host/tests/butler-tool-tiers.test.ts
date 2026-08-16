@@ -130,8 +130,12 @@ const fakeBackupOps = {
   pack: async () => ({ code: 0, lines: [] }),
 }
 
-/** HANDS-M2 三态:'armed'(默认,最大脸)/ 'off'(dep 在但未装 = 监狱缺席或 hands.json 缺席)/ 'absent'(老 main.ts 根本不传)。 */
-type HandsMode = 'armed' | 'off' | 'absent'
+/**
+ * HANDS-M2 四态:'armed'(默认,最大脸)/ 'off'(dep 在但未装 = 监狱缺席或 hands.json
+ * 缺席)/ 'absent'(老 main.ts 根本不传)/ 'no-role'(手装上了,但**这个成员**不在
+ * `allowRoles` 里 —— 手是 hub 级的,「谁有手」是每个人各自的答案)。
+ */
+type HandsMode = 'armed' | 'off' | 'absent' | 'no-role'
 
 function buildButler(provider: LlmProvider, root: string, singleTier?: boolean, handsMode: HandsMode = 'armed') {
   const factory = buildButlerFactory({
@@ -156,14 +160,21 @@ function buildButler(provider: LlmProvider, root: string, singleTier?: boolean, 
     selfHeal: () => undefined,
     // HANDS-M2 — 最大脸必须带 armed 的手,五个 hands_* governed 工具才在;
     // 构造零副作用(工作区懒建),这里的宿主目录不会被真碰。
-    ...(handsMode === 'armed'
+    ...(handsMode === 'armed' || handsMode === 'no-role'
       ? {
           hands: {
             host: {
               spaceRoot: root,
               handsRoot: join(root, 'butler', 'hands'),
               kind: 'sandbox-exec' as const,
-              config: { maxRunSec: 120, maxOutputBytes: 32 * 1024, maxWorkspaceBytes: 512 * 1024 * 1024 },
+              config: {
+                maxRunSec: 120,
+                maxOutputBytes: 32 * 1024,
+                maxWorkspaceBytes: 512 * 1024 * 1024,
+                allowRoles: ['owner', 'admin'],
+              },
+              // 「谁有手」——工具面按 spawn 那一刻的答案决定发不发这五件。
+              allowed: () => handsMode === 'armed',
               logger: silentLogger,
             },
             status: { armed: true as const, kind: 'sandbox-exec' as const },
@@ -274,7 +285,9 @@ describe('AFR-M3 — 工具面分层名单防腐门(真工厂)', () => {
     const HANDS = GOVERNED_TOOLS.filter((n) => n.startsWith('hands_'))
     expect(HANDS).toHaveLength(5)
     const faces: string[][] = []
-    for (const mode of ['absent', 'off'] as const) {
+    // 'no-role' 与前两态给模型看的脸**必须一样**:手装在 hub 上,但这个成员没有。
+    // 发五件永远拒绝他的工具既费 schema token,读起来也像个 bug。
+    for (const mode of ['absent', 'off', 'no-role'] as const) {
       const provider = new TierScriptProvider([])
       const butler = buildButler(provider, root, undefined, mode)
       const r = await butler.onTask(task(`t-${mode}`, `u-${mode}`, '你好。'))
@@ -283,13 +296,28 @@ describe('AFR-M3 — 工具面分层名单防腐门(真工厂)', () => {
       for (const name of HANDS) expect(face, mode).not.toContain(name)
       faces.push(face.slice().sort())
     }
-    // 老 main.ts(不传)与新 main.ts 未装两种姿态给模型看的脸逐字节一样。
+    // 老 main.ts(不传)、未装、装了但这人没手 —— 三种姿态的脸逐字节一样。
     expect(faces[0]).toEqual(faces[1])
+    expect(faces[0]).toEqual(faces[2])
     // 且 = armed 脸减去恰好那五件(手不装不多不少)。
     const armed = new TierScriptProvider([])
     await buildButler(armed, root).onTask(task('t-armed', 'u-armed', '你好。'))
     const armedFace = armed.faces[0]!.map((t) => t.name).filter((n) => !n.startsWith('hands_')).sort()
     expect(faces[0]).toEqual(armedFace)
+  })
+
+  it('HANDS-M2 「手」那行是说给这个人听的:装着但没开给他 ⇒ my_status 说实话,不许一个兑现不了的承诺', async () => {
+    const mine = new TierScriptProvider([{ name: 'my_status', input: {} }])
+    await buildButler(mine, root, true, 'no-role').onTask(task('t-mine', 'u-mine', '你还好吗?'))
+    const said = mine.toolResults.join('')
+    expect(said).toContain('手装着,但没开给你')
+    expect(said).toContain('owner/admin')
+    // 「已装,工作区里写/读/跑」是有手的人才看得到的那句。
+    expect(said).not.toContain('工作区里写/读/跑')
+    // 对照:有手的人看到的就是那句。
+    const his = new TierScriptProvider([{ name: 'my_status', input: {} }])
+    await buildButler(his, root, true, 'armed').onTask(task('t-his', 'u-his', '你还好吗?'))
+    expect(his.toolResults.join('')).toContain('工作区里写/读/跑')
   })
 
   it('IMA 名单双向核对:每个 governed 工具恰好落在「IM 可批」或「网页 only」一侧', async () => {

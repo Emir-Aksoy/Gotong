@@ -112,11 +112,15 @@ podman 套接字…], readOnlyRoots:[落在 HOME 里的 node 前缀…], denySha
 自己从不以自己的权限碰工作区字节。
 监狱探针 `detectFsJail` 结果 `kind:'none'` ⇒ **整套手不装**（fail-closed，B1 能力清单如实不列），
 `my_status` 多一行「手：已装(bwrap)/未装(原因)」。opt-in file-first `<space>/hands.json`
-`{enabled:true, maxRunSec?, maxOutputBytes?, maxWorkspaceBytes?, hidden?:[绝对路径], readOnly?:[绝对路径]}`
+`{enabled:true, allowRoles?:['owner','admin'], maxRunSec?, maxOutputBytes?, maxWorkspaceBytes?, hidden?:[绝对路径], readOnly?:[绝对路径]}`
 （apns.json/fcm.json 同族三态
 合同：缺席 OFF 字节不变 / 形状不对（坏 JSON、未知键、越界数值——区间 `HANDS_CONFIG_BOUNDS`
-1–3600s / 1KB–1MB / 1MB–16GB，越界**不 clamp** 直接不装）warn+OFF / `enabled:false` info+OFF /
-开了但监狱缺席 boot warn+OFF 并说明装法），**零新旋钮（116 冻结）**。审计行 + 每命令回执给
+1–3600s / 1KB–1MB / 1MB–16GB，越界**不 clamp** 直接不装；`allowRoles` 认不出的角色名同样
+不装，因为拼错一个字是**静默收紧**）warn+OFF / `enabled:false` info+OFF /
+开了但监狱缺席 boot warn+OFF 并说明装法），**零新旋钮（116 冻结）**。
+`allowRoles` **默认只 `owner`/`admin`**：`enabled:true` 打开的是命令执行，给成员一双手
+得在文件里把 `member` 写进去（第十轮 H1，§10.7）；查不到成员角色（identity 缺席）⇒
+整套手不装。审计行 + 每命令回执给
 模型只带出码/尾巴/字节数。
 
 ### 4.3 手 B：外驱 CLI coding agent（M2b，opt-in）
@@ -186,7 +190,7 @@ IM 通道即在；**至少一次网页触碰不可避免也不该避免**（owne
 |---|---|---|---|
 | M0 | 本文 | 侦察 + 威胁模型 + 四档表 + 五岔口 | — |
 | M1 | 四档策略纯核 | `personal-butler/src/hands-policy.ts` 纯函数 + 拒绝表 + realpath 逃逸判定 | 单测：配置区/凭证路径永不 allow；符号链接逃逸 refuse；`net:true`→approve；未知→非 allow；拒绝表命中 refuse |
-| M2 ✅ | 手 A 原生（2026-08-15，见 §十） | host `personal-butler-hands.ts` 执行器 + 五工具（**文件四动作走监狱内 node 小助手**）+ `hands.json` opt-in（含 `hidden`/`readOnly` 追加清单）+ core `FsJailHardening`（`unshareNet`/`unsharePid`/`hiddenPaths`/`hiddenFiles`/`readOnlyRoots`/`denySharedTmp`，additive；seatbelt 侧 `unsharePid` 映射成进程隔离规则）+ 上限（含监狱内 `ulimit`）+ 审计（含 stdin 摘要/sha256）+ factory 接线 + AFR 三件套 + main.ts 棘轮显式抬（2768/2770→2772/2780）+ 备份排除工作区 `node_modules` | 真 spawn 门（本机 sandbox-exec 69 例全过，bwrap 靠 argv 单测）：`cat <space>/gotong.env` 在监狱内失败；写 `<space>/agents.json` 双拒（监狱 rc≠0 且字节不变 + hands_write 穿越 refuse）；hub 用户 HOME 与点名文件藏起来；策略放行后目录换成指向 `<space>` 的链接小助手照样写不进读不出（TOCTOU 真闸=监狱）；断网命令联本机 HTTP 失败、`net:true` approve 后成功；超时/超输出/洪水响亮；命令退出即收整个进程组；hub 级并发 1 响亮拒；`kind:'none'` 整套不装；缺席字节不变（脸 absent≡off≡armed−hands_*）；子环境零凭证且 TMPDIR 指进工作区；审计不落正文；**Codex 交叉审七轮**（5H/4M/1L → 2H/6M/2L → 3H/3M → 3H/3M → 2H/1M/1L → 2H/2M/1L → 2H/2M/3L 全部修入，§10.5）✅ |
+| M2 ✅ | 手 A 原生（2026-08-15，见 §十） | host `personal-butler-hands.ts` 执行器 + 五工具（**文件四动作走监狱内 node 小助手**）+ `hands.json` opt-in（含 `allowRoles` **默认 owner/admin**、`hidden`/`readOnly` 追加清单）+ **HOME = 只读空目录**（缓存另指工作区）+ core `FsJailHardening`（`unshareNet`/`unsharePid`/`hiddenPaths`/`hiddenFiles`/`readOnlyRoots`/`denySharedTmp`，additive；seatbelt 侧 `unsharePid` 映射成进程隔离规则）+ 上限（含监狱内 `ulimit`）+ 审计（含 stdin 摘要/sha256）+ factory 接线 + AFR 三件套 + main.ts 棘轮显式抬（2768/2770→2772/2780）+ 备份排除工作区 `node_modules` | 真 spawn 门（host hands **82 例**全过，其中真 spawn 22；bwrap 靠 argv 单测）：`cat <space>/gotong.env` 在监狱内失败；写 `<space>/agents.json` 双拒（监狱 rc≠0 且字节不变 + hands_write 穿越 refuse）；hub 用户 HOME 与点名文件藏起来；策略放行后目录换成指向 `<space>` 的链接小助手照样写不进读不出（TOCTOU 真闸=监狱）；断网命令联本机 HTTP 失败、`net:true` approve 后成功；超时/超输出/洪水响亮；命令退出即收整个进程组；hub 级并发 1 响亮拒；`kind:'none'` 整套不装；缺席字节不变（脸 absent≡off≡armed−hands_*）；子环境零凭证且 TMPDIR 指进工作区；审计不落正文；**只有 owner/admin 有手**（默认；member 的脸上没有这五件、park 期间被降权也执行不了）；**HOME 是只读空目录**（在、列得动、是空的、写不进）；**Codex 交叉审九轮 + 内部对抗审一轮**（5H/4M/1L → 2H/6M/2L → 3H/3M → 3H/3M → 2H/1M/1L → 2H/2M/1L → 2H/2M/3L → 3H/2M/3L → 3H/5M/6L → 第十轮 2H/2M，§10.5/§10.7）✅ |
 | M2b | 手 B 外驱 | cli-agent 参与者 + 共用工作区 + escalate 转派配方 + docs | e2e：阿同写需求→coder 改文件→阿同 `hands_run` 跑测试 |
 | M3 | 手机配置面 | `/setkey` 双路径 + 一次性链接 + 优劣文案 + config-write 两步确认 + `/keys` + SETTING-OPS-CONSOLE 改口 | 单测：直贴不进 SESS 窗/transcript、不回显；非 owner/admin 绑定拒；链接单次 10min；两步确认走 IMA；**Codex 交叉审** |
 | M4 | 环境探测→方案→人批 | `hub_environment` + 提案卡 + tier 2 应用 | 探针零 LLM；不可应用项只指路 |
@@ -372,7 +376,8 @@ factory/self-status/capabilities/main.ts 接线 + cli 备份排除；host 承重
 | HOME / 点名文件藏起来 | 假 HOME（探针缝）里的 `.ssh/id_test`/`.netrc` `cat` 不吐值、`ls -A` stdout 列不出名字；`hidden` 点名的 `etc/gotong.env` `cat` 不吐值（bwrap 是 /dev/null 盖住、seatbelt 是 deny——两种都不吐）；没点名的地方照常可读（监狱藏的是 hub 的凭证不是整台机器）；**真探针**形状藏起 hub 真 HOME 后 `node -e` 照跑（前缀再放开只读）、PATH 里落在 HOME 的项只剩再放开的、文件小助手照常写 |
 | TOCTOU 真闸 | 策略放行后 `proj/` 换成指向 `<space>` 的链接：`hands_write proj/agents.json` isError 且 `<space>/agents.json` 字节不变；`hands_read proj/gotong.env` 无 SECRET；`hands_list proj` 无 `gotong.env` |
 | 断网 | 本机起 HTTP 服务，`node fetch` 脚本 `net:false` → isError、回执无 `BODY:ok-from-host`、含「离线」；`net:true` classify → approve，批后 → `BODY:ok-from-host` + 「联网」 |
-| 子环境 | `env` 零 `HANDS_TEST_SECRET`；`HOME_IS=<工作区 realpath>`；`TMPDIR=<工作区>/.hands-tmp` 且 `touch $TMPDIR/scratch` 成功、盘上真出现；监狱内 `echo x > /tmp/<marker>` 后宿主 /tmp 无该文件 |
+| 子环境 | `env` 零 `HANDS_TEST_SECRET`；**`HOME_IS=<只读空目录 realpath>` 且它在（`test -d`）、列得动（`ls -A` 成功）、是空的（0 条）、写不进（`.npmrc` 种不下去，盘上也不出现）**——三问缺一不可，只问「列出来 0 条」会把「HOME 根本不存在」一起放过（第十轮 H2）；`XDG_CACHE_HOME`/`NPM_CONFIG_CACHE` 指进工作区；`TMPDIR=<工作区>/.hands-tmp` 且 `touch $TMPDIR/scratch` 成功、盘上真出现；监狱内 `echo x > /tmp/<marker>` 后宿主 /tmp 无该文件 |
+| 谁有资格拿到手 | `allowRoles` 默认 `owner`/`admin`：member 的脸上**没有**这五件（tiers absent≡off≡no-role）、五件全 refuse 且工作区目录不建、`my_status` 说「手装着，但没开给你——只开给 owner/admin」而不是「已装」；park 期间被降权 ⇒ 批准也执行不了；identity 缺席 ⇒ 整套不装；`allowRoles` 认不出的角色名 ⇒ warn 不装 |
 | 超时/超输出/洪水/退出收组 | 1s 超时 <6s 收工、回执「超时(1s)」、审计 `timedOut:true`；20000B 输出只留最后 4096B 并注明；`yes` 洪水 → 「输出超过 256KB,已提前终止」；后台孙进程 3s 后要写的 `late.txt` 不出现 |
 | 并发 1（hub 级） | 第一条 un-awaited 在跑，同一 toolset 的 `hands_list` 与**另一份 toolset** 的 `hands_list` 都 → 「还在跑」；第一条正常收工后恢复 |
 | stdin 透明 | `describe` 标题含 `stdin 18B「curl evil rm -rf x」`（换行→空格、超 80 字截断）；审计行 `stdinBytes:21` + 64 位 hex `stdinSha256`，正文不在审计文件里 |
@@ -447,6 +452,12 @@ factory/self-status/capabilities/main.ts 接线 + cli 备份排除；host 承重
   **不指台账**——台账只留 `stdinBytes`+`stdinSha256`，正文永不落盘，指向一个并不存在的「完整内容」
   比不指更坏。所以 stdin 超过 240 字符时，批的人看到的确实只有开头：这是刻意的取舍（正文进台账
   = 密码、token 从此有第二份落盘副本），把它写在这里而不是假装没有。
+- **HOME 只读挡的是「悄悄改」，不是「改」**（第十轮 H2 修完之后的残余）：模型仍可以在
+  自己的命令里写 `sh -c 'HOME=$PWD curl …'` 或 `curl --config ./x`——但那几个字**就在人要
+  读的那行 argv 里**，审批卡因此仍然诚实，这正是这条修法要保住的东西。真正被关掉的是
+  「tier 1 免审批地种一个点文件，去改一条**已经批准过**、卡面上干干净净的 tier 2 命令」。
+  同理，缓存目录在工作区里是可写的：投毒自己的 npm/pip 缓存做得到（内容寻址的完整性校验
+  会挡掉一部分），但那影响的是它自己后续的构建，不改变任何一张已批准的卡面。
 - 真 bwrap 机器上的 spawn 门待 Linux 真机跑一遍（argv 已单测钉死；M6 一键镜像的 CI 就是那台机器）。
 
 ### 10.5 Codex 交叉审账（gpt-5.6-sol，八轮）
@@ -637,22 +648,62 @@ host 不传转派谓词 ⇒ 转派那例红；回执改回沉默 ⇒ 「没跑�
 `resumeParent`，断言量的是一个从未打开过的窗口。改成等**条件**（父 resume 到了、两个子任务都有结果）
 才真钉住。**轮询圈数不是时间。**
 
-### 10.7 第十轮（内部对抗审，**待决未修**）
+### 10.7 第十轮（内部对抗审，**2H 已修 / 1M 待决 / 1M 记档**）
 
 九轮全部收口后又做了一轮独立对抗阅读（不是 Codex——Codex 额度 2026-08-19 恢复，
-那一轮照办）。出 2H/2M，**四条都已对源码核实属实，但一条都还没改**：两条 HIGH
-各自牵到设计面（谁有资格拿到手 / HOME 是什么），按「架构岔口摆给用户」的纪律
-等拍板，不在评审的尾巴上自己改设计。
+那一轮照办）。出 2H/2M，四条都已对源码核实属实。两条 HIGH 各自牵到设计面
+（谁有资格拿到手 / HOME 是什么），按「架构岔口摆给用户」的纪律先摆再改，
+**用户已拍板：H1 = 默认只 owner/admin，H2 = HOME 改成只读空目录**，两条都已落地。
 
-**当前零暴露**：`hands.json` 在生产不存在，M2 的七个 commit 也还没推没部署。
+**当前零暴露**：`hands.json` 在生产不存在，M2 的这批 commit 也还没推没部署。
 下面几条描述的是「一旦打开会怎样」，不是「现在正在发生」。
 
 | # | 严重度 | 缺陷 | 证据 | 状态 |
 |---|---|---|---|---|
-| H1 | 高 | **`hands.json` 是 hub 级布尔，而它打开的是每一个成员的执行权**。没有角色维度也没有名单：`enabled:true` 之后凡是有管家的成员（家庭里的孩子、门店店员）都拿到监狱内的命令执行，且 tier 2 联网动作的审批人就是发起人本人。对照同一刀里的 `pack_backup`——一个只读打包在 classify 与 execute 两端都有 owner/admin 闸，而任意命令执行没有 | `personal-butler-hands.ts:122-181`（配置键里没有角色/名单）、`personal-butler-factory.ts:462-464`（判据只有 `governedOn && hands?.host`）、`personal-butler-escalation.ts:52-56`（审批人=本人）、对照 `personal-butler-backup.ts:98-99,274` | **待用户拍板** |
-| H2 | 高 | **HOME 指向模型可写的工作区**，于是 tier 1（免审批）写的点文件，静默改写每一条**已经批准**的 tier 2 联网命令。`hands_write {path:'.curlrc'}` 不 park 不出卡；下一轮 `curl -sS https://api.github.com/user` 出卡、人读了那个正经域名、批——执行时 curl 读 `$HOME/.curlrc` 走攻击者的代理。同型还有 `.gitconfig` 的 `url.<x>.insteadOf` 与 `credential.helper = !sh -c`、`.npmrc` 的 `registry=`。台账记的也是那条干净 argv | `personal-butler-hands.ts:1411`（`HOME: workspace`；childEnv `:1409-1431` 无任何 `GIT_CONFIG_*`/`NPM_CONFIG_*` 中和项）、`hands-policy.ts:407-412`（工作区内写=tier 1 allow）、`:120-134`（`sh` 不在拒绝表）、对照合同 `approval-text.ts:27` | **待用户拍板** |
+| H1 | 高 | **`hands.json` 是 hub 级布尔，而它打开的是每一个成员的执行权**。没有角色维度也没有名单：`enabled:true` 之后凡是有管家的成员（家庭里的孩子、门店店员）都拿到监狱内的命令执行，且 tier 2 联网动作的审批人就是发起人本人。对照同一刀里的 `pack_backup`——一个只读打包在 classify 与 execute 两端都有 owner/admin 闸，而任意命令执行没有 | `personal-butler-hands.ts:122-181`（配置键里没有角色/名单）、`personal-butler-factory.ts:462-464`（判据只有 `governedOn && hands?.host`）、`personal-butler-escalation.ts:52-56`（审批人=本人）、对照 `personal-butler-backup.ts:98-99,274` | **已修**（用户拍板「默认只 owner/admin」）——见下 |
+| H2 | 高 | **HOME 指向模型可写的工作区**，于是 tier 1（免审批）写的点文件，静默改写每一条**已经批准**的 tier 2 联网命令。`hands_write {path:'.curlrc'}` 不 park 不出卡；下一轮 `curl -sS https://api.github.com/user` 出卡、人读了那个正经域名、批——执行时 curl 读 `$HOME/.curlrc` 走攻击者的代理。同型还有 `.gitconfig` 的 `url.<x>.insteadOf` 与 `credential.helper = !sh -c`、`.npmrc` 的 `registry=`。台账记的也是那条干净 argv | `personal-butler-hands.ts:1411`（`HOME: workspace`；childEnv `:1409-1431` 无任何 `GIT_CONFIG_*`/`NPM_CONFIG_*` 中和项）、`hands-policy.ts:407-412`（工作区内写=tier 1 allow）、`:120-134`（`sh` 不在拒绝表）、对照合同 `approval-text.ts:27` | **已修**（用户拍板「HOME 改成只读空目录」）——见下 |
 | M3 | 中 | **`--unshare-net` 不管 AF_UNIX**。bwrap 基座是 `--ro-bind / /`，网络命名空间隔离挡不住文件路径上的 unix 套接字；而藏名单只点了 docker/podman 两家五条，`/run` 与 `/var/run` 本身不在藏名单里。**内部一致性论证**（比外部知识硬）：如果只读挂载能挡住套接字连接，那么首轮 H1 特意去藏 `docker.sock` 就是死代码——这个库自己的立场就是「套接字是一条出路」，只是用在了两个产品名上没推广到这一**类**。于是同机以套接字暴露的本地服务（postgres/redis/php-fpm/自建转发代理），能在 tier 1「离线」档里被读写，一次 park 都不会发生 | `workspace-jail.ts:490,496`、`personal-butler-hands.ts:216,218-224` | **待决**；只影响 Linux（macOS 侧 `(deny network*)` 按 SBPL 语义覆盖 unix 套接字），本机无法实证，与「真 bwrap spawn 门待 Linux 真机」同一批 |
 | M4 | 中 | `redact()` 只挂在错误路径（`:924` `isError ? ... : out`），而 tier 1 的一条 `pwd` 就把它想藏的四件（哪台机器、哪个用户、装在哪、工具链在哪）原样打出来；`USER`/`LOGNAME` 还是主动递进去的 | `personal-butler-hands.ts:580-586,924,1420-1423` | **不修，改记诚实残余**——见下 |
+
+**H1 的修法（用户拍板「默认只 owner/admin」）**：`hands.json` 加 `allowRoles`，
+**默认 `['owner','admin']`**——给成员一双手要在文件里把 `member` 写进去，是一次显式的
+决定而不是一次遗漏。判据只有一个 `hands.allowed(userId)`，它挂在 `ButlerHandsHost` 上
+（在 `armButlerHands` 里、身份还在手边的地方构造），于是 `buildButlerHandsToolset` 想
+不带闸都调不出来——**闸放在忘不掉的地方**。它出现在**三处**，各有各的理由：①工具面
+（不该给一个永远会被拒的人广告五件工具，那是白付 token）；②`classify`——排在
+`ensureWorkspace()` **之前**，不够格的成员连工作区目录都不该被建出来；③`execute`——
+不复述 classify 的答案而是**再问一遍**，因为 park 可以挂几个小时，而批准是对**那一刻
+够格的他**发的，降权之后那张批准不该还能兑现。配置层同样 fail-closed：`allowRoles`
+必须是非空的、闭集内的、不重复的角色名——`"members"` 这种拼错**是一次静默收紧**
+（手看起来装上了，每个人都被拒），所以认不出的角色名一律 warn + 不装，而不是 clamp
+后装上。查不到成员角色（identity 缺席）时**整套手不装**，与「监狱缺席不装」和
+`pack_backup` 在 identity 缺席时不出现是同一姿态。最后一处是**说给人听的那行字**：
+`my_status` 的「手」一行本就是这个成员在读，装着但没开给他的时候印「已装，工作区里
+写/读/跑」就是在许一个他这边兑现不了的承诺——改成三种「没有」各说各的话（不装 /
+总开关关着 / 装了但没开给你，附上开给谁）。
+
+**H2 的修法（用户拍板「HOME 改成只读空目录」）**：把 HOME 从工作区挪到
+`<space>/butler/hands/<user>/home`，并在监狱里**只读**再放开一次。这条线的名字是
+**缓存不改行为、配置才改行为**：`XDG_CACHE_HOME`/`NPM_CONFIG_CACHE`/`PIP_CACHE_DIR`
+显式指进工作区（可写、可回收、重复下载很贵），而查配置的每一条路都指向那个空目录 ⇒
+查不到 ⇒ 工具走自己的默认值。`XDG_CONFIG_HOME` **刻意不设**——设了就等于又给了一个
+可写的配置落点。为什么是「只读空目录」而不是「藏掉」：bwrap 那边的藏法是盖一层空
+tmpfs（`mkdir -p $HOME` 就能把点文件重新种回来），seatbelt 那边是硬 deny；**一个已经
+存在的空目录经 `readOnlyRoots` 再放开，在两个执行器上行为一致**，而且 HOME 仍然
+`stat` 得到——很多工具 stat 不到 HOME 会以看不懂的方式崩，H2 要的是**空**不是**没有**。
+`childEnv` 的 `home` 因此是**必填**：少传就退回「HOME=工作区」，正是要堵的那个洞，
+让类型系统在编译期问这个问题，别让它变成「谁记不记得住」。
+
+**两条各配会红的门，八道变异逐条验过**（每道先确认它只改了想改的那一处，复原一律走
+精确文本替换 + `shasum` 对拍基线，**不用 `git checkout`**——那会把同文件里未提交的活
+一起丢掉，八轮已经栽过一次）：工具面去掉 `allowed` ⇒ tiers 两例红（脸 + `my_status`
+那句话，两者共用同一个判据）；classify 去掉闸 ⇒「五件全 refuse 且不建目录」红；
+execute 去掉闸 ⇒「park 期间被降权」红；闭集校验退成「只要是字符串」⇒ 拼错/大小写两例红；
+`armButlerHands` 在没有 identity 时照装 ⇒ fail-closed 那例红；HOME 不再作只读层放开 ⇒
+HOME 探针红；HOME 退回工作区 ⇒ 纯件 + 真 spawn 两例红；去掉缓存变量 ⇒ 同两例红。
+**其中 HOME 那道第一遍没红**：原断言只问「列出来是 0 条」，而 `ls` 失败同样输出 0 行 ⇒
+「HOME 根本不存在」被一起放过。补上 `test -d` 与「列得动」两问才真钉住 —— **变异不红时
+先怀疑门**，这条教训在这个 track 里出现第四次了。
 
 **M4 为什么不修**：把成功 stdout 也过一遍 redact 治不了它。tier 1 就是任意离线命令执行，
 `echo $HOME | base64` 一句就绕过任何字符串替换；能挡住的只有「模型没主动要、却被塞回去的」

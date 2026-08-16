@@ -49,6 +49,8 @@ import {
   HANDS_MAX_WORKSPACE_ENTRIES,
   HANDS_OUTPUT_KILL_MULTIPLIER,
   HANDS_TMP_SUBDIR,
+  HANDS_CACHE_SUBDIR,
+  HANDS_DEFAULT_ALLOW_ROLES,
   HANDS_TOOL_NAMES,
   TailBuffer,
   armButlerHands,
@@ -86,10 +88,14 @@ function captureLogger(): { logger: Logger; rows: LogRow[] } {
   }
 }
 
+/** 归属查表的省缺答案:测试里绝大多数用例的主角就是 owner。 */
+const OWNER = 'owner'
+
 const DEFAULT_CFG: HandsConfig = {
   maxRunSec: HANDS_LIMITS.maxRunSec,
   maxOutputBytes: HANDS_LIMITS.maxOutputBytes,
   maxWorkspaceBytes: HANDS_LIMITS.maxWorkspaceBytes,
+  allowRoles: ['owner', 'admin'],
 }
 
 const jailCap = await detectFsJail()
@@ -136,6 +142,7 @@ function makeSpace(cfg: Partial<HandsConfig> = {}): {
   // exactly how `armButlerHands` wires it (a shape computed from a different view
   // of the filesystem than the one the jail re-asks would be a lie).
   const probe = { homedir: () => fakeHome, kind: realKind, execPath: NODE, pathEnv: process.env.PATH }
+  const roles = new Map<string, string | null>([['u1', 'owner']])
   const host: ButlerHandsHost = {
     spaceRoot: space,
     handsRoot: join(space, 'butler', 'hands'),
@@ -145,10 +152,28 @@ function makeSpace(cfg: Partial<HandsConfig> = {}): {
     config,
     shape: jailShapeFor(space, config, probe),
     probe,
+    // 与 `armButlerHands` 同一份判据(角色查表 ∩ config.allowRoles);测试改
+    // `roles` 就等于在 identity 里改归属。默认 u1 是 owner——绝大多数用例要验的
+    // 不是这道门。
+    allowed: (uid) => {
+      const r = roles.get(uid)
+      return typeof r === 'string' && config.allowRoles.includes(r)
+    },
     logger,
   }
   const memberRoot = join(host.handsRoot, 'user', 'u1')
-  return { base, space, fakeHome, fakeEnvFile, host, logs: rows, memberRoot, workspace: join(memberRoot, 'workspace') }
+  return {
+    base,
+    space,
+    fakeHome,
+    fakeEnvFile,
+    host,
+    roles,
+    logs: rows,
+    memberRoot,
+    workspace: join(memberRoot, 'workspace'),
+    jailHome: join(memberRoot, 'home'),
+  }
 }
 
 function realKind(p: string): 'dir' | 'file' | null {
@@ -233,6 +258,16 @@ describe('HANDS-M2 ① loadHandsConfig 三态', () => {
     expect(rows.filter((r) => r.level === 'warn')).toHaveLength(0)
   })
 
+  it('allowRoles 默认只 owner/admin;要给成员手,得在 hands.json 里把 member 写出来', () => {
+    const { logger, rows } = captureLogger()
+    writeFileSync(join(S.space, 'hands.json'), JSON.stringify({ enabled: true }))
+    // 默认值不是「谁开了 hands.json 谁就有手」——与 `pack_backup` 同姿态收在 owner/admin。
+    expect(loadHandsConfig(S.space, logger)?.allowRoles).toEqual(HANDS_DEFAULT_ALLOW_ROLES)
+    writeFileSync(join(S.space, 'hands.json'), JSON.stringify({ enabled: true, allowRoles: ['owner', 'member'] }))
+    expect(loadHandsConfig(S.space, logger)?.allowRoles).toEqual(['owner', 'member'])
+    expect(rows.filter((r) => r.level === 'warn')).toHaveLength(0)
+  })
+
   it('enabled:false → info + undefined(明确关着不算错)', () => {
     const { logger, rows } = captureLogger()
     writeFileSync(join(S.space, 'hands.json'), JSON.stringify({ enabled: false }))
@@ -256,6 +291,14 @@ describe('HANDS-M2 ① loadHandsConfig 三态', () => {
     ['hidden 超过条数上限', JSON.stringify({ enabled: true, hidden: Array.from({ length: HANDS_CONFIG_PATH_LIST_MAX + 1 }, (_, i) => `/p${i}`) })],
     ['hidden 带控制字符', JSON.stringify({ enabled: true, hidden: [`/etc/x${String.fromCharCode(10)}y`] })],
     ['hidden 空串', JSON.stringify({ enabled: true, hidden: [''] })],
+    ['allowRoles 不是数组', JSON.stringify({ enabled: true, allowRoles: 'owner' })],
+    // 空数组长得像「开了」,实际是谁都没手——要关就 enabled:false,别用空清单表达。
+    ['allowRoles 空数组', JSON.stringify({ enabled: true, allowRoles: [] })],
+    // 拼错一个角色名是**静默收紧**:手看着装上了,每个人都被拒,而写的人以为自己刚把手交出去了。
+    ['allowRoles 拼错的角色名', JSON.stringify({ enabled: true, allowRoles: ['owner', 'members'] })],
+    ['allowRoles 大小写不对', JSON.stringify({ enabled: true, allowRoles: ['Admin'] })],
+    ['allowRoles 非字符串项', JSON.stringify({ enabled: true, allowRoles: [1] })],
+    ['allowRoles 重复项', JSON.stringify({ enabled: true, allowRoles: ['owner', 'owner'] })],
   ])('形状不对(%s) → warn + undefined,绝不 clamp 后静默装上', (_label, body) => {
     const { logger, rows } = captureLogger()
     writeFileSync(join(S.space, 'hands.json'), body)
@@ -271,6 +314,7 @@ describe('HANDS-M2 ① armButlerHands', () => {
     const h = await armButlerHands({
       spaceRoot: S.space,
       logger,
+      membershipRole: () => OWNER,
       detect: async () => {
         probed++
         return { kind: 'sandbox-exec' }
@@ -286,7 +330,7 @@ describe('HANDS-M2 ① armButlerHands', () => {
   it('enabled 但监狱缺席 → warn 带安装提示 + 不装(fail-closed:手不装比裸跑强)', async () => {
     const { logger, rows } = captureLogger()
     writeFileSync(join(S.space, 'hands.json'), JSON.stringify({ enabled: true }))
-    const h = await armButlerHands({ spaceRoot: S.space, logger, detect: async () => ({ kind: 'none', reason: 'no bwrap on PATH' }) })
+    const h = await armButlerHands({ spaceRoot: S.space, logger, membershipRole: () => OWNER, detect: async () => ({ kind: 'none', reason: 'no bwrap on PATH' }) })
     expect(h.host).toBeUndefined()
     expect(h.status.armed).toBe(false)
     if (!h.status.armed) {
@@ -301,7 +345,7 @@ describe('HANDS-M2 ① armButlerHands', () => {
   it('enabled + 监狱在 → host 就绪(kind/上限/路径/shape)+ info 披露行不含任何成员态', async () => {
     const { logger, rows } = captureLogger()
     writeFileSync(join(S.space, 'hands.json'), JSON.stringify({ enabled: true, maxRunSec: 30 }))
-    const h = await armButlerHands({ spaceRoot: S.space, logger, detect: async () => ({ kind: 'bwrap' }) })
+    const h = await armButlerHands({ spaceRoot: S.space, logger, membershipRole: () => OWNER, detect: async () => ({ kind: 'bwrap' }) })
     expect(h.status).toEqual({ armed: true, kind: 'bwrap' })
     expect(h.host?.kind).toBe('bwrap')
     expect(h.host?.config).toEqual({ ...DEFAULT_CFG, maxRunSec: 30 })
@@ -316,10 +360,58 @@ describe('HANDS-M2 ① armButlerHands', () => {
     expect(existsSync(join(S.space, 'butler'))).toBe(false)
   })
 
+  it('enabled 但查不到成员角色(identity 缺席)→ 不装(fail-closed:与监狱缺席同姿态)', async () => {
+    // 「谁有手」这道门只在能问出角色的时候才成立。问不出来的时候有两条路:装上五个
+    // 永远拒绝的工具,或者干脆不装。选后者——前者会在工具面上广告一双不存在的手。
+    const { logger, rows } = captureLogger()
+    writeFileSync(join(S.space, 'hands.json'), JSON.stringify({ enabled: true }))
+    const h = await armButlerHands({ spaceRoot: S.space, logger, detect: async () => ({ kind: 'bwrap' }) })
+    expect(h.host).toBeUndefined()
+    expect(h.status.armed).toBe(false)
+    if (!h.status.armed) expect(h.status.reason).toContain('owner/admin')
+    const w = rows.find((r) => r.level === 'warn')
+    expect(w?.msg).toContain('hands NOT installed (fail-closed)')
+    expect(w?.ctx?.allowRoles).toEqual(HANDS_DEFAULT_ALLOW_ROLES)
+  })
+
+  it('allowed() = 角色查表 ∩ allowRoles;查表抛错 → 没有手(不把异常当放行)', async () => {
+    const { logger, rows } = captureLogger()
+    writeFileSync(join(S.space, 'hands.json'), JSON.stringify({ enabled: true }))
+    const roles: Record<string, string | null> = { boss: 'owner', ops: 'admin', kid: 'member', guest: 'viewer', ghost: null }
+    const h = await armButlerHands({
+      spaceRoot: S.space,
+      logger,
+      membershipRole: (uid) => {
+        if (uid === 'boom') throw new Error('identity down')
+        return roles[uid]
+      },
+      detect: async () => ({ kind: 'bwrap' }),
+    })
+    expect(h.host?.allowed('boss')).toBe(true)
+    expect(h.host?.allowed('ops')).toBe(true)
+    expect(h.host?.allowed('kid')).toBe(false)
+    expect(h.host?.allowed('guest')).toBe(false)
+    // 不在册的人、归属为空的人:都不是「暂时查不到」,是没有手。
+    expect(h.host?.allowed('nobody')).toBe(false)
+    expect(h.host?.allowed('ghost')).toBe(false)
+    // identity 挂了 ⇒ 拒,并留一行(静默 false 会让「谁都没手」看起来像配置写错了)。
+    expect(h.host?.allowed('boom')).toBe(false)
+    expect(rows.some((r) => r.level === 'warn' && r.msg.includes('membership lookup failed'))).toBe(true)
+    // 披露行里能看见这台 hub 把手开给了谁。
+    expect(rows.find((r) => r.msg === 'hands: armed')?.ctx?.allowRoles).toEqual(HANDS_DEFAULT_ALLOW_ROLES)
+  })
+
+  it('把 member 写进 allowRoles ⇒ 成员真有手(白名单是决定,不是摆设)', async () => {
+    const { logger } = captureLogger()
+    writeFileSync(join(S.space, 'hands.json'), JSON.stringify({ enabled: true, allowRoles: ['owner', 'member'] }))
+    const h = await armButlerHands({ spaceRoot: S.space, logger, membershipRole: () => 'member', detect: async () => ({ kind: 'bwrap' }) })
+    expect(h.host?.allowed('anyone')).toBe(true)
+  })
+
   it('hidden/readOnly 里不存在的路径:arm 时 warn 一次并跳过(不装死、不假装盖住)', async () => {
     const { logger, rows } = captureLogger()
     writeFileSync(join(S.space, 'hands.json'), JSON.stringify({ enabled: true, hidden: [S.fakeEnvFile, '/nope/never/x'], readOnly: ['/nope/toolchain'] }))
-    const h = await armButlerHands({ spaceRoot: S.space, logger, detect: async () => ({ kind: 'bwrap' }) })
+    const h = await armButlerHands({ spaceRoot: S.space, logger, membershipRole: () => OWNER, detect: async () => ({ kind: 'bwrap' }) })
     expect(h.host?.shape.skipped).toEqual(['/nope/never/x', '/nope/toolchain'])
     expect(h.host?.shape.hiddenFiles).toContain(realpathSync(S.fakeEnvFile))
     const w = rows.find((r) => r.msg.includes('were skipped'))
@@ -338,6 +430,7 @@ describe('HANDS-M2 ① armButlerHands', () => {
       const h = await armButlerHands({
         spaceRoot: S.space,
         logger,
+        membershipRole: () => OWNER,
         detect: async () => ({ kind: 'bwrap' }),
         probe: { homedir: () => home, kind: realKind, execPath: NODE, pathEnv: process.env.PATH },
       })
@@ -353,7 +446,7 @@ describe('HANDS-M2 ① armButlerHands', () => {
   it('config 测试缝优先于文件(显式 undefined = 关)', async () => {
     const { logger } = captureLogger()
     writeFileSync(join(S.space, 'hands.json'), JSON.stringify({ enabled: true }))
-    const h = await armButlerHands({ spaceRoot: S.space, logger, config: undefined, detect: async () => ({ kind: 'bwrap' }) })
+    const h = await armButlerHands({ spaceRoot: S.space, logger, membershipRole: () => OWNER, config: undefined, detect: async () => ({ kind: 'bwrap' }) })
     expect(h.host).toBeUndefined()
   })
 })
@@ -426,6 +519,40 @@ describe('HANDS-M2 ② toolset 形状', () => {
     const r = await ts.callTool('hands_sudo', {})
     expect(r.isError).toBe(true)
     expect(r.content[0]!.text).toContain('unknown governed tool')
+  })
+
+  it('没有手的成员:五件全 refuse,连工作区目录都不建(拒因说清是权限,不是重试能解决的)', async () => {
+    S.roles.set('u1', 'member') // 默认白名单只有 owner/admin
+    const ts = toolset()
+    const calls: Array<[string, Record<string, unknown>]> = [
+      ['hands_run', { argv: ['ls'] }],
+      ['hands_write', { path: 'a.txt', content: 'x' }],
+      ['hands_read', { path: 'a.txt' }],
+      ['hands_list', { path: '.' }],
+      ['hands_rm', { path: 'a.txt' }],
+    ]
+    for (const [name, args] of calls) {
+      const v = await ts.classify(name, args)
+      expect(v.decision, name).toBe('refuse')
+      if (v.decision === 'refuse') {
+        expect(v.reason).toContain('没有动手的权限')
+        expect(v.reason).toContain('owner/admin') // 拒因从 allowRoles 现算,改了白名单它跟着改
+      }
+    }
+    // 连目录都不该长出来:不够格的人在这台 hub 上结构性没有工作区。
+    expect(existsSync(S.memberRoot)).toBe(false)
+  })
+
+  it('park 挂着的几小时里被降权 ⇒ 批准也执行不了(execute 再问一遍,不复述 classify 的答案)', async () => {
+    // 审批是对**那一刻够格的他**发的。批准兑现的时候他已经不是那个人了。
+    const ts = toolset()
+    expect((await ts.classify('hands_run', { argv: ['npm', 'install'] })).decision).toBe('approve')
+    S.roles.set('u1', 'member')
+    const r = await approved(ts, 'hands_run', { argv: ['npm', 'install'] })
+    expect(r.isError).toBe(true)
+    expect(r.text).toContain('没有动手的权限')
+    // 台账上留得下这一笔(这个成员先前有过工作区,台账在)。
+    expect(execRows().some((x) => x.code === 'role')).toBe(true)
   })
 
   it('classify 走 M1 策略:文件动作 allow(tier 1)/联网命令 approve/系统级命令 refuse', async () => {
@@ -681,22 +808,31 @@ describe('HANDS-M2 ② 纯件', () => {
     expect(one.bytes().toString()).toBe('6789')
   })
 
-  it('childEnv 从零拼:hub 的 env 结构性缺席;HOME/TMPDIR 指进工作区;代理变量只在联网时放行', () => {
+  it('childEnv 从零拼:hub 的 env 结构性缺席;HOME 指向只读空目录、TMPDIR 与缓存进工作区;代理变量只在联网时放行', () => {
     process.env.HANDS_TEST_SECRET = 'leak-me'
     process.env.HTTPS_PROXY = 'http://proxy.test:3128'
     try {
-      const off = childEnv('/ws', false)
+      const off = childEnv('/ws', false, { home: '/ro-home' })
       expect(off).not.toHaveProperty('HANDS_TEST_SECRET')
       expect(off).not.toHaveProperty('HTTPS_PROXY')
-      expect(off.HOME).toBe('/ws')
+      // HOME **不是**工作区:工作区里写文件是 tier 1 免审批的,HOME 指过去等于
+      // 把「无声写点文件 → 改写下一条被批准命令的行为」这条路留着。
+      expect(off.HOME).toBe('/ro-home')
       expect(off.TMPDIR).toBe(`/ws/${HANDS_TMP_SUBDIR}`)
+      // HOME 只读之后缓存得有落点,否则每次 npm/pip 都栽在 EROFS 上。
+      expect(off.XDG_CACHE_HOME).toBe(`/ws/${HANDS_CACHE_SUBDIR}`)
+      expect(off.NPM_CONFIG_CACHE).toBe(`/ws/${HANDS_CACHE_SUBDIR}/npm`)
+      expect(off.PIP_CACHE_DIR).toBe(`/ws/${HANDS_CACHE_SUBDIR}/pip`)
+      // 配置类的 XDG 变量刻意**不设**:它默认落在 $HOME/.config,而 HOME 只读 ⇒
+      // 工具回落自带默认值。指进工作区就等于把点文件那条路原样搬过来。
+      expect(off).not.toHaveProperty('XDG_CONFIG_HOME')
       expect(off[HANDS_ENV_MARKER]).toBe('1')
       expect(off.TERM).toBe('dumb')
-      const on = childEnv('/ws', true)
+      const on = childEnv('/ws', true, { home: '/ro-home' })
       expect(on.HTTPS_PROXY).toBe('http://proxy.test:3128')
       expect(on).not.toHaveProperty('HANDS_TEST_SECRET')
       // PATH 用 arm 时过滤好的那份,不是 hub 的原样
-      expect(childEnv('/ws', false, { pathEnv: '/only/this' }).PATH).toBe('/only/this')
+      expect(childEnv('/ws', false, { home: '/ro-home', pathEnv: '/only/this' }).PATH).toBe('/only/this')
     } finally {
       delete process.env.HTTPS_PROXY
     }
@@ -713,6 +849,7 @@ describe('HANDS-M2 ② 纯件', () => {
     expect(proxyUrlHasUserinfo('http://proxy.test:3128/@path')).toBe(true) // 过宽,故意的
     expect(proxyUrlHasUserinfo('proxy.test:3128')).toBe(false)
     const on = childEnv('/ws', true, {
+      home: '/ro-home',
       source: { HTTPS_PROXY: 'http://u:p@proxy.test:3128', HTTP_PROXY: 'http://proxy.test:3128', NO_PROXY: 'localhost', PATH: '/bin' },
     })
     expect(on).not.toHaveProperty('HTTPS_PROXY')
@@ -898,6 +1035,9 @@ describe(`HANDS-M2 ③ 文件四工具(监狱内 node 小助手,jail=${jailCap.k
   }, 60_000)
 
   spawnIt('两个成员两套工作区,互不可见(userId 是闭包不是参数)', async () => {
+    // 两个人都得先有手,否则这条测的就变成角色闸而不是工作区隔离了。
+    S.roles.set('alice', 'owner')
+    S.roles.set('bob', 'admin')
     const a = buildButlerHandsToolset({ userId: 'alice', hands: S.host })
     const b = buildButlerHandsToolset({ userId: 'bob', hands: S.host })
     await gated(a, 'hands_write', { path: 'secret.txt', content: 'alice only' })
@@ -1020,16 +1160,42 @@ describe(`HANDS-M2 ③ 监狱内真 spawn(jail=${jailCap.kind})`, () => {
     }
   }, 40_000)
 
-  spawnIt('凭证结构性缺席:监狱里 env 看不到 hub 的变量;HOME=工作区;TMPDIR=工作区/.hands-tmp 且已建好;ATONG_HANDS=1', async () => {
+  spawnIt('凭证结构性缺席:监狱里 env 看不到 hub 的变量;HOME=只读空目录(点文件种不进去);TMPDIR 与包管理器缓存在工作区里;ATONG_HANDS=1', async () => {
     process.env.HANDS_TEST_SECRET = 'leak-me'
     const ts = toolset()
-    const r = await gated(ts, 'hands_run', { argv: ['sh', '-c', 'env; echo HOME_IS=$HOME; echo TMP_IS=$TMPDIR; touch "$TMPDIR/scratch" && echo tmp-ok'] })
+    const probe = [
+      'env',
+      'echo HOME_IS=$HOME',
+      'echo TMP_IS=$TMPDIR',
+      'touch "$TMPDIR/scratch" && echo tmp-ok',
+      // HOME 得**在**、**读得进去**、而且是**空**的。三件缺一不可:只断言「列出来是
+      // 0 条」会把「HOME 根本不存在」也一起放过去(ls 失败同样输出 0 行),而那是另一
+      // 种东西——很多工具 stat 不到 HOME 会以看不懂的方式崩,H2 要的是空不是没有。
+      'test -d "$HOME" && echo HOME_ISDIR || echo HOME_NO_DIR',
+      'ls -A "$HOME" >/dev/null 2>&1 && echo HOME_LISTABLE || echo HOME_NOT_LISTABLE',
+      'echo HOME_ENTRIES=$(ls -A "$HOME" | wc -l | tr -d " ")',
+      // 且写不进去——种不下 ~/.npmrc 这类「悄悄改工具行为」的点文件。
+      'touch "$HOME/.npmrc" 2>/dev/null && echo DOTFILE_WROTE || echo DOTFILE_REFUSED',
+    ].join('; ')
+    const r = await gated(ts, 'hands_run', { argv: ['sh', '-c', probe] })
     expect(r.isError, r.text).toBe(false)
     expect(r.text).not.toContain('HANDS_TEST_SECRET')
     expect(r.text).not.toContain('leak-me')
     expect(r.text).toContain(`${HANDS_ENV_MARKER}=1`)
     const ws = realpathSync(S.workspace)
-    expect(r.text).toContain(`HOME_IS=${ws}`)
+    // HOME 不是工作区(工作区可写 ⇒ 点文件就能落地并跨命令留下来),而是一个
+    // 只读空目录:查配置的路都指向它 ⇒ 查不到 ⇒ 走工具自己的默认值。
+    expect(r.text).toContain(`HOME_IS=${realpathSync(S.jailHome)}`)
+    expect(r.text).toContain('HOME_ISDIR')
+    expect(r.text).toContain('HOME_LISTABLE')
+    expect(r.text).not.toContain('HOME_NOT_LISTABLE')
+    expect(r.text).toContain('HOME_ENTRIES=0')
+    expect(r.text).toContain('DOTFILE_REFUSED')
+    expect(r.text).not.toContain('DOTFILE_WROTE')
+    expect(existsSync(join(S.jailHome, '.npmrc'))).toBe(false)
+    // 缓存另说:缓存不改行为,只是重复下载很贵 ⇒ 显式指进工作区(可写、可回收)。
+    expect(r.text).toContain(`XDG_CACHE_HOME=${ws}/${HANDS_CACHE_SUBDIR}`)
+    expect(r.text).toContain(`NPM_CONFIG_CACHE=${ws}/${HANDS_CACHE_SUBDIR}/npm`)
     expect(r.text).toContain(`TMP_IS=${ws}/${HANDS_TMP_SUBDIR}`)
     expect(r.text).toContain('tmp-ok')
     expect(existsSync(join(S.workspace, HANDS_TMP_SUBDIR, 'scratch'))).toBe(true)

@@ -459,8 +459,13 @@ export function buildButlerFactory(deps: ButlerFactoryDeps): ButlerFactory {
         // HANDS-M2 — governed 五工具「阿同的手」:分级是 M1 策略(服务端权威),
         // 执行在监狱工作区(userId 闭包 = 只够到本成员自己的工作区)。hands.json
         // 缺席/监狱缺席 ⇒ host 不在 ⇒ 不装;governed 总开关关着同样不装。
+        //
+        // `allowed(userId)` 在这里问一次是**工具面**的事(不够格的人不该看见五个
+        // 永远拒绝他的工具,那既费 schema token 又像个 bug);真正的闸在 toolset
+        // 内部,classify 与 execute 各问一遍——常驻管家活得比一次角色变更长,
+        // 这里的判断是 spawn 那一刻的。同一个谓词,两处各管各的事。
         const handsGov =
-          deps.governedOn && deps.hands?.host
+          deps.governedOn && deps.hands?.host && deps.hands.host.allowed(userId)
             ? buildButlerHandsToolset({ userId, hands: deps.hands.host, logger: log })
             : undefined
         // SEN-M1 — benign hub 体检:骑 onboarding 的惰性 adminHealth getter
@@ -500,8 +505,22 @@ export function buildButlerFactory(deps: ButlerFactoryDeps): ButlerFactory {
           ...(refs.memoryView ? { memory: refs.memoryView } : {}),
           notebook: taskNotebook,
           ...(deps.backupOps ? { backup: deps.backupOps } : {}),
+          // 「手」那一行是**说给这个成员听的**:手装在 hub 上、但没开给他的时候,
+          // 印「已装,工作区里写/读/跑」就是在许一个他这边兑现不了的承诺。三种
+          // 「没有」各自说各自的话——不装、总开关关着、装了但你没有。
           ...(deps.hands
-            ? { hands: handsGov || !deps.hands.host ? deps.hands.status : { armed: false as const, reason: 'governed 总开关关着' } }
+            ? {
+                hands: !deps.hands.host
+                  ? deps.hands.status
+                  : !deps.governedOn
+                    ? { armed: false as const, reason: 'governed 总开关关着' }
+                    : handsGov
+                      ? deps.hands.status
+                      : {
+                          armed: false as const,
+                          reason: `手装着,但没开给你——只开给 ${deps.hands.host.config.allowRoles.join('/')}`,
+                        },
+              }
             : {}),
           logger: log,
         })

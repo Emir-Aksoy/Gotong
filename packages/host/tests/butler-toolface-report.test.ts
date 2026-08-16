@@ -292,7 +292,14 @@ function buildFullFace(): ToolFaceEntry[] {
           spaceRoot: tmp,
           handsRoot: join(tmp, 'butler', 'hands'),
           kind: 'sandbox-exec',
-          config: { maxRunSec: 120, maxOutputBytes: 32 * 1024, maxWorkspaceBytes: 512 * 1024 * 1024 },
+          config: {
+            maxRunSec: 120,
+            maxOutputBytes: 32 * 1024,
+            maxWorkspaceBytes: 512 * 1024 * 1024,
+            allowRoles: ['owner', 'admin'],
+          },
+          // 量的是「有手的人看到的那张脸有多贵」——没手的人这五件根本不发。
+          allowed: () => true,
           logger: stub(),
         },
       }),

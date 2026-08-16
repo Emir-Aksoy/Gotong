@@ -1053,7 +1053,12 @@ async function main(): Promise<void> {
   // HEAL-M1 — 自愈台账(开机分类+心跳);看门狗是 deploy 层的另一写入方。
   const selfHealLog = startSelfHealLog({ runtimeDir: join(space.root, 'runtime'), logger: log })
   // HANDS-M2 — 手 A:opt-in `<space>/hands.json` + OS 监狱在场才装(fail-closed);缺席=字节不变。
-  const butlerHands = await armButlerHands({ spaceRoot: space.root, logger: log })
+  // 手默认只给 owner/admin(`hands.json` 的 allowRoles 可放宽),故 identity 缺席 ⇒ 不装。
+  const butlerHands = await armButlerHands({
+    spaceRoot: space.root,
+    logger: log,
+    ...(identityForBackup ? { membershipRole: (uid: string) => identityForBackup.getMembership(uid)?.role } : {}),
+  })
   // Per-user butler assembly lives in personal-butler-factory.ts (GUARD
   // extraction); refs() reads the forward-declared refs at butler-build time.
   const butlerFactory: ButlerFactory = buildButlerFactory({
