@@ -636,3 +636,38 @@ host 不传转派谓词 ⇒ 转派那例红；回执改回沉默 ⇒ 「没跑�
 顺序打进文件才看清：`setImmediate` 转 20 圈过去的真实时间**约等于 0**，两条 resolve 根本还没跑到
 `resumeParent`，断言量的是一个从未打开过的窗口。改成等**条件**（父 resume 到了、两个子任务都有结果）
 才真钉住。**轮询圈数不是时间。**
+
+### 10.7 第十轮（内部对抗审，**待决未修**）
+
+九轮全部收口后又做了一轮独立对抗阅读（不是 Codex——Codex 额度 2026-08-19 恢复，
+那一轮照办）。出 2H/2M，**四条都已对源码核实属实，但一条都还没改**：两条 HIGH
+各自牵到设计面（谁有资格拿到手 / HOME 是什么），按「架构岔口摆给用户」的纪律
+等拍板，不在评审的尾巴上自己改设计。
+
+**当前零暴露**：`hands.json` 在生产不存在，M2 的七个 commit 也还没推没部署。
+下面几条描述的是「一旦打开会怎样」，不是「现在正在发生」。
+
+| # | 严重度 | 缺陷 | 证据 | 状态 |
+|---|---|---|---|---|
+| H1 | 高 | **`hands.json` 是 hub 级布尔，而它打开的是每一个成员的执行权**。没有角色维度也没有名单：`enabled:true` 之后凡是有管家的成员（家庭里的孩子、门店店员）都拿到监狱内的命令执行，且 tier 2 联网动作的审批人就是发起人本人。对照同一刀里的 `pack_backup`——一个只读打包在 classify 与 execute 两端都有 owner/admin 闸，而任意命令执行没有 | `personal-butler-hands.ts:122-181`（配置键里没有角色/名单）、`personal-butler-factory.ts:462-464`（判据只有 `governedOn && hands?.host`）、`personal-butler-escalation.ts:52-56`（审批人=本人）、对照 `personal-butler-backup.ts:98-99,274` | **待用户拍板** |
+| H2 | 高 | **HOME 指向模型可写的工作区**，于是 tier 1（免审批）写的点文件，静默改写每一条**已经批准**的 tier 2 联网命令。`hands_write {path:'.curlrc'}` 不 park 不出卡；下一轮 `curl -sS https://api.github.com/user` 出卡、人读了那个正经域名、批——执行时 curl 读 `$HOME/.curlrc` 走攻击者的代理。同型还有 `.gitconfig` 的 `url.<x>.insteadOf` 与 `credential.helper = !sh -c`、`.npmrc` 的 `registry=`。台账记的也是那条干净 argv | `personal-butler-hands.ts:1411`（`HOME: workspace`；childEnv `:1409-1431` 无任何 `GIT_CONFIG_*`/`NPM_CONFIG_*` 中和项）、`hands-policy.ts:407-412`（工作区内写=tier 1 allow）、`:120-134`（`sh` 不在拒绝表）、对照合同 `approval-text.ts:27` | **待用户拍板** |
+| M3 | 中 | **`--unshare-net` 不管 AF_UNIX**。bwrap 基座是 `--ro-bind / /`，网络命名空间隔离挡不住文件路径上的 unix 套接字；而藏名单只点了 docker/podman 两家五条，`/run` 与 `/var/run` 本身不在藏名单里。**内部一致性论证**（比外部知识硬）：如果只读挂载能挡住套接字连接，那么首轮 H1 特意去藏 `docker.sock` 就是死代码——这个库自己的立场就是「套接字是一条出路」，只是用在了两个产品名上没推广到这一**类**。于是同机以套接字暴露的本地服务（postgres/redis/php-fpm/自建转发代理），能在 tier 1「离线」档里被读写，一次 park 都不会发生 | `workspace-jail.ts:490,496`、`personal-butler-hands.ts:216,218-224` | **待决**；只影响 Linux（macOS 侧 `(deny network*)` 按 SBPL 语义覆盖 unix 套接字），本机无法实证，与「真 bwrap spawn 门待 Linux 真机」同一批 |
+| M4 | 中 | `redact()` 只挂在错误路径（`:924` `isError ? ... : out`），而 tier 1 的一条 `pwd` 就把它想藏的四件（哪台机器、哪个用户、装在哪、工具链在哪）原样打出来；`USER`/`LOGNAME` 还是主动递进去的 | `personal-butler-hands.ts:580-586,924,1420-1423` | **不修，改记诚实残余**——见下 |
+
+**M4 为什么不修**：把成功 stdout 也过一遍 redact 治不了它。tier 1 就是任意离线命令执行，
+`echo $HOME | base64` 一句就绕过任何字符串替换；能挡住的只有「模型没主动要、却被塞回去的」
+错误文本。所以 `redact()` 的**真实身份是错误路径的卫生措施，不是对着一个能跑命令的模型的
+保密边界**——原注释把它写成后者是过度声称。这条按「说清楚」收口，不按「补一道挡不住的墙」收口。
+
+**已核实不成立的（本轮排除）**：工作区里的符号链接经全量备份外带宿主文件（`backup.ts:100-106`
+只收 `isFile()`）；`hands_*` 混进 AFR 两层目录绕过一等审批（五件全在 governed 数组，
+`butler-tool-tiers.test.ts:209-214` 正向断言）；`nodePrefix` 只读回放把 HOME 的遮盖捅穿
+（同深度时 `JAIL_LAYER_RANK` 让 hidden 后发，失败方向是「手不能用」不是「HOME 露出来」）；
+`BUSY` 的 TOCTOU（检查与占位之间没有 `await`）；park 与 resume 之间参数被掉包（重放的是
+`pending.toolUses` 快照）；argv 塞换行做审计日志注入（`JSON.stringify` 转义）；监狱内 node
+小助手最后一行 JSON 被伪造（唯一一次 `out()` 之后不再执行任何代码）；配额丈量被链接骗过
+（`measureTree` 显式跳过 symlink）；hands 目录被记忆维护 sweep 扫到（两棵树）。
+
+**本轮没看到的面**（预算所限，Codex 那轮或下一轮补）：`/metrics`、`gotong doctor`、
+`setting` 运维台、`restore`/`migrate` 是否会碰到 hands 工作区或短码钥；
+`personal-butler-backup.ts` 的成员枚举；seatbelt 侧 `hiddenFiles` 的 SBPL 生成分支。
