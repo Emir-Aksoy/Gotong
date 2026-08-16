@@ -320,6 +320,18 @@ describe('AFR-M6 — 纯核直测', () => {
     expect(shouldSkipForStaging('butler/hands/user/u1/workspace/src/a.ts', false)).toBe(false)
   })
 
+  it('HANDS-M2 isHandsScratchPath:框架自己的暂存目录只认工作区正下方那一层', () => {
+    for (const d of ['.hands-tmp', '.hands-cache']) {
+      // 目录本身也要匹配,收集阶段才能整棵剪掉
+      expect(isHandsScratchPath(`butler/hands/user/u1/workspace/${d}`)).toBe(true)
+      expect(isHandsScratchPath(`butler/hands/user/u1/workspace/${d}/npm/_cacache/x`)).toBe(true)
+      // 成员在别处建的同名目录是他自己的东西,照收——与 node_modules 的宽松匹配刻意不同
+      expect(isHandsScratchPath(`butler/hands/user/u1/workspace/src/${d}/x`)).toBe(false)
+    }
+    expect(shouldSkipForStaging('butler/hands/user/u1/workspace/.hands-cache/npm/x', false)).toBe(true)
+    expect(shouldSkipForStaging('butler/hands/user/u1/workspace/notes/.hands-cache.md', false)).toBe(false)
+  })
+
   it('buildPeersProjection:老库缺列 → null(不炸);行排序稳定;非对象行剔除', () => {
     const proj = buildPeersProjection(
       [

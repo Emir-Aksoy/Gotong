@@ -17,6 +17,9 @@ export {
   LAST_BACKUP_FACT_FORMAT,
   LAST_BACKUP_FACT_NAME,
   PEERS_PROJECTION_NAME,
+  // HANDS-M2 — 排除面里那两个暂存目录名是从 host 的常量**手抄**过来的
+  // (cli↛host);导出它好让 host 侧那道对拍门直接量这一份,不是量副本。
+  isHandsScratchPath,
   parseLastBackupFact,
   type LastBackupFact,
   type PeersProjection,

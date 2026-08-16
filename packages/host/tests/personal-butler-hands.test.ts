@@ -39,6 +39,7 @@ import { homedir, tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 
 import { detectFsJail, isInsideRoots, type Logger } from '@gotong/core'
+import { isHandsScratchPath } from '@gotong/cli'
 import { HANDS_LIMITS } from '@gotong/personal-butler'
 
 import {
@@ -836,6 +837,18 @@ describe('HANDS-M2 ② 纯件', () => {
     } finally {
       delete process.env.HTTPS_PROXY
     }
+  })
+
+  it('框架自己的暂存目录不进全量备份档(与 cli 侧那份名单对拍)', () => {
+    // cli 够不到 host 的常量(cli↛host 是硬约束),那边只能把名字逐字重写一遍。
+    // 这道门就是那份重写的对拍:改了这边的常量而没改那边,备份会开始把 npm
+    // 缓存整棵收进档案——正是 `node_modules` 排除当初要挡的那件事。
+    for (const d of [HANDS_TMP_SUBDIR, HANDS_CACHE_SUBDIR]) {
+      expect(isHandsScratchPath(`butler/hands/user/u1/workspace/${d}`)).toBe(true)
+      expect(isHandsScratchPath(`butler/hands/user/u1/workspace/${d}/npm/_cacache/x`)).toBe(true)
+    }
+    // 成员写的东西照进档(排除面只到框架自己占的那两个名字上)
+    expect(isHandsScratchPath('butler/hands/user/u1/workspace/src/index.ts')).toBe(false)
   })
 
   it('带用户名密码的代理 URL 也是凭证:联网命令也不放行', () => {

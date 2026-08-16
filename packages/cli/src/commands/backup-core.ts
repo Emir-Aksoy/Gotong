@@ -227,18 +227,30 @@ export function isBackupOutputPath(rel: string): boolean {
 }
 
 /**
+ * 框架**自己拿名字占住**的两个暂存目录,只在阿同工作区正下方那一层算数
+ * (host 侧 `HANDS_TMP_SUBDIR` / `HANDS_CACHE_SUBDIR`;cli 够不到 host 的常量,
+ * 故逐字重写一遍,漂移由 host 侧 `personal-butler-hands.test.ts` 的对拍门挡)。
+ */
+const HANDS_SCRATCH_DIRS = ['.hands-tmp', '.hands-cache']
+
+/**
  * HANDS-M2 — 阿同工作区里的依赖树(`butler/hands/user/<id>/workspace/**\/node_modules/`)
- * 不进归档:那是可再生的下载产物,一个脚手架就能塞进几万个文件,把备份拖成分钟级、
- * 把档案吹到百兆;成员/阿同写的源码、笔记、审计行照常进档,恢复后再装一遍依赖就
- * 回来。只挡 `node_modules` 这一段路径名,别的目录一律照收——宁多备一点,也别把
- * 成员的东西漏掉。目录级也匹配(`.../workspace/node_modules` 本身),好让收集
+ * 与框架自己的暂存目录不进归档:那是可再生的下载产物,一个脚手架就能塞进几万个文件,
+ * 把备份拖成分钟级、把档案吹到百兆;成员/阿同写的源码、笔记、审计行照常进档,恢复后
+ * 再装一遍依赖就回来。目录级也匹配(`.../workspace/node_modules` 本身),好让收集
  * 阶段整棵剪掉不必逐文件走。
+ *
+ * 两种匹配的**宽严刻意不同**:`node_modules` 是生态惯例名、谁都可能在任意深度造出来,
+ * 故按路径名一段一段找;而 `.hands-tmp`/`.hands-cache` 是框架自己在**固定位置**放的
+ * (TMPDIR 与包管理器缓存根),故只认工作区正下方那一层——成员在别处建个同名目录是他
+ * 自己的东西,照收。宁多备一点,也别把成员的东西漏掉。
  */
 export function isHandsScratchPath(rel: string): boolean {
   if (!rel.startsWith('butler/hands/user/')) return false
   const segs = rel.split('/')
   // butler / hands / user / <id> / workspace / ...
   if (segs.length < 6 || segs[4] !== 'workspace') return false
+  if (HANDS_SCRATCH_DIRS.includes(segs[5] as string)) return true
   return segs.slice(5).includes('node_modules')
 }
 
