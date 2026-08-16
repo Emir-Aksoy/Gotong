@@ -195,6 +195,8 @@ export type { JailVerdict, JailParkCode, JailArgvOptions } from './workspace-jai
 // generators) here; the spawning capability probe (`detectFsJail`) is separate.
 export {
   wrapWithFsJail,
+  // HANDS-M2b — the ONE spec→options copier; adapters must not hand-copy fields.
+  jailWrapOptions,
   buildSeatbeltProfile,
   buildBwrapArgs,
   MAC_ESSENTIAL_WRITABLE,

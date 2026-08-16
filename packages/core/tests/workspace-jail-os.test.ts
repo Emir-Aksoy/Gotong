@@ -15,6 +15,8 @@ import {
   detectFsJail,
   resetFsJailCache,
   wrapWithFsJail,
+  jailWrapOptions,
+  type FsJailSpec,
   type JailProbe,
 } from '../src/index.js'
 
@@ -474,5 +476,53 @@ describe('detectFsJail', () => {
     await detectFsJail({ platform: 'linux', probe })
     expect(probe).toHaveBeenCalledTimes(2) // probed again after reset
     resetFsJailCache()
+  })
+})
+
+/**
+ * HANDS-M2b — the spec→options copier. Its whole reason to exist is that the
+ * outbound adapters used to copy `FsJailSpec` fields BY NAME, so a field they
+ * had never heard of (`hardening`) went missing while the jail still reported
+ * `jailed: true` — a weaker perimeter that looks identical from the outside.
+ */
+describe('jailWrapOptions', () => {
+  const spec: FsJailSpec = {
+    allowedRoots: ['/work'],
+    kind: 'bwrap',
+    extraWritableRoots: ['/cache'],
+    hardening: { unshareNet: true, hiddenPaths: ['/secrets'] },
+  }
+
+  it('carries every field of the spec across, plus the command/args/cwd', () => {
+    const o = jailWrapOptions(spec, { command: 'coder', args: ['--go'], cwd: '/work' })
+    expect(o).toEqual({
+      command: 'coder',
+      args: ['--go'],
+      cwd: '/work',
+      allowedRoots: ['/work'],
+      kind: 'bwrap',
+      extraWritableRoots: ['/cache'],
+      hardening: { unshareNet: true, hiddenPaths: ['/secrets'] },
+    })
+  })
+
+  it('forwards a field this function has never heard of (total by construction)', () => {
+    // Stand-in for "someone adds a key to FsJailSpec next year". A by-name copy
+    // would silently drop it; the rest-spread carries it without being taught.
+    const future = { ...spec, someFutureConfinement: true } as FsJailSpec
+    const o = jailWrapOptions(future, { command: 'coder', args: [] }) as Record<string, unknown>
+    expect(o.someFutureConfinement).toBe(true)
+  })
+
+  it('omits cwd when the caller has none (wrapWithFsJail then defaults it)', () => {
+    expect('cwd' in jailWrapOptions(spec, { command: 'coder', args: [] })).toBe(false)
+  })
+
+  it('the hardening it carries really reaches the enforcer argv', () => {
+    const hardened = wrapWithFsJail(jailWrapOptions(spec, { command: 'coder', args: [], cwd: '/work' }))
+    expect(hardened.args).toContain('--unshare-net')
+    const { hardening: _dropped, ...plain } = spec
+    const soft = wrapWithFsJail(jailWrapOptions(plain, { command: 'coder', args: [], cwd: '/work' }))
+    expect(soft.args).not.toContain('--unshare-net')
   })
 })

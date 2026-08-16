@@ -14,7 +14,7 @@
 
 import { spawn } from 'node:child_process'
 
-import { wrapWithFsJail, type FsJailSpec } from '@gotong/core'
+import { wrapWithFsJail, jailWrapOptions, type FsJailSpec } from '@gotong/core'
 
 export interface CliChunk {
   stream: 'stdout' | 'stderr'
@@ -99,16 +99,10 @@ export async function runCliCommand(opts: CliRunOptions): Promise<CliRunResult> 
   // tree can only write inside the roots. `kind: 'none'` passes through unchanged
   // (the caller degrades). This is the spawn engine's job — it owns OS concerns.
   if (opts.fsJail && opts.fsJail.kind !== 'none') {
-    const wrapped = wrapWithFsJail({
-      command,
-      args,
-      allowedRoots: opts.fsJail.allowedRoots,
-      kind: opts.fsJail.kind,
-      ...(opts.cwd !== undefined ? { cwd: opts.cwd } : {}),
-      ...(opts.fsJail.extraWritableRoots !== undefined
-        ? { extraWritableRoots: opts.fsJail.extraWritableRoots }
-        : {}),
-    })
+    // The spec→options copy goes through `jailWrapOptions` (core), never by
+    // hand: a field this call site forgot (e.g. HANDS-M2b `hardening`) would
+    // still report `jailed: true` — a weaker jail that looks the same.
+    const wrapped = wrapWithFsJail(jailWrapOptions(opts.fsJail, { command, args, cwd: opts.cwd }))
     command = wrapped.command
     args = wrapped.args
   }

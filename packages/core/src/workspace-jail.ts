@@ -293,9 +293,7 @@ export interface WrapWithFsJailOptions {
   /**
    * Layer-2 hardening (network off / PID unshare / hidden paths). Absent = the
    * classic write-perimeter-only jail, byte-identical to before this field
-   * existed. Deliberately NOT part of {@link FsJailSpec}: the outbound adapters
-   * copy spec fields by name, so a hardening key there would be dropped in
-   * silence — hand B (M2b) threads it explicitly when it needs it.
+   * existed.
    */
   hardening?: FsJailHardening
 }
@@ -313,6 +311,45 @@ export interface FsJailSpec {
   kind: FsJailKind
   /** Extra writable directories beyond the roots (e.g. a build/tool cache). */
   extraWritableRoots?: readonly string[]
+  /**
+   * HANDS-M2b — layer-2 hardening for an adapter-driven spawn (hand B runs a
+   * coding CLI inside the SAME jail shape hand A uses). Absent = the classic
+   * write-perimeter-only jail, byte-identical to before this field existed.
+   *
+   * This lives in the spec — not only in {@link WrapWithFsJailOptions} — so an
+   * adapter's caller can hand over a complete perimeter. What makes that safe
+   * is {@link jailWrapOptions}: adapters must not copy spec fields by name
+   * (a dropped hardening key still reports `jailed: true`, i.e. a weaker jail
+   * that looks identical from the outside).
+   */
+  hardening?: FsJailHardening
+}
+
+/**
+ * Turn an {@link FsJailSpec} + the spawn's command/args/cwd into
+ * {@link WrapWithFsJailOptions} — the ONE place the spec's fields are copied.
+ *
+ * Why a helper instead of spreading the fields at each adapter: the copy is
+ * **total by construction** (`...rest` carries every field this function has
+ * never heard of), so a field added to the spec later reaches every adapter
+ * without anyone remembering to thread it. The two outbound adapters
+ * (cli-runner, acp-session) used to hand-copy `allowedRoots`/`kind`/
+ * `extraWritableRoots`, which is exactly how `hardening` would have gone
+ * missing in silence.
+ */
+export function jailWrapOptions(
+  spec: FsJailSpec,
+  cmd: { command: string; args: readonly string[]; cwd?: string | undefined },
+): WrapWithFsJailOptions {
+  const { allowedRoots, kind, ...rest } = spec
+  return {
+    command: cmd.command,
+    args: cmd.args,
+    allowedRoots,
+    kind,
+    ...(cmd.cwd !== undefined ? { cwd: cmd.cwd } : {}),
+    ...rest,
+  }
 }
 
 /**

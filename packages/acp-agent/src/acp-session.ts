@@ -30,7 +30,7 @@
 
 import { spawn, type ChildProcess } from 'node:child_process'
 
-import { wrapWithFsJail, type FsJailSpec } from '@gotong/core'
+import { wrapWithFsJail, jailWrapOptions, type FsJailSpec } from '@gotong/core'
 
 import {
   AcpConnection,
@@ -425,16 +425,11 @@ export class AcpSession {
     let command = this.opts.command
     let args = this.opts.args ? [...this.opts.args] : []
     if (this.opts.fsJail && this.opts.fsJail.kind !== 'none') {
-      const wrapped = wrapWithFsJail({
-        command,
-        args,
-        allowedRoots: this.opts.fsJail.allowedRoots,
-        kind: this.opts.fsJail.kind,
-        ...(this.opts.cwd !== undefined ? { cwd: this.opts.cwd } : {}),
-        ...(this.opts.fsJail.extraWritableRoots !== undefined
-          ? { extraWritableRoots: this.opts.fsJail.extraWritableRoots }
-          : {}),
-      })
+      // Spec→options goes through `jailWrapOptions` (core), never by hand —
+      // see the note there: a forgotten field still reports `jailed: true`.
+      const wrapped = wrapWithFsJail(
+        jailWrapOptions(this.opts.fsJail, { command, args, cwd: this.opts.cwd }),
+      )
       command = wrapped.command
       args = wrapped.args
     }

@@ -8,7 +8,7 @@
  */
 
 import { spawnSync } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 
@@ -171,5 +171,30 @@ jailSuite(`runCliCommand fsJail (${realCap.kind})`, () => {
     })
     expect(r.exitCode).not.toBe(0)
     expect(existsSync(denied)).toBe(false)
+  })
+
+  // HANDS-M2b — the perimeter hand B needs is not just "where may I write" but
+  // "what can I even SEE" (the hub's own env file / credentials sit outside the
+  // workspace and are readable by default: Seatbelt is `allow default`). This is
+  // the end-to-end proof that `hardening` survives spec → jailWrapOptions →
+  // wrapWithFsJail → spawn; a by-name field copy anywhere on that path leaves
+  // the first read succeeding while the jail still reports itself as a jail.
+  it('hardening reaches the real child: a hiddenPaths file is readable without it, unreadable with it', async () => {
+    const secretDir = join(jailBase, 'secrets')
+    mkdirSync(secretDir, { recursive: true })
+    const secret = join(secretDir, 'gotong.env')
+    writeFileSync(secret, 'GOTONG_MASTER=nope')
+    const read = "require('fs').readFileSync(process.argv[1], 'utf8')"
+    const base = { command: NODE, args: ['-e', read, secret], cwd: jailRoot } as const
+
+    const soft = await runCliCommand({ ...base, fsJail: { allowedRoots: [jailRoot], kind: realCap.kind } })
+    expect(soft.exitCode, soft.stderr).toBe(0) // reads are allowed by default
+
+    const hard = await runCliCommand({
+      ...base,
+      fsJail: { allowedRoots: [jailRoot], kind: realCap.kind, hardening: { hiddenPaths: [secretDir] } },
+    })
+    expect(hard.exitCode).not.toBe(0)
+    expect(hard.stdout).not.toContain('GOTONG_MASTER')
   })
 })
