@@ -62,20 +62,28 @@ export class FileInboxStore implements InboxStore {
     this.root = join(spaceRoot, 'inbox')
   }
 
-  /** Run `fn` after any in-flight mutation of the same item id completes. */
+  /**
+   * Run `fn` after any in-flight mutation of the same item completes.
+   *
+   * Keyed by the SANITISED name (Codex 八轮 L2), not the raw id: `sanitiseItemId`
+   * is not injective (`a:b` and `a__b` land on one file), so two raw ids can
+   * name the same item. Today's ids are UUIDs and never collide, but the lock
+   * must protect the file — that is the thing being mutated.
+   */
   private serialize<T>(itemId: string, fn: () => Promise<T>): Promise<T> {
-    const prev = this.itemLocks.get(itemId) ?? Promise.resolve()
+    const key = sanitiseItemId(itemId)
+    const prev = this.itemLocks.get(key) ?? Promise.resolve()
     // Chain regardless of the previous op's outcome (settle, don't propagate).
     const next = prev.then(fn, fn)
     const tail = next.then(
       () => undefined,
       () => undefined,
     )
-    this.itemLocks.set(itemId, tail)
+    this.itemLocks.set(key, tail)
     // Drop the entry once this is the trailing op, so the map can't grow
     // without bound across many distinct items.
     void tail.then(() => {
-      if (this.itemLocks.get(itemId) === tail) this.itemLocks.delete(itemId)
+      if (this.itemLocks.get(key) === tail) this.itemLocks.delete(key)
     })
     return next
   }
@@ -90,7 +98,23 @@ export class FileInboxStore implements InboxStore {
     return join(this.root, `${sanitiseItemId(itemId)}.json`)
   }
 
+  /**
+   * Park (or re-park) an item.
+   *
+   * Takes the SAME per-item lock as `markResolved` / `delegate` (Codex 八轮 H1).
+   * Without it the generation guard has a hole it cannot see: `resolveLocked`
+   * checks the expectation and then `await`s its own write, and a re-park
+   * landing in that await is neither ordered against it nor visible to it —
+   * the guard would pass on the generation it read while the last rename wins
+   * on disk. A lock that only covers the readers of a file, not its writers,
+   * is not a lock.
+   */
   async write(item: InboxItem): Promise<void> {
+    return this.serialize(item.itemId, () => this.writeLocked(item))
+  }
+
+  /** The actual write. Callers must already hold the item's lock. */
+  private async writeLocked(item: InboxItem): Promise<void> {
     this.ensureDirs()
     await writeFileAtomic(this.pathFor(item.itemId), JSON.stringify(item, null, 2))
   }
@@ -189,7 +213,7 @@ export class FileInboxStore implements InboxStore {
       resolvedAt: now,
       history: [...(item.history ?? []), event],
     }
-    await this.write(resolved)
+    await this.writeLocked(resolved)
     return resolved
   }
 
@@ -227,7 +251,7 @@ export class FileInboxStore implements InboxStore {
       userId: toUserId,
       history: [...(item.history ?? []), event],
     }
-    await this.write(handed)
+    await this.writeLocked(handed)
     return handed
   }
 }

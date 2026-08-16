@@ -47,6 +47,9 @@ export type InboxResolvedHook = (ctx: {
   childResult: TaskResult | null
 }) => void
 
+/** One parked row, as `SuspendedTaskLookup` hands it back. */
+type SuspendedTaskRow = NonNullable<ReturnType<SuspendedTaskLookup['getSuspendedTask']>>
+
 /** What HostInboxService needs from the identity store. */
 export interface SuspendedTaskLookup {
   getSuspendedTask(
@@ -158,12 +161,33 @@ export class HostInboxService {
     }
     const validated = validateDecision(item, decision)
 
+    // The parked task is read HERE, next to the item every check above ran on
+    // (Codex 八轮 H1). It used to be re-read after the commit, by bare itemId —
+    // and a park writes the `suspended_tasks` row BEFORE the inbox item
+    // (`main.ts` suspendNotifier), so between those two writes a resolve would
+    // verify generation N of the item and then resume generation N+1 of the
+    // task. The generation guard is worth exactly as much as the thing it
+    // guards: if what runs is looked up again afterwards, it guards nothing.
+    // Taking the snapshot now means a later re-park is IGNORED rather than
+    // silently obeyed — we resume the task the human actually approved.
+    const parked = this.identity.getSuspendedTask(itemId)
+
     // RACE GUARD — flip pending→resolved before any resume. A concurrent or
     // repeat resolve hits already_resolved inside markResolved and never
-    // touches the hub. `expect` rides along as the generation guard: both are
-    // evaluated under the store's per-item lock, so nothing can slip between
-    // the check and the write.
-    await this.store.markResolved(itemId, validated, undefined, args.expect)
+    // touches the hub. The predicate rides along as the generation guard: both
+    // are evaluated under the store's per-item lock, so nothing can slip
+    // between the check and the write.
+    //
+    // Ownership and kind are pinned to the FRESH item too (Codex 八轮 H2).
+    // Everything above ran on a snapshot read outside that lock, and `delegate`
+    // takes the lock separately: it hands the item to somebody else while
+    // leaving it pending and leaving every fingerprinted field untouched. Alice
+    // could therefore pass the ownership check, lose the item to Bob, and still
+    // land her decision on it. `kind` is pinned for the same reason —
+    // `validateDecision` ran against the snapshot's kind.
+    const expect: InboxExpectation = (fresh) =>
+      fresh.userId === userId && fresh.kind === item.kind && (args.expect?.(fresh) ?? true)
+    await this.store.markResolved(itemId, validated, undefined, expect)
 
     // Governance audit (inbox-gov M1) — record the committed decision right
     // after the race guard, BEFORE resume mechanics, so the row faithfully
@@ -172,7 +196,7 @@ export class HostInboxService {
     this.recordResolveAudit(item, validated, userId, args.via)
 
     // Two-step resume — child strictly before parent.
-    const child = await this.resumeChild(item, validated)
+    const child = await this.resumeChild(item, validated, parked)
     if (child.resumed) await this.resumeParent(item)
 
     // Post-resolve hook (S1-M3) — deliver a butler governed-action outcome back
@@ -304,8 +328,9 @@ export class HostInboxService {
   private async resumeChild(
     item: InboxItem,
     decision: InboxDecision,
+    /** The row read alongside the item this decision was checked against (八轮 H1). */
+    row: SuspendedTaskRow | null,
   ): Promise<{ resumed: boolean; result: TaskResult | null }> {
-    const row = this.identity.getSuspendedTask(item.itemId)
     if (!row || row.corrupt) {
       this.log?.warn('inbox resolve: child task not parked; decision recorded only', {
         itemId: item.itemId,

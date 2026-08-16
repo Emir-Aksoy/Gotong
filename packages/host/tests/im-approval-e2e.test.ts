@@ -50,7 +50,7 @@ import {
   makeIdentityImBindingResolver,
   type HostImConfig,
 } from '../src/im-bridge.js'
-import { imShortId } from '../src/im-approval-service.js'
+import { imShortId, loadOrCreateShortCodeKey } from '../src/im-approval-service.js'
 import { HostInboxService } from '../src/inbox-service.js'
 import {
   butlerApprovalItemFor,
@@ -131,6 +131,7 @@ describe('IMA-M3 — IM approval loop (hermetic e2e)', () => {
   let bridge: FakeBridge
   let config: HostImConfig
   let aliceId: string
+  let imKey: Buffer
   let pushes: Array<{ userId: string; text: string }>
   let itemWrites: Promise<void>[]
 
@@ -190,7 +191,13 @@ describe('IMA-M3 — IM approval loop (hermetic e2e)', () => {
       onUnbind: async () => ({ removed: false }),
       log: { info() {}, warn() {}, error() {} },
       // The production wiring shape: real service over the real store + resolve.
-      approvals: new ImApprovalService({ store: inboxStore, inbox: service }),
+      // 短码密钥走**真**的生产路径(八轮 M2):`<space>/runtime/im-shortcode.key`
+      // 懒生成 0600。测试里也用它,顺带证明生成/复用这条腿真的能跑。
+      approvals: new ImApprovalService({
+        store: inboxStore,
+        inbox: service,
+        shortCodeKey: (imKey = loadOrCreateShortCodeKey(tmp)),
+      }),
     }
     bridge.onMessage((m) => handleImMessage(bridge, m, config))
     await bridge.inject(imMsg(`/bind ${code}`))
@@ -246,7 +253,7 @@ workflow:
     await bridge.inject(imMsg('/inbox'))
     const item = (await inboxStore.listPending(aliceId))[0]!
     // 短码是**内容指纹**不是 itemId 前缀(六轮 H1):从服务算,和列表里印的那串对上。
-    const shortId = imShortId(item)
+    const shortId = imShortId(item, imKey)
     expect(bridge.last()).toContain(`[${shortId}]`)
     expect(bridge.last()).toContain('批准这个方案吗?')
     expect(bridge.last()).not.toContain('web only') // human step IS IM-approvable
@@ -282,7 +289,7 @@ workflow:
     expect(item.source).toBe('butler')
     expect(item.imApprovable).toBe(true)
 
-    await bridge.inject(imMsg(`/approve ${imShortId(item)}`))
+    await bridge.inject(imMsg(`/approve ${imShortId(item, imKey)}`))
     expect(bridge.last()).toContain('✓ 已批准 / Approved')
     // S1-M3 — the butler's OWN closing line came back for this member.
     expect(pushes).toEqual([{ userId: aliceId, text: '好了,mailer 已经删掉了。' }])
@@ -304,7 +311,7 @@ workflow:
     expect(bridge.last()).toContain('需在网页处理 / web only')
 
     const item = (await inboxStore.listPending(aliceId))[0]!
-    await bridge.inject(imMsg(`/approve ${imShortId(item)}`))
+    await bridge.inject(imMsg(`/approve ${imShortId(item, imKey)}`))
     expect(bridge.last()).toContain('需要在网页上处理')
     // Fail-closed for real: still pending, still parked, no push, no audit row.
     expect((await inboxStore.get(item.itemId))!.status).toBe('pending')
@@ -315,9 +322,11 @@ workflow:
 
   it('act 4 — 审批飞行中同一个 id 被换成另一个动作 ⇒ 一个字节都没批(七轮 H1)', async () => {
     // 管家 tool-loop 的常态:同一条 task 会被反复 park,后一次 `write()` 直接覆盖
-    // 前一次,而且它**刻意不进** per-item 锁(写者不是决定者)。于是人在手机上看到
-    // 的是第一代,手指落下时盘上可能已经是第二代 —— 老门只查 `status==='pending'`,
-    // 两代都 pending,「删 mailer」的同意就会盖到「往外发邮件」上。
+    // 前一次。八轮 H1 之后 `write()` 也走同一把 per-item 锁,所以它插不进 store
+    // 自己的读-查-写中间;但**服务层先读一次、store 再锁着读一次**之间那条缝仍然
+    // 是敞开的(那一刻谁也没拿着锁),重新 park 正落在这里。人在手机上看到的是第一
+    // 代,手指落下时盘上已经是第二代 —— 老门只查 `status==='pending'`,两代都
+    // pending,「删 mailer」的同意就会盖到「往外发邮件」上。
     hub.register(fakeButler('delete_agent'))
     await hub.dispatch({
       from: 'im:telegram:1001',
@@ -329,7 +338,7 @@ workflow:
 
     await bridge.inject(imMsg('/inbox'))
     const shown = (await inboxStore.listPending(aliceId))[0]!
-    const code = imShortId(shown)
+    const code = imShortId(shown, imKey)
     expect(bridge.last()).toContain(code)
 
     // 把「服务先读一次 → store 上锁再读一次」之间那条缝真的撑开:第一次 get 返回

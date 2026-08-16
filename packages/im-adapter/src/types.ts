@@ -121,8 +121,11 @@ export type ImCommand =
   | { kind: 'unbind' }
   | { kind: 'agents' }
   | { kind: 'workflow'; name: string; args: string }
-  // IMA-M1 — the approval loop's three verbs. `shortId` is an itemId PREFIX
-  // (≥4 chars); the host resolves it within the caller's own pending items.
+  // IMA-M1 — the approval loop's three verbs. `shortId` is a full 8-char
+  // CONTENT fingerprint of the item (see `imShortId`), not an id prefix and
+  // not a slot number: one task id gets re-parked with a different action, so
+  // a code copied out of the chat log must stop matching once the action
+  // changes. The host resolves it within the caller's own pending items.
   | { kind: 'inbox' }
   | { kind: 'approve'; shortId: string }
   | { kind: 'deny'; shortId: string }

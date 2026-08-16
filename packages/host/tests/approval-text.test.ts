@@ -136,26 +136,38 @@ describe('clipApprovalText — 超长正文是覆盖攻击,截断处必须说自
   })
 })
 
-describe('hasVisibleContent — 判据反过来写成白名单(七轮 H2)', () => {
-  it('有一个字母 / 数字 / 标点 / 符号就算有内容', () => {
-    for (const s of ['删', 'a', '7', '.', '¥', '  x  ']) {
-      expect(hasVisibleContent(s)).toBe(true)
+describe('hasVisibleContent — 判据收窄成「有没有字或数」(八轮 H3)', () => {
+  it('有一个字母 / 数字就算有内容', () => {
+    for (const t of ['删', 'a', '7', '  x  ', '删除 mailer']) {
+      expect(hasVisibleContent(t)).toBe(true)
     }
   })
 
   it('纯空白 / 空串没有内容', () => {
-    for (const s of ['', ' ', '   ', String.fromCharCode(9, 32, 10)]) {
-      expect(hasVisibleContent(s)).toBe(false)
+    for (const t of ['', ' ', '   ', String.fromCharCode(9, 32, 10)]) {
+      expect(hasVisibleContent(t)).toBe(false)
     }
   })
 
-  it('**顺序承重**:白名单自己会被骗,先洗后问才拦得住', () => {
-    // U+2800 的 Unicode 分类是**符号**(So)、U+3164 是**字母**(Lo)——白名单单独
-    // 看它们会答「有内容」,而它们在屏幕上是空白。所以两道各兜一半:名单先把它们
-    // 洗成空格,白名单再问洗完还剩什么。反过来写(先问后洗)这条就漏了。
-    const sneaky = [0x2800, 0xfff9, 0xdc00, 0x200b, 0x3164]
-      .map((c) => String.fromCharCode(c))
-      .join('')
+  it('**空白字形点不完**:所以判据不再收标点与符号', () => {
+    // 七轮把判据写成「字母/数字/标点/符号」,于是拉黑一个 U+2800 就得拉黑下一个:
+    // U+1D159(MUSICAL SYMBOL NULL NOTEHEAD)同样是 So、同样在屏幕上不占一撇,而且
+    // 在增补平面。这类字形有几百个,名单永远追不完。收窄到「必须有字或数」之后,
+    // 整个类别一次性关掉 —— 剩下的代价只是「一行纯标点」也算不完整(降级去网页,
+    // fail-closed,这个方向是对的)。
+    for (const cp of [0x2800, 0x1d159, 0x1d173, 0x2062]) {
+      expect(hasVisibleContent(ch(cp))).toBe(false)
+    }
+    // 纯标点 / 纯符号的一行同样落网页,而不是被当成一个读得懂的动作。
+    for (const t of ['.', '¥', '...', '· ·']) {
+      expect(hasVisibleContent(t)).toBe(false)
+    }
+  })
+
+  it('**顺序仍然承重**:白名单自己会被骗,先洗后问才拦得住', () => {
+    // U+3164(谚文填充)的分类是**字母**(Lo)——白名单单独看它会答「有内容」,而它
+    // 在屏幕上是空白。两道各兜一半:名单先把它洗成空格,白名单再问洗完还剩什么。
+    const sneaky = ch(0x3164) + ch(0x3164)
     expect(hasVisibleContent(sneaky)).toBe(true) // ← 白名单自己被骗了
     expect(hasVisibleContent(sanitizeApprovalText(sneaky))).toBe(false) // ← 洗完才是真话
   })

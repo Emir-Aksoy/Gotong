@@ -77,8 +77,14 @@ IM 里批**;未标 = web-only。谁标:
 /deny <短码>         — 拒绝(别名 /reject)
 ```
 
-短码 = **内容指纹**(sha256 of itemId‖createdAt‖title‖prompt,各段带长度前缀,取前
-8 位十六进制),**无状态**(不发序号,序号会随新项漂移)。不用 itemId 前缀是因为同一个
+短码 = **内容指纹**(HMAC-SHA256 over itemId‖createdAt‖title‖prompt,各段带长度前缀,
+取前 8 位十六进制),**无状态**(不发序号,序号会随新项漂移)。**带密钥**(八轮 M2):
+32 bit 不带密钥就是阿同自己能算的东西——它知道自己那次 park 的标题与正文、
+`createdAt` 就在它调用工具的几十毫秒内,而 HANDS-M2 之后它**有手**(tier 1 命令免
+审批、监狱里能跑磨哈希的脚本),于是「磨一个新动作撞上你手里那串旧码」把下面这
+道代际闸整个绕过去。密钥 32 字节存 `<space>/runtime/im-shortcode.key`(0600,缺了
+就生成、短了就抛——静默重建会让所有在飞的短码一起失效,而且密钥被人动过本身
+就是要说出来的事),永不出 hub、永不进模型上下文。不用 itemId 前缀是因为同一个
 task.id 会**反复 park**(管家 tool-loop 批一个跑一个,store 直接覆盖)——那样从聊天
 记录里往上翻抄下来的旧短码今天仍匹配得上,批的却是另一个动作(HANDS-M2 Codex 六轮
 H1)。动作一变短码就变,旧短码落 `not_found`。
@@ -104,7 +110,7 @@ IM 消息 → parseImCommand → handleImMessage 新 case
   → config.approvals(鸭子 ImApprovalSurface,host 的 ImApprovalService)
     → listForIm(userId)             只读投影:短码/标题/imApprovable/kind
     → resolveByShortId({userId, shortId, approved})
-        前缀匹配 → imApprovable 服务端复核(不信桥层) → inbox.resolve(既有:
+        全码相等匹配 → imApprovable 服务端复核(不信桥层) → inbox.resolve(既有:
         ownership/race guard/decision 校验/两步 resume/审计/onResolved 回推)
 ```
 

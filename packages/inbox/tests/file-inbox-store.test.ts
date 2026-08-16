@@ -274,6 +274,59 @@ describe('FileInboxStore', () => {
     expect(await store.get('task-crash')).toBeNull()
   })
 
+  // -------------------------------------------------------------------------
+  // Codex 八轮 H1 / L2 — 写者也在同一把锁里,而且锁的是**文件**不是那串原始 id。
+  //
+  // 只锁读者不锁写者的锁不是锁:`resolveLocked` 是「读 → 查代际 → await 写」,
+  // 一次并发的 `write()`(管家 tool-loop 的重新 park)落在那个 await 里,既不排在
+  // 它后面、也不在它的视野里 —— 代际闸在它读到的那一代上通过,盘上最后一次 rename
+  // 却是另一代。所以下面这两条量的都是**顺序**,不是内容。
+  // -------------------------------------------------------------------------
+
+  /** 让锁真的被持有一会儿:在 store 自己那次(持锁的)读里插一个障碍。 */
+  async function raceWriteAgainstResolve(seedId: string, reparkId: string) {
+    await store.write(item({ itemId: seedId, prompt: 'gen-1' }))
+    const realGet = store.get.bind(store)
+    let armed = true
+    let reparked: Promise<void> | null = null
+    let verdict = ''
+    ;(store as unknown as { get: (id: string) => Promise<InboxItem | null> }).get = async (id) => {
+      const snapshot = await realGet(id)
+      if (armed) {
+        armed = false
+        // 此刻锁在 resolveLocked 手里。这条 write 来自另一个上下文,必须排队。
+        reparked = store.write(item({ itemId: reparkId, prompt: 'gen-2' }))
+        verdict = await Promise.race([
+          reparked.then(() => 'wrote-through'),
+          new Promise<string>((r) => setTimeout(() => r('queued'), 40)),
+        ])
+      }
+      return snapshot
+    }
+    await store.markResolved(seedId, { kind: 'approval', approved: true }, 5)
+    await reparked
+    ;(store as unknown as { get: unknown }).get = realGet
+    return verdict
+  }
+
+  it('飞行中的重新 park 排在 resolve 之后,插不进它的读-查-写中间(八轮 H1)', async () => {
+    // 'queued' = 40ms 内那条 write 一个字节都没落 —— 它在等锁。锁一旦漏掉写者,
+    // 这条 write 会在几个 tick 内跑完,拿到 'wrote-through'。
+    expect(await raceWriteAgainstResolve('lock-1', 'lock-1')).toBe('queued')
+    // resolve 赢在前,重新 park 覆在后:盘上是第二代、仍 pending(这正是「排在
+    // 后面」的样子);而 resolve 自己没被中途掉包,它写的是它查过的那一代。
+    const after = (await store.get('lock-1'))!
+    expect(after.prompt).toBe('gen-2')
+    expect(after.status).toBe('pending')
+  })
+
+  it('锁按**文件**排队:两串不同的原始 id 落到同一个文件也算同一把锁(八轮 L2)', async () => {
+    // `sanitiseItemId` 不是单射:'lock:1' 与 'lock__1' 落在同一个 `lock__1.json`。
+    // 锁若按原始串分桶,这两个操作会被当成两件事并发跑 —— 被改的却是同一份数据。
+    expect(await raceWriteAgainstResolve('lock:1', 'lock__1')).toBe('queued')
+    expect((await store.get('lock:1'))!.prompt).toBe('gen-2') // 同一份数据,两个名字
+  })
+
   it('skips a corrupt item file instead of sinking the list', async () => {
     await store.write(item({ itemId: 'task-ok', userId: 'user-a' }))
     // A committed but unparseable `.json` (disk corruption / torn flush) must

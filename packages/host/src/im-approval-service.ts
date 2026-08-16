@@ -37,11 +37,19 @@
  *     `/approve` 当场拒绝并指路 `/me`——那里显示完整的 prompt。
  */
 
-import { createHash } from 'node:crypto'
+import { createHmac, randomBytes } from 'node:crypto'
+import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
 
 import type { InboxDecision, InboxItem } from '@gotong/inbox'
 
-import { clipApprovalText, hasVisibleContent, sanitizeApprovalText } from './approval-text.js'
+import {
+  APPROVAL_CLOSE,
+  APPROVAL_OPEN,
+  clipApprovalText,
+  hasVisibleContent,
+  sanitizeApprovalText,
+} from './approval-text.js'
 
 /** How many short-id chars the list view prints (enough to be unique in practice). */
 export const IM_SHORT_ID_LEN = 8
@@ -75,13 +83,51 @@ const MIN_SHORT_ID = IM_SHORT_ID_LEN
  * 而 UTF-8 编不出落单的代理项——它们会被塞成 U+FFFD,于是「两条不同的 prompt
  * 得到同一个指纹」在 JS 字符串上是可构造的。`length` 前缀也按同一套算(UTF-16
  * 码元数 = `.length`),整个函数就在一个编码里自洽。
+ *
+ * **带密钥**(Codex 八轮 M2)。8 位十六进制只有 32 bit,不带密钥的话攻击者能自己
+ * 算:被注入的阿同知道自己那次 park 的 title/prompt,`createdAt` 也就是它调用工具
+ * 那一刻的几十毫秒之内——把候选逐个试过去,再磨一个新动作让它的指纹撞上人手里
+ * 那串旧码,就把「旧码认不出新动作」这道闸整个绕过去了。而 HANDS-M2 之后**它有
+ * 手**:tier 1 命令免审批、在监狱里就能跑一个磨哈希的脚本,算力不再是门槛。
+ * 换成 HMAC 之后它连算都算不出来——磨谁都不知道,这条路结构性关掉;密钥只在
+ * hub 盘上(`<space>/runtime/im-shortcode.key`,0600),永不出 hub、永不进模型上下文。
  */
-export function imShortId(item: InboxItem): string {
-  const h = createHash('sha256')
+export function imShortId(item: InboxItem, key: Buffer): string {
+  const h = createHmac('sha256', key)
   for (const part of [item.itemId, String(item.createdAt), item.title ?? '', item.prompt]) {
     h.update(String(part.length)).update(':').update(Buffer.from(part, 'utf16le'))
   }
   return h.digest('hex').slice(0, IM_SHORT_ID_LEN)
+}
+
+/** 短码密钥的长度。32 字节 = HMAC-SHA256 的一整块,没有理由更短。 */
+const SHORT_CODE_KEY_BYTES = 32
+
+/**
+ * 读出(或首次生成)这台 hub 的短码密钥。
+ *
+ * 镜像 `loadOrCreateSigningKey` 的姿态:0600、缺了就生成、**坏了就抛**。坏了不
+ * 静默重建有两个理由——重建会让所有在飞的短码一起失效(人手里抄好的码全部落
+ * `not_found`),而且「密钥被人动过」本身就是要说出来的事,不是要悄悄抹平的事。
+ */
+export function loadOrCreateShortCodeKey(spaceRoot: string): Buffer {
+  const file = join(spaceRoot, 'runtime', 'im-shortcode.key')
+  if (existsSync(file)) {
+    const raw = readFileSync(file)
+    if (raw.length < SHORT_CODE_KEY_BYTES) {
+      throw new Error(
+        `IM short-code key '${file}' is ${raw.length} bytes; expected at least ${SHORT_CODE_KEY_BYTES}. ` +
+          'Refusing to start rather than silently minting a new one (every outstanding /approve code would change).',
+      )
+    }
+    return raw
+  }
+  mkdirSync(dirname(file), { recursive: true })
+  const key = randomBytes(SHORT_CODE_KEY_BYTES)
+  writeFileSync(file, key, { mode: 0o600 })
+  // `mode` on writeFileSync is masked by umask on some platforms; state it again.
+  chmodSync(file, 0o600)
+  return key
 }
 /**
  * 一行字里留给动作的字符数。IM 的 `/inbox` 每条就是一行,再长的东西在手机上
@@ -137,15 +183,23 @@ export interface ImApprovalResolver {
 export interface ImApprovalServiceOptions {
   store: ImApprovalStore
   inbox: ImApprovalResolver
+  /**
+   * 短码的 HMAC 密钥(Codex 八轮 M2)。**必填,没有静默回落**——回落成不带密钥的
+   * 摘要就等于把这道防线悄悄关掉,而关掉与没关从外面看一模一样。
+   * 生产由 `loadOrCreateShortCodeKey(spaceRoot)` 供给。
+   */
+  shortCodeKey: Buffer
 }
 
 export class ImApprovalService {
   private readonly store: ImApprovalStore
   private readonly inbox: ImApprovalResolver
+  private readonly key: Buffer
 
   constructor(opts: ImApprovalServiceOptions) {
     this.store = opts.store
     this.inbox = opts.inbox
+    this.key = opts.shortCodeKey
   }
 
   /** Pending items for the caller, newest first, pre-shaped for IM text. */
@@ -157,7 +211,7 @@ export class ImApprovalService {
       .map((i) => {
         const row = imRowText(i)
         return {
-          shortId: imShortId(i),
+          shortId: imShortId(i, this.key),
           title: row.text,
           kind: i.kind,
           // 三个条件缺一不可:写入时标了 / 是二值审批 / 这行字是完整的。
@@ -193,16 +247,16 @@ export class ImApprovalService {
     // 下限=全长之后 `startsWith` 实际上就是相等(多打几位 ⇒ 谁也不匹配 ⇒ not_found,
     // 和打错一样),`ambiguous` 那一支只剩真·8 位十六进制撞车这一条路。
     const mine = await this.store.listPending(args.userId)
-    const matches = mine.filter((i) => imShortId(i).startsWith(shortId))
+    const matches = mine.filter((i) => imShortId(i, this.key).startsWith(shortId))
     if (matches.length === 0) {
       throw new ImApprovalError('not_found', `no pending item matches '${shortId}'`)
     }
     if (matches.length > 1) {
-      const codes = matches.map((i) => imShortId(i)).join(', ')
+      const codes = matches.map((i) => imShortId(i, this.key)).join(', ')
       throw new ImApprovalError('ambiguous', `more than one item matches '${shortId}': ${codes}`)
     }
     const item = matches[0]!
-    const code = imShortId(item)
+    const code = imShortId(item, this.key)
     // Server-side re-check of the write-time whitelist — the risk call is the
     // flag's, never the bridge's. Unset ⇒ web-only, fail-closed.
     if (item.imApprovable !== true) {
@@ -234,7 +288,7 @@ export class ImApprovalService {
       // pending 判据照样放行(新的一条也是 pending),批下去的就是另一个动作了。
       // 判据必须在 store 的原子 transition 里跑,所以把它传进去,而不是在这里
       // 多算一遍。
-      expect: (fresh) => imShortId(fresh) === code,
+      expect: (fresh) => imShortId(fresh, this.key) === code,
     })
     return { title: row.text }
   }
@@ -252,19 +306,37 @@ export class ImApprovalService {
  * 一起量之后,那种形状自然超过一行预算、自然落网页,**判据只有一个**:一行放得下
  * 的、说全了的,才能在手机上批。
  *
- * 标题只在**它说了正文没说的话**时才加进来。管家 park 的 prompt 是一整句
- * `管家「X」想执行一个敏感动作:「<title>」。原因:「<why>」。`——title 是它的子串,
- * 两段拼起来只会把同一件事说两遍,还平白多花掉一行预算里的二十来个字。
+ * 标题只在**它说了正文没说的话**时才加进来,而这个判断锚在**框架的定界符**上
+ * (Codex 八轮 M1)。七轮那版问的是「正文里有没有出现标题这串字」——那是拿一个
+ * 攻击者两头都能写的子串关系当判据:`title:'删除生产数据库'` 配
+ * `prompt:'不要删除生产数据库;这里只批准查看健康状态'`,`includes` 成立,标题就被
+ * 它自己藏掉了。改成找 `「<title>」`:`sanitizeApprovalText` 会把不可信文本里的
+ * `「」` 一律降级成 `『』`,所以洗完的正文里出现的框架定界符**只可能是框架自己
+ * 放的**——去重于是只在「框架把标题原样嵌进了自己的句子」时发生(管家 park 的
+ * `…敏感动作:「<title>」。` 正是这一种),攻击者拼不出这个条件。
  */
 function imRowText(item: InboxItem): { text: string; complete: boolean } {
-  const title = item.title?.trim() ?? ''
-  const body = item.prompt.trim()
-  const raw = title === '' || body.includes(title) ? body : `${title} · ${body}`
-  const clean = sanitizeApprovalText(raw)
+  // 锚点在**洗之前**看,这是承重的顺序:写入方存进来的正文里,不可信文本的
+  // `「」` 已经被降级成 `『』` 了(见 `buildButlerApprovalPrompt`),所以此刻正文里
+  // 的 `「」` 只可能是框架自己放的。而下面这次洗会把框架的那对也降级成 `『』`
+  // ——洗完再找就分不出「这对是谁放的」,攻击者在正文里写一对 `『』` 就能冒充。
+  const rawTitle = item.title?.trim() ?? ''
+  const rawBody = item.prompt.trim()
+  const framed = `${APPROVAL_OPEN}${rawTitle}${APPROVAL_CLOSE}`
+  // 两种去重都不可伪造:①正文与标题**完全相同**(那就只有一份内容,说一遍即可,
+  // 攻击者这么做也只是把自己那段话少印一次);②正文里出现框架亲手加的
+  // `「<title>」`。**子串包含**不在此列 —— 那是攻击者两头都能写的关系。
+  const embedded = rawTitle !== '' && (rawBody === rawTitle || rawBody.includes(framed))
+  const title = sanitizeApprovalText(rawTitle)
+  const body = sanitizeApprovalText(rawBody)
+  const clean = rawTitle === '' || embedded ? body : `${title} · ${body}`
   // 洗完读不出东西 ⇒ 不是「一行短短的动作」,是**一行看不见的东西**(Codex 六轮 H2:
   // `title` 写成一个零宽字符就能得到一条近乎空白、却仍然可批的行)。空白永远不是
   // 一个完整的故事,所以降级成网页处理,并把这件事说出来。
   if (!hasVisibleContent(clean)) return { text: '(这条没有可显示的内容)', complete: false }
-  if (clean.length <= IM_TITLE_CHARS) return { text: clean, complete: true }
-  return { text: clipApprovalText(raw, IM_TITLE_CHARS), complete: false }
+  // 预算按**码点**量(Codex 八轮 L1)。`.length` 是 UTF-16 码元数,41 个 emoji 会
+  // 报 82 > 80 判成截断,而下面的 `clipApprovalText` 按码点看是 41 ≤ 80 原样返回
+  // ——列表显示得好好的、没有截断标记,`/approve` 却报「太长」。两处必须用同一把尺。
+  if (Array.from(clean).length <= IM_TITLE_CHARS) return { text: clean, complete: true }
+  return { text: clipApprovalText(clean, IM_TITLE_CHARS), complete: false }
 }

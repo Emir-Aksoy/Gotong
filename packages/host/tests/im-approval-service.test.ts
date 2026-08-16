@@ -10,12 +10,27 @@ import { describe, expect, it } from 'vitest'
 
 import type { InboxItem } from '@gotong/inbox'
 
+import { mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+
+import {
+  APPROVAL_CLOSE,
+  APPROVAL_OPEN,
+} from '../src/approval-text.js'
 import {
   IM_SHORT_ID_LEN,
   ImApprovalError,
   ImApprovalService,
   imShortId,
+  loadOrCreateShortCodeKey,
 } from '../src/im-approval-service.js'
+
+/**
+ * 短码是 **HMAC**(八轮 M2),所以测试也要一把钥匙。固定字节:测试要的是
+ * 「同一把钥匙下稳定、换一把就变」,不是随机性。
+ */
+const TEST_KEY = Buffer.alloc(32, 7)
 
 function item(over: Partial<InboxItem> & { itemId: string }): InboxItem {
   return {
@@ -37,7 +52,7 @@ function item(over: Partial<InboxItem> & { itemId: string }): InboxItem {
  * `MIN_SHORT_ID` 的注释。所以这里不再切片。
  */
 function code(i: InboxItem): string {
-  return imShortId(i)
+  return imShortId(i, TEST_KEY)
 }
 
 function service(items: InboxItem[]) {
@@ -55,6 +70,7 @@ function service(items: InboxItem[]) {
         resolved.push(args)
       },
     },
+    shortCodeKey: TEST_KEY,
   })
   return { svc, resolved }
 }
@@ -77,7 +93,7 @@ describe('ImApprovalService.listForIm', () => {
     })
     const { svc } = service([older, newer])
     const rows = await svc.listForIm('alice')
-    expect(rows.map((r) => r.shortId)).toEqual([imShortId(newer), imShortId(older)])
+    expect(rows.map((r) => r.shortId)).toEqual([imShortId(newer, TEST_KEY), imShortId(older, TEST_KEY)])
     expect(rows[0]!.shortId).toHaveLength(IM_SHORT_ID_LEN)
     expect(rows[0]!.title).toBe('新的 · 乙')
   })
@@ -205,7 +221,7 @@ describe('ImApprovalService.resolveByShortId', () => {
     const { svc, resolved } = service([it0])
     await svc.resolveByShortId({
       userId: 'alice',
-      shortId: imShortId(it0), // 整串短码(列表里抄下来的那个)
+      shortId: imShortId(it0, TEST_KEY), // 整串短码(列表里抄下来的那个)
       approved: false,
       via: 'im:lark',
     })
@@ -273,8 +289,8 @@ describe('ImApprovalService.resolveByShortId', () => {
       )
     expect(err).toBeInstanceOf(ImApprovalError)
     expect((err as ImApprovalError).code).toBe('ambiguous')
-    expect((err as ImApprovalError).message).toContain(imShortId(a))
-    expect((err as ImApprovalError).message).toContain(imShortId(b))
+    expect((err as ImApprovalError).message).toContain(imShortId(a, TEST_KEY))
+    expect((err as ImApprovalError).message).toContain(imShortId(b, TEST_KEY))
   })
 
   it('re-checks the write-time whitelist server-side (web_only, fail-closed)', async () => {
@@ -414,9 +430,112 @@ describe('ImApprovalService.resolveByShortId', () => {
           throw boom
         },
       },
+      shortCodeKey: TEST_KEY,
     })
     await expect(
       svc.resolveByShortId({ userId: 'alice', shortId: code(it0), approved: true, via: 'im:t' }),
     ).rejects.toBe(boom)
+  })
+})
+
+describe('imRowText — 标题去重锚在框架定界符上(八轮 M1)', () => {
+  it('**否定攻击**:正文里提一句标题,标题不会因此被藏起来', async () => {
+    // 七轮那版问的是「正文里有没有出现标题这串字」。攻击者两头都能写:
+    // 标题写成正文里必然出现的一段,标题那行就被它自己藏掉,人读到的只剩正文。
+    const { svc } = service([
+      item({
+        itemId: 'x1',
+        userId: 'alice',
+        imApprovable: true,
+        title: '删除生产数据库',
+        prompt: '不要删除生产数据库;这里只批准查看健康状态',
+      }),
+    ])
+    const rows = await svc.listForIm('alice')
+    expect(rows[0]!.title.startsWith('删除生产数据库 · ')).toBe(true)
+  })
+
+  it('框架把标题原样嵌进自己的句子时才去重(管家 park 的那种形状)', async () => {
+    const rows = await service([
+      item({
+        itemId: 'x2',
+        userId: 'alice',
+        imApprovable: true,
+        title: 'delete_agent(mailer)',
+        prompt: `管家「atong」想执行一个敏感动作:${APPROVAL_OPEN}delete_agent(mailer)${APPROVAL_CLOSE}。原因:「用户要求」。批准后才会执行。`,
+      }),
+    ]).svc.listForIm('alice')
+    // 正文自己已经念了一遍动作,不再前缀一次。
+    expect(rows[0]!.title.startsWith('管家')).toBe(true)
+    expect(rows[0]!.title.startsWith('delete_agent(mailer) · ')).toBe(false)
+    // 而且渲染出来的定界符已经被降级 —— 屏幕上的「」永远只可能是框架当场加的。
+    expect(rows[0]!.title).not.toContain(APPROVAL_OPEN)
+  })
+
+  it('攻击者拼不出那个锚点:正文里写 `『标题』` 不算数', async () => {
+    // 洗完之后框架的「」也会变成『』,所以「洗完再找」根本分不出是谁放的。
+    // 判据必须在洗之前看 —— 那时不可信文本里的「」早已被写入方降级过了。
+    const rows = await service([
+      item({
+        itemId: 'x3',
+        userId: 'alice',
+        imApprovable: true,
+        title: '往外发邮件',
+        prompt: '『往外发邮件』这一步已经取消,这里只是记录一下',
+      }),
+    ]).svc.listForIm('alice')
+    expect(rows[0]!.title.startsWith('往外发邮件 · ')).toBe(true)
+  })
+})
+
+describe('一行读不读得全:两处用同一把尺(八轮 L1)', () => {
+  const WIDE = String.fromCodePoint(0x20000) // 增补平面的汉字:1 个码点 = 2 个码元
+
+  it('41 个宽字符 = 41 码点 ≤ 80,完整可批(按 `.length` 算会是 82 > 80)', async () => {
+    const rows = await service([
+      item({ itemId: 'w1', userId: 'alice', imApprovable: true, prompt: WIDE.repeat(41) }),
+    ]).svc.listForIm('alice')
+    expect(rows[0]!.title).toBe(WIDE.repeat(41)) // 没被截
+    expect(rows[0]!.imApprovable).toBe(true) // 也没被误判成读不全
+  })
+
+  it('81 个就是真的超了:列出来但只能在网页批', async () => {
+    const rows = await service([
+      item({ itemId: 'w2', userId: 'alice', imApprovable: true, prompt: WIDE.repeat(81) }),
+    ]).svc.listForIm('alice')
+    expect(rows[0]!.title).toContain('已截断')
+    expect(rows[0]!.imApprovable).toBe(false)
+  })
+})
+
+describe('短码带密钥(八轮 M2)', () => {
+  it('换一把钥匙,同一条待批项的短码就不同 —— 攻击者算不出别人的码', () => {
+    // 8 位十六进制只有 32 bit。不带密钥的话,被注入的阿同知道自己那次 park 的
+    // title/prompt、createdAt 就在它调用工具的几十毫秒内 —— 而 HANDS-M2 之后它
+    // 有手,在监狱里磨一个撞上旧码的新动作只是算力问题。带了密钥它连算都算不出来。
+    const it0 = item({ itemId: 'k1' })
+    const a = imShortId(it0, TEST_KEY)
+    const b = imShortId(it0, Buffer.alloc(32, 9))
+    expect(a).not.toBe(b)
+    expect(a).toHaveLength(IM_SHORT_ID_LEN)
+    // 同一把钥匙下稳定(列表里抄下来的码,过一会儿还能用)。
+    expect(imShortId(it0, TEST_KEY)).toBe(a)
+  })
+
+  it('密钥文件:0600 懒生成、复用、坏了就抛(不静默重建)', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'host-im-key-'))
+    try {
+      const first = loadOrCreateShortCodeKey(dir)
+      expect(first).toHaveLength(32)
+      const file = join(dir, 'runtime', 'im-shortcode.key')
+      expect(statSync(file).mode & 0o777).toBe(0o600)
+      // 复用:静默重建会让所有在飞的短码一起失效。
+      expect(loadOrCreateShortCodeKey(dir).equals(first)).toBe(true)
+      // 短了就抛:密钥被人动过是要说出来的事。
+      writeFileSync(file, Buffer.alloc(8))
+      expect(() => loadOrCreateShortCodeKey(dir)).toThrow(/expected at least 32/)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
   })
 })

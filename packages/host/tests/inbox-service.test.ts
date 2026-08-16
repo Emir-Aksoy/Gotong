@@ -345,6 +345,78 @@ describe('HostInboxService — two-step resume', () => {
     expect(parentResumes).toHaveLength(1)
   })
 
+  it('挂起行与待批项在同一刻取快照:批完之后重新 park 的那条不会被顶上去(八轮 H1)', async () => {
+    // `main.ts` 的 suspendNotifier **先**写 `suspended_tasks` 行、**后**写待批项。
+    // 于是「批准之后再按 itemId 查一次挂起行」查到的可能是下一代:代际闸放行的是
+    // 第 N 代的那件事,真正被 resume 的是第 N+1 代 —— 闸守的东西自己被换掉了,闸就
+    // 什么也没守。快照必须和被检查的那条待批项一起取。
+    const childId = await park({ assignee: 'user-a', kind: 'approval', prompt: 'ok?' })
+    const real = identity.getSuspendedTask.bind(identity)
+    let reads = 0
+    const decoy = { ...real(childId)!, taskJson: JSON.stringify({ id: 'decoy-task', from: 'x', payload: {} }) }
+    ;(identity as unknown as { getSuspendedTask: (id: string) => unknown }).getSuspendedTask = (
+      id,
+    ) => {
+      if (id !== childId) return real(id)
+      reads += 1
+      return reads === 1 ? real(id) : decoy // 第二次读 = 重新 park 之后的那一代
+    }
+
+    await service.resolve({
+      itemId: childId,
+      userId: 'user-a',
+      decision: { kind: 'approval', approved: true },
+    })
+
+    // 只读一次 —— 提交之后不再回头查。
+    expect(reads).toBe(1)
+    // 而且真的是**人批的那条**被 resume 了,冒名那条一次都没跑。
+    expect(hub.taskResult(childId)?.kind).toBe('ok')
+    expect(hub.taskResult('decoy-task')).toBeUndefined()
+  })
+
+  it('决定飞行中被转派给别人 ⇒ 一个字节都不落(八轮 H2)', async () => {
+    // `delegate` 单独拿锁,改的是 `userId`,item 仍然 pending,指纹涉及的字段一个
+    // 没动。于是「服务层读快照 → 查归属 → 提交」这条路上,Alice 可以在自己还拥有
+    // 它的时候通过归属检查,提交时它已经是 Bob 的了 —— 决定照样落在上面。归属必须
+    // 钉在**锁内的那份**上。
+    const bob = identity.createUser({
+      email: 'bob2@team.test',
+      displayName: 'Bob',
+      password: 'bob-strong-password',
+      role: 'member',
+    })
+    const childId = await park({ assignee: 'user-a', kind: 'approval', prompt: 'ok?' })
+
+    const realGet = store.get.bind(store)
+    let armed = true
+    ;(store as unknown as { get: (id: string) => Promise<unknown> }).get = async (id) => {
+      const snapshot = await realGet(id)
+      if (armed) {
+        armed = false // delegate 自己也会 get,别递归
+        await service.delegate({ itemId: childId, userId: 'user-a', toEmail: 'bob2@team.test' })
+      }
+      return snapshot
+    }
+
+    await expect(
+      service.resolve({
+        itemId: childId,
+        userId: 'user-a',
+        decision: { kind: 'approval', approved: true },
+      }),
+    ).rejects.toMatchObject({ code: 'stale_item' })
+    ;(store as unknown as { get: unknown }).get = realGet
+
+    const after = (await store.get(childId))!
+    expect(after.status).toBe('pending') // 没被批
+    expect(after.userId).toBe(bob.id) // 现在是 Bob 的,等 Bob 自己看
+    expect(after.decision).toBeUndefined()
+    // 没 resume、没审计行 —— 真的一个字节都没批。
+    expect(identity.getSuspendedTask(childId)).not.toBeNull()
+    expect(identity.listAuditLog({ action: 'inbox_resolve' })).toHaveLength(0)
+  })
+
   it('keeps the parent row when the workflow re-suspends on another human step', async () => {
     const childId = await park({ assignee: 'user-a', kind: 'approval', prompt: 'ok?' })
     parkParent()

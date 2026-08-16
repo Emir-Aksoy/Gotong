@@ -30,7 +30,11 @@ import { ButlerSessionWindow } from '@gotong/personal-butler'
 import type { AdminHealthSurface } from './admin-health.js'
 import type { ButlerPushResult } from './butler-reachable.js'
 import type { FailureLang } from './failure-translator.js'
-import { ImApprovalService, type ImApprovalServiceOptions } from './im-approval-service.js'
+import {
+  ImApprovalService,
+  loadOrCreateShortCodeKey,
+  type ImApprovalServiceOptions,
+} from './im-approval-service.js'
 import { startImBridges, type ImBridgesHandle, type ImLogger } from './im-bridge.js'
 import { listOpsCommands, runOpsCommand } from './ops-core.js'
 
@@ -56,7 +60,11 @@ export interface ImBridgeWiringDeps {
    * 写入时标了 `imApprovable` 白名单的 hub 内动作;缺省 → 动词回「未启用」,
    * 其余分支字节不变。风险裁决在写入方与 resolve 权威点,这里只是装配。
    */
-  approvals?: ImApprovalServiceOptions
+  /**
+   * 审批面的两条腿(读=store,写=HostInboxService)。短码密钥**不在这里**——它由
+   * 装配层自己从 `spaceRoot` 取(Codex 八轮 M2),调用方不必也不该经手。
+   */
+  approvals?: Omit<ImApprovalServiceOptions, 'shortCodeKey'>
   /**
    * VOICE-M3 — opt-in TTS 语音回复(main.ts 构造 `butlerVoiceFromEnv()`)。
    * 给了它,自由文本的 OK 回复附带 opus 语音条(飞书腿播放,其余桥退文本);
@@ -152,7 +160,17 @@ export async function armImBridgeWiring(deps: ImBridgeWiringDeps): Promise<ImBri
     // GRP — 群窗说话人标注用的成员名(identity 是同进程 SQLite,同步读)。
     memberName: (userId) => identityForIm.getUserById(userId)?.displayName ?? null,
     // IMA-M2 — /inbox /approve /deny 的审批面(有 inbox 才有)。
-    ...(deps.approvals ? { approvals: new ImApprovalService(deps.approvals) } : {}),
+    ...(deps.approvals
+      ? {
+          approvals: new ImApprovalService({
+            ...deps.approvals,
+            // 短码是 HMAC,密钥在 `<space>/runtime/im-shortcode.key`(0600,缺了就
+            // 生成、坏了就抛)。不带密钥的 8 位指纹是阿同自己能算出来的
+            // ——而它现在有手(HANDS-M2 tier 1 免审批)。
+            shortCodeKey: loadOrCreateShortCodeKey(deps.spaceRoot),
+          }),
+        }
+      : {}),
     // VOICE-M3 — opt-in 语音回复;未配 undefined = 发送逐字节不变。
     ...(deps.voice ? { voice: deps.voice } : {}),
     // ASR-M3 — opt-in 语音收听;未配 undefined = 入站逐字节不变。
