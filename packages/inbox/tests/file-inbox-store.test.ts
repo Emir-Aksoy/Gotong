@@ -190,6 +190,45 @@ describe('FileInboxStore', () => {
     expect(after.history).toBeUndefined()
   })
 
+  // Codex 九轮 — 同一道代际闸也必须罩住 delegate。转派是一个关于**具体动作**的
+  // 决定(「这件事交给 Bob 看」),而 pending 判据同样看不见重新 park:新一代也是
+  // pending。没有这道闸,Alice 读到「读一个文件」,管家在同一 id 下换成「往外发」,
+  // 她按下转派 —— 落到 Bob 手上的是她从没看见过的那一件,署的却是她的名。
+  it('delegate 的 expect 判 false ⇒ stale_item,归属与 history 一个字节没动', async () => {
+    await store.write(item({ itemId: 'gen-d', prompt: '读一个文件' }))
+    const seen = (await store.get('gen-d'))!
+    await store.write(item({ itemId: 'gen-d', prompt: '往外发一封邮件' }))
+
+    try {
+      await store.delegate('gen-d', 'user-b', {
+        actor: 'user-a',
+        expect: (fresh) => fresh.prompt === seen.prompt,
+      })
+      throw new Error('expected delegate to refuse a changed item')
+    } catch (err) {
+      expect(err).toBeInstanceOf(InboxError)
+      expect((err as InboxError).code).toBe('stale_item')
+    }
+    const after = (await store.get('gen-d'))!
+    expect(after.userId).toBe(seen.userId)
+    expect(after.prompt).toBe('往外发一封邮件')
+    expect(after.history).toBeUndefined()
+  })
+
+  it('delegate 的 expect 判 true ⇒ 照常转派;不传 expect ⇒ 逐字节今天', async () => {
+    await store.write(item({ itemId: 'gen-d2', prompt: '读一个文件' }))
+    const ok = await store.delegate('gen-d2', 'user-b', {
+      actor: 'user-a',
+      now: 5,
+      expect: (fresh) => fresh.prompt === '读一个文件',
+    })
+    expect(ok.userId).toBe('user-b')
+
+    await store.write(item({ itemId: 'gen-d3', prompt: '随便什么' }))
+    const legacy = await store.delegate('gen-d3', 'user-b', { actor: 'user-a', now: 5 })
+    expect(legacy.userId).toBe('user-b')
+  })
+
   it('expect 判 true(没变过)⇒ 照常 resolve;不传 expect ⇒ 逐字节今天', async () => {
     await store.write(item({ itemId: 'gen-ok', prompt: '读一个文件' }))
     const seen = (await store.get('gen-ok'))!

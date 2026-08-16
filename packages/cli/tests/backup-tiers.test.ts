@@ -36,6 +36,7 @@ import {
   parseLastBackupFact,
   parseManifest,
   isHandsScratchPath,
+  isShortcodeKeyPath,
   shouldSkipForStaging,
   type PeersProjection,
 } from '../src/commands/backup-core.js'
@@ -290,6 +291,19 @@ describe('AFR-M6 — 纯核直测', () => {
     // 主钥即便在(不可能通过 CLI 到达的)tier+includeMasterKey 组合下也进不来
     expect(shouldSkipForStaging('identity-master.key', true, 'identity')).toBe(true)
     expect(shouldSkipForStaging('identity.sqlite', true, 'relations')).toBe(true)
+  })
+
+  it('IM 短码 HMAC 钥永远不进档,连搬家档也不进(Codex 九轮)', () => {
+    // 与会话文件同一档:没有开关。全量档默认不带主钥,所以档案的安全前提是
+    // 「拿到包也打不开金库」;而这一把是明文躺在里面的裸密钥,拿到它就能离线
+    // 磨短码碰撞(八轮 M2 关掉的那条路)。--include-master-key 也不放行——那
+    // 个旗标是给主钥的,不是给「凡是密钥都装上」的。
+    expect(shouldSkipForStaging('runtime/im-shortcode.key', false)).toBe(true)
+    expect(shouldSkipForStaging('runtime/im-shortcode.key', true)).toBe(true)
+    expect(isShortcodeKeyPath('runtime/im-shortcode.key')).toBe(true)
+    // 别误伤同目录的邻居。
+    expect(isShortcodeKeyPath('runtime/last-backup.json')).toBe(false)
+    expect(isShortcodeKeyPath('runtime/im-shortcode.key.bak')).toBe(false)
   })
 
   it('HANDS-M2 isHandsScratchPath:只认阿同工作区里的 node_modules 那一段', () => {

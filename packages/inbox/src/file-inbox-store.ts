@@ -220,7 +220,7 @@ export class FileInboxStore implements InboxStore {
   async delegate(
     itemId: string,
     toUserId: string,
-    opts: { actor: string; note?: string; now?: number },
+    opts: { actor: string; note?: string; now?: number; expect?: InboxExpectation },
   ): Promise<InboxItem> {
     return this.serialize(itemId, () => this.delegateLocked(itemId, toUserId, opts))
   }
@@ -228,7 +228,7 @@ export class FileInboxStore implements InboxStore {
   private async delegateLocked(
     itemId: string,
     toUserId: string,
-    opts: { actor: string; note?: string; now?: number },
+    opts: { actor: string; note?: string; now?: number; expect?: InboxExpectation },
   ): Promise<InboxItem> {
     const now = opts.now ?? Date.now()
     const item = await this.get(itemId)
@@ -240,6 +240,14 @@ export class FileInboxStore implements InboxStore {
       throw new InboxError(
         'already_resolved',
         `inbox item '${itemId}' is already ${item.status}`,
+      )
+    }
+    // Generation guard, inside the lock and before the write (Codex 九轮).
+    // Same posture as markResolved: refusing writes nothing at all.
+    if (opts.expect && !opts.expect(item)) {
+      throw new InboxError(
+        'stale_item',
+        `inbox item '${itemId}' changed since it was read`,
       )
     }
     const event: InboxEvent = { type: 'delegated', actor: opts.actor, to: toUserId, at: now }

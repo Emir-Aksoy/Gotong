@@ -12,6 +12,9 @@
  *   - 会话文件**永远**排除(`runtime/{admin,worker}-sessions.json`):
  *     恢复它们等于复活旧 cookie sid,备份泄露即可重放;重新登录只花
  *     5 秒,换一道真实安全边界。没有开关——这不是偏好,是纪律。
+ *   - IM 短码 HMAC 钥(`runtime/im-shortcode.key`)同罪永远排除:它是裸
+ *     密钥,而全量档默认**不带主钥**——把它放进去,等于在一个「打不开金库」
+ *     的包里附赠一把能磨短码碰撞的钥匙。缺了会自动重新生成。
  *   - identity.sqlite 家族在正常收集阶段跳过,由 WAL 安全快照阶梯
  *     单独处理(better-sqlite3 backup API → sqlite3 CLI → 原样拷贝
  *     + 大声警告)。
@@ -179,6 +182,21 @@ export function isSessionPath(rel: string): boolean {
 }
 
 /**
+ * IM 短码 HMAC 钥:与会话文件同罪,永远排除,无开关(Codex 九轮)。
+ *
+ * 它是**裸密钥**,而全量档默认不带主钥——档案的设计前提是「没有主钥就打不开
+ * 金库」,可这一把是明文躺在里面的。拿到它就能离线磨出与人手里那串短码撞上的
+ * 指纹(八轮 M2 关掉的正是这条路),而阿同有手、tier 1 命令免审批,算力不是门槛。
+ *
+ * 不进档的代价是恢复进新家后钥重新生成、旧短码不再匹配——那恰好是**对的**:
+ * 短码指向的是当时那些待批项,换了家就该重新 `/inbox` 看一眼。缺文件会自动
+ * 生成,恢复流程不需要任何额外步骤。
+ */
+export function isShortcodeKeyPath(rel: string): boolean {
+  return rel === 'runtime/im-shortcode.key'
+}
+
+/**
  * master key 两个世代。`identity-master.key*` 只认**根级**——
  * .sh 的排除模式 `$LEAF/identity-master.key*` 锚在 leaf 根,照抄。
  * B① 统一后 `runtime/secret.key*` 前缀盖住退役改名件(.pre-unify.bak);
@@ -240,6 +258,7 @@ export function shouldSkipForStaging(rel: string, includeMasterKey: boolean, tie
   // 照常触发,而不是抱着旧家的台账装新鲜。
   if (rel === LAST_BACKUP_FACT_NAME) return true
   if (isSessionPath(rel)) return true
+  if (isShortcodeKeyPath(rel)) return true
   if (!includeMasterKey && isMasterKeyPath(rel)) return true
   if (isIdentitySqlitePath(rel)) return true
   return false

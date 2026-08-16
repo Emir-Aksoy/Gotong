@@ -228,11 +228,19 @@ export interface InboxStore {
    * rewrites `userId` to `toUserId` and appends a `delegated` history event
    * (`actor` = the delegator, `to` = the new assignee). The item stays pending;
    * the parked task row is untouched (resume still keys off the item id).
+   *
+   * `opts.expect` is the same **generation** guard {@link markResolved} takes,
+   * for the same reason (Codex 九轮): a handoff is a decision about a specific
+   * action — "Bob should look at THIS" — and the pending-only check cannot see
+   * a re-park, because the new generation is pending too. Without it Alice can
+   * read "read a file", have the butler re-park "send money" under the same id,
+   * and hand Bob the second one under her name. Evaluated inside the same
+   * atomic transition as the pending check.
    */
   delegate(
     itemId: string,
     toUserId: string,
-    opts: { actor: string; note?: string; now?: number },
+    opts: { actor: string; note?: string; now?: number; expect?: InboxExpectation },
   ): Promise<InboxItem>
 }
 

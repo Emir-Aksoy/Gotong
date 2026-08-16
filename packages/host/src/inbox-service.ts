@@ -293,7 +293,24 @@ export class HostInboxService {
       throw new InboxError('invalid_target', 'cannot delegate an item to yourself')
     }
 
-    await this.store.delegate(itemId, target.id, { actor: userId, note })
+    // Generation guard (Codex 九轮). Everything checked above ran on a snapshot
+    // read OUTSIDE the store's per-item lock, and an item id is not a
+    // generation: the butler tool-loop re-parks a DIFFERENT action under the
+    // same task id, and the store's pending-only check waves that through
+    // because the new generation is pending too. A handoff is a decision about
+    // a specific action — "Bob should look at this one" — so if the item is no
+    // longer the one Alice read, refuse rather than hand Bob something she
+    // never saw, under her name.
+    //
+    // Pinned fields = ownership + the four the IM short code fingerprints
+    // (`imShortId`), so the two paths agree on what "the same item" means.
+    const expect: InboxExpectation = (fresh) =>
+      fresh.userId === userId &&
+      fresh.kind === item.kind &&
+      fresh.createdAt === item.createdAt &&
+      fresh.title === item.title &&
+      fresh.prompt === item.prompt
+    await this.store.delegate(itemId, target.id, { actor: userId, note, expect })
     this.recordDelegateAudit(item, userId, target.id, note)
   }
 

@@ -170,7 +170,17 @@ export function butlerResolvePushback(
   item: InboxItem,
   childResult: TaskResult | null,
 ): string | null {
-  if (item.source !== 'butler' || !childResult) return null
+  if (item.source !== 'butler') return null
+  // The held turn never resumed (Codex 九轮): `HostInboxService.resumeChild`
+  // returns a null result only when the parked row is gone or its task_json is
+  // corrupt — the decision is committed to disk and to the audit log, and then
+  // nothing runs. Staying silent here meant the member said "批准", the action
+  // never happened, and the only trace was a hub-side warn line. Say it: for an
+  // approval this is the difference between "done" and "never ran"; for a
+  // rejection it is at worst redundant.
+  if (!childResult) {
+    return '你的决定我记下了。但那次挂起的动作已经不在了(hub 可能重启过),所以它没有被执行。需要的话跟我说一声,我重新来一次。'
+  }
   if (childResult.kind === 'ok') {
     const out = childResult.output
     const text =

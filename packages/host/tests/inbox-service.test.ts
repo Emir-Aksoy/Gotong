@@ -375,6 +375,52 @@ describe('HostInboxService — two-step resume', () => {
     expect(identity.listAuditLog({ action: 'inbox_delegate' })).toHaveLength(0)
   })
 
+  it('转派也过代际闸:读到的那一代被换掉,Bob 拿不到她没看过的那件事(Codex 九轮)', async () => {
+    // 这道门量的是 **host 传没传谓词**,不是 store 会不会执行谓词(那条在
+    // `file-inbox-store.test.ts`)。把重新 park 塞进 store.delegate 调用的一瞬间,
+    // 就把「读在锁外、写在锁内」那个窗口变成确定性的:host 若不传谓词,Bob 就会
+    // 收到第二代。
+    const alice = identity.createUser({
+      email: 'alice2@team.test',
+      displayName: 'Alice',
+      password: 'alice-strong-password',
+      role: 'member',
+    })
+    const bob = identity.createUser({
+      email: 'bob2@team.test',
+      displayName: 'Bob',
+      password: 'bob-strong-password',
+      role: 'member',
+    })
+    const childId = await park({ assignee: alice.id, kind: 'approval', prompt: '读一个文件' })
+
+    const real = store.delegate.bind(store)
+    let swapped = false
+    store.delegate = async (itemId, toUserId, opts) => {
+      if (!swapped) {
+        swapped = true
+        const cur = (await store.get(itemId))!
+        // 管家在同一个 id 下重新 park 了另一个动作 —— 仍然 pending。
+        await store.write({ ...cur, prompt: '往外发一封邮件', createdAt: cur.createdAt + 1 })
+      }
+      return real(itemId, toUserId, opts)
+    }
+    try {
+      await expect(
+        service.delegate({ itemId: childId, userId: alice.id, toEmail: 'bob2@team.test' }),
+      ).rejects.toMatchObject({ code: 'stale_item' })
+    } finally {
+      store.delegate = real
+    }
+
+    const after = (await store.get(childId))!
+    expect(after.userId).toBe(alice.id)
+    expect(after.prompt).toBe('往外发一封邮件')
+    expect(after.history).toBeUndefined()
+    expect(identity.listAuditLog({ action: 'inbox_delegate' })).toHaveLength(0)
+    expect(bob.id).not.toBe(alice.id)
+  })
+
   it('a second resolve is rejected (already_resolved) without a second resume', async () => {
     const childId = await park({ assignee: 'user-a', kind: 'approval', prompt: 'ok?' })
     parkParent()

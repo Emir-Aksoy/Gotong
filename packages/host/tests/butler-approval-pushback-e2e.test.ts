@@ -221,10 +221,20 @@ describe('butlerResolvePushback (pure) — the push-back discriminator + phrasin
     expect(butlerResolvePushback(butlerItem(), failed)).toContain('磁盘满了')
   })
 
-  it('stays silent when nothing settled (re-park or unparked child)', () => {
+  it('stays silent on a re-park — that is not a settled outcome, the next resolve settles it', () => {
     const suspended = { kind: 'suspended', taskId: 't', resumeAt: 1 } as TaskResult
     expect(butlerResolvePushback(butlerItem(), suspended)).toBeNull()
-    expect(butlerResolvePushback(butlerItem(), null)).toBeNull()
+  })
+
+  it('says so when the held turn never resumed at all (Codex 九轮)', () => {
+    // `resumeChild` returns a null result only when the parked row is gone or
+    // its task_json is corrupt: the decision commits, then nothing runs. This
+    // used to be folded in with the re-park case above and answered with
+    // silence — so a member could approve an action, have it never happen, and
+    // be told nothing at all. The two nulls are not the same null.
+    const text = butlerResolvePushback(butlerItem(), null)
+    expect(text).not.toBeNull()
+    expect(text).toContain('没有被执行')
   })
 })
 
