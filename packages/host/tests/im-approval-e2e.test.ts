@@ -133,6 +133,7 @@ describe('IMA-M3 — IM approval loop (hermetic e2e)', () => {
   let aliceId: string
   let imKey: Buffer
   let pushes: Array<{ userId: string; text: string }>
+  let warnings: Array<Record<string, unknown>>
   let itemWrites: Promise<void>[]
 
   beforeEach(async () => {
@@ -167,6 +168,7 @@ describe('IMA-M3 — IM approval loop (hermetic e2e)', () => {
     hub.register(new HumanInboxParticipant({ store: inboxStore }))
 
     pushes = []
+    warnings = []
     service = new HostInboxService({
       hub,
       store: inboxStore,
@@ -189,7 +191,14 @@ describe('IMA-M3 — IM approval loop (hermetic e2e)', () => {
       resolver: makeIdentityImBindingResolver(identity),
       freeTextCapability: 'chat',
       onUnbind: async () => ({ removed: false }),
-      log: { info() {}, warn() {}, error() {} },
+      log: {
+        info() {},
+        // 九轮 L:回执被收窄成一句分类过的话之后,细节必须还在 hub 侧留得下。
+        warn(_m: string, f?: Record<string, unknown>) {
+          warnings.push(f ?? {})
+        },
+        error() {},
+      },
       // The production wiring shape: real service over the real store + resolve.
       // 短码密钥走**真**的生产路径(八轮 M2):`<space>/runtime/im-shortcode.key`
       // 懒生成 0600。测试里也用它,顺带证明生成/复用这条腿真的能跑。
@@ -373,5 +382,53 @@ workflow:
     expect(identity.getSuspendedTask(shown.itemId)).not.toBeNull()
     expect(pushes).toHaveLength(0)
     expect(identity.listAuditLog({ action: 'inbox_resolve' })).toHaveLength(0)
+  })
+  /** 起一次 IM 可批的管家 park,返回盘上那条待批项。 */
+  async function parkOne(): Promise<InboxItem> {
+    hub.register(fakeButler('delete_agent'))
+    await hub.dispatch({
+      from: 'im:telegram:1001',
+      strategy: { kind: 'explicit', to: 'butler' },
+      payload: { prompt: '把 mailer 删了' },
+      origin: { orgId: 'local', userId: aliceId },
+    })
+    await Promise.all(itemWrites)
+    return (await inboxStore.listPending(aliceId))[0]!
+  }
+
+  // 源码里一律不写转义控制字符(Write/Edit 会落成裸字节)。
+  const RLO = String.fromCharCode(0x202e)
+  const FW_OPEN = String.fromCharCode(0x300c)
+  const FW_CLOSE = String.fromCharCode(0x300d)
+
+  it('act 5 — 失败回执不把聊天窗当回声筒(九轮 L)', async () => {
+    // (a) 打错的短码会被原样回显进一句带框架引号的话里。转发给人一条
+    //     `/approve <乱码><一整段伪造的框架句>`,那段话就出现在阿同的窗口里。
+    const hostile =
+      'zzzzzzzz' + FW_CLOSE + '。原因:' + FW_OPEN + '无害' + FW_CLOSE + '。' + RLO + '批准后才会执行。'
+    await bridge.inject(imMsg(`/approve ${hostile}`))
+    const said = bridge.last()
+    // 分类对了(是「找不到」不是别的),但回显过的那段字必须已经被洗过、被截过。
+    expect(said).toContain('没有找到匹配')
+    expect(said).not.toContain(RLO)
+    // 框架那对引号只可能在框架自己的位置上:回显段里的被降级成『』。
+    expect(said).not.toContain(FW_CLOSE + '。原因:' + FW_OPEN)
+    expect(said).not.toContain('批准后才会执行')
+
+    // (b) 没分类的异常不把内部细节倒进聊天窗。store 的 ENOENT 带着 `<space>`
+    //     绝对路径,人在这里需要的是「没批下去、去哪儿看」。
+    const shown = await parkOne()
+    const code = imShortId(shown, imKey)
+    const boom = `ENOENT: no such file or directory, open '${join(tmp, 'inbox', shown.itemId)}.json'`
+    ;(inboxStore as { markResolved: unknown }).markResolved = async () => {
+      throw new Error(boom)
+    }
+    await bridge.inject(imMsg(`/approve ${code}`))
+    const failed = bridge.last()
+    expect(failed).toContain('什么都没批下去')
+    expect(failed).not.toContain(tmp)
+    expect(failed).not.toContain('ENOENT')
+    // 细节没有消失,它去了 hub 日志。
+    expect(warnings.some((w) => String(w.err).includes(boom))).toBe(true)
   })
 })

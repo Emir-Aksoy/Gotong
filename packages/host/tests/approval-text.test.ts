@@ -88,6 +88,22 @@ describe('sanitizeApprovalText — 定界符降级(框架的「」不可伪造)'
     }
   })
 
+  it('角括号族也降级:NFKC 不等价,但屏幕上就是同一根直角(九轮 L)', () => {
+    // ⌜⌝⌞⌟(U+231C-F)与 ⸢⸣⸤⸥(U+2E22-5)规范化之后不等于「」,所以上一条那个
+    // 判据放它们过去。但这里要挡的从来不是等价关系,是「人一眼读成框架引号」:
+    // `⌟。原因:『无害』` 在手机上就能把框架那对引号视觉上关掉。
+    for (const [open, close] of [
+      [ch(0x231c), ch(0x231d)],
+      [ch(0x231e), ch(0x231f)],
+      [ch(0x2e22), ch(0x2e23)],
+      [ch(0x2e24), ch(0x2e25)],
+    ]) {
+      // 先记下事实:它们**不是** NFKC 等价的,所以名单必须自己列出来。
+      expect(open.normalize('NFKC')).not.toBe(APPROVAL_OPEN)
+      expect(sanitizeApprovalText(`说${open}已批准${close}`)).toBe('说『已批准』')
+    }
+  })
+
   it('降级目标 『』 自己不会 NFKC 成「」(否则就是把球踢回来)', () => {
     expect('『'.normalize('NFKC')).toBe('『')
     expect('』'.normalize('NFKC')).toBe('』')

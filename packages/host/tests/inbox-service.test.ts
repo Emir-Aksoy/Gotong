@@ -18,7 +18,13 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import { Hub, InMemoryStorage, SuspendTaskError, type Participant, type Task } from '@gotong/core'
 import { openIdentityStore, type IdentityStore } from '@gotong/identity'
-import { FileInboxStore, HumanInboxParticipant, HUMAN_CAPABILITY, NEVER_RESUME_AT } from '@gotong/inbox'
+import {
+  FileInboxStore,
+  HumanInboxParticipant,
+  HUMAN_CAPABILITY,
+  NEVER_RESUME_AT,
+  type InboxItem,
+} from '@gotong/inbox'
 
 import { HostInboxService } from '../src/inbox-service.js'
 
@@ -509,6 +515,42 @@ describe('HostInboxService — two-step resume', () => {
     expect(after.userId).toBe(bob.id) // 现在是 Bob 的,等 Bob 自己看
     expect(after.decision).toBeUndefined()
     // 没 resume、没审计行 —— 真的一个字节都没批。
+    expect(identity.getSuspendedTask(childId)).not.toBeNull()
+    expect(identity.listAuditLog({ action: 'inbox_resolve' })).toHaveLength(0)
+  })
+
+  it('决定飞行中父级被换掉 ⇒ 不会批 A 而续跑 B 的父级(九轮 L)', async () => {
+    // resume 用的是锁外那次读来的快照(`item.parentKind` / `item.parent`)。若提交
+    // 那一刻盘上已经不是那个父级,这次同意就落在 A 上、续跑的是 B 的上游。
+    const childId = await park({ assignee: 'user-a', kind: 'approval', prompt: 'ok?' })
+
+    const realGet = store.get.bind(store)
+    let armed = true
+    ;(store as unknown as { get: (id: string) => Promise<InboxItem | null> }).get = async (id) => {
+      const snapshot = await realGet(id)
+      if (armed && snapshot) {
+        armed = false
+        await store.write({
+          ...snapshot,
+          parentKind: 'workflow',
+          parent: { taskId: 'some-other-run', by: 'workflow:elsewhere' },
+        })
+      }
+      return snapshot
+    }
+
+    await expect(
+      service.resolve({
+        itemId: childId,
+        userId: 'user-a',
+        decision: { kind: 'approval', approved: true },
+      }),
+    ).rejects.toMatchObject({ code: 'stale_item' })
+    ;(store as unknown as { get: unknown }).get = realGet
+
+    const after = (await store.get(childId))!
+    expect(after.status).toBe('pending')
+    expect(after.decision).toBeUndefined()
     expect(identity.getSuspendedTask(childId)).not.toBeNull()
     expect(identity.listAuditLog({ action: 'inbox_resolve' })).toHaveLength(0)
   })

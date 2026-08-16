@@ -393,16 +393,24 @@ describe('IMA-M2 — IM approval verbs', () => {
     }
   })
 
-  it('falls back to the raw message for an unknown failure', async () => {
+  // 九轮 L3:未分类的失败以前把 `err.message` 原样倒进聊天窗,而 store 的 ENOENT
+  // 带着 `<space>` 绝对路径。聊天窗只需要知道「没批下去、去哪儿看」;细节归 hub 侧日志。
+  it('an unclassified failure says nothing was decided — the detail goes to the log, not the chat', async () => {
+    const warnings: unknown[] = []
+    config.log = { ...silentLogger, warn: (_msg: string, meta?: unknown) => void warnings.push(meta) }
     config.approvals = {
       listForIm: async () => [],
       resolveByShortId: async () => {
-        throw new Error('disk on fire')
+        throw new Error('ENOENT: no such file /srv/gotong-space/inbox/x.json')
       },
     }
     await bridge.inject(imMsg('/deny aaaa1111'))
-    expect(last(bridge).text).toContain('处理失败')
-    expect(last(bridge).text).toContain('disk on fire')
+    const said = last(bridge).text
+    expect(said).toContain('什么都没批下去')
+    expect(said).toContain('收件箱')
+    expect(said).not.toContain('ENOENT')
+    expect(said).not.toContain('/srv/gotong-space')
+    expect(warnings.some((w) => String((w as { err?: unknown }).err).includes('/srv/gotong-space'))).toBe(true)
   })
 
   it('the /help text advertises the three verbs', async () => {

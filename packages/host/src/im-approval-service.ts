@@ -38,7 +38,16 @@
  */
 
 import { createHmac, randomBytes } from 'node:crypto'
-import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import {
+  chmodSync,
+  closeSync,
+  existsSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  statSync,
+  writeSync,
+} from 'node:fs'
 import { dirname, join } from 'node:path'
 
 import type { InboxDecision, InboxItem } from '@gotong/inbox'
@@ -107,26 +116,52 @@ const SHORT_CODE_KEY_BYTES = 32
  * 镜像 `loadOrCreateSigningKey` 的姿态:0600、缺了就生成、**坏了就抛**。坏了不
  * 静默重建有两个理由——重建会让所有在飞的短码一起失效(人手里抄好的码全部落
  * `not_found`),而且「密钥被人动过」本身就是要说出来的事,不是要悄悄抹平的事。
+ *
+ * 生成走 `'wx'`(O_CREAT|O_EXCL,Codex 九轮 L):`existsSync` 之后再 `writeFileSync`
+ * 中间有一条缝——两个 hub 同时首启会各写各的(后写的那把赢,先写那把签出去的码
+ * 当场作废),而 `writeFileSync` 会**跟着符号链接**写到别处去。`wx` 把「不存在才
+ * 创建」交给内核一次完成,EEXIST 就说明有人先到了:回头读那一把,不覆盖。
+ *
+ * 读的时候顺手把权限按回 0600。旧版本或搬迁把它留成了组可读,这里不是「发现了
+ * 攻击」而是「把它修回该有的样子」——密钥的模式不该指望上一任写对。
  */
 export function loadOrCreateShortCodeKey(spaceRoot: string): Buffer {
   const file = join(spaceRoot, 'runtime', 'im-shortcode.key')
-  if (existsSync(file)) {
-    const raw = readFileSync(file)
-    if (raw.length < SHORT_CODE_KEY_BYTES) {
-      throw new Error(
-        `IM short-code key '${file}' is ${raw.length} bytes; expected at least ${SHORT_CODE_KEY_BYTES}. ` +
-          'Refusing to start rather than silently minting a new one (every outstanding /approve code would change).',
-      )
-    }
-    return raw
-  }
+  if (existsSync(file)) return readShortCodeKey(file)
   mkdirSync(dirname(file), { recursive: true })
   const key = randomBytes(SHORT_CODE_KEY_BYTES)
-  writeFileSync(file, key, { mode: 0o600 })
-  // `mode` on writeFileSync is masked by umask on some platforms; state it again.
+  let fd: number
+  try {
+    fd = openSync(file, 'wx', 0o600)
+  } catch (err) {
+    // 有人先到了(并发首启),或者那个名字已经是个链接。两种情况的正确答案都是
+    // 「读它,别覆盖」——覆盖会作废另一边刚签出去的码。
+    if ((err as NodeJS.ErrnoException).code === 'EEXIST') return readShortCodeKey(file)
+    throw err
+  }
+  try {
+    writeSync(fd, key)
+  } finally {
+    closeSync(fd)
+  }
+  // `mode` on openSync is masked by umask on some platforms; state it again.
   chmodSync(file, 0o600)
   return key
 }
+
+/** 读一把已存在的短码密钥:长度不够就抛,权限松了就按回 0600。 */
+function readShortCodeKey(file: string): Buffer {
+  const raw = readFileSync(file)
+  if (raw.length < SHORT_CODE_KEY_BYTES) {
+    throw new Error(
+      `IM short-code key '${file}' is ${raw.length} bytes; expected at least ${SHORT_CODE_KEY_BYTES}. ` +
+        'Refusing to start rather than silently minting a new one (every outstanding /approve code would change).',
+    )
+  }
+  if ((statSync(file).mode & 0o077) !== 0) chmodSync(file, 0o600)
+  return raw
+}
+
 /**
  * 一行字里留给动作的字符数。IM 的 `/inbox` 每条就是一行,再长的东西在手机上
  * 也读不成一行——所以这个数不是「显示预算」,它是**能不能在 IM 批**的判据(见
@@ -286,7 +321,11 @@ export class ImApprovalService {
       // pending 判据照样放行(新的一条也是 pending),批下去的就是另一个动作了。
       // 判据必须在 store 的原子 transition 里跑,所以把它传进去,而不是在这里
       // 多算一遍。
-      expect: (fresh) => imShortId(fresh, this.key) === code,
+      // `imApprovable` 也一起钉(九轮 L):上面那道 web-only 闸读的是快照。指纹
+      // 盖住 itemId/createdAt/title/prompt——重新 park 一定换 `createdAt`,所以
+      // park 这条路已经被盖住了;但「谁把这一项标成可在 IM 批」这个判断本身,
+      // 应该在它被执行的那一刻仍然成立,而不是靠另一个字段间接推出来。
+      expect: (fresh) => fresh.imApprovable === true && imShortId(fresh, this.key) === code,
     })
     return { title: row.text }
   }

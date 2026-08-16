@@ -196,8 +196,18 @@ export class HostInboxService {
     // could therefore pass the ownership check, lose the item to Bob, and still
     // land her decision on it. `kind` is pinned for the same reason —
     // `validateDecision` ran against the snapshot's kind.
+    //
+    // 顺着同一条理由再钉两项(Codex 九轮 L):**下面 resume 用的是快照**。
+    // `resumeParent` 完全按 `item.parentKind` / `item.parent` 走,而这两项来自
+    // 锁外那次读。它们在提交那一刻若已经不是盘上的样子,这次决定就落在 A 上、
+    // 续跑的是 B 的父级。钉住 = 「我批的那一代,和我接着要续跑的那一代,是同一代」。
+    const parentTaskId = item.parent?.taskId
     const expect: InboxExpectation = (fresh) =>
-      fresh.userId === userId && fresh.kind === item.kind && (args.expect?.(fresh) ?? true)
+      fresh.userId === userId &&
+      fresh.kind === item.kind &&
+      fresh.parentKind === item.parentKind &&
+      fresh.parent?.taskId === parentTaskId &&
+      (args.expect?.(fresh) ?? true)
     await this.store.markResolved(itemId, validated, undefined, expect)
 
     // Governance audit (inbox-gov M1) — record the committed decision right

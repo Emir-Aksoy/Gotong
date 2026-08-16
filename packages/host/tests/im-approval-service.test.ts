@@ -10,7 +10,7 @@ import { describe, expect, it } from 'vitest'
 
 import type { InboxItem } from '@gotong/inbox'
 
-import { mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { chmodSync, mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -404,6 +404,11 @@ describe('ImApprovalService.resolveByShortId', () => {
     expect(guard!(item({ itemId: 'task-1', title: '往外发一封邮件', imApprovable: true }))).toBe(
       false,
     )
+    // web-only 闸也一起钉(九轮 L):上面读快照时它是可在 IM 批的,提交那一刻不是
+    // 了 ⇒ 不批。指纹涉及的四个字段一个没动,只有这一条能拦住。
+    const unflagged = { ...it0 }
+    delete (unflagged as { imApprovable?: true }).imApprovable
+    expect(guard!(unflagged)).toBe(false)
   })
 
   it('批准回执里的标题是洗过的那份,不是原文(桥拿去回话)', async () => {
@@ -546,6 +551,11 @@ describe('短码带密钥(八轮 M2)', () => {
       // 短了就抛:密钥被人动过是要说出来的事。
       writeFileSync(file, Buffer.alloc(8))
       expect(() => loadOrCreateShortCodeKey(dir)).toThrow(/expected at least 32/)
+      // 权限松了就按回去(九轮 L):旧版本/搬迁可能把它留成组可读,读到就修回来。
+      writeFileSync(file, first)
+      chmodSync(file, 0o644)
+      expect(loadOrCreateShortCodeKey(dir).equals(first)).toBe(true)
+      expect(statSync(file).mode & 0o777).toBe(0o600)
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }

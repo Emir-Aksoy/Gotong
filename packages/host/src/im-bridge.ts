@@ -53,6 +53,7 @@ import { SlackBridge, type WebSocketCtor as SlackWebSocketCtor } from '@gotong/i
 import { WechatBridge } from '@gotong/im-wechat'
 import { WebSocket as NodeWebSocket } from 'ws'
 
+import { clipApprovalText, sanitizeApprovalText } from './approval-text.js'
 import type { ButlerHearing } from './butler-hearing.js'
 import type { ButlerSeeing } from './butler-seeing.js'
 import { ButlerOutbox } from './butler-outbox.js'
@@ -482,6 +483,9 @@ export async function handleImMessage(
           approved ? `✓ 已批准 / Approved — ${out.title}` : `✓ 已拒绝 / Denied — ${out.title}`,
         )
       } catch (err) {
+        // 细节留在 hub 侧(错误串里可能有绝对路径/内部 id),回给聊天窗的是分类过的
+        // 那句话。见 `describeApprovalError` 的 default 分支。
+        config.log.warn('im approval resolve failed', { platform, userId, err: String(err) })
         await reply(bridge, msg, describeApprovalError(err, cmd.shortId))
       }
       return
@@ -1645,12 +1649,23 @@ const APPROVALS_NOT_ENABLED =
  * `InboxError` passing through from `HostInboxService.resolve`
  * (`already_resolved`, `forbidden`, …). Duck-typed on `.code` so this module
  * needs no dep on either class.
+ *
+ * 两处刻意(Codex 九轮 L):
+ *
+ *   - `shortId` **是聊天里打进来的一串字**(`/approve <token>` 的第一段,除了「不含
+ *     空白」没有任何形状约束),两条分支把它原样回显进一句带框架引号的话里。转发给
+ *     人一条 `/approve <8位码><一整段伪造的框架句>` 就能让阿同的窗口里出现那段话。
+ *     所以回显前过同一套清洗 + 一个很窄的上限——真短码是 8 位,给 24 已经够宽。
+ *   - `default:` **不回显 `err.message`**。落到这里的是没分类的异常(store 的 ENOENT
+ *     带着 `<space>` 绝对路径、SQLite 报错带内部 id),细节属于 hub 日志不属于聊天窗;
+ *     人在这里需要的是「没批下去、去哪儿看」,不是栈里的字符串。
  */
-function describeApprovalError(err: unknown, shortId: string): string {
+function describeApprovalError(err: unknown, rawShortId: string): string {
   const code =
     typeof err === 'object' && err !== null && 'code' in err
       ? String((err as { code: unknown }).code)
       : ''
+  const shortId = clipApprovalText(sanitizeApprovalText(rawShortId), ECHOED_SHORT_ID_CHARS)
   switch (code) {
     case 'short_id_too_short':
       return '编号要打全(用 /inbox 查看完整编号)。/ Use the full id from /inbox.'
@@ -1674,6 +1689,9 @@ function describeApprovalError(err: unknown, shortId: string): string {
     case 'forbidden':
       return '这件事不归你处理(可能刚被转派)。/ Not yours to resolve (it may have been delegated).'
     default:
-      return `处理失败 / Failed — ${err instanceof Error ? err.message : String(err)}`
+      return '没能处理这一条(不是你的问题,hub 侧出错了),什么都没批下去。请到网页看:我的 → 收件箱。/ Something went wrong on the hub — nothing was decided. Use the web (/me → inbox).'
   }
 }
+
+/** 回显进聊天窗的短码上限。真短码 8 位;宽出来的余量只为让打错的人认得出自己打了什么。 */
+const ECHOED_SHORT_ID_CHARS = 24
