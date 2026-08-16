@@ -266,6 +266,7 @@ import { HostButlerMemoryService } from './butler-memory-service.js'
 // Assembly lives in personal-butler-factory.ts; main.ts only wires refs.
 import { buildButlerBackupOps } from './personal-butler-backup.js'
 import { buildButlerFactory } from './personal-butler-factory.js'
+import { armButlerCoder } from './personal-butler-coder.js'
 import { armButlerHands } from './personal-butler-hands.js'
 import { buildButlerPanelContentToolset } from './personal-butler-panel.js'
 import { butlerEmbedderFromEnv } from './butler-embedder.js'
@@ -1059,6 +1060,9 @@ async function main(): Promise<void> {
     logger: log,
     ...(identityForBackup ? { membershipRole: (uid: string) => identityForBackup.getMembership(uid)?.role } : {}),
   })
+  // HANDS-M2b — 手 B:骑手 A 那座监狱装一个外驱 coding CLI(`hands.json` 的 coder 块)。
+  // 名册行 + owner 授权都在里面落,阿同 escalate 转派那道 fail-closed 检查才过得去。
+  if (identityForBackup) await armButlerCoder({ hands: butlerHands, hub, space, grants: identityForBackup, logger: log })
   // Per-user butler assembly lives in personal-butler-factory.ts (GUARD
   // extraction); refs() reads the forward-declared refs at butler-build time.
   const butlerFactory: ButlerFactory = buildButlerFactory({

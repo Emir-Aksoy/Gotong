@@ -418,11 +418,13 @@ export function wrapWithFsJail(opts: WrapWithFsJailOptions): WrappedCommand {
  *      one (the member workspace under `<space>`). Depth order is the whole
  *      point: a hide NESTED INSIDE a re-exposed subtree must be emitted after
  *      that subtree or the re-expose would silently undo it;
- *   2. hidden files: `(deny file-read* file-write* (literal f))` — after every
+ *   2. `(allow file-read-metadata (literal a))` for each hidden directory a
+ *      re-exposed path is NESTED UNDER ({@link seatbeltTraversableAncestors});
+ *   3. hidden files: `(deny file-read* file-write* (literal f))` — after every
  *      layer so a hidden file always wins;
- *   3. `unsharePid` → the process-isolation approximation (signal / process-info
+ *   4. `unsharePid` → the process-isolation approximation (signal / process-info
  *      only within the sandbox, no `lsopen`, no AppleEvents, no launchd jobs);
- *   4. `(deny network*)` when `unshareNet`.
+ *   5. `(deny network*)` when `unshareNet`.
  * `denySharedTmp` is not a block: it removes `/tmp`, `/private/tmp` and
  * `/var/folders` (both spellings) from the writable roots BEFORE line 4 of the
  * classic profile is built, so the blanket `(deny file-write*)` covers them.
@@ -458,6 +460,10 @@ export function buildSeatbeltProfile(
             ? '(allow file-read*'
             : '(allow file-read* file-write*'
       lines.push(head, ...group.paths.map((p) => `  (subpath ${sbplString(p)})`), ')')
+    }
+    const traversable = seatbeltTraversableAncestors(plan.groups, hardening.hiddenPaths ?? [])
+    if (traversable.length > 0) {
+      lines.push('(allow file-read-metadata', ...traversable.map((a) => `  (literal ${sbplString(a)})`), ')')
     }
     if (plan.hiddenFiles.length > 0) {
       lines.push(
@@ -648,6 +654,51 @@ function planJailLayers(
 }
 
 /** Number of path segments; `/` = 0. The depth key the layer order sorts on. */
+/**
+ * Seatbelt only: the hidden directories a re-exposed path is NESTED UNDER, which
+ * must stay `lstat`-able or nothing inside them can be RESOLVED.
+ *
+ * `(deny file-read* … (subpath <space>))` covers `<space>` ITSELF, and the
+ * re-expose of `<space>/butler/hands/<u>/workspace` does not reach back up to
+ * it. Opening a file inside still works — the kernel walks the path internally
+ * and Seatbelt judges the operation's TARGET, not its ancestors — but anything
+ * that resolves a path from USERSPACE walks it component by component and dies
+ * on the first hidden one. That is not an exotic case: it is what
+ * `realpath(3)` does, which is what Node does to its main module, so plain
+ * `node test.js` inside the member workspace failed with `EPERM: lstat
+ * '<space>'` while `node -e '…'` worked (verified on macOS 26; the same shape
+ * as the M2 `mkdir -p` finding). Running a file in the workspace is the single
+ * most ordinary thing a workspace is for.
+ *
+ * Metadata on those directories is not a secret we hold: the child is TOLD
+ * their names (its own cwd, `HOME`, `TMPDIR` are all inside `<space>`), so
+ * hiding them buys nothing and breaks path resolution. `file-read-metadata`
+ * grants exactly `stat` — reading a directory's ENTRIES is `file-read-data`,
+ * which stays denied (verified: `ls <space>` → EPERM, `cat <space>/…` → EPERM).
+ *
+ * bwrap needs none of this: a `--tmpfs` over the hidden path plus a `--bind` of
+ * the root inside it makes bwrap materialise the intermediate directories as
+ * real (empty) tmpfs dirs, which are statable by construction.
+ */
+function seatbeltTraversableAncestors(
+  groups: readonly JailLayerGroup[],
+  hiddenPaths: readonly string[],
+): string[] {
+  if (hiddenPaths.length === 0) return []
+  const out = new Set<string>()
+  for (const group of groups) {
+    if (group.kind === 'hidden') continue
+    for (const p of group.paths) {
+      for (let cur = path.dirname(p); ; cur = path.dirname(cur)) {
+        // Above the hidden subtree `(allow default)` already covers it.
+        if (isInsideRoots(cur, hiddenPaths)) out.add(cur)
+        if (path.dirname(cur) === cur) break
+      }
+    }
+  }
+  return [...out].sort()
+}
+
 function pathDepth(p: string): number {
   return p.split(path.sep).filter(Boolean).length
 }

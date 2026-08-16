@@ -264,7 +264,50 @@ describe('wrapWithFsJail hardening (HANDS-M2)', () => {
     expect(lines.slice(iRo, iRw)).toEqual(['(allow file-read*', `  (subpath "${NODE}")`, ')'])
     // /usr/local is not hidden (dropped); the workspace is a writable root (left to the rw re-allow)
     expect(p).not.toContain('"/usr/local"')
-    expect(lines.slice(iRw)).toEqual(['(allow file-read* file-write*', `  (subpath "${WORKSPACE}")`, ')'])
+    const iMeta = lines.indexOf('(allow file-read-metadata')
+    expect(lines.slice(iRw, iMeta)).toEqual(['(allow file-read* file-write*', `  (subpath "${WORKSPACE}")`, ')'])
+  })
+
+  // HANDS-M2b — a re-exposed root under a hidden path is reachable but not
+  // RESOLVABLE: `realpath(3)` walks it component by component, so `node
+  // test.js` inside the member workspace died on `lstat '<space>'` while
+  // `node -e '…'` worked. The ancestors are not a secret we hold (the child is
+  // told them via cwd/HOME); their CONTENTS still are.
+  it('seatbelt: hidden ancestors of a re-exposed root get metadata-only traversal, and nothing else does', () => {
+    const NODE = '/home/hub/.nvm/versions/node/v20'
+    const p = buildSeatbeltProfile([WORKSPACE], {
+      hiddenPaths: ['/home/hub', SPACE],
+      readOnlyRoots: [NODE],
+      hiddenFiles: ['/etc/gotong.env'],
+    })
+    const lines = p.split('\n')
+    const iMeta = lines.indexOf('(allow file-read-metadata')
+    expect(iMeta).toBeGreaterThan(lines.indexOf('(allow file-read* file-write*'))
+    const block = lines.slice(iMeta + 1, lines.indexOf(')', iMeta))
+    expect(block).toEqual([
+      // the hidden root ITSELF is the first component that fails to `lstat`
+      '  (literal "/home/hub")',
+      '  (literal "/home/hub/.nvm")',
+      '  (literal "/home/hub/.nvm/versions")',
+      '  (literal "/home/hub/.nvm/versions/node")',
+      `  (literal "${SPACE}")`,
+      `  (literal "${SPACE}/butler")`,
+      `  (literal "${SPACE}/butler/hands")`,
+      `  (literal "${SPACE}/butler/hands/user")`,
+      `  (literal "${SPACE}/butler/hands/user/u1")`,
+    ])
+    // ancestors ABOVE the hidden subtree are already allowed by default and
+    // need no rule; and it is metadata only — no `subpath`, so nothing recurses.
+    expect(block).not.toContain('  (literal "/home")')
+    expect(block.join('\n')).not.toContain('subpath')
+    expect(block).not.toContain('  (literal "/srv/hub")')
+    // a hidden FILE still wins — it is emitted after this block
+    expect(lines.indexOf('(deny file-read* file-write*', iMeta)).toBeGreaterThan(iMeta)
+  })
+
+  it('seatbelt: nothing hidden → no traversal block at all (classic profile untouched)', () => {
+    expect(buildSeatbeltProfile([ROOT], { unshareNet: true })).not.toContain('file-read-metadata')
+    expect(buildSeatbeltProfile([WORKSPACE], { readOnlyRoots: [WORKSPACE] })).not.toContain('file-read-metadata')
   })
 
   it('seatbelt: hiddenFiles are literal denies appended AFTER every re-allow; a file under a hidden dir is dropped', () => {

@@ -131,6 +131,30 @@ owner 用既有 `@gotong/cli-agent` 把 Claude Code / Codex / Aider 接成兄弟
 fire-and-forget 转派（`personal-butler-escalate.ts:118` explicit 直达），结果 pushToMember 推回。
 需要机器上有该 CLI 及**用户自己的** key（M3 `/setkey` 也能录）；没有=不装。
 
+**落地形状（M2b，见 §十一）**：`hands.json` 加一个 `coder` 块就装上，缺席=字节不变。
+
+```jsonc
+{
+  "enabled": true,
+  "allowRoles": ["owner"],
+  "coder": {
+    "userId": "u-owner",            // 必填:手 B 替谁干活。它的权限 ⊆ 这个人手 A 的权限
+    "command": "claude",            // 必填:机器上的 coding CLI
+    "args": ["-p", "--output-format", "text"],
+    "promptVia": "stdin",           // stdin(默认) | arg(argv 里用 {prompt} 占位)
+    "passEnv": ["ANTHROPIC_API_KEY"], // 环境变量的**名字**,值现从 hub 进程 env 取
+    "agentId": "coder",             // 默认 coder
+    "label": "阿同的手 B(代码)",
+    "timeoutSec": 900,              // 默认 900,上限 7200
+    "maxTurns": 1                   // 默认 1
+  }
+}
+```
+
+转派配方：给管家行配 `escalateTo: "coder"`（DUO 那条既有缝），阿同就能
+`escalate_to_expert` 把「写个加法函数并配测试」交出去；手 B 在**同一个工作区**里改完，
+阿同回头 `hands_run` 跑测试看结果——**文件就是接口**，两只手之间不需要任何新协议。
+
 ### 4.4 手机配置面（M3）
 
 - **`/setkey`**：`/setkey <provider|agentId> <key>` 直贴（桥层截获 → 金库，与 admin API 同一写入
@@ -191,7 +215,7 @@ IM 通道即在；**至少一次网页触碰不可避免也不该避免**（owne
 | M0 | 本文 | 侦察 + 威胁模型 + 四档表 + 五岔口 | — |
 | M1 | 四档策略纯核 | `personal-butler/src/hands-policy.ts` 纯函数 + 拒绝表 + realpath 逃逸判定 | 单测：配置区/凭证路径永不 allow；符号链接逃逸 refuse；`net:true`→approve；未知→非 allow；拒绝表命中 refuse |
 | M2 ✅ | 手 A 原生（2026-08-15，见 §十） | host `personal-butler-hands.ts` 执行器 + 五工具（**文件四动作走监狱内 node 小助手**）+ `hands.json` opt-in（含 `allowRoles` **默认 owner/admin**、`hidden`/`readOnly` 追加清单）+ **HOME = 只读空目录**（缓存另指工作区）+ core `FsJailHardening`（`unshareNet`/`unsharePid`/`hiddenPaths`/`hiddenFiles`/`readOnlyRoots`/`denySharedTmp`，additive；seatbelt 侧 `unsharePid` 映射成进程隔离规则）+ 上限（含监狱内 `ulimit`）+ 审计（含 stdin 摘要/sha256）+ factory 接线 + AFR 三件套 + main.ts 棘轮显式抬（2768/2770→2772/2780）+ 备份排除工作区 `node_modules` | 真 spawn 门（host hands **82 例**全过，其中真 spawn 22；bwrap 靠 argv 单测）：`cat <space>/gotong.env` 在监狱内失败；写 `<space>/agents.json` 双拒（监狱 rc≠0 且字节不变 + hands_write 穿越 refuse）；hub 用户 HOME 与点名文件藏起来；策略放行后目录换成指向 `<space>` 的链接小助手照样写不进读不出（TOCTOU 真闸=监狱）；断网命令联本机 HTTP 失败、`net:true` approve 后成功；超时/超输出/洪水响亮；命令退出即收整个进程组；hub 级并发 1 响亮拒；`kind:'none'` 整套不装；缺席字节不变（脸 absent≡off≡armed−hands_*）；子环境零凭证且 TMPDIR 指进工作区；审计不落正文；**只有 owner/admin 有手**（默认；member 的脸上没有这五件、park 期间被降权也执行不了）；**HOME 是只读空目录**（在、列得动、是空的、写不进）；**Codex 交叉审九轮 + 内部对抗审一轮**（5H/4M/1L → 2H/6M/2L → 3H/3M → 3H/3M → 2H/1M/1L → 2H/2M/1L → 2H/2M/3L → 3H/2M/3L → 3H/5M/6L → 第十轮 2H/2M，§10.5/§10.7）✅ |
-| M2b | 手 B 外驱 | cli-agent 参与者 + 共用工作区 + escalate 转派配方 + docs | e2e：阿同写需求→coder 改文件→阿同 `hands_run` 跑测试 |
+| M2b ✅ | 手 B 外驱（2026-08-16，见 §十一） | host `personal-butler-coder.ts` 装配（围墙全部借手 A 的 `ButlerHandsHost`，五道 fail-closed 闸）+ `hands.json` `coder` 块（形状门与手 A 同一个读者）+ 名册行 + owner 授权（`escalate_to_expert` 认的就是那张表）+ `onChunk` 播成 transcript 观察缝 + cli-agent `PerSpawn` env/fsJail thunk + **core seatbelt 补藏起来祖先的 `stat` 通路**（§11.2，macOS 独有的真洞） | e2e：**阿同写需求→手 B 改文件（真落在手 A 工作区）→阿同 `hands_run` 跑测试出 TESTS PASS**；手 B 读不到 hub 用户 HOME 的钥匙；坏 `coder` 块整份不装；不够格的成员连目录都不建；撞上别人的 agent 行不覆盖；`passEnv` 盖不掉 HOME/PATH/TMPDIR；围墙每次 spawn 现算（host coder **25 例** + 手 A 回归 1 + core 6；变异一道四例齐红） ✅ |
 | M3 | 手机配置面 | `/setkey` 双路径 + 一次性链接 + 优劣文案 + config-write 两步确认 + `/keys` + SETTING-OPS-CONSOLE 改口 | 单测：直贴不进 SESS 窗/transcript、不回显；非 owner/admin 绑定拒；链接单次 10min；两步确认走 IMA；**Codex 交叉审** |
 | M4 | 环境探测→方案→人批 | `hub_environment` + 提案卡 + tier 2 应用 | 探针零 LLM；不可应用项只指路 |
 | M5 | Obsidian 投影 | tasks.md / memory/*.md 生成 + frontmatter + 覆盖语义 | 真相未动；投影可 Obsidian 解析 |
@@ -199,7 +223,7 @@ IM 通道即在；**至少一次网页触碰不可避免也不该避免**（owne
 | M7 | 修复接手 + capstone | 修复动作目录 + `examples/atong-hands` 四幕（注入写配置双拒 / 联网 park 批后跑 / 工作区直写+监狱跑脚本 / `/setkey` 双路径文案 + 金库落值零回显） + 收口 | `pnpm demo:atong-hands` exit 0，零 key 零 LLM |
 
 顺序按用户优先级：**M1→M2（手）→M3（手机）**先，M4/M7 次之，M5/M6 后置；M2b 在 M2 后按需。
-每刀：新单测 + 四门 PASS（旋钮 116）+ 一刀一 commit；M2/M3 必过 Codex 交叉审。
+每刀：新单测 + 四门 PASS（旋钮 116）+ 一刀一 commit；M2/M3 必过 Codex 交叉审（M2b 的装配层同批送审）。
 
 ---
 
@@ -745,3 +769,100 @@ host 侧（host 本就依赖 cli）：它同时拿 host 的常量与 cli 真正�
 `childEnv` 那些断言**全绿**（它们两边都用同一个常量，自洽，天生看不见改名）——这
 恰好说明为什么需要这道门；把 `.hands-cache` 从 cli 名单里去掉 ⇒ cli 与 host 两侧
 各红一例，证明门确实接到了真实现上。
+
+---
+
+## 十一、M2b 落地记录（2026-08-16）
+
+### 11.1 形状：手 B 不是第二座监狱，是同一座监狱换个住客
+
+`packages/host/src/personal-butler-coder.ts` 只做一件事——**装配**。围墙、藏起来的东西、
+只读的空 HOME、过滤过的 PATH、工作区的位置、谁有手，全部从手 A 的 `ButlerHandsHost` 上取，
+一处也不重新推导。第二份推导迟早会和第一份不一样，而不一样的那天不会有人收到通知；真到
+那天，手 B 就是通往同一栋房子的一扇更弱的门。
+
+**配置读者只有一个**：`coder` 块的形状门写在 `personal-butler-hands.ts` 里，紧挨着
+`roleListProblem`/`pathListProblem`——`hands.json` 只有一个解析器。顺带也让
+hands↔coder 结构上不可能成环。块的形状不对 ⇒ **整份 `hands.json` 不装**（warn + OFF），
+与其它每个键一致：让手 A 照跑而手 B 悄悄没装，是同一个文件里的两套规矩。
+
+五道 fail-closed 闸，顺序是刻意的：①手 A 没装 ⇒ 不装；②没有 `coder` 块 ⇒ 不装
+（opt-in，缺席=字节不变）；③`coder.userId` 不在 `allowRoles` 里 ⇒ 不装，**且在建任何
+目录之前**（手 B 的权限是手 A 权限的子集，不另开一道门）；④`agentId` 撞上一行不是我们
+建的 agent ⇒ 不装（绝不覆盖操作者的东西）；⑤工作区建不起来 ⇒ 不装。
+
+几处承重判断：
+
+- **围墙每次 spawn 现算**（`PerSpawn` thunk）。参与者活得比任何一次 spawn 长，一份在构造时
+  冻住的围墙会**悄悄变弱**（boot 之后才装上的套接字不再被藏），而 `jailed: true` 读起来
+  一模一样。thunk 抛错 = 这一轮失败，不 spawn。
+- **环境是「说出来的」不是「减出来的」**：`envMode: 'replace'`，`{...passed, ...jailEnv}`
+  ——展开顺序承重，`passEnv` 只能补充，永远盖不掉 HOME / PATH / TMPDIR / 代理过滤。撞名的
+  那些**说出来**（静默丢弃会让操作者以为透传生效了），判据是把两个真对象的键比一比，不是
+  一张迟早过期的保留字表。
+- **`passEnv` 存的是名字不是值**（与 MCP `${NAME}`、MR-M6 `apiKeyEnv` 同一条凭证纪律），
+  名字形状门顺带接住「把 `sk-…` 粘进来了」。
+- **能力叫 `hands.coder`，刻意不通用**：广告一个能力就是授权它（G-M1），叫 `code` 那种通名，
+  别处一次无心的派发就会撞进一个能改文件的 CLI。
+- **名册行 + owner 授权两样都落**：`escalate_to_expert` 的 fail-closed 检查走
+  `roster.listOwned(userId)`，那是 identity 授权表 ∩ `space.agents()` 的交集——少任何一样
+  转派都过不去。行是**故意露出来的**：一个能改文件的参与者不该藏在名册外面。
+- **观察缝免费**：`onChunk` 播成 `llm_stream_chunk` 瞬时事件，admin 面板已经在消费它，
+  于是人能看着它干活，而不是等十五分钟看一个结论。
+
+### 11.2 这刀顺手挖出手 A 的一个真洞（macOS 独有）
+
+验收门第一次跑，手 B 把 `impl.js`/`test.js` 写进共享工作区都对了，最后阿同
+`hands_run [node, test.js]` 却挂在：
+
+```
+Error: EPERM: operation not permitted, lstat '<space>'
+    at Object.realpathSync (node:fs)
+    at toRealPath (node:internal/modules/helpers)
+    at resolveMainPath (node:internal/modules/run_main)
+```
+
+**病根不在手 B**：工作区住在**藏起来的** `<space>` 底下，`(deny file-read* … (subpath
+<space>))` 盖的是 `<space>` 自己，而重新放开的只是更深处的工作区。打开里面的文件没事
+——内核自己走路径，seatbelt 判的是**操作目标**不是祖先——但凡从**用户态**逐级解析路径的
+都会死在第一个藏起来的那级。那正是 `realpath(3)` 干的事，也正是 Node 对主模块干的事。
+M2 的真 spawn 用例清一色 `node -e '<inline>'`（不解析磁盘模块）、`ls`、`sh -c`，所以这个
+洞一直没露面——**而「跑一下工作区里的文件」正是工作区存在的理由**（`node test.js`、
+`pytest`、`npm test` 全在这条路上）。
+
+**修法**（core `buildSeatbeltProfile`，新 `seatbeltTraversableAncestors`）：为每个被重新
+放开的根，把它**在藏起来的子树里的那些祖先**逐个补一条 `(allow file-read-metadata
+(literal a))`。判断的依据是一句结构性事实——**被我们主动放开的路径，它的祖先不可能是秘密**：
+子进程自己的 cwd、`HOME`、`TMPDIR` 全都在 `<space>` 底下，名字早就告诉它了。藏着它们
+一分钱买不到，却把路径解析整个弄坏。
+
+**给的恰好是 `stat`，不是别的**：读目录的**条目**是 `file-read-data`，仍然拒。真机探针
+逐条证实：`node test.js` 与相对 `require` 通了，`ls <space>` → EPERM，`cat <space>/…` →
+EPERM。bwrap 不需要这条——`--tmpfs` 盖住再 `--bind` 里面那层，中间目录是 bwrap 自己造出来
+的真（空）tmpfs 目录，天生 stat 得到。
+
+一道变异验过：把那段发射改成永远为空 ⇒ core 2 例 + host 2 例（手 A 的 `node x.js` 与 M2b
+验收门）各自变红，别的一个没动；复原后 `shasum` 与基线逐字节一致。
+
+### 11.3 门
+
+| 层 | 例数 | 钉住什么 |
+|---|---|---|
+| ① 配置 | 12 | 默认值填满；8 种坏形状各自的拒因（未知键/缺 userId/缺 command/agentId/promptVia/timeout/maxTurns/不是对象）；`passEnv` 里粘了值而不是名字；label 里的控制字符；**坏 `coder` 块把整份 `hands.json` 拖下水**，好块则一路带上 |
+| ② 装配闸 | 7 | 手 A 没装/没有块（**零副作用，盘上无痕**）/成员不够格（不建目录、不发授权）/撞上别人的行（那行一个字节不动）/重装我们自己的行/装上（参与者 + 无 `managed` 的名册行 + owner 授权）/能力就是 `hands.coder` |
+| ③ 围墙 | 3 | 输出实时进 transcript；**`passEnv` 只能补不能盖**（HOME 仍是那个只读空目录 + 撞名 warn）；围墙**每次 spawn 现算**（arm 之后新藏一个目录，下一次 spawn 就该盖住） |
+| ④ 验收门（真监狱） | 2 | **阿同写需求 → 手 B 改文件（真落在手 A 的工作区里）→ 阿同 `hands_run` 跑测试出 `TESTS PASS`**；手 B 关在同一座监狱里——读不到 hub 用户 HOME 里的钥匙 |
+
+验收：host **2976**+5skip（coder 25 + 手 A 那条新回归 1），core **495**（+6），cli-agent 42，
+四门 PASS（**旋钮 116 零新增**——`coder` 块是 file-first 配置不是旋钮；main.ts 2781，
+棘轮显式抬 2780→2790 留余量）。
+
+### 11.4 诚实残余
+
+- **手 B 结构性联网**（它得连自己的模型）。监狱护的是 hub 自己的凭证与配置，**不是**
+  「工作区里的内容不会被发出去」——把一份代码交给一个云端模型改，就是把它发出去。要的是
+  别的东西，就别给它这份工作区。
+- **祖先的 `stat` 是真给出去了**：`<space>` 与那几级中间目录的大小/时间戳，监狱里量得到。
+  内容与目录条目仍然拒（§11.2 探针）。
+- 手 B 的**转派回执**沿用 DUO 的 fire-and-forget 语义：回执即时、结果 pushToMember 推回。
+- 真 bwrap 的这条路仍待 Linux 真机（本机只有 seatbelt）；core 侧由 profile/argv 单测钉住。

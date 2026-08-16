@@ -1096,6 +1096,21 @@ describe(`HANDS-M2 ③ 监狱内真 spawn(jail=${jailCap.kind})`, () => {
     expect((await gated(ts, 'hands_read', { path: 'sub/note.txt' })).text).toContain('hello')
   }, 30_000)
 
+  // 工作区住在**藏起来的** `<space>` 底下,而 `realpath(3)` 是逐级 lstat 的:
+  // 解释器解析自己的主模块就会撞上那一级。`node -e` 走不到这条路(既有用例全是
+  // 它),所以这个洞一直没露面——而「跑一下工作区里的文件」正是工作区存在的理由。
+  spawnIt('跑工作区里的文件:`node x.js` 与相对 require 都解析得动(藏起来的祖先仍可 lstat)', async () => {
+    const ts = toolset()
+    await gated(ts, 'hands_write', { path: 'lib/m.js', content: 'module.exports=7' })
+    await gated(ts, 'hands_write', { path: 'run.js', content: "console.log('RESOLVED ' + require('./lib/m.js'))" })
+    const r = await gated(ts, 'hands_run', { argv: [process.execPath, 'run.js'] })
+    expect(r.isError, r.text).toBe(false)
+    expect(r.text).toContain('RESOLVED 7')
+    // 能 stat 不等于能读:那一级的内容照样看不见(下一条用例证 `<space>` 全貌)
+    const stat = await gated(ts, 'hands_run', { argv: ['sh', '-c', `ls -d ${JSON.stringify(S.space)} && cat ${JSON.stringify(join(S.space, 'gotong.env'))}`] })
+    expect(stat.text).not.toContain(SECRET)
+  }, 30_000)
+
   spawnIt('hub 用户的 HOME 与点名的凭证文件藏起来:`cat` 不吐值,`ls` 列不出内容', async () => {
     const ts = toolset()
     const home = await gated(ts, 'hands_run', { argv: ['sh', '-c', `cat ${JSON.stringify(join(S.fakeHome, '.ssh', 'id_test'))} ${JSON.stringify(join(S.fakeHome, '.netrc'))}; ls -A ${JSON.stringify(S.fakeHome)}; echo done`] })

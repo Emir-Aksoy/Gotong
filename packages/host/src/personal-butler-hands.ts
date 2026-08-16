@@ -102,6 +102,8 @@ export interface HandsConfig {
   hidden?: string[]
   /** 藏起来的目录里再放开只读的绝对路径(操作者自己的工具链,如 ~/.cargo)。 */
   readOnly?: string[]
+  /** 手 B(HANDS-M2b)——缺席 = 不装,与整个 hands.json 缺席同姿态。 */
+  coder?: HandsCoderConfig
 }
 
 /** 归属角色闭集(镜像 identity 的 `Role`;host 侧刻意不 import 那个类型)。 */
@@ -121,7 +123,7 @@ export const HANDS_CONFIG_BOUNDS = Object.freeze({
 export const HANDS_CONFIG_PATH_LIST_MAX = 32
 const HANDS_CONFIG_PATH_MAX_LEN = 1024
 
-const HANDS_CONFIG_KEYS = ['enabled', 'maxRunSec', 'maxOutputBytes', 'maxWorkspaceBytes', 'allowRoles', 'hidden', 'readOnly'] as const
+const HANDS_CONFIG_KEYS = ['enabled', 'maxRunSec', 'maxOutputBytes', 'maxWorkspaceBytes', 'allowRoles', 'hidden', 'readOnly', 'coder'] as const
 
 const DEFAULT_CONFIG: HandsConfig = Object.freeze({
   maxRunSec: HANDS_LIMITS.maxRunSec,
@@ -203,7 +205,118 @@ export function loadHandsConfig(spaceRoot: string, logger: Pick<Logger, 'info' |
     }
     out[key] = v as string[]
   }
+  if (obj.coder !== undefined) {
+    // 与本文件其余每一道门同一条规矩:看不懂就**整份**不装。手 B 的块写错了却让
+    // 手 A 照跑,等于在同一个文件里立两套规矩,操作者得记住哪些键是致命的。
+    const coder = parseHandsCoder(obj.coder)
+    if (typeof coder === 'string') {
+      logger.warn('hands: hands.json coder block invalid — hands stay OFF', { file, problem: coder })
+      return undefined
+    }
+    out.coder = coder
+  }
   return out
+}
+
+
+// ─── 手 B(HANDS-M2b)的配置块 ─────────────────────────────────────────────────
+//
+// 形状门与本文件其余几道同处一室**是刻意的**:`hands.json` 只有一个读者。手 B
+// 的装配在 personal-butler-coder.ts,但「这份配置长得对不对」属于读配置的人。
+
+/** `coder.agentId` 缺省值。 */
+export const HANDS_CODER_DEFAULT_ID = 'coder'
+/** 一次交办的默认上限:15 分钟、单轮。 */
+export const HANDS_CODER_DEFAULT_TIMEOUT_SEC = 900
+const HANDS_CODER_BOUNDS = Object.freeze({
+  timeoutSec: [1, 7200] as const,
+  maxTurns: [1, 8] as const,
+})
+const CODER_KEYS = ['userId', 'agentId', 'label', 'command', 'args', 'promptVia', 'passEnv', 'timeoutSec', 'maxTurns'] as const
+const AGENT_ID_RE = /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/
+/** 环境变量**名**的形状(POSIX)。配置里永远只有名字,值现从 hub 进程 env 取。 */
+const ENV_NAME_RE = /^[A-Za-z_][A-Za-z0-9_]*$/
+
+/** `hands.json` 的 `coder` 块,解析并补全之后的样子。 */
+export interface HandsCoderConfig {
+  /** 手 B 替谁干活 —— 工作区归属 + 权限判据(必须在 `allowRoles` 里)。 */
+  userId: string
+  agentId: string
+  label: string
+  command: string
+  args: string[]
+  promptVia: 'stdin' | 'arg'
+  /**
+   * 透传进监狱的环境变量**名**(值现从 hub 进程 env 取;配置文件里永远只有名字)。
+   * 与 MCP 的 `${NAME}`、MR-M6 的 `apiKeyEnv` 同一条凭证纪律。
+   */
+  passEnv: string[]
+  timeoutSec: number
+  maxTurns: number
+}
+
+/**
+ * 解析 `hands.json` 的 `coder` 块。返回 `string` = 出了什么问题(调用方响亮拒绝
+ * **整个文件**——与其余键同一条规矩:看不懂的安全配置不装,别让操作者以为配上了)。
+ */
+export function parseHandsCoder(v: unknown): HandsCoderConfig | string {
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return 'coder must be a JSON object'
+  const o = v as Record<string, unknown>
+  const unknown = Object.keys(o).filter((k) => !(CODER_KEYS as readonly string[]).includes(k))
+  if (unknown.length > 0) return `coder has unknown keys: ${unknown.join(', ')}`
+
+  const userId = o.userId
+  if (typeof userId !== 'string' || userId.length === 0 || userId.length > 128 || hasCtrl(userId)) {
+    return 'coder.userId must be a non-empty string (≤128 chars, no control characters)'
+  }
+  const command = o.command
+  if (typeof command !== 'string' || command.length === 0 || command.length > 512 || hasCtrl(command)) {
+    return 'coder.command must be a non-empty string (≤512 chars, no control characters)'
+  }
+  const agentId = o.agentId === undefined ? HANDS_CODER_DEFAULT_ID : o.agentId
+  if (typeof agentId !== 'string' || !AGENT_ID_RE.test(agentId)) {
+    return 'coder.agentId must match [a-zA-Z0-9][a-zA-Z0-9_-]{0,63}'
+  }
+  const label = o.label === undefined ? '阿同的手 B(代码)' : o.label
+  if (typeof label !== 'string' || label.length === 0 || label.length > 128 || hasCtrl(label)) {
+    return 'coder.label must be a non-empty string (≤128 chars, no control characters)'
+  }
+  const args = o.args === undefined ? [] : o.args
+  if (!Array.isArray(args) || args.length > 64) return 'coder.args must be an array of ≤64 strings'
+  for (const a of args) {
+    if (typeof a !== 'string' || a.length > 4096 || hasCtrl(a)) return 'coder.args entries must be strings (≤4096 chars, no control characters)'
+  }
+  const promptVia = o.promptVia === undefined ? 'stdin' : o.promptVia
+  if (promptVia !== 'stdin' && promptVia !== 'arg') return "coder.promptVia must be 'stdin' or 'arg'"
+  const passEnv = o.passEnv === undefined ? [] : o.passEnv
+  if (!Array.isArray(passEnv) || passEnv.length > 32) return 'coder.passEnv must be an array of ≤32 env variable NAMES'
+  for (const n of passEnv) {
+    // 名字形状不对多半是**把值粘进来了**(sk-…)。那种东西不该出现在配置文件里,
+    // 更不该被静默当成一个变量名塞进子进程的环境。
+    if (typeof n !== 'string' || !ENV_NAME_RE.test(n)) return 'coder.passEnv entries must be env variable NAMES, not values'
+  }
+  const nums: Record<'timeoutSec' | 'maxTurns', number> = {
+    timeoutSec: HANDS_CODER_DEFAULT_TIMEOUT_SEC,
+    maxTurns: 1,
+  }
+  for (const key of ['timeoutSec', 'maxTurns'] as const) {
+    const raw = o[key]
+    if (raw === undefined) continue
+    const [lo, hi] = HANDS_CODER_BOUNDS[key]
+    if (typeof raw !== 'number' || !Number.isInteger(raw) || raw < lo || raw > hi) {
+      return `coder.${key} must be an integer in [${lo}, ${hi}]`
+    }
+    nums[key] = raw
+  }
+  return { userId, agentId, label, command, args: args as string[], promptVia, passEnv: passEnv as string[], ...nums }
+}
+
+function hasCtrl(s: string): boolean {
+  for (let i = 0; i < s.length; i++) {
+    const c = s.charCodeAt(i)
+    if (c < 32 || c === 127) return true
+  }
+  return false
 }
 
 /** `allowRoles` 形状门:非空字符串数组、每条来自角色闭集、不重复。 */
@@ -481,6 +594,56 @@ export function handsHardening(args: HandsHardeningInput): FsJailHardening {
   }
 }
 
+/**
+ * 一个成员的手在盘上的四处落点。**导出**是因为手 B(M2b)要住进同一个工作区——
+ * 两份推导就是两个工作区,而「共用工作区」正是手 B 存在的理由。
+ */
+export interface HandsPaths {
+  /** `<space>/butler/hands/<user>/` —— 这个成员的手的根。 */
+  memberRoot: string
+  /** 干活的地方,监狱里唯一可写的根。 */
+  workspaceRaw: string
+  /**
+   * 监狱里的 HOME —— 一个**永远空、永远只读**的目录,不是工作区。
+   *
+   * 让 HOME 指向工作区看起来省事(缓存有地方落),代价是**在工作区里写文件是
+   * tier 1 免审批的**:模型可以先无声地写一份 `~/.gitconfig`(`core.pager` 挂个
+   * 命令)或 `~/.npmrc`(换个 registry),再请成员批准一条看起来人畜无害的
+   * `npm install`。审批卡上那行字是真的,行为却在批准之前就被改写了。
+   *
+   * 环境配置是**看不见的**,工作区里的文件是这次活儿**看得见的一部分**——这条
+   * 线就画在这里:HOME 只读到根本放不进点文件,缓存另给明确的落点(见 childEnv)。
+   */
+  homeRaw: string
+  /** 手 A 的审计台账(0600,超阈值轮转一代)。 */
+  auditPath: string
+}
+
+export function handsPaths(handsRoot: string, userId: string): HandsPaths {
+  const memberRoot = ownerDir(handsRoot, { kind: 'user', id: userId })
+  return {
+    memberRoot,
+    workspaceRaw: path.join(memberRoot, 'workspace'),
+    homeRaw: path.join(memberRoot, 'home'),
+    auditPath: path.join(memberRoot, 'audit.jsonl'),
+  }
+}
+
+/**
+ * 建出工作区与 HOME,并回它们 realpath 之后的样子(监狱按 realpath 匹配)。
+ *
+ * **抛错就是答案**:建不起来时调用方一律停手,绝不退而求其次地开工——手 A 回
+ * 「工作区建不起来」,手 B 不装。
+ */
+export function ensureHandsDirs(p: Pick<HandsPaths, 'workspaceRaw' | 'homeRaw'>): { workspace: string; home: string } {
+  mkdirSync(p.workspaceRaw, { recursive: true, mode: 0o700 })
+  // HOME 与工作区同生:监狱要它当挂载点(bwrap 得有个真目录),而它必须先
+  // 存在、后被 ro-bind——反过来就是「HOME 不存在 → 只读层被静默跳过 →
+  // HOME 落回被藏起来的 <space> 里的某个路径」。
+  mkdirSync(p.homeRaw, { recursive: true, mode: 0o700 })
+  return { workspace: realpathSync.native(p.workspaceRaw), home: realpathSync.native(p.homeRaw) }
+}
+
 export interface ButlerHands {
   /** 只有真装上时才有;factory 据此决定装不装五工具。 */
   host?: ButlerHandsHost
@@ -702,21 +865,7 @@ export function buildButlerHandsToolset(deps: ButlerHandsToolsetDeps): GovernedA
   const log = deps.logger ?? hands.logger
   const now = deps.now ?? (() => Date.now())
   const cfg = hands.config
-  const memberRoot = ownerDir(hands.handsRoot, { kind: 'user', id: userId })
-  const workspaceRaw = path.join(memberRoot, 'workspace')
-  /**
-   * 监狱里的 HOME —— 一个**永远空、永远只读**的目录,不是工作区。
-   *
-   * 让 HOME 指向工作区看起来省事(缓存有地方落),代价是**在工作区里写文件是
-   * tier 1 免审批的**:模型可以先无声地写一份 `~/.gitconfig`(`core.pager` 挂个
-   * 命令)或 `~/.npmrc`(换个 registry),再请成员批准一条看起来人畜无害的
-   * `npm install`。审批卡上那行字是真的,行为却在批准之前就被改写了。
-   *
-   * 环境配置是**看不见的**,工作区里的文件是这次活儿**看得见的一部分**——这条
-   * 线就画在这里:HOME 只读到根本放不进点文件,缓存另给明确的落点(见 childEnv)。
-   */
-  const homeRaw = path.join(memberRoot, 'home')
-  const auditPath = path.join(memberRoot, 'audit.jsonl')
+  const { memberRoot, workspaceRaw, homeRaw, auditPath } = handsPaths(hands.handsRoot, userId)
   const busyKey = `${path.resolve(hands.handsRoot)}::${userId}`
 
   let workspaceReal: string | undefined
@@ -725,13 +874,9 @@ export function buildButlerHandsToolset(deps: ButlerHandsToolsetDeps): GovernedA
   function ensureWorkspace(): { ok: true; root: string } | { ok: false; reason: string } {
     if (workspaceReal) return { ok: true, root: workspaceReal }
     try {
-      mkdirSync(workspaceRaw, { recursive: true, mode: 0o700 })
-      // HOME 与工作区同生:监狱要它当挂载点(bwrap 得有个真目录),而它必须先
-      // 存在、后被 ro-bind——反过来就是「HOME 不存在 → 只读层被静默跳过 →
-      // HOME 落回被藏起来的 <space> 里的某个路径」。
-      mkdirSync(homeRaw, { recursive: true, mode: 0o700 })
-      workspaceReal = realpathSync.native(workspaceRaw)
-      homeReal = realpathSync.native(homeRaw)
+      const dirs = ensureHandsDirs({ workspaceRaw, homeRaw })
+      workspaceReal = dirs.workspace
+      homeReal = dirs.home
       return { ok: true, root: workspaceReal }
     } catch (err) {
       const reason = `工作区建不起来:${errMsg(err)}`
