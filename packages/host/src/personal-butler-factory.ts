@@ -94,6 +94,7 @@ import {
 import type { SelfHealLog } from './self-heal-log.js'
 import { buildButlerPanelToolset, type ButlerPanelSurface } from './personal-butler-panel.js'
 import { buildButlerSelfStatusToolset } from './personal-butler-self-status.js'
+import { buildButlerHandsToolset, type ButlerHands } from './personal-butler-hands.js'
 import {
   buildButlerOnboardingProbe,
   buildButlerOnboardingToolset,
@@ -242,6 +243,12 @@ export interface ButlerFactoryDeps {
    * getter 只为镜像兄弟面姿态——main.ts 里它先于 factory 构造。
    */
   selfHeal?: () => Pick<SelfHealLog, 'recent'> | undefined
+  /**
+   * HANDS-M2 — 阿同的手(main.ts `armButlerHands` 的结果)。`host` 在 ⇒ 装五个
+   * governed 工具(监狱工作区里写/读/列/删/跑);只有 status ⇒ 不装,`my_status`
+   * 「手」行如实印原因。缺席 ⇒ 字节不变(hands.json 缺席 = 手不存在)。
+   */
+  hands?: ButlerHands
 }
 
 export function buildButlerFactory(deps: ButlerFactoryDeps): ButlerFactory {
@@ -449,6 +456,13 @@ export function buildButlerFactory(deps: ButlerFactoryDeps): ButlerFactory {
           deps.governedOn && deps.backupOps
             ? buildButlerBackupPackToolset({ userId, ops: deps.backupOps, logger: log })
             : undefined
+        // HANDS-M2 — governed 五工具「阿同的手」:分级是 M1 策略(服务端权威),
+        // 执行在监狱工作区(userId 闭包 = 只够到本成员自己的工作区)。hands.json
+        // 缺席/监狱缺席 ⇒ host 不在 ⇒ 不装;governed 总开关关着同样不装。
+        const handsGov =
+          deps.governedOn && deps.hands?.host
+            ? buildButlerHandsToolset({ userId, hands: deps.hands.host, logger: log })
+            : undefined
         // SEN-M1 — benign hub 体检:骑 onboarding 的惰性 adminHealth getter
         // (与巡检/面板同一份投影,main.ts 零新接线);牌面判定复用
         // derivePatrolCards 不另写判据。hub 级只读事实同 backup_status。
@@ -486,6 +500,9 @@ export function buildButlerFactory(deps: ButlerFactoryDeps): ButlerFactory {
           ...(refs.memoryView ? { memory: refs.memoryView } : {}),
           notebook: taskNotebook,
           ...(deps.backupOps ? { backup: deps.backupOps } : {}),
+          ...(deps.hands
+            ? { hands: handsGov || !deps.hands.host ? deps.hands.status : { armed: false as const, reason: 'governed 总开关关着' } }
+            : {}),
           logger: log,
         })
         // WIZ-M4c — benign "帮我规划一个工作流": wizard compose, proposal-only
@@ -640,6 +657,7 @@ export function buildButlerFactory(deps: ButlerFactoryDeps): ButlerFactory {
           ...(workflowCreateGov ? [workflowCreateGov] : []),
           ...(askPeerGov ? [askPeerGov] : []),
           ...(backupPackGov ? [backupPackGov] : []),
+          ...(handsGov ? [handsGov] : []),
           ...(mcpSplit?.writeGoverned ? [mcpSplit.writeGoverned] : []),
         ]
         // B1 — now that both sets exist, point the capability getter at their

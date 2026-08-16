@@ -1660,6 +1660,9 @@ function describeApprovalError(err: unknown, shortId: string): string {
       return `「${shortId}」匹配了多个事项,请用 /inbox 显示的完整编号。/ That prefix is ambiguous — use the full id from /inbox.`
     case 'web_only':
       return '这件事涉及对外或跨 hub 动作,需要在网页上处理:我的 → 收件箱。/ This one must be handled on the web (/me → inbox).'
+    case 'title_truncated':
+      // 不是排版抱怨:一行里读到的是省略号,人就没真看见自己在批什么。
+      return '这件事一行显示不下,在这里批等于没看全,请到网页上看完整内容再决定:我的 → 收件箱。/ Too long to show in one line — read the full text on the web (/me → inbox).'
     case 'not_approval_kind':
       return '这件事需要填写具体内容,不是批准/拒绝就能答的,请到网页上处理。/ This one needs a typed answer — use the web.'
     case 'already_resolved':

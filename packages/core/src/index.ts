@@ -202,6 +202,7 @@ export {
 export type {
   FsJailKind,
   FsJailSpec,
+  FsJailHardening,
   WrappedCommand,
   WrapWithFsJailOptions,
 } from './workspace-jail.js'

@@ -62,6 +62,8 @@ function fullDeps(overrides: Partial<ButlerSelfStatusDeps> = {}): ButlerSelfStat
       ],
     },
     backup: { lastBackup: () => ({ format: 'gotong.last-backup/v1', at: NOW - 3 * DAY, tier: 'identity', includesMasterKey: false, archive: 'a.tar.gz' }) },
+    // HANDS-M2 — 第七块碎片:手装没装(armed/未装/未接三态)。
+    hands: { armed: true, kind: 'bwrap' },
     now: () => NOW,
     ...overrides,
   }
@@ -78,13 +80,25 @@ describe('SEN-M3 — renderSelfStatus(六块碎片拼图)', () => {
     expect(out).toContain('- 记忆:长期 2 条,近期 1 条;上次蒸馏 2 天前(提升 3 条,封存 1 条)')
     expect(out).toContain('- 手上任务:进行中 2 件') // done/dropped 不算
     expect(out).toContain('- hub 备份:上次 3 天前(身份档)')
+    expect(out).toContain('- 手:已装(bwrap 监狱,工作区里写/读/跑;联网命令先请你确认)')
   })
 
-  it('all deps absent → six lines all render 「(未接)」, never a crash or a skipped row', async () => {
+  it('all deps absent → seven lines all render 「(未接)」, never a crash or a skipped row', async () => {
     const out = await renderSelfStatus({ userId: 'u1', now: () => NOW })
     const lines = out.split('\n')
-    expect(lines).toHaveLength(7) // header + 6 fixed rows
-    expect(lines.filter((l) => l.endsWith('(未接)'))).toHaveLength(6)
+    expect(lines).toHaveLength(8) // header + 7 fixed rows
+    expect(lines.filter((l) => l.endsWith('(未接)'))).toHaveLength(7)
+  })
+
+  it('HANDS-M2 手 three states: absent → 未接 / not armed → 未装(原因) / armed → 已装(kind)', async () => {
+    const absent = await renderSelfStatus({ userId: 'u1', now: () => NOW })
+    expect(absent).toContain('- 手:(未接)')
+    const off = await renderSelfStatus(
+      fullDeps({ hands: { armed: false, reason: '未开启(<space>/hands.json 缺席或未 enabled)' } }),
+    )
+    expect(off).toContain('- 手:未装(未开启(<space>/hands.json 缺席或未 enabled))')
+    const on = await renderSelfStatus(fullDeps({ hands: { armed: true, kind: 'sandbox-exec' } }))
+    expect(on).toContain('- 手:已装(sandbox-exec 监狱')
   })
 
   it('one fragment throwing degrades ONLY its line — the other five stay intact', async () => {

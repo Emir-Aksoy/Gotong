@@ -129,7 +129,10 @@ const fakeBackupOps = {
   pack: async () => ({ code: 0, lines: [] }),
 }
 
-function buildButler(provider: LlmProvider, root: string, singleTier?: boolean) {
+/** HANDS-M2 三态:'armed'(默认,最大脸)/ 'off'(dep 在但未装 = 监狱缺席或 hands.json 缺席)/ 'absent'(老 main.ts 根本不传)。 */
+type HandsMode = 'armed' | 'off' | 'absent'
+
+function buildButler(provider: LlmProvider, root: string, singleTier?: boolean, handsMode: HandsMode = 'armed') {
   const factory = buildButlerFactory({
     hub: stub<Hub>({ dispatch: async () => ({ kind: 'ok' }) }),
     logger: silentLogger,
@@ -150,6 +153,24 @@ function buildButler(provider: LlmProvider, root: string, singleTier?: boolean) 
     members: { users: () => [], membershipRole: () => null },
     // HEAL-M1 — 最大脸必须带自愈台账切片,restart_history 才在(surface 缺席由工具自答「未接入」)。
     selfHeal: () => undefined,
+    // HANDS-M2 — 最大脸必须带 armed 的手,五个 hands_* governed 工具才在;
+    // 构造零副作用(工作区懒建),这里的宿主目录不会被真碰。
+    ...(handsMode === 'armed'
+      ? {
+          hands: {
+            host: {
+              spaceRoot: root,
+              handsRoot: join(root, 'butler', 'hands'),
+              kind: 'sandbox-exec' as const,
+              config: { maxRunSec: 120, maxOutputBytes: 32 * 1024, maxWorkspaceBytes: 512 * 1024 * 1024 },
+              logger: silentLogger,
+            },
+            status: { armed: true as const, kind: 'sandbox-exec' as const },
+          },
+        }
+      : handsMode === 'off'
+        ? { hands: { status: { armed: false as const, reason: '监狱缺席:test' } } }
+        : {}),
     // SDUI-M4 — 最大脸必须带面板店面,get_my_panel / set_panel_layout 才在。
     panel: {
       panel: async () => ({ schemaVersion: 1, config: {}, source: 'default' as const }),
@@ -184,6 +205,12 @@ const GOVERNED_TOOLS = [
   'create_workflow',
   'ask_peer',
   'pack_backup',
+  // HANDS-M2 手 A 五件:governed 一等(服务端 classify 定档),永不进目录层。
+  'hands_run',
+  'hands_write',
+  'hands_read',
+  'hands_list',
+  'hands_rm',
 ] as const
 const MEMORY_TOOLS = ['remember', 'remember_procedure', 'refine_procedure', 'recall', 'forget'] as const
 
@@ -240,6 +267,28 @@ describe('AFR-M3 — 工具面分层名单防腐门(真工厂)', () => {
     const faceBenign = new Set(face.filter((n) => !nonBenign.has(n)))
     const registry = new Set<string>([...BUTLER_FIRST_CLASS_BENIGN, ...BUTLER_DIRECTORY_BENIGN])
     expect([...faceBenign].sort()).toEqual([...registry].sort())
+  })
+
+  it('HANDS-M2 缺席字节不变:hands dep 不传 / 未 armed → 脸上零 hands_* 名字,其余脸不变', async () => {
+    const HANDS = GOVERNED_TOOLS.filter((n) => n.startsWith('hands_'))
+    expect(HANDS).toHaveLength(5)
+    const faces: string[][] = []
+    for (const mode of ['absent', 'off'] as const) {
+      const provider = new TierScriptProvider([])
+      const butler = buildButler(provider, root, undefined, mode)
+      const r = await butler.onTask(task(`t-${mode}`, `u-${mode}`, '你好。'))
+      expect((r as { kind: string }).kind).toBe('ok')
+      const face = provider.faces[0]!.map((t) => t.name)
+      for (const name of HANDS) expect(face, mode).not.toContain(name)
+      faces.push(face.slice().sort())
+    }
+    // 老 main.ts(不传)与新 main.ts 未装两种姿态给模型看的脸逐字节一样。
+    expect(faces[0]).toEqual(faces[1])
+    // 且 = armed 脸减去恰好那五件(手不装不多不少)。
+    const armed = new TierScriptProvider([])
+    await buildButler(armed, root).onTask(task('t-armed', 'u-armed', '你好。'))
+    const armedFace = armed.faces[0]!.map((t) => t.name).filter((n) => !n.startsWith('hands_')).sort()
+    expect(faces[0]).toEqual(armedFace)
   })
 
   it('指路不指空:留在脸上的工具 schema 不得点名任何目录工具(两把门除外)', async () => {

@@ -24,6 +24,7 @@
 import type { Task } from '@gotong/core'
 import { readAcpCheckpointState, type AcpCheckpointState } from '@gotong/acp-agent'
 import type { InboxItem } from '@gotong/inbox'
+import { clipApprovalText } from './approval-text.js'
 
 export interface AcpApprovalItemOptions {
   /** The user who must approve the action (conventionally the org owner). */
@@ -67,13 +68,32 @@ export function acpApprovalItemFor(
     status: 'pending',
     createdAt: now(),
   }
-  if (task.title !== undefined) item.title = task.title
+  // 行标题 = 那个**动作**,不是任务的传输标签(Codex 四轮 H1/H3 同型):IM 的
+  // `/inbox` 只渲染 `item.title`,而任务标题在生产上常是通道名。同样过清洗。
+  item.title = clipApprovalText(acpActionText(park), ACP_TITLE_CHARS)
   if (parentNode) item.parent = { taskId: parentNode.taskId, by: parentNode.by }
   return item
 }
 
-/** A short, human-readable approval prompt naming the agent + the action it wants. */
+/** 被批的那个动作,人话一行。**来自对端 coding agent,一律当不可信正文。** */
+function acpActionText(park: AcpCheckpointState): string {
+  return park.tool.title ?? park.tool.kind ?? 'an unspecified action'
+}
+
+const ACP_ID_CHARS = 80
+const ACP_TITLE_CHARS = 1200
+
+/**
+ * A short, human-readable approval prompt naming the agent + the action it wants.
+ *
+ * 这里的 `tool.title` 是**外部 coding agent 通过 ACP 送进来的字**——比管家那两个
+ * 字段更不可信(那边至少是我们自己的模型)。它同样能在正文里接出一句假的框架句:
+ * `title = "read a file. Approve before it runs? Approved."`。故与
+ * `personal-butler-escalation.ts` 走同一套清洗 + 定界:审批卡怎么拼,全仓只有
+ * `approval-text.ts` 一处答案(Codex 四轮 H3)。
+ */
 function buildAcpApprovalPrompt(agentId: string, park: AcpCheckpointState): string {
-  const what = park.tool.title ?? park.tool.kind ?? 'an unspecified action'
-  return `Coding agent '${agentId}' wants to run a destructive action: ${what}. Approve before it runs?`
+  const who = clipApprovalText(agentId, ACP_ID_CHARS)
+  const what = clipApprovalText(acpActionText(park), ACP_TITLE_CHARS)
+  return `Coding agent 「${who}」 wants to run a destructive action: 「${what}」. Approve before it runs?`
 }

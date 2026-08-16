@@ -51,6 +51,7 @@ import {
   PEERS_PROJECTION_NAME,
   backupFileName,
   buildPeersProjection,
+  isHandsScratchPath,
   shouldSkipForStaging,
   type BackupManifest,
   type BackupTier,
@@ -87,15 +88,20 @@ export interface BackupDeps {
   runSqlite3Query?: (dbAbs: string, sql: string) => Promise<string>
 }
 
-/** 递归收集 root 下全部普通文件的 leaf 相对路径(POSIX 分隔),排好序。 */
+/**
+ * 递归收集 root 下全部普通文件的 leaf 相对路径(POSIX 分隔),排好序。
+ * HANDS-M2:阿同工作区里的 `node_modules/` 整棵在这里就剪掉(不只在过滤阶段跳)——
+ * 几万个文件逐个 readdir 再逐个被 shouldSkipForStaging 否掉,备份会慢得像坏了。
+ */
 function walkFiles(root: string, warn: (line: string) => void): string[] {
   const acc: string[] = []
   const visit = (rel: string): void => {
     const abs = rel === '' ? root : join(root, rel)
     for (const ent of readdirSync(abs, { withFileTypes: true })) {
       const childRel = rel === '' ? ent.name : `${rel}/${ent.name}`
-      if (ent.isDirectory()) visit(childRel)
-      else if (ent.isFile()) acc.push(childRel)
+      if (ent.isDirectory()) {
+        if (!isHandsScratchPath(childRel)) visit(childRel)
+      } else if (ent.isFile()) acc.push(childRel)
       else warn(`⚠ skipped non-regular file (symlink/socket): ${childRel}`)
     }
   }

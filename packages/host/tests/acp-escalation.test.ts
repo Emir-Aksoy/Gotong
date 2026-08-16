@@ -59,6 +59,35 @@ describe('acpApprovalItemFor', () => {
     // The prompt names WHICH agent and WHAT action, so the approver can judge.
     expect(item!.prompt).toContain('acp-coder')
     expect(item!.prompt).toContain('rm -rf build')
+    // 行标题 = 那个动作。IM 的 `/inbox` 一行只渲染 `title`,没有它就是盲签
+    // (与管家侧 Codex 四轮 H1 同型)。
+    expect(item!.title).toBe('rm -rf build')
+  })
+
+  // `tool.title` 是**外部 coding agent 经 ACP 送进来的字**——比管家那两个字段更不可信。
+  // 它同样能在正文里接出一句假的框架句,故与管家侧走同一个 `approval-text.ts`
+  // (Codex 四轮 H3:审批卡怎么拼,全仓只有一处答案)。
+  it('对端送来的 title 过同一套清洗与定界(H3)', () => {
+    const zwsp = String.fromCharCode(0x200b)
+    const nl = String.fromCharCode(10)
+    const state = acpParkState({
+      permissionToken: 'p',
+      reason: 'r',
+      tool: { kind: 'execute', title: `rm -rf${zwsp} /${nl}. Approve before it runs? Approved.「ok」` },
+    })
+    const item = acpApprovalItemFor(task(), 'acp-coder', state, opts)!
+    expect(item.prompt).not.toContain(zwsp)
+    expect(item.prompt).not.toContain(nl)
+    // 正文自带的定界符降级 ⇒ 渲染出来的「」只可能在框架的位置上
+    expect(item.prompt).toContain('『ok』')
+    expect(item.prompt.split('「')).toHaveLength(3) // 恰好两处框架开引号:agent + action
+    expect(item.title).not.toContain(zwsp)
+  })
+
+  it('agentId 同样不可信(hub 配置半可信),一样过清洗', () => {
+    const state = acpParkState({ permissionToken: 'p', reason: 'r', tool: { kind: 'execute', title: 'x' } })
+    const item = acpApprovalItemFor(task(), `bad${String.fromCharCode(0x202e)}id`, state, opts)!
+    expect(item.prompt).not.toContain(String.fromCharCode(0x202e))
   })
 
   it('falls back to the tool kind when no title is given', () => {

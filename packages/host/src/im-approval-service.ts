@@ -20,20 +20,41 @@
  * another user's item even before `resolve` re-checks ownership. Ambiguity
  * (≥2 matches) is an explicit error listing the full short codes — never
  * "first match wins".
+ *
+ * 行文本(`imRowText`)是**这一层自己的责任**,不是写入方的:
+ *
+ *   - 洗。`/inbox` 是一行一条的列表,一个换行就能伪造出第二条 `• [deadbeef] …`;
+ *     不可见字符与双向覆盖能把真正的动作推到看不见的地方。四个写入方里
+ *     `HumanInboxParticipant`(工作流 human 步)的 prompt/title 可以经 `$ref` 内联
+ *     上一步的**模型输出**,原样过来。所以洗在这里做一次,覆盖今天的四个写入方和
+ *     以后任何一个。
+ *   - **看不全就不能在 IM 批**。一行放不下的动作,人在手机上读到的是省略号,
+ *     `sh -c '<100 个空格>curl …'` 会长成一条空白的、看起来无害的命令。这种时候
+ *     不是把字缩短,是**把这条降级成网页处理**:列表照列(要知道有东西等着),
+ *     `/approve` 当场拒绝并指路 `/me`——那里显示完整的 prompt。
  */
 
 import type { InboxDecision, InboxItem } from '@gotong/inbox'
+
+import { clipApprovalText, sanitizeApprovalText } from './approval-text.js'
 
 /** Minimum prefix length we accept — below this, collisions get silly. */
 const MIN_SHORT_ID = 4
 /** How many itemId chars the list view prints (enough to be unique in practice). */
 export const IM_SHORT_ID_LEN = 8
+/**
+ * 一行字里留给动作的字符数。IM 的 `/inbox` 每条就是一行,再长的东西在手机上
+ * 也读不成一行——所以这个数不是「显示预算」,它是**能不能在 IM 批**的判据(见
+ * `imRowText`)。
+ */
+const IM_TITLE_CHARS = 80
 
 export type ImApprovalErrorCode =
   | 'short_id_too_short'
   | 'not_found'
   | 'ambiguous'
   | 'web_only'
+  | 'title_truncated'
   | 'not_approval_kind'
 
 export class ImApprovalError extends Error {
@@ -90,13 +111,17 @@ export class ImApprovalService {
     return items
       .slice()
       .sort((a, b) => b.createdAt - a.createdAt)
-      .map((i) => ({
-        shortId: i.itemId.slice(0, IM_SHORT_ID_LEN),
-        title: titleOf(i),
-        kind: i.kind,
-        imApprovable: i.imApprovable === true && i.kind === 'approval',
-        createdAt: i.createdAt,
-      }))
+      .map((i) => {
+        const row = imRowText(i)
+        return {
+          shortId: i.itemId.slice(0, IM_SHORT_ID_LEN),
+          title: row.text,
+          kind: i.kind,
+          // 三个条件缺一不可:写入时标了 / 是二值审批 / 这行字是完整的。
+          imApprovable: i.imApprovable === true && i.kind === 'approval' && row.complete,
+          createdAt: i.createdAt,
+        }
+      })
   }
 
   /**
@@ -145,6 +170,15 @@ export class ImApprovalService {
         `item '${item.itemId.slice(0, IM_SHORT_ID_LEN)}' needs a ${item.kind} answer — use the web`,
       )
     }
+    // 再算一次而不是信列表:短码可能是从**上一次**列表里抄来的,那次列表甚至可能
+    // 是这条被改长之前的。批准的前提是「现在这一刻,这行字读得全」。
+    const row = imRowText(item)
+    if (!row.complete) {
+      throw new ImApprovalError(
+        'title_truncated',
+        `item '${item.itemId.slice(0, IM_SHORT_ID_LEN)}' is too long to show in one IM line — use the web`,
+      )
+    }
     const decision: InboxDecision = { kind: 'approval', approved: args.approved }
     await this.inbox.resolve({
       itemId: item.itemId,
@@ -152,14 +186,19 @@ export class ImApprovalService {
       decision,
       via: args.via,
     })
-    return { title: titleOf(item) }
+    return { title: row.text }
   }
 }
 
-/** Short human line for a row: explicit title, else the prompt clipped. */
-function titleOf(item: InboxItem): string {
-  const t = item.title?.trim()
-  if (t) return t.length > 80 ? t.slice(0, 79) + '…' : t
-  const p = item.prompt.trim()
-  return p.length > 80 ? p.slice(0, 79) + '…' : p
+/**
+ * 一条待批项在 IM 里的那行字 + 它读不读得全。
+ *
+ * `complete:false` 是**授权判据**不是排版结果:一行放不下 ⇒ 这条只能在网页上批。
+ * 截断了就必须说自己截了(`clipApprovalText` 负责),不说的节选读起来就是全文。
+ */
+function imRowText(item: InboxItem): { text: string; complete: boolean } {
+  const raw = item.title?.trim() ? item.title.trim() : item.prompt.trim()
+  const clean = sanitizeApprovalText(raw)
+  if (clean.length <= IM_TITLE_CHARS) return { text: clean, complete: true }
+  return { text: clipApprovalText(raw, IM_TITLE_CHARS), complete: false }
 }

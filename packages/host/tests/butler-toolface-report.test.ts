@@ -55,6 +55,7 @@ import { buildButlerConsolidateToolset } from '../src/personal-butler-consolidat
 import { buildButlerDailyBriefToolset } from '../src/personal-butler-daily-brief.js'
 import { buildButlerDiagnoseToolset } from '../src/personal-butler-diagnose.js'
 import { buildButlerGovernedToolset } from '../src/personal-butler-governed.js'
+import { buildButlerHandsToolset } from '../src/personal-butler-hands.js'
 import { buildButlerLanguageToolset } from '../src/personal-butler-language.js'
 import { buildButlerLlmCatalogToolset } from '../src/personal-butler-llm-catalog.js'
 import { buildButlerGuideToolset } from '../src/personal-butler-guide.js'
@@ -113,6 +114,7 @@ const MEASURED_BUILDERS: Record<string, string> = {
   'ask-peer': 'buildButlerAskPeerToolset',
   'backup-status': 'buildButlerBackupStatusToolset',
   'backup-pack': 'buildButlerBackupPackToolset',
+  hands: 'buildButlerHandsToolset',
   'hub-sense': 'buildButlerHubHealthToolset',
   'restart-history': 'buildButlerRestartHistoryToolset',
   'self-status': 'buildButlerSelfStatusToolset',
@@ -278,6 +280,22 @@ function buildFullFace(): ToolFaceEntry[] {
       module: 'backup-pack',
       kind: 'governed',
       toolset: buildButlerBackupPackToolset({ userId: U, ops: stub() }),
+    },
+    // HANDS-M2 手 A:五工具全 governed(服务端 classify 定 allow/approve/refuse);
+    // 构造零副作用 —— 工作区懒建,listTools 静态,这里给的宿主目录从不被碰。
+    {
+      module: 'hands',
+      kind: 'governed',
+      toolset: buildButlerHandsToolset({
+        userId: U,
+        hands: {
+          spaceRoot: tmp,
+          handsRoot: join(tmp, 'butler', 'hands'),
+          kind: 'sandbox-exec',
+          config: { maxRunSec: 120, maxOutputBytes: 32 * 1024, maxWorkspaceBytes: 512 * 1024 * 1024 },
+          logger: stub(),
+        },
+      }),
     },
     // SEN-M1 hub 体检:benign 只读,与巡检/面板同源投影。
     {

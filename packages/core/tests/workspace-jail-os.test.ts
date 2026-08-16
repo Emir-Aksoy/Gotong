@@ -144,6 +144,281 @@ describe('wrapWithFsJail', () => {
   })
 })
 
+// HANDS-M2 hardening: every knob is additive. The load-bearing assertion is the
+// first one — an absent / empty `hardening` MUST build the exact classic argv
+// and profile, because cli-agent / acp-agent never pass it and their jail must
+// not move an inch when the hub's own hands learn to cut the network.
+describe('wrapWithFsJail hardening (HANDS-M2)', () => {
+  const posixOnly = it.skipIf(process.platform === 'win32')
+  const SPACE = '/srv/hub/space'
+  const WORKSPACE = `${SPACE}/butler/hands/user/u1/workspace`
+
+  it('absent and empty hardening are byte-identical to the classic jail (both enforcers)', () => {
+    for (const kind of ['sandbox-exec', 'bwrap'] as const) {
+      const base = { command: 'tool', args: ['x'], allowedRoots: [ROOT], cwd: ROOT, kind }
+      const classic = wrapWithFsJail(base)
+      expect(wrapWithFsJail({ ...base, hardening: {} })).toEqual(classic)
+      expect(wrapWithFsJail({ ...base, hardening: { unshareNet: false, hiddenPaths: [] } })).toEqual(classic)
+      expect(wrapWithFsJail({ ...base, hardening: { hiddenPaths: ['  ', ''] } })).toEqual(classic)
+    }
+    // and the pure builders agree with themselves
+    expect(buildBwrapArgs([ROOT], ROOT, undefined)).toEqual(buildBwrapArgs([ROOT], ROOT))
+    expect(buildSeatbeltProfile([ROOT], undefined)).toBe(buildSeatbeltProfile([ROOT]))
+    expect(buildSeatbeltProfile([ROOT], {})).toBe(buildSeatbeltProfile([ROOT]))
+  })
+
+  it('bwrap: unshare flags precede the mounts; hidden tmpfs comes BEFORE the writable binds and is remounted ro AFTER them', () => {
+    const args = buildBwrapArgs([WORKSPACE], WORKSPACE, {
+      unshareNet: true,
+      unsharePid: true,
+      hiddenPaths: [SPACE],
+    })
+    const iNet = args.indexOf('--unshare-net')
+    const iPid = args.indexOf('--unshare-pid')
+    const iTmpfs = args.indexOf('--tmpfs', args.indexOf('--tmpfs') + 1) // second --tmpfs (first is /tmp)
+    const iBind = args.indexOf('--bind')
+    const iRemount = args.indexOf('--remount-ro')
+    const iChdir = args.indexOf('--chdir')
+    expect(iNet).toBeGreaterThan(0)
+    expect(iPid).toBeGreaterThan(iNet)
+    expect(args[iTmpfs + 1]).toBe(SPACE)
+    expect(iTmpfs).toBeGreaterThan(iPid)
+    expect(iBind).toBeGreaterThan(iTmpfs)
+    expect(args.slice(iBind, iBind + 3)).toEqual(['--bind', WORKSPACE, WORKSPACE])
+    expect(iRemount).toBeGreaterThan(iBind)
+    expect(args[iRemount + 1]).toBe(SPACE)
+    expect(iChdir).toBeGreaterThan(iRemount)
+    // the classic prefix is untouched
+    expect(args.slice(0, 9)).toEqual(['--ro-bind', '/', '/', '--dev', '/dev', '--proc', '/proc', '--tmpfs', '/tmp'])
+  })
+
+  it('bwrap: only the requested flags appear (net without pid, and vice versa)', () => {
+    const net = buildBwrapArgs([ROOT], ROOT, { unshareNet: true })
+    expect(net).toContain('--unshare-net')
+    expect(net).not.toContain('--unshare-pid')
+    expect(net).not.toContain('--remount-ro')
+    const pid = buildBwrapArgs([ROOT], ROOT, { unsharePid: true })
+    expect(pid).toContain('--unshare-pid')
+    expect(pid).not.toContain('--unshare-net')
+  })
+
+  it('seatbelt: hidden paths are denied for read+write, roots UNDER them are re-allowed after, network denied last', () => {
+    const p = buildSeatbeltProfile([WORKSPACE, '/tmp'], { hiddenPaths: [SPACE], unshareNet: true })
+    const lines = p.split('\n')
+    const classic = buildSeatbeltProfile([WORKSPACE, '/tmp']).split('\n')
+    // classic prefix byte-identical, hardening strictly appended
+    expect(lines.slice(0, classic.length)).toEqual(classic)
+    const iDeny = lines.indexOf('(deny file-read* file-write*')
+    const iAllow = lines.indexOf('(allow file-read* file-write*')
+    const iNet = lines.indexOf('(deny network*)')
+    expect(iDeny).toBeGreaterThan(0)
+    expect(lines[iDeny + 1]).toBe(`  (subpath "${SPACE}")`)
+    expect(iAllow).toBeGreaterThan(iDeny)
+    expect(lines[iAllow + 1]).toBe(`  (subpath "${WORKSPACE}")`)
+    // /tmp is not under the hidden path → not in the re-allow block
+    expect(lines.slice(iAllow, iNet).join('\n')).not.toContain('"/tmp"')
+    expect(iNet).toBe(lines.length - 1)
+  })
+
+  it('seatbelt: no root under a hidden path → deny block only, no empty re-allow', () => {
+    const p = buildSeatbeltProfile([ROOT], { hiddenPaths: ['/srv/secret'] })
+    expect(p).toContain('(deny file-read* file-write*\n  (subpath "/srv/secret")\n)')
+    expect(p).not.toContain('(allow file-read* file-write*')
+  })
+
+  it('seatbelt: unsharePid → the process-isolation approximation (signal/process-info within the sandbox, no lsopen, no AppleEvents), appended before the network deny', () => {
+    const p = buildSeatbeltProfile([ROOT], { unsharePid: true, unshareNet: true }).split('\n')
+    const classic = buildSeatbeltProfile([ROOT]).split('\n')
+    expect(p.slice(0, classic.length)).toEqual(classic)
+    expect(p.slice(classic.length)).toEqual([
+      '(deny signal)',
+      '(allow signal (target same-sandbox))',
+      '(deny process-info*)',
+      '(allow process-info* (target same-sandbox))',
+      '(deny lsopen)',
+      '(deny appleevent-send)',
+      '(deny job-creation)',
+      '(deny network*)',
+    ])
+    // the deny is unfiltered and the allow is the narrower rule — `(target others)`
+    // on the deny is silently ignored by current macOS (verified), so a profile
+    // written the other way round would let a jailed command kill the hub.
+    expect(buildSeatbeltProfile([ROOT], { unsharePid: true })).not.toContain('(target others)')
+  })
+
+  it('seatbelt: readOnlyRoots re-expose read-only under a hidden path (only those inside one), before the writable re-allow', () => {
+    const NODE = '/home/hub/.nvm/versions/node/v20'
+    const p = buildSeatbeltProfile([WORKSPACE], {
+      hiddenPaths: ['/home/hub', SPACE],
+      readOnlyRoots: [NODE, '/usr/local', WORKSPACE],
+    })
+    const lines = p.split('\n')
+    const iDeny = lines.indexOf('(deny file-read* file-write*')
+    const iRo = lines.indexOf('(allow file-read*')
+    const iRw = lines.indexOf('(allow file-read* file-write*')
+    expect(iDeny).toBeGreaterThan(0)
+    expect(iRo).toBeGreaterThan(iDeny)
+    expect(iRw).toBeGreaterThan(iRo)
+    expect(lines.slice(iRo, iRw)).toEqual(['(allow file-read*', `  (subpath "${NODE}")`, ')'])
+    // /usr/local is not hidden (dropped); the workspace is a writable root (left to the rw re-allow)
+    expect(p).not.toContain('"/usr/local"')
+    expect(lines.slice(iRw)).toEqual(['(allow file-read* file-write*', `  (subpath "${WORKSPACE}")`, ')'])
+  })
+
+  it('seatbelt: hiddenFiles are literal denies appended AFTER every re-allow; a file under a hidden dir is dropped', () => {
+    const p = buildSeatbeltProfile([WORKSPACE], {
+      hiddenPaths: [SPACE],
+      hiddenFiles: ['/etc/gotong.env', '/var/run/docker.sock', `${SPACE}/hands.json`],
+      unshareNet: true,
+    })
+    const lines = p.split('\n')
+    const iRw = lines.indexOf('(allow file-read* file-write*')
+    const iFiles = lines.lastIndexOf('(deny file-read* file-write*')
+    expect(iFiles).toBeGreaterThan(iRw)
+    expect(lines.slice(iFiles, iFiles + 4)).toEqual([
+      '(deny file-read* file-write*',
+      '  (literal "/etc/gotong.env")',
+      '  (literal "/var/run/docker.sock")',
+      ')',
+    ])
+    expect(p).not.toContain('hands.json')
+    expect(lines[lines.length - 1]).toBe('(deny network*)')
+  })
+
+  it('seatbelt: denySharedTmp drops /tmp + /var/folders (both spellings) from the writable perimeter, keeps /dev and every real root — even one under /tmp', () => {
+    const roots = ['/private/tmp/space/ws', ...MAC_ESSENTIAL_WRITABLE]
+    const p = buildSeatbeltProfile(roots, { denySharedTmp: true })
+    expect(p).toContain('(subpath "/dev")')
+    expect(p).toContain('(subpath "/private/tmp/space/ws")')
+    for (const shared of ['/tmp', '/private/tmp', '/var/folders', '/private/var/folders']) {
+      expect(p).not.toContain(`(subpath "${shared}")`)
+    }
+    // absent → byte-identical classic
+    expect(buildSeatbeltProfile(roots, { denySharedTmp: false })).toBe(buildSeatbeltProfile(roots))
+  })
+
+  it('bwrap: readOnlyRoots ro-bind between the hidden tmpfs and the writable binds; hiddenFiles are /dev/null decoys after the binds; denySharedTmp is a no-op', () => {
+    const NODE = '/home/hub/.nvm/versions/node/v20'
+    const args = buildBwrapArgs([WORKSPACE], WORKSPACE, {
+      hiddenPaths: ['/home/hub', SPACE],
+      readOnlyRoots: [NODE, '/usr/local'],
+      hiddenFiles: ['/etc/gotong.env', `${SPACE}/hands.json`],
+      denySharedTmp: true,
+    })
+    const joined = args.join(' ')
+    const iTmpfsHome = joined.indexOf('--tmpfs /home/hub')
+    const iRo = joined.indexOf(`--ro-bind ${NODE} ${NODE}`)
+    const iBind = joined.indexOf(`--bind ${WORKSPACE} ${WORKSPACE}`)
+    const iFile = joined.indexOf('--ro-bind /dev/null /etc/gotong.env')
+    const iRemount = joined.indexOf('--remount-ro')
+    expect(iTmpfsHome).toBeGreaterThan(0)
+    expect(iRo).toBeGreaterThan(iTmpfsHome)
+    expect(iBind).toBeGreaterThan(iRo)
+    expect(iFile).toBeGreaterThan(iBind)
+    expect(iRemount).toBeGreaterThan(iFile)
+    expect(joined).not.toContain('/usr/local') // not hidden → already readable → dropped
+    expect(joined).not.toContain('hands.json') // under a hidden dir → already gone → dropped
+    // denySharedTmp changes nothing on bwrap
+    const without = buildBwrapArgs([WORKSPACE], WORKSPACE, {
+      hiddenPaths: ['/home/hub', SPACE],
+      readOnlyRoots: [NODE, '/usr/local'],
+      hiddenFiles: ['/etc/gotong.env', `${SPACE}/hands.json`],
+    })
+    expect(args).toEqual(without)
+  })
+
+  // The load-bearing case for the layered emission: `<space>` is hidden, the
+  // member workspace INSIDE it is re-bound writable — and the operator hides
+  // something inside THAT. Emitting by kind (all hides, then all re-exposes)
+  // would put the re-expose last and silently undo the nested hide, i.e. hand
+  // the whole workspace back including the path the operator took away.
+  it('seatbelt: a hide NESTED INSIDE a re-exposed root is emitted after it (deepest wins), and a hidden file inside one is no longer dropped', () => {
+    const NESTED = `${WORKSPACE}/private`
+    const SECRET = `${WORKSPACE}/.env.local`
+    const lines = buildSeatbeltProfile([WORKSPACE], {
+      hiddenPaths: [SPACE, NESTED],
+      hiddenFiles: [SECRET, `${SPACE}/agents.json`],
+    }).split('\n')
+    const iSpace = lines.indexOf(`  (subpath "${SPACE}")`)
+    // lastIndexOf: the workspace appears twice — once in the classic write
+    // allow at the top, once as the re-expose inside the hidden `<space>`.
+    const iWs = lines.lastIndexOf(`  (subpath "${WORKSPACE}")`)
+    const iNested = lines.indexOf(`  (subpath "${NESTED}")`)
+    expect(iSpace).toBeGreaterThan(0)
+    expect(iWs).toBeGreaterThan(iSpace) // workspace re-exposed after the hide
+    expect(iNested).toBeGreaterThan(iWs) // …and the nested hide wins over it
+    expect(lines[iNested - 1]).toBe('(deny file-read* file-write*')
+    // a hidden file inside the re-exposed root survives; one swallowed by a
+    // hide with nothing re-exposing it is still dropped as redundant
+    expect(lines).toContain(`  (literal "${SECRET}")`)
+    expect(lines.join('\n')).not.toContain('agents.json')
+    expect(lines.lastIndexOf(`  (literal "${SECRET}")`)).toBeGreaterThan(iNested)
+  })
+
+  it('bwrap: the nested hide is mounted AFTER the bind that re-exposes it; both hidden mounts are remounted ro at the end', () => {
+    const NESTED = `${WORKSPACE}/private`
+    const SECRET = `${WORKSPACE}/.env.local`
+    const args = buildBwrapArgs([WORKSPACE], WORKSPACE, {
+      hiddenPaths: [SPACE, NESTED],
+      hiddenFiles: [SECRET],
+    })
+    const joined = args.join(' ')
+    const iSpace = joined.indexOf(`--tmpfs ${SPACE} `)
+    const iBind = joined.indexOf(`--bind ${WORKSPACE} ${WORKSPACE}`)
+    const iNested = joined.indexOf(`--tmpfs ${NESTED} `)
+    const iFile = joined.indexOf(`--ro-bind /dev/null ${SECRET}`)
+    expect(iSpace).toBeGreaterThan(0)
+    expect(iBind).toBeGreaterThan(iSpace)
+    expect(iNested).toBeGreaterThan(iBind)
+    expect(iFile).toBeGreaterThan(iNested)
+    expect(joined.indexOf(`--remount-ro ${SPACE} `)).toBeGreaterThan(iFile)
+    expect(joined.indexOf(`--remount-ro ${NESTED}`)).toBeGreaterThan(iFile)
+  })
+
+  it('a read-only re-expose also keeps a hide nested inside it (three alternating layers)', () => {
+    const HOME = '/home/hub'
+    const TOOLS = `${HOME}/.nvm`
+    const INNER = `${TOOLS}/private`
+    const lines = buildSeatbeltProfile([ROOT], {
+      hiddenPaths: [HOME, INNER],
+      readOnlyRoots: [TOOLS],
+    }).split('\n')
+    const iHome = lines.indexOf(`  (subpath "${HOME}")`)
+    const iTools = lines.indexOf(`  (subpath "${TOOLS}")`)
+    const iInner = lines.indexOf(`  (subpath "${INNER}")`)
+    expect(iHome).toBeGreaterThan(0)
+    expect(iTools).toBeGreaterThan(iHome)
+    expect(lines[iTools - 1]).toBe('(allow file-read*')
+    expect(iInner).toBeGreaterThan(iTools)
+    expect(lines[iInner - 1]).toBe('(deny file-read* file-write*')
+  })
+
+  posixOnly('wrapWithFsJail resolves relative hidden paths against cwd, de-duplicates them and drops one nested under another', () => {
+    const w = wrapWithFsJail({
+      command: 'tool',
+      args: [],
+      allowedRoots: ['work'],
+      cwd: '/srv/hub/space',
+      kind: 'bwrap',
+      hardening: { hiddenPaths: ['.', '/srv/hub/space', 'secret'] },
+    })
+    const joined = w.args.join(' ')
+    expect(joined).toContain('--tmpfs /srv/hub/space ')
+    // `secret` is under `/srv/hub/space` → redundant → dropped
+    expect(joined).not.toContain('--tmpfs /srv/hub/space/secret ')
+    expect(w.args.filter((a) => a === '--tmpfs').length).toBe(2) // /tmp + the one unique hidden
+    expect(joined).toContain('--bind /srv/hub/space/work /srv/hub/space/work')
+  })
+
+  posixOnly('wrapWithFsJail: every new field is additive — the classic argv/profile is byte-identical without them', () => {
+    for (const kind of ['sandbox-exec', 'bwrap'] as const) {
+      const base = { command: 'tool', args: ['x'], allowedRoots: [ROOT], cwd: ROOT, kind }
+      const classic = wrapWithFsJail(base)
+      expect(wrapWithFsJail({ ...base, hardening: { hiddenFiles: [], readOnlyRoots: [' '], denySharedTmp: false } })).toEqual(classic)
+    }
+  })
+})
+
 describe('detectFsJail', () => {
   const okProbe: JailProbe = async () => ({ ok: true })
   const failProbe: JailProbe = async () => ({ ok: false, detail: 'no userns' })

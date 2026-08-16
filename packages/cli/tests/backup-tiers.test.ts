@@ -35,6 +35,7 @@ import {
   buildPeersProjection,
   parseLastBackupFact,
   parseManifest,
+  isHandsScratchPath,
   shouldSkipForStaging,
   type PeersProjection,
 } from '../src/commands/backup-core.js'
@@ -289,6 +290,20 @@ describe('AFR-M6 — 纯核直测', () => {
     // 主钥即便在(不可能通过 CLI 到达的)tier+includeMasterKey 组合下也进不来
     expect(shouldSkipForStaging('identity-master.key', true, 'identity')).toBe(true)
     expect(shouldSkipForStaging('identity.sqlite', true, 'relations')).toBe(true)
+  })
+
+  it('HANDS-M2 isHandsScratchPath:只认阿同工作区里的 node_modules 那一段', () => {
+    expect(isHandsScratchPath('butler/hands/user/u1/workspace/node_modules')).toBe(true)
+    expect(isHandsScratchPath('butler/hands/user/u1/workspace/node_modules/a/index.js')).toBe(true)
+    expect(isHandsScratchPath('butler/hands/user/u1/workspace/pkg/node_modules/x.js')).toBe(true)
+    expect(isHandsScratchPath('butler/hands/user/u1/workspace/src/node_modules.ts')).toBe(false)
+    expect(isHandsScratchPath('butler/hands/user/u1/workspace/src/index.ts')).toBe(false)
+    expect(isHandsScratchPath('butler/hands/user/u1/audit.jsonl')).toBe(false)
+    expect(isHandsScratchPath('butler/hands/user/node_modules/x')).toBe(false) // 没有 workspace 段
+    expect(isHandsScratchPath('workflows/node_modules/keep.txt')).toBe(false)
+    expect(isHandsScratchPath('node_modules/x')).toBe(false)
+    expect(shouldSkipForStaging('butler/hands/user/u1/workspace/node_modules/a.js', false)).toBe(true)
+    expect(shouldSkipForStaging('butler/hands/user/u1/workspace/src/a.ts', false)).toBe(false)
   })
 
   it('buildPeersProjection:老库缺列 → null(不炸);行排序稳定;非对象行剔除', () => {

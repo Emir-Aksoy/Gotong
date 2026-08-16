@@ -266,6 +266,7 @@ import { HostButlerMemoryService } from './butler-memory-service.js'
 // Assembly lives in personal-butler-factory.ts; main.ts only wires refs.
 import { buildButlerBackupOps } from './personal-butler-backup.js'
 import { buildButlerFactory } from './personal-butler-factory.js'
+import { armButlerHands } from './personal-butler-hands.js'
 import { buildButlerPanelContentToolset } from './personal-butler-panel.js'
 import { butlerEmbedderFromEnv } from './butler-embedder.js'
 import { butlerHearingFromEnv } from './butler-hearing.js'
@@ -1051,6 +1052,8 @@ async function main(): Promise<void> {
   const mePanelSurface = buildMePanelSurface({ spaceDir: space.root })
   // HEAL-M1 — 自愈台账(开机分类+心跳);看门狗是 deploy 层的另一写入方。
   const selfHealLog = startSelfHealLog({ runtimeDir: join(space.root, 'runtime'), logger: log })
+  // HANDS-M2 — 手 A:opt-in `<space>/hands.json` + OS 监狱在场才装(fail-closed);缺席=字节不变。
+  const butlerHands = await armButlerHands({ spaceRoot: space.root, logger: log })
   // Per-user butler assembly lives in personal-butler-factory.ts (GUARD
   // extraction); refs() reads the forward-declared refs at butler-build time.
   const butlerFactory: ButlerFactory = buildButlerFactory({
@@ -1095,6 +1098,7 @@ async function main(): Promise<void> {
     },
     ...(butlerBackupOps ? { backupOps: butlerBackupOps } : {}),
     selfHeal: () => selfHealLog, // HEAL-M1 restart_history 台账切片
+    hands: butlerHands, // HANDS-M2 手 A(status 恒传给自检;toolset 只在 armed 时装)
     // SEN-M5 — 成员名单投影源(岔口 A 全员见名+角色+id;email 结构性不进投影)。
     ...(identityForBackup
       ? { members: { users: () => identityForBackup.listUsers(),

@@ -51,6 +51,7 @@ import {
   type TaskResult,
 } from '@gotong/core'
 import { NEVER_RESUME_AT, type InboxItem, type InboxStore } from '@gotong/inbox'
+import { clipApprovalText } from './approval-text.js'
 
 /**
  * The slice of the inner outbound participant the gate drives. `RemoteHubViaLink`
@@ -137,7 +138,9 @@ export class ApprovalGatedParticipant implements Participant {
       status: 'pending',
       createdAt: this.now(),
     }
-    if (task.title !== undefined) item.title = task.title
+    // 标题**从动作本身派生**,不用 `task.title`(Codex 五轮 L)。派发方给的 title 是
+    // 能力串这种运输层标签——`/inbox` 一行字渲染的就是标题,那一行必须说清「往哪发」。
+    item.title = outboundActionLabel(this.peerLabel, task)
     if (parentNode) item.parent = { taskId: parentNode.taskId, by: parentNode.by }
 
     await this.store.write(item)
@@ -188,13 +191,31 @@ export class ApprovalGatedParticipant implements Participant {
   }
 }
 
-function buildApprovalPrompt(peerLabel: string, task: Task): string {
+/**
+ * 一行长的动作标签(`/inbox` 里那一行)。跨 hub 出站这件事,人要在一行里读到的是
+ * 「发给谁 / 什么能力」——那才是他在批的东西。
+ */
+function outboundActionLabel(peerLabel: string, task: Task): string {
+  const peer = clipApprovalText(peerLabel, OUTBOUND_FIELD_CHARS)
   const caps =
     task.strategy.kind === 'capability'
-      ? ` (capability: ${task.strategy.capabilities.join(', ')})`
+      ? `:${clipApprovalText(task.strategy.capabilities.join(', '), OUTBOUND_FIELD_CHARS)}`
       : ''
-  return `Approve outbound cross-org task to peer '${peerLabel}'${caps}?`
+  return `发往对端「${peer}」${caps}`
 }
+
+function buildApprovalPrompt(peerLabel: string, task: Task): string {
+  // peer label 与 capability 串都来自配置/派发方,不是框架自己的字——过同一套
+  // 清洗 + 定界(Codex 四轮 H3),审批句怎么拼全仓只有 `approval-text.ts` 一处答案。
+  const caps =
+    task.strategy.kind === 'capability'
+      ? ` (capability: 「${clipApprovalText(task.strategy.capabilities.join(', '), OUTBOUND_FIELD_CHARS)}」)`
+      : ''
+  return `Approve outbound cross-org task to peer 「${clipApprovalText(peerLabel, OUTBOUND_FIELD_CHARS)}」${caps}?`
+}
+
+/** 上限:peer 名与能力串都是短标识符。 */
+const OUTBOUND_FIELD_CHARS = 200
 
 /**
  * Pull the approval verdict out of the resume state. The host's resolve path

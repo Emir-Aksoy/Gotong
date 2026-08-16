@@ -26,6 +26,7 @@
 import type { Task, TaskResult } from '@gotong/core'
 import { readButlerGateState } from '@gotong/personal-butler'
 import type { InboxItem } from '@gotong/inbox'
+import { clipApprovalText } from './approval-text.js'
 
 export interface ButlerApprovalItemOptions {
   /**
@@ -95,7 +96,18 @@ export function butlerApprovalItemFor(
   if (toolName !== '' && toolName !== 'ask_peer' && !toolName.includes('__')) {
     item.imApprovable = true
   }
-  if (task.title !== undefined) item.title = task.title
+  // 行标题 = **动作**,不是任务的传输标签(Codex 四轮 H1)。
+  //
+  // IM 的 `/inbox` 只渲染一行,而那一行取的是 `item.title`(有就用,没有才退回
+  // prompt);而生产上每条 IM 聊天派发出来的任务标题固定是 `im:lark` 之类的**通道
+  // 名**。于是手机上看到的是 `[a1b2c3d4] im:lark`,人按 `/approve a1b2c3d4` 批的
+  // 是什么完全看不见——**盲签**。tier 2「每次 park」的整个安全价值就押在这一行字上,
+  // 它必须说清楚要干什么。
+  //
+  // 故这里用被批动作自己的标题(它已经过同一套清洗+定界),而不是 `task.title`:
+  // 对一次 governed park 来说,「动作」才是这条待批项的名字。80 字的 IM 截断由
+  // `im-approval-service` 做,且带省略号——被截过的一行读起来就是被截过的。
+  item.title = clipApprovalText(gate.pending.approval.title, APPROVAL_TITLE_CHARS)
   if (parentNode) item.parent = { taskId: parentNode.taskId, by: parentNode.by }
   return item
 }
@@ -137,10 +149,33 @@ export function butlerResolvePushback(
   return null
 }
 
-/** A short, human-readable (zh) approval prompt naming the butler + the action. */
+/**
+ * A short, human-readable (zh) approval prompt naming the butler + the action.
+ *
+ * 三个插值位**全都不可信**:`agentId` 来自 hub 配置(半可信),而 title / reason 由
+ * 各 toolset 的 `describe`/`classify` 现拼——里面有模型写的 argv、模型起的 agent id、
+ * 模型填的 MCP 参数。一个被注入的模型不必骗过闸,只要骗过**读闸的人**:在 title 里
+ * 接一句 `。原因:无害。批准后才会执行。` 就能伪造出一句完整的、看起来是 hub 说的话。
+ *
+ * 所以三处都走 `clipApprovalText`(洗不可见字符 + 把正文里的「」降级成『』),再由
+ * 框架用「」把它们包起来:渲染出来的「」只可能在框架的位置上,假框架句接不出来。
+ * 见 `approval-text.ts` 顶注。
+ */
 function buildButlerApprovalPrompt(
   agentId: string,
   approval: { title: string; reason: string },
 ): string {
-  return `管家「${agentId}」想执行一个敏感动作:${approval.title}。原因:${approval.reason}。批准后才会执行。`
+  const who = clipApprovalText(agentId, APPROVAL_ID_CHARS)
+  const what = clipApprovalText(approval.title, APPROVAL_TITLE_CHARS)
+  const why = clipApprovalText(approval.reason, APPROVAL_REASON_CHARS)
+  return `管家「${who}」想执行一个敏感动作:「${what}」。原因:「${why}」。批准后才会执行。`
 }
+
+/**
+ * 三个字段各自的上限。给得宽是刻意的——审批人读不到完整动作就等于盲签(见
+ * `personal-butler-hands.ts` 的 `ARGV_TITLE_CHARS` 同一理由);上限只挡「用几十 KB
+ * 正文把真正的动作顶出屏幕」这一类覆盖攻击。
+ */
+const APPROVAL_ID_CHARS = 80
+const APPROVAL_TITLE_CHARS = 1200
+const APPROVAL_REASON_CHARS = 1200

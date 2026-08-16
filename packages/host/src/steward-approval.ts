@@ -52,6 +52,7 @@ import {
   type StewardWorkflowEditor,
 } from './hub-steward-service.js'
 import type { StewardSensitiveExecutors } from './steward-sensitive.js'
+import { clipApprovalText } from './approval-text.js'
 
 /**
  * The capability the steward dispatches a gated action to. One capability for
@@ -158,7 +159,11 @@ export class StewardApprovalBroker implements Participant {
       status: 'pending',
       createdAt: this.now(),
     }
-    if (task.title !== undefined) item.title = task.title
+    // 标题**从动作本身派生**,不用 `task.title`(Codex 五轮 L)。派发方给的是
+    // `hub:steward exec (dangerous)` 这种运输层标签——它说明了这条任务怎么走的,
+    // 没说明批准之后会发生什么。`/inbox` 一行字渲染的就是标题,人只读那一行就要
+    // 能答「批不批」,所以标题必须是动作。
+    item.title = stewardActionLabel(payload.action)
 
     await this.store.write(item)
 
@@ -229,21 +234,53 @@ export function parseStewardExecPayload(raw: unknown): StewardExecPayload {
  * persisted to the inbox item + transcript, so a secret here would defeat the
  * "never carry plaintext" invariant the validator and executor uphold.
  */
-function buildStewardApprovalPrompt(action: StewardAction): string {
+/** 审批句里每个插值位的上限——比动作标题短:这些都是 id / 变量名 / 数字。 */
+const STEWARD_FIELD_CHARS = 200
+
+/**
+ * 一行长的动作标签(`/inbox` 里那一行)。比 `buildStewardApprovalPrompt` 短:
+ * 那句是完整的确认句,这行是列表里的一条。同样过 `clipApprovalText`——插值位仍是
+ * 模型分类出来的 id/变量名。
+ */
+function stewardActionLabel(action: StewardAction): string {
+  const f = (v: unknown) => clipApprovalText(String(v), STEWARD_FIELD_CHARS)
   switch (action.kind) {
     case 'delete_agent':
-      return `确认删除助手「${action.agentId}」?删掉后无法恢复。`
+      return `删除助手「${f(action.agentId)}」`
     case 'edit_workflow':
-      return `确认按你的说法修改工作流「${action.workflowId}」?它会跨出本 hub,涉及跨组织协作,所以需要你再确认一次。`
+      return `修改跨 hub 工作流「${f(action.workflowId)}」`
+    case 'set_credential_ref':
+      return `注册「${f(action.provider)}」凭证(读环境变量「${f(action.envVarName)}」)`
+    case 'revoke_credential':
+      return `吊销凭证「${f(action.credentialId)}」`
+    case 'set_peer_policy':
+      return `修改对端「${f(action.peerId)}」的信任契约`
+    case 'set_security_quota':
+      return `给「${f(action.scope)}」设「${f(action.metric)}」配额(每${f(action.period)} ${f(action.limit)})`
+    default:
+      return `需要二次确认的动作 (${f((action as { kind: string }).kind)})`
+  }
+}
+
+function buildStewardApprovalPrompt(action: StewardAction): string {
+  // 每个插值位都是**大白话经模型分类后**填进来的(id、变量名、配额值),故一律过
+  // 同一套清洗 + 定界(Codex 四轮 H3):一个含 `」` 的 agent id 就能在这句话里接出
+  // 第二个假的框架句。校验器管的是「这个动作合不合法」,不管「这行字读起来像什么」。
+  const f = (v: unknown) => clipApprovalText(String(v), STEWARD_FIELD_CHARS)
+  switch (action.kind) {
+    case 'delete_agent':
+      return `确认删除助手「${f(action.agentId)}」?删掉后无法恢复。`
+    case 'edit_workflow':
+      return `确认按你的说法修改工作流「${f(action.workflowId)}」?它会跨出本 hub,涉及跨组织协作,所以需要你再确认一次。`
     case 'set_credential_ref':
       // Names the env var, NEVER the secret — the host reads it at apply time.
-      return `确认注册 ${action.provider} 凭证?密钥从主机环境变量 ${action.envVarName} 读取(不在这里填明文),这是站点级敏感操作。`
+      return `确认注册「${f(action.provider)}」凭证?密钥从主机环境变量「${f(action.envVarName)}」读取(不在这里填明文),这是站点级敏感操作。`
     case 'revoke_credential':
-      return `确认吊销凭证「${action.credentialId}」?吊销后用它的助手会失去这个 provider 密钥。`
+      return `确认吊销凭证「${f(action.credentialId)}」?吊销后用它的助手会失去这个 provider 密钥。`
     case 'set_peer_policy':
-      return `确认修改对端「${action.peerId}」的信任契约(数据类 / 配额 / 摘要共享)?这会改变跨组织能流出什么,属于联邦安全操作。`
+      return `确认修改对端「${f(action.peerId)}」的信任契约(数据类 / 配额 / 摘要共享)?这会改变跨组织能流出什么,属于联邦安全操作。`
     case 'set_security_quota':
-      return `确认给 ${action.scope} 设 ${action.metric} 配额(每${action.period}上限 ${action.limit})?这是站点级安全配额。`
+      return `确认给「${f(action.scope)}」设「${f(action.metric)}」配额(每${f(action.period)}上限 ${f(action.limit)})?这是站点级安全配额。`
     default:
       // Only dangerous (delete_agent) / cross_hub (edit_workflow) / the four
       // sensitive kinds reach the broker; anything else is a routing bug. Give a

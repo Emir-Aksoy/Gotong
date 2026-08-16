@@ -14,11 +14,12 @@
  *              不进渲染(拼图卡不是第二个隐私面)
  *   任务     ← TN-M1 本成员任务笔记本,只数 open
  *   备份     ← AFR-M7 `lastBackup()` 事实(hub 级,同 backup_status)
+ *   手       ← HANDS-M2 `armButlerHands` 的结果(装了=监狱种类;没装=原因)
  *
  * ── 逐行降级,绝不整卡失效 ────────────────────────────────────────────────
- * 六块 dep 全部可选:缺席 = 该行「(未接)」;读失败 = 该行「(读取失败)」
- * + warn。一块碎片的死活永远不连累其余五行——自检卡的价值恰恰在
- * 「我看不到哪块」也是状态的一部分(honest-unknown,固定六行不跳行,
+ * 七块 dep 全部可选:缺席 = 该行「(未接)」;读失败 = 该行「(读取失败)」
+ * + warn。一块碎片的死活永远不连累其余六行——自检卡的价值恰恰在
+ * 「我看不到哪块」也是状态的一部分(honest-unknown,固定七行不跳行,
  * 与 hub_health 的问题导向跳行姿态刻意不同)。
  *
  * 复用纪律:病名翻译走 hub-sense 的 outageHeadline、成本格式走 observe 的
@@ -32,6 +33,7 @@ import type {
 } from '@gotong/llm'
 
 import { tierLabel, type ButlerBackupOps } from './personal-butler-backup.js'
+import type { ButlerHandsStatus } from './personal-butler-hands.js'
 import { outageHeadline } from './personal-butler-hub-sense.js'
 import type { ButlerLlmSurface } from './personal-butler-llms.js'
 import { fmtCost, type ButlerUsageSurface } from './personal-butler-observe.js'
@@ -68,6 +70,8 @@ export interface ButlerSelfStatusDeps {
   notebook?: { list(): Promise<ReadonlyArray<{ status: string }>> }
   /** AFR-M7 备份事实(hub 级)。 */
   backup?: Pick<ButlerBackupOps, 'lastBackup'>
+  /** HANDS-M2 手装没装(hub 级事实,boot 时定)。 */
+  hands?: ButlerHandsStatus
   now?: () => number
   logger?: { warn: (msg: string, meta?: Record<string, unknown>) => void }
 }
@@ -78,7 +82,7 @@ const READ_FAILED = '(读取失败)'
 const STATUS_TOOL: LlmToolDefinition = {
   name: 'my_status',
   description:
-    '看你(阿同)自己当下的状态汇总:大脑模型链健不健康、有没有断供、累计用量、记忆规模与上次蒸馏、手上进行中的任务数、hub 上次备份。成员问「你还好吗」「你现在什么状态」,或你自己怀疑状态不对劲时用它。只读自检,不改任何东西。',
+    '看你(阿同)自己当下的状态汇总:大脑模型链健不健康、有没有断供、累计用量、记忆规模与上次蒸馏、手上进行中的任务数、hub 上次备份、手(监狱工作区)装没装。成员问「你还好吗」「你现在什么状态」,或你自己怀疑状态不对劲时用它。只读自检,不改任何东西。',
   inputSchema: { type: 'object', properties: {}, additionalProperties: false },
 }
 
@@ -193,7 +197,17 @@ function backupLine(deps: ButlerSelfStatusDeps, now: number): string {
   }
 }
 
-/** 纯投影渲染(零 LLM 决策):六块碎片 → 固定六行自检卡。导出给测试直打。 */
+/**
+ * HANDS-M2 「手」行:boot 时定的 hub 级事实,不是探针——装了印监狱种类,没装印
+ * 原因(hands.json 缺席 / 监狱缺席 / governed 关着),缺席=host 太老没接。
+ */
+function handsLine(deps: ButlerSelfStatusDeps): string {
+  const h = deps.hands
+  if (!h) return NOT_WIRED
+  return h.armed ? `已装(${h.kind} 监狱,工作区里写/读/跑;联网命令先请你确认)` : `未装(${h.reason})`
+}
+
+/** 纯投影渲染(零 LLM 决策):七块碎片 → 固定七行自检卡。导出给测试直打。 */
 export async function renderSelfStatus(deps: ButlerSelfStatusDeps): Promise<string> {
   const now = deps.now?.() ?? Date.now()
   return [
@@ -204,6 +218,7 @@ export async function renderSelfStatus(deps: ButlerSelfStatusDeps): Promise<stri
     `- 记忆:${await memoryLine(deps, now)}`,
     `- 手上任务:${await notebookLine(deps)}`,
     `- hub 备份:${backupLine(deps, now)}`,
+    `- 手:${handsLine(deps)}`,
   ].join('\n')
 }
 

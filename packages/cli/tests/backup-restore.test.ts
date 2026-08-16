@@ -160,6 +160,30 @@ describe('KIT-M1 backup — 排除规则与提示语', () => {
     expect(out.join('\n')).toContain('INCLUDES the master keys')
   })
 
+  it('HANDS-M2:阿同工作区里的 node_modules 不进包(源码/审计照进;别处同名目录照进)', async () => {
+    const space = join(root, 'space')
+    makeSpace(space)
+    const ws = join(space, 'butler', 'hands', 'user', 'u1', 'workspace')
+    mkdirSync(join(ws, 'src'), { recursive: true })
+    mkdirSync(join(ws, 'node_modules', 'left-pad'), { recursive: true })
+    mkdirSync(join(ws, 'pkg', 'node_modules', 'nested'), { recursive: true })
+    writeFileSync(join(ws, 'src', 'index.ts'), 'export {}\n', 'utf8')
+    writeFileSync(join(ws, 'node_modules', 'left-pad', 'index.js'), 'module.exports = 1\n', 'utf8')
+    writeFileSync(join(ws, 'pkg', 'node_modules', 'nested', 'x.js'), '1\n', 'utf8')
+    writeFileSync(join(space, 'butler', 'hands', 'user', 'u1', 'audit.jsonl'), '{"tool":"hands_run"}\n', 'utf8')
+    // 不在阿同工作区里的 node_modules 目录名照收——排除只认那一段路径。
+    mkdirSync(join(space, 'workflows', 'node_modules'), { recursive: true })
+    writeFileSync(join(space, 'workflows', 'node_modules', 'keep.txt'), 'keep\n', 'utf8')
+    const { code, tgz } = await runBackup(space, join(root, 'bk'))
+    expect(code).toBe(0)
+    const members = await archiveMembers(tgz)
+    expect(members).toContain('space/butler/hands/user/u1/workspace/src/index.ts')
+    expect(members).toContain('space/butler/hands/user/u1/audit.jsonl')
+    expect(members).toContain('space/workflows/node_modules/keep.txt')
+    expect(members.some((m) => m.includes('/workspace/node_modules/'))).toBe(false)
+    expect(members.some((m) => m.includes('/pkg/node_modules/'))).toBe(false)
+  })
+
   it('不是 workspace(无 space.json)→ 退出码 2', async () => {
     const notSpace = join(root, 'plain')
     mkdirSync(notSpace, { recursive: true })

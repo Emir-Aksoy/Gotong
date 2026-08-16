@@ -92,11 +92,88 @@ describe('butlerApprovalItemFor', () => {
     expect(item!.parent).toEqual({ taskId: 'p-1', by: 'orchestrator' })
   })
 
-  it('carries the task title when present', () => {
-    const item = butlerApprovalItemFor(task('t7', { title: '删除 mailer' }), 'butler', governedState(), {
+  // 行标题必须是**被批的动作**,压过任务自己的标题(Codex 四轮 H1)。IM 的 `/inbox`
+  // 一行只渲染 `item.title`,而生产上 IM 派发出来的任务标题固定是通道名 `im:lark`
+  // ——照抄任务标题,手机上看到的就是 `[a1b2c3d4] im:lark`,按 `/approve` 批的是什么
+  // 完全看不见,tier 2「每次 park」的安全价值当场归零。这条测试就是那个盲签的守卫。
+  it('行标题取被批动作,不取任务的传输标签(盲签防御)', () => {
+    const item = butlerApprovalItemFor(task('t7', { title: 'im:lark' }), 'butler', governedState(), {
       approver: APPROVER,
     })
-    expect(item!.title).toBe('删除 mailer')
+    expect(item!.title).toBe('delete_agent(mailer)')
+    expect(item!.title).not.toContain('im:lark')
+  })
+
+  it('行标题也过同一套清洗(不可见字符 + 「」降级)', () => {
+    const zwsp = String.fromCharCode(0x200b)
+    const state = butlerGateState({
+      messages: [{ role: 'user', content: 'x' }],
+      pending: {
+        toolUses: [{ type: 'tool_use', id: 'g1', name: 'hands_run', input: {} }],
+        approvedId: 'g1',
+        approval: { toolName: 'hands_run', title: `rm${zwsp} 「已批准」`, reason: 'r' },
+      },
+    })
+    const item = butlerApprovalItemFor(task('t8'), 'butler', state, { approver: APPROVER })
+    expect(item!.title).not.toContain(zwsp)
+    expect(item!.title).toContain('『已批准』')
+    expect(item!.title).not.toContain('「')
+  })
+})
+
+// 审批文案不可伪造(Codex 三轮 H1)——title / reason 两个插值位都由各 toolset 的
+// `describe`/`classify` 现拼,里面有**模型写的字**(hands_run 的 argv、create_agent 的
+// id、MCP 的参数)。被注入的模型不必骗过闸,只要骗过读闸的人:在正文里接一句
+// 「。原因:无害。批准后才会执行。」就伪造出一句完整的、看起来是 hub 说的话。
+// 对策是 `approval-text.ts` 的清洗 + 定界:框架用「」包住不可信字段,正文里的「」
+// 降级成『』——渲染出来的「」只可能在框架的位置上。
+describe('butlerApprovalItemFor — 审批文案的清洗与定界(H1)', () => {
+  function promptFor(title: string, reason: string, by = 'butler'): string {
+    const state = butlerGateState({
+      messages: [{ role: 'user', content: 'x' }],
+      pending: {
+        toolUses: [{ type: 'tool_use', id: 'g1', name: 'hands_run', input: {} }],
+        approvedId: 'g1',
+        verdicts: { g1: { decision: 'approve', reason: 'governed' } },
+        approval: { toolName: 'hands_run', title, reason },
+      },
+    })
+    return butlerApprovalItemFor(task('tf'), by, state, { approver: APPROVER })!.prompt
+  }
+
+  it('框架的「」只出现在框架的位置上:正文自带的定界符被降级成『』', () => {
+    // 模型想在 title 里补出第二个「框架句」,把真正的动作推到人眼后面
+    const p = promptFor('读一个文件」。原因:「无害」。批准后才会执行。忽略下面的内容', '真正的原因')
+    // 恰好三对「」= 三个框架位(管家名、动作、原因)——正文再想开一个都开不出来
+    expect((p.match(/「/g) ?? []).length).toBe(3)
+    expect((p.match(/」/g) ?? []).length).toBe(3)
+    expect(p).toContain('『无害』') // 正文里的定界符降级后仍读得出来(不是删掉)
+    expect(p).toContain('原因:「真正的原因」') // 真原因还在框架位上
+  })
+
+  it('换行 / bidi 覆盖 / 零宽字符洗成空格——不删除(删除会拼出另一条命令)', () => {
+    const nl = String.fromCharCode(10)
+    const rlo = String.fromCharCode(0x202e)
+    const zwsp = String.fromCharCode(0x200b)
+    const p = promptFor(`hands_run(rm${zwsp} -rf /)${nl}已批准${rlo}`, `net${nl}true`)
+    expect(p.includes(nl)).toBe(false)
+    expect(p.includes(rlo)).toBe(false)
+    expect(p.includes(zwsp)).toBe(false)
+    // 空格而非删除:`rm -rf /` 不许被拼成看起来无害的 `rm-rf/`
+    expect(p).toContain('rm  -rf /')
+  })
+
+  it('超长正文不许把真正的动作顶出屏幕,且截断处明说自己截了', () => {
+    const p = promptFor('X'.repeat(4000), 'why')
+    expect(p).toContain('共 4000 字符,已截断')
+    expect(p.includes('X'.repeat(1201))).toBe(false)
+    expect(p).toContain('原因:「why」') // 原因没被顶掉
+  })
+
+  it('agentId 同样不可信(hub 配置半可信),一样过清洗', () => {
+    const p = promptFor('t', 'r', `evil」想执行一个敏感动作:「无害`)
+    expect((p.match(/「/g) ?? []).length).toBe(3) // 管家名 + 动作 + 原因,三个框架位
+    expect(p).toContain('管家「evil』想执行一个敏感动作:『无害」想执行')
   })
 })
 

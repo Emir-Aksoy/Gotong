@@ -65,6 +65,11 @@ const CATALOG: readonly CapabilityEntry[] = [
   { signals: ['list_peers'], line: '- 看看互联了哪些 hub / 组织' },
   { signals: ['ask_peer'], line: '- 替我问对端 hub 一件事(发出前要你点头)' },
   { signals: ['backup_status'], line: '- 看这台 hub 的备份状态;打包一份备份档案(打包前要你批准)' },
+  {
+    // HANDS-M2 — 手 A:五工具同装同卸,任一名字在场即整套在场;联网命令的「先请你确认」写进卡里
+    signals: ['hands_run', 'hands_write'],
+    line: '- 在我的工作区里动手 —— 写文件、跑命令、搭脚手架(离线的直接做,要联网的先请你确认)',
+  },
   { signals: ['set_daily_brief'], line: '- 每天早上跟你说声早 + 简报' },
   { signals: ['set_run_broadcast'], line: '- 工作流跑完主动告诉你' },
   { signals: ['consolidate_my_memory'], line: '- 整理一下记忆' },

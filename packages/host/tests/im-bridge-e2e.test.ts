@@ -372,6 +372,7 @@ describe('IMA-M2 — IM approval verbs', () => {
       ['not_found', '没有找到匹配'],
       ['ambiguous', '完整编号'],
       ['web_only', '需要在网页上处理'],
+      ['title_truncated', '一行显示不下'],
       ['not_approval_kind', '填写具体内容'],
       ['already_resolved', '已经被处理过'],
       ['forbidden', '不归你处理'],

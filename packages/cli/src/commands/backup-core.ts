@@ -209,6 +209,22 @@ export function isBackupOutputPath(rel: string): boolean {
 }
 
 /**
+ * HANDS-M2 — 阿同工作区里的依赖树(`butler/hands/user/<id>/workspace/**\/node_modules/`)
+ * 不进归档:那是可再生的下载产物,一个脚手架就能塞进几万个文件,把备份拖成分钟级、
+ * 把档案吹到百兆;成员/阿同写的源码、笔记、审计行照常进档,恢复后再装一遍依赖就
+ * 回来。只挡 `node_modules` 这一段路径名,别的目录一律照收——宁多备一点,也别把
+ * 成员的东西漏掉。目录级也匹配(`.../workspace/node_modules` 本身),好让收集
+ * 阶段整棵剪掉不必逐文件走。
+ */
+export function isHandsScratchPath(rel: string): boolean {
+  if (!rel.startsWith('butler/hands/user/')) return false
+  const segs = rel.split('/')
+  // butler / hands / user / <id> / workspace / ...
+  if (segs.length < 6 || segs[4] !== 'workspace') return false
+  return segs.slice(5).includes('node_modules')
+}
+
+/**
  * 正常收集阶段该不该跳过这个文件。sqlite 家族的「跳过」不等于「不进
  * 归档」——快照阶梯会以一致性拷贝的形式把它放回去(**分档时例外**:
  * 子集档绝不含 sqlite,快照阶梯整个不跑,金库密文字节结构性进不来)。
@@ -217,6 +233,7 @@ export function isBackupOutputPath(rel: string): boolean {
 export function shouldSkipForStaging(rel: string, includeMasterKey: boolean, tier?: BackupTier): boolean {
   if (tier !== undefined) return !isIdentityTierPath(rel)
   if (isBackupOutputPath(rel)) return true
+  if (isHandsScratchPath(rel)) return true
   // 「上次备份」事实与 backups/ 同罪:它是备份机器自己的台账,不是空间状态。
   // 首次备份靠「先归档后写」天然不进档,这里挡的是**下一次**备份把上一轮的
   // 事实带走——恢复进新家的空间该如实说「这个家还没打过备份」,让陈旧提醒
