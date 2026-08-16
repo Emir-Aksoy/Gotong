@@ -1653,7 +1653,7 @@ function describeApprovalError(err: unknown, shortId: string): string {
       : ''
   switch (code) {
     case 'short_id_too_short':
-      return '编号太短,至少要 4 位(用 /inbox 查看编号)。/ That id is too short — at least 4 chars (see /inbox).'
+      return '编号要打全(用 /inbox 查看完整编号)。/ Use the full id from /inbox.'
     case 'not_found':
       return `没有找到匹配「${shortId}」的待办事项(可能已被处理)。发 /inbox 查看最新列表。/ No pending item matches — see /inbox.`
     case 'ambiguous':
@@ -1667,6 +1667,10 @@ function describeApprovalError(err: unknown, shortId: string): string {
       return '这件事需要填写具体内容,不是批准/拒绝就能答的,请到网页上处理。/ This one needs a typed answer — use the web.'
     case 'already_resolved':
       return '这件事已经被处理过了。发 /inbox 查看最新待办。/ Already resolved — see /inbox.'
+    case 'stale_item':
+      // 代际不符:这个编号底下的动作在你读到它之后被换过(阿同接着又要批下一个
+      // 动作,写的是同一条)。什么都没批,请重新看一眼再决定。
+      return '这条已经变成另一个动作了,没有帮你批。发 /inbox 看最新的再决定。/ This one changed into a different action — nothing was approved. See /inbox.'
     case 'forbidden':
       return '这件事不归你处理(可能刚被转派)。/ Not yours to resolve (it may have been delegated).'
     default:

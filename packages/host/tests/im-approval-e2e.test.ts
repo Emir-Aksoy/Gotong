@@ -35,7 +35,12 @@ import {
   type TaskResult,
 } from '@gotong/core'
 import { openIdentityStore, type IdentityStore } from '@gotong/identity'
-import { FileInboxStore, HumanInboxParticipant, NEVER_RESUME_AT } from '@gotong/inbox'
+import {
+  FileInboxStore,
+  HumanInboxParticipant,
+  NEVER_RESUME_AT,
+  type InboxItem,
+} from '@gotong/inbox'
 import type { ImAttachment, ImBridge, ImMessage, ImUser } from '@gotong/im-adapter'
 import { butlerGateState } from '@gotong/personal-butler'
 
@@ -45,6 +50,7 @@ import {
   makeIdentityImBindingResolver,
   type HostImConfig,
 } from '../src/im-bridge.js'
+import { imShortId } from '../src/im-approval-service.js'
 import { HostInboxService } from '../src/inbox-service.js'
 import {
   butlerApprovalItemFor,
@@ -239,7 +245,8 @@ workflow:
     // The chat shows the parked item with its short id…
     await bridge.inject(imMsg('/inbox'))
     const item = (await inboxStore.listPending(aliceId))[0]!
-    const shortId = item.itemId.slice(0, 8)
+    // 短码是**内容指纹**不是 itemId 前缀(六轮 H1):从服务算,和列表里印的那串对上。
+    const shortId = imShortId(item)
     expect(bridge.last()).toContain(`[${shortId}]`)
     expect(bridge.last()).toContain('批准这个方案吗?')
     expect(bridge.last()).not.toContain('web only') // human step IS IM-approvable
@@ -275,7 +282,7 @@ workflow:
     expect(item.source).toBe('butler')
     expect(item.imApprovable).toBe(true)
 
-    await bridge.inject(imMsg(`/approve ${item.itemId.slice(0, 8)}`))
+    await bridge.inject(imMsg(`/approve ${imShortId(item)}`))
     expect(bridge.last()).toContain('✓ 已批准 / Approved')
     // S1-M3 — the butler's OWN closing line came back for this member.
     expect(pushes).toEqual([{ userId: aliceId, text: '好了,mailer 已经删掉了。' }])
@@ -297,11 +304,64 @@ workflow:
     expect(bridge.last()).toContain('需在网页处理 / web only')
 
     const item = (await inboxStore.listPending(aliceId))[0]!
-    await bridge.inject(imMsg(`/approve ${item.itemId.slice(0, 8)}`))
+    await bridge.inject(imMsg(`/approve ${imShortId(item)}`))
     expect(bridge.last()).toContain('需要在网页上处理')
     // Fail-closed for real: still pending, still parked, no push, no audit row.
     expect((await inboxStore.get(item.itemId))!.status).toBe('pending')
     expect(identity.getSuspendedTask(item.itemId)).not.toBeNull()
+    expect(pushes).toHaveLength(0)
+    expect(identity.listAuditLog({ action: 'inbox_resolve' })).toHaveLength(0)
+  })
+
+  it('act 4 — 审批飞行中同一个 id 被换成另一个动作 ⇒ 一个字节都没批(七轮 H1)', async () => {
+    // 管家 tool-loop 的常态:同一条 task 会被反复 park,后一次 `write()` 直接覆盖
+    // 前一次,而且它**刻意不进** per-item 锁(写者不是决定者)。于是人在手机上看到
+    // 的是第一代,手指落下时盘上可能已经是第二代 —— 老门只查 `status==='pending'`,
+    // 两代都 pending,「删 mailer」的同意就会盖到「往外发邮件」上。
+    hub.register(fakeButler('delete_agent'))
+    await hub.dispatch({
+      from: 'im:telegram:1001',
+      strategy: { kind: 'explicit', to: 'butler' },
+      payload: { prompt: '把 mailer 删了' },
+      origin: { orgId: 'local', userId: aliceId },
+    })
+    await Promise.all(itemWrites)
+
+    await bridge.inject(imMsg('/inbox'))
+    const shown = (await inboxStore.listPending(aliceId))[0]!
+    const code = imShortId(shown)
+    expect(bridge.last()).toContain(code)
+
+    // 把「服务先读一次 → store 上锁再读一次」之间那条缝真的撑开:第一次 get 返回
+    // 老快照之后、markResolved 拿到锁之前,同一个 id 底下换成另一个动作。
+    // 代际检查若只在 IM 层/服务层拿老快照重算一遍(六轮的形状),这里会照批不误 ——
+    // 只有把谓词交进 store 自己的原子 transition 才拦得住。
+    const realGet = inboxStore.get.bind(inboxStore)
+    let armed = true
+    ;(inboxStore as { get: (id: string) => Promise<InboxItem | null> }).get = async (id) => {
+      const snapshot = await realGet(id)
+      if (armed && snapshot) {
+        armed = false
+        await inboxStore.write({
+          ...snapshot,
+          title: 'send_email(客户名单)',
+          prompt: '往外发一封邮件',
+        })
+      }
+      return snapshot
+    }
+
+    await bridge.inject(imMsg(`/approve ${code}`))
+
+    expect(bridge.last()).toContain('已经变成另一个动作')
+    // 盘上留下的是第二代,而且原封不动:没被批、没被标记、连历史都没写一行。
+    const after = (await realGet(shown.itemId))!
+    expect(after.status).toBe('pending')
+    expect(after.prompt).toBe('往外发一封邮件')
+    expect(after.decision).toBeUndefined()
+    expect(after.resolvedAt).toBeUndefined()
+    // 挂起行还在、没推送、没审计行 —— 真的一个字节都没批。
+    expect(identity.getSuspendedTask(shown.itemId)).not.toBeNull()
     expect(pushes).toHaveLength(0)
     expect(identity.listAuditLog({ action: 'inbox_resolve' })).toHaveLength(0)
   })

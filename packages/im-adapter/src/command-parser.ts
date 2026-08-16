@@ -90,9 +90,11 @@ export function parseImCommand(raw: string): ImCommand {
     case 'who':
       return { kind: 'agents' }
 
-    // IMA-M1 — the approval loop. `/inbox` lists; `/approve`+`/deny` act on an
-    // itemId prefix. A missing prefix falls through to `free` (like `/bind`
-    // with no code) so the bridge renders the help reply instead of guessing.
+    // IMA-M1 — the approval loop. `/inbox` lists; `/approve`+`/deny` act on the
+    // short code printed there (opaque to this parser — the host side defines
+    // it as a content fingerprint, NOT an itemId prefix). A missing code falls
+    // through to `free` (like `/bind` with no code) so the bridge renders the
+    // help reply instead of guessing.
     case 'inbox':
     case 'pending':
       return { kind: 'inbox' }

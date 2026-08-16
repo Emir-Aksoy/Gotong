@@ -11,7 +11,13 @@
 
 import { describe, expect, it } from 'vitest'
 
-import { APPROVAL_CLOSE, APPROVAL_OPEN, clipApprovalText, sanitizeApprovalText } from '../src/approval-text.js'
+import {
+  APPROVAL_CLOSE,
+  APPROVAL_OPEN,
+  clipApprovalText,
+  hasVisibleContent,
+  sanitizeApprovalText,
+} from '../src/approval-text.js'
 
 const ch = (c: number): string => String.fromCodePoint(c)
 
@@ -111,5 +117,52 @@ describe('clipApprovalText — 超长正文是覆盖攻击,截断处必须说自
     const out = clipApprovalText(`「${'a'.repeat(40)}」`, 5)
     expect(out.startsWith('『')).toBe(true)
     expect(out).not.toContain(APPROVAL_OPEN)
+  })
+
+  it('按码点切,不把增补平面的字劈成半个代理项(六轮 L)', () => {
+    // U+1F4A3 是两个 UTF-16 码元;按码元 slice(0,5) 会切在第三个字中间,
+    // 渲染出来多一个原文里没有的 U+FFFD——而这行字的全部意义就是「它和真正
+    // 要跑的动作是同一件事」。
+    const BOMB = String.fromCodePoint(0x1f4a3)
+    const out = clipApprovalText(BOMB.repeat(20), 5)
+    // 半个代理项在字符串里仍是一个孤立码元(渲染时才变 U+FFFD),所以按码点扫。
+    const lone = Array.from(out).filter((c) => {
+      const cp = c.codePointAt(0) ?? 0
+      return cp >= 0xd800 && cp <= 0xdfff
+    })
+    expect(lone).toHaveLength(0)
+    expect(Array.from(out.slice(0, out.indexOf('…')))).toHaveLength(5)
+    expect(out).toContain('共 20 字符') // 总长也按码点数,不按码元数(20 不是 40)
+  })
+})
+
+describe('hasVisibleContent — 判据反过来写成白名单(七轮 H2)', () => {
+  it('有一个字母 / 数字 / 标点 / 符号就算有内容', () => {
+    for (const s of ['删', 'a', '7', '.', '¥', '  x  ']) {
+      expect(hasVisibleContent(s)).toBe(true)
+    }
+  })
+
+  it('纯空白 / 空串没有内容', () => {
+    for (const s of ['', ' ', '   ', String.fromCharCode(9, 32, 10)]) {
+      expect(hasVisibleContent(s)).toBe(false)
+    }
+  })
+
+  it('**顺序承重**:白名单自己会被骗,先洗后问才拦得住', () => {
+    // U+2800 的 Unicode 分类是**符号**(So)、U+3164 是**字母**(Lo)——白名单单独
+    // 看它们会答「有内容」,而它们在屏幕上是空白。所以两道各兜一半:名单先把它们
+    // 洗成空格,白名单再问洗完还剩什么。反过来写(先问后洗)这条就漏了。
+    const sneaky = [0x2800, 0xfff9, 0xdc00, 0x200b, 0x3164]
+      .map((c) => String.fromCharCode(c))
+      .join('')
+    expect(hasVisibleContent(sneaky)).toBe(true) // ← 白名单自己被骗了
+    expect(hasVisibleContent(sanitizeApprovalText(sneaky))).toBe(false) // ← 洗完才是真话
+  })
+
+  it('每一个都真的被洗成了空格(名单与白名单各兜一半)', () => {
+    for (const c of [0x2800, 0xfff9, 0xfffa, 0xfffb, 0x2060, 0x206f, 0xd800, 0xdfff]) {
+      expect(sanitizeApprovalText(String.fromCharCode(c))).toBe(' ')
+    }
   })
 })

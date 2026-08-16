@@ -24,7 +24,13 @@
  */
 
 import type { Hub, Task, TaskResult } from '@gotong/core'
-import { InboxError, type InboxDecision, type InboxItem, type InboxStore } from '@gotong/inbox'
+import {
+  InboxError,
+  type InboxDecision,
+  type InboxExpectation,
+  type InboxItem,
+  type InboxStore,
+} from '@gotong/inbox'
 import { AUDIT_ACTIONS, type WriteAuditLogInput } from '@gotong/identity'
 
 /**
@@ -130,6 +136,16 @@ export class HostInboxService {
      * an honest queryable fact, not flattened away.
      */
     via?: string
+    /**
+     * Codex 七轮 H1 — the generation the caller believes it is answering,
+     * checked INSIDE the store's atomic transition (see `InboxExpectation`).
+     * Callers that address an item by something narrower than its id — the IM
+     * short code is a content fingerprint — must pass it: everything below
+     * (`validateDecision`, the audit row, the resume) is computed from the
+     * item read here, and without this guard a re-park between that read and
+     * the write would silently retarget all of it.
+     */
+    expect?: InboxExpectation
   }): Promise<void> {
     const { itemId, userId, decision } = args
     const item = await this.store.get(itemId)
@@ -144,8 +160,10 @@ export class HostInboxService {
 
     // RACE GUARD — flip pending→resolved before any resume. A concurrent or
     // repeat resolve hits already_resolved inside markResolved and never
-    // touches the hub.
-    await this.store.markResolved(itemId, validated)
+    // touches the hub. `expect` rides along as the generation guard: both are
+    // evaluated under the store's per-item lock, so nothing can slip between
+    // the check and the write.
+    await this.store.markResolved(itemId, validated, undefined, args.expect)
 
     // Governance audit (inbox-gov M1) — record the committed decision right
     // after the race guard, BEFORE resume mechanics, so the row faithfully

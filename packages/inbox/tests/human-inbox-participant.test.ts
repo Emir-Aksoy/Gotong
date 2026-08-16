@@ -99,6 +99,29 @@ describe('HumanInboxParticipant.handleTask', () => {
     })
   })
 
+  it('标志断言的是收件人,不是「那行字够不够」——有没有标题都照标(七轮 M3)', async () => {
+    // 六轮曾在这里按「有没有标题」收窄:标题在场 ⇒ 不给标志。七轮核出它误伤了画廊里
+    // 21 条本来短小、本来该能在手机上批的 human 步(「睡前安防确认 / 是否锁好大门并
+    // 布防?」)。盲签那个形状(标题四个字 + 正文是整张表)该被挡下的地方是渲染层:
+    // `imRowText` 把两段一起渲染并按一行预算量 —— 见 im-approval-service 的门。
+    const store = new MemStore()
+    const broker = new HumanInboxParticipant({ store })
+    await broker
+      .onTask(
+        makeTask({
+          id: 'titled',
+          payload: { ...goodPayload, title: '排班确认', prompt: '<整张排班表……>' },
+        }),
+      )
+      .catch(() => {})
+    const titled = await store.get('titled')
+    expect(titled!.title).toBe('排班确认')
+    expect(titled!.imApprovable).toBe(true)
+
+    await broker.onTask(makeTask({ id: 'plain', payload: goodPayload })).catch(() => {})
+    expect((await store.get('plain'))!.imApprovable).toBe(true)
+  })
+
   it('classifies parentKind from the last ancestry node', async () => {
     const store = new MemStore()
     const broker = new HumanInboxParticipant({ store })

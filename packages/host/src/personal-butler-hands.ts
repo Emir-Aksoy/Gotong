@@ -456,26 +456,48 @@ export const HANDS_OUTPUT_KILL_MULTIPLIER = 64
 /** 命令退出后再等 stdio 关闭的宽限;逃出进程组的守护进程抓着管道时不能无限等。 */
 const STDIO_GRACE_MS = 1000
 /**
- * 一条动作最坏情况能往台账里写多少字节。**推出来的,不是拍的**:argv 总量由策略层
- * 封顶(`maxArgvTotalChars`,单位是**字符**),JSON 转义最坏 6 字节/字符(控制字符
- * 会被写成 6 个字符的 u-转义),而同一条动作会写两行带 argv 的(分级 + 动手前的 begin)。
+ * **一行**带 argv 的台账最坏能有多大。全部项都由策略层封顶,所以这是推得出来的:
+ *   - argv 总量 ≤ `maxArgvTotalChars`(单位是 UTF-16 码元),JSON 转义最坏
+ *     **6 字节/码元**——落单代理项写成 `\udXXX` 六个 ASCII 字节。(控制字符同样是
+ *     六字节,但它们在策略层就被 `hasHostileArgChar` 拒了,根本进不到这里。)
+ *   - 每个元素还要 `"…",` 三个结构字节,元素数 ≤ `maxArgv`;
+ *   - 其余字段(时间戳 / 工具名 / 判决码 / cwd / stdin 摘要 / 退出码 / 输出计数)给
+ *     一块宽定额,免得再为每个字段各拍一个数。
  */
-const AUDIT_WORST_ACTION_BYTES = HANDS_LIMITS.maxArgvTotalChars * 6 * 2
+const AUDIT_WORST_ROW_BYTES =
+  HANDS_LIMITS.maxArgvTotalChars * 6 + HANDS_LIMITS.maxArgv * 3 + 8 * 1024
+/**
+ * 一条动作最坏往台账里写多少。**三行不是两行**(Codex 六轮 M):分级(classify)、
+ * 动手前(begin)、跑完(result)——三行都带 argv。上一版只数了前两行,于是「装得下
+ * 40 条」这个说法本身就是错的(真容量约 26 条)。
+ *
+ * 这一条**不靠公式对不对**来保证:`personal-butler-hands.test.ts` 里有一条门,拿
+ * 顶格 argv 真跑一次、量出这条动作实际写了多少字节,再断言 `阈值 / 实测 ≥ 40`。
+ * 公式漂了、哪天多写一行带 argv 的、`maxArgvTotalChars` 调大了,那道门先红。
+ */
+const AUDIT_WORST_ACTION_BYTES = AUDIT_WORST_ROW_BYTES * 3
 /** 台账里至少要装得下多少条**最坏情况**的动作。 */
-const AUDIT_MIN_ACTIONS = 40
+export const AUDIT_MIN_ACTIONS = 40
 /**
  * 轮转阈值。为什么不是随手一个 1MB(Codex 五轮 M):台账只留一代 `.1`,所以阈值太小
  * 会变成一根**反取证杠杆**——被注入的模型连着发几条顶格 argv 的 tier 1 命令(在监狱
  * 里、不需要审批),就能把更早的行挤出窗口。阈值从 argv 上限推出来,argv 上限哪天改了
  * 它自己跟着走,不会两个数字各自漂。
  *
- * 现在:~7.5MB(每成员盘上最多两代 ≈ 15MB,对着 512MB 工作区配额可以忽略),够装
- * 40 条顶格动作、或者两万多条正常动作(一条真实命令行大约 300 字节)。
+ * 现在:~12.3MB,够装 40 条顶格动作;换成正常动作是**约一万四千条**——一条动作
+ * 记**三行**(分级/动手前/跑完),一行真实命令大约 300 字节,所以每条约 900 字节。
+ * (Codex 七轮 L7:上一版拿「12MB ÷ 300」写成了「四万多条动作」,那是四万多**行**,
+ * 把行数当成了动作数。)
  *
- * **诚实残余**:轮转天生是个窗口。发足够多的顶格动作仍然能把旧行推出去——挡不住,
- * 只能让它变贵且留痕:那些动作每一条自己都先被记了下来。
+ * **诚实残余**两条:
+ *   1. 轮转天生是个窗口。发足够多的顶格动作仍然能把旧行推出去——挡不住,只能让它
+ *      变贵且留痕:那些动作每一条自己都先被记了下来。
+ *   2. 台账**不计入工作区配额**(它是工作区的兄弟目录,成员的命令删不掉它),所以
+ *      最坏盘上占用是「每成员两代 ≈ 25MB × 成员数」,没有 hub 级总量闸。日常量级
+ *      差着三个数量级(正常行 300 字节),但这是随成员数线性增长的一笔账。
  */
 const AUDIT_ROTATE_BYTES = AUDIT_MIN_ACTIONS * AUDIT_WORST_ACTION_BYTES
+export const AUDIT_ROTATE_BYTES_FOR_TEST = AUDIT_ROTATE_BYTES
 const LIST_MAX_ENTRIES = 200
 const LIST_SCAN_MAX = 5000
 const BINARY_SNIFF_BYTES = 8192
@@ -1470,7 +1492,12 @@ export function fmtBytes(n: number): string {
 function clipSafe(s: string, max: number, tail = ''): string {
   const clean = sanitizeApprovalText(s)
   if (clean.length <= max) return clean
-  return `${clean.slice(0, max)}…(共 ${clean.length} 字符,已截断${tail})`
+  // 按**码点**切,不按 UTF-16 码元(Codex 七轮 L6,与 `clipApprovalText` 同一条):
+  // `slice` 会把 emoji / 增补平面的字劈成半个代理项,审批卡上凭空多一个原文里没有
+  // 的替换符——这行字的全部意义就是「它和真正要跑的命令是同一件事」。
+  const cps = Array.from(clean)
+  if (cps.length <= max) return clean
+  return `${cps.slice(0, max).join('')}…(共 ${cps.length} 字符,已截断${tail})`
 }
 
 function describeArgv(argv: unknown[], max = ARGV_TITLE_CHARS): string {

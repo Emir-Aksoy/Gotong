@@ -73,13 +73,20 @@ export class HumanInboxParticipant extends AgentParticipant {
       kind: payload.kind,
       prompt: payload.prompt,
       parentKind,
-      // IMA-M1 — a human step is addressed to exactly this person; answering
-      // from their bound IM chat is the same person on another channel.
-      imApprovable: true,
       status: 'pending',
       createdAt: this.now(),
     }
     if (payload.title !== undefined) item.title = payload.title
+    // IMA-M1 — a human step is addressed to exactly this person; answering
+    // from their bound IM chat is the same person on another channel.
+    //
+    // 这个标志断言的是**收件人**,不是「那行字够不够说清楚」。后者是渲染层的判据,
+    // 归 `imRowText`:它把 title 与 prompt **两段一起**渲染并按一行预算量,读不全的
+    // 自然落网页(Codex 六轮 H2 想挡的盲签形状——`title: 排班确认` + `prompt: <整张
+    // 排班表>`——正是这样被挡下的)。曾经在这里按「有没有标题」收窄过一版(六轮),
+    // 七轮核出它误伤 21 条画廊里本来短小、本来该能在手机上批的 human 步:标题在场
+    // 不等于正文被藏起来,把两段都渲染出来才是诚实的修法。
+    item.imApprovable = true
     if (payload.options !== undefined) item.options = payload.options
     if (payload.editField !== undefined) item.editField = payload.editField
     if (parentNode) item.parent = { taskId: parentNode.taskId, by: parentNode.by }

@@ -40,10 +40,12 @@ function isInvisible(c: number): boolean {
   if (c >= 0x200b && c <= 0x200f) return true // 零宽 + LRM/RLM
   if (c === 0x2028 || c === 0x2029) return true // 行 / 段分隔符
   if (c >= 0x202a && c <= 0x202e) return true // 双向嵌入 / 覆盖
-  if (c >= 0x2060 && c <= 0x2064) return true // word joiner / 不可见运算符
-  if (c >= 0x2066 && c <= 0x2069) return true // 双向隔离
+  if (c >= 0x2060 && c <= 0x206f) return true // word joiner / 双向隔离 / 弃用的格式字符
+  if (c >= 0xd800 && c <= 0xdfff) return true // 落单的代理项(渲染成 U+FFFD 的「幽灵字」)
+  if (c === 0x2800) return true // BRAILLE PATTERN BLANK:分类是符号,渲染是空白
   if (c === 0x3164 || c === 0xffa0) return true // 谚文填充(全角 / 半角)
   if (c >= 0xfe00 && c <= 0xfe0f) return true // 变体选择符
+  if (c >= 0xfff9 && c <= 0xfffb) return true // 行间注释(渲染面各行其是)
   if (c === 0xfeff) return true // BOM / 零宽不换行空格
   if (c >= 0xe0000 && c <= 0xe007f) return true // 标签字符(整段隐藏文字的老把戏)
   if (c >= 0xe0100 && c <= 0xe01ef) return true // 变体选择符补充
@@ -81,11 +83,31 @@ export function sanitizeApprovalText(s: string): string {
 }
 
 /**
+ * 这行字里有没有**人能读到的东西**。
+ *
+ * 上面那张 `isInvisible` 名单是黑名单,而不可见码点是一个开着口子的集合(U+2800
+ * 是「符号」类却渲染成空白、U+FFF9–FFFB 各家渲染面各行其是、以后 Unicode 还会
+ * 加)。所以判据反过来写成白名单(Codex 七轮 H2):**至少要有一个字母 / 数字 /
+ * 标点 / 符号**,否则这行字读出来什么都没有——空白从来不是一个完整的故事。
+ *
+ * 白名单先于名单跑不行,顺序是「先洗后问」:洗完的空格不算内容,漏网的不可见字符
+ * 也进不了这四类,两道各自兜住一半。
+ */
+export function hasVisibleContent(s: string): boolean {
+  return /[\p{L}\p{N}\p{P}\p{S}]/u.test(s)
+}
+
+/**
  * 清洗 + 有界。超长的正文同样是一种覆盖攻击(把真正的动作顶出屏幕),所以给一个
  * 上限;截断处**必须说自己截了**——一个不说自己是节选的节选,读起来就是全文。
  */
 export function clipApprovalText(s: string, max: number): string {
   const clean = sanitizeApprovalText(s)
   if (clean.length <= max) return clean
-  return `${clean.slice(0, max)}…(共 ${clean.length} 字符,已截断)`
+  // 按**码点**切,不按 UTF-16 码元(Codex 六轮 L):`slice` 会把一个 emoji / 增补
+  // 平面的字劈成半个代理项,渲染出来是替换符 U+FFFD——审批卡上凭空多出一个不是
+  // 原文的字符,而这行字的全部意义就是「它和真正要跑的动作是同一件事」。
+  const cps = Array.from(clean)
+  if (cps.length <= max) return clean
+  return `${cps.slice(0, max).join('')}…(共 ${cps.length} 字符,已截断)`
 }

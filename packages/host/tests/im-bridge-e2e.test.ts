@@ -368,7 +368,9 @@ describe('IMA-M2 — IM approval verbs', () => {
 
   it('maps every gate code to an actionable bilingual line', async () => {
     const cases: Array<[string, string]> = [
-      ['short_id_too_short', '至少要 4 位'],
+      // 七轮 M4:下限抬到全长后,这条不再说「至少要 N 位」——短码是内容指纹,
+      // 抄一半就不是那个动作的名字了,只能整串打全。
+      ['short_id_too_short', '编号要打全'],
       ['not_found', '没有找到匹配'],
       ['ambiguous', '完整编号'],
       ['web_only', '需要在网页上处理'],
@@ -376,6 +378,8 @@ describe('IMA-M2 — IM approval verbs', () => {
       ['not_approval_kind', '填写具体内容'],
       ['already_resolved', '已经被处理过'],
       ['forbidden', '不归你处理'],
+      // 七轮 H1:审批飞行中同一个 id 被换成了另一个动作,store 拒绝落笔。
+      ['stale_item', '变成另一个动作'],
     ]
     for (const [code, expected] of cases) {
       config.approvals = {

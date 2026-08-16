@@ -23,6 +23,7 @@ import {
   InboxError,
   type InboxDecision,
   type InboxEvent,
+  type InboxExpectation,
   type InboxItem,
   type InboxStore,
 } from './types.js'
@@ -138,14 +139,16 @@ export class FileInboxStore implements InboxStore {
     itemId: string,
     decision: InboxDecision,
     now: number = Date.now(),
+    expect?: InboxExpectation,
   ): Promise<InboxItem> {
-    return this.serialize(itemId, () => this.resolveLocked(itemId, decision, now))
+    return this.serialize(itemId, () => this.resolveLocked(itemId, decision, now, expect))
   }
 
   private async resolveLocked(
     itemId: string,
     decision: InboxDecision,
     now: number,
+    expect?: InboxExpectation,
   ): Promise<InboxItem> {
     const item = await this.get(itemId)
     if (!item) {
@@ -159,6 +162,17 @@ export class FileInboxStore implements InboxStore {
       throw new InboxError(
         'already_resolved',
         `inbox item '${itemId}' is already ${item.status}`,
+      )
+    }
+    // GENERATION guard (Codex 七轮 H1). It sits HERE — inside the per-item
+    // lock, on the freshly-read item, one statement before the write — because
+    // an id is not a generation: `write()` re-parks a *different* action under
+    // the same id and leaves it `pending`, so the guard above waves it through.
+    // Checking this in the caller instead leaves exactly that window open.
+    if (expect && !expect(item)) {
+      throw new InboxError(
+        'stale_item',
+        `inbox item '${itemId}' changed since it was shown; refusing to resolve the wrong action`,
       )
     }
     // Seed the action trail (inbox-gov M1). The resolver is the assignee —

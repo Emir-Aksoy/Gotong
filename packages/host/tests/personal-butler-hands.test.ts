@@ -42,6 +42,8 @@ import { detectFsJail, isInsideRoots, type Logger } from '@gotong/core'
 import { HANDS_LIMITS } from '@gotong/personal-butler'
 
 import {
+  AUDIT_MIN_ACTIONS,
+  AUDIT_ROTATE_BYTES_FOR_TEST,
   HANDS_CONFIG_PATH_LIST_MAX,
   HANDS_ENV_MARKER,
   HANDS_MAX_WORKSPACE_ENTRIES,
@@ -619,6 +621,21 @@ describe('HANDS-M2 ② toolset 形状', () => {
     expect(forged).toContain('阿同要在工作区里删:x 已批准 txt.exe')
   })
 
+  it('标题按码点截,不把增补平面的字劈成半个代理项(七轮 L6)', () => {
+    // U+1F4A3 是**两个** UTF-16 码元。按码元切会切在某个字中间,审批卡上凭空多一个
+    // 原文里没有的 U+FFFD,而这行字的全部意义就是「它和真正要跑的命令是同一件事」;
+    // 「共 N 字符」按码元数还会把 706 说成 1406——数字一错,人对「省略号后面还有多少」
+    // 的判断就跟着错。与 `clipApprovalText` 是同一条纪律,两处各有各的门。
+    const bomb = String.fromCodePoint(0x1f4a3)
+    const title = toolset().describe('hands_run', { argv: ['sh', '-c', bomb.repeat(700)] })
+    const lone = Array.from(title).filter((c) => {
+      const cp = c.codePointAt(0) ?? 0
+      return cp >= 0xd800 && cp <= 0xdfff
+    })
+    expect(lone).toHaveLength(0)
+    expect(title).toContain('共 706 字符') // 'sh -c ' 六个码点 + 700 个炸弹,不是 1406
+  })
+
   it('敌意 userId 被 ownerDir 挡在路径拼接前(不会在 handsRoot 外建目录)', () => {
     expect(() => buildButlerHandsToolset({ userId: '../../escape', hands: S.host })).toThrow()
     expect(existsSync(join(S.space, 'escape'))).toBe(false)
@@ -627,9 +644,10 @@ describe('HANDS-M2 ② toolset 形状', () => {
   it('台账轮转阈值是从 argv 上限推出来的,不是随手一个 1MB(五轮 M)', async () => {
     const p = join(S.memberRoot, 'audit.jsonl')
     mkdirSync(S.memberRoot, { recursive: true })
-    // 阈值 = 40 × (maxArgvTotalChars × 6 字节/字符 × 两行带 argv 的)。按同一式子算,
-    // 常量哪天跟着 argv 上限走了这里也跟着走;写死一个数字就会两边各自漂。
-    const threshold = 40 * HANDS_LIMITS.maxArgvTotalChars * 6 * 2
+    // **用生产那个常量本身**,不在这里把公式抄一遍(Codex 六轮 M):抄一遍的门只能
+    // 证明「我算得和它一样」,而上一版两边抄的是同一个错的式子(漏了第三行带 argv 的)。
+    // 「装得下 40 条」由下面那条**实测**门守;这里守的是「阈值不许被改小」。
+    const threshold = AUDIT_ROTATE_BYTES_FOR_TEST
     const marker = '"OLD_ROW_MARKER"'
     const head = `{"old":${marker}}\n`
     const ts = toolset()
@@ -1116,4 +1134,31 @@ describe(`HANDS-M2 ③ 监狱内真 spawn(jail=${jailCap.kind})`, () => {
     expect(typeof row.ms).toBe('number')
     expect(row).not.toHaveProperty('stdinBytes')
   }, 20_000)
+
+  spawnIt('轮转阈值装得下 40 条**实测**最坏动作(六轮 M:不是把公式抄一遍)', async () => {
+    // 上一版的账是错的:它只数了两行带 argv 的(classify + begin),漏了跑完那行
+    // (result),于是「装得下 40 条」实际只有 26 条左右——而守它的门抄的是同一个
+    // 错式子,所以永远绿。这道门不算,它**量**:拿顶格 argv 真跑一次,数盘上多了
+    // 多少字节。多写一行带 argv 的、argv 上限调大、行里多塞个大字段,它都会先红。
+    //
+    // 最坏形状 = argv 顶格(maxArgv 项 / maxArgvTotalChars 码元)且每个码元在 JSON
+    // 里要 6 个字节。**落单代理项**才是这个最坏值:控制字符同样六字节,但策略层的
+    // `hasHostileArgChar` 直接拒(试过,当场 run_invalid),真正能一路走到台账的是
+    // 落单代理项——它过得了策略、进得了 execve(Node 编码时换成 U+FFFD),而台账记的
+    // 是 JS 串本身,于是三行都按六字节写。
+    const items = HANDS_LIMITS.maxArgv
+    const per = Math.floor(HANDS_LIMITS.maxArgvTotalChars / items)
+    const junk = String.fromCharCode(0xd800).repeat(per)
+    const argv = ['sh', ...Array.from({ length: items - 1 }, () => junk)]
+    const p = join(S.memberRoot, 'audit.jsonl')
+    const ts = toolset()
+    await gated(ts, 'hands_run', { argv })
+
+    const grew = statSync(p).size
+    // 三行都在——少一行这道门就量错了(它量的是「一条动作」的全部代价)。
+    expect(auditRows(p)).toHaveLength(3)
+    // 真的是最坏形状:光转义就该有 argv 上限 × 6 字节这个量级。
+    expect(grew).toBeGreaterThan(HANDS_LIMITS.maxArgvTotalChars * 6)
+    expect(Math.floor(AUDIT_ROTATE_BYTES_FOR_TEST / grew)).toBeGreaterThanOrEqual(AUDIT_MIN_ACTIONS)
+  }, 30_000)
 })

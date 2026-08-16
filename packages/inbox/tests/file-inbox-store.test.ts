@@ -159,6 +159,56 @@ describe('FileInboxStore', () => {
     }
   })
 
+  // Codex 七轮 H1 — 代际守卫。id 不是代际:`write()` 会把**另一个动作**写进同一个
+  // itemId 并且仍然是 pending,于是上面那道 pending 判据照样放行。判据必须跑在
+  // store 自己的原子 transition 里,所以这几条门测的是 store,不是调用方。
+  it('expect 判 false ⇒ stale_item,而且一个字节都没写', async () => {
+    await store.write(item({ itemId: 'gen', prompt: '读一个文件' }))
+    // 人读到的那一代:
+    const seen = (await store.get('gen'))!
+    // …然后管家在同一个 id 下重新 park 了另一个动作(仍然 pending)。
+    await store.write(item({ itemId: 'gen', prompt: '往外发一封邮件' }))
+
+    try {
+      await store.markResolved(
+        'gen',
+        { kind: 'approval', approved: true },
+        7,
+        (fresh) => fresh.prompt === seen.prompt,
+      )
+      throw new Error('expected markResolved to refuse a changed item')
+    } catch (err) {
+      expect(err).toBeInstanceOf(InboxError)
+      expect((err as InboxError).code).toBe('stale_item')
+    }
+    // 没批下去:那条邮件还挂着,没有 decision、没有 resolvedAt、没有 history。
+    const after = (await store.get('gen'))!
+    expect(after.status).toBe('pending')
+    expect(after.prompt).toBe('往外发一封邮件')
+    expect(after.decision).toBeUndefined()
+    expect(after.resolvedAt).toBeUndefined()
+    expect(after.history).toBeUndefined()
+  })
+
+  it('expect 判 true(没变过)⇒ 照常 resolve;不传 expect ⇒ 逐字节今天', async () => {
+    await store.write(item({ itemId: 'gen-ok', prompt: '读一个文件' }))
+    const seen = (await store.get('gen-ok'))!
+    const r = await store.markResolved(
+      'gen-ok',
+      { kind: 'approval', approved: true },
+      9,
+      (fresh) => fresh.prompt === seen.prompt,
+    )
+    expect(r.status).toBe('resolved')
+    expect(r.resolvedAt).toBe(9)
+
+    // 不传 = 老调用点(web / demo / 例子),行为一个字节都不变。
+    await store.write(item({ itemId: 'gen-none' }))
+    expect((await store.markResolved('gen-none', { kind: 'approval', approved: false })).status).toBe(
+      'resolved',
+    )
+  })
+
   // Audit M5 — the race guard is read-check-write, so two resolves issued in
   // the SAME tick (a double-click, or a request racing the resume sweep) can
   // both `get()` the pending item before either `write()`s, both pass the

@@ -150,6 +150,23 @@ export interface InboxItem {
 }
 
 /**
+ * A caller-supplied predicate on the item as it exists *at the moment of the
+ * transition*. `false` ⇒ the store refuses with `InboxError('stale_item')` and
+ * writes nothing.
+ *
+ * Why this lives in the store contract and not in the caller (Codex 七轮 H1):
+ * an item id is **not** a generation. `write()` overwrites an existing id
+ * unconditionally and resets `status` to `pending` — the butler tool-loop does
+ * exactly that, re-parking a *different* action under the same `task.id`. So a
+ * caller that re-reads the item, checks "is this still the thing I showed the
+ * human", and then calls `markResolved(itemId, …)` has a window between its
+ * check and the store's write: the pending-only guard cannot see the swap
+ * (the new generation is pending too). Only a predicate evaluated inside the
+ * store's own atomic transition closes it.
+ */
+export type InboxExpectation = (item: InboxItem) => boolean
+
+/**
  * Persistence contract for inbox items. `FileInboxStore` is the default;
  * keep this narrow so a SQLite implementation can drop in unchanged.
  */
@@ -168,8 +185,17 @@ export interface InboxStore {
    * pending (so a second `resolve` is rejected BEFORE any `hub.resumeTask`
    * runs), and `InboxError('not_found')` when the item is missing. Returns the
    * updated item.
+   *
+   * `expect` is the **generation** guard (Codex 七轮 H1) and it must be
+   * evaluated *inside* the same atomic transition as the pending check — see
+   * {@link InboxExpectation} for why checking it anywhere else is a TOCTOU.
    */
-  markResolved(itemId: string, decision: InboxDecision, now?: number): Promise<InboxItem>
+  markResolved(
+    itemId: string,
+    decision: InboxDecision,
+    now?: number,
+    expect?: InboxExpectation,
+  ): Promise<InboxItem>
   /**
    * inbox-gov M2 — hand a still-`pending` item to a new assignee. Like
    * {@link markResolved} this is a pending-only guarded transition: it throws
@@ -196,6 +222,14 @@ export type InboxErrorCode =
   | 'invalid_payload'
   /** inbox-gov M2 — the delegate target is missing, unknown, or the caller itself. */
   | 'invalid_target'
+  /**
+   * The item id still exists and is still pending, but it is no longer the
+   * generation the caller was answering — the row was overwritten by a newer
+   * park under the same id. Distinct from `already_resolved` on purpose: the
+   * honest thing to tell the human is "this one changed, look again", not
+   * "someone already decided". See {@link InboxExpectation}.
+   */
+  | 'stale_item'
 
 /** Typed error so callers map `.code` to an HTTP status instead of parsing strings. */
 export class InboxError extends Error {

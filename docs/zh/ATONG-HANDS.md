@@ -2,7 +2,7 @@
 
 > Status: **M0 计划落档 + M1 四档策略纯核 + M2 手 A 原生执行器落地（2026-08-15）**——侦察 +
 > 威胁模型 + 四档策略 + 五岔口拍板 + 里程碑 M1→M7；M1 见 §九，M2 见 §十（真 spawn 门全过 +
-> Codex 交叉审五轮：5H/4M/1L → 2H/6M/2L → 3H/3M → 3H/3M → 2H/1M/1L，全部修入，见 §10.5）。**M2b 及之后的里程碑都是方向性规划，
+> Codex 交叉审七轮：5H/4M/1L → 2H/6M/2L → 3H/3M → 3H/3M → 2H/1M/1L → 2H/2M/1L → 2H/2M/3L，全部修入，见 §10.5）。**M2b 及之后的里程碑都是方向性规划，
 > 实现前按 M0 惯例重新细化。**
 > Last updated: 2026-08-15
 >
@@ -186,7 +186,7 @@ IM 通道即在；**至少一次网页触碰不可避免也不该避免**（owne
 |---|---|---|---|
 | M0 | 本文 | 侦察 + 威胁模型 + 四档表 + 五岔口 | — |
 | M1 | 四档策略纯核 | `personal-butler/src/hands-policy.ts` 纯函数 + 拒绝表 + realpath 逃逸判定 | 单测：配置区/凭证路径永不 allow；符号链接逃逸 refuse；`net:true`→approve；未知→非 allow；拒绝表命中 refuse |
-| M2 ✅ | 手 A 原生（2026-08-15，见 §十） | host `personal-butler-hands.ts` 执行器 + 五工具（**文件四动作走监狱内 node 小助手**）+ `hands.json` opt-in（含 `hidden`/`readOnly` 追加清单）+ core `FsJailHardening`（`unshareNet`/`unsharePid`/`hiddenPaths`/`hiddenFiles`/`readOnlyRoots`/`denySharedTmp`，additive；seatbelt 侧 `unsharePid` 映射成进程隔离规则）+ 上限（含监狱内 `ulimit`）+ 审计（含 stdin 摘要/sha256）+ factory 接线 + AFR 三件套 + main.ts 棘轮显式抬（2768/2770→2772/2780）+ 备份排除工作区 `node_modules` | 真 spawn 门（本机 sandbox-exec 68 例全过，bwrap 靠 argv 单测）：`cat <space>/gotong.env` 在监狱内失败；写 `<space>/agents.json` 双拒（监狱 rc≠0 且字节不变 + hands_write 穿越 refuse）；hub 用户 HOME 与点名文件藏起来；策略放行后目录换成指向 `<space>` 的链接小助手照样写不进读不出（TOCTOU 真闸=监狱）；断网命令联本机 HTTP 失败、`net:true` approve 后成功；超时/超输出/洪水响亮；命令退出即收整个进程组；hub 级并发 1 响亮拒；`kind:'none'` 整套不装；缺席字节不变（脸 absent≡off≡armed−hands_*）；子环境零凭证且 TMPDIR 指进工作区；审计不落正文；**Codex 交叉审五轮**（5H/4M/1L → 2H/6M/2L → 3H/3M → 3H/3M → 2H/1M/1L 全部修入，§10.5）✅ |
+| M2 ✅ | 手 A 原生（2026-08-15，见 §十） | host `personal-butler-hands.ts` 执行器 + 五工具（**文件四动作走监狱内 node 小助手**）+ `hands.json` opt-in（含 `hidden`/`readOnly` 追加清单）+ core `FsJailHardening`（`unshareNet`/`unsharePid`/`hiddenPaths`/`hiddenFiles`/`readOnlyRoots`/`denySharedTmp`，additive；seatbelt 侧 `unsharePid` 映射成进程隔离规则）+ 上限（含监狱内 `ulimit`）+ 审计（含 stdin 摘要/sha256）+ factory 接线 + AFR 三件套 + main.ts 棘轮显式抬（2768/2770→2772/2780）+ 备份排除工作区 `node_modules` | 真 spawn 门（本机 sandbox-exec 69 例全过，bwrap 靠 argv 单测）：`cat <space>/gotong.env` 在监狱内失败；写 `<space>/agents.json` 双拒（监狱 rc≠0 且字节不变 + hands_write 穿越 refuse）；hub 用户 HOME 与点名文件藏起来；策略放行后目录换成指向 `<space>` 的链接小助手照样写不进读不出（TOCTOU 真闸=监狱）；断网命令联本机 HTTP 失败、`net:true` approve 后成功；超时/超输出/洪水响亮；命令退出即收整个进程组；hub 级并发 1 响亮拒；`kind:'none'` 整套不装；缺席字节不变（脸 absent≡off≡armed−hands_*）；子环境零凭证且 TMPDIR 指进工作区；审计不落正文；**Codex 交叉审七轮**（5H/4M/1L → 2H/6M/2L → 3H/3M → 3H/3M → 2H/1M/1L → 2H/2M/1L → 2H/2M/3L 全部修入，§10.5）✅ |
 | M2b | 手 B 外驱 | cli-agent 参与者 + 共用工作区 + escalate 转派配方 + docs | e2e：阿同写需求→coder 改文件→阿同 `hands_run` 跑测试 |
 | M3 | 手机配置面 | `/setkey` 双路径 + 一次性链接 + 优劣文案 + config-write 两步确认 + `/keys` + SETTING-OPS-CONSOLE 改口 | 单测：直贴不进 SESS 窗/transcript、不回显；非 owner/admin 绑定拒；链接单次 10min；两步确认走 IMA；**Codex 交叉审** |
 | M4 | 环境探测→方案→人批 | `hub_environment` + 提案卡 + tier 2 应用 | 探针零 LLM；不可应用项只指路 |
@@ -270,12 +270,14 @@ additive）；四门 PASS 全程；每个新 builder 过 AFR 注册三件套（t
 
 `packages/host/src/personal-butler-hands.ts`（约 1300 行）+ core `FsJailHardening`（additive 六键）+
 factory/self-status/capabilities/main.ts 接线 + cli 备份排除；host 承重门
-`tests/personal-butler-hands.test.ts` **68 例**（其中 22 例在真 OS 监狱里 spawn——文件四工具也在这
+`tests/personal-butler-hands.test.ts` **69 例**（其中 23 例在真 OS 监狱里 spawn——文件四工具也在这
 一层），core `workspace-jail-os.test.ts` **33 例**，另有共享审批文案的 `approval-text.test.ts` **14 例**
-与跨入口的 `approval-copy-shared.test.ts`。**Codex 交叉审五轮**（§10.5）：每一轮都是对**上一轮修完的
-代码**再审，前四轮的结论都是「修了再提交」——5H/4M/1L → 2H/6M/2L → 3H/3M → 3H/3M → 2H/1M/1L，
-全部修入。其中两条是**前一轮的修法自己引入的**（二轮 S1：藏 HOME 会把 HOME 下的工作区一起盖掉；
-五轮 H1：四轮把写进去的那行字修对了，读出来那行仍在硬截断），这正是多轮审的价值所在。
+与跨入口的 `approval-copy-shared.test.ts`。**Codex 交叉审七轮**（§10.5）：每一轮都是对**上一轮修完的
+代码**再审，前六轮的结论都是「修了再提交」——5H/4M/1L → 2H/6M/2L → 3H/3M → 3H/3M → 2H/1M/1L →
+2H/2M/1L → 2H/2M/3L，全部修入。其中四条是**前一轮的修法自己引入的**（二轮 S1：藏 HOME 会把 HOME
+下的工作区一起盖掉；五轮 H1：四轮把写进去的那行字修对了，读出来那行仍在硬截断；七轮 M3：六轮为了挡
+盲签而收窄，误伤了 21 条本来短小的画廊 human 步；七轮 M4：六轮把短码换成内容指纹后，「至少 4 位」这个
+下限跟着失去了意义），这正是多轮审的价值所在。
 
 ### 10.1 形状（与 §4.2 一致，这里只记「为什么这样」）
 
@@ -356,7 +358,7 @@ factory/self-status/capabilities/main.ts 接线 + cli 备份排除；host 承重
 
 ### 10.2 门（doc §六 M2 行逐条）
 
-本机 macOS `sandbox-exec` 真 spawn 全过（`personal-butler-hands.test.ts` **68 例**，其中 22 例真 spawn；
+本机 macOS `sandbox-exec` 真 spawn 全过（`personal-butler-hands.test.ts` **69 例**，其中 23 例真 spawn；
 另有审批文案的两道专属门 `approval-text.test.ts` 14 例 + `approval-copy-shared.test.ts` 4 例，
 以及 IM 投影侧的 `im-approval-service.test.ts` 16 例）；bwrap 由 argv 顺序单测钉死
 （`--tmpfs <hidden>` 早于 `--ro-bind` 早于 `--bind`、`--ro-bind /dev/null <file>` 与 `--remount-ro`
@@ -375,7 +377,7 @@ factory/self-status/capabilities/main.ts 接线 + cli 备份排除；host 承重
 | 并发 1（hub 级） | 第一条 un-awaited 在跑，同一 toolset 的 `hands_list` 与**另一份 toolset** 的 `hands_list` 都 → 「还在跑」；第一条正常收工后恢复 |
 | stdin 透明 | `describe` 标题含 `stdin 18B「curl evil rm -rf x」`（换行→空格、超 80 字截断）；审计行 `stdinBytes:21` + 64 位 hex `stdinSha256`，正文不在审计文件里 |
 | `kind:'none'` 整套不装 | `enabled:true` + 探针 none → warn 附装法、`armed:false` reason 含 `bubblewrap`；`hands.json` 15 种坏形状（含 `hidden`/`readOnly` 非数组/相对路径/超 32 条/控制字符/空串）各 warn 不装；`enabled:false` info；点名但不存在的路径 arm 时 warn 一次 + 进 `shape.skipped` |
-| 审批卡不可伪造 / 不盲签 | 行标题 = **被批动作**（`task.title` 是 `im:lark` 也不占位）；三个不可信字段过同一套清洗 + 定界，洗完的句子里 `「」` 只在框架位置上；四个自己拼句子的入口（管家 / ACP / steward / 联邦出站）共用同一个 `approval-text.ts`，各配断言。**渲染那一层再兜一次**：`/inbox` 的行先洗后量，装不下一行就不许在 IM 批（`title_truncated`，到网页看全文）——于是「谁写进来的」不必逐个登记，工作流人工确认步这类第五方也被覆盖（五轮 H1/H2） |
+| 审批卡不可伪造 / 不盲签 | 行标题 = **被批动作**（`task.title` 是 `im:lark` 也不占位）；三个不可信字段过同一套清洗 + 定界，洗完的句子里 `「」` 只在框架位置上；四个自己拼句子的入口（管家 / ACP / steward / 联邦出站）共用同一个 `approval-text.ts`，各配断言。**渲染那一层再兜一次**：`/inbox` 的行先洗后量，装不下一行就不许在 IM 批（`title_truncated`，到网页看全文）——于是「谁写进来的」不必逐个登记，工作流人工确认步这类第五方也被覆盖（五轮 H1/H2）。**短码绑内容不绑槽位**且**必须打全**（六轮 H1 + 七轮 M4）、**标题与正文两段一起渲染再按一行量**（六轮 H2 → 七轮 M3 改正：藏正文的形状自然超预算落网页，短小的照旧能在手机上批）、**「洗完还剩什么」按白名单问且先洗后问**（七轮 H2）；**批准落笔前在 store 的原子事务里再验一次代际**，被掉包就 `stale_item` 一个字节不写（七轮 H1） |
 | 可批准 ≡ 可留档 | 策略 argv 总量顶与台账容量是同一个常量；**上限那一点**的命令原样进台账、零截断标记；台账记结构化 argv 向量（`['printf','a b']` 与 `['printf','a','b']` 分得开） |
 | 每趟都留痕（并发下也是） | 同一成员两次并发：先进门那趟早退 + 后一趟被 `BUSY` 拒，两条各留各的行（兜底状态跟着调用走，不是 toolset 共用一格） |
 | HOME 藏不住就停手 | arm 时与**每次 spawn 前**用逐字相同的三条件判死（`/`、空、相对路径）；arm 之后 HOME 变样 ⇒ 这一步 isError 且工作区无字节落地，台账上 `begin` + 兜底两行看得见 |
@@ -401,6 +403,12 @@ factory/self-status/capabilities/main.ts 接线 + cli 备份排除；host 承重
 
 ### 10.4 诚实残余
 
+- **代际闸只接在 IM 那条路上**（七轮 H1）：`/approve <短码>` 会把「我在批的是哪一代」作为谓词传进
+  store，网页 `/me` 的收件箱按钮不传——它按 `itemId` 直接 resolve，同一个 id 在页面渲染之后被重新 park
+  成另一个动作，点下去批的仍是新的那一代。**要补的不是 store**（那道闸已经是通用的），而是让 `/me` 的
+  投影 DTO 带上同一个指纹、SPA 原样回传。挡它的是这需要动 `/me` 的返回形状与前端一跳，不属于这一刀；
+  已挂独立票。网页那一侧的窗口比 IM 小（人正看着那张卡、不存在「从聊天记录里往上翻」），但它确实还在。
+
 - **藏起来的以外的宿主文件系统监狱里可读**（系统目录、`/opt`、`/etc` 里没点名的、其他用户 0755 的家）
   ——「凭证结构性缺席」说的是 hub 自己的凭证（`<space>`、HOME、点名文件），不是整台机器；把 hub 用户的
   凭证放在 HOME/`<space>`/`/etc/gotong.env` 之外的操作者要用 `hands.json` `hidden` 点名。
@@ -417,12 +425,15 @@ factory/self-status/capabilities/main.ts 接线 + cli 备份排除；host 承重
   `launchctl` 起后台任务在 macOS 26 被 launchd 自己拒掉 —— `(deny job-creation)` 是第二把锁）；BSD
   `mkdir -p` 用**绝对路径**穿藏起来的祖先会 EPERM（用相对路径；Linux bwrap 无此问题，tmpfs 挂载点存在）。
   生产 = Linux，这些是开发机注脚。
-- 审计台账轮转只留一代 `.1`，阈值从策略层的 argv 上限推出来（≈7.5MB，见 §10.5 五轮 M3）。**动手前**会真落一行 `begin`（写不成就 fail-closed 拒绝，见 §10.5 三轮 M5），但
+- 审计台账轮转只留一代 `.1`，阈值从策略层的 argv 上限推出来（≈12MB，见 §10.5 六轮 M3）。**动手前**会真落一行 `begin`（写不成就 fail-closed 拒绝，见 §10.5 三轮 M5），但
   **事后** append 失败（盘刚好满在这一瞬）只 warn——动作已经发生，拒绝收不回。`begin` 那行的承诺**只到
   进程崩溃**：`appendFileSync` 不 fsync，整机断电时它可能还在页缓存里没落盘，故这条不承诺断电语义
   （四轮确认；要断电语义得每行 fsync，那是给每次动手加一次同步刷盘的代价，这双手不值这个价）。
-  轮转本身天生是个**窗口**：发足够多顶格 argv 的动作仍能把旧行推出去（阈值 ≈7.5MB ≈ 40 条顶格动作
-  或两万多条正常动作）。挡不住，只能让它变贵且留痕——那些动作每一条自己都先被记了下来（五轮 M3）。
+  轮转本身天生是个**窗口**：发足够多顶格 argv 的动作仍能把旧行推出去（阈值 ≈12.3MB ≈ 40 条顶格动作，
+  或**约一万四千条**正常动作——一条动作记三行、一行约 300 字节，七轮 L7 纠正了此前把行数当动作数的算法）。
+  挡不住，只能让它变贵且留痕——那些动作每一条自己都先被记了下来（六轮 M3）。
+  **台账本身不在工作区配额之内**（它在 `<space>` 侧，手够不到）：最坏情况是每成员 ≈2 代 × 12MB，
+  没有 hub 级总量顶——真要治得给台账一个独立的总盘子，记档不做（六轮 M3）。
 - 审批标题里的命令到 600 字符为止，超出明说「共 N 字符，已截断，完整命令见审计台账」——**兑现得了**：
   分级那一刻的 `classify` 行带完整 argv，且策略层的 argv 总量顶（16KB）与台账的容量是**同一个常量**
   （四轮 H2），于是「可批准的命令」必然是「可留档的命令」。stdin 摘要到 240 字符为止，截断处只说「共 N 字符，已截断」
@@ -431,7 +442,7 @@ factory/self-status/capabilities/main.ts 接线 + cli 备份排除；host 承重
   = 密码、token 从此有第二份落盘副本），把它写在这里而不是假装没有。
 - 真 bwrap 机器上的 spawn 门待 Linux 真机跑一遍（argv 已单测钉死；M6 一键镜像的 CI 就是那台机器）。
 
-### 10.5 Codex 交叉审账（gpt-5.6-sol，四轮）
+### 10.5 Codex 交叉审账（gpt-5.6-sol，七轮）
 
 首轮结论「修了再提交」5H/4M/1L，逐条对源码核实后**全部修入**（复审见本节末）：
 
@@ -512,3 +523,44 @@ H1b 关掉 resolve 侧完整性门 ⇒ 拒批那例红；H2 让 `imRowText` 不�
 `task.title` ⇒ 各 1 例红；M3 换回写死的 1MB ⇒ 轮转那例红。**M3 那次变异第一遍没红**——测试只证了「超过阈值
 会轮转」，而 1MB 同样会轮转；补上「差一个字节到阈值就**不**该轮转」这半边才真的钉住了阈值本身。
 变异测试自己也要被验证：它没变红时，先怀疑门而不是怀疑变异。
+
+**六轮**（对五轮修完的代码再审）结论仍是「修了再提交」，2H/2M/1L；`steward`/联邦出站的动作标签本轮
+没有再漏分支。逐条对源码核实后全部收口：
+
+| # | 级 | 发现 | 修法 |
+|---|---|---|---|
+| H1 | 高 | **短码是槽位号不是内容**：收件箱按 `itemId = task.id` 寻址，而**同一个任务会在同一个 id 下反复 park**（管家 tool-loop 批一个跑一个，`FileInboxStore.write` 直接覆盖）。于是聊天记录里往上翻一条旧 `/inbox` 抄下来的短码今天仍然匹配得上——人以为在批「读一个文件」，批下去的是后来写进去的「往外发」 | 短码改成**内容指纹**：`imShortId()` = sha256(itemId ‖ createdAt ‖ title ‖ prompt) 前 8 位，各段带长度前缀（不用分隔符 ⇒ 不存在「把分隔符写进标题里凑出另一段组合」）。动作一变短码就变，旧短码落 `not_found`（桥回「可能已被处理，发 /inbox 看最新列表」）；同一件事没变过 ⇒ 短码稳定，抄下来照样能用 |
+| H2 | 高 | **标题把正文藏起来**：`imApprovable` 是**写入时**的断言「这一行字就是全部内容」，但 `HumanInboxParticipant` 无条件标它。IM 一行渲染的是 `title ?? prompt`，网页两样都显示 ⇒ `title: 排班确认` + `prompt: <整张排班表>` 在手机上读到的只有四个字。**仓里两个画廊模板正好是这个形状**（`cafe-ops` / `pro-firm-hub`） | 写入侧收窄成**「给了标题就只能在网页上批」**（`payload.title === undefined` 才标）——steward / 联邦出站 / 管家的标题是从动作**算**出来的、与正文同信息量，不受影响；投影侧再兜一道：洗完是空白（`title` 写成一个零宽字符）同样降级网页，行文本换成「(这条没有可显示的内容)」。空白永远不是一个完整的故事 |
+| M3 | 中 | **轮转阈值算少了、而且那道门永远绿**：一次 `hands_run` 落的是 **三** 行带 argv 的记录（`begin`/`approved`/`end`）不是两行，故五轮那个 ≈7.5MB 实际只装得下 ~26 条而不是 40 条；更糟的是门**照抄了同一个公式**，只能证明「我算得和它一样」 | 常量按三行重算（`AUDIT_MIN_ACTIONS × 每条 3 行 ≈ 12MB`），门改成**量出来的**：真跑一条顶格 argv 的动作、`statSync` 量它涨了多少字节，再断言阈值除以实测值 ≥ 40。**排错记**：第一版用控制字符填 argv 只落了 1 行——`hasHostileArgChar` 在策略层就把它拒了（`run_invalid`），真正的 6 字节/码元最坏情况是**孤立代理项**（控制字符结构性到不了台账）。另记两条诚实残余：轮转天生是窗口；台账在工作区配额之外，最坏 ≈25MB × 成员数，无 hub 级总量顶 |
+| L | 低 | **截断能劈开一个字**：`clipApprovalText` 按 UTF-16 码元 `slice`，把增补平面的字（emoji 等）切成半个代理项，渲染出来多一个原文里没有的替换符——而这行字的全部意义就是「它和真正要跑的动作是同一件事」 | 按**码点**切（`Array.from`），「共 N 字符」也随之按码点数（20 个 emoji 是 20 不是 40） |
+
+六轮同样逐条变异测试（四次，全部按预期变红后复原 byte-identical）：H1 短码退回 `itemId` 前缀 ⇒ 旧短码
+那例红（而且红得很准：`promise resolved "{ title: '往外发一封邮件' }" instead of rejecting`——正是那个洞
+本身）；H2 写入侧改回无条件标 ⇒ 带标题那例红；H2b 去掉「洗完空白」判据 ⇒ 零宽标题那例红；L 退回按码元
+切 ⇒ 孤立代理项那例红。
+
+**七轮**（对六轮修完的代码再审）2H/2M/3L。这一轮有两条是**六轮的修法自己带出来的**（M3 是它误伤了
+别人，M4 是它让一个下限失去了意义），另有一条 L 是六轮那一刀只砍了两处同型代码中的一处。逐条对源码
+核实后全部收口：
+
+| # | 级 | 发现 | 修法 |
+|---|---|---|---|
+| H1 | 高 | **六轮的指纹只挡住了「抄旧短码」，没挡住「批准飞行中被掉包」**：`resolveByShortId` 重算一次指纹确认这仍是那个动作，然后才调 `markResolved` —— 两步之间同一个 id 可以被重新 park 成另一个动作。store 那道 pending-only 闸看不见这次掉包（新一代同样是 `pending`），于是人批的是 A、落笔的是 B。**id 不是代际** | 把「我在批的是哪一代」作为**谓词**一路传到 store：新 `InboxExpectation`（`InboxStore.markResolved` 第四参，additive 可选），在 `resolveLocked` 里**紧挨着写之前、且在同一把 per-item 锁内**求值，不符 ⇒ 新错误码 `stale_item`，一个字节都不写。IM 侧传的谓词就是「重算的指纹还等于人打的那串码」。**放在调用方检查是治不好的**——窗口正是在调用方检查之后 |
+| H2 | 高 | **「洗完是空白」的判据是反着写的**：六轮 H2b 问的是「洗完还剩不剩字符」，那是拿黑名单当全集。渲染成空白但**不在**名单里的字符照样答「有内容」 | 判据换成白名单：`hasVisibleContent()` 要求至少有一个字母/数字/标点/符号。**顺序在这里承重**——白名单自己也会被骗（U+2800 盲文空模的分类是**符号**、U+3164 谚文填充是**字母**，两者屏幕上都是空白），所以必须**先洗后问**：名单先把它们换成空格，白名单再问洗完还剩什么。同轮补齐名单：U+2800、落单代理项、U+FFF9–FFFB 行间注释、U+2060–206F 合并成整段 |
+| M3 | 中 | **六轮 H2 的收窄误伤了正主**：它把「写了 `title` 就只能在网页上批」当成修法，可标题在场 ≠ 正文被藏起来。仓里 **21 条**画廊 human 步本来短小、本来该能在手机上批，被这一刀一起关进网页 | 收窄整个撤掉，改在**渲染层**做诚实的事：`imRowText` 把 `title` 与 `prompt` **两段一起**渲染再按一行预算量——藏正文的那种形状（短标题 + 一整张表）自然超预算落 `title_truncated`，短小的那 21 条照旧能在手机上批。**一处刻意**：正文里已经含标题就不重复拼（管家 park 的 prompt 本就把标题逐字嵌在里面，拼一遍会平白多出 5 个字符把 80 的预算顶爆，让**每一条**管家 governed park 都变成网页 only） |
+| M4 | 中 | **下限还停在「至少 4 位」**：短码在六轮已经从 id 前缀变成内容指纹，而指纹抄一半不是任何东西的名字——4 位只有 16 bit，同一个人手上几件待办撞一次的概率并不小，撞了还只能拒 | `MIN_SHORT_ID` 抬到全长（8 位十六进制）。这同时是**一致性**要求而不只是加固：H1 的谓词比的是**完整**指纹，4 位的码永远等不上，每一次短码审批都会落 `stale_item`。下限等于全长后前缀匹配退化成相等，`ambiguous` 只在真的 32 bit 撞车时才可能出现（门里用确定性生日搜索造了一对真撞的 `createdAt`） |
+| L5 | 低 | `im-adapter` 的注释还写着「`/approve` 作用在 itemId 前缀上」——六轮之后这句话不再是真的，而这是内核包里给下一个人看的说明 | 改成「短码对本解析器不透明；host 侧定义它是内容指纹，不是 itemId 前缀」 |
+| L6 | 低 | **六轮那刀只砍了两处同型代码的一处**：`clipApprovalText` 改按码点切了，`personal-butler-hands.ts` 里自己那份 `clipSafe`（审批标题的 argv/stdin 摘要走它）还在按码元 `slice` | 同改按码点；「共 N 字符」也随之按码点数（门：700 个 emoji 报 706 不报 1406，且输出里零个落单代理项） |
+| L7 | 低 | 六轮 M3 的散文把**行数**当成了**动作数**：≈12MB ÷ 每行 300 字节 ≈ 四万，但一条动作记三行 | 散文改成「约一万四千条正常动作」（顶格 argv 的仍是 40 条那一档，那一档由实测门钉着） |
+
+七轮逐条变异测试（五次，全部按预期变红后复原 byte-identical）：H1a 摘掉 store 里的代际闸 ⇒ inbox 两例 +
+e2e 幕四同时红；H1b 让 host 侧不再把谓词传下去 ⇒ e2e 幕四红（证明这条缝是端到端接通的，不是只在 store
+里自娱自乐）；H2 从名单里去掉 U+2800 ⇒ 3 例红（跨 `approval-text` 与 `im-approval-service` 两层）；M3 把行
+渲染改回只有标题 ⇒ 6 例红；M4 下限退回 4 ⇒ 1 例红；L6 `clipSafe` 退回按码元切 ⇒ 码点那例红。
+
+**这一轮自己踩的两个坑，记下来**：①M3 的第一版把 `title · prompt` 无条件拼起来，管家 park 当场超预算
+——**审批句里 prompt 才是权威字段，title 只是它的标签**，`buildButlerApprovalPrompt` 早就把标题逐字
+嵌在正文里了。加个「正文已含标题就不拼」的判断之前，e2e 幕二直接变红，是它先说出了这件事。
+②H2 的门第一版断言 `hasVisibleContent(sneaky) === false` —— 断言写错了，代码是对的：U+2800/U+3164 在
+Unicode 里确实是符号与字母。改成断言那条**更强**的真话（白名单自己会被骗、先洗后问才拦得住），门反而
+更有牙了。**门变红时先确认自己断言的是不是真话**，这次是断言错了，六轮 M3 那次是门不够严——两种都发生过。
