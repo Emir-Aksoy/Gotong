@@ -36,6 +36,7 @@ import {
   type ImApprovalServiceOptions,
 } from './im-approval-service.js'
 import { startImBridges, type ImBridgesHandle, type ImLogger } from './im-bridge.js'
+import { ImCredentialsService, type ImCredentialsSpace } from './im-credentials-service.js'
 import { listOpsCommands, runOpsCommand } from './ops-core.js'
 
 export interface ImBridgeWiringDeps {
@@ -90,6 +91,20 @@ export interface ImBridgeWiringDeps {
    * 缺省 → 回落链不存在,与今天逐字节一致。
    */
   webPushFallback?: (userId: string) => Promise<ButlerPushResult>
+  /**
+   * HANDS-M3a — opt-in 手机配置 key 面(`/setkey` + `/keys`)。给了它,owner/admin
+   * 能从手机换一把过期的 provider key;缺省 → 两个动词回「未启用」,其余字节不变。
+   *
+   * **刻意只收 space 与重启腿**:`identity` 用装配层自己那份,`allowed` 由这里
+   * 拿 `imIsOperator` 拼——调用方连传一个不同的角色判据的机会都没有。这是
+   * HANDS-M2 那条「闸放在忘不掉的地方」的同一姿态。
+   */
+  credentials?: {
+    space: ImCredentialsSpace
+    /** 存完 key 后重启会用到它的 agent(= admin 面写完 key 调的那同一个
+     *  `lifecycle.start`)。缺省 → 如实回「存好了但还没生效」。 */
+    restartAgents?: (agentIds: string[]) => Promise<{ restarted: string[]; failed: string[] }>
+  }
 }
 
 /** 窄鸭子:只要 synthesize 一面(butler-voice 的 ButlerVoice 天然满足)。 */
@@ -168,6 +183,22 @@ export async function armImBridgeWiring(deps: ImBridgeWiringDeps): Promise<ImBri
             // 生成、坏了就抛)。不带密钥的 8 位指纹是阿同自己能算出来的
             // ——而它现在有手(HANDS-M2 tier 1 免审批)。
             shortCodeKey: loadOrCreateShortCodeKey(deps.spaceRoot),
+          }),
+        }
+      : {}),
+    // HANDS-M3a — opt-in 手机配置 key 面。`allowed` 在这里拼(与 setting 台
+    // 同一个 imIsOperator,不长第二份角色判据);不够格的成员拿到的与「没接」
+    // 一模一样——凭证面说「你没权限」等于说「这里能配 key」。
+    ...(deps.credentials
+      ? {
+          credentials: new ImCredentialsService({
+            allowed: imIsOperator,
+            space: deps.credentials.space,
+            identity: deps.identity,
+            ...(deps.credentials.restartAgents
+              ? { restartAgents: deps.credentials.restartAgents }
+              : {}),
+            log: deps.log,
           }),
         }
       : {}),

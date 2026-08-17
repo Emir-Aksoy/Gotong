@@ -129,6 +129,16 @@ export type ImCommand =
   | { kind: 'inbox' }
   | { kind: 'approve'; shortId: string }
   | { kind: 'deny'; shortId: string }
+  // HANDS-M3 — the credential face. `setkey` is the ONE command whose payload
+  // is a secret, so its parse is deliberately un-symmetric with every verb
+  // above: a malformed `/setkey …` does NOT fall through to `free` (that path
+  // records the raw text into the session window, the transcript and episodic
+  // memory) — it returns `mode:'help'` and DROPS the rest on the floor. The
+  // rule to keep: nothing that starts with a setkey verb may ever be carried
+  // as free text, and no parse result may hold text we didn't recognise.
+  | { kind: 'setkey'; mode: 'paste'; target: string; secret: string }
+  | { kind: 'setkey'; mode: 'help' }
+  | { kind: 'keys' }
   | { kind: 'free'; text: string }
 
 // ---------------------------------------------------------------------------

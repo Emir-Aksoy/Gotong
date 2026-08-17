@@ -216,7 +216,9 @@ IM 通道即在；**至少一次网页触碰不可避免也不该避免**（owne
 | M1 | 四档策略纯核 | `personal-butler/src/hands-policy.ts` 纯函数 + 拒绝表 + realpath 逃逸判定 | 单测：配置区/凭证路径永不 allow；符号链接逃逸 refuse；`net:true`→approve；未知→非 allow；拒绝表命中 refuse |
 | M2 ✅ | 手 A 原生（2026-08-15，见 §十） | host `personal-butler-hands.ts` 执行器 + 五工具（**文件四动作走监狱内 node 小助手**）+ `hands.json` opt-in（含 `allowRoles` **默认 owner/admin**、`hidden`/`readOnly` 追加清单）+ **HOME = 只读空目录**（缓存另指工作区）+ core `FsJailHardening`（`unshareNet`/`unsharePid`/`hiddenPaths`/`hiddenFiles`/`readOnlyRoots`/`denySharedTmp`，additive；seatbelt 侧 `unsharePid` 映射成进程隔离规则）+ 上限（含监狱内 `ulimit`）+ 审计（含 stdin 摘要/sha256）+ factory 接线 + AFR 三件套 + main.ts 棘轮显式抬（2768/2770→2772/2780）+ 备份排除工作区 `node_modules` | 真 spawn 门（host hands **82 例**全过，其中真 spawn 22；bwrap 靠 argv 单测）：`cat <space>/gotong.env` 在监狱内失败；写 `<space>/agents.json` 双拒（监狱 rc≠0 且字节不变 + hands_write 穿越 refuse）；hub 用户 HOME 与点名文件藏起来；策略放行后目录换成指向 `<space>` 的链接小助手照样写不进读不出（TOCTOU 真闸=监狱）；断网命令联本机 HTTP 失败、`net:true` approve 后成功；超时/超输出/洪水响亮；命令退出即收整个进程组；hub 级并发 1 响亮拒；`kind:'none'` 整套不装；缺席字节不变（脸 absent≡off≡armed−hands_*）；子环境零凭证且 TMPDIR 指进工作区；审计不落正文；**只有 owner/admin 有手**（默认；member 的脸上没有这五件、park 期间被降权也执行不了）；**HOME 是只读空目录**（在、列得动、是空的、写不进）；**Codex 交叉审九轮 + 内部对抗审一轮**（5H/4M/1L → 2H/6M/2L → 3H/3M → 3H/3M → 2H/1M/1L → 2H/2M/1L → 2H/2M/3L → 3H/2M/3L → 3H/5M/6L → 第十轮 2H/2M，§10.5/§10.7）✅ |
 | M2b ✅ | 手 B 外驱（2026-08-16，见 §十一） | host `personal-butler-coder.ts` 装配（围墙全部借手 A 的 `ButlerHandsHost`，五道 fail-closed 闸）+ `hands.json` `coder` 块（形状门与手 A 同一个读者）+ 名册行 + owner 授权（`escalate_to_expert` 认的就是那张表）+ `onChunk` 播成 transcript 观察缝 + cli-agent `PerSpawn` env/fsJail thunk + **core seatbelt 补藏起来祖先的 `stat` 通路**（§11.2，macOS 独有的真洞） | e2e：**阿同写需求→手 B 改文件（真落在手 A 工作区）→阿同 `hands_run` 跑测试出 TESTS PASS**；手 B 读不到 hub 用户 HOME 的钥匙；坏 `coder` 块整份不装；不够格的成员连目录都不建；撞上别人的 agent 行不覆盖；`passEnv` 盖不掉 HOME/PATH/TMPDIR；围墙每次 spawn 现算（host coder **25 例** + 手 A 回归 1 + core 6；变异一道四例齐红） ✅ |
-| M3 | 手机配置面 | `/setkey` 双路径 + 一次性链接 + 优劣文案 + config-write 两步确认 + `/keys` + SETTING-OPS-CONSOLE 改口 | 单测：直贴不进 SESS 窗/transcript、不回显；非 owner/admin 绑定拒；链接单次 10min；两步确认走 IMA；**Codex 交叉审** |
+| M3a ✅ | 手机配置面·直贴（2026-08-17，见 §十二） | im-adapter `/setkey` 全形状认领 + host `im-credentials-service.ts`（写金库 + **写完重启那些真会换钥的 agent**）+ 桥两条 gated 路由 + `/keys` 槽位表（永不列值） | 单测 38：直贴不进 SESS 窗/transcript/日志/审计；**顺序打反（`/setkey <key> <agent>`）也不把 key 回显进聊天**；坏形状永不落回自由文本；非 owner/admin 与「没接」同一句；`env_pinned`/mock/`openai-compatible` 共享档拒绝而不是假装存上；优先级表由**真** `selectLlmApiKey` 推导对拍 |
+| M3b | 手机配置面·链接 | `/setkey link` 一次性 10min 链接 + 双路径优劣文案 | 链接单次、过期即废、不建会话 |
+| M3c | config-write 上手机 | 两步确认走 IMA + SETTING-OPS-CONSOLE 「config-write ✗ IM」显式改口 | 两步确认走 IMA 同一 pending 面；**Codex 交叉审**（与 M2/M2b 同批） |
 | M4 | 环境探测→方案→人批 | `hub_environment` + 提案卡 + tier 2 应用 | 探针零 LLM；不可应用项只指路 |
 | M5 | Obsidian 投影 | tasks.md / memory/*.md 生成 + frontmatter + 覆盖语义 | 真相未动；投影可 Obsidian 解析 |
 | M6 | 一键镜像 e2e | compose env 透传 + e2e 脚本 | `compose up` → IM 在 → 网页一次触碰 → 手机 `/setkey`→`/model` 全通 |
@@ -866,3 +868,81 @@ EPERM。bwrap 不需要这条——`--tmpfs` 盖住再 `--bind` 里面那层，�
   内容与目录条目仍然拒（§11.2 探针）。
 - 手 B 的**转派回执**沿用 DUO 的 fire-and-forget 语义：回执即时、结果 pushToMember 推回。
 - 真 bwrap 的这条路仍待 Linux 真机（本机只有 seatbelt）；core 侧由 profile/argv 单测钉住。
+
+---
+
+## 十二、M3a 落地记录（2026-08-17）
+
+要治的是一件很小、很具体的事：**key 在周日过期，而换掉它的唯一办法是一台笔记本上的
+管理员会话**。手机上该有的别的都有了（运维台、审批、工作流），只剩这一趟必须回到桌前。
+
+三层一刀，每层只做自己那件事：`@gotong/im-adapter` 认领动词的**每一种形状**，
+`host/src/im-credentials-service.ts` 拿着秘密去写金库并**返回一个不含秘密的结果**，
+`im-bridge.ts` 只按结果渲染文字。凭证值因此只到达 `setAgentApiKey`/金库，别处一个字节没有。
+
+### 12.1 一个刻意不对称的解析
+
+命令面的所有别的动词，解析不出来就落回 `{kind:'free'}` 交给模型——那条路会 **记录并重放
+原文**（SESS 会话窗、transcript、episodic 捕获）。`/setkey` 是唯一一个载荷本身就是秘密的
+动词，于是它的解析是不对称的：**认得出就带值走，认不出就带 `mode:'help'` 走，永远不落回
+自由文本**。别名 `setkey|set-key|set_key|key` 一并认领，把「手忙脚乱时打错的那几种」也圈
+进来——漏认一种，那一条就变成一条把 key 念给模型听的普通消息。
+
+### 12.2 结果里不带成员打的字（写门时挖出来的真缺陷）
+
+原本 `unknown_target` 的回复会把你打的那个词回显出来（「不认识目标「xxx」」），读起来很
+体贴。写测试时发现：**`/setkey <key> <agent>`——正是着急的人会打的那个顺序——是一条合法
+的两段解析，它的 `target` 就是 key 本身**。于是那句体贴的话会把一把活钥匙印进聊天记录里，
+而且恰好发生在这个面存在的理由（人手忙脚乱）上。
+
+修法不是「回显前洗一遍」，是**把成员打的字从渲染层整个拿走**：`renderSetKeyOutcome` 不再
+收原始 target，每一个结果携带的字符串都取自 hub 自己的记录（agent id、provider 标签、环境
+变量名）——`ambiguous_target` 那条也从 `args.target` 改成 `agentHit.id`（今天是同一个字符串，
+但取自记录才让「结果里没有成员的字」变成形状的性质，而不是这一行一直写对的性质）。渲染层
+因此没有任何需要判断「这段文字重复出去安不安全」的地方，也就没有一个将来会写错的清洗调用。
+顺序打反的那句话改成只讲规则：「第一个词不是这台 hub 认识的目标（注意顺序是先目标后 key）」，
+再列出**可用的目标**——信息量没少，key 一个字符没出现。
+
+### 12.3 存下去必须真管用
+
+三条拒绝，都是「宁可说不，也不要假装成功」：
+
+- **`env_pinned`**：agent 配了 `apiKeyEnv`（MR-M6 语义是**排他**的），存进金库那把永远轮
+  不上。回「你这台 agent 认的是环境变量 `X`」并指路，不写。
+- **`mock_agent`**：mock 不看 key。
+- **`openai-compatible` 当共享档**：那个标签是 DeepSeek/Qwen/MiMo 的伞，一行共享 key 会把
+  DeepSeek 的钥匙递给 MiMo 的端点，401 还会撒谎说成是钥匙不对（`me-credentials-service`
+  当年按同一条理由收窄过成员自带 key）。**按 agent 的那种写法不含糊，照开**。
+
+**重启是承重件**：托管 agent 在 spawn 那一刻解析一次 key（`resolveApiKey` → `providerFactory`），
+存完不重启，「已存入」就会被读成「修好了」而其实什么都没变。所以写完即重启受影响的 agent；
+共享档只重启**真会换钥的**那些——被 per-agent key 或 env 盖住的照旧不动（打断一个正在好好
+干活的 agent 去改一个不影响它的东西，是另一种不诚实）。`/keys` 把这件事摊开：哪个槽位有、
+最后一次更新在什么时候、以及**解析优先级**那一行。
+
+### 12.4 门
+
+| 层 | 例数 | 钉住什么 |
+|---|---|---|
+| ① 解析（im-adapter） | 12 | 三个别名 + 大小写 + 多余空白都认领；坏形状一律 `mode:'help'` **且不带值**；`link` 子命令；`/keys` |
+| ② 服务 | 30 | 秘密只到金库（日志/审计/回结果全文扫描连**前 12 个字符**都不许出现，且**每一条拒绝路径都用带哨兵的秘密驱动**——包括最容易长出「你打的是…」的坏形状那条）；三条拒绝各自；写完重启谁不重启谁；`env_pinned`/`per-agent` 遮蔽判定；`list()` 只在 anthropic/openai 上报 workspace/env（那才是 `resolveApiKey` 真去问的层）；**优先级表由真 `selectLlmApiKey` 推导出来对拍**（逐层静默、看它退到哪一层），不是抄一份常量 |
+| ③ 路由（e2e） | 8 | 直贴后 transcript/会话窗/派发全空；**顺序打反不回显 key**；坏形状不落自由文本（6 种形状）；不够格的成员与没接线的 host **逐字节同一句**；surface 抛错既不漏 key 也不漏 `<space>` 路径；`/keys` 与每一条拒因都渲染得出；`/help` 两个动词都在 |
+
+四道变异四次全红（priority 表改掉 / 拒绝路径的泄漏断言 / 重启把被遮蔽的也重启 / 把原始
+target 塞回渲染层），复原 `shasum` 逐字节一致。**其中一道第一遍没红**——拒绝表给坏形状那行
+喂的是一个随手写的短字符串，哨兵根本不在场，于是「日志里回显了秘密」这个变异无迹可寻；
+改成每一行都用带哨兵的秘密驱动才真钉住。**变异不红时先怀疑门**（本 track 第五次）。
+
+验收：host **3014**+5skip（+38），im-adapter **45**（+12），四门 PASS（**旋钮 116 零新增**——
+这个面接不接就是开关；main.ts 2785/2790）。
+
+### 12.5 诚实残余
+
+- **直贴这条路上，IM 平台的服务器看得见那把 key，聊天记录里也留着底**。这是用户拍板保留的
+  路径（岔口 2），不是没想到；回复固定提醒「请手动删除刚才那条消息」。把平台挡在外面的那条
+  路是 M3b 的一次性链接，两条路的优劣文案跟它同刀。
+- 撤回原消息的 best-effort（平台支持时）**尚未接**，归 M3b。
+- `/keys` 报的是**有没有、什么时候更新的**，不报「能不能用」——那是「测试连接」按钮的事
+  （MR-M5），要花钱要打真端点，不该由一条只读命令顺手做掉。
+- config-write（`/model set`、`/setting config-set`）仍按 `SETTING-OPS-CONSOLE` 的老规矩在
+  IM 上 ✗；两步确认与那张表的改口归 M3c。

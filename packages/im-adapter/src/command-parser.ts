@@ -13,6 +13,8 @@
  *   `/inbox` `/pending`       → { kind: 'inbox' }            (IMA-M1)
  *   `/approve <shortId>`      → { kind: 'approve', shortId }
  *   `/deny <shortId>`         → { kind: 'deny', shortId }    (`/reject` alias)
+ *   `/setkey <target> <key>`  → { kind: 'setkey', mode:'paste', … }  (HANDS-M3)
+ *   `/keys`                   → { kind: 'keys' }
  *
  * Anything else (including leading-`/` text whose verb we don't
  * recognise) falls through to `{ kind: 'free', text }` with the
@@ -111,6 +113,35 @@ export function parseImCommand(raw: string): ImCommand {
       if (shortId.length === 0) return { kind: 'free', text: trimmed }
       return { kind: 'deny', shortId }
     }
+
+    // HANDS-M3 — the credential verbs. `setkey` is the only command that
+    // carries a secret, and that changes one rule for it alone: it may NEVER
+    // fall through to `free`. Free text is recorded (session window,
+    // transcript, episodic capture) and echoed back into a model's context —
+    // exactly where an API key must not go. So every shape of the verb
+    // resolves inside this branch, and the malformed shape carries NOTHING.
+    //
+    // The alias list is part of the defence, not convenience: `/set-key` and
+    // `/key` are the near-misses a person types under a "my key expired" kind
+    // of hurry, and each one that isn't claimed here is a secret that lands in
+    // the transcript instead. Typos we don't list still leak — that residual
+    // is honest and documented (ATONG-HANDS §12.4), and it's why the reply
+    // tells the member to delete their own message either way.
+    case 'setkey':
+    case 'set-key':
+    case 'set_key':
+    case 'key': {
+      // Exactly two whitespace-separated tokens, or we don't know what we're
+      // holding. `.split` (not a lenient regex) so a third token — a pasted
+      // key with a stray space, a trailing comment — reads as malformed
+      // rather than silently truncating the member's secret to its prefix.
+      const parts = rest.split(/\s+/).filter((p) => p.length > 0)
+      if (parts.length !== 2) return { kind: 'setkey', mode: 'help' }
+      return { kind: 'setkey', mode: 'paste', target: parts[0]!, secret: parts[1]! }
+    }
+
+    case 'keys':
+      return { kind: 'keys' }
 
     case 'workflow':
     case 'wf': {

@@ -160,6 +160,7 @@ import { AcpOutboundManager } from './acp-outbound.js'
 import { acpApprovalItemFor } from './acp-escalation.js'
 import { type ImBridgesHandle } from './im-bridge.js'
 import { armImBridgeWiring } from './im-bridge-wiring.js'
+import { buildAgentRestarter } from './im-credentials-service.js'
 import { buildMePanelData } from './me-panel-data.js'
 import { buildMePanelSurface } from './me-panel-surface.js'
 import { buildMeExchange } from './me-exchange-service.js'
@@ -2325,6 +2326,9 @@ async function main(): Promise<void> {
       ...(tapFallback ? { webPushFallback: tapFallback } : {}),
       // IMA-M2 — /inbox /approve /deny:读走 InboxStore、写走 HostInboxService(既有权威)。
       ...(inboxStore && inboxService ? { approvals: { store: inboxStore, inbox: inboxService } } : {}),
+      // HANDS-M3a — 手机换 key(owner/admin)。重启腿=admin 面写完 key 调的那同一个
+      // lifecycle:存了不重启,跑着的 agent 仍拿旧 key,「已存入」就成了假话。
+      credentials: { space, restartAgents: buildAgentRestarter(space, localAgents) },
       // CARE-M5 — 恢复探活骑 onboarding key check 只读活体链;lazy ref 兜未就绪;status==='ok' 才算真恢复。
       probeLiveness: async () => {
         const keyCheck = butlerOnboardingKeyCheckRef

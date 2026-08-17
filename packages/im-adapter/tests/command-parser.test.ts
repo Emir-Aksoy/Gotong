@@ -184,6 +184,70 @@ describe('parseImCommand', () => {
     expect(parseImCommand('/inbox@MyBot')).toEqual({ kind: 'inbox' })
   })
 
+  // --- HANDS-M3 credential verbs ------------------------------------
+
+  describe('/setkey (HANDS-M3)', () => {
+    // The secret used across this block. Kept in one const so the
+    // "never carried" assertions below can look for it verbatim.
+    const SECRET = 'sk-test-abcdefghijklmnop'
+
+    it('two tokens → paste with target and secret preserved verbatim', () => {
+      expect(parseImCommand(`/setkey assistant ${SECRET}`)).toEqual({
+        kind: 'setkey',
+        mode: 'paste',
+        target: 'assistant',
+        secret: SECRET,
+      })
+    })
+
+    it.each(['setkey', 'set-key', 'set_key', 'key'])(
+      '/%s is claimed by the credential branch (near-miss typos never leak)',
+      (verb) => {
+        expect(parseImCommand(`/${verb} assistant ${SECRET}`)).toEqual({
+          kind: 'setkey',
+          mode: 'paste',
+          target: 'assistant',
+          secret: SECRET,
+        })
+      },
+    )
+
+    // THE load-bearing property of this whole command: a malformed setkey
+    // must not become `free`, because free text is recorded into the session
+    // window / transcript / episodic memory and replayed into a model's
+    // context. It must also not carry the unrecognised remainder anywhere in
+    // the parse result — so we assert on the SERIALISED result, which catches
+    // a future field added in good faith ("keep the raw for the help text").
+    it.each([
+      ['no tokens', '/setkey'],
+      ['trailing space only', '/setkey   '],
+      ['one token (target missing)', `/setkey ${SECRET}`],
+      ['three tokens (key pasted with a space)', `/setkey assistant ${SECRET} extra`],
+      ['sub-verb we have not built yet', '/setkey link'],
+    ])('malformed (%s) → help, and the parse result holds no leftover text', (_label, raw) => {
+      const parsed = parseImCommand(raw)
+      expect(parsed).toEqual({ kind: 'setkey', mode: 'help' })
+      const serialised = JSON.stringify(parsed)
+      expect(serialised).not.toContain(SECRET)
+      expect(serialised).not.toContain('assistant')
+    })
+
+    it('strips the bot-mention suffix (a mention must not make it malformed)', () => {
+      expect(parseImCommand(`/setkey@MyBot assistant ${SECRET}`)).toEqual({
+        kind: 'setkey',
+        mode: 'paste',
+        target: 'assistant',
+        secret: SECRET,
+      })
+    })
+
+    it('/keys lists; it takes no argument, so nothing can ride along', () => {
+      expect(parseImCommand('/keys')).toEqual({ kind: 'keys' })
+      expect(parseImCommand(`/keys ${SECRET}`)).toEqual({ kind: 'keys' })
+      expect(parseImCommand('/KEYS')).toEqual({ kind: 'keys' })
+    })
+  })
+
   // --- defensive --------------------------------------------------
 
   it('non-string input → empty free (defensive fallback)', () => {

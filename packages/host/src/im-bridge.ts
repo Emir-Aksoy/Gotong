@@ -54,6 +54,8 @@ import { WechatBridge } from '@gotong/im-wechat'
 import { WebSocket as NodeWebSocket } from 'ws'
 
 import { clipApprovalText, sanitizeApprovalText } from './approval-text.js'
+import { IM_KEY_PRIORITY } from './im-credentials-service.js'
+import type { ImKeysView, ImSetKeyOutcome } from './im-credentials-service.js'
 import type { ButlerHearing } from './butler-hearing.js'
 import type { ButlerSeeing } from './butler-seeing.js'
 import { ButlerOutbox } from './butler-outbox.js'
@@ -149,6 +151,31 @@ export interface ImApprovalSurface {
   }): Promise<{ title: string }>
 }
 
+/**
+ * HANDS-M3a — optional `/setkey` / `/keys` surface. Production binds it to
+ * `ImCredentialsService`; absent → both verbs reply "not enabled".
+ *
+ * The bridge's job here is narrower than anywhere else in this file: it hands
+ * the secret straight through and renders TEXT FROM AN OUTCOME. It never
+ * inspects the key, never logs it, never puts it in an error string, and the
+ * outcome type structurally cannot carry it back. Authorisation (owner/admin),
+ * target resolution and the "could this key ever take effect" refusals all live
+ * behind the surface.
+ *
+ * Unauthorised members get the SAME reply as an unwired host — a credential
+ * face that says "you're not allowed" is also saying "it exists here".
+ */
+export interface ImCredentialsSurface {
+  allowed(userId: string): Promise<boolean>
+  list(): Promise<ImKeysView>
+  setKey(args: {
+    userId: string
+    target: string
+    secret: string
+    via: string
+  }): Promise<ImSetKeyOutcome>
+}
+
 // ── setting console (setting-ops M5) ─────────────────────────────────────────
 // The IM face of the unified deterministic `setting` ops console — the THIRD
 // surface over the one host `ops-core` (CLI + admin web + IM). An operator DMs
@@ -211,6 +238,8 @@ export interface HostImConfig {
   resolveWorkflow?: ImWorkflowResolver
   /** IMA-M2 — optional approval surface; absent → the three verbs reply "not enabled". */
   approvals?: ImApprovalSurface
+  /** HANDS-M3a — optional credential surface; absent → `/setkey` + `/keys` reply "not enabled". */
+  credentials?: ImCredentialsSurface
   log: ImLogger
   /**
    * setting-ops M5 — owner/operator-only deterministic ops command mode, entered
@@ -304,6 +333,8 @@ const HELP_TEXT = [
   '  /inbox                  — list items waiting for your approval',
   '  /approve <id>           — approve one (id from /inbox)',
   '  /deny <id>              — reject one',
+  '  /keys                   — which API-key slots are filled (owner/admin)',
+  '  /setkey <target> <key>  — replace a provider key (owner/admin)',
   '  <anything else>         — chat with your default agent',
 ].join('\n')
 
@@ -487,6 +518,62 @@ export async function handleImMessage(
         // 那句话。见 `describeApprovalError` 的 default 分支。
         config.log.warn('im approval resolve failed', { platform, userId, err: String(err) })
         await reply(bridge, msg, describeApprovalError(err, cmd.shortId))
+      }
+      return
+    }
+
+    // HANDS-M3a — the credential verbs. Two rules shape this branch and only
+    // this branch:
+    //
+    //   1. The secret goes to the surface and NOWHERE else. It is never
+    //      logged, never echoed, never put in an error string, and it never
+    //      reaches `config.log` — including on the failure paths, where the
+    //      temptation to "show what we got" is strongest.
+    //   2. An unauthorised caller gets the not-enabled reply, byte-identical
+    //      to a host that never wired the surface. Telling a member "you're
+    //      not allowed to set keys here" tells them keys can be set here.
+    case 'keys': {
+      if (!config.credentials || !(await config.credentials.allowed(userId))) {
+        await reply(bridge, msg, CREDENTIALS_NOT_ENABLED)
+        return
+      }
+      const view = await config.credentials.list()
+      await reply(bridge, msg, renderKeysView(view))
+      return
+    }
+
+    case 'setkey': {
+      if (!config.credentials || !(await config.credentials.allowed(userId))) {
+        await reply(bridge, msg, CREDENTIALS_NOT_ENABLED)
+        return
+      }
+      if (cmd.mode === 'help') {
+        // The parser sends every malformed shape here carrying nothing — so
+        // this reply is written for someone who may have just pasted a real
+        // key into a chat log with a typo'd verb. Say the delete part first.
+        await reply(bridge, msg, SETKEY_USAGE)
+        return
+      }
+      try {
+        const out = await config.credentials.setKey({
+          userId,
+          target: cmd.target,
+          secret: cmd.secret,
+          via: `im:${platform}`,
+        })
+        await reply(bridge, msg, renderSetKeyOutcome(out))
+      } catch (err) {
+        // Deliberately does NOT echo `err.message` (a store/vault error carries
+        // absolute paths and internal ids) and deliberately does not log the
+        // command text — only that the write failed, for which target shape.
+        config.log.warn('im setkey failed', { platform, userId, err: String(err) })
+        await reply(
+          bridge,
+          msg,
+          '✗ 没能存进去(hub 侧出错了,不是你的问题),这把 key 没有被保存。请到网页处理。\n' +
+            '/ Storing the key failed on the hub — nothing was saved. Use the admin UI.\n\n' +
+            DELETE_YOUR_MESSAGE,
+        )
       }
       return
     }
@@ -1642,6 +1729,179 @@ function summariseResult(result: TaskResult, imApprovals = false): string {
 
 const APPROVALS_NOT_ENABLED =
   '此 host 未启用 IM 审批,请到网页「我的 → 收件箱」处理。/ IM approval is not enabled on this host — use the web (/me).'
+
+// ── HANDS-M3a credential-face copy ───────────────────────────────────────────
+
+/** One reply for "no surface" and for "not owner/admin" — see the branch note. */
+const CREDENTIALS_NOT_ENABLED =
+  '此 host 未启用 IM 配置 key,请在网页管理界面处理。/ Setting keys over IM is not enabled here — use the admin UI.'
+
+/**
+ * Printed on EVERY `/setkey` reply, success or failure. The trade-off of the
+ * paste path is exactly this line, and it is not a footnote: we can promise
+ * the key never enters the hub's conversation record, and we cannot touch the
+ * copy sitting in the member's own chat history on the platform's servers.
+ */
+const DELETE_YOUR_MESSAGE =
+  '⚠ 请手动删除你刚才那条消息 —— key 不会进阿同的对话记录/记忆,但它还留在聊天平台上。\n' +
+  '/ Delete your own message — the key never enters Atong\'s memory, but the platform still has your copy.'
+
+const SETKEY_USAGE = [
+  '用法:/setkey <目标> <key>',
+  '',
+  '  目标 = agent 的 id(如 assistant),或共享池 provider(anthropic / openai)',
+  '  例:  /setkey assistant sk-xxxxxxxx',
+  '',
+  '先发 /keys 看有哪些槽位、哪些还空着。',
+  '/ Usage: /setkey <agent-id|anthropic|openai> <key> — send /keys to see the slots.',
+  '',
+  DELETE_YOUR_MESSAGE,
+].join('\n')
+
+/** `/keys` — slots, never values, and never a simulated "winner". */
+function renderKeysView(view: ImKeysView): string {
+  const lines: string[] = ['Key 槽位(只报有没有,永远不显示 key 本身):', '']
+  if (view.agents.length === 0) {
+    lines.push('  (这台 hub 还没有托管 agent)')
+  }
+  for (const a of view.agents) {
+    if (a.envName) {
+      // MR-M6 pins are exclusive, so this row's answer is the whole answer for
+      // that agent — an empty variable means it has no key at all, which is
+      // worth saying out loud rather than leaving as "pinned, therefore fine".
+      lines.push(
+        `  • ${a.agentId}(${a.provider})— 钉了环境变量 ${a.envName}:` +
+          (a.envPresent ? '✓ 有值' : '✗ 没值(它现在没有 key)'),
+      )
+    } else if (a.perAgentUpdatedAt) {
+      lines.push(`  • ${a.agentId}(${a.provider})— 专属 key:✓ 有(${a.perAgentUpdatedAt.slice(0, 10)})`)
+    } else {
+      lines.push(`  • ${a.agentId}(${a.provider})— 专属 key:✗ 无`)
+    }
+  }
+  const tally = (m: Record<string, boolean>): string =>
+    Object.keys(m).length === 0
+      ? '(无)'
+      : Object.entries(m)
+          .map(([p, has]) => `${p} ${has ? '✓' : '✗'}`)
+          .join(' · ')
+  lines.push(
+    '',
+    `共享池:${tally(view.shared)}`,
+    // 这两行只列 anthropic/openai——openai-compatible 根本不查这两层。
+    `工作区级:${tally(view.workspace)}`,
+    `服务器环境变量:${tally(view.hostEnv)}`,
+  )
+  lines.push(
+    '',
+    `取用顺序:${KEY_PRIORITY_LINE}`,
+    '换一把:/setkey <agent 或 provider> <key>',
+  )
+  return lines.join('\n')
+}
+
+/**
+ * The resolution order, rendered from `IM_KEY_PRIORITY` rather than typed as
+ * prose here — a priority line that quietly disagrees with `selectLlmApiKey`
+ * is worse than none, because a member would act on it. The anti-drift test
+ * derives the real order from the selector and compares.
+ */
+const KEY_PRIORITY_LABELS: Record<string, string> = {
+  'pinned-env': '钉死的环境变量',
+  'per-agent': '专属',
+  'org-pool': '共享池',
+  'user-pool': '成员自带',
+  workspace: '工作区',
+  env: '服务器环境变量',
+}
+const KEY_PRIORITY_LINE = IM_KEY_PRIORITY.map((k) => KEY_PRIORITY_LABELS[k] ?? k).join(' > ')
+
+/**
+ * `/setkey` — text from an outcome, and ONLY from an outcome.
+ *
+ * This function deliberately does not take the raw target. `/setkey <key>
+ * <agent>` (the arguments in the order a hurried person types them) parses as
+ * target=<key>, so echoing "不认识目标「…」" would print a live key back into
+ * the chat on exactly the slip this face should be forgiving about. Every
+ * string below comes from the hub's own records instead, which is why there is
+ * no sanitiser call here to get wrong: there is nothing member-supplied to
+ * sanitise.
+ */
+function renderSetKeyOutcome(out: ImSetKeyOutcome): string {
+  if (!out.ok) {
+    const head = ((): string => {
+      switch (out.code) {
+        case 'bad_secret':
+          return out.reason === 'too_short'
+            ? '✗ 没存 —— 这串太短,不像一把完整的 key(多半是粘贴时被截断了)。'
+            : out.reason === 'too_long'
+              ? '✗ 没存 —— 这串太长,不像一把 key。'
+              : '✗ 没存 —— 这串里有换行/控制字符,多半是粘贴时带进了别的东西。'
+        case 'unknown_target':
+          // 刻意不回显你打的那个词——万一顺序打反了,那个词就是 key 本身。
+          return (
+            '✗ 没存 —— 第一个词不是这台 hub 认识的目标(注意顺序是「先目标后 key」)。\n' +
+            `  可用的 agent:${out.agents.length > 0 ? out.agents.join('、') : '(无)'}\n` +
+            `  可用的共享 provider:${out.providers.join('、')}`
+          )
+        case 'ambiguous_target':
+          return (
+            `✗ 没存 —— 「${out.target}」既是 agent 也是 provider,分不清你要改哪个。\n` +
+            `  请写明:/setkey agent:${out.target} <key> 或 /setkey provider:${out.target} <key>`
+          )
+        case 'env_pinned':
+          // Refusing here IS the honest answer: writing would have "succeeded"
+          // and changed nothing, because an apiKeyEnv pin is exclusive.
+          return (
+            `✗ 没存 —— ${out.agentId} 的 key 被钉在服务器环境变量 ${out.envName} 上,` +
+            '存进来的 key 永远轮不上。\n' +
+            '  要换它,请在服务器上改那个环境变量并重启;或先在网页把这个 agent 的 apiKeyEnv 去掉。'
+          )
+        case 'mock_agent':
+          return `✗ 没存 —— ${out.agentId} 是 mock provider,不用 key。`
+        case 'vendor_ambiguous':
+          return (
+            '✗ 没存 —— openai-compatible 是一堆不同厂商共用的标签(DeepSeek / Qwen / MiMo …),' +
+            '存一把共享 key 会被发给错的端点。\n' +
+            `  请改成按 agent 存:${
+              out.agents.length > 0
+                ? out.agents.map((a) => `/setkey ${a} <key>`).join('  或  ')
+                : '/setkey <agent-id> <key>'
+            }`
+          )
+      }
+    })()
+    return `${head}\n\n${DELETE_YOUR_MESSAGE}`
+  }
+
+  const lines: string[] =
+    out.slot === 'agent'
+      ? [`✓ 已存入 —— ${out.agentId} 的专属 key(provider: ${out.provider})`]
+      : [`✓ 已存入 —— 共享池的 ${out.provider} key`]
+  if (out.slot === 'shared' && out.shadowed.length > 0) {
+    lines.push(
+      '  用不到它的:' +
+        out.shadowed
+          .map((s) => `${s.agentId}(${s.reason === 'per-agent' ? '有专属 key' : '钉了环境变量'})`)
+          .join('、'),
+    )
+  }
+  // Effect, stated exactly. A stored key that isn't running yet is not "done".
+  const r = out.restart
+  if (r.restarted.length > 0) {
+    lines.push(`  已重启并生效:${r.restarted.join('、')}`)
+  }
+  if (r.failed.length > 0) {
+    lines.push(`  ⚠ 重启失败:${r.failed.join('、')} —— key 已存好,但要等它下次启动才生效。`)
+  }
+  if (r.unavailable) {
+    lines.push('  ⚠ 这台 host 没接 agent 重启,key 已存好,但要等下次启动才生效。')
+  }
+  if (r.restarted.length === 0 && r.failed.length === 0 && !r.unavailable) {
+    lines.push('  (当前没有 agent 会用到它,存着备用。)')
+  }
+  return `${lines.join('\n')}\n\n${DELETE_YOUR_MESSAGE}`
+}
 
 /**
  * Map an approval-resolve failure to a bilingual reply. Covers BOTH error

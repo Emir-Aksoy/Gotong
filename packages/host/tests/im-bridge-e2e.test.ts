@@ -43,6 +43,7 @@ import {
   startImBridges,
   type HostImConfig,
 } from '../src/im-bridge.js'
+import { IM_KEY_PRIORITY, type ImSetKeyOutcome } from '../src/im-credentials-service.js'
 
 const silentLogger: Logger = {
   trace() {},
@@ -688,6 +689,284 @@ describe('VIS-M3 — foldSeeingDescriber', () => {
     expect(warns[0]!.data).toMatchObject({ reason: '识别请求超时' })
   })
 })
+
+describe('HANDS-M3a — the credential verbs', () => {
+  /** The value that must not turn up in any reply, any log, or any transcript. */
+  const SECRET = 'sk-ant-router-0123456789abcdef'
+
+  let hub: Hub
+  let identity: IdentityStore
+  let bridge: FakeBridge
+  let config: HostImConfig
+  let logs: Array<{ msg: string; data?: unknown }>
+  let seenTasks: Task[]
+
+  beforeEach(async () => {
+    hub = Hub.inMemory()
+    await hub.start()
+    seenTasks = []
+    hub.register(
+      new AgentParticipant({
+        id: 'echo',
+        capabilities: ['chat'],
+        handle: async (task) => {
+          seenTasks.push(task)
+          return { ok: true, output: { text: 'echo' } }
+        },
+      }),
+    )
+    identity = openIdentityStore({ dbPath: ':memory:' })
+    const alice = identity.createUser({ email: 'alice@example.com', displayName: 'Alice' })
+    const code = identity.issueImBindingCode({ userId: alice.id }).code
+    bridge = new FakeBridge()
+    await bridge.start()
+    logs = []
+    config = {
+      hub,
+      resolver: makeIdentityImBindingResolver(identity),
+      freeTextCapability: 'chat',
+      onUnbind: async () => ({ removed: false }),
+      log: {
+        ...silentLogger,
+        warn: (msg: string, data?: unknown) => logs.push({ msg, data }),
+        info: (msg: string, data?: unknown) => logs.push({ msg, data }),
+      } as Logger,
+    }
+    bridge.onMessage((m) => handleImMessage(bridge, m, config))
+    await bridge.inject(imMsg(`/bind ${code}`))
+  })
+
+  afterEach(async () => {
+    await bridge.stop()
+    await hub.stop()
+    identity.close()
+  })
+
+  /** The whole milestone, applied to everything the router can emit. */
+  function expectNoSecretAnywhere(): void {
+    const haystack = JSON.stringify({
+      outbound: bridge.outbound,
+      logs,
+      tasks: seenTasks,
+      transcript: hub.transcript.all(),
+    })
+    expect(haystack).not.toContain(SECRET)
+    expect(haystack).not.toContain(SECRET.slice(0, 12))
+  }
+
+  it('a malformed /setkey never falls through to free-text — nothing is recorded', async () => {
+    // The load-bearing case of the whole cut. `free` records the raw sentence
+    // into the session window and dispatches it to a model; a fumbled verb
+    // must not put a live key on that path. The parser claims every shape.
+    config.credentials = {
+      allowed: async () => true,
+      list: async () => ({ agents: [], shared: {}, workspace: {}, hostEnv: {} }),
+      setKey: async () => {
+        throw new Error('setKey must not be reached for a malformed command')
+      },
+    }
+    for (const bad of [
+      `/setkey ${SECRET}`, // forgot the target — the key is now argument #1
+      `/setkey ${SECRET} assistant extra`, // three words: still not a valid form
+      '/setkey',
+      `/set-key ${SECRET}`, // near-miss alias, same hurry
+      `/set_key ${SECRET}`,
+      `/key ${SECRET}`,
+    ]) {
+      await bridge.inject(imMsg(bad))
+      expect(last(bridge).text).toContain('用法:/setkey <目标> <key>')
+      // Usage help leads with the delete instruction, because whoever sees it
+      // may have just pasted a real key with a typo'd verb.
+      expect(last(bridge).text).toContain('请手动删除你刚才那条消息')
+    }
+    expect(seenTasks).toHaveLength(0)
+    expectNoSecretAnywhere()
+  })
+
+  it('an unauthorised member and an unwired host give the SAME answer', async () => {
+    // Anything else ("you're not allowed to set keys here") advertises that
+    // keys can be set here.
+    const unwired: string[] = []
+    for (const cmd of ['/keys', `/setkey assistant ${SECRET}`]) {
+      await bridge.inject(imMsg(cmd))
+      unwired.push(last(bridge).text)
+    }
+    let asked = 0
+    config.credentials = {
+      allowed: async () => (asked++, false),
+      list: async () => {
+        throw new Error('list must not be reached for a non-operator')
+      },
+      setKey: async () => {
+        throw new Error('setKey must not be reached for a non-operator')
+      },
+    }
+    const denied: string[] = []
+    for (const cmd of ['/keys', `/setkey assistant ${SECRET}`]) {
+      await bridge.inject(imMsg(cmd))
+      denied.push(last(bridge).text)
+    }
+    expect(denied).toEqual(unwired)
+    expect(denied[0]).toContain('未启用 IM 配置 key')
+    expect(asked).toBe(2)
+    expectNoSecretAnywhere()
+  })
+
+  it('/setkey hands the secret to the surface and renders only the outcome', async () => {
+    const calls: Array<{ userId: string; target: string; secret: string; via: string }> = []
+    config.credentials = {
+      allowed: async () => true,
+      list: async () => ({ agents: [], shared: {}, workspace: {}, hostEnv: {} }),
+      setKey: async (args) => {
+        calls.push(args)
+        return {
+          ok: true,
+          slot: 'agent',
+          agentId: 'assistant',
+          provider: 'anthropic',
+          restart: { restarted: ['assistant'], failed: [] },
+        }
+      },
+    }
+    await bridge.inject(imMsg(`/setkey assistant ${SECRET}`))
+
+    // The secret reaches the surface verbatim — that is the one destination.
+    expect(calls).toEqual([
+      { userId: expect.any(String), target: 'assistant', secret: SECRET, via: 'im:telegram' },
+    ])
+    const text = last(bridge).text
+    expect(text).toContain('✓ 已存入 —— assistant 的专属 key')
+    expect(text).toContain('已重启并生效:assistant')
+    expect(text).toContain('请手动删除你刚才那条消息')
+    // …and nowhere else: not the reply, not the log, not the transcript.
+    expectNoSecretAnywhere()
+  })
+
+  it('a surface that throws says nothing was saved, and leaks neither the key nor the internals', async () => {
+    config.credentials = {
+      allowed: async () => true,
+      list: async () => ({ agents: [], shared: {}, workspace: {}, hostEnv: {} }),
+      setKey: async () => {
+        throw new Error(`vault write failed at /srv/gotong/.gotong/vault.db for ${SECRET}`)
+      },
+    }
+    await bridge.inject(imMsg(`/setkey assistant ${SECRET}`))
+    const text = last(bridge).text
+    expect(text).toContain('这把 key 没有被保存')
+    // The thrown message carries an absolute path AND (in this hostile fixture)
+    // the secret itself; neither may be echoed to the member.
+    expect(text).not.toContain('/srv/gotong')
+    expect(text).not.toContain(SECRET)
+    // The hub-side warn is allowed to carry the error string, so the leak
+    // check here is scoped to what the MEMBER sees plus the recorded task.
+    expect(logs.some((l) => l.msg === 'im setkey failed')).toBe(true)
+    expect(seenTasks).toHaveLength(0)
+  })
+
+  it('/keys renders slots, the real priority order, and never a value', async () => {
+    config.credentials = {
+      allowed: async () => true,
+      list: async () => ({
+        agents: [
+          { agentId: 'pinned', provider: 'anthropic', envName: 'MIMO_API_KEY', envPresent: false },
+          { agentId: 'assistant', provider: 'openai-compatible', perAgentUpdatedAt: '2026-08-01T09:00:00.000Z' },
+          { agentId: 'bare', provider: 'openai' },
+        ],
+        shared: { anthropic: true, openai: false },
+        workspace: { anthropic: false, openai: false },
+        hostEnv: { anthropic: false, openai: true },
+      }),
+      setKey: async () => {
+        throw new Error('unused')
+      },
+    }
+    await bridge.inject(imMsg('/keys'))
+    const text = last(bridge).text
+    // An empty pin is stated out loud rather than left as "pinned, so fine".
+    expect(text).toContain('钉了环境变量 MIMO_API_KEY:✗ 没值(它现在没有 key)')
+    expect(text).toContain('assistant(openai-compatible)— 专属 key:✓ 有(2026-08-01)')
+    expect(text).toContain('bare(openai)— 专属 key:✗ 无')
+    expect(text).toContain('共享池:anthropic ✓ · openai ✗')
+    expect(text).toContain('服务器环境变量:anthropic ✗ · openai ✓')
+    // Rendered from IM_KEY_PRIORITY, not typed as prose twice.
+    expect(text).toContain('取用顺序:')
+    for (const id of IM_KEY_PRIORITY) {
+      expect(KEY_PRIORITY_ZH[id]).toBeDefined()
+      expect(text).toContain(KEY_PRIORITY_ZH[id]!)
+    }
+  })
+
+  it('every refusal code renders, and none of them echoes a secret', async () => {
+    const outcomes: ImSetKeyOutcome[] = [
+      { ok: false, code: 'bad_secret', reason: 'too_short' },
+      { ok: false, code: 'bad_secret', reason: 'bad_chars' },
+      { ok: false, code: 'unknown_target', agents: ['a'], providers: ['anthropic', 'openai'] },
+      { ok: false, code: 'ambiguous_target', target: 'anthropic' },
+      { ok: false, code: 'env_pinned', agentId: 'a', envName: 'MIMO_API_KEY' },
+      { ok: false, code: 'mock_agent', agentId: 'm' },
+      { ok: false, code: 'vendor_ambiguous', agents: ['mimo-bot'] },
+    ]
+    for (const outcome of outcomes) {
+      config.credentials = {
+        allowed: async () => true,
+        list: async () => ({ agents: [], shared: {}, workspace: {}, hostEnv: {} }),
+        setKey: async () => outcome,
+      }
+      await bridge.inject(imMsg(`/setkey some-target ${SECRET}`))
+      const text = last(bridge).text
+      expect(text).toContain('✗ 没存')
+      expect(text).toContain('请手动删除你刚才那条消息')
+    }
+    expectNoSecretAnywhere()
+  })
+
+  it('swapped arguments do not get the key printed back into the chat', async () => {
+    // `/setkey <key> <agent>` is a well-formed command that means something
+    // else: it parses as target=<key>. Any refusal that echoed "I don't know
+    // the target «…»" would publish a live key on exactly the slip a hurried
+    // person makes. Hence: outcomes carry no member text, and the renderer
+    // does not receive the raw target at all.
+    const seen: string[] = []
+    config.credentials = {
+      allowed: async () => true,
+      list: async () => ({ agents: [], shared: {}, workspace: {}, hostEnv: {} }),
+      setKey: async (args) => {
+        seen.push(args.target)
+        return { ok: false, code: 'unknown_target', agents: ['assistant'], providers: ['anthropic'] }
+      },
+    }
+    await bridge.inject(imMsg(`/setkey ${SECRET} assistant`))
+
+    // The service really was handed the key as the target — the mistake is
+    // reachable, which is why the reply matters.
+    expect(seen).toEqual([SECRET])
+    const text = last(bridge).text
+    expect(text).toContain('先目标后 key')
+    expect(text).toContain('可用的 agent:assistant')
+    expectNoSecretAnywhere()
+  })
+
+  it('/help advertises both verbs', async () => {
+    await bridge.inject(imMsg('/help'))
+    expect(last(bridge).text).toContain('/keys')
+    expect(last(bridge).text).toContain('/setkey <target> <key>')
+  })
+})
+
+/**
+ * Mirror of the router's private label map. Kept here (rather than exported)
+ * so the assertion above proves the RENDERED line covers every id in
+ * `IM_KEY_PRIORITY` — if a new tier is added without a label, the rendered
+ * text would silently show a raw id and this lookup goes undefined.
+ */
+const KEY_PRIORITY_ZH: Record<string, string> = {
+  'pinned-env': '钉死的环境变量',
+  'per-agent': '专属',
+  'org-pool': '共享池',
+  'user-pool': '成员自带',
+  workspace: '工作区',
+  env: '服务器环境变量',
+}
 
 function last(bridge: FakeBridge): {
   to: ImUser
