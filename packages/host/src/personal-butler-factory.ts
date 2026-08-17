@@ -94,6 +94,10 @@ import {
 } from './personal-butler-hub-sense.js'
 import type { SelfHealLog } from './self-heal-log.js'
 import { buildButlerPanelToolset, type ButlerPanelSurface } from './personal-butler-panel.js'
+import {
+  buildButlerEnvironmentToolset,
+  defaultHubEnvProbe,
+} from './personal-butler-environment.js'
 import { buildButlerSelfStatusToolset } from './personal-butler-self-status.js'
 import { buildButlerHandsToolset, type ButlerHands } from './personal-butler-hands.js'
 import {
@@ -256,6 +260,12 @@ export interface ButlerFactoryDeps {
    * owner/admin 判定钉在 `ops.privileged` —— 与 pack_backup 同姿态,服务端权威。
    */
   configOps?: ButlerConfigOps
+  /**
+   * HANDS-M4 — 空间根,**只用来 statfs 量那块盘还剩多少**(环境卡的一个数字),
+   * 路径本身永不进任何输出。缺席 ⇒ 磁盘那格如实「未知」,不猜 cwd:
+   * 猜错分区会给出一个看起来很确定的错数字,比诚实的「不知道」坏得多。
+   */
+  spaceRoot?: string
 }
 
 export function buildButlerFactory(deps: ButlerFactoryDeps): ButlerFactory {
@@ -493,6 +503,16 @@ export function buildButlerFactory(deps: ButlerFactoryDeps): ButlerFactory {
         const hubHealthToolset = deps.onboarding
           ? buildButlerHubHealthToolset({ health: deps.onboarding.health, logger: log })
           : undefined
+        // HANDS-M4 — benign 环境卡:机器事实 + 工具链 + 手/监狱 + 被动出网 +
+        // 四个旋钮,再折出提案。`config` 借的就是 M3c 那份 ops(读写两半看同一个
+        // 投影);`hands` 直接复用 boot 那次功能探针的结论,这张卡自己不判监狱。
+        const environmentToolset = buildButlerEnvironmentToolset({
+          ...(deps.spaceRoot ? { probe: defaultHubEnvProbe(deps.spaceRoot) } : {}),
+          ...(deps.hands ? { hands: deps.hands.status } : {}),
+          ...(deps.configOps ? { config: deps.configOps } : {}),
+          ...(deps.onboarding ? { health: deps.onboarding.health } : {}),
+          logger: log,
+        })
         // HEAL-M1 — benign 重启历史:自愈台账只读投影(开机分类+看门狗记录)。
         const restartHistoryToolset = deps.selfHeal
           ? buildButlerRestartHistoryToolset({ selfHeal: deps.selfHeal, logger: log })
@@ -645,6 +665,7 @@ export function buildButlerFactory(deps: ButlerFactoryDeps): ButlerFactory {
           ...(membersToolset ? [membersToolset] : []),
           ...(panelToolset ? [panelToolset] : []),
           selfStatusToolset,
+          environmentToolset,
           ...(planWizardToolset ? [planWizardToolset] : []),
           ...(consolidateToolset ? [consolidateToolset] : []),
           remindersToolset,
@@ -669,6 +690,7 @@ export function buildButlerFactory(deps: ButlerFactoryDeps): ButlerFactory {
           ...(membersToolset ? [membersToolset] : []),
           ...(panelToolset ? [panelToolset] : []),
           selfStatusToolset,
+          environmentToolset,
           knowledgeToolset,
           ...(consolidateToolset ? [consolidateToolset] : []),
           languageToolset,

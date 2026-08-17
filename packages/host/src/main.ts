@@ -1120,6 +1120,7 @@ async function main(): Promise<void> {
     selfHeal: () => selfHealLog, // HEAL-M1 restart_history 台账切片
     hands: butlerHands, // HANDS-M2 手 A(status 恒传给自检;toolset 只在 armed 时装)
     ...(butlerConfigOps ? { configOps: butlerConfigOps } : {}), // HANDS-M3c set_hub_config
+    spaceRoot: space.root, // HANDS-M4 环境卡:只拿去 statfs 量剩余磁盘,路径不进输出
     // SEN-M5 — 成员名单投影源(岔口 A 全员见名+角色+id;email 结构性不进投影)。
     ...(identityForBackup
       ? { members: { users: () => identityForBackup.listUsers(),

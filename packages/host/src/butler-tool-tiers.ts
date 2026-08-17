@@ -85,6 +85,10 @@ export const BUTLER_DIRECTORY_BENIGN = [
   // SEN-M3 自我状态一卡 — 低频按需自省(「你还好吗」);渲染里点名的
   // list_my_llms 同在目录内部(LSA-M1 先例,模式连续)
   'my_status',
+  // HANDS-M4 机器环境一卡 — 低频按需诊断(「这台服务器撑得住吗」「怎么没有
+  // 手」);同域 hub_health / my_status 一族。它的提案会点名 `set_hub_config`
+  // ——那是 **governed**,按规则全量留一等,指路不指空成立。
+  'hub_environment',
   // SEN-M4 定时工作流成员向投影 — 低频(「每天早上自动跑什么」);渲染指路
   // admin 面板是人话不是工具名,描述零工具点名
   'list_schedules',

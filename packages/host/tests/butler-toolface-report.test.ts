@@ -49,6 +49,7 @@ import {
 } from '../src/personal-butler-hub-sense.js'
 import { buildButlerMembersToolset } from '../src/personal-butler-members.js'
 import { buildButlerSchedulesToolset } from '../src/personal-butler-schedules.js'
+import { buildButlerEnvironmentToolset } from '../src/personal-butler-environment.js'
 import { buildButlerSelfStatusToolset } from '../src/personal-butler-self-status.js'
 import { buildButlerCapabilitiesToolset } from '../src/personal-butler-capabilities.js'
 import { buildButlerConsolidateToolset } from '../src/personal-butler-consolidate.js'
@@ -120,6 +121,7 @@ const MEASURED_BUILDERS: Record<string, string> = {
   'hub-sense': 'buildButlerHubHealthToolset',
   'restart-history': 'buildButlerRestartHistoryToolset',
   'self-status': 'buildButlerSelfStatusToolset',
+  environment: 'buildButlerEnvironmentToolset',
   schedules: 'buildButlerSchedulesToolset',
   members: 'buildButlerMembersToolset',
   panel: 'buildButlerPanelToolset',
@@ -333,6 +335,12 @@ function buildFullFace(): ToolFaceEntry[] {
       module: 'self-status',
       kind: 'benign',
       toolset: buildButlerSelfStatusToolset({ userId: 'u', notebook }),
+    },
+    // HANDS-M4 环境卡:benign 只读,机器事实 + 工具链 + 手 + 被动出网 + 旋钮。
+    {
+      module: 'environment',
+      kind: 'benign',
+      toolset: buildButlerEnvironmentToolset({}),
     },
     // SEN-M4 定时工作流成员向投影:benign 只读,admin list 同源。
     {

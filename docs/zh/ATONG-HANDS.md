@@ -182,6 +182,16 @@ approve，不能的写「你要做什么」指路）。典型：内存 <4GB ⇒ 
 语音腿不可用 + 装法；无监狱 ⇒ 手不可用 + 装法；无出网 ⇒ 搜索/推送退化。**探针每轮零 LLM，
 方案由阿同渲染，应用经闸**。
 
+> **M0 → M4 改口（2026-08-17 落地，见 §十五）**：上面这段把「可自动应用」写宽了。真做一遍
+> 才看清 —— hub 是**非特权**跑的（威胁模型里当特性写着的那条），装 ffmpeg、装监狱、清磁盘、
+> 修防火墙**结构上都不是阿同能做的事**，一律落 `applicable:false` 只指路；而「关 embedder /
+> 关图书馆员」那类开关**不在 M3c 那四个可改设置项的白名单里**，同样只能指路 —— 一张环境卡
+> 不该顺手把那张白名单撑宽，那是另一个决定。真正 `applicable:true` 的只有一条：**两个端口被
+> 写成了同一个**（正是 M3c 让手机能造出来的那个错），它落在 `set_hub_config` **已有**的参数
+> 空间里，一个字节的新落盘路径都不需要。另两处改口：**GPU 不探**（探得到，但没有任何一条建议
+> 由它决定，探了就是「写了永不读」）；**出网不主动探** —— 主动探一次就等于给模型开一个新的
+> 出网面，改成读 CARE 那份从真实流量折叠出来的断供事实，并在卡上写明「被动看，不主动探」。
+
 ### 4.6 Obsidian 投影（M5）
 
 `<ownerDir>/` 本就可被 Obsidian 当 vault 打开（`knowledge/` 是 md 树）。补三块只读投影：
@@ -225,7 +235,7 @@ IM 通道即在；**至少一次网页触碰不可避免也不该避免**（owne
 | M3a ✅ | 手机配置面·直贴（2026-08-17，见 §十二） | im-adapter `/setkey` 全形状认领 + host `im-credentials-service.ts`（写金库 + **写完重启那些真会换钥的 agent**）+ 桥两条 gated 路由 + `/keys` 槽位表（永不列值） | 单测 38：直贴不进 SESS 窗/transcript/日志/审计；**顺序打反（`/setkey <key> <agent>`）也不把 key 回显进聊天**；坏形状永不落回自由文本；非 owner/admin 与「没接」同一句；`env_pinned`/mock/`openai-compatible` 共享档拒绝而不是假装存上；优先级表由**真** `selectLlmApiKey` 推导对拍 |
 | M3b ✅ | 手机配置面·链接（2026-08-17，见 §十三） | host `setkey-link-store.ts`（文件名 = `sha256(token)`，删除即认领）+ 服务四方法（`linkAvailable`/`issueLink`/`linkPage`/`submitLink`）+ web `setkey-routes.ts` 零 JavaScript 表单（**挂在 CSRF 门之前**）+ 双路径优劣文案 + **M3a 装配缝的死线修复** | 单测 60（存储 11 / 服务 +13 / 装配 6 / 路由 16 / 解析 +6）：令牌不在盘上任何一个字节里；单次；过期即废；页面是 peek 不是认领；写给**令牌的主人**而不是提交者；两处各自重问角色；秘密不出现在任何响应体（含重画表单那次）；无 cookie / bearer / CSRF 可达且**控制组先证那道门开着**；直贴与链接在审计里永远分得出来；`GOTONG_PUBLIC_URL` 缺席=整条路诚实缺席（不猜 `host:port`） |
 | M3c ✅ | config-write 上手机（2026-08-17，见 §十四） | 一件 governed 工具 `set_hub_config`（tier 2「每次 park」）+ host `personal-butler-config.ts`（classify 预检 = `applyEnvKnob` 逐条同序）+ 进 `IM_APPROVABLE_TOOLS` + `OpsSurface` 第四个值 `butler` + SETTING-OPS-CONSOLE 「config-write ✗ IM」**显式改口**（并写清改的是哪条路） | 单测 24 + tiers 双向核对：枚举 ≡ `ENV_KNOBS`（参数空间封闭 = IM 可批的理由）/ 角色在最前（先于任何参数判断）/ 密钥键指 `/setkey` 而不是「不是可改的设置项」/ 读现值失败**不变成拒绝**（`GovernedActionToolset.classify` 无 catch）/ park→批准之间被降权则不执行 / 真写真审计且审计抛错不回滚已落的字节 / 同样 `surface:'butler'` 不带 `allowConfigWrite` 照样 `OpsTierError`；**五道变异五次全红且只红该红那一例**；**Codex 交叉审**（与 M2/M2b 同批，额度 08-19 恢复） |
-| M4 | 环境探测→方案→人批 | `hub_environment` + 提案卡 + tier 2 应用 | 探针零 LLM；不可应用项只指路 |
+| M4 ✅ | 环境探测→方案→人批（2026-08-17，见 §十五） | host `personal-butler-environment.ts`：零 spawn 零联网探针（cpu/mem/disk/node/PATH 上的 ffmpeg·git·docker）+ 复用 boot 那次监狱功能探测的结论 + 被动读 CARE 断供 + 纯函数提案引擎（判别联合：`applicable:false` 那一支**结构上没有 apply 字段**）+ 渲染卡；进目录层 benign（~193tk，不占每轮脸）；`spaceRoot` 穿一行进 factory 只为 statfs | 单测 30（六组）：schema 封闭 + 描述如实说「不跑任何命令 / 不发任何网络请求」；**源码级断言**剥掉注释后不含 `child_process`/`spawn(`/`execFile`/`fetch(`/`node:http`；每一块读不动只让那一块 null 且**不产生提案**（null ≠ 有问题）；磁盘探不动不当成 0；端口撞车两支（能算出安全值⇒指向 `set_hub_config`；活值也撞⇒降级只指路）；凡 `applicable:true` 其 `apply.tool` 恒为 `set_hub_config` 且 key ∈ 四个白名单旋钮；渲染里**结构性没有**绝对路径/用户名（真跑默认探针对拍）；**七道变异七次全红且只红该红那些**（含摘掉判别联合、摘掉 tiers 登记、摘掉 AFR tripwire） |
 | M5 | Obsidian 投影 | tasks.md / memory/*.md 生成 + frontmatter + 覆盖语义 | 真相未动；投影可 Obsidian 解析 |
 | M6 | 一键镜像 e2e | compose env 透传 + e2e 脚本 | `compose up` → IM 在 → 网页一次触碰 → 手机 `/setkey`→`/model` 全通 |
 | M7 | 修复接手 + capstone | 修复动作目录 + `examples/atong-hands` 四幕（注入写配置双拒 / 联网 park 批后跑 / 工作区直写+监狱跑脚本 / `/setkey` 双路径文案 + 金库落值零回显） + 收口 | `pnpm demo:atong-hands` exit 0，零 key 零 LLM |
@@ -1228,3 +1238,116 @@ execute 侧的降权复查（1 例）/ schema 枚举写死成手抄名单（1 �
 - 审计行里 `actorSource` 是 `v4-session`（发起人是一个真的 v4 用户行），**批准的渠道**由收件箱
   自己那条 resolve 审计行的 `metadata.via` 记——两行拼起来才是完整的一次改动，这是刻意的分工。
 - Codex 交叉审**尚未跑**（额度 08-19 恢复），与 M2/M2b 同批送审。
+
+---
+
+## 十五、M4 落地记录（2026-08-17）
+
+一句话：**这台机器什么样、够不够用、有什么该改** 折成一次只读调用 —— 而「该改」里真轮得到
+阿同动手的，只有一件，因为 hub 是非特权跑的，这是特性不是缺陷。
+
+### 15.1 M4 不需要第二条落盘路（这一刀最重要的判断）
+
+计划原文把 M4 写成「提案卡 + **tier 2 应用**」，读起来像要再造一条应用路径。落地时先把
+「哪些环境问题阿同真的能自己修」一条条过了一遍，答案是：**几乎没有**。
+
+装 ffmpeg、装 bwrap、清磁盘、改防火墙 —— 全要包管理器 / root，而 hub **刻意**是非特权跑的
+（威胁模型 §二把 `apt` / `systemctl` 结构上做不到当**特性**写着）。「关 embedder / 关图书馆员
+省内存」倒是不需要 root，但那几个旋钮**不在 M3c 那四个可改设置项的白名单里** —— 一张环境卡
+要是为了让自己的建议能一键落地，顺手把那张白名单撑宽，那才是真出事：**白名单该不该长，是一个
+独立的决定，不能被一张诊断卡顺带做掉**。
+
+于是真正 `applicable:true` 的只剩一条：**`GOTONG_WEB_PORT` 与 `GOTONG_WS_PORT` 被写成了同一个
+值**。这条来自 M3c 自己 —— `validatePort` 只查 1..65535 的范围，不查两个端口撞不撞，所以手机上
+一句「把网页端口改成 3000」就能造出「下次重启起不来、而现在跑着的进程毫无感觉」的状态。**M3c
+造出了这个失败模式，M4 负责在它炸之前看见它**；修法落在 `set_hub_config` **已有**的参数空间里，
+一个字节的新落盘路径都不需要。
+
+这条提案还有一支**降级**：如果活着的值也已经撞上了（两边都被改过），阿同算不出一个确定不撞的
+值，就别假装能一键修 —— 降级成只指路，挑端口是人的决定。
+
+判别联合把这件事钉死在类型上：`applicable:false` 那一支**根本没有 `apply` 字段**。一条只该指路
+的建议想夹带一个能落盘的动作，结构上没有地方放。门里对每一条提案反向断言
+`hasOwnProperty('apply') === false`，因为运行时的越权不该只靠编译器拦。
+
+**为什么不复用 RES 的 `AdaptationProposal`**：那个联合的 apply 路径写死在「agent 编辑 →
+`agents.json`」（`agents-routes.ts` → `adaptEditBodyFromProposal` → `space.upsertAgent`），一条
+环境类提案送进去只会拿到 400 `not_applicable` —— 复用它等于让类型撒一个谎。
+
+### 15.2 三种「不探」，每种都有各自的理由
+
+- **监狱不重探**。别处可以拿 PATH 上有没有那个文件当答案，这一行不行：`detectFsJail` 是
+  **功能**探针（真 spawn 一次试着关进去），而「PATH 上有 bwrap」≠「这台机器上能用」——
+  Ubuntu 23.10+ 的非特权 userns 可能被 AppArmor 关掉，那正是威胁模型里如实写着的残余。所以
+  这一行读 boot 时定下的 `ButlerHandsStatus`，自己一个字也不判；没手时**原样带上 boot 那次的
+  原因**，再补一句「装监狱要包管理器权限，我自己装不了」。
+- **出网不主动探**。一个模型能触发的出站请求，本身就是一个新的出网面（WSE / LSA 一路守下来的
+  边界）。改成读 CARE 那份从**真实流量**折出来的断供投影，并在卡上写明「被动看，不主动探」
+  —— 「没人报过错」不等于「探过是通的」，这句话必须让读卡的人看见。另外只有 `network` 类断供
+  算环境问题：配额耗尽 / key 过期不是这台机器的事，把它们算进来会把人指向错误的方向。
+- **版本号不取**。工具链只看 PATH 上那个文件在不在（`existsSync`），**绝不跑 `--version`**
+  —— 与 resource-inventory 同一条纪律：一个能被注入的模型触发的进程，不该因为「想知道版本号」
+  而存在。门把这条升成**源码级断言**：剥掉注释后，这个文件里不许出现 `child_process`、
+  `spawn(`、`execFile`、`fetch(`、`node:http`（注释里可以谈这件事，代码里不许写 —— 与 innerHTML
+  那道门同姿态）。
+
+### 15.3 每一块读不动，都只让那一块沉默
+
+采集分四块（机器 / 工具链 / 旋钮 / 体检），逐块 try/catch，一块读不动只让那一块是 null，卡照出
+（`my_status` 六行逐行降级同纪律）。三条具体的诚实：
+
+- **null ≠ 有问题**。读不动的块**不产生任何提案** —— 一张「什么都读不到」的卡，提案清单是空的，
+  而不是把「我看不见」渲染成「你有一堆毛病」。
+- **磁盘探不动不当成 0**。`statfsSync` 是 Node 18.15+ 才有的，老运行时上诚实回 null；把 null
+  当 0 会让每一台老机器都收到一条「磁盘快满了」。
+- **未接与读不动分得开**。旋钮面没接是 `null`，接了但读盘失败也是 `null`，而体检那格用三个值
+  分开说（`'not_wired'` / `'unknown'` / 真值）—— 因为「没接断供监测」和「断供监测说没事」在
+  屏幕上必须是两句话。
+
+**敏感事实是结构性缺席的，不是采完再脱敏**：绝对路径 / 主机名 / 用户名 / 任何 env 的**值**一律
+不进采集面（`spaceDir` 只交给 statfs，永不进输出），渲染器想泄露也拿不到。门真跑一遍默认探针
+再断言输出里不含 `process.cwd()`、不含 `/usr/bin`、不含 `$USER`。
+
+### 15.4 它落在目录层，不占每轮的脸
+
+`hub_environment` 进 `BUTLER_DIRECTORY_BENIGN`（与 `hub_health` / `my_status` / `restart_history`
+同族）：出事才问，不是每轮动词。它的提案会点名 `set_hub_config` —— 而那件是 **governed**，按
+AFR-M3 的规则全量留一等，所以「指路不指空」成立。AFR-M1 报告量到 622 字节 / ~193tk（在目录后面，
+每轮的脸一个字节没长）。
+
+`list_my_capabilities` 里刻意分成**两条** signal：环境卡永远在（机器事实这块总探得到），而
+「我能帮你改基础设置」那句话由 `set_hub_config` 在不在决定 —— 合并成一条就会在没接 M3c 的
+hub 上许一个做不到的诺。
+
+### 15.5 门
+
+新 `personal-butler-environment.test.ts` **30 例**六组：工具面与只读契约（含上面那条源码级断言）/
+采集逐块降级 / 提案引擎纯函数（端口撞车两支、待生效、没手、工具链、内存、磁盘、出网七类）/
+判别联合承重（凡 `applicable:true` 其 `apply.tool` 恒为 `set_hub_config` 且 key ∈ 四个白名单旋钮；
+凡 `applicable:false` 结构上没有 `apply`）/ 渲染（逐行降级 + 敏感事实结构性不出现）/ **真实默认
+探针自己也跑一次**（生产走的就是那条路，只测注入的假探针等于没测过它）。
+
+**七道变异，七次全红，且每次只红该红的那些**：给「不可应用」那支夹带一个 `apply`（④ 1 例）/
+端口撞车不再降级（③ 1 例）/ 磁盘 null 当 0（③ 1 例）/ 渲染顺手打印 `process.cwd()`（⑤ 1 例）/
+源码里出现一个 `fetch(`（① 1 例）/ 从 `BUTLER_DIRECTORY_BENIGN` 摘掉 `hub_environment`
+（tiers 门 2 例，双向都红）/ 从 AFR-M1 `MEASURED_BUILDERS` 摘掉它（tripwire 2 例，报出的正是
+「factory 组装了它但报告没度量它」）。复原一律 python 精确替换 + `shasum` 与基线对拍，**绝不
+`git checkout <file>`**。
+
+验收：host **3098** + 5 skip（+30）、全仓 `pnpm -r typecheck` 净、四门 PASS（**旋钮 116 零新增**
+—— `spaceRoot` 是 factory 的 dep 不是旋钮；main.ts 2801，棘轮 2800→2810 **显式抬**并写明理由：
+上一刀已经顶格，继续靠压注释续命正是那道门头注警告的事）。
+
+### 15.6 诚实残余
+
+- **`applicable:true` 只有一条**，而且它治的是 M3c 自己造出来的失败模式。这不是设计得不够 ——
+  是「hub 非特权」这条立场的直接后果：环境问题的修法绝大多数在 hub 的权限之外，阿同能做的就是
+  **准确地说清楚该谁做什么**。
+- **探针看不见 hub 自己的资源占用**（`os.freemem()` 是整台机器的）。要报「阿同这个进程吃了多少」
+  得另开一条路，那是 metrics 的事，不是这张卡的。
+- **端口撞车只查这一对**。别的占用（另一个进程已经占着 3000）探不到 —— 探它就得真去 bind，
+  那是副作用不是探测。
+- **提案不落审计**。渲染一张卡不是一次动作；真要改，落盘的那一下由 `set_hub_config` 自己记
+  （M3c 的 `setting_config_write` 行）。
+- **磁盘只看空间所在那块盘**。备份档 / transcript 若被配到别的挂载点上，这张卡看不见它满没满。
+- Codex 交叉审**尚未跑**（额度 08-19 恢复），与 M2/M2b/M3a/M3b/M3c 同批送审。

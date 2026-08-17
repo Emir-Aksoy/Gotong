@@ -66,6 +66,16 @@ const CATALOG: readonly CapabilityEntry[] = [
   { signals: ['ask_peer'], line: '- 替我问对端 hub 一件事(发出前要你点头)' },
   { signals: ['backup_status'], line: '- 看这台 hub 的备份状态;打包一份备份档案(打包前要你批准)' },
   {
+    // HANDS-M4 — 环境卡永远在(机器事实这块总探得到);`set_hub_config` 在不在
+    // 决定这句话的后半截,所以它自己是一条 signal,不与环境卡合并。
+    signals: ['hub_environment'],
+    line: '- 看这台服务器什么情况 —— 内存/磁盘够不够、ffmpeg 装没装、我有没有手',
+  },
+  {
+    signals: ['set_hub_config'],
+    line: '- 改这台 hub 的基础设置 —— 端口、个人/团队模式(改动前要你批准,下次重启生效)',
+  },
+  {
     // HANDS-M2 — 手 A:五工具同装同卸,任一名字在场即整套在场;联网命令的「先请你确认」写进卡里
     signals: ['hands_run', 'hands_write'],
     line: '- 在我的工作区里动手 —— 写文件、跑命令、搭脚手架(离线的直接做,要联网的先请你确认)',
