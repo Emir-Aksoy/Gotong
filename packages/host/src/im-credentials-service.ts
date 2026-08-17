@@ -94,6 +94,17 @@ export interface ImCredentialsServiceOptions {
    * instead of quietly implying it is.
    */
   restartAgents?: (agentIds: string[]) => Promise<{ restarted: string[]; failed: string[] }>
+  /**
+   * HANDS-M3b — the other path. Absent (or a hub with no public URL) means
+   * `/setkey link` says so rather than printing a link that cannot be opened.
+   */
+  links?: {
+    issue(userId: string): { token: string; expiresAt: number }
+    peek(token: unknown): { userId: string; expiresAt: number } | null
+    consume(token: unknown): { userId: string } | null
+  }
+  /** Externally reachable base for the link, already validated. */
+  linkBaseUrl?: string
   /** Structured logger. Target/outcome only — this file never logs a secret. */
   log: { info(msg: string, meta?: Record<string, unknown>): void }
 }
@@ -175,6 +186,62 @@ export type ImSetKeyOutcome =
   | { ok: false; code: 'env_pinned'; agentId: string; envName: string }
   | { ok: false; code: 'mock_agent'; agentId: string }
   | { ok: false; code: 'vendor_ambiguous'; agents: string[] }
+
+/**
+ * HANDS-M3b — what `/setkey link` answers. `unavailable` covers both shapes of
+ * "we cannot hand you a working link" (no store wired, no public address), and
+ * it is one code on purpose: the member's next move is the same either way, and
+ * telling a chat window which half of the plumbing is missing is operator
+ * detail that belongs in the hub log.
+ */
+export type ImSetKeyLinkOutcome =
+  | { ok: true; url: string; expiresAt: number }
+  | { ok: false; code: 'unavailable' }
+
+/**
+ * One entry in the form's target picker.
+ *
+ * Two decisions live in this shape:
+ *
+ *   - `value` is the EXPLICIT `agent:` / `provider:` form, so a submit coming
+ *     from the form can never hit `ambiguous_target`. The bare-name parse stays
+ *     for the chat path, where typing a prefix is friction; here the page has
+ *     room to be unambiguous for free.
+ *   - `blocked` names a refusal that is knowable BEFORE the write. The page
+ *     disables those options — a one-time link should not be spent on a "no"
+ *     the hub could already see coming. The server still refuses a crafted
+ *     submit: the picker declines to offer the impossible, it does not
+ *     authorise the rest.
+ *
+ * Codes, not prose: every word the member reads is rendered by the web layer,
+ * the same split `ImSetKeyOutcome` already uses for the chat replies.
+ */
+export interface SetKeyLinkTarget {
+  value: string
+  kind: 'agent' | 'provider'
+  /** Bare id / tag, for display. */
+  name: string
+  /** The agent's provider tag (agents only). */
+  provider?: string
+  blocked?: 'env-pinned' | 'mock'
+  envName?: string
+  /** A key is already stored in this slot (presence only, never the value). */
+  filled: boolean
+}
+
+/** What the form page needs to render. Presence only — no value ever leaves. */
+export type SetKeyLinkPage =
+  | { ok: true; targets: SetKeyLinkTarget[]; expiresAt: number }
+  | { ok: false; code: 'link_invalid' | 'not_allowed' }
+
+/**
+ * The submit answer. Reuses `ImSetKeyOutcome` verbatim so the two paths cannot
+ * drift in what a refusal MEANS, plus the two failures only the link path has.
+ */
+export type ImSetKeyLinkSubmitOutcome =
+  | ImSetKeyOutcome
+  | { ok: false; code: 'link_invalid' }
+  | { ok: false; code: 'not_allowed' }
 
 /**
  * The resolution order `/keys` prints. Kept as data (not prose) so the
@@ -306,6 +373,110 @@ export class ImCredentialsService {
     }
   }
 
+  // ── HANDS-M3b: the link path ──────────────────────────────────────────────
+
+  /**
+   * Whether a link would actually work here. Read by the PASTE replies before
+   * they offer the alternative — advice that fails when taken is worse than no
+   * advice, especially in the sentence right after "your key is in your chat
+   * history now".
+   */
+  linkAvailable(): boolean {
+    return Boolean(this.opts.links && this.opts.linkBaseUrl)
+  }
+
+  /**
+   * Mint a one-time link. The caller has already been through `allowed()`.
+   *
+   * Both halves of "no link" collapse to one refusal, and the log line is where
+   * the operator learns which half — a member reading a chat reply cannot act
+   * on "GOTONG_PUBLIC_URL is unset" any differently than on "no store wired".
+   */
+  issueLink(userId: string): ImSetKeyLinkOutcome {
+    const base = this.opts.linkBaseUrl
+    if (!this.opts.links || !base) {
+      this.opts.log.info('im setkey link unavailable', {
+        hasStore: Boolean(this.opts.links),
+        hasBaseUrl: Boolean(base),
+      })
+      return { ok: false, code: 'unavailable' }
+    }
+    const link = this.opts.links.issue(userId)
+    this.opts.log.info('im setkey link issued', { userId, expiresAt: link.expiresAt })
+    return { ok: true, url: `${base}/setkey/${link.token}`, expiresAt: link.expiresAt }
+  }
+
+  /**
+   * What the form page may show. A peek, not a claim: opening the page twice
+   * (a mis-tap, a preview fetch by the IM client) must not cost the link.
+   *
+   * The role is re-read here and again at submit rather than trusted from mint
+   * time — same reason the hands toolset re-asks at execute: a link can sit on
+   * a screen for minutes, and the write happens on behalf of whoever the member
+   * is NOW.
+   */
+  async linkPage(token: unknown): Promise<SetKeyLinkPage> {
+    const held = this.opts.links?.peek(token)
+    if (!held) return { ok: false, code: 'link_invalid' }
+    if (!(await this.allowed(held.userId))) return { ok: false, code: 'not_allowed' }
+    const view = await this.list()
+    const targets: SetKeyLinkTarget[] = []
+    for (const a of view.agents) {
+      targets.push({
+        value: `agent:${a.agentId}`,
+        kind: 'agent',
+        name: a.agentId,
+        provider: a.provider,
+        ...(a.provider === 'mock'
+          ? { blocked: 'mock' as const }
+          : a.envName
+            ? { blocked: 'env-pinned' as const, envName: a.envName }
+            : {}),
+        filled: Boolean(a.perAgentUpdatedAt),
+      })
+    }
+    // Shared rows only for the tags a shared key can honestly serve — the
+    // `openai-compatible` umbrella is never offered here, which is what makes
+    // `vendor_ambiguous` unreachable from the form rather than merely refused.
+    for (const p of IM_SHARED_KEY_PROVIDERS) {
+      targets.push({ value: `provider:${p}`, kind: 'provider', name: p, filled: Boolean(view.shared[p]) })
+    }
+    return { ok: true, targets, expiresAt: held.expiresAt }
+  }
+
+  /**
+   * Spend the link and write the key.
+   *
+   * The order is chosen so the ONE realistic mistake does not cost a round trip
+   * to the phone: a truncated paste is caught by the pure shape check BEFORE
+   * the link is spent, so the member just pastes again on the same page. That
+   * check reads no hub state and reveals nothing, so declining to burn the link
+   * for it gives an attacker holding the token exactly nothing — they could
+   * already spend it once, and every branch past this point does.
+   *
+   * Everything else consumes first: the removal is the claim, so two submits
+   * racing the same token cannot both reach `setKey`.
+   */
+  async submitLink(args: {
+    token: unknown
+    target: string
+    secret: string
+  }): Promise<ImSetKeyLinkSubmitOutcome> {
+    const held = this.opts.links?.peek(args.token)
+    if (!held) return { ok: false, code: 'link_invalid' }
+    if (!(await this.allowed(held.userId))) return { ok: false, code: 'not_allowed' }
+    const bad = secretProblem(args.secret)
+    if (bad) return { ok: false, code: 'bad_secret', reason: bad }
+    const claimed = this.opts.links?.consume(args.token)
+    if (!claimed) return { ok: false, code: 'link_invalid' }
+    return this.setKey({
+      userId: claimed.userId,
+      target: args.target,
+      secret: args.secret,
+      via: 'setkey-link',
+    })
+  }
+
   // ── the two writers ────────────────────────────────────────────────────────
 
   private async setAgentKey(
@@ -406,6 +577,22 @@ export class ImCredentialsService {
    * carries the SLOT, never the value — same discipline as the wizard's
    * `SETUP_OWNER_LLM_KEY` row. Best-effort: a store without an audit sink (or
    * one that throws) must not cost the member the write they just made.
+   *
+   * HANDS-M3b — why `actorSource: 'im'` is still true when the secret arrived
+   * through the WEB form. `actorSource` is a small closed enum and it answers
+   * "how was the actor established", not "which keyboard did the bytes cross":
+   * there is no session and no bearer here, the member never logged in, and we
+   * know exactly who they are — because the one-time token was minted to an IM
+   * binding. The browser is only a keyboard; the authority is the IM identity.
+   * (The IMA precedent is the same shape: one coarse enum value, the detail in
+   * metadata, because a finer string would be clamped to `system` on read and
+   * lose the fact it was trying to record.)
+   *
+   * The distinction that actually matters — did this secret cross a chat window
+   * or not — lives in `via`: `im:<platform>` for a paste, `setkey-link` for the
+   * form. That is the load-bearing field, and a test pins that the two paths
+   * can never become indistinguishable. Do not "fix" this by widening the enum
+   * without first deciding what a reader loses.
    */
   private audit(userId: string, via: string, meta: Record<string, unknown>): void {
     try {

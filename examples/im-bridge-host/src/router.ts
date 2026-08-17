@@ -325,6 +325,24 @@ export async function handleImMessage(
       return
     }
 
+    case 'setkey':
+    case 'keys': {
+      // HANDS-M3a/b — same posture as the approval verbs, one notch firmer.
+      // Writing a credential needs the host-side vault + audit chain this
+      // minimal example doesn't stand up, so it answers honestly. What makes
+      // this case load-bearing rather than merely tidy: `/setkey` is the ONE
+      // verb whose payload IS a secret, so it must never reach the free-text
+      // dispatch above — that path records and replays the raw message.
+      // Replying with a fixed string also means the key cannot be echoed back
+      // into the chat by construction (`cmd` is not read here at all).
+      await reply(
+        bridge,
+        msg,
+        'Credential commands aren\'t wired in this example router. The full Gotong host binds /setkey and /keys to its vault (paste, or /setkey link for a one-time web form) — use the admin UI or run the production host.',
+      )
+      return
+    }
+
     default: {
       // Exhaustiveness — switch covers all ImCommand kinds we care
       // about; an unknown one means parseImCommand changed shape.

@@ -217,7 +217,7 @@ IM 通道即在；**至少一次网页触碰不可避免也不该避免**（owne
 | M2 ✅ | 手 A 原生（2026-08-15，见 §十） | host `personal-butler-hands.ts` 执行器 + 五工具（**文件四动作走监狱内 node 小助手**）+ `hands.json` opt-in（含 `allowRoles` **默认 owner/admin**、`hidden`/`readOnly` 追加清单）+ **HOME = 只读空目录**（缓存另指工作区）+ core `FsJailHardening`（`unshareNet`/`unsharePid`/`hiddenPaths`/`hiddenFiles`/`readOnlyRoots`/`denySharedTmp`，additive；seatbelt 侧 `unsharePid` 映射成进程隔离规则）+ 上限（含监狱内 `ulimit`）+ 审计（含 stdin 摘要/sha256）+ factory 接线 + AFR 三件套 + main.ts 棘轮显式抬（2768/2770→2772/2780）+ 备份排除工作区 `node_modules` | 真 spawn 门（host hands **82 例**全过，其中真 spawn 22；bwrap 靠 argv 单测）：`cat <space>/gotong.env` 在监狱内失败；写 `<space>/agents.json` 双拒（监狱 rc≠0 且字节不变 + hands_write 穿越 refuse）；hub 用户 HOME 与点名文件藏起来；策略放行后目录换成指向 `<space>` 的链接小助手照样写不进读不出（TOCTOU 真闸=监狱）；断网命令联本机 HTTP 失败、`net:true` approve 后成功；超时/超输出/洪水响亮；命令退出即收整个进程组；hub 级并发 1 响亮拒；`kind:'none'` 整套不装；缺席字节不变（脸 absent≡off≡armed−hands_*）；子环境零凭证且 TMPDIR 指进工作区；审计不落正文；**只有 owner/admin 有手**（默认；member 的脸上没有这五件、park 期间被降权也执行不了）；**HOME 是只读空目录**（在、列得动、是空的、写不进）；**Codex 交叉审九轮 + 内部对抗审一轮**（5H/4M/1L → 2H/6M/2L → 3H/3M → 3H/3M → 2H/1M/1L → 2H/2M/1L → 2H/2M/3L → 3H/2M/3L → 3H/5M/6L → 第十轮 2H/2M，§10.5/§10.7）✅ |
 | M2b ✅ | 手 B 外驱（2026-08-16，见 §十一） | host `personal-butler-coder.ts` 装配（围墙全部借手 A 的 `ButlerHandsHost`，五道 fail-closed 闸）+ `hands.json` `coder` 块（形状门与手 A 同一个读者）+ 名册行 + owner 授权（`escalate_to_expert` 认的就是那张表）+ `onChunk` 播成 transcript 观察缝 + cli-agent `PerSpawn` env/fsJail thunk + **core seatbelt 补藏起来祖先的 `stat` 通路**（§11.2，macOS 独有的真洞） | e2e：**阿同写需求→手 B 改文件（真落在手 A 工作区）→阿同 `hands_run` 跑测试出 TESTS PASS**；手 B 读不到 hub 用户 HOME 的钥匙；坏 `coder` 块整份不装；不够格的成员连目录都不建；撞上别人的 agent 行不覆盖；`passEnv` 盖不掉 HOME/PATH/TMPDIR；围墙每次 spawn 现算（host coder **25 例** + 手 A 回归 1 + core 6；变异一道四例齐红） ✅ |
 | M3a ✅ | 手机配置面·直贴（2026-08-17，见 §十二） | im-adapter `/setkey` 全形状认领 + host `im-credentials-service.ts`（写金库 + **写完重启那些真会换钥的 agent**）+ 桥两条 gated 路由 + `/keys` 槽位表（永不列值） | 单测 38：直贴不进 SESS 窗/transcript/日志/审计；**顺序打反（`/setkey <key> <agent>`）也不把 key 回显进聊天**；坏形状永不落回自由文本；非 owner/admin 与「没接」同一句；`env_pinned`/mock/`openai-compatible` 共享档拒绝而不是假装存上；优先级表由**真** `selectLlmApiKey` 推导对拍 |
-| M3b | 手机配置面·链接 | `/setkey link` 一次性 10min 链接 + 双路径优劣文案 | 链接单次、过期即废、不建会话 |
+| M3b ✅ | 手机配置面·链接（2026-08-17，见 §十三） | host `setkey-link-store.ts`（文件名 = `sha256(token)`，删除即认领）+ 服务四方法（`linkAvailable`/`issueLink`/`linkPage`/`submitLink`）+ web `setkey-routes.ts` 零 JavaScript 表单（**挂在 CSRF 门之前**）+ 双路径优劣文案 + **M3a 装配缝的死线修复** | 单测 60（存储 11 / 服务 +13 / 装配 6 / 路由 16 / 解析 +6）：令牌不在盘上任何一个字节里；单次；过期即废；页面是 peek 不是认领；写给**令牌的主人**而不是提交者；两处各自重问角色；秘密不出现在任何响应体（含重画表单那次）；无 cookie / bearer / CSRF 可达且**控制组先证那道门开着**；直贴与链接在审计里永远分得出来；`GOTONG_PUBLIC_URL` 缺席=整条路诚实缺席（不猜 `host:port`） |
 | M3c | config-write 上手机 | 两步确认走 IMA + SETTING-OPS-CONSOLE 「config-write ✗ IM」显式改口 | 两步确认走 IMA 同一 pending 面；**Codex 交叉审**（与 M2/M2b 同批） |
 | M4 | 环境探测→方案→人批 | `hub_environment` + 提案卡 + tier 2 应用 | 探针零 LLM；不可应用项只指路 |
 | M5 | Obsidian 投影 | tasks.md / memory/*.md 生成 + frontmatter + 覆盖语义 | 真相未动；投影可 Obsidian 解析 |
@@ -941,8 +941,148 @@ target 塞回渲染层），复原 `shasum` 逐字节一致。**其中一道第�
 - **直贴这条路上，IM 平台的服务器看得见那把 key，聊天记录里也留着底**。这是用户拍板保留的
   路径（岔口 2），不是没想到；回复固定提醒「请手动删除刚才那条消息」。把平台挡在外面的那条
   路是 M3b 的一次性链接，两条路的优劣文案跟它同刀。
-- 撤回原消息的 best-effort（平台支持时）**尚未接**，归 M3b。
+- 撤回原消息的 best-effort（平台支持时）**尚未接**——M3b 做的是「让 key 根本不进聊天窗」的
+  那条路（一次性链接），没有顺手把这条捡起来；仍是残余，见 §13.10。
 - `/keys` 报的是**有没有、什么时候更新的**，不报「能不能用」——那是「测试连接」按钮的事
   （MR-M5），要花钱要打真端点，不该由一条只读命令顺手做掉。
 - config-write（`/model set`、`/setting config-set`）仍按 `SETTING-OPS-CONSOLE` 的老规矩在
   IM 上 ✗；两步确认与那张表的改口归 M3c。
+
+---
+
+## 十三、M3b 落地记录（2026-08-17）
+
+M3a 把「换 key」搬上了手机，代价写在它自己的残余里：那条路上 key 会经过 IM 平台的服务器，
+并在聊天记录里留底。用户在岔口 2 明确要保留它（着急的时候它最快），同时要「告知两种方式
+优劣」——**M3b 就是被告知的那第二条**：聊天窗里只走一个十分钟的一次性令牌，秘密从手机浏览器
+直接进金库，IM 平台被整个挪开。
+
+### 13.1 令牌从不被写下来
+
+`setkey-link-store.ts` 的不变量，逐条都有门：
+
+- **文件名是 `sha256(token)`**。读到那个目录的人知道「有一条链接、是给谁的」，重建不出可用
+  的 URL。门是逐字节扫盘上的每一个字符。
+- **`'wx'` 建、0600**，与所有挨着凭证的文件同一姿态。
+- **十分钟 TTL，两处读都判**，过期的那份顺手扫掉。
+- **发新的杀掉本人的旧链接**（与 IM 绑定码、设备配对码两族「出新码即废旧码」同一条规矩），
+  别人的一条不动——走开没用的那条链接不该一直活着。
+
+### 13.2 单次是靠删除实现的，不是靠一个布尔
+
+`consume` 先 `unlinkSync` 再报成功：**移除本身就是认领**。先读出来、再标一个 `used`，中间就有
+一个窗口能让两个并发提交都被放行；这里没有那个窗口，因为放行的凭据就是「我删掉了它」。
+
+### 13.3 拒绝的顺序也是设计
+
+`submitLink` 里，**纯形状检查排在花掉链接之前**——唯一现实的失误（粘贴粘断了）不该逼人回聊天
+窗再要一条新链接。它读 hub 的零个状态、泄露零个事实，所以不为它烧链接对一个握着令牌的攻击者
+一点好处也没有：他本来就能花掉一次，而这行之后的**每一条**分支都花。别的一律先 consume。
+
+### 13.4 链接不是一张被捕获的许可
+
+`linkPage` 与 `submitLink` **各自重新问一次 `allowed()`**，不信任发码那一刻的判断——和手 A 在
+execute 再问一次同一条理由：链接会在屏幕上躺几分钟，而写入是替**此刻**的这个人做的。
+
+而且 `submitLink` **不收 userId**：身份是从令牌里读出来的，提交者说不出它是谁。门钉的是
+`allowedAsked === ['u-alice']` ——被拿去问权限的，只可能是令牌的主人。
+
+### 13.5 选择器只是不提供做不到的，它不授权别的
+
+- picker 的 `value` 用显式 `agent:` / `provider:` 形式 ⇒ 表单来的提交**结构性**撞不上
+  `ambiguous_target`（裸名解析留给聊天那条路，那里打前缀是摩擦；这一页有地方把话说清楚，免费）。
+- `openai-compatible` 那把伞根本不出现在共享行里 ⇒ `vendor_ambiguous` 从表单**够不到**，
+  而不只是被拒。
+- 已经能提前看见的「不行」（mock / env-pinned）在页面上 `disabled`——一条一次性链接不该花在
+  hub 早就看得见的拒绝上。**但服务端照拒**：手工构造的提交仍走同一条判定。选择器是不提供
+  做不到的，不是替剩下的那些发许可。
+
+### 13.6 表单那一页
+
+- **挂在 CSRF 门之前**（与 OIDC / OAuth callback 同区）。理由不是「方便」：这条路上根本不存在
+  任何环境凭证——没有 cookie、没有 bearer、成员从没登录——所以没有东西可供一次 CSRF 去花；
+  **令牌就是授权**。这句话写在挂载处，因为一条路为什么坐在门前面，必须在门那儿读得到。
+- **零 JavaScript**。hub 的 CSP 是 `script-src 'self'` 且没有 `unsafe-inline`，一个内联
+  `<script>` 会被静默吞掉（SHELL-M4 那个下午）。一张纯 HTML form 不需要脚本，于是这个坑
+  结构性不存在。
+- **秘密不出现在任何响应体里**，包括那一次会重画表单的失败：`renderForm` 结构性收不到它。
+- `no-store` + `no-referrer`——referrer 会把带令牌的那条 URL 递给下一跳。
+- host 侧的 code 与 web 侧的 DTO 是**镜像的联合类型 + 穷尽 `switch` + `const never: never`**：
+  host 加了一个 web 没接的 code 是**编译错误**，不是一张白页。`web ∌ host` 是硬约束，这是能把
+  「两边不漂」交给类型系统的唯一办法。
+- per-IP 预算在碰到 surface **之前**就拒（429）；405 带正确的 `allow`；超大 body 413 且不到
+  surface。
+
+### 13.7 审计里 `actorSource` 还是 `im`（想清楚了才没改的那个决定）
+
+`actorSource` 是个小闭集，它答的是**「这个人是怎么被确立的」，不是「字节经过了哪个键盘」**：
+这条路上没有会话也没有 bearer，成员从没登录，而我们**确切知道他是谁**——因为那把一次性令牌
+是发给一条 IM 绑定的。浏览器只是键盘，权威在 IM 身份。IMA 判例同形：一个粗粒度枚举值 + 细节
+进 `metadata`，因为更细的字符串会在读侧被防腐守卫压成 `system`，**恰好丢掉它想记的那件事**。
+
+真正承重的区分——这个秘密**有没有穿过聊天窗**——住在 `via`：直贴是 `im:<平台>`，表单是
+`setkey-link`。一条门钉死这两条路永远不会变得分不出来；想改成加第七个枚举值的人，先读
+`audit()` 头上那段，它写着一个读者会因此失去什么。
+
+### 13.8 装配那条缝：M3a 发出去的时候其实是死的
+
+M3a 的 `/setkey` 与 `/keys` 在**每一台** hub 上都答「未启用」，而所有单测全绿。
+
+病因：`StartImBridgesOptions` 从没声明过 `credentials`，wiring 用条件展开
+`...(x ? { credentials } : {})` 把它传进去——**展开会关掉多余属性检查**，编译器一声不吭，值落在
+`opts` 上，而 `startImBridges` 从没把它拷进自己建的 `HostImConfig`。运行期
+`config.credentials === undefined`。
+
+两条教训：
+
+1. **条件展开是类型系统上的一个洞，不是一种风格选择。** 要传可选字段，就把那个字段声明出来。
+2. **一条缝，如果它的测试全都自己手搭对面那一半，那它就是没测过。** M3a 的测试手搭一个
+   `HostImConfig` 直接调路由器：它们钉的是**分支**（那部分是对的），而没有任何东西钉**线**。
+   修法不是补一句断言，是新开一份从 `startImBridges({ credentials })`——装配层自己走的那道
+   门——进去的测试，并让它同时证明「没接线时仍答未启用」，否则上面那些断言可能是空洞地真。
+
+**同一族的第二处，收口时跑 `pnpm -r typecheck` 才现形**：`examples/im-bridge-host/src/router.ts`
+的穷尽 `switch` 从 M3a 起就没认过 `setkey` / `keys` 两个新 kind——**M3a 是带着一处全仓 typecheck
+失败发出去的**，而每个包自己的测试全绿。这条编译期的门本来就是为这件事存在的（和 §13.6 里 web
+那个 `const never: never` 一模一样的机制），它当时确实红了，只是**没有人去看**：那一刀跑的是包级
+测试，没跑全仓 tsc。修法同 approvals 那一档并且更硬一点——例子里没有金库可写，就诚实答「这个
+示例路由没接凭证命令」，而且这个分支**根本不读 `cmd`**，于是 key 结构性回显不出去，也永远掉不进
+下面那条会记录并重放原文的自由文本派发。**教训：一刀收口前跑全仓 tsc，别只跑改到的那几个包**。
+
+### 13.9 门
+
+| 层 | 例数 | 钉住什么 |
+|---|---|---|
+| ① 解析（im-adapter） | 51（+6） | `/setkey link` 全形状认领（别名 / 大小写 / 多余空白）；`link` 不带值 |
+| ② 存储 | 11 | 令牌不在文件名也不在正文（逐字节扫盘）；单次；发新的只废本人的；两处读都判过期且顺手清；坏形状在碰到路径之前就拒；坏记录读成「没有」而不是可用的；`setKeyLinkBaseUrl` 宁可拒不猜（无 `host:port` 回落、明文 http 只在回环） |
+| ③ 服务 | 43（+13） | 页面是 peek 不是认领；两处各自重问角色；写给**令牌的主人**而不是提交者；形状检查在花掉之前、别的都在之后；picker 使 `ambiguous` / `vendor_ambiguous` 从表单够不到；**直贴与链接在审计里永远分得出来** |
+| ④ 装配 | 6 | 接了就必须够得着（`/keys` 不答未启用、`/setkey` 带秘密到达、`link` 到达 `issueLink`）；没接仍答未启用（证上面那些不是空洞地真）；`handle.setKeyLink` 在场**当且仅当**链接真能用，且与聊天动词**是同一个实例** |
+| ⑤ 路由（web） | 16 | 无 cookie / bearer / CSRF 可达；**挂在 CSRF 门之前**；秘密不出现在任何响应体（含重画表单那次）；每页零 `<script>`、`no-store`、`no-referrer`；八种拒因都渲染得出且都不带秘密；预算 / 405 / 413 都在碰到 surface 之前 |
+
+三道变异三次全红、且**只红该红的那些**：`via` 改成 `'im:telegram'`（服务 2 例）／把秘密回显进
+重试提示（路由 1 例，正是那条叫 THE PROMISE 的）／把挂载点挪到 CSRF 门之后（路由 1 例）。复原
+一律精确文本替换 + `shasum` 对拍（**绝不 `git checkout <file>`**，八轮栽过）。
+
+写门时踩的一个坑值得记：CSRF 那条控制**第一版断言 403 却拿到 503**，差点被判成「挂载点错了」。
+真因是 `checkOrigin` 在 `allowedHosts` 缺席时直接 `return true`——那道门当时根本没开，503 来自
+没接 identity。**一条通过了的控制断言，如果它守的门当时是关着的，它什么也没证明。** 改法=给那
+一例显式配 `allowedHosts`，并且**先证那道门确实在拒别的路，再证这条路进得去**。顺带一条硬事实：
+Node 的 `fetch` 会**静默忽略** `Host` 头覆盖，`node:http.request` 不会——按主机判定的门只能用
+后者去撞（那也更像一次真的浏览器表单 POST）。
+
+验收：host **3044**+5skip（+30），web **1662**（+16），im-adapter **51**（+6），四门 PASS（**旋钮 116 零新增**——
+链接的地址复用 `GOTONG_PUBLIC_URL`（#111），那本来就是「外面怎么找到这台 hub」的答案，不必
+再配第二样东西；main.ts 2789/2800、server.ts 2476/2490 各自显式抬并在门里写明理由）。
+
+### 13.10 诚实残余
+
+- **令牌就是凭证**：谁拿到那条 URL，谁就能在十分钟内往这台 hub 写一次 key（角色仍会被重问，
+  所以他还得是那个够格的人）。回复里那句「它就是凭证，别转发」不是客套。转发一条链接比转发
+  一把 key 危害小（单次、会过期、写不出别的东西），但不是零。
+- 撤回原消息的 best-effort **仍未接**（M3a 记的那条）：直贴那条路只能靠提醒人手删。
+- 链接页**不显示**任何已存 key 的值，只显示「这个槽位有没有」；也不做「测试连接」——那是
+  MR-M5 的事，要花钱要打真端点。
+- `linkBaseUrl` 缺席时整条路**诚实缺席**（`/setkey link` 说这台 hub 没有一次性链接并指回直贴 /
+  网页），**不猜 `host:port`**：聊天窗里一条打不开的链接，比一句「做不到」更糟。
+- 表单页是中英对照的静态文案（与 IM 回复同姿态），没有走 SPA 的 i18n——它不加载 SPA 的任何
+  字节，那是它零 JavaScript 的代价，也正是它的目的。

@@ -223,13 +223,40 @@ describe('parseImCommand', () => {
       ['trailing space only', '/setkey   '],
       ['one token (target missing)', `/setkey ${SECRET}`],
       ['three tokens (key pasted with a space)', `/setkey assistant ${SECRET} extra`],
-      ['sub-verb we have not built yet', '/setkey link'],
+      ['four tokens', `/setkey link assistant ${SECRET}`],
     ])('malformed (%s) → help, and the parse result holds no leftover text', (_label, raw) => {
       const parsed = parseImCommand(raw)
       expect(parsed).toEqual({ kind: 'setkey', mode: 'help' })
       const serialised = JSON.stringify(parsed)
       expect(serialised).not.toContain(SECRET)
       expect(serialised).not.toContain('assistant')
+    })
+
+    // HANDS-M3b — the other path. A bare word is unambiguous here because a
+    // paste is always two tokens, so claiming `link` cannot swallow a key.
+    it.each([
+      ['/setkey link', 'setkey'],
+      ['/setkey LINK', 'uppercase'],
+      ['/set-key link', 'alias'],
+      ['/key   link  ', 'padded alias'],
+      ['/setkey@MyBot link', 'bot-mention suffix'],
+    ])('%s (%s) → link mode', (raw) => {
+      expect(parseImCommand(raw)).toEqual({ kind: 'setkey', mode: 'link' })
+    })
+
+    // The invariant that makes claiming the bare word `link` safe: TWO tokens
+    // is always a paste, never a subcommand with an argument. So someone who
+    // types `/setkey link <key>` gets a paste at target "link" — refused as an
+    // unknown target, and (by the no-raw-target rule in the bridge) with
+    // nothing echoed back. What must never happen is the reverse: a subcommand
+    // parse that swallows the second token, because the second token is a key.
+    it('two tokens is a paste even when the first word is a subcommand name', () => {
+      expect(parseImCommand(`/setkey link ${SECRET}`)).toEqual({
+        kind: 'setkey',
+        mode: 'paste',
+        target: 'link',
+        secret: SECRET,
+      })
     })
 
     it('strips the bot-mention suffix (a mention must not make it malformed)', () => {

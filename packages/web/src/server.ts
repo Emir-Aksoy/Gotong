@@ -64,6 +64,7 @@ import {
 import { handleAdminPanelRoute, type MePanelDataSurface, type MePanelSurface } from './panel-routes.js'
 import type { MeNativePushSurface, MeWebPushSurface } from './push-routes.js'
 import { handleDeviceClaimRoute, type MeDeviceSurface } from './device-routes.js'
+import { handleSetKeyLinkRoute, type SetKeyLinkSurface } from './setkey-routes.js'
 import type { MeExchangeSurface } from './exchange-routes.js'
 import {
   handleWorkflowRoute,
@@ -308,6 +309,12 @@ export function serveWeb(hub: Hub, opts: WebServerOptions = {}): Promise<WebServ
   // a member pairing a phone types one code, and 10/min per IP is already
   // generous for that while being nowhere near enough to search 80 bits.
   const deviceClaimLimiter = new RateLimiter(10, 60_000)
+  // HANDS-M3b — the public `/setkey` form. Its own budget, and tighter than the
+  // pairing one for a different reason: nobody types this token (it arrives as
+  // a link), so a burst of requests is never a person retrying — it is a
+  // scanner. 10/min per IP is far more than a member needs and nowhere near
+  // enough to search 256 bits.
+  const setKeyLinkLimiter = new RateLimiter(10, 60_000)
   const sseClients = new Set<SseClient>()
 
   const unsubscribe = hub.onEvent((event) => {
@@ -371,7 +378,9 @@ export function serveWeb(hub: Hub, opts: WebServerOptions = {}): Promise<WebServ
     nativePush: opts.nativePush,
     devices: opts.devices,
     meExchange: opts.meExchange,
+    setKeyLink: opts.setKeyLink,
     deviceClaimLimiter,
+    setKeyLinkLimiter,
     panelLibrary: opts.panelLibrary,
     operatorSteward: opts.operatorSteward,
     readinessGate: opts.readinessGate,
@@ -575,8 +584,12 @@ interface HandlerCtx {
   devices: MeDeviceSurface | undefined
   /** EXCH-M1 — envelope import/export; absent → probe {available:false}, POSTs 503. */
   meExchange: MeExchangeSurface | undefined
+  /** HANDS-M3b — see WebServerOptions.setKeyLink doc above. */
+  setKeyLink: SetKeyLinkSurface | undefined
   /** SHELL-M1 — per-IP budget for the PUBLIC pairing-code claim endpoint. */
   deviceClaimLimiter: RateLimiter
+  /** HANDS-M3b — per-IP budget for the PUBLIC one-time `/setkey` form. */
+  setKeyLinkLimiter: RateLimiter
   panelLibrary: WebServerOptions['panelLibrary']
   /** SW-M9 A-M6 — see WebServerOptions.operatorSteward doc above. */
   operatorSteward: MeHubStewardSurface | undefined
@@ -893,6 +906,27 @@ async function handle(
   if (
     await handleDeviceClaimRoute(
       { devices: ctx.devices, allowClaim: () => ctx.deviceClaimLimiter.check(clientIp(ctx, req)) },
+      req,
+      res,
+      method,
+      path,
+    )
+  ) {
+    return
+  }
+
+  // HANDS-M3b — the public one-time `/setkey` form. Pre-CSRF and outside
+  // requireAdmin on the same reasoning as the claim above: the caller has no
+  // session, and the one-time token IS the authorisation. CSRF is not the
+  // threat here — a CSRF attack spends a VICTIM's ambient credentials, and
+  // there are none on this path; whoever holds the token can simply open the
+  // link themselves. What holds it up is the 256-bit single-use token, the
+  // per-IP limiter, and one wording for every failure. The mount stays here
+  // (rather than folded into setkey-routes' own file) because the REASON a
+  // route sits before the gate has to be readable at the gate.
+  if (
+    await handleSetKeyLinkRoute(
+      { setKeyLink: ctx.setKeyLink, allow: () => ctx.setKeyLinkLimiter.check(clientIp(ctx, req)) },
       req,
       res,
       method,

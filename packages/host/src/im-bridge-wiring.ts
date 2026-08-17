@@ -37,6 +37,7 @@ import {
 } from './im-approval-service.js'
 import { startImBridges, type ImBridgesHandle, type ImLogger } from './im-bridge.js'
 import { ImCredentialsService, type ImCredentialsSpace } from './im-credentials-service.js'
+import { SetKeyLinkStore, setKeyLinkBaseUrl } from './setkey-link-store.js'
 import { listOpsCommands, runOpsCommand } from './ops-core.js'
 
 export interface ImBridgeWiringDeps {
@@ -153,6 +154,11 @@ export async function armImBridgeWiring(deps: ImBridgeWiringDeps): Promise<ImBri
   const imSettingMode = new Map<string, boolean>()
   const imOpsCaller = { surface: 'im' as const, allowConfigWrite: false }
   const imOpsDeps = { spaceDir: deps.spaceRoot, env: process.env, health: deps.health }
+  // HANDS-M3b — `GOTONG_PUBLIC_URL` is knob #111, already the answer to "what
+  // address do people reach this hub at". Reusing it keeps the count at 116 and,
+  // more to the point, means a hub that is reachable has working links without
+  // anyone configuring a second thing.
+  const setKeyLinkBase = setKeyLinkBaseUrl(process.env.GOTONG_PUBLIC_URL)
   return startImBridges({
     hub: deps.hub,
     identity: deps.identity,
@@ -198,6 +204,14 @@ export async function armImBridgeWiring(deps: ImBridgeWiringDeps): Promise<ImBri
             ...(deps.credentials.restartAgents
               ? { restartAgents: deps.credentials.restartAgents }
               : {}),
+            // HANDS-M3b — the other path. The store is unconditional (a
+            // directory that stays empty costs nothing); what actually decides
+            // whether links are offered is the base URL, and that comes from
+            // the ONE existing knob for "how the outside world reaches this
+            // hub". No fallback to host:port: a link a phone cannot open is
+            // worse than saying we can't make one.
+            links: new SetKeyLinkStore(deps.spaceRoot),
+            ...(setKeyLinkBase ? { linkBaseUrl: setKeyLinkBase } : {}),
             log: deps.log,
           }),
         }

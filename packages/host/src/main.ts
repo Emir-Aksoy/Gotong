@@ -2456,6 +2456,10 @@ async function main(): Promise<void> {
           },
         }
       : {}),
+    // HANDS-M3b — the public one-time `/setkey` form. The SAME service the chat
+    // verb mints from (one token store, one allowed() policy); absent when a link
+    // could not work here, so the routes 404 instead of serving a dead form.
+    ...(imBridges?.setKeyLink ? { setKeyLink: imBridges.setKeyLink } : {}),
     // SDUI-M2/M3 — member panel store + template panel-preset sink (one object,
     // one validatePanelConfig choke point in the host store).
     mePanel: mePanelSurface,

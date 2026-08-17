@@ -39,6 +39,7 @@ import type { WorkflowWizardSurface } from './wizard-routes.js'
 import type { MePanelDataSurface, MePanelSurface } from './panel-routes.js'
 import type { MeNativePushSurface, MeWebPushSurface } from './push-routes.js'
 import type { MeDeviceSurface } from './device-routes.js'
+import type { SetKeyLinkSurface } from './setkey-routes.js'
 import type { MeExchangeSurface } from './exchange-routes.js'
 import type {
   ConnectorSlotSink,
@@ -371,6 +372,15 @@ export interface WebServerOptions {
    * pairing card stays hidden; the claim endpoint 503s.
    */
   devices?: MeDeviceSurface
+  /**
+   * HANDS-M3b — the PUBLIC one-time `/setkey` form the IM link points at.
+   * Absent → both routes answer 404, which is what an unwired hub should look
+   * like: a page that cannot set keys must not advertise that keys can be set
+   * this way. The host wires `ImCredentialsService` (its linkPage/submitLink);
+   * that service also decides, from the same store, whether `/setkey link` in
+   * chat offers a link at all.
+   */
+  setKeyLink?: SetKeyLinkSurface
   /**
    * EXCH-M1 — standard exchange-envelope import/export (`/api/me/exchange*`).
    * Absent → the probe answers {available:false} (SPA hides the card) and the

@@ -55,7 +55,13 @@ import { WebSocket as NodeWebSocket } from 'ws'
 
 import { clipApprovalText, sanitizeApprovalText } from './approval-text.js'
 import { IM_KEY_PRIORITY } from './im-credentials-service.js'
-import type { ImKeysView, ImSetKeyOutcome } from './im-credentials-service.js'
+import type {
+  ImKeysView,
+  ImSetKeyLinkOutcome,
+  ImSetKeyLinkSubmitOutcome,
+  ImSetKeyOutcome,
+  SetKeyLinkPage,
+} from './im-credentials-service.js'
 import type { ButlerHearing } from './butler-hearing.js'
 import type { ButlerSeeing } from './butler-seeing.js'
 import { ButlerOutbox } from './butler-outbox.js'
@@ -174,6 +180,51 @@ export interface ImCredentialsSurface {
     secret: string
     via: string
   }): Promise<ImSetKeyOutcome>
+  /**
+   * HANDS-M3b — mint a one-time web link so the key never enters the chat.
+   * Optional so a host wired before M3b keeps compiling; absent behaves exactly
+   * like a hub that cannot issue links (`/setkey link` says so and points back
+   * at the paste path).
+   */
+  issueLink?(userId: string): ImSetKeyLinkOutcome
+  /**
+   * Whether a link would actually work here. Read on the PASTE replies, which
+   * is where "there is a way to avoid leaving your key in this chat" is worth
+   * knowing — and where suggesting it on a hub with no public address would be
+   * a dead end.
+   */
+  linkAvailable?(): boolean
+  /**
+   * The web half of the same service. NOT called by the bridge — it is carried
+   * here so `ImBridgesHandle` can hand the caller the SAME service instance the
+   * chat commands use. That sharing is load-bearing rather than tidy: the token
+   * `/setkey link` mints and the token the form spends have to be looked up in
+   * one store, and two instances pointed at one directory would still be two
+   * `allowed()` policies and two vault writers waiting to disagree. Same reason
+   * `sessions` is re-exposed on the handle.
+   */
+  linkPage?(token: unknown): Promise<SetKeyLinkPage>
+  submitLink?(args: {
+    token: unknown
+    target: string
+    secret: string
+  }): Promise<ImSetKeyLinkSubmitOutcome>
+}
+
+/**
+ * What the web `/setkey` form needs — exactly the two methods above, with both
+ * required. `ImBridgesHandle.setKeyLink` is present only when the service can
+ * actually serve a form (a store AND a public address), so an unwired hub hands
+ * web `undefined` and the routes 404 rather than serving a page that could
+ * never accept anything.
+ */
+export interface ImSetKeyLinkWebSurface {
+  linkPage(token: unknown): Promise<SetKeyLinkPage>
+  submitLink(args: {
+    token: unknown
+    target: string
+    secret: string
+  }): Promise<ImSetKeyLinkSubmitOutcome>
 }
 
 // ── setting console (setting-ops M5) ─────────────────────────────────────────
@@ -554,6 +605,21 @@ export async function handleImMessage(
         await reply(bridge, msg, SETKEY_USAGE)
         return
       }
+      if (cmd.mode === 'link') {
+        // HANDS-M3b — the other path. Minting touches the filesystem, so a
+        // failure is possible and collapses into the SAME "unavailable" reply
+        // as an unwired hub: from where the member sits, "the disk is full" and
+        // "no public address" are one fact — there is no link, use the paste
+        // path. Which half it was goes to the hub log.
+        let link: ImSetKeyLinkOutcome = { ok: false, code: 'unavailable' }
+        try {
+          link = config.credentials.issueLink?.(userId) ?? link
+        } catch (err) {
+          config.log.warn('im setkey link mint failed', { platform, userId, err: String(err) })
+        }
+        await reply(bridge, msg, renderSetKeyLink(link))
+        return
+      }
       try {
         const out = await config.credentials.setKey({
           userId,
@@ -561,7 +627,7 @@ export async function handleImMessage(
           secret: cmd.secret,
           via: `im:${platform}`,
         })
-        await reply(bridge, msg, renderSetKeyOutcome(out))
+        await reply(bridge, msg, renderSetKeyOutcome(out, config.credentials.linkAvailable?.() ?? false))
       } catch (err) {
         // Deliberately does NOT echo `err.message` (a store/vault error carries
         // absolute paths and internal ids) and deliberately does not log the
@@ -1010,6 +1076,22 @@ export interface StartImBridgesOptions {
   /** IMA-M2 — `/inbox` `/approve` `/deny`; absent → the verbs reply "not enabled". */
   approvals?: ImApprovalSurface
   /**
+   * HANDS-M3a — `/setkey` `/keys`; absent → both verbs reply "not enabled".
+   *
+   * This field was MISSING when M3a landed. The wiring passed `credentials`
+   * inside a spread (`...(x ? { credentials } : {})`), and a spread suppresses
+   * excess-property checking — so the compiler never objected, and the value
+   * arrived on `opts` but was never copied into `config`. Both verbs answered
+   * "not enabled" on every hub, while the unit tests (which hand-build a
+   * `HostImConfig`) stayed green: they tested the branch, not the assembly.
+   *
+   * Two things follow, and the second is the durable one:
+   *   - a conditional spread is a hole in the type system, not a style choice;
+   *   - a seam whose only tests hand-build the far side of it is untested.
+   * The regression for this lives at `startImBridges`, not at the branch.
+   */
+  credentials?: ImCredentialsSurface
+  /**
    * DEPLOY-B1 — opt into the hot-start seam: return a handle even when no
    * platform resolved credentials at boot, exposing `startPlatform` so the
    * first-boot wizard can bring a bridge up right after writing its token to
@@ -1150,6 +1232,14 @@ export interface ImBridgesHandle {
    * conversation across IM and web. Present only when sessions were wired.
    */
   sessions?: ImSessionSurface
+  /**
+   * HANDS-M3b — the web `/setkey` form's backing service, re-exposed for the
+   * same reason as `sessions`: one instance, one store, one policy across the
+   * chat command and the page it points at. Present only when links can
+   * actually be issued here (store wired AND a public address configured) —
+   * so a hub that cannot mint a link also has no page pretending it could.
+   */
+  setKeyLink?: ImSetKeyLinkWebSurface
   /**
    * DEPLOY-B1 — start ONE not-yet-running vault-capable platform, resolving
    * credentials at call time (env first, then the vault row the caller just
@@ -1384,6 +1474,7 @@ export async function startImBridges(
     listAgents: opts.listAgents,
     resolveWorkflow: opts.resolveWorkflow,
     ...(opts.approvals ? { approvals: opts.approvals } : {}),
+    ...(opts.credentials ? { credentials: opts.credentials } : {}),
     log: opts.log,
     ...(opts.setting ? { setting: opts.setting } : {}),
     ...(opts.voice ? { voice: opts.voice } : {}),
@@ -1505,6 +1596,12 @@ export async function startImBridges(
     outboxTimer.unref?.()
   }
 
+  const creds = opts.credentials
+  const setKeyLinkWeb: ImSetKeyLinkWebSurface | undefined =
+    creds?.linkPage && creds.submitLink && creds.linkAvailable?.()
+      ? { linkPage: creds.linkPage.bind(creds), submitLink: creds.submitLink.bind(creds) }
+      : undefined
+
   return {
     bridges,
     status: () =>
@@ -1514,6 +1611,12 @@ export async function startImBridges(
       }),
     ...(deliverToMember ? { pushToMember: deliverToMember } : {}),
     ...(opts.sessions ? { sessions: opts.sessions } : {}),
+    // HANDS-M3b — hand the caller the SAME credentials service, but only when
+    // it can really serve a form. `linkAvailable()` is the one judge of that
+    // (store + public address), and it is the same call the paste reply reads
+    // before suggesting `/setkey link` — so the chat cannot advertise a path
+    // the web has 404'd, nor the reverse.
+    ...(setKeyLinkWeb ? { setKeyLink: setKeyLinkWeb } : {}),
     ...(opts.hotStart ? { startPlatform } : {}),
     async stop() {
       if (recoveryTimer) clearInterval(recoveryTimer)
@@ -1746,6 +1849,23 @@ const DELETE_YOUR_MESSAGE =
   '⚠ 请手动删除你刚才那条消息 —— key 不会进阿同的对话记录/记忆,但它还留在聊天平台上。\n' +
   '/ Delete your own message — the key never enters Atong\'s memory, but the platform still has your copy.'
 
+/**
+ * HANDS-M3b — the fork answer was "keep the paste path AND add the link path,
+ * and tell the member the trade-off of each". This is that sentence, and it is
+ * written as a comparison rather than a recommendation on purpose: which one is
+ * right depends on something we cannot see (is this a group chat? a work
+ * account someone else administers? are you standing in a queue with no time to
+ * open a browser?). Stating both costs honestly beats picking for them.
+ */
+const SETKEY_TWO_PATHS = [
+  '两种方式,各有代价:',
+  '  ① 直接贴  /setkey <目标> <key>',
+  '     快,不用离开聊天窗;但 key 会留在聊天平台的记录里,你得自己删,而且删之前它已经过了平台的服务器。',
+  '  ② 一次性链接  /setkey link',
+  '     key 从不进聊天窗——你在浏览器里直接填给 hub;但要点开网页,链接 10 分钟内有效、只能用一次。',
+  '/ ① paste = fast, but the key sits in your chat history. ② /setkey link = the key never enters the chat.',
+].join('\n')
+
 const SETKEY_USAGE = [
   '用法:/setkey <目标> <key>',
   '',
@@ -1755,8 +1875,37 @@ const SETKEY_USAGE = [
   '先发 /keys 看有哪些槽位、哪些还空着。',
   '/ Usage: /setkey <agent-id|anthropic|openai> <key> — send /keys to see the slots.',
   '',
+  SETKEY_TWO_PATHS,
+  '',
   DELETE_YOUR_MESSAGE,
 ].join('\n')
+
+/**
+ * `/setkey link` — the reply carries a live bearer token, so it says so.
+ *
+ * The expiry is rendered as a DURATION, not a wall-clock time: the hub's clock,
+ * the member's phone and the member's actual timezone are three different
+ * things here, and "10 分钟内" cannot be read wrong by any of them.
+ */
+function renderSetKeyLink(out: ImSetKeyLinkOutcome): string {
+  if (!out.ok) {
+    return [
+      '✗ 这台 hub 开不了一次性链接(没配公网地址,或没接这条路)。',
+      '  要么在网页管理界面改 key,要么用直贴:/setkey <目标> <key>',
+      '/ No one-time link on this hub — use the admin UI, or paste: /setkey <target> <key>',
+    ].join('\n')
+  }
+  const minutes = Math.max(1, Math.round((out.expiresAt - Date.now()) / 60_000))
+  return [
+    `打开这个链接填 key(${minutes} 分钟内有效,只能用一次):`,
+    '',
+    out.url,
+    '',
+    '⚠ 这个链接本身就是凭证:谁点开谁就能改这台 hub 的 key,别转发。',
+    '  用过、或者过了时间,它就自动作废;想再来一次就再发一遍 /setkey link。',
+    `/ One-time link, valid ${minutes} min. It IS the credential — do not forward it.`,
+  ].join('\n')
+}
 
 /** `/keys` — slots, never values, and never a simulated "winner". */
 function renderKeysView(view: ImKeysView): string {
@@ -1826,8 +1975,19 @@ const KEY_PRIORITY_LINE = IM_KEY_PRIORITY.map((k) => KEY_PRIORITY_LABELS[k] ?? k
  * string below comes from the hub's own records instead, which is why there is
  * no sanitiser call here to get wrong: there is nothing member-supplied to
  * sanitise.
+ *
+ * `linkAvailable` decides whether the tail offers the other path. Pointing at
+ * `/setkey link` on a hub that cannot mint one would be advice that fails when
+ * taken — worse than not mentioning it, because the member is being told this
+ * right after learning their key is now in their chat history.
  */
-function renderSetKeyOutcome(out: ImSetKeyOutcome): string {
+function renderSetKeyOutcome(out: ImSetKeyOutcome, linkAvailable: boolean): string {
+  // Appended to EVERY reply on this path, success or failure: the moment a
+  // member reads "delete your own message" is the moment the alternative is
+  // worth knowing about.
+  const tail = linkAvailable
+    ? `${DELETE_YOUR_MESSAGE}\n  想避免这一条?下次发 /setkey link,key 就不进聊天窗了。/ Or use /setkey link next time.`
+    : DELETE_YOUR_MESSAGE
   if (!out.ok) {
     const head = ((): string => {
       switch (out.code) {
@@ -1871,7 +2031,7 @@ function renderSetKeyOutcome(out: ImSetKeyOutcome): string {
           )
       }
     })()
-    return `${head}\n\n${DELETE_YOUR_MESSAGE}`
+    return `${head}\n\n${tail}`
   }
 
   const lines: string[] =
@@ -1900,7 +2060,7 @@ function renderSetKeyOutcome(out: ImSetKeyOutcome): string {
   if (r.restarted.length === 0 && r.failed.length === 0 && !r.unavailable) {
     lines.push('  (当前没有 agent 会用到它,存着备用。)')
   }
-  return `${lines.join('\n')}\n\n${DELETE_YOUR_MESSAGE}`
+  return `${lines.join('\n')}\n\n${tail}`
 }
 
 /**

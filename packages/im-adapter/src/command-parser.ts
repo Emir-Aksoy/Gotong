@@ -136,6 +136,13 @@ export function parseImCommand(raw: string): ImCommand {
       // key with a stray space, a trailing comment — reads as malformed
       // rather than silently truncating the member's secret to its prefix.
       const parts = rest.split(/\s+/).filter((p) => p.length > 0)
+      // `/setkey link` — the other path (HANDS-M3b). Safe to claim a bare word
+      // here precisely BECAUSE a single token is never a paste: a paste needs a
+      // target and a secret, so nothing that could be a key is being reread as
+      // a subcommand. `/setkey link <anything>` stays malformed → help.
+      if (parts.length === 1 && parts[0]!.toLowerCase() === 'link') {
+        return { kind: 'setkey', mode: 'link' }
+      }
       if (parts.length !== 2) return { kind: 'setkey', mode: 'help' }
       return { kind: 'setkey', mode: 'paste', target: parts[0]!, secret: parts[1]! }
     }

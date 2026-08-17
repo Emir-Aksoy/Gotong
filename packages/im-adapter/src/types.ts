@@ -137,6 +137,10 @@ export type ImCommand =
   // rule to keep: nothing that starts with a setkey verb may ever be carried
   // as free text, and no parse result may hold text we didn't recognise.
   | { kind: 'setkey'; mode: 'paste'; target: string; secret: string }
+  // `/setkey link` — ask for a one-time web link instead of pasting. Carries
+  // nothing: the whole point of this mode is that the secret never enters the
+  // chat at all.
+  | { kind: 'setkey'; mode: 'link' }
   | { kind: 'setkey'; mode: 'help' }
   | { kind: 'keys' }
   | { kind: 'free'; text: string }
