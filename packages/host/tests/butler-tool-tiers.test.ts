@@ -155,6 +155,12 @@ function buildButler(provider: LlmProvider, root: string, singleTier?: boolean, 
     },
     ...(singleTier === undefined ? {} : { singleTierToolFace: singleTier }),
     backupOps: fakeBackupOps,
+    // HANDS-M3c — 最大脸必须带配置写面,set_hub_config 才在(读写全是假件,不碰盘)。
+    configOps: {
+      privileged: () => true,
+      knobs: async () => [],
+      set: async () => ({ lines: [] }),
+    },
     members: { users: () => [], membershipRole: () => null },
     // HEAL-M1 — 最大脸必须带自愈台账切片,restart_history 才在(surface 缺席由工具自答「未接入」)。
     selfHeal: () => undefined,
@@ -223,6 +229,8 @@ const GOVERNED_TOOLS = [
   'hands_read',
   'hands_list',
   'hands_rm',
+  // HANDS-M3c — 基础设置写(tier 2 每次 park);参数空间封闭 ⇒ 在 IM 可批名单上。
+  'set_hub_config',
 ] as const
 const MEMORY_TOOLS = ['remember', 'remember_procedure', 'refine_procedure', 'recall', 'forget'] as const
 

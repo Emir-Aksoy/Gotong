@@ -83,7 +83,20 @@ export type {
 
 export type OpsTier = 'read' | 'safe-mutate' | 'config-write' | 'destructive-offline'
 
-export type OpsSurface = 'cli' | 'web' | 'im'
+/**
+ * HANDS-M3c — `'butler'` is the FOURTH surface: the typed governed action Atong
+ * parks, a member approves in `/inbox` (or `/me`), and the resumed turn then
+ * executes. It is deliberately its own value rather than borrowing `'im'`:
+ * the same parked action can be approved from the phone OR the web, so any
+ * channel name written here would be a coin-flip lie half the time. The channel
+ * IS recorded — by the inbox resolve's own audit row (`metadata.via`) — so two
+ * rows carry two facts and neither has to guess the other's.
+ *
+ * `runnableOnSurface` needs no case for it: it switches on TIER, and the one
+ * place surface is read (`destructive-offline` → `surface === 'cli'`) already
+ * gives the correct answer (a butler can never reach a destructive op).
+ */
+export type OpsSurface = 'cli' | 'web' | 'im' | 'butler'
 
 /**
  * Who is invoking — drives the per-surface display gate AND the config-write
@@ -418,6 +431,28 @@ function runnableOnSurface(tier: OpsTier, caller: OpsCaller): boolean {
 const CLI_HINT = 'Run it from the server CLI: the hub is down (or being replaced) during this operation, so only the CLI can.'
 const OWNER_HINT = 'A hub owner makes this change from the admin web UI or the server CLI.'
 
+/**
+ * HANDS-M3c — the IM face of the same refusal. The console itself stays
+ * single-step by construction (a deterministic line-runner with no task to
+ * suspend, so it has nothing the inbox could resolve), and single-step was the
+ * ORIGINAL reason config-write was ✗ here. What changed is that there is now a
+ * two-step path on this very phone: ask Atong, it parks a typed action, you
+ * approve it with `/approve <code>`.
+ *
+ * The refusal is unchanged; the pointer GAINS a line. It deliberately does NOT
+ * replace the owner/web/CLI pointer: this module is a pure zero-LLM catalog and
+ * cannot know whether a butler with `set_hub_config` is armed on this hub (no
+ * identity ⇒ it isn't). Pointing ONLY at Atong would, on those hubs, send people
+ * down a path that does not exist there — the same failure mode M3b refused for
+ * `linkBaseUrl` ("a link that won't open is worse than 'can't do that here'").
+ * Both sentences are true everywhere; the phone one goes first because that is
+ * where the reader is standing.
+ */
+const IM_CONFIG_WRITE_HINT =
+  '在手机上改这一项:直接对阿同说你想改什么(例如「把网页端口改成 8080」),它会先把改动送进 /inbox,你回 `/approve <短码>` 才落盘' +
+  '(前提是这台 hub 装了阿同的配置面)。否则仍由 owner 在网页后台或服务器 CLI 改。' +
+  ` / On IM, ask Atong instead — it parks a typed action you approve with \`/approve <code>\`. ${OWNER_HINT}`
+
 // The catalog: read + safe-mutate + config-write (M3) handlers, plus the
 // destructive-offline listings (display-only here — the CLI adapter runs them).
 const COMMANDS: OpsCommandDef[] = [
@@ -559,10 +594,13 @@ export async function runOpsCommand(
     )
   }
   if (def.tier === 'config-write' && !caller.allowConfigWrite) {
+    // HANDS-M3c — same refusal, surface-appropriate pointer. On IM the honest
+    // next step is the butler's typed two-step action, not a trip to a laptop.
     throw new OpsTierError(
       'config_write_not_permitted',
       def.tier,
-      `'${id}' writes configuration and is not permitted from this surface. ${OWNER_HINT}`,
+      `'${id}' writes configuration and is not permitted from this surface. ` +
+        `${caller.surface === 'im' ? IM_CONFIG_WRITE_HINT : OWNER_HINT}`,
     )
   }
   if (!def.run) {

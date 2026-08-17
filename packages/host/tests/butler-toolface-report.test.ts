@@ -56,6 +56,7 @@ import { buildButlerDailyBriefToolset } from '../src/personal-butler-daily-brief
 import { buildButlerDiagnoseToolset } from '../src/personal-butler-diagnose.js'
 import { buildButlerGovernedToolset } from '../src/personal-butler-governed.js'
 import { buildButlerHandsToolset } from '../src/personal-butler-hands.js'
+import { buildButlerConfigToolset } from '../src/personal-butler-config.js'
 import { buildButlerLanguageToolset } from '../src/personal-butler-language.js'
 import { buildButlerLlmCatalogToolset } from '../src/personal-butler-llm-catalog.js'
 import { buildButlerGuideToolset } from '../src/personal-butler-guide.js'
@@ -115,6 +116,7 @@ const MEASURED_BUILDERS: Record<string, string> = {
   'backup-status': 'buildButlerBackupStatusToolset',
   'backup-pack': 'buildButlerBackupPackToolset',
   hands: 'buildButlerHandsToolset',
+  config: 'buildButlerConfigToolset',
   'hub-sense': 'buildButlerHubHealthToolset',
   'restart-history': 'buildButlerRestartHistoryToolset',
   'self-status': 'buildButlerSelfStatusToolset',
@@ -302,6 +304,16 @@ function buildFullFace(): ToolFaceEntry[] {
           allowed: () => true,
           logger: stub(),
         },
+      }),
+    },
+    // HANDS-M3c 基础设置写:一件 governed(tier 2「每次 park」)。构造零副作用——
+    // 枚举从 `ENV_KNOBS` 派生,`ops` 的三个方法在 listTools 这条路上一个都不被调。
+    {
+      module: 'config',
+      kind: 'governed',
+      toolset: buildButlerConfigToolset({
+        userId: U,
+        ops: { privileged: () => true, knobs: async () => [], set: async () => ({ lines: [] }) },
       }),
     },
     // SEN-M1 hub 体检:benign 只读,与巡检/面板同源投影。

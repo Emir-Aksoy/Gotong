@@ -57,6 +57,7 @@ import {
   type ButlerBackupOps,
 } from './personal-butler-backup.js'
 import { buildButlerCapabilitiesToolset } from './personal-butler-capabilities.js'
+import { buildButlerConfigToolset, type ButlerConfigOps } from './personal-butler-config.js'
 import { buildButlerConsolidateToolset } from './personal-butler-consolidate.js'
 import { buildButlerDailyBriefToolset } from './personal-butler-daily-brief.js'
 import {
@@ -249,6 +250,12 @@ export interface ButlerFactoryDeps {
    * 「手」行如实印原因。缺席 ⇒ 字节不变(hands.json 缺席 = 手不存在)。
    */
   hands?: ButlerHands
+  /**
+   * HANDS-M3c — 基础设置写面(main.ts 在 identity 在场时构造;缺席 ⇒
+   * `set_hub_config` 不装)。四档表的 tier 2:阿同自身基础设施,**每次 park**。
+   * owner/admin 判定钉在 `ops.privileged` —— 与 pack_backup 同姿态,服务端权威。
+   */
+  configOps?: ButlerConfigOps
 }
 
 export function buildButlerFactory(deps: ButlerFactoryDeps): ButlerFactory {
@@ -468,6 +475,18 @@ export function buildButlerFactory(deps: ButlerFactoryDeps): ButlerFactory {
           deps.governedOn && deps.hands?.host && deps.hands.host.allowed(userId)
             ? buildButlerHandsToolset({ userId, hands: deps.hands.host, logger: log })
             : undefined
+        // HANDS-M3c — governed `set_hub_config`:配置写从「网页/命令行才行」变成
+        // 手机上也走得通的两步(说要改 → park → `/approve <短码>` → 落盘)。
+        //
+        // 与手(HANDS-M2)刻意不同:那里工具面也问一遍 `allowed(userId)`,因为五件
+        // 工具的 schema 对一个永远被拒的人是白付的 token;这里只有一件、参数是封闭
+        // 枚举,省不出什么,**故工具面不问**——让 classify 的拒绝把「只对 owner/admin
+        // 开放」当着人的面说出来,好过一件工具凭空不存在。闸一点没少:classify 与
+        // execute 各问一遍(常驻管家活得比一次角色变更长,park 到批准也能隔几小时)。
+        const configGov =
+          deps.governedOn && deps.configOps
+            ? buildButlerConfigToolset({ userId, ops: deps.configOps, logger: log })
+            : undefined
         // SEN-M1 — benign hub 体检:骑 onboarding 的惰性 adminHealth getter
         // (与巡检/面板同一份投影,main.ts 零新接线);牌面判定复用
         // derivePatrolCards 不另写判据。hub 级只读事实同 backup_status。
@@ -677,6 +696,7 @@ export function buildButlerFactory(deps: ButlerFactoryDeps): ButlerFactory {
           ...(askPeerGov ? [askPeerGov] : []),
           ...(backupPackGov ? [backupPackGov] : []),
           ...(handsGov ? [handsGov] : []),
+          ...(configGov ? [configGov] : []),
           ...(mcpSplit?.writeGoverned ? [mcpSplit.writeGoverned] : []),
         ]
         // B1 — now that both sets exist, point the capability getter at their

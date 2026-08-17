@@ -48,9 +48,15 @@ IM 里批**;未标 = web-only。谁标:
 管家 governed park 标不标 `imApprovable`,看被批工具名(park 时从
 `pending.toolUses`+`approvedId` 拿)在不在
 `personal-butler-escalation.ts` 的 **`IM_APPROVABLE_TOOLS`** 里:建/改/删 agent、
-建/改工作流——五件 hub 内配置动作。**不在名单上 = web-only**,新工具的默认答案是
-「没表态」。名单与真实 governed 工具面的双向核对在 `butler-tool-tiers.test.ts`:
-新增一个 governed 工具而两边都不表态,门就红。
+建/改工作流,加 HANDS-M3c 的 `set_hub_config`(改 hub 基础设置)——六件 hub 内配置
+动作。**不在名单上 = web-only**,新工具的默认答案是「没表态」。名单与真实 governed
+工具面的双向核对在 `butler-tool-tiers.test.ts`:新增一个 governed 工具而两边都不
+表态,门就红。
+
+> `set_hub_config` 进名单的理由,与下面那条「不能当安全属性用」的观察正好互为反面:
+> 它的参数空间是**封闭的**(4 个具名键的 `enum` + 枚举/端口值 + `additionalProperties:
+> false`),那一行**结构上就长不了**,不是「今天恰好短」。这条推理由一道门守着
+> (`枚举 ≡ ENV_KNOBS`),见 [`ATONG-HANDS.md`](ATONG-HANDS.md) §14.4。
 
 > **原设计是排除法,它错了**(HANDS-M2 Codex 九轮 H1a)。原文写「规则是形状不是
 > 名单……将来接入任何新 MCP 连接器,其 WRITE 动作自动落 web-only,无需维护枚举」

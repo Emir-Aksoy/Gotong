@@ -42,6 +42,10 @@ export const IM_APPROVABLE_TOOLS: ReadonlySet<string> = new Set([
   'delete_agent',
   'create_workflow',
   'edit_workflow',
+  // HANDS-M3c — `set_hub_config` 进名单的理由不是「这行字短」,是**它长不了**:
+  // 参数空间是封闭的(4 个具名键 + 枚举/端口值),没有一个自由文本字段。这正是
+  // `hands_*` 的反面——那边留在网页侧,恰恰因为 argv 想多长有多长。
+  'set_hub_config',
 ])
 
 export interface ButlerApprovalItemOptions {

@@ -33,14 +33,15 @@
 ## 二、tier 模型(整个设计的脊柱)
 
 ops-core 每条命令带一个 `OpsTier`; tier **就是**跨 surface 的边界闸。
-`OpsSurface = 'cli' | 'web' | 'im'`; `OpsCaller = { surface, allowConfigWrite }`。
+`OpsSurface = 'cli' | 'web' | 'im' | 'butler'`; `OpsCaller = { surface, allowConfigWrite }`。
+(第四个值 `butler` 是 HANDS-M3c 加的,见本节末。)
 
-| tier | 含义 | CLI | 网页(admin) | IM 命令模式(operator) |
-|---|---|---|---|---|
-| `read` | 状态快照 / 定义校验 / 配置体检 / 恢复清单 / 列资源 | ✓ | ✓ | ✓ |
-| `safe-mutate` | 唯一一条: 建缺失目录(`fix-dirs`, 可逆幂等) | ✓ | ✓ | ✓ |
-| `config-write` | **owner-gated + 审计** 确定性配置写(见 §四) | ✓ | ✓(owner) | ✗ 列出+提示「owner 在网页/CLI 改」 |
-| `destructive-offline` | 冷启动 / restore / rotate-master-key | ✓(确认后) | ✗ 列出+提示去 CLI | ✗ 列出+提示去 CLI |
+| tier | 含义 | CLI | 网页(admin) | IM `/setting` 命令模式 | 阿同(手机对话) |
+|---|---|---|---|---|---|
+| `read` | 状态快照 / 定义校验 / 配置体检 / 恢复清单 / 列资源 | ✓ | ✓ | ✓ | ✓(经工具) |
+| `safe-mutate` | 唯一一条: 建缺失目录(`fix-dirs`, 可逆幂等) | ✓ | ✓ | ✓ | — |
+| `config-write` | **owner-gated + 审计** 确定性配置写(见 §四) | ✓ | ✓(owner) | ✗ 列出+提示「跟阿同说,或 owner 去网页/CLI 改」 | ✓ **两步**: 阿同 park → `/approve <短码>` |
+| `destructive-offline` | 冷启动 / restore / rotate-master-key | ✓(确认后) | ✗ 列出+提示去 CLI | ✗ 列出+提示去 CLI | ✗ 同左 |
 
 `listOpsCommands(caller)` **列出全部 tier**(含 destructive / config-write 当**描述**:
 tier + 标题 + summary + `whereToRun`「去哪跑」),让三个 surface 都能**展示**完整生命周期;
@@ -55,6 +56,31 @@ read / safe-mutate    → 跑
 ```
 
 CLI/web/IM 全部漏斗到这一个 `runOpsCommand`。所以 web/IM **逻辑上**够不着破坏性操作。
+
+### 2.1 HANDS-M3c 改口 —— config-write 上了手机, 但**不是**经这个命令台
+
+本文原文写的是「config-write **不**上 IM」「破坏性 / config-write 在 IM 上执行(物理 + 安全双拒,
+**永不**上 IM)」。前半句现在要改口, 后半句一个字不改, 因为它们说的是两件事:
+
+- **不变的**: `/setting` 这个**确定性命令台**在 IM 上仍然只能跑 `read` / `safe-mutate`, 遇到
+  config-write 仍然当场拒。理由不是「怕」, 是**结构性的**: 待批项的 `itemId` **就是**那个被挂起
+  的 Task 的 id, 而这条零 LLM 的命令行**根本没有一个 task 可挂**。要让它 park, 就得再造一个
+  与 `HostInboxService.resolve` 平行的第二套裁决权威 —— 一道闸有两个执法点, 迟早各说各话。
+- **新增的**: 手机上改设置走的是**另一条既有的路** —— 阿同的 governed 动作面。你对阿同说
+  「把网页端口改成 8080」, 它调 `set_hub_config`(tier 2「每次 park」, 零 blanket grant), 动作进
+  `/inbox`, 你回 `/approve <短码>` 才落盘。**一句话**: 命令台仍是一步式的, 手机多的是一条两步式
+  的路; 参与裁决的仍然只有 `HostInboxService.resolve` 一个执法点。
+
+那条路本身没有绕开任何闸: 它写的是**同一个** `runOpsCommand('config-set', …)`(同一份白名单、
+同一套校验、同一条 `setting_config_write` 审计动作), 只是 caller 的 `surface` 是第四个值
+`butler`。为什么不复用 `'im'`: **同一个 park 项既可能在手机上批, 也可能在网页 `/me` 上批** ——
+写死任何一个渠道名, 都有一半的时候在撒谎; 渠道由收件箱 resolve 自己的审计行记(`metadata.via`,
+见 IM-APPROVAL.md)。闸也不挂在这个名字上, 挂在 `allowConfigWrite` 旗标上(单测钉死: 同样是
+`surface:'butler'`, 不带旗标照样抛 `OpsTierError`)。
+
+IM 面对 config-write 的那句拒绝文案因此也改口了 —— 从「owner 在网页/CLI 改」改成先指阿同这条
+路(`IM_CONFIG_WRITE_HINT`), 因为手机上现在真的有得改。设计与四档表见
+[`ATONG-HANDS.md`](ATONG-HANDS.md) §十四。
 
 ---
 
@@ -109,7 +135,8 @@ CLI/web/IM 全部漏斗到这一个 `runOpsCommand`。所以 web/IM **逻辑上*
 事实核查: host **没有**通用运行时可热改的 `config.json`。配置只有三处 —— ① env-driven
 (`process.env.GOTONG_*`, 启动时读, host **不**自己读 `.env`)② `<GOTONG_SPACE>/pricing.json`
 (host 真读的唯一配置文件)③ `org_mode`(identity 持久, 已有升级流)。据此 config-write
-**严格限定**为(owner-gated + 校验 + 审计, CLI + web, **不**上 IM):
+**严格限定**为(owner-gated + 校验 + 审计; CLI + web, 以及 HANDS-M3c 之后经阿同两步确认的
+手机路 —— 见 §2.1, 白名单/校验/审计三件与这里逐字一致):
 
 ### 5.1 托管 env 文件 `<GOTONG_SPACE>/gotong.env`(`config-set`)
 
@@ -242,7 +269,10 @@ ExecStart=/usr/bin/node /opt/gotong/dist/main.js
 
 ## 八、显式推迟
 
-1. 破坏性 / config-write 在 IM 上**执行**(物理 + 安全双拒, 永不上 IM)。
+1. 破坏性操作在 IM 上**执行**(物理 + 安全双拒, 永不上 IM)。
+   ~~config-write 同罪~~ —— **HANDS-M3c 改口**: 经 `/setting` 这个确定性命令台仍然永不上 IM
+   (理由是结构性的, 见 §2.1), 但手机上改设置有了另一条路 —— 对阿同说, 它 park, 你
+   `/approve <短码>`。两句话不矛盾: 命令台没有 task 可挂, 阿同有。
 2. 通用运行时**热重载**配置子系统(host 仍只读 env + pricing.json, 本轮只做「写下次启动会读的文件」)。
 3. `org_mode` 切换经 setting(沿用既有「升级到团队」流, 不重造)。
 4. IM 命令模式升格独立 `@gotong/im-ops-router` 包(D2 选生产加性, 第二个 caller 再升)。

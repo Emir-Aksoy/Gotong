@@ -162,10 +162,16 @@ fire-and-forget 转派（`personal-butler-escalate.ts:118` explicit 直达），
   息）/ `/setkey link` 出单次 10min 链接（设备配对码同族：`hands_credential_codes` 单用户单码，
   链接打开极简页 POST key + token，**不建会话**）。**发送方必须是绑定了 owner/admin 用户的 IM 身份**
   （im_bindings → userId → role），否则同 IM 命令面其他门一样「未启用」。
-- **config-write 上手机 = 两步确认**：`/model set <agent> <model>`、`/setting config-set K V`
-  等先回「将改 X→Y，回 `/approve <短码>` 确认」，短码走 IMA 同一 pending 面；`destructive-offline`
-  仍 CLI-only。这是对 `SETTING-OPS-CONSOLE` 表「config-write ✗ IM」的**显式改口**——当年 ✗ 的理由
-  是 IM 单步无确认，两步确认后理由消失；文档同刀改。
+- **config-write 上手机 = 两步确认**：先回「将改 X→Y，回 `/approve <短码>` 确认」，短码走 IMA
+  同一 pending 面；`destructive-offline` 仍 CLI-only。这是对 `SETTING-OPS-CONSOLE` 表
+  「config-write ✗ IM」的**显式改口**——当年 ✗ 的理由是 IM 单步无确认，两步确认后理由消失；
+  文档同刀改。
+  > **M3c 实现修正**（写门时挖出来的结构性事实，见 §十四）：这里原本写的载体是
+  > `/setting config-set K V` 这类**命令行**。做不到——`InboxItem.itemId` **就是**被挂起的
+  > Task 的 id，而那条零 LLM 的命令行**没有 task 可挂**；让它 park 就得再造一个与
+  > `HostInboxService.resolve` 平行的裁决权威。故落地形态改成**一件 governed 工具**
+  > `set_hub_config`（对阿同说人话，它 park，你 `/approve`），命令台维持一步式不动。
+  > 改口的那句话一个字没少，只是改口的**是哪条路**换了。
 - **`/keys`** 列 key 有无（名字/槽位/有无/最后测试结果），永不列值。
 
 ### 4.5 环境探测 → 部署方案 → 人批（M4）
@@ -218,7 +224,7 @@ IM 通道即在；**至少一次网页触碰不可避免也不该避免**（owne
 | M2b ✅ | 手 B 外驱（2026-08-16，见 §十一） | host `personal-butler-coder.ts` 装配（围墙全部借手 A 的 `ButlerHandsHost`，五道 fail-closed 闸）+ `hands.json` `coder` 块（形状门与手 A 同一个读者）+ 名册行 + owner 授权（`escalate_to_expert` 认的就是那张表）+ `onChunk` 播成 transcript 观察缝 + cli-agent `PerSpawn` env/fsJail thunk + **core seatbelt 补藏起来祖先的 `stat` 通路**（§11.2，macOS 独有的真洞） | e2e：**阿同写需求→手 B 改文件（真落在手 A 工作区）→阿同 `hands_run` 跑测试出 TESTS PASS**；手 B 读不到 hub 用户 HOME 的钥匙；坏 `coder` 块整份不装；不够格的成员连目录都不建；撞上别人的 agent 行不覆盖；`passEnv` 盖不掉 HOME/PATH/TMPDIR；围墙每次 spawn 现算（host coder **25 例** + 手 A 回归 1 + core 6；变异一道四例齐红） ✅ |
 | M3a ✅ | 手机配置面·直贴（2026-08-17，见 §十二） | im-adapter `/setkey` 全形状认领 + host `im-credentials-service.ts`（写金库 + **写完重启那些真会换钥的 agent**）+ 桥两条 gated 路由 + `/keys` 槽位表（永不列值） | 单测 38：直贴不进 SESS 窗/transcript/日志/审计；**顺序打反（`/setkey <key> <agent>`）也不把 key 回显进聊天**；坏形状永不落回自由文本；非 owner/admin 与「没接」同一句；`env_pinned`/mock/`openai-compatible` 共享档拒绝而不是假装存上；优先级表由**真** `selectLlmApiKey` 推导对拍 |
 | M3b ✅ | 手机配置面·链接（2026-08-17，见 §十三） | host `setkey-link-store.ts`（文件名 = `sha256(token)`，删除即认领）+ 服务四方法（`linkAvailable`/`issueLink`/`linkPage`/`submitLink`）+ web `setkey-routes.ts` 零 JavaScript 表单（**挂在 CSRF 门之前**）+ 双路径优劣文案 + **M3a 装配缝的死线修复** | 单测 60（存储 11 / 服务 +13 / 装配 6 / 路由 16 / 解析 +6）：令牌不在盘上任何一个字节里；单次；过期即废；页面是 peek 不是认领；写给**令牌的主人**而不是提交者；两处各自重问角色；秘密不出现在任何响应体（含重画表单那次）；无 cookie / bearer / CSRF 可达且**控制组先证那道门开着**；直贴与链接在审计里永远分得出来；`GOTONG_PUBLIC_URL` 缺席=整条路诚实缺席（不猜 `host:port`） |
-| M3c | config-write 上手机 | 两步确认走 IMA + SETTING-OPS-CONSOLE 「config-write ✗ IM」显式改口 | 两步确认走 IMA 同一 pending 面；**Codex 交叉审**（与 M2/M2b 同批） |
+| M3c ✅ | config-write 上手机（2026-08-17，见 §十四） | 一件 governed 工具 `set_hub_config`（tier 2「每次 park」）+ host `personal-butler-config.ts`（classify 预检 = `applyEnvKnob` 逐条同序）+ 进 `IM_APPROVABLE_TOOLS` + `OpsSurface` 第四个值 `butler` + SETTING-OPS-CONSOLE 「config-write ✗ IM」**显式改口**（并写清改的是哪条路） | 单测 24 + tiers 双向核对：枚举 ≡ `ENV_KNOBS`（参数空间封闭 = IM 可批的理由）/ 角色在最前（先于任何参数判断）/ 密钥键指 `/setkey` 而不是「不是可改的设置项」/ 读现值失败**不变成拒绝**（`GovernedActionToolset.classify` 无 catch）/ park→批准之间被降权则不执行 / 真写真审计且审计抛错不回滚已落的字节 / 同样 `surface:'butler'` 不带 `allowConfigWrite` 照样 `OpsTierError`；**五道变异五次全红且只红该红那一例**；**Codex 交叉审**（与 M2/M2b 同批，额度 08-19 恢复） |
 | M4 | 环境探测→方案→人批 | `hub_environment` + 提案卡 + tier 2 应用 | 探针零 LLM；不可应用项只指路 |
 | M5 | Obsidian 投影 | tasks.md / memory/*.md 生成 + frontmatter + 覆盖语义 | 真相未动；投影可 Obsidian 解析 |
 | M6 | 一键镜像 e2e | compose env 透传 + e2e 脚本 | `compose up` → IM 在 → 网页一次触碰 → 手机 `/setkey`→`/model` 全通 |
@@ -1086,3 +1092,139 @@ Node 的 `fetch` 会**静默忽略** `Host` 头覆盖，`node:http.request` 不�
   网页），**不猜 `host:port`**：聊天窗里一条打不开的链接，比一句「做不到」更糟。
 - 表单页是中英对照的静态文案（与 IM 回复同姿态），没有走 SPA 的 i18n——它不加载 SPA 的任何
   字节，那是它零 JavaScript 的代价，也正是它的目的。
+
+---
+
+## 十四、M3c 落地记录（2026-08-17）
+
+M3a/M3b 把「换 key」搬上了手机。M3c 搬的是另一半：**改 hub 自己的基础设置**——四档表里
+tier 2 的正主，用户拍板的姿态是「**每次 park**」，没有 blanket grant。
+
+### 14.1 一台确定性的命令台，没有 task 可以挂
+
+计划（§4.4）原本写的载体是 `/setting config-set K V` 这类命令行：先回一句「将改 X→Y」，
+再 `/approve <短码>`。写门的时候撞上一条结构性事实，它把这个形态直接判死了：
+
+**`InboxItem.itemId` 就是那个被挂起的 Task 的 id。** `HostInboxService.resolve` 拿短码找到
+待批项之后，做的事是把**那个 task** 从 `suspended_tasks` 里捞出来续跑。而 `/setting` 是一条
+零 LLM 的确定性命令行——它从头到尾**没有一个 task**。要让它 park，就得给收件箱另造一种
+「没有 task 的待批项」，再给它另写一条 resolve 路径：**一道闸从此有两个执法点**。IMA 那一族
+八轮 Codex 交叉审修的几乎全是「闸修好了、但闸两侧还有一条路绕过去」，再自己开一条平行的，
+是明知故犯。
+
+所以 M3c 的形态换成了**一件 governed 工具** `set_hub_config`：阿同本来就是一个会 park 的
+参与者，它的每一次 governed 动作**天生**就是一个挂起的 task。命令台一步不动（IM 上遇到
+config-write 仍然当场拒），手机上多的是**另一条**两步式的路。`SETTING-OPS-CONSOLE` 的改口
+因此也写清楚了「改的是哪条路」，见那篇 §2.1。
+
+### 14.2 第四个 surface 值，而不是借 `'im'`
+
+`OpsSurface` 从 `'cli' | 'web' | 'im'` 加到四个值，新的那个叫 `butler`。
+
+不复用 `'im'` 的理由不是洁癖：**同一个 park 项既可能在手机 `/approve` 上批，也可能在网页
+`/me` 收件箱上批**——动作是同一个动作，批它的键盘可能是任意一个。写死任何一个渠道名，都有
+一半的时候在撒谎。而渠道**本来就有人记**：收件箱 resolve 自己的审计行带 `metadata.via`
+（IMA-M2），那才是「从哪按下去的」的权威。这里的 `surface` 回答的是另一个问题——**这次写是
+谁发起的**，答案恒定是「阿同的 governed 动作面」。
+
+加一个 surface 值的成本是零：`runnableOnSurface` 从来只 switch **tier** 不 switch surface，
+唯一读 surface 的那处（`destructive-offline` 的 `caller.surface === 'cli'`）对 butler 已经
+答对了。而闸也**不挂在这个名字上**——挂在 `allowConfigWrite` 旗标上，单测钉死：同样是
+`surface:'butler'`，不带旗标照样抛 `OpsTierError`。名字只是审计里那行字。
+
+### 14.3 classify 是同一套策略的**预检**，不是第二套策略
+
+`classify` 里那五道判断（角色 → 有没有给 key → 是不是密钥键 → 在不在白名单 → 值合不合法）
+**逐条镜像** `applyEnvKnob` 自己的顺序，一条不多一条不少。这不是重复实现，是把那套判断
+**提前到 park 之前跑一遍**：
+
+- 不提前跑，一次注定要被拒的动作也会先占掉人一次审批——tier 2「每次 park」的代价本来就高，
+  拿它去问一个必然的「不行」是纯浪费（HANDS-M2 tier 2 联网命令先查配额，同一条纪律）；
+- 顺序必须一致，否则「批准了」和「真的会落盘」之间会裂开：批准的时候说值合法，执行的时候
+  另一套规则说不合法，人就会看到一次**批下去却没发生**的改动。
+
+真正落盘的仍然只有一条路：`runOpsCommand('config-set', …)`。白名单、校验、审计动作
+（`setting_config_write`）三件与网页/CLI 逐字同一份。
+
+审计类型也是**复用** `SettingAuditSink` 而不是就地声明一个更松的——那个类型的 `actorSource`
+是个闭集，第二个入口顺手把它放宽，等于把一道收窄过的门从背面重新打开。
+
+### 14.4 它能在一行 IM 里批，理由是「它长不了」，不是「这行字短」
+
+`set_hub_config` 进了 `IM_APPROVABLE_TOOLS`。写这条的时候特意把理由写进了名单旁边的注释，
+因为它和 `hands_*` 留在网页侧的理由是**同一把尺子的两端**：
+
+- `hands_*` 的参数是 argv，**想多长有多长**。今天它们在手机上显示不全，是因为那把尺子恰好
+  量不下——把 agent id 改短、把框架那句话缩一缩，这道门就会**静默**打开。安全属性不能挂在
+  显示长度上，所以它们被**列举**在名单之外。
+- `set_hub_config` 的参数空间是**封闭的**：4 个具名键（`enum` 就是 `ENV_KNOBS` 派生的）、
+  值是枚举或端口号、`additionalProperties: false`。它渲染出来的那一行**结构上就长不了**，
+  也长不出自由文本。
+
+这条推理有一道门守着：`枚举 ≡ ENV_KNOBS` 的断言。有人往 `ENV_KNOBS` 加一个自由文本旋钮而
+schema 手抄名单没跟上，门就红；变异测试把枚举写死成一份手抄名单，恰好红那一例。
+
+（Codex 九轮 H1 立的规矩在这里第一次被新工具**正着用**了一遍：名单是**列举**，新工具的默认
+答案是「不在名单上」，往里加一个名字 = 明确宣称「这个动作在一行 IM 里读得全」。
+`butler-tool-tiers.test.ts` 的双向核对同刀跟上：13 个 governed 工具，每个恰好落一侧。）
+
+### 14.5 一个装饰性的读盘失败，不该从闸里炸出去（写门时挖到的）
+
+审批卡上有一句「现在配置文件里是 3000 / 当前进程在用 9000」——纯粹是给人看的注解。第一版
+它是这么取的：
+
+```ts
+const view = (await ops.knobs()).find((k) => k.key === key)
+```
+
+读了 `GovernedActionToolset.classify` 的源码才发现：**它对分类器抛出的东西不设 catch**。于是
+一次磁盘打嗝会从闸里炸出去，而「这个改动该不该问人」这个判断，本来一个字节都不依赖那句注解。
+
+修法是给它一个**承重的** try/catch + 一行 warn，注释里写明这道 catch 不是防御性编程。变异
+测试把 catch 摘掉，恰好红一例（`现值读不到 ⇒ 照样 approve，只是少一句`）。
+
+另一条同类的教训在同一批门里：我先写了个「读不动 ⇒ 空数组」的断言，跑出来是红的——因为
+`readEffectiveConfig` **根本不抛**，一个还没写过的 `gotong.env` 是诚实的「四个键都在、
+`fileValue` 全是 null、默认值在」。**门变红时先确认自己断言的是不是真话**（Codex 七轮同款），
+这次是我的断言错，改成钉住那个真实行为。
+
+### 14.6 门
+
+`personal-butler-config.test.ts` **24** 例，六组：工具面与参数空间（枚举 ≡ `ENV_KNOBS` / 必填 /
+`additionalProperties:false` / 在 IM 可批名单上 / 描述里点名 `/setkey` 与价格另有其人）；classify
+预检（角色在最前，**参数再坏也先答角色** / 密钥键指 `/setkey` 而**不是**「不是可改的设置项」/
+未知键把四个可改项列全 / 坏值把原样回显进理由 / `' 8080 '` 归一后 approve 且理由含 8080 与
+「重启」/ 现值两行 / 读现值失败照样 approve 且不泄漏内部错误文本 / 未知工具名 refuse）；describe
+（逐字断言那一行 + 最长的合法一行 < 80 码点，即 IM 一行预算内）；execute（`ops.set` 收到的
+参数逐字段 / park→批准之间被降权 ⇒ `isError` 且 `ops.sets` 仍是空 / 写失败把 ops-core 的话
+原样传出去）；**真 ops**（真 owner 判定 / 真写 `<space>/gotong.env` + 恰好一条审计行 /
+审计抛错**不回滚**已落的字节 / `knobs()` 反映盘上的 8080 / 全新 hub 四个键 `fileValue` 全 null）；
+surface（`butler` 不带 `allowConfigWrite` ⇒ `OpsTierError` —— **闸挂在旗标上不挂在名字上** /
+IM 拒绝文案含 `/approve` 与「阿同」/ 枚举里没有 `PRICE`）。
+
+`butler-tool-tiers.test.ts` 同步：`GOVERNED_TOOLS` 13 个名字，双向核对每个恰好落
+「IM 可批」或「网页 only」一侧；最大脸的 fake 补上 `configOps`。
+
+**五道变异五次全红，且每次只红该红的那一例**：摘 classify 的 catch（1 例）/ 角色闸挪到值校验
+之后（1 例）/ 从 `IM_APPROVABLE_TOOLS` 摘掉 `set_hub_config`（2 例，跨两个测试文件）/ 摘掉
+execute 侧的降权复查（1 例）/ schema 枚举写死成手抄名单（1 例）。复原一律 python 精确替换 +
+`shasum` 对拍基线，**绝不 `git checkout <file>`**（八轮栽过）。
+
+排错记：复原第二道变异时，锚点 `const key = normKey(args.key)` 在文件里出现 **3 次**
+（classify/describe/execute 各一），`mut.py` 的「锚点必须恰好出现一次」当场拦下——那个断言是
+八轮「变异测试自己也要验证它真的只改了想改的那处」的直接产物，这次它救了一手。
+
+### 14.7 诚实残余
+
+- **owner/admin 才有这件工具的执行权**，判定与 `pack_backup` / 手 A 同源（服务端权威，classify
+  与 execute 各问一遍）。但工具面**不**问——只有一件工具、参数是封闭枚举，省不出多少 token，
+  而让 classify 的拒绝把「只对 owner/admin 开放」当着人的面说出来，好过一件工具凭空不存在
+  （这与手 A 刻意相反：那边五件工具的 schema 对一个永远被拒的人是白付的）。
+- **写的是下次启动才读的文件**。回复里那句「下次重启这台 hub 时生效」不是免责声明，是这条路
+  的全部语义——host 没有通用运行时热重载（`SETTING-OPS-CONSOLE` §五的事实核查至今成立）。
+- **`config-price`（`pricing.json`）没上这条路**：它的参数是自由形状的价格表，撞的正是 14.4
+  那条「参数空间封闭」的理由。要上得先想清楚一行 IM 怎么把它说全。
+- **`/setting` 命令台仍然一步式**，理由是 14.1 那条结构性的，不是「以后再说」。
+- 审计行里 `actorSource` 是 `v4-session`（发起人是一个真的 v4 用户行），**批准的渠道**由收件箱
+  自己那条 resolve 审计行的 `metadata.via` 记——两行拼起来才是完整的一次改动，这是刻意的分工。
+- Codex 交叉审**尚未跑**（额度 08-19 恢复），与 M2/M2b 同批送审。

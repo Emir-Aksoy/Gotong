@@ -266,6 +266,7 @@ import { HostButlerMemoryService } from './butler-memory-service.js'
 // many bound users each get a butler that remembers ONLY them across sessions.
 // Assembly lives in personal-butler-factory.ts; main.ts only wires refs.
 import { buildButlerBackupOps } from './personal-butler-backup.js'
+import { buildButlerConfigOps } from './personal-butler-config.js'
 import { buildButlerFactory } from './personal-butler-factory.js'
 import { armButlerCoder } from './personal-butler-coder.js'
 import { armButlerHands } from './personal-butler-hands.js'
@@ -1050,6 +1051,15 @@ async function main(): Promise<void> {
         peerCreatedTimes: () => identityForBackup.listPeers().map((p) => p.createdAt),
       })
     : undefined
+  // HANDS-M3c — 基础设置写面(tier 2「每次 park」):角色判定与 pack_backup 同源,写走 ops-core 同一咽喉与同一审计 action;identity 缺席 ⇒ 不装(同姿态)。
+  const butlerConfigOps = identityForBackup
+    ? buildButlerConfigOps({
+        ops: { spaceDir: space.root, env: process.env },
+        membershipRole: (uid: string) => identityForBackup.getMembership(uid)?.role,
+        audit: identityForBackup,
+        logger: log,
+      })
+    : undefined
   // SDUI-M3/M4 — ONE panel store shared by web routes / template sink / butler.
   const mePanelSurface = buildMePanelSurface({ spaceDir: space.root })
   // HEAL-M1 — 自愈台账(开机分类+心跳);看门狗是 deploy 层的另一写入方。
@@ -1109,6 +1119,7 @@ async function main(): Promise<void> {
     ...(butlerBackupOps ? { backupOps: butlerBackupOps } : {}),
     selfHeal: () => selfHealLog, // HEAL-M1 restart_history 台账切片
     hands: butlerHands, // HANDS-M2 手 A(status 恒传给自检;toolset 只在 armed 时装)
+    ...(butlerConfigOps ? { configOps: butlerConfigOps } : {}), // HANDS-M3c set_hub_config
     // SEN-M5 — 成员名单投影源(岔口 A 全员见名+角色+id;email 结构性不进投影)。
     ...(identityForBackup
       ? { members: { users: () => identityForBackup.listUsers(),

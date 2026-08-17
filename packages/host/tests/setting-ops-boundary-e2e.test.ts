@@ -400,11 +400,20 @@ maybe('setting-ops M6 — physical tier boundary across CLI / web / IM (real sta
     expect(readFileSync(cfgPricing, 'utf8')).toContain('acme-model-1')
     expect(webAuditRows.some((r) => r.action === AUDIT_ACTIONS.SETTING_CONFIG_WRITE)).toBe(true)
 
-    // IM: config-write is never on the IM surface — refused with an owner hint.
+    // IM: config-write is never on THIS surface (the console is a deterministic
+    // line-runner with no task to suspend) — refused, and the refusal now points
+    // at BOTH ways out: HANDS-M3c's two-step butler path on the same phone, and
+    // the pre-existing owner/web/CLI one. Both must stay: this module cannot know
+    // whether a butler is armed here, so dropping either sentence sends someone
+    // down a path that may not exist on their hub.
     await bridge.inject(msgFrom(ALICE, '/setting'))
     await bridge.inject(msgFrom(ALICE, 'config-set GOTONG_WEB_PORT 8080'))
     expect(last(bridge)).toContain('✗')
     expect(last(bridge)).toMatch(/owner/i)
+    expect(last(bridge)).toContain('阿同')
+    expect(last(bridge)).toContain('/approve')
+    // …and it still really refuses: nothing landed in the env file.
+    expect(readFileSync(cfgEnv, 'utf8')).not.toContain('GOTONG_WEB_PORT=8080')
     await bridge.inject(msgFrom(ALICE, 'exit'))
 
     // A secret-name key is hard-refused BEFORE any write — nothing lands.
