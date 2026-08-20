@@ -99,6 +99,13 @@ export interface OpenTaskNotebookOptions {
   logger?: TaskNotebookLogger
   /** Test seam — defaults to `Date.now`. */
   now?: () => number
+  /**
+   * HANDS-M5 projection seam: called AFTER the truth has landed on disk, with
+   * the notebook that was just written. The projection is a DERIVATIVE — it may
+   * never fail a save, so we call it inside try/catch and swallow. It is also
+   * never read back: nothing in this module ever parses the .md again.
+   */
+  onSaved?: (tasks: readonly TaskNote[]) => void | Promise<void>
 }
 
 export interface OpenTaskNoteInput {
@@ -180,6 +187,18 @@ export function openTaskNotebook(opts: OpenTaskNotebookOptions): TaskNotebook {
     await mkdir(dirname(opts.file), { recursive: true })
     // atomic: a crash never leaves half a file
     await writeFileAtomic(opts.file, `${JSON.stringify(nb, null, 2)}\n`)
+    if (opts.onSaved) {
+      try {
+        await opts.onSaved(nb.tasks)
+      } catch (err) {
+        // The JSON — the truth — is already durable. A broken projection is a
+        // cosmetic problem; refusing the member's edit over it would not be.
+        opts.logger?.warn('task notebook: projection failed', {
+          file: opts.file,
+          err: err instanceof Error ? err.message : String(err),
+        })
+      }
+    }
   }
 
   /** Serialize a mutation onto the chain; reads share it so they see writes. */

@@ -161,6 +161,15 @@ function renderStatusFile(summary: string, now: number): string {
     '',
     clipped.length > 0 ? `- ${clipped}` : '_（上次维护无需改动）_',
     '',
+    // HANDS-M5 §4.6 —— 「投影被人改了下次覆盖(并在 STATUS 里提一句)」。这句话
+    // 必须出现在**人真的会打开的那个文件**里:成员把这个目录当 Obsidian vault
+    // 打开,不会有别的地方告诉他 tasks.md 里手打的字为什么隔天不见了。
+    '## 关于这个目录里的 .md',
+    '',
+    '- `tasks.md`、`memory/*.md` 是**只读投影**,由 `tasks.json` 与记忆 jsonl 生成。',
+    '- 在里面手打的字**不会**被读回去,下次重写时会被覆盖——要改内容请跟阿同说。',
+    '- `knowledge/` 里的笔记不是投影,那是你和阿同共同的书架,随便改。',
+    '',
   ]
   return lines.join('\n')
 }

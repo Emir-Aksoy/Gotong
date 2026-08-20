@@ -40,6 +40,7 @@ import {
 import type { MemoryEntry, MemoryHandle } from '@gotong/services-sdk'
 import type { WebServerOptions } from '@gotong/web'
 
+import { openButlerObsidianProjector } from './butler-obsidian.js'
 import { openButlerDreamDiary, type ButlerDreamDiary } from './personal-butler-dreams.js'
 import { openButlerMemory } from './personal-butler-memory.js'
 import { openButlerSkillFile, type ButlerSkillFile } from './personal-butler-skills.js'
@@ -142,6 +143,13 @@ export class HostButlerMemoryService implements ButlerMemorySurface {
     await this.diary(userId).remove()
     await this.skillFile(userId).remove()
     await this.statusFile(userId).remove()
+    // HANDS-M5 — 记忆的 md 投影同罪:留着它,一份被要求忘掉的事实还会在 vault 里
+    // 摆着,而且看起来像现状。tasks.md 不在此列——那是笔记本的投影,不是记忆的。
+    await openButlerObsidianProjector({
+      rootDir: this.rootDir,
+      userId,
+      logger: this.logger,
+    }).removeMemoryProjections()
     this.logger.info('member cleared all butler memory', { userId })
   }
 

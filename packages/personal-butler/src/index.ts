@@ -163,3 +163,20 @@ export {
   type PanelScale,
   type PanelValidationResult,
 } from './panel-schema.js'
+
+export {
+  openObsidianProjector,
+  renderTasksProjection,
+  renderMemoryTierProjection,
+  planMemoryProjections,
+  buildKnowledgeLinkTable,
+  linkifyKnowledgePaths,
+  isSafeTierId,
+  oneLine,
+  TASKS_PROJECTION_FILE,
+  MEMORY_PROJECTION_DIR,
+  OBSIDIAN_PROJECTION_LIMITS,
+  type ObsidianProjector,
+  type OpenObsidianProjectorOptions,
+  type MemoryProjectionPlan,
+} from './obsidian-projection.js'

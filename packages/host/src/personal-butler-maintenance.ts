@@ -96,6 +96,7 @@ import { ownerDir } from '@gotong/service-memory-file'
 import type { MemoryHandle } from '@gotong/services-sdk'
 
 import { snapshotMemoryTree, type GitRunner } from './butler-memory-git.js'
+import { projectButlerVault } from './butler-obsidian.js'
 import { butlerMemoryWriters } from './personal-butler-writers.js'
 import { openButlerMemory } from './personal-butler-memory.js'
 import {
@@ -380,6 +381,15 @@ export async function runButlerMaintenanceOnce(
   })
   const episodic = await memory.recall({ kinds: ['episodic'], k: opts.recallK ?? DEFAULT_RECALL_K })
   const out = await reviewer({ memory, episodic, now: now() })
+  // HANDS-M5 — 兜底重投一遍 Obsidian 只读投影。位置在**这一 tick 改完真相之后**:
+  // 蒸馏/校正/上架刚动过 semantic,投影要照的是改完的那份。永不抛。
+  await projectButlerVault({
+    rootDir: opts.rootDir,
+    userId: opts.userId,
+    logger: opts.logger,
+    now: now(),
+    ...(opts.tierConfig ? { tierConfig: opts.tierConfig } : {}),
+  })
   return out.summary ?? ''
 }
 

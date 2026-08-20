@@ -45,6 +45,7 @@ import type { AdminHealthSurface } from './admin-health.js'
 import { createButlerRouter } from './butler-router.js'
 import type { HostButlerMemoryService } from './butler-memory-service.js'
 import { openButlerRecallIndex } from './butler-recall-index.js'
+import { openButlerObsidianProjector } from './butler-obsidian.js'
 import type { FailureLang } from './failure-translator.js'
 import type { ButlerFactory } from './local-agent-pool.js'
 import type { StewardAgentDirectory, StewardWorkflowEditor } from './hub-steward-service.js'
@@ -326,9 +327,15 @@ export function buildButlerFactory(deps: ButlerFactoryDeps): ButlerFactory {
         // editing your own list touches nobody else); its per-turn digest joins
         // the CARE-M4 probe below so each turn the model reads "where we are"
         // instead of holding the plan in its own context.
+        // HANDS-M5 — 只读投影器(用户拍板的第 4 条岔口:md 投影层、JSON 仍是真相)。
+        // 和 6h 维护那条兜底路走**同一个**工厂,两条路投出来的字节因此不可能不同。
+        const obsidian = openButlerObsidianProjector({ rootDir: memoryRoot, userId, logger: log })
         const taskNotebook = openTaskNotebook({
           file: join(ownerDir(memoryRoot, { kind: 'user', id: userId }), 'tasks.json'),
           logger: log,
+          // 投影跟在**真相落盘之后**,而且只往一个方向流:没有任何一条读路径会去
+          // 解析那份 .md。人改了它,下次写笔记本时被改回来——这就是它的全部语义。
+          onSaved: (tasks) => obsidian.projectTasks(tasks),
         })
         const taskNotebookToolset = createTaskNotebookToolset(taskNotebook)
         // LIB-M2 — the member's knowledge library (上架区): a `knowledge/` tree

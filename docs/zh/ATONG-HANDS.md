@@ -192,12 +192,18 @@ approve，不能的写「你要做什么」指路）。典型：内存 <4GB ⇒ 
 > 由它决定，探了就是「写了永不读」）；**出网不主动探** —— 主动探一次就等于给模型开一个新的
 > 出网面，改成读 CARE 那份从真实流量折叠出来的断供事实，并在卡上写明「被动看，不主动探」。
 
-### 4.6 Obsidian 投影（M5）
+### 4.6 Obsidian 投影（M5 ✅ 已落，见 §十六）
 
 `<ownerDir>/` 本就可被 Obsidian 当 vault 打开（`knowledge/` 是 md 树）。补三块只读投影：
-`tasks.md`（从 tasks.json，含 `[[knowledge/...]]` 链）/ `memory/<tier>.md`（事实摘要 + 出处）/
+`tasks.md`（从 tasks.json，含 `[[knowledge/...]]` 链）/ `memory/<cluster>.md`（事实摘要 + 出处）/
 `STATUS.md` 已在。生成时机=各自写路径末尾 + 6h 维护兜底；frontmatter `generated: true`；
 真相仍 JSON，投影被人改了下次覆盖（并在 STATUS 里提一句）。零 LLM。
+
+落地时改口两处：**文件名叫 cluster 不叫 tier**（`memory/<tier>.md` 里的 tier 是记忆的**主题簇**
+id，与「多级记忆」的 level 不是一回事，同一个词指两样东西会读错）；**记忆投影只在 6h 维护那一刻
+重画**（语义事实本来就只在蒸馏时变，跟着每一次 capture 走只是白写盘）——tasks 才走「写路径末尾」，
+因为笔记本每一次编辑都是一次真相变更。另加一条计划里没写、但决定了实现形状的判断：**投影里
+一个 `Date.now()` 都不能有**（§16.1）。
 
 ### 4.7 一键镜像（M6）与修复接手（M7）
 
@@ -236,7 +242,7 @@ IM 通道即在；**至少一次网页触碰不可避免也不该避免**（owne
 | M3b ✅ | 手机配置面·链接（2026-08-17，见 §十三） | host `setkey-link-store.ts`（文件名 = `sha256(token)`，删除即认领）+ 服务四方法（`linkAvailable`/`issueLink`/`linkPage`/`submitLink`）+ web `setkey-routes.ts` 零 JavaScript 表单（**挂在 CSRF 门之前**）+ 双路径优劣文案 + **M3a 装配缝的死线修复** | 单测 60（存储 11 / 服务 +13 / 装配 6 / 路由 16 / 解析 +6）：令牌不在盘上任何一个字节里；单次；过期即废；页面是 peek 不是认领；写给**令牌的主人**而不是提交者；两处各自重问角色；秘密不出现在任何响应体（含重画表单那次）；无 cookie / bearer / CSRF 可达且**控制组先证那道门开着**；直贴与链接在审计里永远分得出来；`GOTONG_PUBLIC_URL` 缺席=整条路诚实缺席（不猜 `host:port`） |
 | M3c ✅ | config-write 上手机（2026-08-17，见 §十四） | 一件 governed 工具 `set_hub_config`（tier 2「每次 park」）+ host `personal-butler-config.ts`（classify 预检 = `applyEnvKnob` 逐条同序）+ 进 `IM_APPROVABLE_TOOLS` + `OpsSurface` 第四个值 `butler` + SETTING-OPS-CONSOLE 「config-write ✗ IM」**显式改口**（并写清改的是哪条路） | 单测 24 + tiers 双向核对：枚举 ≡ `ENV_KNOBS`（参数空间封闭 = IM 可批的理由）/ 角色在最前（先于任何参数判断）/ 密钥键指 `/setkey` 而不是「不是可改的设置项」/ 读现值失败**不变成拒绝**（`GovernedActionToolset.classify` 无 catch）/ park→批准之间被降权则不执行 / 真写真审计且审计抛错不回滚已落的字节 / 同样 `surface:'butler'` 不带 `allowConfigWrite` 照样 `OpsTierError`；**五道变异五次全红且只红该红那一例**；**Codex 交叉审**（与 M2/M2b 同批，额度 08-19 恢复） |
 | M4 ✅ | 环境探测→方案→人批（2026-08-17，见 §十五） | host `personal-butler-environment.ts`：零 spawn 零联网探针（cpu/mem/disk/node/PATH 上的 ffmpeg·git·docker）+ 复用 boot 那次监狱功能探测的结论 + 被动读 CARE 断供 + 纯函数提案引擎（判别联合：`applicable:false` 那一支**结构上没有 apply 字段**）+ 渲染卡；进目录层 benign（~193tk，不占每轮脸）；`spaceRoot` 穿一行进 factory 只为 statfs | 单测 30（六组）：schema 封闭 + 描述如实说「不跑任何命令 / 不发任何网络请求」；**源码级断言**剥掉注释后不含 `child_process`/`spawn(`/`execFile`/`fetch(`/`node:http`；每一块读不动只让那一块 null 且**不产生提案**（null ≠ 有问题）；磁盘探不动不当成 0；端口撞车两支（能算出安全值⇒指向 `set_hub_config`；活值也撞⇒降级只指路）；凡 `applicable:true` 其 `apply.tool` 恒为 `set_hub_config` 且 key ∈ 四个白名单旋钮；渲染里**结构性没有**绝对路径/用户名（真跑默认探针对拍）；**七道变异七次全红且只红该红那些**（含摘掉判别联合、摘掉 tiers 登记、摘掉 AFR tripwire） |
-| M5 | Obsidian 投影 | tasks.md / memory/*.md 生成 + frontmatter + 覆盖语义 | 真相未动；投影可 Obsidian 解析 |
+| M5 ✅ | Obsidian 投影 | tasks.md / memory/*.md 生成 + frontmatter + 覆盖语义 | 真相未动；投影可 Obsidian 解析 |
 | M6 | 一键镜像 e2e | compose env 透传 + e2e 脚本 | `compose up` → IM 在 → 网页一次触碰 → 手机 `/setkey`→`/model` 全通 |
 | M7 | 修复接手 + capstone | 修复动作目录 + `examples/atong-hands` 四幕（注入写配置双拒 / 联网 park 批后跑 / 工作区直写+监狱跑脚本 / `/setkey` 双路径文案 + 金库落值零回显） + 收口 | `pnpm demo:atong-hands` exit 0，零 key 零 LLM |
 
@@ -1351,3 +1357,112 @@ hub 上许一个做不到的诺。
   （M3c 的 `setting_config_write` 行）。
 - **磁盘只看空间所在那块盘**。备份档 / transcript 若被配到别的挂载点上，这张卡看不见它满没满。
 - Codex 交叉审**尚未跑**（额度 08-19 恢复），与 M2/M2b/M3a/M3b/M3c 同批送审。
+
+---
+
+## 十六、M5 落地记录（2026-08-19）
+
+一句话：**打开这个目录，人能读懂阿同记着什么、在做什么** —— 而这些 md 一个字也不会被读回去，
+它们是派生物，不是第二份真相。
+
+### 16.1 投影里一个 `Date.now()` 都不能有（这一刀最重要的判断）
+
+计划里没写这条，但它决定了整个实现的形状。投影每 6h 兜底重写一次；只要正文里塞一个墙上时钟
+（「生成于 2026-08-19 14:03」这种一看就该有的东西），MU-M5 的记忆树 git 快照就会**每一次 tick
+都看到 diff**：`snapshotMemoryTree` 的判据是 `git status --porcelain`，没变化就 no-op，而一个每次
+都不同的时间戳会把「什么都没变」渲染成「变了」。开了那个旋钮的成员，一年 1400 个空 commit，真正
+的改动埋在里面找不到。
+
+所以：**投影里的时间戳只能来自真相自身**（任务的 `createdAt` / 事实的 `ts`，都是真相里本来就有的
+字节），`now` 只用来**选**哪些条目进得来（`isActive` 判这条事实现在还成不成立），永远不进输出。
+同一份真相渲染两次必须逐字节相同 —— 门里拿两个相差一天的 `now` 各渲染一次，断言字节相等。
+
+这条升成**源码级断言**（与 M4 的只读契约同姿态）：剥掉块注释与 `//` 行之后，本文件里不许出现
+`Date.now` 或 `new Date()`。**注释里可以谈，代码里不许写**。
+
+一个刻意的例外：`STATUS.md` 里那条时间戳是对的 —— 它记的是「维护**跑过**」这件事，时间就是它的
+全部内容；投影记的是**状态**，状态不该带表。
+
+### 16.2 三条边上的判断
+
+- **文件名只能来自闭集**。`memory/<cluster>.md` 的 cluster 来自 `meta.tier`，那是蒸馏**模型写的
+  自由字符串** —— 直接拿去拼路径，一次幻觉就能写到 `memory/../../` 去。故一律先过 `normalizeTier`
+  压回目录里的已知 id，再过 `isSafeTierId`（小写字母/数字/`-`/`_`，≤32）；不合形状的 cluster
+  **跳过并 warn**，绝不「尽力拼一个」。两道是分工不是重复：前者防模型，后者防目录本身被人配坏
+  （自定义 `TierConfig`）。
+- **链只指真实存在的文件**。`[[knowledge/…]]` 只在这个成员的书架上**真的有那个文件**时才生成
+  （`archive/` 下的不算——归档过的笔记不该被任务卡拽回台前）。Obsidian 里的死链不是「点了没反应」，
+  是**点了就新建一个本不该存在的笔记** —— 与 M3b 那条「指一条可能不存在的路，比说『这儿干不了』
+  更坏」同一形状。链表读不到（知识库连不上）时降级成不带链，投影照出。
+- **frontmatter 里不放自由文本**。值只有布尔、整数和固定标识符。任何一个带冒号的任务标题塞进去
+  都会把 YAML 撑坏，而 Obsidian 解析失败时是**整块 frontmatter 悄悄消失** —— 里程碑要的「投影可
+  Obsidian 解析」会以最安静的方式失效。自由文本一律进正文，且**压成一行**（`oneLine` 把换行与
+  控制字符换成空格）：一条被注入的「事实」于是伪造不出 `## 事实` 这样的小标题。
+
+### 16.3 写前比字节；空了就删
+
+`writeIfChanged` 先读旧字节，一样就**一个 syscall 都不发** —— 这是 16.1 那条判断的下半场：没有
+墙上时钟保证了「内容没变 ⇒ 字节没变」，比字节保证了「字节没变 ⇒ 盘不动」，两条合起来 git 快照才
+真的安静。门里量的是 mtime：同一份真相投两次，第二次之后 mtime 一个纳秒都没动。
+
+某个 cluster 一条活着的事实都不剩时，**删掉那个文件**而不是写一个空的 —— 一个留在盘上的空投影会
+让人以为那些事实还在。`forget-all` 同罪：`removeMemoryProjections()` 与 DREAMS/SKILL/STATUS 一起
+清（一份被要求忘掉的事实，不该还在 vault 里摆着、还看起来像现状）；`memory/` 目录只在**空**的时候
+才 rmdir，人自己往里放的东西不动。
+
+### 16.4 两条生成路径必须产出同样的字节
+
+`tasks.md` 走**写路径末尾**（`openTaskNotebook` 那个唯一的 `save()` 咽喉，`onSaved` 钩子），
+`memory/*.md` 走 **6h 维护兜底**（语义事实本来就只在蒸馏那一刻变；跟着每一次 capture 走只是白写盘），
+而 6h 那一趟会把**两块都重投一遍**。
+
+于是有个真实的漂移风险：同一个 `tasks.md`，写路径投一次、维护路径再投一次，两边要是各自组装
+projector（各自算 vault 目录、各自决定要不要接知识库链表），迟早会不一样，而那天没有人会被通知。
+修法是**结构性**的：两条路都调 `openButlerObsidianProjector()` 这**一个**工厂，它是「这个成员的
+投影器长什么样」的唯一答案。门不满足于「两边都调了同一个函数」，而是真跑两条路，断言维护那一趟
+写出来的 `tasks.md` 与写路径那一趟**逐字节相同**。
+
+投影失败只 `warn`：真相已经落盘了，派生物写不出来不该让成员的一次任务编辑失败（与 STATUS.md 同
+姿态）。`projectTasks` / `projectMemory` 结构上 never-throws。
+
+### 16.5 门
+
+- 纯核 `obsidian-projection.test.ts` **30 例**六组：frontmatter 闭集 / 渲染确定性（含源码级
+  `Date.now` 断言、两个不同 `now` 渲染逐字节相同）/ cluster 名闭集（敌意 `meta.tier` 落回 misc、
+  坏目录 id 跳过并 warn）/ 知识库链（只连真在架上的、`archive/` 不连、最长匹配、单扫不用正则）/
+  自由文本压成一行（换行与控制字符换空格、伪造小标题变不成标题）/ 写盘（字节没变 mtime 不动、
+  空 cluster 删文件）。
+- 装配门 `butler-obsidian-wiring.test.ts` **5 例**：**真** `buildButlerFactory` + 真
+  `runButlerMaintenanceOnce` + 真 `HostButlerMemoryService.forgetAll` 全走一遍 —— 这是 M3b 那条
+  教训的直接产物（**一条缝，如果它的测试全都自己手搭对面那一半，那它就是没测过**）。断言：写完
+  笔记本 vault 根就出现 `tasks.md` 而 `tasks.json` 仍是真相 / 链只在架上真有那篇时才连 / 维护那趟
+  的 `tasks.md` 与写路径逐字节相同 / forget-all 清掉 `memory/*.md` 但**不碰** `tasks.md` /
+  STATUS.md 里那句覆盖提醒在。
+
+**九道变异，九次全红，且每次只红该红的那些**：往 frontmatter 塞 `rendered_at: Date.now()`（4 例，
+源码断言 + 渲染确定性 + frontmatter 闭集 + mtime）/ `normalizeTier` 换成裸 `tierOf`（1 例）/ 摘掉
+`isSafeTierId` 那道跳过（1 例）/ 链表不再排除 `archive/`（1 例）/ 去掉 `if (current === body) return`
+（1 例）/ 空 cluster 留着旧文件（1 例）/ `oneLine` 不再折控制字符（2 例）/ 工厂不传 `onSaved`
+（3 例）/ 维护不调 `projectButlerVault`（2 例）/ `forgetAll` 不清记忆投影（1 例）。复原一律 python
+精确替换 + `shasum` 与基线对拍，**绝不 `git checkout <file>`**。
+
+**排错记**：删除型变异的复原被 `mut.py` 的「锚点必须恰好出现一次」当场拦下 —— 变异后的「新」侧是
+一个**空串**，而空串在任何文件里都出现上万次。那道守卫是八轮变异测试的直接产物，这次它拦下的是一次
+会把整个文件搅烂的复原。教训：**删除型变异要在「新」侧留一个非空且唯一的标记**（一行注释即可）。
+
+验收：personal-butler **216**（+30）、host **3103** + 5 skip（+5）、全仓 `pnpm -r typecheck` 净、
+四门 PASS（**旋钮 116 零新增** —— 投影不是开关，它跟着 vault 一起在；`main.ts` 未触碰）。
+
+### 16.6 诚实残余
+
+- **记忆投影读到 500 条为止**。这不是我们挑的数，是文件后端 `list` 自己的 `LIST_MAX_LIMIT`
+  —— 与其许一个后端兑现不了的诺，不如照它的上限取最新的 500 条，并在正文里写明「还有 N 条没有
+  列出，完整数据在 `semantic.jsonl`」。真相一条不少，投影是有界的。
+- **投影只出不进**。人在 `tasks.md` 里打的字不会被读回去，下次写入直接覆盖 —— 这是岔口 4 的全部
+  语义，不是待补的功能。要改内容跟阿同说（或直接改 `knowledge/`，那不是投影）。
+- **`forget-all` 不删 `tasks.md`**。那是笔记本的投影不是记忆的；任务本身还在 `tasks.json` 里，
+  连带删掉会把「忘掉关于我的事实」悄悄扩成「删掉我的待办」。
+- **只投当下成立的事实**。被后来的说法翻篇的旧事实不在投影里（它们仍在 jsonl 里 —— 记忆不删只
+  翻篇）；想看全史只能读 jsonl。
+- **episodic 不投**。每轮捕获的原话是流水不是状态，投出来只会淹掉那几条真正的事实。
+- Codex 交叉审**尚未跑**（额度 08-19 恢复），与 M2/M2b/M3a/M3b/M3c/M4 同批送审。
