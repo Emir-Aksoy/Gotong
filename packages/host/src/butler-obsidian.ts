@@ -91,10 +91,33 @@ export async function projectButlerVault(opts: ProjectButlerVaultOptions): Promi
       err: err instanceof Error ? err.message : String(err),
     })
   }
+  await projectButlerMemoryVault({ ...opts, projector })
+}
+
+/**
+ * 只重投**记忆**那一半。
+ *
+ * 两个调用者:6h 兜底(上面)与成员点「忘掉这一条」之后(`ButlerMemoryService.forget`)。
+ * 刻意抽成一个函数而不是各写一遍 —— 与 M5 让两条写路径共用 `openButlerObsidianProjector`
+ * 同一个理由:「读多少条 / 算不算读满了窗 / 投给谁」这三件事只能有一份答案,
+ * 各写一遍迟早不一样,而不一样的那天没有人会被通知。
+ *
+ * 永不抛:投影是派生物,读不动真相就跳过这次(下一 tick 再来)。
+ */
+export async function projectButlerMemoryVault(
+  opts: ProjectButlerVaultOptions & { readonly projector?: ObsidianProjector },
+): Promise<void> {
+  const projector = opts.projector ?? openButlerObsidianProjector(opts)
   try {
     const memory = openButlerMemory({ rootDir: opts.rootDir, userId: opts.userId, logger: opts.logger })
     const facts = await memory.list({ kind: 'semantic', limit: OBSIDIAN_PROJECTION_READ_LIMIT })
-    await projector.projectMemory(facts, opts.now)
+    // 读满了上限 = 这一次很可能没看全(后端 `list` 自己的 `LIST_MAX_LIMIT` 就是 500)。
+    // 把这个事实带下去:投影层据此**不删**看起来空掉的 cluster,也在正文里说明白。
+    // 「读到 500 条」与「一共正好 500 条」在这里被当成同一件事 —— 宁可多说一句
+    // 「可能没列全」,也不要因为差一条而把一份还成立的投影删掉。
+    await projector.projectMemory(facts, opts.now, {
+      windowed: facts.length >= OBSIDIAN_PROJECTION_READ_LIMIT,
+    })
   } catch (err) {
     opts.logger.warn('obsidian projection: memory skipped', {
       userId: opts.userId,

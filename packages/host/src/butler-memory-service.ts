@@ -40,7 +40,7 @@ import {
 import type { MemoryEntry, MemoryHandle } from '@gotong/services-sdk'
 import type { WebServerOptions } from '@gotong/web'
 
-import { openButlerObsidianProjector } from './butler-obsidian.js'
+import { openButlerObsidianProjector, projectButlerMemoryVault } from './butler-obsidian.js'
 import { openButlerDreamDiary, type ButlerDreamDiary } from './personal-butler-dreams.js'
 import { openButlerMemory } from './personal-butler-memory.js'
 import { openButlerSkillFile, type ButlerSkillFile } from './personal-butler-skills.js'
@@ -131,6 +131,20 @@ export class HostButlerMemoryService implements ButlerMemorySurface {
     const existed = (await mem.list({ limit: EXPORT_LIMIT })).some((e) => e.id === id)
     await mem.forget(id)
     this.logger.info('member forgot a butler memory', { userId, id, existed })
+    // HANDS-M5 补课(Codex 轮 C H2):md 投影是这份 jsonl 的派生物,忘掉一条而不
+    // 重投,那条事实还会在成员的 vault 里摆着,一摆最多 6 小时 —— 而「忘掉」这个
+    // 动作的全部意义就是「别再让我看见它」。`forgetAll` 从第一版起就连投影一起
+    // 清,单条却漏了;两条路对「忘掉」的定义必须一致。
+    // 投影失败只 warn(函数内部已吞):真相已经改了,一次派生物写不出不该把一次
+    // 成功的遗忘报成失败 —— 与写路径末尾同姿态。
+    if (existed) {
+      await projectButlerMemoryVault({
+        rootDir: this.rootDir,
+        userId,
+        logger: this.logger,
+        now: this.clock(),
+      })
+    }
     return existed
   }
 

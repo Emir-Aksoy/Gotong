@@ -141,6 +141,20 @@ const jailCap = await detectFsJail()
 const HAS_JAIL = jailCap.kind !== 'none'
 const USER = 'u-owner'
 
+/**
+ * 「真 spawn」那一半跑不跑得成 —— 跑不成时记一笔,收官如实报**跳过了几段**。
+ *
+ * 一句「N 条断言全过」在没有监狱的机器上会把「少跑了三段」说成「全都验过了」。
+ * 跳过本身是设计内的(幕 0 已经证过:没有监狱,手根本不存在),但它必须被数出来
+ * —— 与框架里「no silent caps」同一条纪律:砍掉的东西要说出口。
+ */
+let skippedSpawns = 0
+function jailHalf(): boolean {
+  if (HAS_JAIL) return true
+  skippedSpawns += 1
+  return false
+}
+
 console.log('━━ atong-hands — 一双手,和它够不到的每一样东西 ━━\n')
 console.log(`布景:一个真 <space>(里面有 agents.json 和一把 key),监狱=${jailCap.kind}`)
 console.log(`  家在 ${space}\n`)
@@ -239,7 +253,7 @@ console.log('━━━ 幕 1 · 注入写配置:策略层拒一次,监狱层再�
   const injected = { argv: ['sh', '-c', `echo pwned > ${join(space, 'agents.json')}`] }
   const shell = await ts.classify('hands_run', injected)
   assert(shell.decision === 'allow', '层二:同一个念头走 shell —— 策略层按设计放行(tier 1)')
-  if (HAS_JAIL) {
+  if (jailHalf()) {
     // 控制组先跑:同一条 shell 重定向写到**工作区里**是成功的。没有这一条,
     // 下面那句「写不进去」可能只是在说 sh 根本没跑起来 —— 一条通过了的控制
     // 断言,如果它守的门当时是关着的,它什么也没证明。
@@ -269,10 +283,14 @@ console.log('━━━ 幕 2 · 联网命令:park → 人点头 → 才跑 ━�
   // 关键的一条:判决出来了,但**什么都还没发生**。
   assert(
     !readdirSync(workspace).includes('act2-ran.txt'),
-    '  批准之前:盘上零痕迹(park 不是「先跑了再说」)',
+    '  批准之前:工作区里一个字节没落(park 不是「先跑了再说」)',
   )
+  // 措辞上的一条诚实(Codex 轮 C M9):这里说的是**工作区**零痕迹,不是「盘上」。
+  // `classify` 会在审计台账里落一行 `stage:'classify'` —— 那是**故意**的:审批卡
+  // 上写着「完整命令见审计台账」,不先落那一行,卡上那句话就没有兑现处。
+  // 「还没跑」证的是工作区,「问过谁、问的是哪条命令」证的是台账,两件事各有各的落点。
 
-  if (HAS_JAIL) {
+  if (jailHalf()) {
     const yes = await approved(ts, 'hands_run', call)
     assert(!yes.isError, '人点头之后:在监狱里真跑完')
     assert(readFileSync(join(workspace, 'act2-ran.txt'), 'utf8').trim() === 'fetched', '  产出落在工作区里')
@@ -300,7 +318,7 @@ console.log('━━━ 幕 3 · 工作区直写 + 监狱里跑脚本 ━━━')
     '  文件真落在工作区里',
   )
 
-  if (HAS_JAIL) {
+  if (jailHalf()) {
     const run = await gated(ts, 'hands_run', { argv: ['node', 'test.js'] })
     assert(run.decision === 'allow', '跑本地脚本 = tier 1(不联网,不 park)')
     assert(run.text.includes('TESTS PASS'), '  监狱里真跑出 TESTS PASS')
@@ -425,7 +443,11 @@ console.log('  → 唯一一件「载荷本身就是秘密」的事,被桥层在
 // ── 收官 ─────────────────────────────────────────────────────────────────────
 
 console.log('━━ 收官 ━━')
-console.log(`  ${passed} 条断言全过,零网络 / 零 key / 零 LLM。`)
+console.log(
+  skippedSpawns === 0
+    ? `  ${passed} 条断言全过,零网络 / 零 key / 零 LLM。`
+    : `  ${passed} 条断言全过,零网络 / 零 key / 零 LLM(另有 ${skippedSpawns} 段「真 spawn」按设计跳过:本机无 OS 监狱)。`,
+)
 console.log('')
 console.log('  这四幕合起来是一句话:阿同的每一分能力,都配了一堵指得出来的墙。')
 console.log('   · 没有监狱 ⇒ 没有手(不是「有手但小心点」)')

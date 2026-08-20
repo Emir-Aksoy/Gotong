@@ -22,7 +22,10 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { HostButlerMemoryService } from '../src/butler-memory-service.js'
 import { openButlerMemory } from '../src/personal-butler-memory.js'
 import { buildButlerFactory, type ButlerFactoryRefs } from '../src/personal-butler-factory.js'
-import { runButlerMaintenanceOnce } from '../src/personal-butler-maintenance.js'
+import {
+  ButlerMaintenanceSweeper,
+  runButlerMaintenanceOnce,
+} from '../src/personal-butler-maintenance.js'
 
 const silentLogger: Logger = {
   trace() {},
@@ -192,6 +195,56 @@ describe('HANDS-M5 wiring — 投影接在真实落盘路径上', () => {
     // 被要求忘掉的事实不该还在 vault 里摆着,而且看起来像现状。
     expect(existsSync(join(root, 'user', 'u1', 'memory', 'persona.md'))).toBe(false)
     expect(existsSync(join(root, 'user', 'u1', 'tasks.md'))).toBe(true)
+  })
+
+  // ── Codex 轮 C 补课 ───────────────────────────────────────────────────────
+
+  it('忘掉**一条**也会重投 —— 否则那条事实还在 vault 里摆最多 6 小时', async () => {
+    const mem = openButlerMemory({ rootDir: root, userId: 'u1', logger: silentLogger })
+    await mem.remember({ kind: 'semantic', text: '用户住在槟城', meta: { tier: 'persona' } })
+    await mem.remember({ kind: 'semantic', text: '用户最爱的饮料是珍珠奶茶', meta: { tier: 'persona' } })
+    await runButlerMaintenanceOnce({
+      rootDir: root,
+      userId: 'u1',
+      summarize: async () => '',
+      logger: silentLogger,
+    })
+    const before = readFileSync(join(root, 'user', 'u1', 'memory', 'persona.md'), 'utf8')
+    expect(before).toContain('槟城')
+
+    const service = new HostButlerMemoryService({ rootDir: root, logger: silentLogger })
+    const target = (await mem.list({ limit: 50 })).find((e) => e.text.includes('槟城'))!
+    expect(await service.forget('u1', target.id)).toBe(true)
+
+    const after = readFileSync(join(root, 'user', 'u1', 'memory', 'persona.md'), 'utf8')
+    expect(after).not.toContain('槟城')
+    expect(after).toContain('珍珠奶茶') // 只少了被忘掉的那一条
+  })
+
+  it('没有 provider 的那一趟照样投影 —— 渲染 md 不需要模型', async () => {
+    // 蒸馏要 provider,把盘上已有的真相渲染成 md 不要。没有 key 的 hub 一份
+    // tasks.md 也拿不到,而那两份真相本来就在盘上。
+    const butler = butlerFor(new NotebookProvider())
+    await butler.onTask(dispatchTask('t1', 'u1', '帮我筹备生日会。'))
+    rmSync(join(root, 'user', 'u1', 'tasks.md'))
+
+    const mem = openButlerMemory({ rootDir: root, userId: 'u1', logger: silentLogger })
+    await mem.remember({ kind: 'semantic', text: '用户住在槟城', meta: { tier: 'persona' } })
+
+    let asked = 0
+    const sweeper = new ButlerMaintenanceSweeper({
+      rootDir: root,
+      logger: silentLogger,
+      buildProvider: async () => {
+        asked += 1
+        return null // 没建管家行 / 解析不出 key
+      },
+    })
+    await sweeper.runOnce()
+
+    expect(asked).toBe(1)
+    expect(existsSync(join(root, 'user', 'u1', 'tasks.md'))).toBe(true)
+    expect(readFileSync(join(root, 'user', 'u1', 'memory', 'persona.md'), 'utf8')).toContain('槟城')
   })
 
   it('STATUS.md 里写清了这些 .md 是投影、手改会被覆盖', async () => {

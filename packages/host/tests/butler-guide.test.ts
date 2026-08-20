@@ -157,4 +157,20 @@ describe('AFR-M4 — gotong_guide 知识卡防腐门', () => {
     const bad = await ts.callTool('nope', {})
     expect(bad.isError).toBe(true)
   })
+
+  it('repair 卡把「聊天窗能批的」与「只能去网页批的」分开(Codex 轮 C M8)', async () => {
+    // `hands_*` **刻意**不在 `IM_APPROVABLE_TOOLS` 里(名单是列举不是排除法,
+    // 而 argv 想多长有多长)。所以一张把「工作区里的联网命令」和「/approve」
+    // 写在同一句里的卡,会把成员送上一条对那件事不存在的路 —— M3b 那条
+    // 「指一条可能不存在的路,比说『这儿干不了』更坏」同一形状。
+    const { IM_APPROVABLE_TOOLS } = await import('../src/personal-butler-escalation.js')
+    expect([...IM_APPROVABLE_TOOLS]).not.toContain('hands_run')
+
+    const card = renderGuideCard('repair')
+    expect(card).toContain('/approve <短码>')
+    expect(card).toContain('只能去网页批')
+    // 顺序也承重:先说能在聊天窗批的那几件,再说那一件不能 —— 反过来读起来像
+    // 「全都得去网页」,而 `set_hub_config` 恰恰是能在手机上批的。
+    expect(card.indexOf('/approve <短码>')).toBeLessThan(card.indexOf('只能去网页批'))
+  })
 })

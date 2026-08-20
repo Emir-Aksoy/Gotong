@@ -552,6 +552,12 @@ export class ButlerMaintenanceSweeper {
         this.log.debug('butler maintenance: no provider, skipping tick', {
           members: userIds.length,
         })
+        // HANDS-M5 补课(Codex 轮 C M5):**投影不需要模型**。蒸馏要 provider,把
+        // 盘上已有的真相渲染成 md 不要。挂在蒸馏后面是因为「照的是改完的那份」,
+        // 不是因为它依赖蒸馏 —— 没有 key 的 hub 于是一份 tasks.md 也拿不到,而
+        // 那两份真相(tasks.json / semantic.jsonl)本来就在盘上;双时态还会让
+        // 「什么算数」随时间变,没有这一趟就永远停在最后一次有 key 的样子。
+        await this.projectOnly(userIds)
         return
       }
       // NA-M5 — per-tick model override (opt-in `maintenanceModel` on the butler
@@ -587,6 +593,31 @@ export class ButlerMaintenanceSweeper {
       })
     } finally {
       this.running = false
+    }
+  }
+
+  /**
+   * 没有 provider 的那一趟:只重投 Obsidian 投影,一个模型调用都不发。
+   *
+   * 逐成员 best-effort —— `projectButlerVault` 自己永不抛,这里的 try 只防
+   * 「连投影器都构造不出来」那种意外,不让它连累后面的成员。
+   */
+  private async projectOnly(userIds: readonly string[]): Promise<void> {
+    for (const userId of userIds) {
+      try {
+        await projectButlerVault({
+          rootDir: this.rootDir,
+          userId,
+          logger: this.log,
+          now: this.now(),
+          ...(this.tierConfig ? { tierConfig: this.tierConfig } : {}),
+        })
+      } catch (err) {
+        this.log.warn('butler maintenance: projection-only tick failed', {
+          userId,
+          err: err instanceof Error ? err.message : String(err),
+        })
+      }
     }
   }
 
