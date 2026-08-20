@@ -52,6 +52,7 @@ pnpm demo                          # = hello-collab（官方第一步，见 QUIC
 | [`model-ensemble`](../../examples/model-ensemble) | LSA capstone：同一问题 **并行** fan-out 到 N 个模型（routing 只调一个）→ 综合器收全 N 份草稿折成一份 → 成本诚实 ×N → 挂一个照跑 → 要调工具就透传；真 `EnsembleProvider` 只 stub 几个成员 | 零（无网络无 key） |
 | [`atong-recovery`](../../examples/atong-recovery) | AFR capstone：三档备份（身份/身份+关系/搬家）→ 新目录真恢复 → kid 逐字节复算不变、peers 投影还在（令牌不随行）、搬家档用恢复出的主钥真开金库；真 `backup()`/`restore()`/真金库加密 | 零（无网络无 key） |
 | [`atong-librarian`](../../examples/atong-librarian) | LIB capstone：知识自治四幕——真图书馆员把进货区主题事实上架进 knowledge/（文件先落盘才双时态下架，可逆带出处，第二 tick 零模型调用）→ 树长 25× 常驻索引卡**逐字节不变**（M1 尺量的，胖索引被 ≤500tk 顶封死）→ 归档不真删 → 真管家靠索引卡导航读出待办，对外发送照样 park（知识≠授权） | 零（无网络无 key） |
+| [`atong-hands`](../../examples/atong-hands) | HANDS capstone：一双手和它够不到的每一样东西——监狱缺席则手根本不装 → 注入写配置**两层各拒一次**（`agents.json` 逐字节不变）→ `net:true` park，批准前盘上零痕迹、批准后真跑完 → 工作区直写不 park、监狱里 `node test.js` 真出 `TESTS PASS`，同一个 `cat` 读不到 `<space>/gotong.env` → `/setkey` 秘密只到金库（整个 `<space>` 扫不到明文，渲染/日志/审计零回显）；两处配**控制组**，不让「够不到」空洞地真 | 零（无网络无 key） |
 
 ## ③ 接真东西（需 key / 本地 MCP server / 跨进程）
 

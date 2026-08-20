@@ -699,3 +699,153 @@ function secretProblem(secret: string): 'too_short' | 'too_long' | 'bad_chars' |
   }
   return null
 }
+
+// ── HANDS-M3a/M3b · the copy this face renders ───────────────────────────────
+//
+// HANDS-M7 —— 这段文案从 im-bridge.ts 搬到这里,理由是**它穷尽 switch 的那个联合
+// 就定义在本文件里**。给 `ImSetKeyOutcome` 加一支失败码,编译器该在**一个**地方
+// 报错;分居两个文件时,那个「一处」全靠人记得两边一起改。搬家零行为改动——既有
+// im-bridge 测试逐字断言这些句子,它们是这次搬运的门。
+//
+// 副作用之一是它现在能被 host 的子路径导出够到,capstone 因此渲染的是**生产那
+// 一份字节**,而不是在 demo 里手抄一份看起来一样的话(M3b 的教训:一条缝,如果
+// 它的测试全都自己手搭对面那一半,那它就是没测过)。
+
+/**
+ * Printed on EVERY `/setkey` reply, success or failure. The trade-off of the
+ * paste path is exactly this line, and it is not a footnote: we can promise
+ * the key never enters the hub's conversation record, and we cannot touch the
+ * copy sitting in the member's own chat history on the platform's servers.
+ */
+export const DELETE_YOUR_MESSAGE =
+  '⚠ 请手动删除你刚才那条消息 —— key 不会进阿同的对话记录/记忆,但它还留在聊天平台上。\n' +
+  '/ Delete your own message — the key never enters Atong\'s memory, but the platform still has your copy.'
+
+/**
+ * HANDS-M3b — the fork answer was "keep the paste path AND add the link path,
+ * and tell the member the trade-off of each". This is that sentence, and it is
+ * written as a comparison rather than a recommendation on purpose: which one is
+ * right depends on something we cannot see (is this a group chat? a work
+ * account someone else administers? are you standing in a queue with no time to
+ * open a browser?). Stating both costs honestly beats picking for them.
+ */
+const SETKEY_TWO_PATHS = [
+  '两种方式,各有代价:',
+  '  ① 直接贴  /setkey <目标> <key>',
+  '     快,不用离开聊天窗;但 key 会留在聊天平台的记录里,你得自己删,而且删之前它已经过了平台的服务器。',
+  '  ② 一次性链接  /setkey link',
+  '     key 从不进聊天窗——你在浏览器里直接填给 hub;但要点开网页,链接 10 分钟内有效、只能用一次。',
+  '/ ① paste = fast, but the key sits in your chat history. ② /setkey link = the key never enters the chat.',
+].join('\n')
+
+export const SETKEY_USAGE = [
+  '用法:/setkey <目标> <key>',
+  '',
+  '  目标 = agent 的 id(如 assistant),或共享池 provider(anthropic / openai)',
+  '  例:  /setkey assistant sk-xxxxxxxx',
+  '',
+  '先发 /keys 看有哪些槽位、哪些还空着。',
+  '/ Usage: /setkey <agent-id|anthropic|openai> <key> — send /keys to see the slots.',
+  '',
+  SETKEY_TWO_PATHS,
+  '',
+  DELETE_YOUR_MESSAGE,
+].join('\n')
+
+/**
+ * `/setkey` — text from an outcome, and ONLY from an outcome.
+ *
+ * This function deliberately does not take the raw target. `/setkey <key>
+ * <agent>` (the arguments in the order a hurried person types them) parses as
+ * target=<key>, so echoing "不认识目标「…」" would print a live key back into
+ * the chat on exactly the slip this face should be forgiving about. Every
+ * string below comes from the hub's own records instead, which is why there is
+ * no sanitiser call here to get wrong: there is nothing member-supplied to
+ * sanitise.
+ *
+ * `linkAvailable` decides whether the tail offers the other path. Pointing at
+ * `/setkey link` on a hub that cannot mint one would be advice that fails when
+ * taken — worse than not mentioning it, because the member is being told this
+ * right after learning their key is now in their chat history.
+ */
+export function renderSetKeyOutcome(out: ImSetKeyOutcome, linkAvailable: boolean): string {
+  // Appended to EVERY reply on this path, success or failure: the moment a
+  // member reads "delete your own message" is the moment the alternative is
+  // worth knowing about.
+  const tail = linkAvailable
+    ? `${DELETE_YOUR_MESSAGE}\n  想避免这一条?下次发 /setkey link,key 就不进聊天窗了。/ Or use /setkey link next time.`
+    : DELETE_YOUR_MESSAGE
+  if (!out.ok) {
+    const head = ((): string => {
+      switch (out.code) {
+        case 'bad_secret':
+          return out.reason === 'too_short'
+            ? '✗ 没存 —— 这串太短,不像一把完整的 key(多半是粘贴时被截断了)。'
+            : out.reason === 'too_long'
+              ? '✗ 没存 —— 这串太长,不像一把 key。'
+              : '✗ 没存 —— 这串里有换行/控制字符,多半是粘贴时带进了别的东西。'
+        case 'unknown_target':
+          // 刻意不回显你打的那个词——万一顺序打反了,那个词就是 key 本身。
+          return (
+            '✗ 没存 —— 第一个词不是这台 hub 认识的目标(注意顺序是「先目标后 key」)。\n' +
+            `  可用的 agent:${out.agents.length > 0 ? out.agents.join('、') : '(无)'}\n` +
+            `  可用的共享 provider:${out.providers.join('、')}`
+          )
+        case 'ambiguous_target':
+          return (
+            `✗ 没存 —— 「${out.target}」既是 agent 也是 provider,分不清你要改哪个。\n` +
+            `  请写明:/setkey agent:${out.target} <key> 或 /setkey provider:${out.target} <key>`
+          )
+        case 'env_pinned':
+          // Refusing here IS the honest answer: writing would have "succeeded"
+          // and changed nothing, because an apiKeyEnv pin is exclusive.
+          return (
+            `✗ 没存 —— ${out.agentId} 的 key 被钉在服务器环境变量 ${out.envName} 上,` +
+            '存进来的 key 永远轮不上。\n' +
+            '  要换它,请在服务器上改那个环境变量并重启;或先在网页把这个 agent 的 apiKeyEnv 去掉。'
+          )
+        case 'mock_agent':
+          return `✗ 没存 —— ${out.agentId} 是 mock provider,不用 key。`
+        case 'vendor_ambiguous':
+          return (
+            '✗ 没存 —— openai-compatible 是一堆不同厂商共用的标签(DeepSeek / Qwen / MiMo …),' +
+            '存一把共享 key 会被发给错的端点。\n' +
+            `  请改成按 agent 存:${
+              out.agents.length > 0
+                ? out.agents.map((a) => `/setkey ${a} <key>`).join('  或  ')
+                : '/setkey <agent-id> <key>'
+            }`
+          )
+      }
+    })()
+    return `${head}\n\n${tail}`
+  }
+
+  const lines: string[] =
+    out.slot === 'agent'
+      ? [`✓ 已存入 —— ${out.agentId} 的专属 key(provider: ${out.provider})`]
+      : [`✓ 已存入 —— 共享池的 ${out.provider} key`]
+  if (out.slot === 'shared' && out.shadowed.length > 0) {
+    lines.push(
+      '  用不到它的:' +
+        out.shadowed
+          .map((s) => `${s.agentId}(${s.reason === 'per-agent' ? '有专属 key' : '钉了环境变量'})`)
+          .join('、'),
+    )
+  }
+  // Effect, stated exactly. A stored key that isn't running yet is not "done".
+  const r = out.restart
+  if (r.restarted.length > 0) {
+    lines.push(`  已重启并生效:${r.restarted.join('、')}`)
+  }
+  if (r.failed.length > 0) {
+    lines.push(`  ⚠ 重启失败:${r.failed.join('、')} —— key 已存好,但要等它下次启动才生效。`)
+  }
+  if (r.unavailable) {
+    lines.push('  ⚠ 这台 host 没接 agent 重启,key 已存好,但要等下次启动才生效。')
+  }
+  if (r.restarted.length === 0 && r.failed.length === 0 && !r.unavailable) {
+    lines.push('  (当前没有 agent 会用到它,存着备用。)')
+  }
+  return `${lines.join('\n')}\n\n${tail}`
+}

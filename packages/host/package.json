@@ -53,6 +53,14 @@
     "./butler-escalate": {
       "types": "./dist/personal-butler-escalate.d.ts",
       "import": "./dist/personal-butler-escalate.js"
+    },
+    "./butler-hands": {
+      "types": "./dist/personal-butler-hands.d.ts",
+      "import": "./dist/personal-butler-hands.js"
+    },
+    "./im-credentials": {
+      "types": "./dist/im-credentials-service.d.ts",
+      "import": "./dist/im-credentials-service.js"
     }
   },
   "files": [

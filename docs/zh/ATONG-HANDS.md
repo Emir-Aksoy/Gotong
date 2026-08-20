@@ -1,12 +1,11 @@
 # 阿同执行能力 track（HANDS）— 给阿同一双关在监狱里的手，配置动作搬到手机上
 
-> Status: **M0→M6 已落，余 M7（2026-08-20）**——侦察 + 威胁模型 + 四档策略 + 五岔口拍板 +
-> 里程碑 M1→M7。落地记录：M1 §九 · M2 §十（真 spawn 门全过 + Codex 交叉审九轮 5H/4M/1L →
-> 2H/6M/2L → 3H/3M → 3H/3M → 2H/1M/1L → 2H/2M/1L → 2H/2M/3L → 3H/2M/3L → 3H/5M/6L +
-> 内部对抗审一轮 2H/2M，全部修入，见 §10.5/§10.7）· M2b §十一 · M3a §十二 · M3b §十三 ·
-> M3c §十四 · M4 §十五 · M5 §十六 · M6 §十七。
-> **M2/M2b/M3a/M3b/M3c/M4/M5 的 Codex 交叉审同批待跑**（额度 08-19 恢复）；**M7 仍是方向性
-> 规划，实现前按 M0 惯例重新细化。**
+> Status: **M0→M7 全完（2026-08-20）**——侦察 + 威胁模型 + 四档策略 + 五岔口拍板 +
+> 里程碑 M1→M7 全部落地。落地记录：M1 §九 · M2 §十（真 spawn 门全过 + Codex 交叉审九轮
+> 5H/4M/1L → 2H/6M/2L → 3H/3M → 3H/3M → 2H/1M/1L → 2H/2M/1L → 2H/2M/3L → 3H/2M/3L →
+> 3H/5M/6L + 内部对抗审一轮 2H/2M，全部修入，见 §10.5/§10.7）· M2b §十一 · M3a §十二 ·
+> M3b §十三 · M3c §十四 · M4 §十五 · M5 §十六 · M6 §十七 · M7 §十八。
+> **M2/M2b/M3a/M3b/M3c/M4/M5/M6/M7 的 Codex 交叉审同批待跑**（额度 08-19 恢复）。
 > Last updated: 2026-08-20
 >
 > 用户诉求（2026-08-15 原话）：「我们要增强 atong 的执行能力，比如说增加手机可执行
@@ -221,9 +220,18 @@ M6（✅ 2026-08-20 已落，见 §十七）：compose 加 IM token / provider k
 裁决过不做的形状。故 M6 的验收改成 **`compose up` → IM 在 → 网页一次触碰 → 手机 `/setkey`
 （金库）→ 手机说人话换模型（park → `/approve`）全通**。
 
-M7：修复动作目录按四档挂——`fix-dirs`/清缓存(1) /
-重拉桥、重连 MCP、应用 RES 提案(2) / 「换钥/改 unit」指路人(3)；AFR-M5 面包屑在失败分支多一句
-「阿同能修的直接提议修」。
+M7（✅ 2026-08-20 已落，见 §十八）—— **这一条按 M4 的姿态重新过了一遍，结论是它不该是一族
+新工具，而该是一张地图。** 计划里那七件「修复动作」逐条对着源码走完：`fix-dirs` 在一台已经在跑的
+hub 上只能造一个空目录，补不上 M3c 造出来的任何一个失败模式；清缓存今天就是 tier 1 的
+`hands_rm`；重拉桥要一条 stop-and-restart 的缝，而那条缝不存在（何况桥断着的时候，人根本收不到
+那张 park 卡）；重连 MCP 没有 reconnect 这个操作；应用 RES 提案早就通了——`diagnose_my_agents`
+的 `actionHint` 指向 governed `edit_agent`，再开第二条 apply 路，正是 M3c 判死过的「一道闸从此
+有两个执法点」；换钥不再是指路人的活（`/setkey` 就是那条路）；改 unit 要 root，而 hub 刻意
+非特权。**零新动作工具**，M7 的上半场落成 `gotong_guide` 的第 10 张卡 `repair`（§18.1）。
+
+面包屑那句同样改口：**不往任何一条零 LLM 播报里塞第二个指针**——一条播报里两个指针互相稀释
+＝噪音。「哪些我能自己动手、哪些要你点头」这层语义住在 `repair` 卡的正文里，由 `framework-map`
+与 `workflow-failed` 两张卡各指一句过去；卡与卡之间互相指路，播报仍只带一个面包屑（§18.2）。
 
 ---
 
@@ -255,7 +263,7 @@ M7：修复动作目录按四档挂——`fix-dirs`/清缓存(1) /
 | M4 ✅ | 环境探测→方案→人批（2026-08-17，见 §十五） | host `personal-butler-environment.ts`：零 spawn 零联网探针（cpu/mem/disk/node/PATH 上的 ffmpeg·git·docker）+ 复用 boot 那次监狱功能探测的结论 + 被动读 CARE 断供 + 纯函数提案引擎（判别联合：`applicable:false` 那一支**结构上没有 apply 字段**）+ 渲染卡；进目录层 benign（~193tk，不占每轮脸）；`spaceRoot` 穿一行进 factory 只为 statfs | 单测 30（六组）：schema 封闭 + 描述如实说「不跑任何命令 / 不发任何网络请求」；**源码级断言**剥掉注释后不含 `child_process`/`spawn(`/`execFile`/`fetch(`/`node:http`；每一块读不动只让那一块 null 且**不产生提案**（null ≠ 有问题）；磁盘探不动不当成 0；端口撞车两支（能算出安全值⇒指向 `set_hub_config`；活值也撞⇒降级只指路）；凡 `applicable:true` 其 `apply.tool` 恒为 `set_hub_config` 且 key ∈ 四个白名单旋钮；渲染里**结构性没有**绝对路径/用户名（真跑默认探针对拍）；**七道变异七次全红且只红该红那些**（含摘掉判别联合、摘掉 tiers 登记、摘掉 AFR tripwire） |
 | M5 ✅ | Obsidian 投影 | tasks.md / memory/*.md 生成 + frontmatter + 覆盖语义 | 真相未动；投影可 Obsidian 解析 |
 | M6 ✅ | 一键镜像（2026-08-20，见 §十七） | 两份 compose 补 13 个 IM 变量 + 两个 provider key 的部署期透传（**空值键**：宿主没设就不进容器 ⇒ 未设时逐字节不变，且值永远不进 git）+ 验收行 `/model` **显式改口**（那个命令不存在也不该造，换模型走 `edit_agent` + `/approve`） | 单测 12（两半）：**文本半**——变量名从 `im-bridge.ts` **源码**扒出来（不是手抄清单），两份 compose 一个不少；凡像凭证的键（判据复用 `set_hub_config` 拒写秘密的**同一个** `isSecretKey`）值只能是空或 `${VAR}` 插值，绝不是字面量；发布出去的 `ports:` 与 `GOTONG_WEB_PORT`/`_WS_PORT` 对得上。**行为半**——拿**真** `startImBridges` 跑装配层：三座可金库的桥从 env 起来（`source:'env'`）；13 个全设成空串 ⇒ 一座不起；**空串永远盖不掉金库里的凭证**；`selectLlmApiKey` 里空串等于没设、手机 `/setkey` 的 per-agent 那把压得住 compose 的。**五道变异五次全红且只红该红那些** |
-| M7 | 修复接手 + capstone | 修复动作目录 + `examples/atong-hands` 四幕（注入写配置双拒 / 联网 park 批后跑 / 工作区直写+监狱跑脚本 / `/setkey` 双路径文案 + 金库落值零回显） + 收口 | `pnpm demo:atong-hands` exit 0，零 key 零 LLM |
+| M7 ✅ | 修复接手 + capstone（2026-08-20，见 §十八） | **零新动作工具**（七件「修复动作」逐条对着源码走完，答案是「早就有，散在七处」）→ `gotong_guide` 第 10 张卡 `repair`（四档修复地图，457tk/500tk；卡量 10 = 门的上限）+ `framework-map`/`workflow-failed` 各指一句过去（**播报仍只带一个面包屑**）+ 把 `DELETE_YOUR_MESSAGE`/`renderSetKeyOutcome` 从 `im-bridge.ts` 挪进 `im-credentials-service.ts` 并开两条子路径导出，使 capstone 渲染的**是生产那一份字节** + `examples/atong-hands` 五幕 | `pnpm demo:atong-hands` exit 0（**36 条断言**，零网络零 key 零 LLM）：幕 0 监狱缺席 / 角色查不到 ⇒ 手根本不装；幕 1 注入写配置**两层各拒一次**且 `agents.json` 逐字节不变；幕 2 `net:true` park，**批准前盘上零痕迹**，批准后真跑完；幕 3 工作区直写不 park + 监狱里 `node test.js` 真出 `TESTS PASS`；幕 4 秘密只到金库（`readVaultSecret` 解得出、整个 `<space>` 逐字节扫不到明文、渲染/日志/审计零回显，含**顺序打反**那次）；**幕 1 与幕 3 各配一条控制组**，不让「够不到」空洞地真 |
 
 顺序按用户优先级：**M1→M2（手）→M3（手机）**先，M4/M7 次之，M5/M6 后置；M2b 在 M2 后按需。
 每刀：新单测 + 四门 PASS（旋钮 116）+ 一刀一 commit；M2/M3 必过 Codex 交叉审（M2b 的装配层同批送审）。
@@ -1596,3 +1604,116 @@ prod compose 粘一个字面 token ⇒ 「值不是字面量」1 例；`GOTONG_W
   **让 host 自己在 boot 读那个文件**（按 `ENV_KNOBS` 白名单只认那四个键、`process.env` 优先），
   那样谁来启动都成立，而且它天生进不了秘密。M6 不顺手做，是因为它是另一件事。
 - **镜像发布到 GHCR = 用户门**，不擅自做。
+---
+
+## 十八、M7 落地记录（2026-08-20）
+
+一句话：**M7 计划里那一族「修复动作工具」，逐条对着源码走完之后一件都没造。** 修复能力早就
+建好了，只是散在七个不同的地方；缺的从来不是动作，是一张能让人（和模型自己）看懂「这件事该
+谁动手」的地图。于是 M7 的上半场是 `gotong_guide` 的第 10 张卡，下半场是把整条 track 的四条
+承诺摆到一个 exit 0 的 demo 里逐条撞一遍。
+
+### 18.1 七件「修复动作」逐条走完，答案是「早就有」（这一刀最重要的判断）
+
+这是 M4 那把尺子的第二次使用：**先把「阿同真能自己修的」一条条过完，再决定要不要造工具。**
+
+| §4.7 里那一件 | 今天在哪 | 判决 |
+|---|---|---|
+| `fix-dirs`（1） | `setting` 运维台，tier `safe-mutate` ⇒ `runnableOnSurface` 对它恒 true ⇒ **手机上 `/setting fix-dirs` 今天就能跑** | 已在。且在一台**已经在跑**的 hub 上它只能 `mkdir -p` 补一个空目录（幂等可逆），补不上 M3c 造出来的任何一个失败模式 |
+| 清缓存（1） | `hands_rm`，M2 就落了：工作区内 tier 1 免审批、在监狱里删、断网 | 已在 |
+| 重拉桥（2） | 不存在这条缝——`startImBridges` 只有起没有停 | 不造。要造它得先有一个被证实的失败模式，而目前没有；更要命的是**桥断着的时候那张 park 卡送不到人手上**，一件只在自己不能工作时才被需要的工具 |
+| 重连 MCP（2） | 没有 reconnect 这个操作——连接在 spawn 那一刻建立，**重启 agent 就是重连**（`edit_agent` 已经会做） | 不造 |
+| 应用 RES 提案（2） | 早就通了：`diagnose_my_agents` 的 `actionHint` 逐字写着「我可以帮你改：用 `edit_agent` 把…切到…，会先送 /me 让你点批准」 | 不造。再开第二条 apply 路，正是 M3c 判死过的「**一道闸从此有两个执法点**」 |
+| 换钥「指路人」（3） | `/setkey` 直贴 + `/setkey link`（M3a/M3b） | 改口。它已经不是指路人的活了 |
+| 改 unit「指路人」（3） | `hub_environment`（M4）把该跑的命令原样写出来 | 已在，且**这条确实只能是指路人**：要 root，而 hub 刻意非特权跑（§二把这件事当**特性**写着） |
+
+七件里六件「已在或不该造」，剩下那一件本来就是「说准而不动手」。所以 M7 上半场的交付是
+`gotong_guide` 的第 10 张卡 `repair`（`坏了找谁修:四档修复地图`），正文按**后果落在谁身上**
+分四段：我自己动 / 先送你确认再动 / 换 key 是例外不用绕 / 我碰不到只能把该做的说准；末行是红线
+「**能修 ≠ 有权修**」。
+
+三条写卡时的约束：
+
+- **卡里只点名 benign 工具**（`hub_health` / `hub_environment` / `my_status` / `restart_history` /
+  `diagnose_my_agents`，五个都在 `BUTLER_DIRECTORY_BENIGN` 里）**与 IM 动词**（`setkey` / `keys` /
+  `approve`，三个都是 `command-parser.ts` 的真 case）。governed 那一侧一律用**人话**描述而不点
+  工具名——这是 AFR-M5 立下的规矩：**让成员照抄问句，永不出现原始工具名**。顺带它也让防腐门里
+  那份 `KNOWN_TOOLS` 手抄名单不必为这张卡变长。
+- **457tk / 500tk**。AFR-M4 的门按码点估，中日韩字符一个算一 token，所以 500tk 实际上是约 430
+  个汉字的预算——这张卡写到第七行就顶到墙，多一段就得砍另一段。
+- **卡量 10 = 门的上限**（`卡量 6–10`）。刻意不抬那个上限：第 11 张卡得自己论证它为什么值一格。
+
+### 18.2 面包屑刻意只有一个（§4.7 的第二处改口）
+
+计划原文是「AFR-M5 面包屑在失败分支多一句『阿同能修的直接提议修』」。落地时没这么做，理由
+是一条**播报**里塞两个指针，两个都会变弱：零 LLM 播报的全部价值就在「一句话说清出了什么事
+＋一个照抄就能问的问题」，第二个指针只会稀释第一个。
+
+改成：那层语义住进 `repair` 卡的正文，**卡与卡之间互相指路**——`framework-map` 与
+`workflow-failed` 各加一行指向 `repair`（前者是总图该有一条修复线，后者是「工作流失败了」这个
+最常见的失败面），而 `workflow-failed` 自己作为播报面包屑的靶子**一个字没多**。于是：播报永远
+只带一个面包屑，人一旦落到卡上，卡会告诉他下一张该看哪张。
+
+### 18.3 capstone 渲染的必须是生产那一份字节（一次刻意的代码搬家）
+
+幕 4 要证的是「`/setkey` 的回复里没有秘密、有该有的四样东西」。第一版可以在 demo 里手抄一段
+看起来一样的话——那就等于什么都没证，正是 M3b 那个下午的教训：**一条缝，如果它的测试全都
+自己手搭对面那一半，那它就是没测过。**
+
+于是把 `DELETE_YOUR_MESSAGE`（那句「请删掉你那条消息」）与 `renderSetKeyOutcome` 从
+`im-bridge.ts` 挪进 `im-credentials-service.ts`：
+
+- **搬家的理由不是「demo 要用」，是它本来就该在那儿**——`renderSetKeyOutcome` 穷尽 switch 的
+  那个联合（`SetKeyOutcome`）就定义在 `im-credentials-service.ts` 里，渲染器和它渲染的那个类型
+  住在同一个文件，将来加一个 outcome 分支，编译器在同一屏之内就把没写的那支指出来。
+- `im-bridge.ts` 2117 → 1983 行；`im-credentials-service.ts` 701 → 851 行。
+- `KEY_PRIORITY_LABELS` / `KEY_PRIORITY_LINE` **没有跟着搬**：只有 `/keys` 用它们，那是桥的事。
+- `packages/host/package.json` 开两条子路径导出 `./butler-hands` 与 `./im-credentials`。
+  **子路径是必须的**：`@gotong/host` 的根 `src/index.ts` 只有一行 `import './main.js'`——
+  import 它就等于**把整台 host 跑起来**，这是 AFR-M8 那个 capstone 已经踩明白的事。
+
+### 18.4 两处控制组：不让「够不到」空洞地真
+
+「监狱里 `cat` 读不到 `<space>/gotong.env`」这句话有一种廉价的假通过方式：`cat` 根本没跑起来，
+输出当然是空的，断言当然过。同理「改走 shell 也写不进 `<space>/agents.json`」——如果那条重定向
+本身在这座监狱里就不工作，这条断言什么也没证。
+
+所以幕 1 与幕 3 各先跑一条**同形状但目标在工作区里**的命令（`echo ok > act1-control.txt` /
+`cat test.js`），证明这条路本身通，再去撞墙。这是 M3b 「**一条通过了的控制断言，如果它守的门
+当时是关着的，它什么也没证明**」在一个 demo 里的复用——那次是给测试补的，这次是给演示补的。
+
+### 18.5 五幕在证什么
+
+`examples/atong-hands`，`pnpm demo:atong-hands`，**零网络 / 零 API key / 零 LLM，36 条断言**。
+底下全是真件：真 `detectFsJail()`、真 `armButlerHands` / `buildButlerHandsToolset` / `jailShapeFor`、
+真 `parseImCommand`、真 `ImCredentialsService` + 真 `renderSetKeyOutcome`、真 `@gotong/identity`
+金库（`loadOrCreateMasterKey` + `openIdentityStore`，key 真信封加密）。
+
+| 幕 | 证什么 | 硬断言 |
+|---|---|---|
+| 0 布景 | **fail-closed 是地板不是兜底** | `detect` 报 `kind:'none'` ⇒ `armButlerHands` **根本不返回 host**（五件工具一件也造不出来），`my_status` 那一行如实说「没装」并说清原因；查不到成员角色 ⇒ 同样不装 |
+| 1 注入写配置 | **两层各拒一次** | 层一 `hands_write ../../../agents.json` ⇒ 策略层当场 `refuse`，execute 一步没跑、输出为空；层二 同一个念头改走 `sh -c 'echo pwned > <space>/agents.json'`（策略层**按设计** `allow`——解释器不 park）⇒ 控制组先证重定向本身通 ⇒ 写 `<space>` 失败 ⇒ `agents.json` **逐字节不变**（这条断言无条件跑，没有监狱也跑） |
+| 2 联网 park | **批准前零执行** | `net:true` ⇒ classify 判 `approve` 且理由非空；**批准之前盘上零痕迹**（产物文件不存在）；人点头之后在监狱里真跑完、产物落在工作区 |
+| 3 工作区自留地 | **有手 ≠ 什么都能碰** | `hands_write test.js` tier 1 不 park、文件逐字节落盘；`node test.js` 在监狱里真跑出 `TESTS PASS`；控制组先证 `cat` 在这座监狱里读得出东西 ⇒ 同一个 `cat` 读 `<space>/gotong.env` 读不到那把 key |
+| 4 `/setkey` | **秘密只到金库** | 真 `parseImCommand`（`mode:'paste'`）→ 真 `ImCredentialsService` → 真金库：`readVaultSecret` 解得出原文，而**整个 `<space>` 逐字节扫，明文一处也不在**；生产那一份渲染器的回复里没有秘密、有目标名、有 `DELETE_YOUR_MESSAGE`、有 `/setkey link` 那条路；**顺序打反那次**（`/setkey <key> <agent>` —— 着急的人最常打的顺序）落 `unknown_target` 且一个字节都不回显、只讲规则「先目标后 key」；日志与审计同罪 |
+
+### 18.6 验收
+
+- `pnpm demo:atong-hands` **exit 0**，36 条断言（幕 0 四条 / 幕 1 六条 / 幕 2 五条 / 幕 3 六条 /
+  幕 4 十五条）。
+- host 全套测试全绿；`gotong_guide` 那道四层防腐门全过（卡量 10 ≤ 10、`repair` 457tk ≤ 500tk、
+  pins 里每个工具名都在真名册里、双语与 topic 枚举双向核对）。
+- 全仓 `pnpm -r typecheck` 净（M3b 的教训：**一刀收口前跑全仓 tsc，别只跑改到的那几个包**）。
+- 四门 PASS，**旋钮 116 零新增**（一张知识卡与一个 demo 都不是开关）；`main.ts` 本刀未触碰。
+
+### 18.7 诚实残余
+
+- **本机没有 OS 监狱时**（既无 bubblewrap 也无 sandbox-exec），三幕里「真 spawn」那一半按设计
+  跳过，断言数会少几条。跳过的是**执行**不是**结论**——幕 0 已经证过没有监狱时手根本不存在；
+  而幕 1 那条「`agents.json` 逐字节不变」无条件跑。想在 Linux 上跑全：`apt install bubblewrap`。
+- **`repair` 卡是地图不是执行器**。它降低的是「人不知道该找谁」的成本，不改变任何一道闸；一个
+  被注入的模型读完这张卡，能做的事和读之前一模一样。
+- **`fix-dirs` 手机上跑得了，但它治不了 M3c 造出来的病**（端口写成同一个）。那件事的正主是 M4
+  的端口撞车提案 → `set_hub_config`，两者刻意分开。
+- **卡量顶到 10**。下一张卡要么替掉一张，要么先说服那道门为什么该抬。
+- **Codex 交叉审仍与 M2/M2b/M3a/M3b/M3c/M4/M5/M6 同批待跑**。

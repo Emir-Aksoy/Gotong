@@ -86,6 +86,24 @@ importers:
         specifier: workspace:*
         version: link:../../packages/host
 
+  examples/atong-hands:
+    dependencies:
+      '@gotong/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      '@gotong/host':
+        specifier: workspace:*
+        version: link:../../packages/host
+      '@gotong/identity':
+        specifier: workspace:*
+        version: link:../../packages/identity
+      '@gotong/im-adapter':
+        specifier: workspace:*
+        version: link:../../packages/im-adapter
+      '@gotong/personal-butler':
+        specifier: workspace:*
+        version: link:../../packages/personal-butler
+
   examples/atong-librarian:
     dependencies:
       '@gotong/core':
@@ -943,6 +961,9 @@ importers:
       '@gotong/cli':
         specifier: workspace:*
         version: link:../cli
+      '@gotong/cli-agent':
+        specifier: workspace:*
+        version: link:../cli-agent
       '@gotong/core':
         specifier: workspace:*
         version: link:../core
@@ -1034,9 +1055,6 @@ importers:
         specifier: ^8.21.1
         version: 8.21.1
     devDependencies:
-      '@gotong/cli-agent':
-        specifier: workspace:*
-        version: link:../cli-agent
       '@gotong/sdk-node':
         specifier: workspace:*
         version: link:../sdk-node

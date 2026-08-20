@@ -38,6 +38,7 @@
     "demo:atong-recovery": "pnpm --filter @gotong/example-atong-recovery start",
     "demo:atong-librarian": "pnpm --filter @gotong/example-atong-librarian start",
     "demo:atong-dual-brain": "pnpm --filter @gotong/example-atong-dual-brain start",
+    "demo:atong-hands": "pnpm --filter @gotong/example-atong-hands start",
     "demo:coding-agent-bridge": "pnpm --filter @gotong/example-coding-agent-bridge start",
     "demo:acp-coding-bridge": "pnpm --filter @gotong/example-acp-coding-bridge start",
     "demo:personal-coding-hub": "pnpm --filter @gotong/example-personal-coding-hub start",

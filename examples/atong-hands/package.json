@@ -1,0 +1,18 @@
+{
+  "name": "@gotong/example-atong-hands",
+  "version": "0.0.0",
+  "type": "module",
+  "private": true,
+  "description": "HANDS capstone (阿同执行能力 track) — 一双关在监狱里的手,一个确定性脚本跑完四幕:监狱缺席则手结构性不装(fail-closed) → 被注入的阿同想改 hub 自己的配置,被策略层与监狱层各拒一次(agents.json 逐字节不变) → 联网命令 park,批准前零执行、批准后在监狱里真跑 → 工作区里直写脚本、监狱里真跑出 TESTS PASS,同一座监狱读不到 <space> 里的凭证 → 手机 /setkey 走真解析器 + 真金库 + 生产那一份渲染器:秘密只到金库,回复里连打反顺序那次都不回显一个字节。No network, no API key, no LLM.",
+  "scripts": {
+    "start": "tsx src/demo.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@gotong/core": "workspace:*",
+    "@gotong/host": "workspace:*",
+    "@gotong/identity": "workspace:*",
+    "@gotong/im-adapter": "workspace:*",
+    "@gotong/personal-butler": "workspace:*"
+  }
+}

@@ -56,6 +56,7 @@ const CARDS = [
       '- **联邦**:hub 之间策展互联(peer),跨 hub 派活走双边令牌 + 白名单 + 审批闸。',
       '- **状态都是磁盘文件**:`.gotong/` 目录就是整个房间,复制目录=搬走房间。',
       '想知道我现在真实能干什么,用 list_my_capabilities(一等工具)看清单。',
+      '坏了找谁修(哪些我能自己动手、哪些要你点头):看 repair 卡。',
     ].join('\n'),
     pins: { tools: ['list_my_capabilities'] },
   },
@@ -99,6 +100,7 @@ const CARDS = [
       '- 看细节:/me「我的工作流」里点开那次 run,每步的输出与错误都在。',
       '- 想让我体检你的助手(模型 key 健不健康、有没有能调优的),经 use_tool 调 diagnose_my_agents。',
       '- 改流程:直接用大白话跟我说要改什么(改动会先给你过目再落盘)。',
+      '- 想知道这类问题里哪些我能自己动手、哪些要你点头:看 repair 卡。',
     ].join('\n'),
     pins: { tools: ['list_my_runs', 'diagnose_my_agents'] },
   },
@@ -175,6 +177,30 @@ const CARDS = [
       '看现状:list_peers(一等工具)列互联与各边允许的能力。',
     ].join('\n'),
     pins: { commands: ['peer-card', 'mint-peer-token'], tools: ['list_peers', 'ask_peer'] },
+  },
+  {
+    // HANDS-M7 —— 这张卡是本里程碑的**主要交付**,而它是一张地图不是一件新工具:
+    // 把「阿同真能自己修什么」逐条过完,答案是**修复能力早就建好了,散在七个地方**
+    // (体检 / 诊断 / `/setkey` / `set_hub_config` / hands_rm / 看门狗 / hub_environment),
+    // 缺的从来不是动作,是一张把它们按「后果落在谁身上」串起来的地图。造第八件工具
+    // 只会让每一轮都为它付 schema token,而成员的问题——「这个我能不能自己弄」——
+    // 一个字节都没被回答。
+    id: 'repair',
+    title: '坏了找谁修:四档修复地图',
+    oneLiner: '按「后果落在谁身上」分档:我自己动的、先送你确认的、只能说准的',
+    body: [
+      '出问题时,哪些我能自己动手、哪些必须你来 —— 不按难易分,按后果落在谁身上分。',
+      '**我自己动**:清工作区里的脏文件与缓存(在监狱里删,断网,只碰工作区);只读体检经 use_tool 调 hub_health(红黄牌)、hub_environment(这台机器够不够用)、my_status(我自己)、restart_history(自愈重启记录)、diagnose_my_agents(助手的模型健不健康)。',
+      '**先送你确认再动**:改 hub 基础设置(端口/模式/首启开浏览器)、建改助手与工作流、工作区里的联网命令。跟我说要改什么,我把「现在是 X → 改成 Y」送进你的待办,`/approve <短码>` 批了才算数(设置改动下次重启生效)。',
+      '**换模型 key 是例外,不用绕**:聊天窗直接 `/setkey <目标> <key>`,秘密只进金库、不进我的上下文;`/keys` 看有哪些槽位。',
+      '**我碰不到,只能把该做的说准**:装系统包、改 systemd、开防火墙、清系统盘都要 root,而 hub 是**刻意**非特权跑的 —— hub_environment 会把该跑的命令原样写给你,由你执行。',
+      '分域细查:connector-down(连接器)/ peer-offline(对端 hub)/ workflow-failed(工作流)三张卡。',
+      '红线:**能修 ≠ 有权修** —— 会改变外部世界的,仍各走各的闸,我绕不过去。',
+    ].join('\n'),
+    pins: {
+      tools: ['hub_health', 'hub_environment', 'my_status', 'restart_history', 'diagnose_my_agents'],
+      imVerbs: ['setkey', 'keys', 'approve'],
+    },
   },
 ] as const satisfies readonly ButlerGuideCard[]
 
