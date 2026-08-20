@@ -58,9 +58,48 @@ services:
       # which satisfies the gate properly instead of waiving it.
       GOTONG_ALLOW_INSECURE: "1"
 
-      # Optional — uncomment to give managed agents a default LLM key.
-      # ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
-      # OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      # ── HANDS-M6 · IM 通道 + provider key 的部署期透传 ──────────────────
+      # 键在这里,值不在这里:冒号后留空 = compose 去**宿主 shell 环境**取同
+      # 名变量,宿主没设就不把这个变量放进容器。所以一个都不设时,容器里的
+      # 环境跟加上这一段之前一样;而 token 的值永远不会被提交进 git。
+      #
+      #   GOTONG_TELEGRAM_BOT_TOKEN=123:abc docker compose up -d
+      #
+      # 或写进仓库根的 `.env`(已 gitignore),compose 会自动读它。
+      #
+      # 就算某个 compose 版本改成往容器里塞一个空串也不会出事:host 侧这些
+      # 变量一律 trim 后按真值判断,空串 == 没设 ⇒ 照样回落金库。这条性质
+      # 由 packages/host/tests/compose-im-passthrough.test.ts 拿**真**
+      # startImBridges 跑出来钉死,不是靠读文档相信。
+      #
+      # env 与金库是两条路,**env 在就赢**(im-bridge.ts `resolveImCreds`)。
+      # 金库那条 = 首启向导粘 token / `gotong wechat-login` 扫码。想让手机
+      # 说了算,就别在这里设同名变量。
+      #
+      # telegram / lark / slack / wechat 都是**往外拨**的,NAT 后面的盒子
+      # 不用开任何入站端口;QQ 官方 Bot API 只推**入站 webhook**,除这几个
+      # 变量外还得自己在上面 `ports:` 加一条映射并在前面挂 TLS 反代。
+      GOTONG_TELEGRAM_BOT_TOKEN:
+      GOTONG_LARK_APP_ID:
+      GOTONG_LARK_APP_SECRET:
+      GOTONG_WECHAT_BOT_TOKEN:
+      GOTONG_WECHAT_BASE_URL:
+      GOTONG_SLACK_APP_TOKEN:
+      GOTONG_SLACK_BOT_TOKEN:
+      GOTONG_QQ_BOT_APPID:
+      GOTONG_QQ_BOT_SECRET:
+      GOTONG_QQ_WEBHOOK_HOST:
+      GOTONG_QQ_WEBHOOK_PATH:
+      GOTONG_QQ_WEBHOOK_PORT:
+      GOTONG_IM_CHAT_CAPABILITY:
+
+      # 托管 agent 的默认 LLM key —— 同样是「键在、值不在」。
+      # 手机 `/setkey` 写的是金库,在解析顺序里排在 env **前面**(per-agent →
+      # org pool → user pool → workspace → env),所以这里设了也盖不掉手机上
+      # 贴的那把。用 MR-M6 `apiKeyEnv` 点名了别的变量的(LONGCAT_API_KEY
+      # 之类),照这个样子自己加一行空值键。
+      ANTHROPIC_API_KEY:
+      OPENAI_API_KEY:
 
       # Optional — for KMS-mounted master key setups. Skip and the host
       # will use ./data/runtime/secret.key (chmod 600).

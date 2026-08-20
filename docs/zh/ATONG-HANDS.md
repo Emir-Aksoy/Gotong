@@ -1,10 +1,13 @@
 # 阿同执行能力 track（HANDS）— 给阿同一双关在监狱里的手，配置动作搬到手机上
 
-> Status: **M0 计划落档 + M1 四档策略纯核 + M2 手 A 原生执行器落地（2026-08-15）**——侦察 +
-> 威胁模型 + 四档策略 + 五岔口拍板 + 里程碑 M1→M7；M1 见 §九，M2 见 §十（真 spawn 门全过 +
-> Codex 交叉审七轮：5H/4M/1L → 2H/6M/2L → 3H/3M → 3H/3M → 2H/1M/1L → 2H/2M/1L → 2H/2M/3L，全部修入，见 §10.5）。**M2b 及之后的里程碑都是方向性规划，
-> 实现前按 M0 惯例重新细化。**
-> Last updated: 2026-08-15
+> Status: **M0→M6 已落，余 M7（2026-08-20）**——侦察 + 威胁模型 + 四档策略 + 五岔口拍板 +
+> 里程碑 M1→M7。落地记录：M1 §九 · M2 §十（真 spawn 门全过 + Codex 交叉审九轮 5H/4M/1L →
+> 2H/6M/2L → 3H/3M → 3H/3M → 2H/1M/1L → 2H/2M/1L → 2H/2M/3L → 3H/2M/3L → 3H/5M/6L +
+> 内部对抗审一轮 2H/2M，全部修入，见 §10.5/§10.7）· M2b §十一 · M3a §十二 · M3b §十三 ·
+> M3c §十四 · M4 §十五 · M5 §十六 · M6 §十七。
+> **M2/M2b/M3a/M3b/M3c/M4/M5 的 Codex 交叉审同批待跑**（额度 08-19 恢复）；**M7 仍是方向性
+> 规划，实现前按 M0 惯例重新细化。**
+> Last updated: 2026-08-20
 >
 > 用户诉求（2026-08-15 原话）：「我们要增强 atong 的执行能力，比如说增加手机可执行
 > 命令。理想形态是在服务器里一键镜像完成部署，完成 im 通道后包括配 api-key 这种指令也
@@ -207,10 +210,18 @@ id，与「多级记忆」的 level 不是一回事，同一个词指两样东�
 
 ### 4.7 一键镜像（M6）与修复接手（M7）
 
-M6：compose 加 IM token / provider key 的部署期 env 透传（`GOTONG_TELEGRAM_BOT_TOKEN` /
-`GOTONG_LARK_*` / `GOTONG_WECHAT_BOT_TOKEN` 既有旋钮，零新增），一次 `docker compose up` 后
-IM 通道即在；**至少一次网页触碰不可避免也不该避免**（owner 设密 + `/bind` 出码 = 身份锚），此后
-配置全在手机。镜像发布到 GHCR = 用户门。M7：修复动作目录按四档挂——`fix-dirs`/清缓存(1) /
+M6（✅ 2026-08-20 已落，见 §十七）：compose 加 IM token / provider key 的部署期 env 透传
+（`GOTONG_TELEGRAM_BOT_TOKEN` / `GOTONG_LARK_*` / `GOTONG_WECHAT_BOT_TOKEN` 既有旋钮，
+零新增），一次 `docker compose up` 后 IM 通道即在；**至少一次网页触碰不可避免也不该避免**
+（owner 设密 + `/bind` 出码 = 身份锚），此后配置全在手机。镜像发布到 GHCR = 用户门。
+
+~~验收行里的 `/model`~~ —— **这条改口**：`/model` 这个命令**不存在，而且不该造**（§17.1）。
+手机上换模型今天就通，走的是 `edit_agent` 的 `changes.model` 字段 + `/approve <短码>`；再造
+一条零 LLM 的 `/model` 命令去写 `agents.json`，等于给同一道闸开第二个执法点，正是 M3c 已经
+裁决过不做的形状。故 M6 的验收改成 **`compose up` → IM 在 → 网页一次触碰 → 手机 `/setkey`
+（金库）→ 手机说人话换模型（park → `/approve`）全通**。
+
+M7：修复动作目录按四档挂——`fix-dirs`/清缓存(1) /
 重拉桥、重连 MCP、应用 RES 提案(2) / 「换钥/改 unit」指路人(3)；AFR-M5 面包屑在失败分支多一句
 「阿同能修的直接提议修」。
 
@@ -243,7 +254,7 @@ IM 通道即在；**至少一次网页触碰不可避免也不该避免**（owne
 | M3c ✅ | config-write 上手机（2026-08-17，见 §十四） | 一件 governed 工具 `set_hub_config`（tier 2「每次 park」）+ host `personal-butler-config.ts`（classify 预检 = `applyEnvKnob` 逐条同序）+ 进 `IM_APPROVABLE_TOOLS` + `OpsSurface` 第四个值 `butler` + SETTING-OPS-CONSOLE 「config-write ✗ IM」**显式改口**（并写清改的是哪条路） | 单测 24 + tiers 双向核对：枚举 ≡ `ENV_KNOBS`（参数空间封闭 = IM 可批的理由）/ 角色在最前（先于任何参数判断）/ 密钥键指 `/setkey` 而不是「不是可改的设置项」/ 读现值失败**不变成拒绝**（`GovernedActionToolset.classify` 无 catch）/ park→批准之间被降权则不执行 / 真写真审计且审计抛错不回滚已落的字节 / 同样 `surface:'butler'` 不带 `allowConfigWrite` 照样 `OpsTierError`；**五道变异五次全红且只红该红那一例**；**Codex 交叉审**（与 M2/M2b 同批，额度 08-19 恢复） |
 | M4 ✅ | 环境探测→方案→人批（2026-08-17，见 §十五） | host `personal-butler-environment.ts`：零 spawn 零联网探针（cpu/mem/disk/node/PATH 上的 ffmpeg·git·docker）+ 复用 boot 那次监狱功能探测的结论 + 被动读 CARE 断供 + 纯函数提案引擎（判别联合：`applicable:false` 那一支**结构上没有 apply 字段**）+ 渲染卡；进目录层 benign（~193tk，不占每轮脸）；`spaceRoot` 穿一行进 factory 只为 statfs | 单测 30（六组）：schema 封闭 + 描述如实说「不跑任何命令 / 不发任何网络请求」；**源码级断言**剥掉注释后不含 `child_process`/`spawn(`/`execFile`/`fetch(`/`node:http`；每一块读不动只让那一块 null 且**不产生提案**（null ≠ 有问题）；磁盘探不动不当成 0；端口撞车两支（能算出安全值⇒指向 `set_hub_config`；活值也撞⇒降级只指路）；凡 `applicable:true` 其 `apply.tool` 恒为 `set_hub_config` 且 key ∈ 四个白名单旋钮；渲染里**结构性没有**绝对路径/用户名（真跑默认探针对拍）；**七道变异七次全红且只红该红那些**（含摘掉判别联合、摘掉 tiers 登记、摘掉 AFR tripwire） |
 | M5 ✅ | Obsidian 投影 | tasks.md / memory/*.md 生成 + frontmatter + 覆盖语义 | 真相未动；投影可 Obsidian 解析 |
-| M6 | 一键镜像 e2e | compose env 透传 + e2e 脚本 | `compose up` → IM 在 → 网页一次触碰 → 手机 `/setkey`→`/model` 全通 |
+| M6 ✅ | 一键镜像（2026-08-20，见 §十七） | 两份 compose 补 13 个 IM 变量 + 两个 provider key 的部署期透传（**空值键**：宿主没设就不进容器 ⇒ 未设时逐字节不变，且值永远不进 git）+ 验收行 `/model` **显式改口**（那个命令不存在也不该造，换模型走 `edit_agent` + `/approve`） | 单测 12（两半）：**文本半**——变量名从 `im-bridge.ts` **源码**扒出来（不是手抄清单），两份 compose 一个不少；凡像凭证的键（判据复用 `set_hub_config` 拒写秘密的**同一个** `isSecretKey`）值只能是空或 `${VAR}` 插值，绝不是字面量；发布出去的 `ports:` 与 `GOTONG_WEB_PORT`/`_WS_PORT` 对得上。**行为半**——拿**真** `startImBridges` 跑装配层：三座可金库的桥从 env 起来（`source:'env'`）；13 个全设成空串 ⇒ 一座不起；**空串永远盖不掉金库里的凭证**；`selectLlmApiKey` 里空串等于没设、手机 `/setkey` 的 per-agent 那把压得住 compose 的。**五道变异五次全红且只红该红那些** |
 | M7 | 修复接手 + capstone | 修复动作目录 + `examples/atong-hands` 四幕（注入写配置双拒 / 联网 park 批后跑 / 工作区直写+监狱跑脚本 / `/setkey` 双路径文案 + 金库落值零回显） + 收口 | `pnpm demo:atong-hands` exit 0，零 key 零 LLM |
 
 顺序按用户优先级：**M1→M2（手）→M3（手机）**先，M4/M7 次之，M5/M6 后置；M2b 在 M2 后按需。
@@ -1466,3 +1477,122 @@ projector（各自算 vault 目录、各自决定要不要接知识库链表）�
   翻篇）；想看全史只能读 jsonl。
 - **episodic 不投**。每轮捕获的原话是流水不是状态，投出来只会淹掉那几条真正的事实。
 - Codex 交叉审**尚未跑**（额度 08-19 恢复），与 M2/M2b/M3a/M3b/M3c/M4 同批送审。
+
+---
+
+## 十七、M6 落地记录（2026-08-20）
+
+一句话：**这一刀几乎没有代码**——host 侧读 env 的能力从 DEPLOY-B1 起就在，缺的只是两份
+compose 从来没把那些变量端进容器。所以 M6 的全部内容是「把一条早就通的路在部署文件里说出来」，
+外加一条把它钉住、且将来不会跟源码漂移的门。
+
+### 17.1 `/model` 不存在，而且不该造（这一刀最重要的判断）
+
+M6 的验收行原文写的是「手机 `/setkey`→`/model` 全通」。落地前先去找 `/model`——
+`packages/im-adapter/src/command-parser.ts` 认领 help / bind / unbind / agents / workflow /
+inbox / approve / deny / setkey / keys，**没有 `/model`**。
+
+那就该补一条吗？不该。把「手机上换模型」这件事拆开看，它今天已经通了：
+
+- `edit_agent` 的 `changes` 里就有 `provider` 和 `model` 两个字段（`personal-butler-governed.ts`）；
+- 它的 `defaultVerdict` 是 `approve` ⇒ 每次都 park；
+- 它在 `IM_APPROVABLE_TOOLS` 名单里 ⇒ 那个待批项**手机上批得了**。
+
+所以手机上换模型 = 跟阿同说人话 → governed park → `/approve <短码>`，一步不缺。
+
+而再造一条零 LLM 的 `/model` 命令去写 `agents.json`，代价是**一道闸从此有两个执法点**——这正是
+M3c 已经裁决过、并且为此把「config-write 命令」整个换成一件 governed 工具的形状（§14.1）。
+更关键的是：`/setkey` 之所以必须是命令，理由是**它的载荷本身就是秘密**，一个字都不能进模型的
+上下文；模型名不是秘密，那条理由在这里根本不成立。**给 `/setkey` 开命令面的那个理由，恰好是
+不给 `/model` 开命令面的理由。**
+
+故本刀不写代码，改口：验收行里的 `/model` 划掉，写清换模型走哪条路（§4.7）。
+
+### 17.2 键在文件里，值不在文件里
+
+两份 compose 里新加的每一行都是**空值键**——`GOTONG_TELEGRAM_BOT_TOKEN:` 后面什么都没有。
+这不是省事，是两条性质：
+
+- **未设时逐字节不变**。空值键让 compose 去宿主 shell 取同名变量，宿主没设就**干脆不把这个
+  变量放进容器**。一个都不设时容器里的环境跟加这段之前一样，opt-in 的默认值仍然是「什么也没
+  发生」（边界 4 的形状）。
+- **值永远不会被提交进 git**。仓库里只有键名。
+
+对照 prod 文件里既有的 `"${ANTHROPIC_API_KEY:-}"` 写法：那种写法在未设时会往容器里塞一个
+**空串**。它今天也是安全的——host 侧这些变量一律 `?.trim()` 后按真值判断，空串走的是和「没设」
+完全一样的分支。但「安全」和「不必依赖那条性质」是两回事，新加的一律用空值键。
+
+而那条性质本身，**必须由代码跑出来，不能靠读文档相信**：一个空串如果被当成「配好了」，后果是
+成员在手机上配好的金库凭证被一份看起来什么都没写的 compose 悄悄顶掉，表现成「昨天还好好的，
+今天 IM 不响了」。门里因此有一条专门的断言：**13 个变量全设成空串 + 金库里有一行 ⇒ 解析结果仍是
+`source:'vault'`**。变异测试把 `if (token)` 改成 `if (token !== undefined)`，这条当场红。
+
+provider key 那一侧同理，而且顺序是承重的：`selectLlmApiKey` 的解析链是
+per-agent → org pool → user pool → workspace → **env（最后）**，`/setkey` 写的正是第一层。
+所以 compose 里给一把默认 key 是便利，**盖不掉**手机上贴的那把。这句话写在 compose 的注释里，
+也由一条断言钉住——不然它就只是一句注释。
+
+### 17.3 变量名的真相源是源码，不是一份手抄清单
+
+门里那 13 个名字不是我抄进测试里的，是从 `im-bridge.ts` 的源码文本里用
+`/process\.env\.(GOTONG_[A-Z0-9_]+)/g` 扒出来的，再拿去和两份 compose 对拍。
+
+理由是漂移的后果特别难看：接第七座桥、多读一个变量，而 compose 没跟上——部署文件看起来齐齐整整，
+某座桥就是起不来，而且没有任何东西会报错。手抄的清单只会和源码一起腐坏；从源码派生，这道门就
+永远比清单新。（顺带：`GOTONG_IM_CHAT_CAPABILITY` 不是凭证，但它同样是 im-bridge 读的、
+部署时可能要调的，所以「凡 im-bridge 读的都得能在部署时够到」这条规则不必开例外。）
+
+同一节里还有一条复用：判断「这个键像不像凭证」用的是 `isSecretKey`——**手机上 `set_hub_config`
+拒绝写秘密用的同一个谓词**。一份定义两处执法，不会各说各话；有人往 compose 里粘了一个字面
+token，这道门就红。
+
+### 17.4 端口那条不变量住在同一份文件里
+
+`GOTONG_WEB_PORT` 和 `ports:` 的映射写在同一份 compose 里，写岔了的后果是
+**容器里跑得好好的、外面连不上**——而健康检查读的正是 `GOTONG_WEB_PORT`，所以它还会一直显示
+健康。这条不变量今天成立，门把它钉住（发布出去的容器侧端口必须等于那两个变量）。
+
+它同时是一条**结构性的保险**：将来若有人给 compose 接 `env_file`（好让手机改的
+`<space>/gotong.env` 生效），`environment:` 的优先级高于 `env_file:`，端口就仍然钉在这份文件里
+——手机上改端口会**什么都不发生**，而不是把 hub 改到一个没有被发布的端口上去。
+**惰性好过半途生效**：改坏的那个人，正好就是那个再也够不着它的人。
+
+### 17.5 门
+
+`packages/host/tests/compose-im-passthrough.test.ts` **12 例**，两半：
+
+- **文本半（6）**：源码扫描不是空跑（扫到 ≥12 个且含三个点名的）／两份 compose 各自声明了
+  `im-bridge.ts` 读的每一个变量／两份 compose 里凡像凭证的键值只能是空或 `${VAR}` 插值／
+  两份 compose 的 `ports:` 与端口变量对得上。
+- **行为半（6）**：三座可金库的桥从 env 起来且 `status()` 三个 `env`（真 `startImBridges`，桥用
+  `makeBridge` 注入假件——真 TelegramBridge 一启动就去长轮询线上 API）／13 个全空串一座不起／
+  空串盖不掉金库／`selectLlmApiKey` 空串等于没设／per-agent 压得住 env。
+
+**五道变异五次全红且只红该红那些**：dev compose 漏一个变量 ⇒ 「声明了每一个变量」1 例；
+prod compose 粘一个字面 token ⇒ 「值不是字面量」1 例；`GOTONG_WEB_PORT` 写岔 ⇒ 端口那例 1；
+`if (token)` 改 `!== undefined` ⇒ 空串那两例（全空串起桥 + 空串盖金库）；
+`if (args.env)` 改 `!== null` ⇒ provider key 空串那例 1。复原一律 python 精确替换 + `shasum`
+对拍基线，**绝不 `git checkout <file>`**。
+
+### 17.6 诚实残余
+
+- **`docker compose up` 本身没跑过**。本机没有 docker，所以这道门不是驱动那个 daemon 的 e2e，
+  而是「两份 compose 的文本 + 真装配层的行为」两边对拍。真正只有真机才证得了的那一段——镜像
+  build 成功、端口真发布出去、容器里进程真起来——**这道门证不了**，如实记着。
+- **QQ / Slack 的正面腿没跑**。`makeBridge` 这个测试缝只覆盖三个可金库平台，QQ/Slack 会真的
+  构造出会联网的桥。它们的变量声明由文本半盖住，起桥那一段没有。
+- **给了变量不等于给了入站通路**。telegram / lark / slack / wechat 都是往外拨的，NAT 后面的盒子
+  不用开任何入站端口；**QQ 官方 Bot API 只推入站 webhook**，除这几个变量外还得自己加一条
+  `ports:` 映射并在前面挂 TLS 反代——注释里写明了，但 compose 里没有替谁做这个决定。
+- **门只证「compose 端进来的值到得了桥」，不证那个 token 是真的能登录的**。假凭证一样能让这
+  三座假桥起来；真不真是平台那边的事。
+- **`<space>/gotong.env` 今天没有人读**（这一刀挖到的，不属于 M6 的交付，已挂独立票）：
+  `set_hub_config` / `/setting` 写的是它，而四条发行的启动路径里**只有桌面启动器**
+  （`deploy/Gotong.command` / `.sh` 的 `source_managed_env()`）真的 source 它；
+  `deploy/gotong.service` 和 `deploy/cloud-quickstart.sh` 都漏了
+  SETTING-OPS-CONSOLE §7.2 白纸黑字写着的 `EnvironmentFile=-<space>/gotong.env`；
+  compose 那条更硬——prod 用的是**具名卷**，`env_file:` 结构上够不到卷里的文件。
+  也就是说「下次重启生效」这句承诺，在三条路上是假的。最干净的修法不是逐条去补启动器，而是
+  **让 host 自己在 boot 读那个文件**（按 `ENV_KNOBS` 白名单只认那四个键、`process.env` 优先），
+  那样谁来启动都成立，而且它天生进不了秘密。M6 不顺手做，是因为它是另一件事。
+- **镜像发布到 GHCR = 用户门**，不擅自做。

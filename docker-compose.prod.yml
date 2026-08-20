@@ -88,8 +88,44 @@ services:
       GOTONG_SECRET_KEY: "${GOTONG_SECRET_KEY:-}"
       # Optional managed-agent LLM keys. The admin UI lets you override
       # per-agent, but baking process-wide defaults here is convenient.
+      # 注意解析顺序:per-agent → org pool → user pool → workspace → env,
+      # env 排**最后**,所以手机 `/setkey` 贴进金库的那把永远盖得住这里。
       ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY:-}"
       OPENAI_API_KEY: "${OPENAI_API_KEY:-}"
+
+      # ── HANDS-M6 · IM 通道的部署期透传 ────────────────────────────────
+      # 键在这里,值不在这里。冒号后**留空**(不是 `"${VAR:-}"`)是刻意的:
+      # 宿主没设该变量时 compose 干脆不把它放进容器,容器里的环境跟加这段
+      # 之前逐字节一样;而 token 的值永远不会被提交进 git。上面几行沿用
+      # `${VAR:-}` 是既有写法,那种写法在未设时会塞一个空串——host 侧这些
+      # 变量一律 trim 后按真值判断,空串 == 没设,所以两种写法都安全;新加
+      # 的一律用空值键,因为它连「安全地忽略空串」都不必依赖。
+      #
+      #   GOTONG_LARK_APP_ID=cli_x GOTONG_LARK_APP_SECRET=y \
+      #     docker compose -f docker-compose.prod.yml up -d
+      #
+      # 或写进这个 compose 文件旁边的 `.env`(compose 自动读)。
+      #
+      # env 与金库是两条路,**env 在就赢**(im-bridge.ts `resolveImCreds`)。
+      # 金库那条 = 首启向导粘 token / `gotong wechat-login` 扫码 / 手机上
+      # 改。想让手机说了算,就别在这里设同名变量。
+      #
+      # telegram / lark / slack / wechat 全是**往外拨**的,这台机器不用为
+      # 它们开任何入站端口;QQ 官方 Bot API 只推**入站 webhook**,除下面
+      # 几个变量外还得自己在 Caddy 里加一条到 webhook 端口的反代。
+      GOTONG_TELEGRAM_BOT_TOKEN:
+      GOTONG_LARK_APP_ID:
+      GOTONG_LARK_APP_SECRET:
+      GOTONG_WECHAT_BOT_TOKEN:
+      GOTONG_WECHAT_BASE_URL:
+      GOTONG_SLACK_APP_TOKEN:
+      GOTONG_SLACK_BOT_TOKEN:
+      GOTONG_QQ_BOT_APPID:
+      GOTONG_QQ_BOT_SECRET:
+      GOTONG_QQ_WEBHOOK_HOST:
+      GOTONG_QQ_WEBHOOK_PATH:
+      GOTONG_QQ_WEBHOOK_PORT:
+      GOTONG_IM_CHAT_CAPABILITY:
       # Dev tool — set to "1" to enable per-frame protocol validation.
       # Costs O(n) per inbound frame; leave off in prod unless
       # debugging a misbehaving third-party SDK.
