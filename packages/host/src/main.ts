@@ -2362,6 +2362,12 @@ async function main(): Promise<void> {
     host: config.host,
     port: config.webPort,
     cookieSecure: config.cookieSecure,
+    // GOTONG_TRUST_PROXY was read by the peer/mesh limiter and NOWHERE ELSE, so
+    // every web limiter (admin login, device claim, the public `/setkey` form)
+    // was bucketing on the reverse proxy's own address in exactly the deployment
+    // the knob exists for — one attacker's ten requests rate-limited everyone.
+    // GO-LIVE.md has promised otherwise since it was written.
+    trustProxy: envBool('GOTONG_TRUST_PROXY', false),
     lifecycle: localAgents,
     // ease-of-use ③-M1 — LLM-key probe for the template-import checklist (reuses the pool's spawn-time key resolution).
     llmKeyProbe: {

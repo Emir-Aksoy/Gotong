@@ -104,9 +104,37 @@ export function setKeyLinkBaseUrl(raw: string | undefined | null): string | null
     host.endsWith('.localhost') ||
     host === '::1' ||
     host === '[::1]' ||
-    /^127\./.test(host)
+    isIpv4Loopback(host)
   if (url.protocol === 'http:' && !loopback) return null
   return `${url.origin}${url.pathname}`.replace(/\/+$/, '')
+}
+
+/**
+ * 127.0.0.0/8, and only as a literal address.
+ *
+ * A bare `/^127\./` test on `url.hostname` looks right and is not:
+ * `127.attacker.example` is an ordinary DNS name that matches it, and matching
+ * it would let the plaintext carve-out ship a bearer token across the open
+ * network — the exact thing the carve-out exists to prevent. So the whole
+ * string has to BE an address. Shorthand forms need no special handling: the
+ * WHATWG parser has already normalised `127.1` / `2130706433` / `0x7f000001`
+ * to dotted-quad by the time we see `hostname`, while a name stays a name.
+ *
+ * Digits are compared by code point rather than a character class, for the
+ * reason spelled out on `secretProblem` in im-credentials-service.ts.
+ */
+function isIpv4Loopback(host: string): boolean {
+  const parts = host.split('.')
+  if (parts.length !== 4) return false
+  for (const part of parts) {
+    if (part.length === 0 || part.length > 3) return false
+    for (let i = 0; i < part.length; i++) {
+      const c = part.charCodeAt(i)
+      if (c < 48 || c > 57) return false
+    }
+    if (Number(part) > 255) return false
+  }
+  return parts[0] === '127'
 }
 
 /**

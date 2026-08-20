@@ -365,7 +365,10 @@ console.log('━━━ 幕 4 · /setkey:秘密只到金库,回复里一个字节
     allowed: (uid) => uid === USER,
     space: credSpace,
     identity,
-    log: { info: (msg, meta) => logs.push({ msg, ...(meta ? { meta } : {}) }) },
+    log: {
+      info: (msg, meta) => logs.push({ msg, ...(meta ? { meta } : {}) }),
+      warn: (msg, meta) => logs.push({ msg, ...(meta ? { meta } : {}) }),
+    },
   })
 
   // ① 解析器认领这个动词的**每一种**形状 —— 认不出就走 help,永远不落回自由

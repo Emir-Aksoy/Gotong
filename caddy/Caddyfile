@@ -52,6 +52,16 @@
         X-Frame-Options "SAMEORIGIN"
     }
 
+    # HANDS-M3b — the one-time `/setkey/<token>` link is a bearer credential
+    # carried in the PATH, so an access log entry for it is a replayable
+    # credential sitting in stdout (and in whatever ships stdout off this box)
+    # for the ten minutes the token is alive. The request is exactly the one we
+    # least want written down, so it is the one request we do not log. Failures
+    # on that route are diagnosable from the hub's own log, which records the
+    # outcome with the token and the key taken out.
+    @setkey path /setkey /setkey/*
+    log_skip @setkey
+
     log {
         output stdout
         format console

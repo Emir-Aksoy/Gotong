@@ -857,10 +857,20 @@ describe('HANDS-M3a — the credential verbs', () => {
     // the secret itself; neither may be echoed to the member.
     expect(text).not.toContain('/srv/gotong')
     expect(text).not.toContain(SECRET)
-    // The hub-side warn is allowed to carry the error string, so the leak
-    // check here is scoped to what the MEMBER sees plus the recorded task.
-    expect(logs.some((l) => l.msg === 'im setkey failed')).toBe(true)
+    // The hub-side warn used to be exempt from the leak check, and that exemption
+    // WAS the bug: a store that quotes its own input turns `String(err)` into a
+    // plaintext key in the operator's log. The invariant is "the key reaches the
+    // vault and nothing else" — it cannot depend on every layer below choosing
+    // not to repeat what it was handed. So the warn is redacted at the one place
+    // that still has the secret in hand, and the leak sweep now covers the log too.
+    const warn = logs.find((l) => l.msg === 'im setkey failed')
+    expect(warn).toBeDefined()
+    const errText = String((warn?.data as { err?: unknown } | undefined)?.err)
+    expect(errText).toContain('<redacted>')
+    // Redaction, not suppression: the part an operator debugs with survives.
+    expect(errText).toContain('/srv/gotong')
     expect(seenTasks).toHaveLength(0)
+    expectNoSecretAnywhere()
   })
 
   it('/keys renders slots, the real priority order, and never a value', async () => {

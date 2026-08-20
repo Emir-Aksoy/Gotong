@@ -40,6 +40,13 @@ hub.example.com {
         flush_interval -1   # SSE chunk 立刻 flush
     }
 
+    # HANDS-M3b — 一次性 `/setkey/<token>` 链接把 bearer 凭证放在**路径**里,
+    # 所以一条访问日志就是一份可重放的凭证。这个 vhost 现在没有 site 级 `log`
+    # 指令(上面那个全局 log 是 Caddy 自己的运行日志,不是访问日志),所以今天
+    # 本来就不会记——这行是给**以后加 `log` 的那个人**准备的:加了也不记这条。
+    @setkey path /setkey /setkey/*
+    log_skip @setkey
+
     # 标准 hardening
     header {
         Strict-Transport-Security "max-age=63072000; includeSubDomains; preload"

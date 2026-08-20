@@ -106,7 +106,10 @@ export interface ImCredentialsServiceOptions {
   /** Externally reachable base for the link, already validated. */
   linkBaseUrl?: string
   /** Structured logger. Target/outcome only — this file never logs a secret. */
-  log: { info(msg: string, meta?: Record<string, unknown>): void }
+  log: {
+    info(msg: string, meta?: Record<string, unknown>): void
+    warn(msg: string, meta?: Record<string, unknown>): void
+  }
 }
 
 /**
@@ -513,17 +516,20 @@ export class ImCredentialsService {
     }
     // Overwrite hygiene, verbatim from the setup wizard's org-key step: revoke
     // prior active rows carrying the same tag so re-runs don't pile up. Not
-    // required for correctness (the pool picks the newest active row) — but a
-    // vault full of a member's superseded keys is its own small hazard.
+    // required for correctness (the pool picks the newest active row) — and
+    // that is exactly why the SNAPSHOT is taken here while the REVOKE happens
+    // AFTER the write. Revoking first and then failing to write leaves the
+    // shared pool with NO key, and the member is told the new one wasn't saved
+    // — so nothing in what they can see says the old one is gone too.
+    // Write-then-clean can at worst leave one redundant superseded row, which
+    // loses to the newest active one anyway.
+    let prior: Array<{ id: string }> = []
     try {
-      const prior = this.opts.identity
+      prior = this.opts.identity
         .listVaultEntries({ kind: 'llm_provider', ownerKind: 'org', activeOnly: true })
         .filter((e) => providerTagOf(e) === provider)
-      if (typeof this.opts.identity.revokeVaultEntry === 'function') {
-        for (const e of prior) this.opts.identity.revokeVaultEntry(e.id)
-      }
     } catch {
-      /* cleanup is best-effort; the write below is the thing that matters */
+      /* can't enumerate priors; the write below is the thing that matters */
     }
     this.opts.identity.createVaultEntry({
       kind: 'llm_provider',
@@ -534,19 +540,39 @@ export class ImCredentialsService {
       // Non-secret context only — the same shape the wizard writes.
       metadata: { provider, registeredBy: 'im-setkey' },
     })
+    // Past this line the key IS stored. The audit belongs to the WRITE, not to
+    // the reporting below it — so it goes first, and nothing after it may turn
+    // a stored key into a reported failure.
+    this.audit(args.userId, args.via, { slot: 'shared', provider })
+    this.opts.log.info('im setkey wrote shared provider key', { provider, via: args.via })
+    try {
+      if (typeof this.opts.identity.revokeVaultEntry === 'function') {
+        for (const e of prior) this.opts.identity.revokeVaultEntry(e.id)
+      }
+    } catch {
+      /* cleanup is best-effort; a superseded row loses to the newest active one */
+    }
     // No manual pool invalidation: createVaultEntry fires the IdentityStore
     // vault-mutation hook the OrgApiPool subscribes to at construction.
     const shadowed: Array<{ agentId: string; reason: 'per-agent' | 'env-pinned' }> = []
     const willUse: string[] = []
-    const perAgent = await this.opts.space.listAgentApiKeys()
+    let perAgent: Record<string, unknown> = {}
+    try {
+      perAgent = await this.opts.space.listAgentApiKeys()
+    } catch (err) {
+      // Can't see the per-agent keys ⇒ can't rule anyone out, so nobody is
+      // marked shadowed and everyone eligible gets respawned. Restarting an
+      // agent that turns out to be shadowed costs one needless respawn; NOT
+      // restarting one that isn't leaves it on the OLD key while the reply says
+      // the new one is live. Prefer the recoverable error.
+      this.opts.log.warn('im setkey could not read per-agent keys', { provider, err: String(err) })
+    }
     for (const a of agents) {
       if (a.managed!.provider !== provider) continue
       if (a.managed!.apiKeyEnv) shadowed.push({ agentId: a.id, reason: 'env-pinned' })
       else if (perAgent[a.id]) shadowed.push({ agentId: a.id, reason: 'per-agent' })
       else willUse.push(a.id)
     }
-    this.audit(args.userId, args.via, { slot: 'shared', provider })
-    this.opts.log.info('im setkey wrote shared provider key', { provider, via: args.via })
     // Only the agents that would actually resolve to this row — restarting a
     // shadowed one would interrupt a working agent to change nothing.
     const restart = await this.restart(willUse)
@@ -699,6 +725,35 @@ function secretProblem(secret: string): 'too_short' | 'too_long' | 'bad_chars' |
   }
   return null
 }
+
+/**
+ * Scrub a secret out of a string that is about to be logged.
+ *
+ * The failure path is the one place where we hold BOTH the pasted key and an
+ * error produced by a layer below us — and an error message is exactly the kind
+ * of thing that quotes its own input ("vault write failed for sk-…"). The claim
+ * this entire surface rests on is that the key reaches the vault and nothing
+ * else; that claim must not depend on every downstream layer choosing not to
+ * quote its argument. Here we still know what "it" is, so here is where it comes
+ * out.
+ *
+ * The 12-character prefix goes too: a truncated key is still a usable
+ * fingerprint for matching a log line to an account, which is why the M3a leak
+ * tests check for it separately.
+ */
+export function redactSecret(text: string, secret: string | undefined | null): string {
+  const s = (secret ?? '').trim()
+  // Below 8 characters nothing real is being protected and a short string would
+  // turn every log line into confetti (`secretProblem` refuses these anyway).
+  if (s.length < SECRET_MIN_CHARS) return text
+  // split/join, not a regex: the secret is attacker-chosen text and building a
+  // pattern out of it is how you get an escaping bug in the redactor itself.
+  let out = text.split(s).join(SECRET_REDACTED)
+  if (s.length >= 12) out = out.split(s.slice(0, 12)).join(SECRET_REDACTED)
+  return out
+}
+
+const SECRET_REDACTED = '<redacted>'
 
 // ── HANDS-M3a/M3b · the copy this face renders ───────────────────────────────
 //

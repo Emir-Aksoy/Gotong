@@ -155,4 +155,22 @@ describe('setKeyLinkBaseUrl — refuses rather than guesses', () => {
     expect(setKeyLinkBaseUrl('http://dev.localhost:3000')).toBe('http://dev.localhost:3000')
     expect(setKeyLinkBaseUrl('http://[::1]:3000')).toBe('http://[::1]:3000')
   })
+
+  it('the loopback carve-out is an ADDRESS test, not a prefix test', () => {
+    // `127.attacker.example` is an ordinary DNS name that a `/^127\./` check
+    // on `hostname` happily accepts — and accepting it ships this bearer token
+    // across the open network in plaintext, which is the one thing the
+    // carve-out exists to prevent. The whole string has to BE an address.
+    expect(setKeyLinkBaseUrl('http://127.attacker.example')).toBeNull()
+    expect(setKeyLinkBaseUrl('http://127.0.0.1.evil.example')).toBeNull()
+    expect(setKeyLinkBaseUrl('http://1270.0.0.1')).toBeNull()
+    expect(setKeyLinkBaseUrl('http://127.0.0.256')).toBeNull()
+    // …and no shorthand slips past either: the WHATWG parser normalises these
+    // to dotted-quad before we see `hostname`, so one strict test covers all.
+    expect(setKeyLinkBaseUrl('http://127.1:3000')).toBe('http://127.0.0.1:3000')
+    expect(setKeyLinkBaseUrl('http://2130706433:3000')).toBe('http://127.0.0.1:3000')
+    expect(setKeyLinkBaseUrl('http://0x7f000001:3000')).toBe('http://127.0.0.1:3000')
+    // A different /8 is still not loopback.
+    expect(setKeyLinkBaseUrl('http://126.0.0.1')).toBeNull()
+  })
 })

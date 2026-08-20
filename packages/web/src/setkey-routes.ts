@@ -110,6 +110,20 @@ export interface SetKeyRouteDeps {
 /** Bounds a form body before it is parsed. A key is short; this is generous. */
 const MAX_FORM_BYTES = 16 * 1024
 
+/**
+ * The buck stops here: nothing thrown below may reach the server's generic
+ * handler.
+ *
+ * That handler logs `req.url` and the raw error — and on this route those are
+ * precisely the two things that must never be written down. The URL of the GET
+ * half IS the one-time bearer token; an error raised by the POST half may quote
+ * the pasted key. Neither is available to this file in a form it could scrub
+ * (the token is the path; the secret came out of a body it no longer holds by
+ * the time an exception unwinds), so the honest move is to answer without
+ * writing either anywhere. The diagnosable signal for a real failure lives on
+ * the host side, where `ImCredentialsService` logs its own outcomes with the
+ * secret taken out.
+ */
 export async function handleSetKeyLinkRoute(
   deps: SetKeyRouteDeps,
   req: IncomingMessage,
@@ -119,7 +133,37 @@ export async function handleSetKeyLinkRoute(
 ): Promise<boolean> {
   const isForm = path.startsWith('/setkey/')
   if (!isForm && path !== '/setkey') return false
+  try {
+    return await routeSetKeyLink(deps, req, res, method, path, isForm)
+  } catch {
+    if (!res.headersSent) {
+      sendPage(
+        res,
+        500,
+        page('出错了 / Something broke', [
+          '<p>hub 侧出错了,这把 key 没有被保存。请稍后再试,或到网页管理界面处理。</p>',
+          '<p class="muted">Something failed on the hub — nothing was saved. Try again later, or use the admin UI.</p>',
+        ]),
+      )
+    } else {
+      try {
+        res.end()
+      } catch {
+        /* client already gone */
+      }
+    }
+    return true
+  }
+}
 
+async function routeSetKeyLink(
+  deps: SetKeyRouteDeps,
+  req: IncomingMessage,
+  res: ServerResponse,
+  method: string,
+  path: string,
+  isForm: boolean,
+): Promise<boolean> {
   // Rate limit BEFORE anything else, including reading a body: a flood must not
   // get us to parse its payloads, and the answer is the same either way.
   if (!deps.allow()) {

@@ -74,12 +74,17 @@ class StubSetKeyLink implements SetKeyLinkSurface {
     restart: { restarted: ['assistant'], failed: [] },
   }
 
+  /** Set to make the surface blow up, so the route's own catch is exercised. */
+  throws: Error | undefined
+
   async linkPage(token: unknown): Promise<SetKeyLinkPageDto> {
     this.pageCalls.push(token)
+    if (this.throws) throw this.throws
     return this.page
   }
   async submitLink(args: { token: unknown; target: string; secret: string }): Promise<SetKeySubmitDto> {
     this.submitCalls.push(args)
+    if (this.throws) throw this.throws
     return this.submit
   }
 }
@@ -322,6 +327,31 @@ describe('public one-time /setkey form (HANDS-M3b)', () => {
     expect(html).not.toMatch(/<script/i)
     expect(html).not.toContain('<img src=x')
     expect(html).toContain('&lt;img src=x')
+  })
+
+  it('a surface that throws is caught HERE — the generic handler never sees this URL', async () => {
+    // The buck stops in the route because the process-wide handler logs
+    // `req.url` and the raw error, and on this route those are exactly the two
+    // things that must never be written down: the path IS a bearer credential
+    // and the error may quote the key it failed to store. A 500 whose body is
+    // `internal server error (requestId=…)` would mean the generic handler ran.
+    b = await boot()
+    b.stub!.throws = new Error(`vault write failed for ${SECRET} at /srv/gotong/.gotong`)
+
+    const get = await fetch(`${b.server.url}/setkey/${TOKEN}`)
+    expect(get.status).toBe(500)
+    const getBody = await get.text()
+    expect(getBody).not.toContain('requestId=')
+    expect(getBody).toContain('这把 key 没有被保存')
+    expect(getBody).not.toContain(SECRET)
+    expect(getBody).not.toContain('/srv/gotong')
+
+    const post = await postForm(b.server.url, { token: TOKEN, target: 'agent:assistant', secret: SECRET })
+    expect(post.status).toBe(500)
+    const postBody = await post.text()
+    expect(postBody).not.toContain('requestId=')
+    expect(postBody).not.toContain(SECRET)
+    expect(postBody).not.toContain(TOKEN)
   })
 
   it('no surface wired → 404, indistinguishable from "no such page"', async () => {

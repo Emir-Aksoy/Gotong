@@ -228,6 +228,41 @@ describe('setting-ops M5 — IM `/setting` command console (hermetic)', () => {
     expect(mode.get(bobId)).not.toBe(true)
   })
 
+  it('the credential verbs are never claimed by the console — not even in command mode', async () => {
+    // `/setkey` is not an ops command. Letting the console claim it means the
+    // line is parsed as an ops argv: the rotation silently fails with "unknown
+    // command", and the pasted secret lands in an argument array it has no
+    // business being in. The console is for ops; the credential face is its own
+    // path and outranks a mode flag.
+    const SECRET = 'sk-ant-console-0123456789abcdef'
+    const seen: Array<{ target: string; secret: string }> = []
+    config.credentials = {
+      allowed: async () => true,
+      list: async () => ({ agents: [], shared: {}, workspace: {}, hostEnv: {} }),
+      setKey: async (args) => {
+        seen.push({ target: args.target, secret: args.secret })
+        return { ok: true, slot: 'agent', agentId: args.target, restart: { restarted: [args.target], failed: [] } }
+      },
+    }
+    await bridge.inject(msgFrom(ALICE, '/setting'))
+    expect(mode.get(aliceId)).toBe(true)
+    bridge.outbound.length = 0
+
+    await bridge.inject(msgFrom(ALICE, `/setkey assistant ${SECRET}`))
+    // It reached the credential face verbatim…
+    expect(seen).toEqual([{ target: 'assistant', secret: SECRET }])
+    // …and not the ops runner, which would have answered "unknown command".
+    expect(last(bridge).text).not.toContain('unknown command')
+    expect(last(bridge).text).toContain('已存入')
+    // The console is still open — bypassing a verb is not the same as exiting.
+    expect(mode.get(aliceId)).toBe(true)
+
+    // `/keys` too: a slot listing is not an ops subcommand either.
+    bridge.outbound.length = 0
+    await bridge.inject(msgFrom(ALICE, '/keys'))
+    expect(last(bridge).text).not.toContain('unknown command')
+  })
+
   it('an OPERATOR walks the console: enter → status → refusals → help → exit → free-text', async () => {
     // 1. /setting → enter command mode + see the runnable (read + safe-mutate) catalog.
     await bridge.inject(msgFrom(ALICE, '/setting'))

@@ -289,3 +289,33 @@ describe('compose 透传 — 行为半:装配层真跑一遍', () => {
     expect(hit?.source.kind).toBe('per-agent')
   })
 })
+
+/**
+ * HANDS-M3b 补课 —— 同一族「部署文件」的第二条不变量,和上面那条方向相反:
+ * 上面钉的是**该端进容器的**变量都在;这条钉的是**不该被写下来的**请求不写。
+ *
+ * `/setkey/<token>` 把一个 bearer 凭证放在**路径**里(这是刻意的:成员手上没有
+ * 会话,令牌就是全部授权)。而反代的访问日志逐条记 URI —— 于是在令牌活着的那
+ * 十分钟里,一条日志行就是一份可重放的凭证,躺在 stdout 里,还会被任何收集
+ * stdout 的东西带走。它同时是最不该被写下来、也最容易被写下来的那条请求。
+ *
+ * 这条门只能是文本级的:反代不在这个进程里,而缺陷也不在代码里——是模板里少
+ * 一行。诊断能力没被牺牲:这条路失败时 hub 自己的日志会记结果,只是令牌与
+ * key 都已被拿掉。
+ */
+describe('HANDS-M3b — 反代不记 /setkey 这条路', () => {
+  const CADDYFILES = ['caddy/Caddyfile', 'deploy/Caddyfile.baremetal'] as const
+
+  it.each(CADDYFILES)('%s skips the access log for the one-time link', (file) => {
+    const text = readFileSync(fileURLToPath(new URL(`../../../${file}`, import.meta.url)), 'utf8')
+    // The matcher has to cover both shapes the route answers on: the form
+    // itself (`/setkey/<token>`) and the POST target (`/setkey`).
+    expect(text).toContain('@setkey path /setkey /setkey/*')
+    expect(text).toContain('log_skip @setkey')
+    // …and it must sit inside the site block that proxies the web port, not in
+    // some unrelated vhost: `log_skip` is site-scoped in Caddy.
+    const skipAt = text.indexOf('log_skip @setkey')
+    const proxyAt = text.indexOf('reverse_proxy')
+    expect(skipAt).toBeGreaterThan(proxyAt)
+  })
+})

@@ -58,6 +58,7 @@ import {
   DELETE_YOUR_MESSAGE,
   IM_KEY_PRIORITY,
   SETKEY_USAGE,
+  redactSecret,
   renderSetKeyOutcome,
 } from './im-credentials-service.js'
 import type {
@@ -422,7 +423,13 @@ export async function handleImMessage(
   // unless the host wired `config.setting`. GRP — never for group messages:
   // command mode is per-person, so a member mid-console in their DM must not
   // have their group chatter claimed (ops output would leak into the room).
-  if (!isGroupChat && config.setting) {
+  // …with ONE exception: the credential verbs are never claimed. `/setkey` and
+  // `/keys` are not ops commands, so an operator who is still inside the console
+  // would have `/setkey <target> <key>` parsed as an ops argv — the rotation
+  // silently fails (unknown command) and the pasted secret lands in an argument
+  // array it has no business being in. The console is for ops; the credential
+  // face is its own path and outranks a mode flag.
+  if (!isGroupChat && config.setting && cmd.kind !== 'setkey' && cmd.kind !== 'keys') {
     const claimed = await handleSettingConsole(bridge, msg, config, config.setting)
     if (claimed) return
   }
@@ -637,7 +644,15 @@ export async function handleImMessage(
         // Deliberately does NOT echo `err.message` (a store/vault error carries
         // absolute paths and internal ids) and deliberately does not log the
         // command text — only that the write failed, for which target shape.
-        config.log.warn('im setkey failed', { platform, userId, err: String(err) })
+        // The hub-side warn is SCRUBBED rather than trusted: an error from a
+        // layer below us may quote its own input ("vault write failed for sk-…"),
+        // and "the key reaches the vault and nothing else" must not rest on every
+        // downstream layer choosing not to. We still hold the secret here.
+        config.log.warn('im setkey failed', {
+          platform,
+          userId,
+          err: redactSecret(String(err), cmd.secret),
+        })
         await reply(
           bridge,
           msg,

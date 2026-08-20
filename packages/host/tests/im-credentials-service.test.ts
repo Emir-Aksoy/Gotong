@@ -22,6 +22,7 @@ import {
   IM_SHARED_KEY_PROVIDERS,
   ImCredentialsService,
   buildAgentRestarter,
+  redactSecret,
   type ImCredentialsIdentity,
   type ImCredentialsSpace,
 } from '../src/im-credentials-service.js'
@@ -121,7 +122,10 @@ function harness(opts: {
         }),
     ...(opts.links ? { links: opts.links } : {}),
     ...(opts.linkBaseUrl ? { linkBaseUrl: opts.linkBaseUrl } : {}),
-    log: { info: (msg, meta) => logs.push({ msg, ...(meta ? { meta } : {}) }) },
+    log: {
+      info: (msg, meta) => logs.push({ msg, ...(meta ? { meta } : {}) }),
+      warn: (msg, meta) => logs.push({ msg, ...(meta ? { meta } : {}) }),
+    },
   })
   return { svc, setKeyCalls, vaultCreated, revoked, audits, logs, restartCalls, allowedAsked }
 }
@@ -341,6 +345,153 @@ describe('ImCredentialsService — the shared row', () => {
   })
 })
 
+describe('ImCredentialsService — a stored key is never reported as unstored', () => {
+  /**
+   * Two failure modes with the same root: work that happens AFTER the vault
+   * write must not be able to change the answer the member gets. Telling
+   * someone their key wasn't saved when it was invites them to paste the
+   * secret again — the one instruction `restart()` already refuses to give
+   * wrongly, applied to the two steps that sit between the write and the reply.
+   */
+  function sharedHarness(over: {
+    revoke?: (id: string) => boolean
+    listAgentApiKeys?: () => Promise<Record<string, string>>
+  }): {
+    svc: ImCredentialsService
+    order: string[]
+    audits: Array<Record<string, unknown>>
+    restarts: string[][]
+  } {
+    const order: string[] = []
+    const audits: Array<Record<string, unknown>> = []
+    const restarts: string[][] = []
+    const svc = new ImCredentialsService({
+      allowed: () => true,
+      space: {
+        agents: async () => [agent('a', 'anthropic')],
+        listAgentApiKeys:
+          over.listAgentApiKeys ??
+          (async () => {
+            order.push('list-per-agent')
+            return {}
+          }),
+        listProviderApiKeys: async () => ({}),
+        setAgentApiKey: async () => {},
+      },
+      identity: {
+        createVaultEntry: (input) => {
+          order.push('create')
+          return { id: 'new', ...input } as never
+        },
+        listVaultEntries: () => {
+          order.push('list-vault')
+          return [{ id: 'old', metadata: { provider: 'anthropic' } }] as never
+        },
+        revokeVaultEntry:
+          over.revoke ??
+          ((id) => {
+            order.push(`revoke:${id}`)
+            return true
+          }),
+        writeAuditLog: (input) => {
+          order.push('audit')
+          audits.push({ ...input })
+          return undefined
+        },
+      },
+      restartAgents: async (ids) => {
+        restarts.push([...ids])
+        return { restarted: [...ids], failed: [] }
+      },
+      log: { info: () => {}, warn: () => {} },
+    })
+    return { svc, order, audits, restarts }
+  }
+
+  it('WRITE-then-clean: the prior row is revoked only after the new one exists', async () => {
+    // Revoke-first would mean a failed write leaves the shared pool with NO
+    // key at all, while the member is told only that the NEW one wasn't saved.
+    const h = sharedHarness({})
+    const out = await h.svc.setKey({
+      userId: 'u',
+      target: 'anthropic',
+      secret: SECRET,
+      via: 'im:lark',
+    })
+    expect(out.ok).toBe(true)
+    expect(h.order.indexOf('create')).toBeLessThan(h.order.indexOf('revoke:old'))
+    // The snapshot may be taken first — it reads, it does not destroy.
+    expect(h.order.indexOf('list-vault')).toBeLessThan(h.order.indexOf('create'))
+  })
+
+  it('a revoke that throws costs a redundant row, not the write', async () => {
+    const h = sharedHarness({
+      revoke: () => {
+        throw new Error('vault busy')
+      },
+    })
+    const out = await h.svc.setKey({
+      userId: 'u',
+      target: 'anthropic',
+      secret: SECRET,
+      via: 'im:lark',
+    })
+    expect(out.ok).toBe(true)
+    // The audit belongs to the write, so it survives a failed cleanup.
+    expect(h.audits).toHaveLength(1)
+  })
+
+  it('unreadable per-agent keys still audit, still restart — and shadow nobody', async () => {
+    // Can't see the per-agent keys ⇒ can't rule anyone out. Restarting an agent
+    // that turns out to be shadowed costs one needless respawn; NOT restarting
+    // one that isn't leaves it on the old key while the reply says otherwise.
+    const h = sharedHarness({
+      listAgentApiKeys: async () => {
+        throw new Error('space read failed')
+      },
+    })
+    const out = await h.svc.setKey({
+      userId: 'u',
+      target: 'anthropic',
+      secret: SECRET,
+      via: 'im:lark',
+    })
+    expect(out).toMatchObject({ ok: true, slot: 'shared', provider: 'anthropic', shadowed: [] })
+    expect(h.audits).toHaveLength(1)
+    expect(h.restarts).toEqual([['a']])
+    // The write already happened, so the audit cannot be gated behind a read
+    // that comes after it.
+    expect(h.order.indexOf('audit')).toBeLessThan(h.order.length)
+    expect(h.order).toContain('create')
+  })
+})
+
+describe('redactSecret — the one place that still has the secret in hand', () => {
+  it('replaces the full value and a 12-character prefix', () => {
+    const line = `write failed for ${SECRET} (prefix ${SECRET.slice(0, 12)})`
+    // Asserted as an EXACT string, not with `not.toContain`: the prefix pass on
+    // its own already removes enough to satisfy a containment check while
+    // leaving the tail of the key sitting in the log. Nothing of it may survive.
+    expect(redactSecret(line, SECRET)).toBe(
+      'write failed for <redacted> (prefix <redacted>)',
+    )
+  })
+
+  it('leaves the text alone when there is nothing real to protect', () => {
+    // Below the minimum a `/setkey` would accept, blanking short strings would
+    // turn every log line into confetti without protecting anything.
+    expect(redactSecret('the value ab is fine', 'ab')).toBe('the value ab is fine')
+    expect(redactSecret('nothing here', undefined)).toBe('nothing here')
+  })
+
+  it('treats the secret as text, not as a pattern', () => {
+    // The secret is attacker-chosen; building a regex out of it is how the
+    // redactor itself grows an escaping bug.
+    const hostile = 'sk-.*.*.*-0123456789'
+    expect(redactSecret(`err ${hostile} end`, hostile)).toBe('err <redacted> end')
+  })
+})
+
 describe('ImCredentialsService — the respawn is reported, not assumed', () => {
   it('a per-agent write respawns exactly that agent', async () => {
     const h = harness({ agents: [agent('a', 'anthropic'), agent('b', 'anthropic')] })
@@ -419,7 +570,7 @@ describe('ImCredentialsService — audit + gate', () => {
           throw new Error('audit down')
         },
       },
-      log: { info: () => {} },
+      log: { info: () => {}, warn: () => {} },
     })
     const out = await svc.setKey({ userId: 'u', target: 'a', secret: SECRET, via: 'im' })
     expect(out.ok).toBe(true)
@@ -510,7 +661,7 @@ describe('ImCredentialsService — /keys shows slots, never values', () => {
           throw new Error('vault locked')
         },
       },
-      log: { info: () => {} },
+      log: { info: () => {}, warn: () => {} },
     })
     const view = await svc.list()
     expect(view.shared.anthropic).toBe(false)
