@@ -241,6 +241,55 @@ describe('HANDS-M4 提案引擎', () => {
     expect(proposeEnvironmentFixes(env).some((x) => x.id === 'pending-restart')).toBe(false)
   })
 
+  it('文件里写着一个过不了校验的值 ⇒ 报根因,且**那个值一个字符都不复述**', () => {
+    // 卡面会进模型的上下文,而 gotong.env 不是这个编辑器一个人在写。
+    const poison = 'abc<<INJECTED>>'
+    const env = healthyEnv({
+      knobs: [knob('GOTONG_WEB_PORT', poison, '3000', '3000'), knob('GOTONG_WS_PORT', null, '4000', '4000')],
+    })
+    const p = proposeEnvironmentFixes(env).find((x) => x.id === 'invalid-knob-value')
+    expect(p?.applicable).toBe(false)
+    expect(p?.detail).toContain('GOTONG_WEB_PORT')
+    // 载重:整张卡里找不到那个串(提案清单 + 渲染出来的正文都算)。
+    expect(JSON.stringify(proposeEnvironmentFixes(env))).not.toContain('INJECTED')
+    expect(renderHubEnvironment(env, 0)).not.toContain('INJECTED')
+  })
+
+  it('两个端口写成同一个不合法的值 ⇒ 只报根因,不报「撞车」', () => {
+    // 两个 `abc` 确实相等,但那不是撞车,是「这根本不是端口」。指人去改一个
+    // 不存在的问题,比不说更糟。
+    const env = healthyEnv({
+      knobs: [knob('GOTONG_WEB_PORT', 'abc', '3000', '3000'), knob('GOTONG_WS_PORT', 'abc', '4000', '4000')],
+    })
+    const ids = proposeEnvironmentFixes(env).map((x) => x.id)
+    expect(ids).toContain('invalid-knob-value')
+    expect(ids).not.toContain('port-collision')
+  })
+
+  it('活着的值自己就不合法 ⇒ 端口撞车降级成只指路(不提一个注定被 400 的值)', () => {
+    const env = healthyEnv({
+      knobs: [
+        knob('GOTONG_WEB_PORT', null, '3000', '3000'),
+        // 活值 `0` 不在 1-65535 里:拿它当 revert 会被 set_hub_config 当场拒。
+        knob('GOTONG_WS_PORT', '3000', '0', '4000'),
+      ],
+    })
+    const p = proposeEnvironmentFixes(env).find((x) => x.id === 'port-collision')
+    expect(p?.applicable).toBe(false)
+  })
+
+  it('活值合法只是文件值撞了 ⇒ 仍然可应用(上一条不是把整支关掉)', () => {
+    const env = healthyEnv({
+      knobs: [
+        knob('GOTONG_WEB_PORT', null, '3000', '3000'),
+        knob('GOTONG_WS_PORT', '3000', '4000', '4000'),
+      ],
+    })
+    expect(
+      proposeEnvironmentFixes(env).find((x) => x.id === 'port-collision')?.applicable,
+    ).toBe(true)
+  })
+
   it('没手 ⇒ 提案原样带上 boot 那次的原因,并说清我自己装不了监狱', () => {
     const env = healthyEnv({ hands: { armed: false, reason: '监狱缺席:no bwrap(装法…)' } })
     const p = proposeEnvironmentFixes(env).find((x) => x.id === 'no-hands')
@@ -364,6 +413,22 @@ describe('HANDS-M4 渲染', () => {
     expect(out).toContain('ffmpeg 有')
     expect(out).toContain('bwrap 监狱,已装')
     expect(out).toContain('没发现需要处理的地方')
+  })
+
+  it('基础设置那几行不回显不合法的值,只说「(值不合法)」', () => {
+    const out = renderHubEnvironment(
+      healthyEnv({
+        knobs: [
+          knob('GOTONG_WEB_PORT', 'not-a-port<<INJECTED>>', '3000', '3000'),
+          knob('GOTONG_WS_PORT', null, '4000', '4000'),
+        ],
+      }),
+      0,
+    )
+    expect(out).toContain('GOTONG_WEB_PORT = (值不合法)')
+    expect(out).not.toContain('INJECTED')
+    // 合法的那个照常印出来——这条门守的是「不合法不回显」,不是「都别印」。
+    expect(out).toContain('GOTONG_WS_PORT = 4000')
   })
 
   it('出网那行明说是被动看的,不主动探', () => {

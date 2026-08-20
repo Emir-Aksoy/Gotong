@@ -160,6 +160,8 @@ function buildButler(provider: LlmProvider, root: string, singleTier?: boolean, 
       privileged: () => true,
       knobs: async () => [],
       set: async () => ({ lines: [] }),
+      // 只被脱敏用;这条脸测试不跑 execute,值是什么不影响任何断言。
+      spaceDir: '/fake/space',
     },
     members: { users: () => [], membershipRole: () => null },
     // HEAL-M1 — 最大脸必须带自愈台账切片,restart_history 才在(surface 缺席由工具自答「未接入」)。

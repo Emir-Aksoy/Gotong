@@ -8,6 +8,8 @@
  * surface that may not write it.
  */
 
+import { readFileSync } from 'node:fs'
+
 import { describe, it, expect } from 'vitest'
 
 import {
@@ -15,9 +17,12 @@ import {
   applyPricingUpsert,
   readEffectiveConfig,
   isSecretKey,
+  ENV_KNOBS,
+  ENV_KNOB_KEYS,
   parseEnvFile,
   serializeEnvFile,
   type ConfigWriteAuditSink,
+  type EnvKnobKey,
 } from '../src/ops-config-write.js'
 import { runOpsCommand, OpsError, OpsTierError, type OpsCaller, type OpsDeps } from '../src/ops-core.js'
 
@@ -81,6 +86,77 @@ describe('isSecretKey', () => {
     for (const k of ['GOTONG_MODE', 'GOTONG_WEB_PORT', 'GOTONG_WS_PORT', 'GOTONG_OPEN_BROWSER']) {
       expect(isSecretKey(k)).toBe(false)
     }
+  })
+})
+
+// ───────────────────────────────────────────────────────────────────────────
+// 旋钮名单的类型面(Codex 轮 B / LOW 5)
+// ───────────────────────────────────────────────────────────────────────────
+
+describe('ENV_KNOB_KEYS / EnvKnobKey', () => {
+  it('与 ENV_KNOBS 同序同内容(一份真相,不是手抄的第二份)', () => {
+    expect([...ENV_KNOB_KEYS]).toEqual(ENV_KNOBS.map((k) => k.key))
+    expect(ENV_KNOB_KEYS.length).toBeGreaterThan(0)
+  })
+
+  it('是**窄联合**不是 string —— 执法的那行必须还在源码里', () => {
+    // 「窄不窄」是编译期的事,运行期断言不到:`EnvKnobKey` 塌成 `string` 之后,
+    // 每一条 `toEqual` / `toContain` 照样绿。真正的门是 `ops-config-write.ts` 里
+    // 那行 `@ts-expect-error` 自检——它一旦变成合法赋值,tsc 就红。
+    //
+    // 这条测试守的是**那行门自己还在**。刻意不写在测试文件里做类型断言:本包
+    // tsconfig 只 include `src/**\/*.ts`,vitest 又走 esbuild 剥类型,写在这儿的
+    // `@ts-expect-error` 两边都没人看,是一条永远绿的假门。
+    const src = readFileSync(new URL('../src/ops-config-write.ts', import.meta.url), 'utf8')
+    expect(src).toContain('] as const satisfies readonly EnvKnobSpec[]')
+    expect(src).toMatch(/@ts-expect-error[^\n]*\n\s*const _envKnobKeyMustStayNarrow: EnvKnobKey = 'nope'/)
+    const real: EnvKnobKey = 'GOTONG_WEB_PORT'
+    expect(ENV_KNOB_KEYS).toContain(real)
+  })
+})
+
+// ───────────────────────────────────────────────────────────────────────────
+// GOTONG_OPEN_BROWSER 的别名与归一(Codex 轮 B / LOW 6)
+// ───────────────────────────────────────────────────────────────────────────
+
+describe('GOTONG_OPEN_BROWSER', () => {
+  const spec = ENV_KNOBS.find((k) => k.key === 'GOTONG_OPEN_BROWSER')!
+
+  it('拒绝语里许过的词,自己收得下(always / never)', () => {
+    // 原来的拒绝语写着「auto/always/never」,而校验器只认 auto/1/0/true/false…
+    // ——照着提示打字的人会被自己的 hub 拒绝。
+    expect(spec.validate('always').ok).toBe(true)
+    expect(spec.validate('never').ok).toBe(true)
+  })
+
+  it('收下之后必须**归一**成 host 真的会解析的词', () => {
+    // 承重的是这一半:`parseOpenBrowserEnv` 根本不认识字面量 `always`,存进去
+    // 会被它当成不认识的值落回 `auto`。存一个宿主读不懂的词 = 一次安静的撒谎。
+    const a = spec.validate('always')
+    expect(a.ok && a.value).toBe('true')
+    const n = spec.validate('NEVER')
+    expect(n.ok && n.value).toBe('false')
+    const auto = spec.validate('  Auto ')
+    expect(auto.ok && auto.value).toBe('auto')
+    // 既有别名一个都没被这次改动挤掉。
+    for (const [raw, want] of [
+      ['1', 'true'],
+      ['on', 'true'],
+      ['yes', 'true'],
+      ['0', 'false'],
+      ['off', 'false'],
+      ['no', 'false'],
+    ] as const) {
+      const v = spec.validate(raw)
+      expect(v.ok && v.value).toBe(want)
+    }
+  })
+
+  it('不认识的词照拒,且拒绝语里点名 always/never', () => {
+    const v = spec.validate('maybe')
+    expect(v.ok).toBe(false)
+    expect(v.ok === false && v.reason).toContain('always')
+    expect(v.ok === false && v.reason).toContain('never')
   })
 })
 
@@ -333,5 +409,122 @@ describe('runOpsCommand config-write gate', () => {
     const fs = fakeFs()
     await expect(runOpsCommand('config-price', ['m', '-1', '2'], CLI, depsWith(fs))).rejects.toBeInstanceOf(OpsError)
     expect(fs.writes).toBe(0)
+  })
+})
+
+// ───────────────────────────────────────────────────────────────────────────
+// read-merge-write safety (Codex 轮 B MEDIUM 3)
+//
+// 这一族守的不是「写得对不对」，是**写之前那次读**。config-set 的形状是
+// read → merge → write：读那一步只要撒一次谎（把「读不动」读成「空文件」），
+// 下一步的序列化就会把**别的每一个键**擦掉——而人点头批准的那张卡上只写了
+// 一个键。同理，两个并发的 read-merge-write 会双双读到旧内容，后写的把前一个
+// 悄悄丢掉，两边却各自都拿到过一次批准。
+// ───────────────────────────────────────────────────────────────────────────
+
+/** fs seam whose READ has a real await gap — 并发不是思想实验，是可复现的交错。 */
+function slowFakeFs(initial: Record<string, string> = {}, readDelayTicks = 3) {
+  const base = fakeFs(initial)
+  return {
+    ...base,
+    get writes() {
+      return base.writes
+    },
+    readFileImpl: async (p: string): Promise<string> => {
+      for (let i = 0; i < readDelayTicks; i += 1) await Promise.resolve()
+      return base.readFileImpl(p)
+    },
+  }
+}
+
+/** fs seam whose read fails with something that is NOT ENOENT. */
+function unreadableFs(path: string, code: string, initial: Record<string, string> = {}) {
+  const base = fakeFs(initial)
+  return {
+    ...base,
+    get writes() {
+      return base.writes
+    },
+    readFileImpl: async (p: string): Promise<string> => {
+      if (p === path) throw Object.assign(new Error(code), { code })
+      return base.readFileImpl(p)
+    },
+  }
+}
+
+describe('read-merge-write safety', () => {
+  it('an UNREADABLE env file is refused before the write — the other knobs survive', async () => {
+    const existing = 'GOTONG_MODE=team\nGOTONG_WEB_PORT=3001\n'
+    const fs = unreadableFs(ENV_PATH, 'EACCES', { [ENV_PATH]: existing })
+    const audit = fakeAudit()
+    await expect(
+      applyEnvKnob({ key: 'GOTONG_WS_PORT', value: '9000' }, { envFilePath: ENV_PATH, surface: 'cli', audit: audit.sink, ...fs }),
+    ).rejects.toMatchObject({ code: 'config_file_unreadable' })
+    expect(fs.writes).toBe(0)
+    expect(audit.calls).toHaveLength(0)
+    // 载重断言：盘上那份**逐字节没动**。吞掉读错误的版本会把它变成
+    // `GOTONG_WS_PORT=9000\n`，两个别的键人间蒸发。
+    expect(fs.files.get(ENV_PATH)).toBe(existing)
+  })
+
+  it('CONTROL — an ABSENT env file still creates it (absent is mergeable, unreadable is not)', async () => {
+    const fs = fakeFs()
+    await applyEnvKnob({ key: 'GOTONG_WS_PORT', value: '9000' }, { envFilePath: ENV_PATH, surface: 'cli', ...fs })
+    expect(parseEnvFile(fs.files.get(ENV_PATH)!).get('GOTONG_WS_PORT')).toBe('9000')
+  })
+
+  it('an UNREADABLE pricing file is refused before the write (same chokepoint)', async () => {
+    const existing = '{"m":{"inputPer1M":1,"outputPer1M":2}}'
+    const fs = unreadableFs(PRICING_PATH, 'EIO', { [PRICING_PATH]: existing })
+    await expect(
+      applyPricingUpsert(
+        { model: 'n', price: { inputPer1M: 3, outputPer1M: 4 } },
+        { pricingPath: PRICING_PATH, surface: 'cli', ...fs },
+      ),
+    ).rejects.toMatchObject({ code: 'config_file_unreadable' })
+    expect(fs.writes).toBe(0)
+    expect(fs.files.get(PRICING_PATH)).toBe(existing)
+  })
+
+  it('two concurrent env writes BOTH survive (the later read sees the earlier write)', async () => {
+    const fs = slowFakeFs()
+    await Promise.all([
+      applyEnvKnob({ key: 'GOTONG_MODE', value: 'team' }, { envFilePath: ENV_PATH, surface: 'web', ...fs }),
+      applyEnvKnob({ key: 'GOTONG_WS_PORT', value: '9000' }, { envFilePath: ENV_PATH, surface: 'butler', ...fs }),
+    ])
+    const after = parseEnvFile(fs.files.get(ENV_PATH)!)
+    expect(after.get('GOTONG_MODE')).toBe('team')
+    expect(after.get('GOTONG_WS_PORT')).toBe('9000')
+  })
+
+  it('two concurrent price writes BOTH survive', async () => {
+    const fs = slowFakeFs()
+    await Promise.all([
+      applyPricingUpsert({ model: 'a', price: { inputPer1M: 1, outputPer1M: 2 } }, { pricingPath: PRICING_PATH, surface: 'web', ...fs }),
+      applyPricingUpsert({ model: 'b', price: { inputPer1M: 3, outputPer1M: 4 } }, { pricingPath: PRICING_PATH, surface: 'cli', ...fs }),
+    ])
+    const after = JSON.parse(fs.files.get(PRICING_PATH)!) as Record<string, unknown>
+    expect(Object.keys(after).sort()).toEqual(['a', 'b'])
+  })
+
+  it('a failed write does not poison the queue for the next writer', async () => {
+    const fs = slowFakeFs()
+    const boom = { ...fs, writeFileImpl: async () => { throw new Error('disk on fire') } }
+    await expect(
+      applyEnvKnob({ key: 'GOTONG_MODE', value: 'team' }, { envFilePath: ENV_PATH, surface: 'cli', ...boom }),
+    ).rejects.toBeTruthy()
+    await applyEnvKnob({ key: 'GOTONG_WS_PORT', value: '9000' }, { envFilePath: ENV_PATH, surface: 'cli', ...fs })
+    expect(parseEnvFile(fs.files.get(ENV_PATH)!).get('GOTONG_WS_PORT')).toBe('9000')
+  })
+
+  it('the DEFAULT write is atomic (tmp + rename), not a bare writeFile', async () => {
+    // 原子性本身没法在不断电的情况下观察到，能守的是**它走哪条实现**：默认写
+    // 必须是 core 的 `writeFileAtomic`，而这个模块不许再从 node:fs/promises
+    // 里拿 `writeFile`（拿了就会有人图省事用它）。散文里可以谈，代码里不许写。
+    const src = readFileSync(new URL('../src/ops-config-write.ts', import.meta.url), 'utf8')
+    const code = src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')
+    expect(code).toMatch(/import\s*\{[^}]*\bwriteFileAtomic\b[^}]*\}\s*from\s*'@gotong\/core'/)
+    expect(code).not.toMatch(/import\s*\{[^}]*\bwriteFile\b\s*[,}][^}]*\}\s*from\s*'node:fs\/promises'/)
+    expect(code).toMatch(/seams\.writeFileImpl\s*\?\?[\s\S]{0,80}writeFileAtomic/)
   })
 })

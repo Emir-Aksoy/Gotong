@@ -69,11 +69,12 @@ export type { WorkspaceCheckReport, CheckFinding, AdminHealthSurface, HealthSnap
 // whitelist, secret-var list and template through the same `@gotong/host/ops`
 // import (M3). The writers themselves are only reachable via `runOpsCommand`'s
 // gated handlers — never exported for a surface to call directly.
-export { ENV_KNOBS, SECRET_ENV_VARS, isSecretKey, generateEnvTemplate } from './ops-config-write.js'
+export { ENV_KNOBS, ENV_KNOB_KEYS, SECRET_ENV_VARS, isSecretKey, generateEnvTemplate } from './ops-config-write.js'
 export type {
   ConfigWriteAuditSink,
   EffectiveConfigView,
   EffectiveKnobView,
+  EnvKnobKey,
   EnvKnobSpec,
 } from './ops-config-write.js'
 

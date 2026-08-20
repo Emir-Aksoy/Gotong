@@ -24,6 +24,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { detectFsJail, type AgentRecord, type Logger, type Participant, type Task, type TaskId } from '@gotong/core'
+import type { Principal } from '@gotong/identity'
 import { afterEach, describe, expect, it } from 'vitest'
 
 import {
@@ -130,16 +131,29 @@ function makeHands(opts: { coder?: unknown; role?: string | null; allowRoles?: s
   }
 }
 
-/** 名册假件:记下注册进来的参与者、写进 agents.json 的行、发出去的授权。 */
-function fakeRoster(seed: AgentRecord[] = []) {
+type FakeGrant = { principal: Principal; perm: string }
+
+/**
+ * 名册假件:记下注册进来的参与者、写进 agents.json 的行、发出去的授权。
+ *
+ * 授权那半是一张**真的**表(有行、能读、能删)而不是一个 push 数组——手 B 的归属
+ * 不变量是「这台 coder 恰好一个 owner」,而 upsert 顶不掉旧行正是它会破的方式,
+ * 只记「发过哪些」的假件对这条不变量什么也证明不了。
+ */
+function fakeRoster(
+  seed: AgentRecord[] = [],
+  opts: { grants?: FakeGrant[]; listThrows?: boolean } = {},
+) {
   const registered: Participant[] = []
   const rows: AgentRecord[] = [...seed]
   const grants: Array<Record<string, unknown>> = []
+  const grantRows: FakeGrant[] = [...(opts.grants ?? [])]
   const chunks: Array<Record<string, unknown>> = []
   return {
     registered,
     rows,
     grants,
+    grantRows,
     chunks,
     hub: {
       register: (p: Participant) => registered.push(p),
@@ -155,7 +169,27 @@ function fakeRoster(seed: AgentRecord[] = []) {
         return full
       },
     },
-    grantsDep: { setResourceGrant: (i: Parameters<CoderGrantDeps['setResourceGrant']>[0]) => grants.push(i as unknown as Record<string, unknown>) } as CoderGrantDeps,
+    grantsDep: {
+      setResourceGrant: (i: Parameters<CoderGrantDeps['setResourceGrant']>[0]) => {
+        grants.push(i as unknown as Record<string, unknown>)
+        const at = grantRows.findIndex(
+          (g) => g.principal.kind === i.principal.kind && g.principal.id === i.principal.id,
+        )
+        const row: FakeGrant = { principal: i.principal, perm: i.perm }
+        if (at >= 0) grantRows[at] = row
+        else grantRows.push(row)
+      },
+      listResourceGrants: () => {
+        if (opts.listThrows) throw new Error('grant table unreadable')
+        return grantRows.map((g) => ({ principal: g.principal, perm: g.perm }))
+      },
+      removeResourceGrant: (_k: 'agent', _id: string, principal: Principal) => {
+        const at = grantRows.findIndex(
+          (g) => g.principal.kind === principal.kind && g.principal.id === principal.id,
+        )
+        if (at >= 0) grantRows.splice(at, 1)
+      },
+    } as CoderGrantDeps,
   }
 }
 
@@ -300,6 +334,37 @@ describe('HANDS-M2b arming gates (fail-closed)', () => {
   it('the advertised capability is the deliberately specific one (advertising = authorizing)', () => {
     expect(HANDS_CODER_CAPABILITY).toBe('hands.coder')
   })
+
+  it('re-binding to another member drops the previous OWNER row (upsert alone would not)', async () => {
+    // grant 的主键含 principal ⇒ 只 upsert 新的,前任仍是 owner,而 owner 正是
+    // `escalate_to_expert` 的 fail-closed 检查读的那张表 ⇒ 前任还能驱动这只手。
+    const fx = makeHands({ coder: coderCfg({ agentId: 'mycoder' }) })
+    const r = fakeRoster([], {
+      grants: [
+        { principal: { kind: 'user', id: 'u0-previous' }, perm: 'owner' },
+        // 别人在 agent 面板上刻意给的读权限——不是这条配置线的事,不许连坐。
+        { principal: { kind: 'user', id: 'u9-reader' }, perm: 'viewer' },
+      ],
+    })
+    const { res } = await arm(fx, r)
+    expect(res.armed).toBe(true)
+    const owners = r.grantRows.filter((g) => g.perm === 'owner').map((g) => g.principal.id)
+    expect(owners).toEqual(['u1'])
+    expect(r.grantRows.some((g) => g.principal.id === 'u9-reader' && g.perm === 'viewer')).toBe(true)
+    expect(fx.logs.some((l) => l.level === 'warn' && l.msg.includes('stale coder owner grant'))).toBe(true)
+  })
+
+  it('cannot read the old grant rows ⇒ hand B stays OFF (fail-closed)', async () => {
+    // 读不到旧行 = 不知道清没清干净。一台「可能还有第二个 owner」的手 B,比没有
+    // 手 B 更坏——与上面五道闸同姿态。
+    const fx = makeHands({ coder: coderCfg() })
+    const r = fakeRoster([], { listThrows: true })
+    const { res } = await arm(fx, r)
+    expect(res.armed).toBe(false)
+    expect(res.reason).toContain('读不出来')
+    expect(r.registered).toHaveLength(0)
+    expect(r.grants).toHaveLength(0)
+  })
 })
 
 // ─── ③ 围墙 ──────────────────────────────────────────────────────────────────
@@ -335,6 +400,20 @@ describe('HANDS-M2b perimeter', () => {
     expect(fx.logs.some((l) => l.level === 'warn' && l.msg.includes('passEnv'))).toBe(true)
   })
 
+  it('names credential-shaped passEnv entries out loud (a path, not a leak)', async () => {
+    // 手 B 必须拿到自己的模型 key 才能开工 ⇒ passEnv **不可避免**是一条凭证通道。
+    // 不拦,但也不许悄悄发生:名字进日志,值永远不进。
+    process.env.CODER_TEST_API_KEY = 'sk-should-never-be-logged'
+    const fx = makeHands({ coder: coderCfg({ passEnv: ['CODER_TEST_API_KEY', 'LANG'] }) })
+    await arm(fx)
+    delete process.env.CODER_TEST_API_KEY
+    const row = fx.logs.find((l) => l.level === 'warn' && l.msg.includes('credential-shaped'))
+    expect(row).toBeDefined()
+    expect((row!.ctx as { names: string[] }).names).toEqual(['CODER_TEST_API_KEY'])
+    // 值一个字节都不许出现在任何一行里。
+    expect(JSON.stringify(fx.logs)).not.toContain('sk-should-never-be-logged')
+  })
+
   it('the jail spec is computed per spawn, not frozen at arm time', async () => {
     // 长活的参与者 + 定死的围墙 = 悄悄变弱的围墙:装好之后才出现的东西(这里是
     // 一个新的套接字文件)必须在**下一次** spawn 时就被藏起来。
@@ -349,6 +428,20 @@ describe('HANDS-M2b perimeter', () => {
     const after = p.fsJail().hardening?.hiddenPaths ?? []
     expect(before).not.toContain(late)
     expect(after).toContain(late)
+  })
+
+  it('authorization is re-asked per spawn — losing allowRoles stops hand B too', async () => {
+    // arm 时问一次是不够的:participant 一旦注册就常驻,而 `allowRoles` 是会变的。
+    // 手 A 会在**每次调用**重问(classify + execute 各一次),手 B 也必须——否则一个
+    // 被降权的成员失去手 A、却留着一台能改同一个工作区的手 B。
+    // 检查挂在围墙这条 thunk 上而不是另开一处:这条路本来就必须走,它抛错 = 这一
+    // 轮不 spawn(闸放在忘不掉的地方)。
+    const fx = makeHands({ coder: coderCfg() })
+    const { r } = await arm(fx)
+    const p = r.registered[0] as unknown as { fsJail: () => unknown }
+    expect(() => p.fsJail()).not.toThrow()
+    fx.host.allowed = () => false
+    expect(() => p.fsJail()).toThrow(/allowRoles/)
   })
 })
 

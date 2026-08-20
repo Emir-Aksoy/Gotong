@@ -908,6 +908,14 @@ EPERM。bwrap 不需要这条——`--tmpfs` 盖住再 `--bind` 里面那层，�
 - **祖先的 `stat` 是真给出去了**：`<space>` 与那几级中间目录的大小/时间戳，监狱里量得到。
   内容与目录条目仍然拒（§11.2 探针）。
 - 手 B 的**转派回执**沿用 DUO 的 fire-and-forget 语义：回执即时、结果 pushToMember 推回。
+- **`passEnv` 不可避免是一条凭证通道**（Codex 轮 B HIGH，核实属实，**如实记档而不是"修"**）：
+  一个外驱的 coding agent 不拿到自己的模型 key 就开不了工，所以 `hands.json` 里那份透传表
+  天生就要递 key 进监狱；递进去之后，监狱里的进程读得到它——`hands_run` 一句 `echo $KEY`
+  就够。要把它变成「阿同看不见的 key」，得在监狱外面立一个本地代理端点、由它替手 B 转发
+  模型请求，那是**一个新子系统**，不是一处补丁。所以这一刀做的是「别让它悄悄发生」：装的
+  时候把凭证形状的名字（判据复用 `isSecretKey`，与 `/setkey` 拒绝那条同一份定义）**点名印
+  在日志里，值永远不印**，操作者于是确切知道自己刚把哪几样递了进去。**别把不该给这只手的
+  key 写进 `passEnv`** —— 给它的那把，就当成它已经知道了。
 - 真 bwrap 的这条路仍待 Linux 真机（本机只有 seatbelt）；core 侧由 profile/argv 单测钉住。
 
 ---
@@ -1716,4 +1724,91 @@ prod compose 粘一个字面 token ⇒ 「值不是字面量」1 例；`GOTONG_W
 - **`fix-dirs` 手机上跑得了，但它治不了 M3c 造出来的病**（端口写成同一个）。那件事的正主是 M4
   的端口撞车提案 → `set_hub_config`，两者刻意分开。
 - **卡量顶到 10**。下一张卡要么替掉一张，要么先说服那道门为什么该抬。
-- **Codex 交叉审仍与 M2/M2b/M3a/M3b/M3c/M4/M5/M6 同批待跑**。
+- **Codex 交叉审见 §十九**（分三轮，A/B 已收口，C 在跑）。
+
+---
+
+## 十九、Codex 交叉审收口记录（2026-08-20）
+
+HANDS track 的九个里程碑攒成一批送审（额度 08-19 恢复）。**源码 diff 太大，一次审不精**——
+所以拆成三轮，每轮只给一个面：
+
+| 轮 | 面 | 覆盖 | 结果 |
+|---|---|---|---|
+| A | 凭证面 | M3a `c415453` / M3b `955fc3f` / M7 那次渲染器搬家 | 7 发现，全属实，全修 |
+| B | 执行面 | M2b `6142c40` / M3c `f8f9d54` / M4 `8a2020e` | 2H/2M/3L，6 修 1 记档 |
+| C | 投影面 + capstone | M5 `ac3e297` / M7 `5e4538a` | 在跑 |
+
+M6 `67bbf7a` 的 src 改动行数是 **0**（compose + 文档 + 测试），不单开一轮。
+
+### 19.1 轮 A（凭证面）
+
+7 条逐条见 commit `9aa67d0` 的正文。一句话：**「秘密只到金库」这句话，在它自己的每一条
+失败路径上也得成立**——失败时记的那行日志、反代的访问日志、surface 抛错落进的通用 500
+处理器，三处各自都能把一把活钥匙留在盘上。
+
+### 19.2 轮 B（执行面）
+
+**H1 换绑不清场，前任仍是 owner。** `setResourceGrant` 的主键含 principal，**只 upsert
+新的不会顶掉旧的**；把 `hands.json` 里 `coder.userId` 从 A 改成 B 之后，A 仍在
+`listOwned('coder')` 里——而那正是 `escalate_to_expert` 认的那张表 ⇒ A 能继续驱动一台
+现在住在 B 工作区里的手。修=**在任何副作用之前**读出既有 owner 行、把不是他的删掉（只清
+`owner` 档：viewer/editor 是有人在 agent 面板上刻意给的，那是别人的决定）；读不动就一个
+参与者都不注册——「可能还有第二个 owner」的手 B 比没有手 B 更坏。
+
+**H2 arm 时问一次不够。** participant 一旦注册就常驻，而 `allowRoles` 是会变的：一次降权
+之后**手 A 当场没了、手 B 还在原地听调**（owner grant 是持久的），于是「手 B 的权限是手 A
+权限的子集」这句话只在配置没动过的那段时间成立。修=把 `host.allowed(cfg.userId)` 挂到
+**每次 spawn 现算围墙的那条 thunk 上**——不另开一处检查，因为这条路本来就必须走，它抛错
+= 这一轮不 spawn，与「围墙算不出来就不 spawn」共用同一条 fail-closed。
+
+**M3 `readFileOr` 吞掉每一种错误。** 只有 `ENOENT` 该回落成空串：一个存在但读不动（EACCES）
+而**写得动**的 `gotong.env`，会让 read-merge-write 把它读成空、写回去只剩这一个键——
+**改一个旋钮抹掉其余全部**。修=非 ENOENT 一律 `OpsError('config_file_unreadable')`；顺手
+给整个读-改-写周期套上 `serializeByPath` 的进程内队列（两个并发 `config-set` 原本会各读
+各的旧内容，后写的赢）。
+
+**M4a 环境卡回显它担保不了的值。** `gotong.env` 里写了 `GOTONG_WEB_PORT=abc<恶意文本>`，
+那串字节会原样出现在给人看的那张卡上。修的是两件事，而**第二件才是要紧的**：①不合法的值
+渲染成 `(值不合法)`，不复述；②新出一条 `invalid-knob-value` 提案**指出根因**——原来的
+`knobPortCollision` 会把两个同样不合法的值读成「端口撞车」，把人指去修一个并不存在的问题。
+另有两道守卫：撞车提案先确认两个值都合法才出，`revert` 的值自己也必须过 `set_hub_config`
+的校验器（**绝不提一个写侧注定 400 的方案**，与 M3c 的 classify 预检同一条纪律）。
+
+**L5 `EnvKnobKey` 曾经不是一个联合。** `ENV_KNOBS` 上写的是 `: readonly EnvKnobSpec[]`，
+把字面量键**放宽成了 `string`**——于是 `HubEnvProposal.apply.key` 声明得再好看，编译器也
+不会问「你提的这个键真的能改吗」。改成 `as const satisfies`，导出 `EnvKnobKey`/`ENV_KNOB_KEYS`。
+**这道自检必须住在 src 里**：`packages/host/tsconfig.json` 的 `include` 只有 `src/**/*.ts`，
+写在测试文件里的 `@ts-expect-error` 是一道**永远绿的假门**（vitest 用 esbuild 剥类型，
+`tsc --noEmit` 根本看不见 tests/）——变异测试第一遍不红，正是这么发现的。
+
+**L6 `GOTONG_OPEN_BROWSER` 认得六个别名，独独不认 `always`/`never`。** 而那两个词正是
+`renderKnobValue` 与 doctor 印在人眼前的那对名字。补进别名表，且**归一化才是承重的那一半**：
+存一个 host 的 `parseOpenBrowserEnv` 不认识的词进 `gotong.env`，等于安静地撒谎——所以
+`always` 落盘成 `true`，和 `' 8080 '` 落盘成 `8080` 是同一件事。
+
+**L7 `set_hub_config` 的失败路径把绝对路径倒进聊天窗。** ops-core 的那句话三面共用
+（网页/CLI 确实要那条绝对路径），只有喂给模型的这一份要换掉 ⇒ 脱敏落在**渲染那一层**
+（复用手 A `redact()` 的判例）；非 `OpsError` 的错（ENOSPC 带临时文件名之类）不是给人看的，
+收窄成一句人话 + 「详细原因在服务器日志里」。`describe` 的不合法分支同罪：那条分支现实中
+到不了（classify 先拒），但「到不了」不是「可以往人的聊天窗里倒一段任意自由文本」的理由。
+
+**M4b 核实后没照办**：`pathListProblem` 拼的那句话确实带着成员写在 `hands.json` 里的原文，
+但它**只走到 `logger.warn`**，紧挨着一个我们刻意打印的绝对路径——那是 hub 侧的运维日志，
+不是模型面也不是聊天窗。收窄它只会让操作者看不清自己哪一行写错了。**与轮 A 同样的处理：
+记档，不改。**
+
+**十四道变异十四次全红且只红该红那些**：H1 不清场（1 例）/ H2 摘掉围墙 thunk 里那道闸
+（1 例）/ M3 吞 EACCES（2 例，env 与 pricing 同一咽喉）/ M3 去掉写队列（2 例）/ M4a 四道
+各一 / L5 放宽回 `: readonly EnvKnobSpec[]`（**tsc 报 TS2578 + 1 例红**）/ L6 收了 `always`
+但不归一化（1 例）/ L6 从表里删掉 `always`（2 例）/ L7 成功行不脱敏（1 例）/ L7 任何错都
+原文透传（2 例）/ L7 `describe` 原样回显（1 例）。其中 **L7 的 `describe` 那道第一遍不红**
+——那条分支当时没有门，
+按「变异不红时先怀疑门」补了一条（敌意串走 `String.fromCharCode` 拼，别让转义序列在源码里
+落成裸控制字节，本 track 踩过六次）。复原一律 python 精确替换 + `shasum` 对拍，**绝不
+`git checkout <file>`**。
+
+**顺带一件**：`ButlerConfigOps` 多了一个必填的 `spaceDir`（脱敏用，`buildButlerConfigOps`
+从 `deps.ops.spaceDir` 转手；注释写明**绝不拿它拼路径**——拼路径的规则只有 `envFileOf`
+一处）。它把两个测试假件打成编译错误，那正是这条设计要的：**产出那条绝对路径的人，随身带着
+用来脱敏的那个前缀**，两者分开传迟早会配错一对而脱敏静默失效。

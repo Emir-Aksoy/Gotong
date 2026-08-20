@@ -47,6 +47,7 @@ import { delimiter, join } from 'node:path'
 
 import type { LlmAgentToolset, LlmToolCallResult, LlmToolDefinition } from '@gotong/llm'
 
+import { ENV_KNOBS, type EnvKnobKey } from './ops-core.js'
 import type { ButlerConfigKnobView, ButlerConfigOps } from './personal-butler-config.js'
 import type { ButlerHandsStatus } from './personal-butler-hands.js'
 import { outageHeadline } from './personal-butler-hub-sense.js'
@@ -238,7 +239,12 @@ export type HubEnvProposal =
       detail: string
       applicable: true
       /** 唯一的落盘出口 = HANDS-M3c 那件 governed 工具。 */
-      apply: { tool: 'set_hub_config'; key: string; value: string }
+      /**
+       * `EnvKnobKey` 而不是 `string`——提案要落盘只有 `set_hub_config` 一条路,
+       * 而那件工具的参数空间是从 `ENV_KNOBS` 派生的封闭枚举。让编译器来问「你
+       * 提的这个键真的能改吗」,比让运行期拿一个 400 回来诚实。
+       */
+      apply: { tool: 'set_hub_config'; key: EnvKnobKey; value: string }
     }
   | { id: string; title: string; detail: string; applicable: false; howTo: string }
 
@@ -247,6 +253,28 @@ const GIB = 1024 * 1024 * 1024
 const LOW_MEM_BYTES = 2 * GIB
 /** 磁盘下限:transcript / 审计 / 备份档都在这块盘上长。 */
 const LOW_DISK_BYTES = 1 * GIB
+
+/**
+ * 这个值过不过它**自己那道**校验器(写入方白名单里的同一个函数,不另立一套
+ * 「什么算合法」)。认不出的键 = 不评判,当合法处理:这张卡不该替别人立规矩。
+ */
+function knobValueOk(key: string, value: string): boolean {
+  const spec = ENV_KNOBS.find((k) => k.key === key)
+  return spec ? spec.validate(value).ok : true
+}
+
+/**
+ * 值渲染进卡面前先过一遍校验器,不合法就**不回显**,只说「不合法」。
+ *
+ * 两个理由,后一个才是承重的:一是这一行会进模型的上下文,而 `gotong.env` 不是
+ * 这个编辑器一个人在写(操作者手改、模板、`process.env` 都能落进来);二是把一个
+ * 会让 hub 起不来的值渲染成「重启后会用 X」**本身就是假话**——`envInt` 对着
+ * `GOTONG_WEB_PORT=abc` 是当场抛错,不是回落默认。说不准的时候说「不合法」,
+ * 比说一个具体而错误的未来诚实。
+ */
+function renderKnobValue(key: string, value: string): string {
+  return knobValueOk(key, value) ? value : '(值不合法)'
+}
 
 /** 这个旋钮**下次重启**会用的值(文件里写了就是它,否则回落到当前生效/默认)。 */
 function nextValueOf(k: ButlerConfigKnobView): string {
@@ -265,9 +293,15 @@ function knobPortCollision(knobs: readonly ButlerConfigKnobView[]): HubEnvPropos
   const nextWeb = nextValueOf(web)
   const nextWs = nextValueOf(ws)
   if (nextWeb !== nextWs) return null
+  // 只比**真的是端口**的两个值。两个同样不合法的值(`abc` / `abc`)相等,但那不
+  // 是「撞车」——那是「这根本不是端口」,由 `knobInvalidValue` 说,而且它说的
+  // 才是根因。在这里报「端口撞了」会把人指去改一个不存在的问题。
+  if (!knobValueOk(WEB_PORT_KEY, nextWeb) || !knobValueOk(WS_PORT_KEY, nextWs)) return null
   const detail = `配置文件里网页端口和 agent WebSocket 端口都写成了 ${nextWeb},这台 hub 下次重启会起不来(现在跑着的还是旧值,所以你暂时没感觉)。`
   const revert = liveValueOf(ws)
-  if (revert === nextWeb) {
+  // `revert` 也得自己过得了那道校验器——提一个会被 `set_hub_config` 当场 400
+  // 的值,等于拿走人一次审批换一个注定的「不行」(与 M3c 的 classify 预检同纪律)。
+  if (revert === nextWeb || !knobValueOk(WS_PORT_KEY, revert)) {
     // 活着的值也一样(比如两边同时被改过)——我算不出一个确定不撞的值,
     // 就别假装能一键修:挑端口是人的决定。
     return {
@@ -290,7 +324,9 @@ function knobPortCollision(knobs: readonly ButlerConfigKnobView[]): HubEnvPropos
 function knobPendingRestart(knobs: readonly ButlerConfigKnobView[]): HubEnvProposal | null {
   const pending = knobs.filter((k) => k.fileValue !== null && k.fileValue !== liveValueOf(k))
   if (pending.length === 0) return null
-  const list = pending.map((k) => `${k.key}(现在 ${liveValueOf(k)} → 重启后 ${k.fileValue})`).join('、')
+  const list = pending
+    .map((k) => `${k.key}(现在 ${renderKnobValue(k.key, liveValueOf(k))} → 重启后 ${renderKnobValue(k.key, k.fileValue!)})`)
+    .join('、')
   return {
     id: 'pending-restart',
     title: '有配置改动写进去了,但还没生效',
@@ -301,11 +337,37 @@ function knobPendingRestart(knobs: readonly ButlerConfigKnobView[]): HubEnvPropo
   }
 }
 
+/**
+ * 文件里写着一个这台 hub 用不了的值。**只看 fileValue**:`envValue` 是当前进程
+ * 已经在用的东西,它不合法这件事已经无法在「下次重启」之前补救,而文件里那个
+ * 是下次重启真会读的那一份——改得动的正是它。
+ *
+ * 刻意 `applicable:false`:算不出一个确定安全的替代值(端口挑哪个、模式选哪个
+ * 都是人的决定),与端口撞车那支的降级分支同一条理由。
+ */
+function knobInvalidValue(knobs: readonly ButlerConfigKnobView[]): HubEnvProposal | null {
+  const bad = knobs.filter((k) => k.fileValue !== null && !knobValueOk(k.key, k.fileValue))
+  if (bad.length === 0) return null
+  const keys = bad.map((k) => k.key).join('、')
+  return {
+    id: 'invalid-knob-value',
+    title: '配置文件里有这台 hub 用不了的值',
+    // 值本身刻意不复述:它不合法,而复述一个不合法的串对读的人没有帮助
+    // (要看原文就去看文件),对读到这张卡的模型只是一段没人管过的自由文本。
+    detail: `${keys} 在 gotong.env 里写着一个过不了校验的值,下次重启会出问题(现在跑着的还是旧值,所以你暂时没感觉)。`,
+    applicable: false,
+    howTo: `让我用 set_hub_config 重新设一遍这几项(端口=1-65535 的整数;模式=personal 或 team;自动开浏览器=auto/always/never),或者直接改 gotong.env。`,
+  }
+}
+
 /** 纯函数:采集结果 → 提案清单。同一份输入永远同一份输出(可直测)。 */
 export function proposeEnvironmentFixes(env: HubEnvironment): HubEnvProposal[] {
   const out: HubEnvProposal[] = []
 
   if (env.knobs) {
+    // 顺序有意义:值不合法是根因,排在「撞车」前面(而撞车那支自己也会让开)。
+    const invalid = knobInvalidValue(env.knobs)
+    if (invalid) out.push(invalid)
     const collision = knobPortCollision(env.knobs)
     if (collision) out.push(collision)
     const pending = knobPendingRestart(env.knobs)
@@ -425,8 +487,8 @@ function knobLines(knobs: readonly ButlerConfigKnobView[] | null): string[] {
     ...knobs.map((k) => {
       const next = nextValueOf(k)
       const live = liveValueOf(k)
-      const tail = next === live ? '' : `(现在还是 ${live})`
-      return `  · ${k.key} = ${next}${tail}`
+      const tail = next === live ? '' : `(现在还是 ${renderKnobValue(k.key, live)})`
+      return `  · ${k.key} = ${renderKnobValue(k.key, next)}${tail}`
     }),
   ]
 }

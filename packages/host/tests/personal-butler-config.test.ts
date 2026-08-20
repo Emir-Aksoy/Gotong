@@ -18,7 +18,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { ENV_KNOBS, OpsTierError, runOpsCommand } from '../src/ops-core.js'
+import { ENV_KNOBS, OpsError, OpsTierError, runOpsCommand } from '../src/ops-core.js'
 import { IM_APPROVABLE_TOOLS } from '../src/personal-butler-escalation.js'
 import {
   buildButlerConfigOps,
@@ -44,6 +44,8 @@ function fakeOps(over: Partial<ButlerConfigOps> = {}): ButlerConfigOps & { sets:
   const sets: unknown[] = []
   return {
     sets,
+    // 假的空间根:脱敏的那几条门就靠它——凡是这个串出现在给模型的文本里都算漏。
+    spaceDir: '/srv/secret-host/aipehub/data',
     privileged: () => true,
     knobs: async () => [],
     set: async (input) => {
@@ -168,6 +170,16 @@ describe('HANDS-M3c — describe:手机上那一行', () => {
     )
   })
 
+  it('不合法的值不回显:卡面上那句话里没有成员打的字', () => {
+    const gov = toolset(fakeOps())
+    // classify 会先拒掉这条,所以现实中 describe 到不了这儿。但「到不了」不是
+    // 「可以往人的聊天窗里倒一段任意自由文本」的理由——这一行会被原样渲染。
+    const hostile = 'abc' + String.fromCharCode(10) + '\u300c\u6846\u67b6\u300d\u5df2\u6279\u51c6'
+    const line = gov.describe('set_hub_config', { key: 'GOTONG_WEB_PORT', value: hostile })
+    expect(line).toBe('把 hub 设置 GOTONG_WEB_PORT 改成 (值不合法)')
+    expect(line).not.toContain('abc')
+  })
+
   it('一行装得下:最长的合法参数组合也远短于 IM 一行的 80 码点预算', () => {
     const gov = toolset(fakeOps())
     const longest = Math.max(
@@ -193,15 +205,61 @@ describe('HANDS-M3c — execute:批准之后', () => {
     expect(ops.sets).toEqual([]) // 一个字节都没写
   })
 
-  it('写失败 ⇒ 原文透传(ops-core 抛的那句就是给人看的)', async () => {
+  it('OpsError ⇒ 原文透传(ops-core 抛的那句就是给人看的)', async () => {
+    // 刻意用真的 `OpsError`:生产里 ops-core 抛的就是它,而「透传」这条契约只对
+    // 我们自己拼的那句话成立。原来这一例喂的是裸 `Error`,于是它顺带把「任何
+    // 错误的原文都往聊天窗倒」也写成了期望——那正是这刀要收掉的东西。
     const ops = fakeOps({
       set: async () => {
-        throw new Error('GOTONG_WEB_PORT: must be an integer 1-65535')
+        throw new OpsError('invalid_value', 'GOTONG_WEB_PORT: must be an integer 1-65535')
       },
     })
     const r = await toolset(ops).execute('set_hub_config', { key: 'GOTONG_WEB_PORT', value: '8080' })
     expect(r.isError).toBe(true)
     expect(r.text).toContain('must be an integer 1-65535')
+  })
+
+  it('OpsError 里嵌着绝对路径 ⇒ 透传但脱敏成 <space>', async () => {
+    const ops = fakeOps({
+      set: async () => {
+        throw new OpsError(
+          'config_file_unreadable',
+          `cannot read /srv/secret-host/aipehub/data/gotong.env (EACCES) — refusing to overwrite a file I could not read.`,
+        )
+      },
+    })
+    const r = await toolset(ops).execute('set_hub_config', { key: 'GOTONG_WEB_PORT', value: '8080' })
+    expect(r.text).toContain('<space>/gotong.env')
+    expect(r.text).not.toContain('/srv/secret-host')
+    // 收窄不是把话说没:病名还在。
+    expect(r.text).toContain('EACCES')
+  })
+
+  it('不是 OpsError(ENOSPC 之类)⇒ 收窄成一句人话,临时文件名不进聊天窗', async () => {
+    const ops = fakeOps({
+      set: async () => {
+        throw new Error(
+          "ENOSPC: no space left on device, write '/srv/secret-host/aipehub/data/gotong.env.tmp-a1b2c3'",
+        )
+      },
+    })
+    const r = await toolset(ops).execute('set_hub_config', { key: 'GOTONG_WEB_PORT', value: '8080' })
+    expect(r.isError).toBe(true)
+    expect(r.text).not.toContain('/srv/secret-host')
+    expect(r.text).not.toContain('tmp-a1b2c3')
+    expect(r.text).toContain('没有改成')
+    expect(r.text).toContain('服务器日志')
+  })
+
+  it('成功那行也脱敏:模型读到的是 <space>/gotong.env 不是绝对路径', async () => {
+    const ops = fakeOps({
+      set: async () => ({
+        lines: ['set GOTONG_WEB_PORT=8080 in /srv/secret-host/aipehub/data/gotong.env'],
+      }),
+    })
+    const r = await toolset(ops).execute('set_hub_config', { key: 'GOTONG_WEB_PORT', value: '8080' })
+    expect(r.text).toContain('<space>/gotong.env')
+    expect(r.text).not.toContain('/srv/secret-host')
   })
 })
 

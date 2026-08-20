@@ -25,8 +25,10 @@
  * M3 acceptance tests run hermetically with fakes.
  */
 
-import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { mkdir, readFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
+
+import { writeFileAtomic } from '@gotong/core'
 
 import { type ModelPrice, validatePricingTable } from './pricing.js'
 // `OpsError` is the subsystem's typed error. The import forms a cycle with
@@ -70,16 +72,41 @@ function validateMode(raw: string): KnobVerdict {
   return { ok: true, value: t }
 }
 
-// Mirrors host `parseOpenBrowserEnv`: 0/false/off/no → never, 1/true/on/yes →
-// always, plus an explicit `auto`. Anything else is rejected (the host would
-// silently treat it as `auto`, so refusing here is the honest, predictable move).
-const OPEN_BROWSER_TOKENS = new Set(['0', '1', 'true', 'false', 'on', 'off', 'yes', 'no', 'auto'])
+/**
+ * Mirrors host `parseOpenBrowserEnv`: 0/false/off/no → never, 1/true/on/yes →
+ * always, plus an explicit `auto`. Anything else is rejected (the host would
+ * silently treat it as `auto`, so refusing here is the honest, predictable move).
+ *
+ * The words `always` / `never` are accepted BECAUSE this validator's own
+ * rejection text has always advertised them — telling someone "must be one of:
+ * auto, always, never" and then refusing `always` is the editor contradicting
+ * itself. They are NORMALISED on the way in, though, and that half is the
+ * load-bearing one: `parseOpenBrowserEnv` does NOT know the word `always` —
+ * it would fall through to `auto`. Storing the word verbatim would write a
+ * value the host silently means something else by, which is exactly the class
+ * of quiet lie this editor exists to prevent. So the words map to tokens the
+ * host really parses, the same way ` 8080 ` is normalised to `8080`.
+ */
+const OPEN_BROWSER_ALIASES = new Map<string, string>([
+  ['auto', 'auto'],
+  ['always', 'true'],
+  ['never', 'false'],
+  ['1', 'true'],
+  ['true', 'true'],
+  ['on', 'true'],
+  ['yes', 'true'],
+  ['0', 'false'],
+  ['false', 'false'],
+  ['off', 'false'],
+  ['no', 'false'],
+])
 function validateOpenBrowser(raw: string): KnobVerdict {
   const t = raw.trim().toLowerCase()
-  if (!OPEN_BROWSER_TOKENS.has(t)) {
+  const canonical = OPEN_BROWSER_ALIASES.get(t)
+  if (canonical === undefined) {
     return { ok: false, reason: 'must be one of: auto, always(1/true/on/yes), never(0/false/off/no)' }
   }
-  return { ok: true, value: t }
+  return { ok: true, value: canonical }
 }
 
 /**
@@ -91,12 +118,39 @@ function validateOpenBrowser(raw: string): KnobVerdict {
  * hard-refuses. So there is no honest knob to add; inventing one would write an
  * env the host never reads.
  */
-export const ENV_KNOBS: readonly EnvKnobSpec[] = [
+export const ENV_KNOBS = [
   { key: 'GOTONG_MODE', summary: 'Personal vs team mode (auto-detected when unset).', defaultValue: 'personal', validate: validateMode },
   { key: 'GOTONG_WEB_PORT', summary: 'Admin UI / API port.', defaultValue: '3000', validate: validatePort },
   { key: 'GOTONG_WS_PORT', summary: 'Agent WebSocket port.', defaultValue: '4000', validate: validatePort },
   { key: 'GOTONG_OPEN_BROWSER', summary: 'First-run browser auto-open behaviour.', defaultValue: 'auto', validate: validateOpenBrowser },
-]
+  // `as const satisfies` 而不是 `: readonly EnvKnobSpec[]`——注解会把每个 key 拓宽成
+  // `string`,那样下面那个联合类型就只是 `string`,什么也约束不住。
+] as const satisfies readonly EnvKnobSpec[]
+
+/**
+ * 可改旋钮的**键名联合**——一份定义,四处执法。M3c 的工具 schema 用它当 enum、
+ * M4 的提案用它当 `apply.key` 的类型、写入方用它查表:谁都不再自己抄一份名字。
+ * 抄一份的代价不是丑,是**编译器不再问问题**——ENV_KNOBS 加一项而某处手抄名单
+ * 没跟上,那一项就在那个面上凭空不存在,而没有任何东西会红。
+ */
+export type EnvKnobKey = (typeof ENV_KNOBS)[number]['key']
+
+/**
+ * 编译期自检——**这就是那条窄类型的门**。
+ *
+ * 上面那个 `as const satisfies` 如果被谁换回 `: readonly EnvKnobSpec[]`,
+ * `EnvKnobKey` 会静默塌成 `string`,而两个消费点(`KNOB_KEYS`、
+ * `HubEnvProposal.apply.key`)照旧编译通过——没有任何东西会红。那时下面这行
+ * 就成了合法赋值,`@ts-expect-error` 变成「未使用的指令」⇒ tsc 当场红。
+ *
+ * 刻意放在 src 里而不是测试里:本包的 tsconfig 只 include `src/**\/*.ts`,而
+ * vitest 走 esbuild 直接把类型剥掉——写在测试里的 `@ts-expect-error` 两边都没人看,
+ * 是一条永远绿的假门。
+ */
+// @ts-expect-error 'nope' 不是一个旋钮名——它**必须**不是
+const _envKnobKeyMustStayNarrow: EnvKnobKey = 'nope'
+void _envKnobKeyMustStayNarrow
+export const ENV_KNOB_KEYS: readonly EnvKnobKey[] = ENV_KNOBS.map((k) => k.key)
 
 function knobSpec(key: string): EnvKnobSpec | undefined {
   return ENV_KNOBS.find((k) => k.key === key)
@@ -178,19 +232,48 @@ interface FsWriteSeams {
   mkdirpImpl?: (p: string) => Promise<void>
 }
 
+/**
+ * Read a managed file for a read-merge-write. **Only ENOENT falls back** — an
+ * unreadable-but-writable file (EACCES, EIO, a directory in the way) must NOT
+ * be read as "empty", because the very next step serializes the merged map back
+ * over it: swallowing the read error turns "set one knob" into "erase every
+ * other knob", and the approval card the operator said yes to promised exactly
+ * one key. Absent is a state we can honestly merge onto; unreadable is not.
+ */
 async function readFileOr(path: string, fallback: string, seams: FsWriteSeams): Promise<string> {
   const impl = seams.readFileImpl ?? ((p: string) => readFile(p, 'utf8'))
   try {
     return await impl(path)
-  } catch {
-    // ENOENT / unreadable → treat as empty (first write creates it).
-    return fallback
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException)?.code === 'ENOENT') return fallback
+    throw new OpsError(
+      'config_file_unreadable',
+      `cannot read ${path} (${(err as NodeJS.ErrnoException)?.code ?? String(err)}) — refusing to overwrite a file I could not read.`,
+    )
   }
+}
+
+/**
+ * 同一进程内、同一个文件的写**排队**。read-merge-write 之间 await 了两次,两个
+ * 并发的 config-set 会双双读到旧内容、后写的那个把前一个的键**悄悄丢掉**;而两
+ * 边各自都拿到过一次人的批准。跨进程(CLI 另起一个)不在这把锁的射程内——那需要
+ * 文件锁,而那是另一件事;这里先把**一台 hub 里三个入口**(网页/阿同/setting 台)
+ * 的并发关掉。
+ */
+const writeChains = new Map<string, Promise<unknown>>()
+function serializeByPath<T>(path: string, fn: () => Promise<T>): Promise<T> {
+  const prev = writeChains.get(path) ?? Promise.resolve()
+  const next = prev.then(fn, fn)
+  // 链子只用来排队,不用来传播失败:一次写失败不该让后面每一次写都跟着炸。
+  writeChains.set(path, next.then(() => undefined, () => undefined))
+  return next
 }
 
 async function writeFileAt(path: string, data: string, seams: FsWriteSeams): Promise<void> {
   const mkdirp = seams.mkdirpImpl ?? ((p: string) => mkdir(p, { recursive: true }).then(() => undefined))
-  const write = seams.writeFileImpl ?? ((p: string, d: string) => writeFile(p, d, 'utf8'))
+  // 缺省走**原子写**(tmp + rename):这个文件是下次启动读的那一份,半截的它会让
+  // hub 起不来,而写到一半的窗口正是断电/OOM 落在的地方。
+  const write = seams.writeFileImpl ?? ((p: string, d: string) => writeFileAtomic(p, d))
   await mkdirp(dirname(path))
   await write(path, data)
 }
@@ -244,10 +327,14 @@ export async function applyEnvKnob(
     throw new OpsError('invalid_value', `'${key}': ${verdict.reason}; got ${JSON.stringify(input.value)}.`)
   }
 
-  // 4. Read-merge-write the managed file.
-  const current = parseEnvFile(await readFileOr(deps.envFilePath, '', deps))
-  current.set(key, verdict.value)
-  await writeFileAt(deps.envFilePath, serializeEnvFile(current), deps)
+  // 4. Read-merge-write the managed file — the whole cycle inside one queue slot
+  //    (see `serializeByPath`: the two awaits below are where a concurrent write
+  //    would slip in and lose the other one's key).
+  await serializeByPath(deps.envFilePath, async () => {
+    const current = parseEnvFile(await readFileOr(deps.envFilePath, '', deps))
+    current.set(key, verdict.value)
+    await writeFileAt(deps.envFilePath, serializeEnvFile(current), deps)
+  })
 
   // 5. Best-effort audit (never a secret value — just the key + new value, which
   //    for a whitelisted non-secret knob is safe to record).
@@ -300,28 +387,32 @@ export async function applyPricingUpsert(
     throw new OpsError('invalid_price', (e as Error).message)
   }
 
-  // Read existing OWN overrides (ENOENT → empty object).
-  const rawExisting = await readFileOr(deps.pricingPath, '{}', deps)
-  let parsed: unknown
-  try {
-    parsed = JSON.parse(rawExisting)
-  } catch (e) {
-    throw new OpsError(
-      'pricing_corrupt',
-      `${deps.pricingPath} is not valid JSON (${(e as Error).message}); fix or remove it before editing prices here.`,
-    )
-  }
-  // Re-validate the whole merged own-table so a pre-existing bad entry surfaces
-  // now rather than at the next boot.
-  let own: Record<string, ModelPrice>
-  try {
-    own = validatePricingTable(parsed, deps.pricingPath)
-  } catch (e) {
-    throw new OpsError('pricing_corrupt', (e as Error).message)
-  }
-  own[model] = entry
+  // Read-merge-write, one queue slot for the whole cycle (same reason as the
+  // env file above: two concurrent upserts would each drop the other's model).
+  await serializeByPath(deps.pricingPath, async () => {
+    // Read existing OWN overrides (ENOENT → empty object; unreadable → refuse).
+    const rawExisting = await readFileOr(deps.pricingPath, '{}', deps)
+    let parsed: unknown
+    try {
+      parsed = JSON.parse(rawExisting)
+    } catch (e) {
+      throw new OpsError(
+        'pricing_corrupt',
+        `${deps.pricingPath} is not valid JSON (${(e as Error).message}); fix or remove it before editing prices here.`,
+      )
+    }
+    // Re-validate the whole merged own-table so a pre-existing bad entry surfaces
+    // now rather than at the next boot.
+    let own: Record<string, ModelPrice>
+    try {
+      own = validatePricingTable(parsed, deps.pricingPath)
+    } catch (e) {
+      throw new OpsError('pricing_corrupt', (e as Error).message)
+    }
+    own[model] = entry
 
-  await writeFileAt(deps.pricingPath, `${JSON.stringify(own, null, 2)}\n`, deps)
+    await writeFileAt(deps.pricingPath, `${JSON.stringify(own, null, 2)}\n`, deps)
+  })
 
   try {
     deps.audit?.({ kind: 'pricing', surface: deps.surface, model, takesEffectOnRestart: true })

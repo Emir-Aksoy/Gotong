@@ -39,7 +39,15 @@ import type { Logger } from '@gotong/core'
 import { AUDIT_ACTIONS } from '@gotong/identity'
 import { GovernedActionToolset } from '@gotong/personal-butler'
 
-import { ENV_KNOBS, isSecretKey, runOpsCommand, type OpsDeps } from './ops-core.js'
+import {
+  ENV_KNOB_KEYS,
+  ENV_KNOBS,
+  isSecretKey,
+  OpsError,
+  runOpsCommand,
+  type EnvKnobKey,
+  type OpsDeps,
+} from './ops-core.js'
 import type { SettingAuditSink } from './setting-ops-service.js'
 
 /** 一个旋钮的当前状态投影(read-tier `config` 的一行,只为审批卡上的「现在是 X」)。 */
@@ -61,6 +69,13 @@ export interface ButlerConfigOps {
   knobs(): Promise<ButlerConfigKnobView[]>
   /** 真写:走 ops-core `runOpsCommand('config-set')` 咽喉。 */
   set(input: { key: string; value: string; userId: string }): Promise<{ lines: string[] }>
+  /**
+   * 空间根的绝对路径,**只为脱敏**——把 `/home/ubuntu/aipehub/data/gotong.env`
+   * 渲染成 `<space>/gotong.env`。绝不拿它拼路径(拼路径的规则只有 `envFileOf`
+   * 一处,复制它就是造第二份将来会漂移的真相)。手 A 的 `redact()` 同一条理由:
+   * 绝对路径本身就是布局情报,而这些字节是**被注入过的模型**读得到的东西。
+   */
+  spaceDir: string
 }
 
 /** identity 里那点窄切片 + 审计沉降口(都可缺席)。 */
@@ -83,6 +98,7 @@ const AUDIT_ACTION = AUDIT_ACTIONS.SETTING_CONFIG_WRITE
 
 export function buildButlerConfigOps(deps: ButlerConfigOpsDeps): ButlerConfigOps {
   return {
+    spaceDir: deps.ops.spaceDir,
     privileged(userId) {
       const role = deps.membershipRole(userId)
       return role === 'owner' || role === 'admin'
@@ -142,8 +158,14 @@ export function buildButlerConfigOps(deps: ButlerConfigOpsDeps): ButlerConfigOps
 const REFUSE_ROLE = '改这台 hub 的基础设置只对 owner/admin 开放。'
 const SECRET_HINT = '凭证不走这里——api key / bot token 用 `/setkey`(直贴或 `/setkey link` 出一次性网页表单),它们进金库,永远不进这个配置文件。'
 
-/** 白名单里那四个;写在一处,工具 schema 的 enum 与 classify 都从它派生。 */
-const KNOB_KEYS: readonly string[] = ENV_KNOBS.map((k) => k.key)
+/**
+ * 白名单里那四个;写在一处,工具 schema 的 enum 与 classify 都从它派生。
+ *
+ * 类型是 `EnvKnobKey` 不是 `string`——这不是装饰:`HubEnvProposal.apply.key`
+ * 也是这个联合,于是「M4 提了一个键 → M3c 收得下」是**编译期**成立的,不是靠
+ * 运行期拿一个 400 回来才发现。
+ */
+const KNOB_KEYS: readonly EnvKnobKey[] = ENV_KNOB_KEYS
 
 function knobOf(key: string) {
   return ENV_KNOBS.find((k) => k.key === key)
@@ -170,11 +192,33 @@ export interface ButlerConfigToolsetDeps {
 }
 
 /**
+ * 给模型看的文本里,把空间根换成 `<space>`。手 A 的 `redact()` 是同一条理由,
+ * 分工也一样:**错误本身仍带绝对路径**(网页 owner / CLI 就在那台机器上,那条
+ * 路径正是他要的),脱敏属于**渲染给模型的那一层**,不属于错误。
+ *
+ * `''` 与 `'/'` 不换:前者会把每个空字符串位置都替换掉,后者会把文本里每一根
+ * 斜杠切成 `<space>`——两者都会把一句人话搅成乱码(与手 A 的 `length > 1` 守卫同源)。
+ */
+function makeRedactor(spaceDir: string): (text: string) => string {
+  const root = spaceDir.replace(/\/+$/, '')
+  if (root.length <= 1) return (t) => t
+  return (t) => t.split(root).join('<space>')
+}
+
+/**
+ * 非 `OpsError` 的东西——`ENOSPC`/`EACCES`/`EROFS` 之类——文本里带的是**临时文件
+ * 名**(`gotong.env.tmp-a1b2c3`)和 errno,对读的人零帮助,而它是我们控制不住形状
+ * 的一段自由文本。收窄成一句人话,细节留在 hub 侧的 `log.warn` 里。
+ */
+const WRITE_FAILED = '写不进去(磁盘或权限的问题)。这一项没有改动。详细原因在服务器日志里。'
+
+/**
  * governed 配置闸。verdict 永远 approve(每次 park——用户拍板的岔口 3「每次
  * park」,无 blanket grant),owner/admin 之外与坏参数一律在 park **之前** refuse。
  */
 export function buildButlerConfigToolset(deps: ButlerConfigToolsetDeps): GovernedActionToolset {
   const { userId, ops } = deps
+  const redact = makeRedactor(ops.spaceDir)
   return new GovernedActionToolset({
     tools: [
       {
@@ -254,10 +298,11 @@ export function buildButlerConfigToolset(deps: ButlerConfigToolsetDeps): Governe
       const key = normKey(args.key) || '(未指定)'
       const spec = knobOf(key)
       const raw = normValue(args.value)
-      // 归一化过的值(`always` / `8080`)才是人要读的那个;值不合法就**原样回显**
-      // ——这一行是卡面,不是第二道校验(真拒绝在 classify,人根本看不到这张卡)。
+      // 归一化过的值(`always`→`true` / `' 8080 '`→`8080`)才是人要读的那个。
+      // 不合法就**不回显**:这条分支现实中到不了(classify 先拒),但「到不了」
+      // 不是「可以往卡面上倒一段任意自由文本」的理由——这一行会进人的聊天窗。
       const verdict = spec?.validate(raw)
-      const v = verdict?.ok ? verdict.value : raw
+      const v = verdict?.ok ? verdict.value : '(值不合法)'
       return `把 hub 设置 ${key} 改成 ${v || '(空)'}`
     },
     execute: async (_name, args) => {
@@ -270,13 +315,16 @@ export function buildButlerConfigToolset(deps: ButlerConfigToolsetDeps): Governe
       const value = normValue(args.value)
       try {
         const out = await ops.set({ key, value, userId })
-        const body = out.lines.length > 0 ? out.lines.join('\n') : '(no output)'
+        // 成功那行是 ops-core 写的 `set KEY=v in <绝对路径>/gotong.env`——**同一条
+        // 文本三面共用**,网页/CLI 要那条绝对路径,只有喂给模型的这一份要换掉。
+        const body = out.lines.length > 0 ? redact(out.lines.join('\n')) : '(no output)'
         return { text: `${body}\n下次重启这台 hub 时生效。` }
       } catch (err) {
-        // ops-core 抛的是带说明的类型化错误(密钥名/未知旋钮/值不合法),原文
-        // 就是给人看的那句话——透传,别翻译成一句更含糊的「失败了」。
-        const message = err instanceof Error ? err.message : String(err)
         deps.logger?.warn('butler config: config-set failed', { key, err })
+        // `OpsError` 是我们自己拼的、给人看的那句话(密钥名/未知旋钮/值不合法),
+        // 透传——但仍然过一遍脱敏:它里面可能嵌着 `config_file_unreadable` 那种
+        // 带路径的说明。别的错不是给人看的,收窄。
+        const message = err instanceof OpsError ? redact(err.message) : WRITE_FAILED
         return { text: `没有改成:${message}`, isError: true }
       }
     },

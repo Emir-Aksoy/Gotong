@@ -315,7 +315,13 @@ function buildFullFace(): ToolFaceEntry[] {
       kind: 'governed',
       toolset: buildButlerConfigToolset({
         userId: U,
-        ops: { privileged: () => true, knobs: async () => [], set: async () => ({ lines: [] }) },
+        ops: {
+        privileged: () => true,
+        knobs: async () => [],
+        set: async () => ({ lines: [] }),
+        // 只被脱敏用;这份报告只量 schema,execute 一次不跑。
+        spaceDir: '/fake/space',
+      },
       }),
     },
     // SEN-M1 hub 体检:benign 只读,与巡检/面板同源投影。

@@ -26,8 +26,9 @@
 
 import { CliParticipant } from '@gotong/cli-agent'
 import type { AgentRecord, FsJailSpec, Logger, Participant, TranscriptEntry } from '@gotong/core'
-import { userPrincipal } from '@gotong/identity'
+import { type Principal, userPrincipal } from '@gotong/identity'
 
+import { isSecretKey } from './ops-config-write.js'
 import {
   childEnv,
   ensureHandsDirs,
@@ -65,10 +66,20 @@ export interface CoderGrantDeps {
   setResourceGrant(input: {
     resourceKind: 'agent'
     resourceId: string
-    principal: ReturnType<typeof userPrincipal>
+    principal: Principal
     perm: 'owner'
     grantedBy?: string | null
   }): unknown
+  /**
+   * 手 B 的归属是「**恰好一个**成员」——grant 的主键含 principal,只 upsert 新的
+   * **不会**顶掉旧的,所以换绑(改 `hands.json` 里的 userId)时旧的那行必须被读出来
+   * 删掉,否则前任仍在 `listOwned` 里,仍能经 `escalate_to_expert` 驱动这只手。
+   */
+  listResourceGrants(
+    resourceKind: 'agent',
+    resourceId: string,
+  ): Array<{ principal: Principal; perm: string }>
+  removeResourceGrant(resourceKind: 'agent', resourceId: string, principal: Principal): unknown
 }
 
 export interface ArmButlerCoderOptions {
@@ -126,6 +137,19 @@ export async function armButlerCoder(opts: ArmButlerCoderOptions): Promise<Butle
     log.warn('hands: coder passEnv names are set by the jail itself — not passed through', { names: collided })
   }
 
+  // 凭证形状的名字**点名说出来**——但只是说,不拦。手 B 是一个外驱的 coding
+  // agent:它必须拿到自己的模型 key 才能开工,`passEnv` 因此**不可避免**是一条
+  // 凭证通道,而不是一个可以关掉的疏漏。能做的是让它别悄悄发生:装的时候把名字
+  // 印在日志里(值永远不印),操作者于是知道自己刚把哪几样递进了监狱。
+  // 残余如实记在 ATONG-HANDS.md §11.4:进了监狱的那把 key,监狱里的进程读得到。
+  const secretish = cfg.passEnv.filter((n) => !collided.includes(n) && isSecretKey(n))
+  if (secretish.length > 0) {
+    log.warn('hands: coder passEnv carries credential-shaped names into the jail', {
+      names: secretish,
+      note: 'an external coding agent needs its own model key — this is a deliberate credential path, not a leak',
+    })
+  }
+
   const participant = new CliParticipant({
     id: cfg.agentId,
     capabilities: [HANDS_CODER_CAPABILITY],
@@ -139,11 +163,22 @@ export async function armButlerCoder(opts: ArmButlerCoderOptions): Promise<Butle
     timeoutMs: cfg.timeoutSec * 1000,
     maxTurns: cfg.maxTurns,
     // thunk:围墙**每次 spawn 现算**(见 PerSpawn)。抛错 = 这一轮失败,不 spawn。
-    fsJail: (): FsJailSpec => ({
-      allowedRoots: [dirs.workspace],
-      kind: host.kind,
-      hardening: handsHardening({ hands: host, net: true, homeRaw: paths.homeRaw, homeReal: dirs.home }),
-    }),
+    fsJail: (): FsJailSpec => {
+      // 授权也现算,而且**就放在这里**:arm 时问一次是不够的——participant 一旦
+      // 注册就常驻,而 `allowRoles` 是个会变的东西(一次降权之后,手 A 当场没了,
+      // 手 B 却还在原地听 `escalate_to_expert` 的调,因为 owner grant 是持久的)。
+      // 那样「手 B 的权限是手 A 权限的子集」这句话就只在配置没动过的那段时间成立。
+      // 挂在围墙这条 thunk 上而不是另开一处检查,是因为**这条路本来就必须走**:
+      // 它抛错 = 这一轮不 spawn,与「围墙算不出来就不 spawn」共用同一条 fail-closed。
+      if (!host.allowed(cfg.userId)) {
+        throw new Error(`手 B 的归属成员「${cfg.userId}」现在不在 allowRoles(${host.config.allowRoles.join('/')})里——这一轮不跑`)
+      }
+      return {
+        allowedRoots: [dirs.workspace],
+        kind: host.kind,
+        hardening: handsHardening({ hands: host, net: true, homeRaw: paths.homeRaw, homeReal: dirs.home }),
+      }
+    },
     // 观察缝:CLI 的每一段输出即时播成 transcript 事件(admin 面板已经在消费
     // `llm_stream_chunk`),人能看着它干活——而不是等十五分钟看一个结论。
     onChunk: (taskId, c) => {
@@ -160,6 +195,32 @@ export async function armButlerCoder(opts: ArmButlerCoderOptions): Promise<Butle
     },
   })
 
+  // 换绑先清场,而且**排在任何副作用之前**:grant 的主键含 principal,只 upsert
+  // 新的**不会**顶掉旧的,于是把 `coder.userId` 从 A 改成 B 之后,A 仍然是这台
+  // coder 的 owner ——而 owner 正是 `escalate_to_expert` 认的那张表 ⇒ A 能继续
+  // 驱动一台现在住在 B 工作区里的手。手 B 的归属是「恰好一个成员」,所以这里读
+  // 出来、把不是他的那些删掉;读不动就一个参与者都不注册(下面那句 return)。
+  const mine = userPrincipal(cfg.userId)
+  try {
+    for (const g of opts.grants.listResourceGrants('agent', cfg.agentId)) {
+      // 只清 owner 行。别的档位(viewer/editor)是有人在 agent 面板上刻意给的,
+      // 那是**别人的决定**,不是这条配置线的事;这里要守的不变量只有一条:
+      // 「这台 coder 的 owner 恰好是 hands.json 里写的那个成员」。
+      if (g.perm !== 'owner') continue
+      if (g.principal.kind === mine.kind && g.principal.id === mine.id) continue
+      opts.grants.removeResourceGrant('agent', cfg.agentId, g.principal)
+      log.warn('hands: dropped a stale coder owner grant', {
+        agentId: cfg.agentId,
+        principal: `${g.principal.kind}:${g.principal.id}`,
+      })
+    }
+  } catch (err) {
+    // 读不到旧行 ⇒ 不知道清没清干净。宁可不装:一台「可能还有第二个 owner」的
+    // 手 B,比没有手 B 更坏(fail-closed 与上面五道闸同姿态)。
+    log.warn('hands: could not reconcile coder owner grants — hand B stays OFF', { agentId: cfg.agentId, err: String(err) })
+    return { armed: false, reason: `旧的归属行读不出来,不敢装:${String(err)}` }
+  }
+
   opts.hub.register(participant)
   // 名册行 + 授权:两样都在,`escalate_to_expert` 的 fail-closed 检查
   // (`roster.listOwned(userId)` 必须含 escalateTo)才过得去。**行是故意露出来的**
@@ -172,7 +233,7 @@ export async function armButlerCoder(opts: ArmButlerCoderOptions): Promise<Butle
   opts.grants.setResourceGrant({
     resourceKind: 'agent',
     resourceId: cfg.agentId,
-    principal: userPrincipal(cfg.userId),
+    principal: mine,
     perm: 'owner',
     grantedBy: cfg.userId,
   })
