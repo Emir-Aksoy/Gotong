@@ -36,10 +36,10 @@
     "@gotong/llm": "workspace:*"
   },
   "peerDependencies": {
-    "@anthropic-ai/sdk": "^0.112.3"
+    "@anthropic-ai/sdk": "^0.117.1"
   },
   "devDependencies": {
-    "@anthropic-ai/sdk": "^0.112.3",
+    "@anthropic-ai/sdk": "^0.117.1",
     "vitest": "^4.1.10"
   }
 }
