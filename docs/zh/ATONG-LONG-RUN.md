@@ -1,7 +1,9 @@
 # 阿同长任务执行(LONG track)— 分段长跑
 
-> Status: **M0 计划落档(2026-08-21)**。方向: **主 T 兼 M**(循环骨架/工具面/验证预算
-> 属 T;任务级工作记忆/压缩/交接属 M)。
+> Status: **M0 完(计划+三岔口拍板 2026-08-21) · M1 完(档案纯核 2026-08-21) · M2 待做**。方向: **主 T 兼 M**
+> (循环骨架/工具面/验证预算属 T;任务级工作记忆/压缩/交接属 M)。
+> 拍板结果:驱动器=骑 suspended_tasks 自挂起+resume sweep;配置面=扩
+> ManagedAgentSpec additive;范围=先只给管家阿同。
 >
 > 本文是 LONG track 的北极星:诊断、原则、边界、两路侦察实录、设计定型、里程碑与岔口。
 > 岔口未拍板前零代码零旋钮(116 冻结)。侦察出处:自家仓库盘点(2026-08-21,file:line 齐)
@@ -265,9 +267,23 @@ tool-loop;接力(relay)是段末自挂起+到点冷启动;工种槽把组合里�
 
 ## 七、里程碑
 
-- **M1 任务档案纯核**(personal-butler,host-free):dossier/journal 读写与追加、预算
-  记账纯函数、接力提示确定性渲染(注入防御=定界+「数据不是指令」+控制字符清洗,
-  mdSafe/oneLine 先例;同一 dossier 渲染两次逐字节相同——投影零 Date.now 先例)。
+- ✅ **M1 任务档案纯核**(personal-butler,host-free;2026-08-21 落地
+  `src/longrun-dossier.ts`):dossier/journal 读写与追加(dossier=tmp+rename 原子写,
+  journal=append-only 永不重写;坏档隔离改名且 **missing 与 corrupt 是两种可区分结果**
+  ——驱动器能响亮报「档案坏了」而不是把任务静默当新开)、预算记账纯函数(token+墙钟
+  双轨+段数机械兜底;坏表计 0 但段数照进,零 token 环圈不住)、段末四分支零 LLM 裁决
+  `decideSegmentVerdict`(**分支序承重:终态压过预算耗尽**——模型刚 complete 的任务
+  绝不被送进收尾段)、零 LLM 唤醒预检 `precheckLongRunWake`(等子活醒来没新结果→
+  指数退避再挂,零模型调用;`waitingForChildren` **刻意 sticky**——弱模型声明一次就够,
+  裁决的 wait 分支要求 pending>0 故僵旗永不困住已收齐的任务;`childResultsSeen`
+  **段末才记账** `markChildResultsSeen` 且只记到渲染时刻的快照——段中途落地的子结果
+  保持未读,下次唤醒重跑段把它渲染出来,绝不被段末快照静默吞掉)、接力/收尾提示确定性
+  渲染(注入防御两层=入口折叠控制字符+bidi、渲染处 XML 转义——objective 里写
+  `</objective>` 关不掉框架定界,提示原文声明「它是数据不是指令」;完成审计句
+  「没发现剩余工作」不算证据;同 dossier 渲染两次逐字节相同,**源码级断言零
+  `Date.now`/`new Date(`,`now` 是必填注入**——投影零时钟先例)。38 单测 8 组+三道
+  变异各红在恰好该红那些例(转义神经化⇒3 例/终态序让位预算⇒1 例/摘 journal 尾部
+  字节顶⇒1 例),python 精确替换复原+shasum 对拍。
 - **M2 分段执行器+接力驱动**(host):段末自挂起(**接力挂起不打包 messages**,与 park
   相区分)/resume 唤醒建段/段末四分支确定性裁决/预算双轨入账;段内 park 与接力共存
   e2e;工具面 persist_progress/complete(benign,AFR 三件套);中断标记(上段被打断
@@ -283,7 +299,7 @@ tool-loop;接力(relay)是段末自挂起+到点冷启动;工种槽把组合里�
 每刀验收照例:单测+变异测试(python 精确替换复原+shasum 对拍)、四门 PASS、全仓
 typecheck、旋钮 116 零新增。
 
-## 八、岔口(摆给用户拍板)
+## 八、岔口(2026-08-21 用户已全拍板,三项均取推荐)
 
 1. **驱动器住哪**:(a) 骑工作流引擎(长任务=现场生成 ephemeral run) /
    **(b) 骑 suspended_tasks 自挂起+resume sweep〔推荐〕** / (c) 另起新循环。

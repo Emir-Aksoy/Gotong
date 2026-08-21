@@ -22,6 +22,12 @@ export type ButlerErrorCode =
   | 'knowledge_not_found'
   /** Knowledge library (LIB-M2): an explicit cap refused the op (no silent caps). */
   | 'knowledge_limit'
+  /** Long-run dossier (LONG-M1): bad input (bad taskId / empty objective / bad budget). */
+  | 'longrun_invalid'
+  /** Long-run dossier (LONG-M1): the referenced task dossier doesn't exist. */
+  | 'longrun_not_found'
+  /** Long-run dossier (LONG-M1): an explicit cap refused the op (no silent caps). */
+  | 'longrun_limit'
 
 export class ButlerError extends Error {
   readonly code: ButlerErrorCode
