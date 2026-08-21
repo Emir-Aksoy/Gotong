@@ -1139,6 +1139,39 @@ export interface FallbackCandidate {
 }
 
 /**
+ * LONG-M4 — 一个长任务工种槽指定的模型(FallbackCandidate 的同族兄弟,两处
+ * 刻意不同:`model` **必填**——槽存在的全部意义就是「这个工种换这个模型」;
+ * `provider` **可选**——缺省 = 在管家自己的 provider 上只换模型名(NA-M5
+ * maintenanceModel 语义),设了 = 跨 provider(host 经 resolveApiKey +
+ * providerFactory 现构造,与 fallback 候选同一条链)。
+ */
+export interface LongRunModelSlot {
+  /** 缺省 = 管家主 provider 上只换模型名;设了 = 跨 provider 构造。 */
+  provider?: 'anthropic' | 'openai' | 'openai-compatible' | 'mock'
+  /** 该工种用的模型 id。必填 —— 没有模型名的槽没有意义。 */
+  model: string
+  /** `provider === 'openai-compatible'` 时必填 —— 该 vendor 的 /v1 端点。 */
+  baseURL?: string
+  /**
+   * 可选的 **env 变量名**(不是 key 本身;值永不进本文件 —— 与
+   * {@link FallbackCandidate.apiKeyEnv} 同一纪律)。仅在 `provider` 设了时
+   * 有意义:缺省 provider = 用管家自己已解析的 key,槽层 key 无从谈起。
+   */
+  apiKeyEnv?: string
+}
+
+/**
+ * LONG-M4 — 长任务工种×模型槽表(见 {@link ManagedAgentSpec.longRunModels})。
+ * 键名是闭集:未知槽名在配置门被拒(typo 响亮,不是静默没生效)。
+ */
+export interface LongRunModelSlots {
+  /** 段末交接摘要 / 档案蒸馏。 */
+  compactor?: LongRunModelSlot
+  /** 收尾段综合交付。 */
+  synthesizer?: LongRunModelSlot
+}
+
+/**
  * Recipe for an agent the **host** will spawn in-process and keep alive.
  * The `kind` discriminator picks which agent class the loader
  * instantiates:
@@ -1253,6 +1286,21 @@ export interface ManagedAgentSpec {
    * 厂商默认行为,逐字节不变。Hub 不解释本字段;只有 host 的 provider 装配读它。
    */
   thinking?: 'enabled' | 'disabled'
+  /**
+   * LONG-M4 — 可选的**长任务工种×模型槽**(按工种派档)。设了,host 的管家
+   * 长任务驱动器在对应工种的调用上换用槽里指定的模型/端点:
+   *
+   *   - `compactor`   — 段末交接摘要 / 档案蒸馏(低频 × 高杠杆,值得强模型)
+   *   - `synthesizer` — 收尾段综合交付(同上)
+   *
+   * `planner`(重规划)刻意**不设**:v1 驱动器没有重规划调用点,没有消费者的
+   * 配置键就是死配置;校验器拒未知槽名,将来加是 additive、typo 当场响亮。
+   * 缺省 / 槽缺席 = 该工种沿用管家主链,逐字节不变。确定性地板不动:段末
+   * 裁决 / 接力渲染仍零 LLM,槽只升级「谁来写摘要 / 谁跑收尾段」。
+   * Hub 不解释本字段;只有 host 的 butler 长任务驱动器读它(opt-in)。
+   * 详见 `docs/zh/ATONG-LONG-RUN.md` §6.4。
+   */
+  longRunModels?: LongRunModelSlots
   /**
    * Hub Services this agent uses (v2.2 — see docs/services-rfc.md §6).
    * Empty / absent means the agent has no service handles at runtime;

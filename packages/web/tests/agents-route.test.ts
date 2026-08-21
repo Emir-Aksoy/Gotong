@@ -398,6 +398,84 @@ describe('agents-route: thinking (DUO-M4a reasoning switch)', () => {
   })
 })
 
+// LONG-M4a — the direct POST/PUT body accepts `longRunModels` through the SAME
+// validator the manifest importer uses (validateLongRunModels), so the two
+// write paths can never drift on what a legal slot looks like.
+describe('agents-route: longRunModels (LONG-M4a craft-model slots)', () => {
+  let b: Boot
+  beforeEach(async () => { b = await boot() })
+  afterEach(async () => { await teardown(b) })
+
+  const SLOTS = {
+    compactor: { provider: 'anthropic', model: 'claude-strong-1', apiKeyEnv: 'STRONG_KEY' },
+    synthesizer: { model: 'strong-syn' },
+  }
+
+  it('POST persists both slots; GET echoes them via managed', async () => {
+    const res = await fetch(`${b.baseUrl}/api/admin/agents`, {
+      method: 'POST',
+      headers: auth(b.token),
+      body: JSON.stringify({ ...base, id: 'runner', longRunModels: SLOTS }),
+    })
+    expect(res.status).toBe(200)
+    const body = await res.json()
+    expect(body.agent.managed.longRunModels).toEqual(SLOTS)
+    const list = await fetch(`${b.baseUrl}/api/admin/agents`, { headers: auth(b.token) })
+    const agents = (await list.json()).agents as Array<{ id: string; managed?: { longRunModels?: unknown } }>
+    expect(agents.find((a) => a.id === 'runner')?.managed?.longRunModels).toEqual(SLOTS)
+  })
+
+  it('omitting longRunModels leaves it undefined (opt-in byte-stable)', async () => {
+    const res = await fetch(`${b.baseUrl}/api/admin/agents`, {
+      method: 'POST',
+      headers: auth(b.token),
+      body: JSON.stringify({ ...base, id: 'no-slots' }),
+    })
+    expect(res.status).toBe(200)
+    expect((await b.space.agents()).find((a) => a.id === 'no-slots')?.managed.longRunModels).toBeUndefined()
+  })
+
+  it('an unknown slot name / a slot without model → 400, nothing persisted', async () => {
+    for (const bad of [
+      { compacter: { model: 'm' } }, // typo — closed key set
+      { compactor: { provider: 'anthropic' } }, // model required
+      { compactor: { model: 'm', apiKeyEnv: 'K' } }, // apiKeyEnv needs a provider
+      42, // not an object
+    ]) {
+      const res = await fetch(`${b.baseUrl}/api/admin/agents`, {
+        method: 'POST',
+        headers: auth(b.token),
+        body: JSON.stringify({ ...base, id: 'bad-slots', longRunModels: bad }),
+      })
+      expect(res.status).toBe(400)
+    }
+    expect((await b.space.agents()).some((a) => a.id === 'bad-slots')).toBe(false)
+  })
+
+  it('PUT echoing the slots keeps them; omitting them drops them (wholesale replace)', async () => {
+    await fetch(`${b.baseUrl}/api/admin/agents`, {
+      method: 'POST',
+      headers: auth(b.token),
+      body: JSON.stringify({ ...base, id: 'slot-edit', longRunModels: SLOTS }),
+    })
+    const keep = await fetch(`${b.baseUrl}/api/admin/agents/slot-edit`, {
+      method: 'PUT',
+      headers: auth(b.token),
+      body: JSON.stringify({ ...base, id: 'slot-edit', longRunModels: SLOTS }),
+    })
+    expect(keep.status).toBe(200)
+    expect((await b.space.agents()).find((a) => a.id === 'slot-edit')?.managed.longRunModels).toEqual(SLOTS)
+    // Omission drops — the admin form's capture-echo (managed-agents.js) defends this.
+    const drop = await fetch(`${b.baseUrl}/api/admin/agents/slot-edit`, {
+      method: 'PUT',
+      headers: auth(b.token),
+      body: JSON.stringify({ ...base, id: 'slot-edit' }),
+    })
+    expect(drop.status).toBe(200)
+    expect((await b.space.agents()).find((a) => a.id === 'slot-edit')?.managed.longRunModels).toBeUndefined()
+  })
+})
+
 describe('agents-route: apiKeyEnv (MR-M6 per-candidate env credentials)', () => {
   let b: Boot
   beforeEach(async () => { b = await boot() })

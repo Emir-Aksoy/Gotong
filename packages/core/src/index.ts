@@ -27,6 +27,9 @@ export type {
   AgentRecord,
   ManagedAgentSpec,
   FallbackCandidate,
+  // LONG-M4 — 长任务工种×模型槽(compactor/synthesizer;host 驱动器消费)
+  LongRunModelSlot,
+  LongRunModelSlots,
   ManagedAgentLifecycle,
   McpServerSpec,
   McpStdioServerSpec,

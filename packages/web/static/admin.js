@@ -1029,6 +1029,7 @@
       ma._editingApiKeyEnv = mode === "edit" && typeof agent?.managed?.apiKeyEnv === "string" ? agent.managed.apiKeyEnv : null;
       ma._editingEscalateTo = mode === "edit" && typeof agent?.managed?.escalateTo === "string" ? agent.managed.escalateTo : null;
       ma._editingThinking = mode === "edit" && typeof agent?.managed?.thinking === "string" ? agent.managed.thinking : null;
+      ma._editingLongRunModels = mode === "edit" && agent?.managed?.longRunModels && typeof agent.managed.longRunModels === "object" ? agent.managed.longRunModels : null;
       if (dom.maForm) dom.maForm.hidden = false;
       if (dom.maQuickchat) dom.maQuickchat.hidden = true;
       ma._quickChatAgentId = null;
@@ -1206,6 +1207,9 @@
       }
       if (typeof ma._editingThinking === "string" && ma._editingThinking) {
         body.thinking = ma._editingThinking;
+      }
+      if (ma._editingLongRunModels && typeof ma._editingLongRunModels === "object") {
+        body.longRunModels = ma._editingLongRunModels;
       }
       if (dom.maHeartbeatEnabled?.checked) {
         const minutes = Math.max(1, Math.round(Number(dom.maHeartbeatInterval?.value.trim()) || 30));

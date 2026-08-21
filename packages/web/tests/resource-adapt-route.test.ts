@@ -234,6 +234,15 @@ describe('RES-M3 adapt route: MR-M2/M6/NA-M5 spec fields survive the constrained
     { provider: 'openai-compatible', baseURL: 'http://fallback.test/v1', providerLabel: 'DeepSeek' },
   ]
 
+  // LONG-M4a — craft-model slots. Each slot names its OWN provider/model (or
+  // rides whatever the primary is), so a primary rewire must carry them along;
+  // a stale slot model fails loudly at the next long-run segment (one-field
+  // follow-up edit), which beats a silent wipe.
+  const LONG_RUN = {
+    compactor: { provider: 'anthropic', model: 'claude-strong-1', apiKeyEnv: 'STRONG_KEY' },
+    synthesizer: { model: 'strong-syn' },
+  }
+
   it('use_local_endpoint keeps fallbacks + maintenanceModel; sheds and REPORTS the primary apiKeyEnv', async () => {
     await createAgent(b, {
       id: 'router',
@@ -245,6 +254,7 @@ describe('RES-M3 adapt route: MR-M2/M6/NA-M5 spec fields survive the constrained
       escalateTo: 'expert-agent',
       thinking: 'disabled',
       fallbacks: FALLBACKS,
+      longRunModels: LONG_RUN,
     })
     const res = await adapt(b, {
       kind: 'use_local_endpoint',
@@ -278,6 +288,8 @@ describe('RES-M3 adapt route: MR-M2/M6/NA-M5 spec fields survive the constrained
     // DUO-M4a — the reasoning switch is the owner's latency/cost stance,
     // orthogonal to which endpoint serves; it must survive the rewire too.
     expect(m?.thinking).toBe('disabled')
+    // LONG-M4a — the craft-model slots survive too (see LONG_RUN note above).
+    expect(m?.longRunModels).toEqual(LONG_RUN)
     // The primary's exclusive env name pointed at the OLD vendor — it must not
     // ride along onto the local endpoint (the placeholder per-agent key serves it).
     expect(m?.apiKeyEnv).toBeUndefined()
@@ -296,6 +308,7 @@ describe('RES-M3 adapt route: MR-M2/M6/NA-M5 spec fields survive the constrained
       escalateTo: 'expert-agent',
       thinking: 'disabled',
       fallbacks: FALLBACKS,
+      longRunModels: LONG_RUN,
     })
     const res = await adapt(b, {
       kind: 'switch_provider',
@@ -325,6 +338,7 @@ describe('RES-M3 adapt route: MR-M2/M6/NA-M5 spec fields survive the constrained
     expect(m?.maintenanceModel).toBe('claude-haiku-4-5')
     expect(m?.escalateTo).toBe('expert-agent')
     expect(m?.thinking).toBe('disabled')
+    expect(m?.longRunModels).toEqual(LONG_RUN)
   })
 })
 

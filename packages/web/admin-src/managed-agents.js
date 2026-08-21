@@ -393,6 +393,16 @@ export function createManagedAgents({ ma, openBundleImportModal }) {
     ma._editingThinking = (mode === 'edit' && typeof agent?.managed?.thinking === 'string')
       ? agent.managed.thinking
       : null
+    // LONG-M4 — same capture/echo for the long-run craft-model slots. No
+    // structured editor yet (author via manifest export → edit YAML →
+    // re-import, same as fallbacks); but a PUT replaces `managed` wholesale,
+    // so the captured slots MUST be echoed on save or a plain edit would
+    // silently drop them.
+    ma._editingLongRunModels = (mode === 'edit'
+        && agent?.managed?.longRunModels
+        && typeof agent.managed.longRunModels === 'object')
+      ? agent.managed.longRunModels
+      : null
     // ease-of-use ②TC — always open on the form, never a stale quick-chat
     // panel left over from a prior create (closeAgentForm also resets, but be
     // defensive so the entry point is self-sufficient).
@@ -627,6 +637,11 @@ export function createManagedAgents({ ma, openBundleImportModal }) {
     // via manifest). Omitting it would silently flip the vendor default back on.
     if (typeof ma._editingThinking === 'string' && ma._editingThinking) {
       body.thinking = ma._editingThinking
+    }
+    // LONG-M4 — echo the captured craft-model slots (no form widget; authored
+    // via manifest). Omitting them would silently drop the long-run slot config.
+    if (ma._editingLongRunModels && typeof ma._editingLongRunModels === 'object') {
+      body.longRunModels = ma._editingLongRunModels
     }
     // v5 D-M4 — heartbeat. Checked → persist { enabled, intervalMs (from the
     // minutes input), checklist? }. Unchecked → omit so a PUT (which replaces

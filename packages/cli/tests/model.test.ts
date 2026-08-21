@@ -89,6 +89,10 @@ function exportedAtong(extra: Record<string, unknown> = {}): Record<string, unkn
       { provider: 'openai-compatible', baseURL: 'https://mimo.example/v1', model: 'm2', apiKeyEnv: 'MIMO_KEY' },
     ],
     maintenanceModel: 'cheap-1',
+    // LONG-M4a — craft-model slots ride the `{...exported}` spread like every
+    // other echo-sensitive field; present in the fixture so EVERY buildPutBody
+    // path proves it survives.
+    longRunModels: { synthesizer: { model: 'strong-syn' } },
     heartbeat: { enabled: true, intervalMs: 60_000 },
     ...extra,
   }
@@ -180,6 +184,7 @@ describe('buildPutBody', () => {
       heartbeat: { enabled: true, intervalMs: 60_000 },
     })
     expect(body.fallbacks).toEqual(exportedAtong().fallbacks)
+    expect(body.longRunModels).toEqual({ synthesizer: { model: 'strong-syn' } })
     expect(droppedApiKeyEnv).toBeUndefined()
   })
 
@@ -309,6 +314,7 @@ describe('gotong model (scripted end-to-end)', () => {
       maintenanceModel: 'cheap-1',
     })
     expect(put.body!.fallbacks).toEqual(exportedAtong().fallbacks)
+    expect(put.body!.longRunModels).toEqual({ synthesizer: { model: 'strong-syn' } })
     expect(put.body!.kind).toBeUndefined()
     // apiKeyEnv exclusivity: new key → binding dropped and said out loud
     expect(put.body!.apiKeyEnv).toBeUndefined()

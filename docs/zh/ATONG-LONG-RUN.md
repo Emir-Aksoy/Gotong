@@ -1,6 +1,6 @@
 # 阿同长任务执行(LONG track)— 分段长跑
 
-> Status: **M0 完(计划+三岔口拍板 2026-08-21) · M1 完(档案纯核 2026-08-21) · M2 完(分段执行器+接力驱动 2026-08-21) · M3 完(分解-回收 2026-08-21) · M4 待做**。方向: **主 T 兼 M**
+> Status: **M0 完(计划+三岔口拍板 2026-08-21) · M1 完(档案纯核 2026-08-21) · M2 完(分段执行器+接力驱动 2026-08-21) · M3 完(分解-回收 2026-08-21) · M4a 完(工种×模型配置面 2026-08-21) · M4b 待做(槽解析+消费者)**。方向: **主 T 兼 M**
 > (循环骨架/工具面/验证预算属 T;任务级工作记忆/压缩/交接属 M)。
 > 拍板结果:驱动器=骑 suspended_tasks 自挂起+resume sweep;配置面=扩
 > ManagedAgentSpec additive;范围=先只给管家阿同。
@@ -257,9 +257,17 @@ tool-loop;接力(relay)是段末自挂起+到点冷启动;工种槽把组合里�
 
 ### 6.4 工种×模型
 
-- 槽位:**压缩者**(段末交接摘要/档案蒸馏)/**规划者**(重规划)/**汇总者**(子活
-  综合)。槽形状=FallbackCandidate 族 `{provider?, model, apiKeyEnv?}`,解析走既有
-  `resolveApiKey`+providerFactory——跨 provider 机制零新造。
+- 槽位:**压缩者 compactor**(段末交接摘要/档案蒸馏)/**汇总者 synthesizer**(收尾段
+  综合交付)。〔M4a 改口〕本节原列第三槽**规划者**,落地时刻意不设:v1 驱动器没有
+  重规划调用点,没人读的槽=死配置;校验器把槽名集**闭死**(未知槽名响亮拒),将来加
+  `planner` 是 additive——旧 hub 撞新 manifest 在导入时就红,绝不静默 no-op。
+- 槽形状=FallbackCandidate 族 `{provider?, model, baseURL?, apiKeyEnv?}`,两处刻意
+  不同:`model` **必填**(槽的全部意义就是「这工种用这个模型」),`provider` 可选
+  (缺省=管家主 provider 上只换模型名,NA-M5 maintenanceModel 语义;设了=跨 provider
+  构造,解析走既有 `resolveApiKey`+providerFactory——跨 provider 机制零新造)。
+  `apiKeyEnv` 只在设了 provider 时合法(不设 provider 时管家自己解析好的 key 就是
+  答案,槽级 env 名会是一句被静默携带的谎——与 baseURL 只许配 openai-compatible 同一
+  论证);存的是 env 变量**名**,永不是 key 本身(MR-M6 同规)。
 - 未配槽=回落管家主链(=Codex 现状,主模型干一切);**确定性地板与模型路径走同一
   生命周期**(Codex 守则):段末落盘的档案形状,不因「谁写的摘要」而不同。
 - 地板(全弱/零槽配置)=段末进度由段内模型经结构化工具落(typed 字段,确定性形状),
@@ -362,8 +370,32 @@ tool-loop;接力(relay)是段末自挂起+到点冷启动;工种槽把组合里�
     main.ts 2810/2810 未动,接线在 factory);**三道变异三次全红且只红该红那些**
     (摘 spawn 的等待旗⇒恰 1 例/摘 no_participant 事实行⇒恰 1 例/摘子活 finally
     flush⇒恰 2 例[两条计费测]),python 精确替换复原+shasum 对拍。
-- **M4 工种×模型配置面**:core additive spec 字段 + web 三缝 echo(manifest/
-  agents-routes/admin capture-echo,maintenanceModel/fallbacks 先例)+ pool 槽解析。
+- ✅ **M4a 工种×模型配置面**(2026-08-21;DUO-M1 先例=配置面先落、消费者下一刀,
+  字段头注写明「host 长任务驱动器消费,M4b 到位」):core additive
+  `ManagedAgentSpec.longRunModels?: LongRunModelSlots`(槽名闭集 {compactor,
+  synthesizer},**planner 刻意不设**——v1 无重规划调用点,拒未知槽名使将来加它
+  additive-安全,见 §6.4 改口)。**一个校验器两条写路径**:`validateLongRunModels`
+  (manifest.ts,导出)同时喂 manifest 导入与 agents-routes POST/PUT——model 必填/
+  provider 四元枚举可选/baseURL 当且仅当 openai-compatible/**apiKeyEnv 必须伴随
+  provider**(不伴随=管家自己的 key 就是答案,槽级 env 名是被静默携带的谎,响亮拒)/
+  apiKeyEnv 走共享 `validateApiKeyEnv`(env 变量名形状,贴 key 本身当场红)。
+  **五个 echo 面全核齐**(PUT 整体替换语义下,漏任何一面=普通编辑静默抹槽):
+  ①manifest 解析 ②export 深拷贝 echo(空对象不落键)③agents-routes PUT 校验
+  ④RES adapt-apply 逐字段 echo(主链改道时槽存活——槽各自钉自己的 provider/model,
+  陈旧槽在下段响亮失败=一格跟进编辑,好过静默抹)⑤admin 面板 capture-echo
+  (`_editingLongRunModels`,无结构化编辑器=fallbacks 同规「manifest 导出→改 YAML→
+  重导入」;新薄文本门钉 capture+echo 两锚点)——CLI `buildPutBody` 走 `{...exported}`
+  展开免费搭车(fixture 加槽使每条 buildPutBody 路径都证存活)。验收:web **1680**
+  (+17:manifest 校验器 11/agents-routes 4/面板文本门 2;adapt 存活扩展骑既有 2 例)、
+  cli **323**(+2 断言骑既有例,例数不变)、全仓 typecheck 净、四门 PASS(**旋钮 116 零新增**
+  ——longRunModels 是 spec 数据字段不是 env 旋钮,maintenanceModel 同一论证;六热
+  文件 main.ts 2810/2810 未动)。**两道变异两次全红且只红该红那些**(摘 adapt echo
+  ⇒恰 2 例[两条存活测];未知槽名 throw 改 continue⇒恰 2 例[manifest typo+路由 400,
+  两条写路径同一校验器各红一例]),python 精确替换复原+shasum 对拍。
+- **M4b 槽解析+消费者**:pool 槽解析 closure 骑 `ButlerRowExtras` 第三参(DUO-M2
+  先例,spawn 时快照结构性不 stale,main.ts 零触碰)+ llm `providerFor(task)` additive
+  缝 + 驱动器两消费者(synthesizer=收尾段/compactor=接力类裁决的档案蒸馏交接,
+  用量入 dossier 预算同一 mutate=边界⑥)。
 - **M5 随档刻度接线**〔用户门:等 EFF 出数,段长/压缩节律/转派阈值随组合调〕。
 - **M6 capstone**(零 key 零网络自断言):故意失忆 provider(TN-M3 先例)证 dossier
   跨段接力;kill-restart 中途证盘上幸存;预算耗尽证诚实部分交付;fan-out 回收一遍。

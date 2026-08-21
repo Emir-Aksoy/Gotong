@@ -3,6 +3,8 @@ import { parse as parseYaml } from 'yaml'
 import type {
   FallbackCandidate,
   HeartbeatSpec,
+  LongRunModelSlot,
+  LongRunModelSlots,
   ManagedAgentSpec,
   McpServerSpec,
   ServiceUseSpec,
@@ -454,6 +456,11 @@ function validateAgent(a: Record<string, unknown>, path: string): ParsedAgent {
   if (a.thinking !== undefined) {
     managed.thinking = validateThinking(a.thinking, `${path}.thinking`)
   }
+  // Optional `longRunModels:` — LONG-M4 craft-model slots for the butler's
+  // long-run driver. Shape-only here; the driver resolves them at spawn.
+  if (a.longRunModels !== undefined) {
+    managed.longRunModels = validateLongRunModels(a.longRunModels, `${path}.longRunModels`)
+  }
   const out: ParsedAgent = { id: a.id, capabilities, managed }
   if (typeof a.displayName === 'string') out.displayName = a.displayName
   return out
@@ -845,6 +852,89 @@ export function validateFallbacksArray(raw: unknown, path: string): FallbackCand
   return out
 }
 
+// LONG-M4 — the closed set of craft slots the long-run driver consumes.
+// `planner` is deliberately NOT here: the v1 driver has no replan call site,
+// and a config key nobody reads is dead config. Rejecting unknown keys is
+// what makes adding it later additive-safe (old hub + new manifest fails
+// loudly at import, never a silent no-op).
+const LONG_RUN_SLOT_NAMES = ['compactor', 'synthesizer'] as const
+
+/**
+ * Validate an optional `longRunModels:` map (LONG-M4 — craft-model slots for
+ * the butler's long-run driver; see `docs/zh/ATONG-LONG-RUN.md` §6.4). Slot
+ * shape is the FallbackCandidate family with two deliberate differences:
+ * `model` is REQUIRED (a slot's whole point is "this craft uses THIS model")
+ * and `provider` is OPTIONAL (absent = model-name override on the butler's
+ * own provider, NA-M5 maintenanceModel semantics; present = cross-provider
+ * construction through the same resolveApiKey + providerFactory chain the
+ * fallback candidates use). `apiKeyEnv` is only meaningful WITH a provider —
+ * without one the butler's own already-resolved key serves, so a slot-level
+ * env name would be a silently-carried lie; rejected loudly instead (same
+ * argument as baseURL on a non-compatible fallback candidate).
+ *
+ * Exported so the admin POST/PUT path (`agents-routes.ts`) runs the exact
+ * same checks the manifest importer does — one validator, no drift.
+ */
+export function validateLongRunModels(raw: unknown, path: string): LongRunModelSlots {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    throw new ManifestError(`${path} must be an object`)
+  }
+  const rec = raw as Record<string, unknown>
+  for (const key of Object.keys(rec)) {
+    if (!(LONG_RUN_SLOT_NAMES as readonly string[]).includes(key)) {
+      throw new ManifestError(
+        `${path}.${key} is not a known long-run slot (known: ${LONG_RUN_SLOT_NAMES.join(', ')})`,
+      )
+    }
+  }
+  const out: LongRunModelSlots = {}
+  for (const name of LONG_RUN_SLOT_NAMES) {
+    const entry = rec[name]
+    if (entry === undefined) continue
+    const ep = `${path}.${name}`
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+      throw new ManifestError(`${ep} must be an object`)
+    }
+    const e = entry as Record<string, unknown>
+    if (typeof e.model !== 'string' || e.model.trim().length === 0) {
+      throw new ManifestError(`${ep}.model is required (a non-empty string)`)
+    }
+    const slot: LongRunModelSlot = { model: e.model.trim() }
+    if (e.provider !== undefined) {
+      const provider = e.provider
+      if (
+        provider !== 'anthropic' &&
+        provider !== 'openai' &&
+        provider !== 'openai-compatible' &&
+        provider !== 'mock'
+      ) {
+        throw new ManifestError(
+          `${ep}.provider must be 'anthropic', 'openai', 'openai-compatible', or 'mock' when present`,
+        )
+      }
+      slot.provider = provider
+    }
+    if (slot.provider === 'openai-compatible') {
+      if (typeof e.baseURL !== 'string' || e.baseURL.length === 0) {
+        throw new ManifestError(`${ep}.baseURL is required when provider is 'openai-compatible'`)
+      }
+      slot.baseURL = e.baseURL
+    } else if (e.baseURL !== undefined) {
+      throw new ManifestError(`${ep}.baseURL is only valid when provider is 'openai-compatible'`)
+    }
+    if (e.apiKeyEnv !== undefined) {
+      if (slot.provider === undefined) {
+        throw new ManifestError(
+          `${ep}.apiKeyEnv is only valid when the slot names a provider — without one the butler's own key serves`,
+        )
+      }
+      slot.apiKeyEnv = validateApiKeyEnv(e.apiKeyEnv, `${ep}.apiKeyEnv`)
+    }
+    out[name] = slot
+  }
+  return out
+}
+
 /**
  * Validate an optional `{ string: string }` map (used for both stdio
  * `env` and http/sse `headers`). Returns `undefined` when the field is
@@ -969,6 +1059,20 @@ export function renderAgentManifest(rec: {
   if (rec.managed.thinking) {
     // DUO-M4a — echo so export → re-import preserves the reasoning switch.
     agent.thinking = rec.managed.thinking
+  }
+  if (rec.managed.longRunModels && Object.keys(rec.managed.longRunModels).length > 0) {
+    // LONG-M4 — echo so export → re-import preserves the craft-model slots
+    // byte-for-byte. Deep-clone each slot (same posture as fallbacks above).
+    const slots: Record<string, unknown> = {}
+    for (const [name, slot] of Object.entries(rec.managed.longRunModels)) {
+      if (!slot) continue
+      const out: Record<string, unknown> = { model: slot.model }
+      if (slot.provider !== undefined) out.provider = slot.provider
+      if (slot.baseURL !== undefined) out.baseURL = slot.baseURL
+      if (slot.apiKeyEnv !== undefined) out.apiKeyEnv = slot.apiKeyEnv
+      slots[name] = out
+    }
+    agent.longRunModels = slots
   }
   if (rec.displayName) agent.displayName = rec.displayName
   return {

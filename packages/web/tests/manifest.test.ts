@@ -760,6 +760,157 @@ agent: { id: w, capabilities: [x], provider: mock, system: hi, ${bad} }
   })
 })
 
+// LONG-M4a — `longRunModels:` maps a craft (compactor / synthesizer) to the
+// model that does it. Slot shape = FallbackCandidate family, except `model`
+// is REQUIRED and `provider` optional (absent = model-name override on the
+// butler's own provider). The slot-name set is CLOSED: a typo must fail at
+// import, never become a silent no-op the driver ignores forever.
+describe('parseManifest — longRunModels: (LONG-M4a craft-model slots)', () => {
+  it('parses both slots — provider-less override and full cross-provider', () => {
+    const yaml = `
+schema: gotong.agent/v1
+agent:
+  id: w
+  capabilities: [x]
+  provider: anthropic
+  system: hi
+  longRunModels:
+    compactor:
+      model: '  claude-strong-1  '
+    synthesizer:
+      provider: openai-compatible
+      baseURL: 'https://api.deepseek.example/v1'
+      model: deepseek-reasoner
+      apiKeyEnv: DEEPSEEK_API_KEY
+`
+    const m = parseManifest(yaml)
+    const slots = m.agents[0]!.managed.longRunModels
+    expect(slots).toEqual({
+      compactor: { model: 'claude-strong-1' },
+      synthesizer: {
+        provider: 'openai-compatible',
+        baseURL: 'https://api.deepseek.example/v1',
+        model: 'deepseek-reasoner',
+        apiKeyEnv: 'DEEPSEEK_API_KEY',
+      },
+    })
+  })
+
+  it('an agent without longRunModels parses cleanly and reports undefined', () => {
+    const yaml = `
+schema: gotong.agent/v1
+agent: { id: w, capabilities: [x], provider: mock, system: hi }
+`
+    const m = parseManifest(yaml)
+    expect(m.agents[0]!.managed.longRunModels).toBeUndefined()
+  })
+
+  it('rejects an unknown slot name — a typo must fail at import, not silently no-op', () => {
+    const yaml = `
+schema: gotong.agent/v1
+agent:
+  id: w
+  capabilities: [x]
+  provider: mock
+  system: hi
+  longRunModels:
+    compacter: { model: strong-1 }
+`
+    expect(() => parseManifest(yaml)).toThrow(/compacter is not a known long-run slot/)
+  })
+
+  it('rejects a slot without model — a slot names THIS model or it means nothing', () => {
+    for (const bad of ['{ provider: anthropic }', "{ model: '' }", '{ model: 42 }']) {
+      const yaml = `
+schema: gotong.agent/v1
+agent: { id: w, capabilities: [x], provider: mock, system: hi, longRunModels: { compactor: ${bad} } }
+`
+      expect(() => parseManifest(yaml)).toThrow(/model is required/)
+    }
+  })
+
+  it('rejects a provider outside the four-provider enum', () => {
+    const yaml = `
+schema: gotong.agent/v1
+agent: { id: w, capabilities: [x], provider: mock, system: hi, longRunModels: { compactor: { provider: groq, model: m } } }
+`
+    expect(() => parseManifest(yaml)).toThrow(/provider must be 'anthropic', 'openai', 'openai-compatible', or 'mock'/)
+  })
+
+  it("openai-compatible requires baseURL; baseURL on any other shape is rejected", () => {
+    const noBase = `
+schema: gotong.agent/v1
+agent: { id: w, capabilities: [x], provider: mock, system: hi, longRunModels: { compactor: { provider: openai-compatible, model: m } } }
+`
+    expect(() => parseManifest(noBase)).toThrow(/baseURL is required when provider is 'openai-compatible'/)
+    const strayBase = `
+schema: gotong.agent/v1
+agent: { id: w, capabilities: [x], provider: mock, system: hi, longRunModels: { compactor: { model: m, baseURL: 'https://x.test/v1' } } }
+`
+    expect(() => parseManifest(strayBase)).toThrow(/baseURL is only valid when provider is 'openai-compatible'/)
+  })
+
+  it('apiKeyEnv without a provider is rejected — the butler’s own key serves that shape', () => {
+    const yaml = `
+schema: gotong.agent/v1
+agent: { id: w, capabilities: [x], provider: mock, system: hi, longRunModels: { compactor: { model: m, apiKeyEnv: SOME_KEY } } }
+`
+    expect(() => parseManifest(yaml)).toThrow(/apiKeyEnv is only valid when the slot names a provider/)
+  })
+
+  it('apiKeyEnv must be an env var NAME, never a pasted key', () => {
+    const yaml = `
+schema: gotong.agent/v1
+agent: { id: w, capabilities: [x], provider: mock, system: hi, longRunModels: { compactor: { provider: anthropic, model: m, apiKeyEnv: 'sk-not a name' } } }
+`
+    expect(() => parseManifest(yaml)).toThrow(/must be an env var NAME/)
+  })
+
+  it('rejects a non-object longRunModels and a non-object slot', () => {
+    for (const bad of ['longRunModels: 42', 'longRunModels: [a]', 'longRunModels: { compactor: strong-1 }']) {
+      const yaml = `
+schema: gotong.agent/v1
+agent: { id: w, capabilities: [x], provider: mock, system: hi, ${bad} }
+`
+      expect(() => parseManifest(yaml)).toThrow(/must be an object/)
+    }
+  })
+
+  it('renderAgentManifest round-trips both slots byte-for-byte', () => {
+    const slots = {
+      compactor: { model: 'claude-strong-1' },
+      synthesizer: {
+        provider: 'openai-compatible' as const,
+        baseURL: 'https://api.deepseek.example/v1',
+        model: 'deepseek-reasoner',
+        apiKeyEnv: 'DEEPSEEK_API_KEY',
+      },
+    }
+    const rendered = renderAgentManifest({
+      id: 'atong',
+      allowedCapabilities: ['x'],
+      managed: { kind: 'llm', provider: 'anthropic', system: 'be brief', longRunModels: slots },
+    })
+    const parsed = parseManifest(JSON.stringify(rendered))
+    expect(parsed.agents[0]!.managed.longRunModels).toEqual(slots)
+  })
+
+  it('renderAgentManifest omits longRunModels entirely when not declared (or empty)', () => {
+    const rendered = renderAgentManifest({
+      id: 'plain',
+      allowedCapabilities: ['x'],
+      managed: { kind: 'llm', provider: 'mock', system: 'hi' },
+    })
+    expect((rendered.agent as Record<string, unknown>).longRunModels).toBeUndefined()
+    const empty = renderAgentManifest({
+      id: 'empty',
+      allowedCapabilities: ['x'],
+      managed: { kind: 'llm', provider: 'mock', system: 'hi', longRunModels: {} },
+    })
+    expect((empty.agent as Record<string, unknown>).longRunModels).toBeUndefined()
+  })
+})
+
 // MR-M6 — `apiKeyEnv:` names an env VAR whose value is the credential for that
 // spec / candidate. The manifest carries the NAME only, never the key itself —
 // the validator's shape rule (identifier chars) is what makes pasting a real

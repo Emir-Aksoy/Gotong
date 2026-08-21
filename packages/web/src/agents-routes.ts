@@ -46,6 +46,7 @@ import {
   validateEscalateTo,
   validateThinking,
   validateApiKeyEnv,
+  validateLongRunModels,
   type ParsedAgent,
 } from './manifest.js'
 import { decryptJson } from './template-crypto.js'
@@ -342,6 +343,10 @@ function validateAgentBody(body: Record<string, unknown>): ParsedAgent {
   if (body.thinking !== undefined) {
     managed.thinking = validateThinking(body.thinking, 'thinking')
   }
+  // LONG-M4 — optional craft-model slots for the butler's long-run driver.
+  if (body.longRunModels !== undefined) {
+    managed.longRunModels = validateLongRunModels(body.longRunModels, 'longRunModels')
+  }
   if (body.uses !== undefined) {
     managed.uses = validateUsesArray(body.uses, 'uses')
   }
@@ -461,6 +466,15 @@ function adaptEditBodyFromProposal(
   // to which endpoint serves; endpoints that don't know the field ignore it (or
   // fail loudly — a one-field follow-up edit), unlike a silent wipe.
   if (m.thinking) body.thinking = m.thinking
+  // LONG-M4 — the craft-model slots survive a primary rewire: each slot names
+  // its OWN provider/model/apiKeyEnv (or rides whatever the primary is at call
+  // time when provider-less), none of which the adapt touches. A stale slot
+  // model id after a rewire fails loudly at the next long-run segment and is a
+  // one-field follow-up edit — same posture as maintenanceModel above, unlike
+  // a silent wipe.
+  if (m.longRunModels && Object.keys(m.longRunModels).length > 0) {
+    body.longRunModels = m.longRunModels
+  }
 
   // MR-M6 — apiKeyEnv is EXCLUSIVE: the pool reads ONLY that env var, never
   // falling through to stored keys. Both enactable kinds repoint the primary at
