@@ -1,6 +1,6 @@
 # EXCH · 标准交付物信封与人肉中继(`gotong.envelope/v1`)
 
-> Status: **M0 完(计划+schema 定稿) · M1 完(hub 导入/导出缝) · M2 完(pi 规范包) · M3 完(dsh 规范包) · M4 WorkBuddy 包本体完(2026-08-14)** · M4 四步实机验证=用户门待做
+> Status: **M0 完(计划+schema 定稿) · M1 完(hub 导入/导出缝) · M2 完(pi 规范包) · M3 完(dsh 规范包) · M4 WorkBuddy 包本体完(2026-08-14) · M5 完(gotong-client 直连客户端包,2026-08-21)** · M4 四步实机验证=用户门待做
 > Last updated: 2026-08-14
 >
 > 一句话:把「两个 hub 之间的一条联邦边」降级成「一份标准 JSON 文件 + 一个转发文件的人」,
@@ -259,6 +259,37 @@ hub 侧不落这两个目录——hub 的进出走 `<space>/exchange/`(M1,file-f
   「zip 拖拽导入/兼容 Claude Code 技能规范/助理可收文件消息」全部来自 2026-08-13 文档
   侦察(二手),本包在 WorkBuddy 实机的识别与运行**未验证**——README 成色说明如实标注,
   实机验证后按事实改写。host 2802+5skip(+30),四门 PASS(旋钮 116 冻结)。
+- **M5 gotong-client 直连客户端包 — 完(2026-08-21;STRATEGY-2026-08 §10.3 方向 B 第一刀)**
+  (`packs/client/skills/gotong-client/`,三文件:SKILL.md+`scripts/hubctl.py`+包 README)。
+  **把 track 的覆盖面从「文件靠人转发」扩到「有网络可达性时直连」**:任何认 SKILL.md 的
+  本机 agent(pi/dsh/WorkBuddy/Claude Code)拿到一个**成员身份的手**——列/派发工作流、看
+  运行、读待办、批/拒/打回,骑的全是 `/api/me` 成员面,hub 的每道闸(角色、载荷白名单、
+  `user_scope` 钉死、限速、park)原样生效,零管理员能力零绕行。**一份包多宿主是结构性的**:
+  HTTP 机制对谁都一样,per-host 拷贝只会漂移——所以只有一份 `packs/client/`,不是三份。
+  **形状=SKILL.md+纯 stdlib Python 3.9+ 单文件 CLI**(`workflows`/`dispatch`/`runs`/
+  `inbox`/`approve`/`deny`/`request-changes`;WorkBuddy validate.py 同款受众地板,macOS
+  自带 3.9)。**三条纪律**(全部门钉):①**令牌只活在 env 与 Authorization 头**——env 名
+  `GOTONG_HUB_URL`/`GOTONG_HUB_KEY`(**刻意不叫 `GOTONG_URL`**:那是 cli 脚手架里 ws://
+  agent 协议地址的既有惯例名,撞名会让人把成员令牌塞给 agent 协议);绝不进 argv/输出/盘,
+  所有输出经单一出口做 redact 兜底——它防的不是脚本自己(脚本从不打印 key)而是**回显型
+  hub**(把 Authorization 头倒进错误正文,脚本转述时就替它打了;门用真回显 mock 钉死占位符
+  替换);②**明文 http 只许回环**且检查**先于任何网络 I/O**(SHELL-M2 同姿态,无 --insecure
+  逃生门);③**批准要先看见**:approve/deny/打回先 GET 取那一条原文打印再 POST,不在待办/
+  非批准类=**一个字节都不提交**;choice/edit 诚实拒绝指路网页(IMA v1 同口径);打回必须带
+  `--comment`;没有批量操作。**防漂移门** `packages/host/tests/exchange-pack-client.test.ts`
+  **16 例**,全程**异步 spawn** 真 `python3` 打**进程内 mock hub**(spawnSync 会阻塞 vitest
+  事件循环让 mock accept 不了=HEAL 看门狗同一个坑):wire 形状逐字段对拍(dispatch body/
+  decision 三形/resolve 路径)+THE PROMISE 全失败路径(401/非 JSON/连接拒绝/回显型 hub)+
+  Authorization 头恰为令牌+回环拒绝消息证据+批准先打印后提交的**顺序断言**+未知条目与
+  choice 类**零 POST**+frontmatter 多宿主契约+stdlib-only import(subprocess 缺席顺带证明
+  令牌结构性进不了子进程 argv)+全包零裸控制字节。**两道变异两次全红且只红该红那例**
+  (redact 出口神经化→回显 hub 那例红;摘回环检查→拒绝那例红,且红法本身是证据:变异后
+  测试 5s 超时=脚本**真去连**了 192.0.2.1,反证正常路径确实零网络);复原 python 精确替换+
+  `shasum` 对拍。**诚实残余**(README §诚实边界同文):派发即发即走(hub 契约如此);成员
+  HTTP 面 resolve **无 IM 那条路的内容指纹代际闸**(独立票已挂),「先取原文打印再提交」
+  缩小盲签窗口但两步之间重新 park 的窗口仍在——高敏审批建议走网页或 IM 短码;限速由 hub
+  执行脚本只转述。host **3185**+5skip(+16),四门 PASS(**旋钮 116 冻结零新增**——
+  `GOTONG_HUB_*` 是 packs/ 脚本的客户端约定不是 hub 旋钮,env-registry 门只扫 packages/)。
 
 ## 七、显式不做(v1)
 
