@@ -446,6 +446,9 @@ export function buildButlerFactory(deps: ButlerFactoryDeps): ButlerFactory {
                 roster: refs.askRoster,
                 hub,
                 ...(refs.memberPush ? { push: refs.memberPush } : {}),
+                // EFF-M2 — 转派事实行落 memory 的兄弟目录(presence/prefs 同款
+                // 落位理由:不进记忆树,MU-M5 git 快照不被它搅动)。
+                factDir: join(dirname(memoryRoot), 'escalate'),
                 logger: log,
               })
             : undefined

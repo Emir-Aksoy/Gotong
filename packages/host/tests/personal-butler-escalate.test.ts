@@ -13,6 +13,10 @@
  *     logged + pushed as a failure line, never an unhandledRejection.
  */
 
+import { mkdtemp, readFile, readdir, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+
 import { describe, it, expect } from 'vitest'
 
 import { buildButlerEscalateToolset } from '../src/personal-butler-escalate.js'
@@ -205,5 +209,88 @@ describe('DUO-M2 escalate_to_expert — 转派专家 benign 工具', () => {
     const ts = buildButlerEscalateToolset(deps)
     const r = await ts.callTool('nope', {})
     expect(r.isError).toBe(true)
+  })
+})
+
+describe('EFF-M2 转派事实行 — <factDir>/<userId>.jsonl', () => {
+  it('settle 后 append 一行 {at, expert, ok};ok 只认 kind===ok,失败/挂起落 false,顺序保序', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'gotong-esc-fact-'))
+    let nextKind: 'ok' | 'failed' | 'suspended' = 'ok'
+    const { deps } = makeDeps({
+      factDir: dir,
+      hub: { dispatch: async () => ({ kind: nextKind, output: { text: 'x' } }) as never },
+    })
+    const ts = buildButlerEscalateToolset(deps)
+    await ts.callTool('escalate_to_expert', { task_summary: '活一' })
+    await settle()
+    nextKind = 'failed'
+    await ts.callTool('escalate_to_expert', { task_summary: '活二' })
+    await settle()
+    nextKind = 'suspended'
+    await ts.callTool('escalate_to_expert', { task_summary: '活三' })
+    await settle()
+    const lines = (await readFile(join(dir, 'u1.jsonl'), 'utf8')).trim().split('\n')
+    expect(lines).toHaveLength(3)
+    const rows = lines.map((l) => JSON.parse(l) as { at: string; expert: string; ok: boolean })
+    for (const r of rows) {
+      expect(Object.keys(r).sort()).toEqual(['at', 'expert', 'ok'])
+      expect(Number.isNaN(Date.parse(r.at))).toBe(false) // ISO,字典序=时序
+      expect(r.expert).toBe('expert-x') // 稳定 id,非 label
+    }
+    expect(rows.map((r) => r.ok)).toEqual([true, false, false])
+  })
+
+  it('dispatch 自己抛(pre-flight 失败)也落一行 ok:false', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'gotong-esc-fact-'))
+    const { deps } = makeDeps({
+      factDir: dir,
+      hub: { dispatch: async () => { throw new Error('pre-flight down') } },
+    })
+    const ts = buildButlerEscalateToolset(deps)
+    const r = await ts.callTool('escalate_to_expert', { task_summary: '活' })
+    expect(r.isError).toBeUndefined() // 回执照发(fire-and-forget)
+    await settle()
+    const rows = (await readFile(join(dir, 'u1.jsonl'), 'utf8')).trim().split('\n').map((l) => JSON.parse(l))
+    expect(rows).toEqual([expect.objectContaining({ expert: 'expert-x', ok: false })])
+  })
+
+  it('factDir 缺席 = 零 fs 触碰(转派照常,盘上什么也不出现)', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'gotong-esc-fact-'))
+    const { deps, pushed } = makeDeps() // 没给 factDir;dir 只当观察哨
+    const ts = buildButlerEscalateToolset(deps)
+    await ts.callTool('escalate_to_expert', { task_summary: '活' })
+    await settle()
+    expect(pushed).toHaveLength(1) // 转派链完整
+    expect(await readdir(dir)).toEqual([]) // 观察哨目录一个字节没多
+  })
+
+  it('append 失败 warn 绝不连累转派:factDir 位置被一个文件占着,回执/推送照常', async () => {
+    const parent = await mkdtemp(join(tmpdir(), 'gotong-esc-fact-'))
+    const occupied = join(parent, 'not-a-dir')
+    await writeFile(occupied, 'x', 'utf8') // mkdir(factDir) 必失败
+    const warns: string[] = []
+    const { deps, pushed } = makeDeps({
+      factDir: occupied,
+      logger: { warn: (m) => { warns.push(m) }, error: () => {} },
+    })
+    const ts = buildButlerEscalateToolset(deps)
+    const r = await ts.callTool('escalate_to_expert', { task_summary: '活' })
+    expect(r.isError).toBeUndefined()
+    await settle()
+    expect(pushed).toHaveLength(1) // 结果照推
+    expect(warns.some((m) => m.includes('fact append failed'))).toBe(true)
+  })
+
+  it('敌意 userId 进不了路径拼接(assertSafeOwnerId 先于 join,warn 后零文件)', async () => {
+    // factDir 套在沙箱里一层:若守卫被摘,`../evil.jsonl` 会穿到沙箱根 —— 在
+    // 观察范围内。直接拿 mkdtemp 根当 factDir 的话,穿越目标落在共享 tmpdir,
+    // 断言什么也看不见 = 假门。
+    const sandbox = await mkdtemp(join(tmpdir(), 'gotong-esc-fact-'))
+    const factDir = join(sandbox, 'facts')
+    const { deps } = makeDeps({ factDir, userId: '../evil' })
+    const ts = buildButlerEscalateToolset(deps)
+    await ts.callTool('escalate_to_expert', { task_summary: '活' })
+    await settle()
+    expect(await readdir(sandbox)).toEqual([]) // facts 没建、evil.jsonl 没穿出来
   })
 })

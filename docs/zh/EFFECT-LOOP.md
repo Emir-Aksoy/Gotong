@@ -119,7 +119,7 @@ for 每档 tier（来自档位表文件）:
 |---|---|---|
 | M0 | 本篇计划落档 | 文档 + 导航钩 |
 | M1 ✅ | `scripts/effect-matrix.mjs` + `pnpm effect:matrix`；mock 档全链 CI 门（`pnpm check:effect-matrix`） | 已落：mock 档零 key 跑绿；换刀走 cli 真件 `buildPutBody`（export→PUT echo 纪律免复刻）+ 换刀后 export 复核 provider；冒烟包死端点设计使「绿=换刀的证据」；两道变异（摘换刀/粉饰红判定）各红在该红断言上 |
-| M2 | 转派事实行（host 层，~1 文件） | 单测：append 形状 / 失败不连累转派 / 字节不变（未接目录） |
+| M2 ✅ | 转派事实行（host 层：escalate 咽喉 + factory 接 `<space>/butler/escalate`——memory 兄弟目录，presence/prefs 同款落位理由） | 已落：5 单测（append 形状含 pre-flight 失败臂 / 失败 warn 不连累转派 / 缺席零 fs / 敌意 id 穿不出**沙箱套层才看得见**）；两道变异各红在该红例；host 3160 + 全仓 typecheck 净 |
 | M3 | 效果信号零 LLM 投影 + admin 面板卡 | 三态合同测试；真机 round-trip |
 | M4 | 首次真档矩阵报告（**用户门**：用户给档位表与 key） | 曲线快照记档，指出补位件的下一刀 |
 

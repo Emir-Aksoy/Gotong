@@ -34,6 +34,11 @@
  * — the honest asymmetry DUO-M0 accepted.
  */
 
+import { appendFile, mkdir } from 'node:fs/promises'
+import { join } from 'node:path'
+
+import { assertSafeOwnerId } from '@gotong/services-sdk'
+
 import type {
   LlmAgentToolset,
   LlmToolCallResult,
@@ -56,6 +61,13 @@ export interface ButlerEscalateDeps {
   roster: ButlerAskRosterSource
   hub: ButlerAskDispatch
   push?: ButlerEscalatePush
+  /**
+   * EFF-M2 — 转派事实目录(`<space>/butler/escalate`,outbox 同族 per-user 布局:
+   * `<factDir>/<userId>.jsonl` 每次转派 settle 后 append 一行 `{at, expert, ok}`)。
+   * 这是效果回路的可数事实(转派率的分子);此前转派只在 transcript 标题里留痕,
+   * 数不出来。缺席 ⇒ 零 fs 触碰,字节不变;append 失败 warn 绝不连累转派本身。
+   */
+  factDir?: string
   logger?: {
     warn: (msg: string, meta?: Record<string, unknown>) => void
     error: (msg: string, meta?: Record<string, unknown>) => void
@@ -120,10 +132,18 @@ class ButlerEscalateToolset implements LlmAgentToolset {
         title: `转派专家「${label}」— ${userId}`,
       })
       .then(
-        (result) => this.deliver(label, result),
-        (err) => {
+        async (result) => {
+          // EFF-M2 — 先落账再推送(self-heal 看门狗同款顺序):事实行是效果回路的
+          // 记录之所在,推送只是 best-effort 投递。ok 只认 kind==='ok';suspended
+          // 落 false 是有界的不精确(批准后补完不回写)——M3 的主指标是行数(转派率),
+          // ok 是随手带的结果信号,为它开第二条追踪缝不值。
+          await this.recordFact(result.kind === 'ok')
+          return this.deliver(label, result)
+        },
+        async (err) => {
           // dispatch itself threw (pre-flight failure) — never silent.
           this.deps.logger?.error('butler escalate: dispatch failed', { err, escalateTo })
+          await this.recordFact(false)
           return this.pushSafe(
             `刚才转派给「${label}」的事没能启动(派发失败),需要的话换个说法再交给我一次。`,
           )
@@ -162,6 +182,29 @@ class ButlerEscalateToolset implements LlmAgentToolset {
       case 'cancelled':
         await this.pushSafe(`你转派给「${label}」的事被取消了(${result.reason ?? '未知原因'})。`)
         return
+    }
+  }
+
+  /**
+   * EFF-M2 — append one fact line per settled escalation. Fire-and-forget:
+   * any failure (unsafe id / mkdir / append) warns and returns — the
+   * escalation itself already happened, a broken ledger must not unhappen it.
+   * `at` is ISO (字典序=时序, self-heal 台账同款), `expert` is the stable id
+   * (label 会改名,id 才是可数维度)。
+   */
+  private async recordFact(ok: boolean): Promise<void> {
+    const { factDir, userId, escalateTo } = this.deps
+    if (!factDir) return // 未接 = 零 fs 触碰
+    try {
+      assertSafeOwnerId(userId) // 绝不拿入参当路径直用(outbox 同款防御纵深)
+      await mkdir(factDir, { recursive: true })
+      const line = JSON.stringify({ at: new Date().toISOString(), expert: escalateTo, ok })
+      await appendFile(join(factDir, `${userId}.jsonl`), line + '\n', 'utf8')
+    } catch (err) {
+      this.deps.logger?.warn('butler escalate: fact append failed (escalation unaffected)', {
+        err: err instanceof Error ? err.message : String(err),
+        userId,
+      })
     }
   }
 
