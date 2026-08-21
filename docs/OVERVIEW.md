@@ -314,6 +314,18 @@ capability; the link is runtime configuration).
 
 ---
 
+## Where it's headed — two directions
+
+Set 2026-08 as the project's judgment about the future of agents and the agent ecosystem:
+
+- **The agent (Atong): LLM-adaptive** — the same scaffold gets good real-world results on weak, mid, or frontier models *at each tier*; the scaffold compensates on weak models and gets out of the way on strong ones, and governance never loosens with the tier. Measured by real effect (usable-output rate, rework rate), not leaderboard scores.
+- **The framework (Gotong): form-factor compatibility** — go where agents and users already are, in the forms they already use (skill packs, envelope files, MCP / A2A, IM). The test: the other side changes nothing.
+- **One principle behind both: capability moves out of the model** into portable structure — skills, memory, workflows, governance. Less tier-sensitivity for the agent; more portability for the framework.
+
+Full reasoning and evidence: [`zh/STRATEGY-2026-08.md`](./zh/STRATEGY-2026-08.md) (zh).
+
+---
+
 ## Further reading — pick a path
 
 Pick whichever "what I most want to figure out right now" applies:

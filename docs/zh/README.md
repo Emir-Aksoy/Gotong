@@ -34,7 +34,7 @@
 - [`DEPLOYMENT-PROFILE.md`](DEPLOYMENT-PROFILE.md) — 部署视角 `GOTONG_PROFILE=hub|federation`（hub 内 vs 跨 hub；呈现视角非行为开关）
 - [`PERSONAL-MODE.md`](PERSONAL-MODE.md) — 个人 / 主权 hub 心智
 - [`COMPETITIVE-LANDSCAPE.md`](COMPETITIVE-LANDSCAPE.md) · [`PRODUCT-MATRIX.md`](PRODUCT-MATRIX.md) — 赛道地图 + 产品级矩阵
-- [`STRATEGY-2026-07.md`](STRATEGY-2026-07.md) · [`STRATEGY-2026-08.md`](STRATEGY-2026-08.md) — 战略盘点姊妹篇：市场格局与路线裁决（07）+ 能力评测 · 可调节性 · 跨用户互联（08）
+- [`STRATEGY-2026-07.md`](STRATEGY-2026-07.md) · [`STRATEGY-2026-08.md`](STRATEGY-2026-08.md) — 战略盘点姊妹篇：市场格局与路线裁决（07）+ 能力评测 · 可调节性 · 跨用户互联（08）；**两条提升方向定调**（LLM 自适应 × 形态兼容 × 能力搬家）见 08 篇 §十 与 [`CHARTER.md`](CHARTER.md) §5
 
 ## ③ 动手用 / 建（能力 how-to）
 

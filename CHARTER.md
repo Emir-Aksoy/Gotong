@@ -167,6 +167,32 @@ makes contributors keep contributing is honest attribution and a path to
 authority — not a payout. The free graph stays decentralized precisely because
 no central party is needed to settle a ledger.
 
+### The road there — two directions of improvement (set 2026-08)
+
+The vision says where this goes; this note pins how it gets there. It is this
+project's judgment about the future of agents and the agent ecosystem, and its
+ongoing line of development.
+
+- **The agent (Atong): LLM-adaptive.** A good agent is not a fixed configuration.
+  The same scaffold, plugged into a weak, mid, or frontier model, should get good
+  real-world results *at that tier* — on weak models the scaffold compensates
+  (smaller steps, a narrower tool face, frequent recitation, tight budgets, earlier
+  escalation to a stronger brain or a human); on strong models it gets out of the
+  way. Governance gates never loosen with the tier. Measured by real effect
+  (usable-output rate, rework rate), not leaderboard scores — we set no standard
+  and chase no benchmark.
+- **The framework (Gotong): form-factor compatibility.** Go where people and
+  agents already are, and speak the forms they already use — skill packs
+  (SKILL.md), envelope files, MCP / A2A, IM. The single test: the other side
+  changes nothing; the compatibility work can be done unilaterally on our side.
+- **The unifying principle: capability moves out of the model.** Move capability
+  from model weights into portable structure — skills, memory, workflows,
+  governance. The more that moves, the less capability fluctuates with model tier
+  (the agent direction), and the further it travels across hosts (the framework
+  direction). The two directions are one motion seen from both ends.
+
+(Provenance and evidence: [`docs/zh/STRATEGY-2026-08.md`](docs/zh/STRATEGY-2026-08.md), zh.)
+
 ---
 
 ## 6. How to use it

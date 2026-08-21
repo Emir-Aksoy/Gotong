@@ -35,6 +35,14 @@ Fronting all of this for each member is **Atong (阿同)** — the resident pers
 
 The npm packages are scoped `@gotong/*`; the Python SDK is `gotong` on PyPI. License: [MIT](LICENSE) — permanently: we [commit to never relicensing](GOVERNANCE.md#license-permanence).
 
+## Direction
+
+Two improvement directions, set 2026-08, guide ongoing work (full reasoning: [`docs/zh/STRATEGY-2026-08.md`](docs/zh/STRATEGY-2026-08.md), zh):
+
+- **The agent — LLM-adaptive.** The same scaffold should get good real-world results on a weak, mid, or frontier model *at that tier*: on weak models the scaffold compensates (smaller steps, narrower tool face, recitation, tight budgets, earlier escalation); on strong ones it gets out of the way. Governance never loosens with the tier. Measured by real effect, not leaderboard scores.
+- **The framework — form-factor compatibility.** Go where agents and users already are, in the forms they already use: skill packs (SKILL.md), envelope files, MCP / A2A, IM bridges. The test: the other side changes nothing.
+- **Behind both — capability moves out of the model** into portable structure (skills, memory, workflows, governance): the more that moves, the less it fluctuates with model tier and the further it travels across hosts.
+
 ## Pick your door
 
 > **Lost?** Start at [`docs/OVERVIEW.md`](docs/OVERVIEW.md) — a single page that ties usage, license, agent on-boarding, template downloads, multi-user teams, and multi-team federation into one narrative. The table below is the by-role drill-down.
