@@ -37,7 +37,13 @@ The npm packages are scoped `@gotong/*`; the Python SDK is `gotong` on PyPI. Lic
 
 ## Direction
 
-Two improvement directions, set 2026-08, guide ongoing work (full reasoning: [`docs/zh/STRATEGY-2026-08.md`](docs/zh/STRATEGY-2026-08.md), zh):
+**Three focus areas** (set 2026-08) — every piece of development serves one of these and states which one it strengthens (discipline & roadmaps: [`docs/zh/DIRECTIONS.md`](docs/zh/DIRECTIONS.md), zh):
+
+- **Tool-use capability** — tool loop, tool face, execution tiers & sandboxing, call resilience, the effect loop.
+- **Memory management capability** — capture & distillation, retrieval, layering, bitemporality & forgetting, projections, write-side measurability.
+- **Agent-to-agent collaboration framework** — federation & graded trust, interop protocol surfaces, governance that travels with the work.
+
+**Two methods** guide how (full reasoning: [`docs/zh/STRATEGY-2026-08.md`](docs/zh/STRATEGY-2026-08.md), zh):
 
 - **The agent — LLM-adaptive.** The same scaffold should get good real-world results on a weak, mid, or frontier model *at that tier*: on weak models the scaffold compensates (smaller steps, narrower tool face, recitation, tight budgets, earlier escalation); on strong ones it gets out of the way. Governance never loosens with the tier. Measured by real effect, not leaderboard scores.
 - **The framework — form-factor compatibility.** Go where agents and users already are, in the forms they already use: skill packs (SKILL.md), envelope files, MCP / A2A, IM bridges. The test: the other side changes nothing.

@@ -167,11 +167,29 @@ makes contributors keep contributing is honest attribution and a path to
 authority — not a payout. The free graph stays decentralized precisely because
 no central party is needed to settle a ledger.
 
-### The road there — two directions of improvement (set 2026-08)
+### The road there — three focus areas × two methods (set 2026-08)
 
-The vision says where this goes; this note pins how it gets there. It is this
-project's judgment about the future of agents and the agent ecosystem, and its
-ongoing line of development.
+The vision says where this goes; this note pins where the effort goes and how.
+It is this project's judgment about the future of agents and the agent
+ecosystem, and its ongoing line of development.
+
+**Three focus areas (what to improve)** — every piece of development from here on
+serves one of these, and **every piece of development must state which one it
+strengthens** (discipline and per-area roadmaps:
+[`docs/zh/DIRECTIONS.md`](docs/zh/DIRECTIONS.md), zh):
+
+- **Tool-use capability** — agents using tools correctly, frugally, safely
+  (tool loop, tool face, execution tiers & sandboxing, call resilience, the
+  effect loop).
+- **Memory management capability** — agents keeping memory well-organized,
+  retrievable, and forgettable (capture & distillation, retrieval, layering,
+  bitemporality & forgetting, projections, write-side measurability).
+- **Agent-to-agent collaboration framework** — agents of different people,
+  hosts, and trust tiers interconnecting with low loss and high quality
+  (federation & graded trust, interop protocol surfaces, governance that
+  travels with the work).
+
+**Two methods (how to improve)**:
 
 - **The agent (Atong): LLM-adaptive.** A good agent is not a fixed configuration.
   The same scaffold, plugged into a weak, mid, or frontier model, should get good

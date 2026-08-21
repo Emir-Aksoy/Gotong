@@ -314,9 +314,17 @@ capability; the link is runtime configuration).
 
 ---
 
-## Where it's headed — two directions
+## Where it's headed — three focus areas × two methods
 
-Set 2026-08 as the project's judgment about the future of agents and the agent ecosystem:
+**Three focus areas** (set 2026-08): every piece of development serves one of
+these, and every piece of development states which one it strengthens
+(discipline and roadmaps: [`zh/DIRECTIONS.md`](./zh/DIRECTIONS.md), zh):
+
+- **Tool-use capability** — agents using tools correctly, frugally, safely: tool loop, tool face, execution tiers & sandboxing, call resilience, the effect loop.
+- **Memory management capability** — agents keeping memory organized, retrievable, and forgettable: capture & distillation, retrieval, layering, bitemporality & forgetting, projections, write-side measurability.
+- **Agent-to-agent collaboration framework** — agents of different people, hosts, and trust tiers interconnecting with low loss: federation & graded trust, interop protocol surfaces, governance that travels with the work.
+
+**Two methods** (the project's judgment about the future of agents and the agent ecosystem):
 
 - **The agent (Atong): LLM-adaptive** — the same scaffold gets good real-world results on weak, mid, or frontier models *at each tier*; the scaffold compensates on weak models and gets out of the way on strong ones, and governance never loosens with the tier. Measured by real effect (usable-output rate, rework rate), not leaderboard scores.
 - **The framework (Gotong): form-factor compatibility** — go where agents and users already are, in the forms they already use (skill packs, envelope files, MCP / A2A, IM). The test: the other side changes nothing.

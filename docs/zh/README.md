@@ -27,6 +27,7 @@
 > 目标：读完知道 Gotong 的立场，改代码不跑偏。
 
 - [`CHARTER.md`](CHARTER.md) — 项目宪章（北极星三不可破 · 信任护城河；与代码冲突时宪章为源）
+- [`DIRECTIONS.md`](DIRECTIONS.md) — **三大方向开发规划钉子**（工具调用能力 / 记忆管理能力 / agent 间协作框架；之后每一个开发都要说明增强哪个方向——纪律与各方向路线钉此）
 - [`ARCHITECTURE.md`](ARCHITECTURE.md) — 框架设计哲学 + 模块边界
 - [`SURFACE-PATTERN.md`](SURFACE-PATTERN.md) — 给框架加能力而不加耦合（host↔web 鸭子 surface 注入；web 不依赖 host）
 - [`CONVENTIONS.md`](CONVENTIONS.md) — 让 Gotong 保持轻的惯例 + GUARD 承重门（依赖方向 / 旋钮登记 / 行数预算）
@@ -34,7 +35,7 @@
 - [`DEPLOYMENT-PROFILE.md`](DEPLOYMENT-PROFILE.md) — 部署视角 `GOTONG_PROFILE=hub|federation`（hub 内 vs 跨 hub；呈现视角非行为开关）
 - [`PERSONAL-MODE.md`](PERSONAL-MODE.md) — 个人 / 主权 hub 心智
 - [`COMPETITIVE-LANDSCAPE.md`](COMPETITIVE-LANDSCAPE.md) · [`PRODUCT-MATRIX.md`](PRODUCT-MATRIX.md) — 赛道地图 + 产品级矩阵
-- [`STRATEGY-2026-07.md`](STRATEGY-2026-07.md) · [`STRATEGY-2026-08.md`](STRATEGY-2026-08.md) — 战略盘点姊妹篇：市场格局与路线裁决（07）+ 能力评测 · 可调节性 · 跨用户互联（08）；**两条提升方向定调**（LLM 自适应 × 形态兼容 × 能力搬家）见 08 篇 §十 与 [`CHARTER.md`](CHARTER.md) §5
+- [`STRATEGY-2026-07.md`](STRATEGY-2026-07.md) · [`STRATEGY-2026-08.md`](STRATEGY-2026-08.md) — 战略盘点姊妹篇：市场格局与路线裁决（07）+ 能力评测 · 可调节性 · 跨用户互联（08）；**方法论层定调**（LLM 自适应 × 形态兼容 × 能力搬家）见 08 篇 §十 与 [`CHARTER.md`](CHARTER.md) §5；聚焦域层（三大方向）见 [`DIRECTIONS.md`](DIRECTIONS.md)
 - [`EFFECT-LOOP.md`](EFFECT-LOOP.md) — **效果回路**（方向 A 的证据端：golden-run × 模型档矩阵 + 生产效果信号零 LLM 投影；不立标准，数字只与自己比）
 
 ## ③ 动手用 / 建（能力 how-to）
