@@ -1483,7 +1483,34 @@ import { createWorkflows } from './workflows.js'
             </li>`).join('')}
         </ul>
       </div>`
-    return head + signalList + nextHtml + roster + renderSelfHealHtml(snap) + renderHealthAdaptationsHtml(lastAdaptations)
+    return head + signalList + nextHtml + roster + renderSelfHealHtml(snap) + renderEffectSignalsHtml(snap) + renderHealthAdaptationsHtml(lastAdaptations)
+  }
+
+  // EFF-M3 — 效果信号卡(内部回路的仪表,不是榜单:数字只与自己比)。host 未接/
+  // 探针抛 → 字段缺席 → 整卡不渲染;子块缺席 = 读不到(如实印,绝不当 0),在场
+  // 的零 = 真的零。比率在这层折(host 只出原始计数):打回率分母 = 已决三计数和,
+  // 每百次分母 = llmCalls;分母缺席/为 0 就不折 —— 卡对自己的分母诚实。
+  function renderEffectSignalsHtml(snap) {
+    const es = snap?.effectSignals
+    if (!es || typeof es.windowDays !== 'number') return ''
+    const lines = []
+    if (es.parks) {
+      const p = es.parks
+      const decided = p.approved + p.rejected + p.changesRequested
+      const pct = decided > 0 ? Math.round((p.changesRequested / decided) * 100) : null
+      lines.push(t.healthEffectParks(p.approved, p.rejected, p.changesRequested, pct))
+    } else lines.push(t.healthEffectParksUnreadable)
+    if (es.escalations) lines.push(t.healthEffectEscalations(es.escalations.total, es.escalations.ok))
+    else lines.push(t.healthEffectEscalationsUnreadable)
+    if (typeof es.llmCalls === 'number') {
+      const per100 = (n) => (es.llmCalls > 0 ? ((n * 100) / es.llmCalls).toFixed(1) : null)
+      const parkPer = es.parks ? per100(es.parks.approved + es.parks.rejected + es.parks.changesRequested) : null
+      lines.push(t.healthEffectCalls(es.llmCalls, parkPer, es.escalations ? per100(es.escalations.total) : null))
+    } else lines.push(t.healthEffectNoDenominator)
+    return `<div class="hh-heal">
+      <h3 class="hh-heal-title">${escapeHtml(t.healthEffectTitle(es.windowDays))}</h3>
+      <ul class="hh-heal-list">${lines.map((l) => `<li class="hh-heal-row">${escapeHtml(l)}</li>`).join('')}</ul>
+    </div>`
   }
 
   // HEAL-M1 — 自愈历史块(非当下信号:一次旧崩溃不该让面板黄 30 天,历史行

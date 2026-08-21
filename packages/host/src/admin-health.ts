@@ -32,6 +32,7 @@
 
 import { access, constants as FS } from 'node:fs/promises'
 
+import type { HealthEffectSignalsRow } from './effect-signals.js'
 import type { HealthRoutingRow } from './routing-health.js'
 
 /** One managed LLM agent's at-a-glance health. */
@@ -134,6 +135,13 @@ export interface HealthSnapshot {
    * .jsonl` 的窄投影(见 HealthSelfHealRow),`journalTail` 在 host 侧截断。
    */
   selfHeal?: HealthSelfHealRow[]
+  /**
+   * EFF-M3 — 效果回路的生产信号(park 批/拒/打回、转派、LLM 调用分母),喂体检
+   * 面板「效果信号」卡。「可选=诚实未知」同约定:字段缺席 → host 未接(或探针
+   * 抛了,warn 过);在场 → 行内各子块再各自降级(见 HealthEffectSignalsRow)。
+   * 数字只与自己比 —— 这张卡是内部回路的仪表,不是榜单。
+   */
+  effectSignals?: HealthEffectSignalsRow
   /** ISO timestamp the snapshot was taken. */
   checkedAt: string
 }
@@ -280,6 +288,12 @@ export interface AdminHealthDeps {
    * 的降级姿态。行是宽容形状,投影(挑键+验型+截断)在本服务做。
    */
   selfHealRecent?(): Promise<readonly Record<string, unknown>[]>
+  /**
+   * EFF-M3 — 读效果信号投影(host 注入 `buildEffectSignalsReader(...)` 的
+   * thunk)。可选:absent → snapshot 不含 effectSignals(诚实未知)。thunk 的
+   * 合同是自身永不抛(子块各自降级);这里仍套 try 只为镜像兄弟字段的降级姿态。
+   */
+  effectSignals?(): Promise<HealthEffectSignalsRow>
 }
 
 /** The duck-typed surface injected into `serveWeb`. */
@@ -458,6 +472,17 @@ export function createAdminHealthService(deps: AdminHealthDeps): AdminHealthSurf
         }
       }
 
+      // EFF-M3 — 效果信号。thunk 合同是永不抛;这里的 catch 只镜像兄弟字段的
+      // 降级姿态(抛了 → 字段缺席 + warn,快照其余部分不被连累)。
+      let effectSignals: HealthEffectSignalsRow | undefined
+      if (deps.effectSignals) {
+        try {
+          effectSignals = await deps.effectSignals()
+        } catch {
+          effectSignals = undefined
+        }
+      }
+
       return {
         agents: rows,
         agentsMissingKey: rows.filter((r) => r.missingKey).length,
@@ -480,6 +505,7 @@ export function createAdminHealthService(deps: AdminHealthDeps): AdminHealthSurf
         ...(routing !== undefined ? { routing } : {}),
         ...(updateAvailable !== undefined ? { updateAvailable } : {}),
         ...(selfHeal !== undefined ? { selfHeal } : {}),
+        ...(effectSignals !== undefined ? { effectSignals } : {}),
         checkedAt: new Date().toISOString(),
       }
     },

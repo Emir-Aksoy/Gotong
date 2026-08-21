@@ -108,9 +108,18 @@ for 每档 tier（来自档位表文件）:
   `<space>/butler/escalate/<userId>.jsonl`（`{at, expert, ok}`；outbox/sessions 同族
   per-user 布局），fire-and-forget——append 失败 warn 绝不连累转派本身。park 决定与显式
   返工**零新落盘**（2.3 已有）。
-- **M3 效果信号投影**：me-panel-data 形状新投影（三态合同同款），窗口期（30 天）内：
-  park 批准/拒绝/打回计数、转派行数、以 usage calls 为分母的比率。落点 = admin 体检面板
-  一张卡为主；阿同 `my_status` 扩行与否 M3 开工时按 token 预算与六行合同定。
+- **M3 效果信号投影**（已落）：host 纯读者 `effect-signals.ts`（永不抛的 thunk），窗口期
+  （默认 30 天）内三块——park 批准/拒绝/打回计数（直读 `<space>/inbox/` 已决审批项，打回
+  优先镜像 inbox-service.outcomeOf）、转派行数与成功数（读 M2 事实行）、LLM 调用分母
+  （注入 identity `aggregateLedger` thunk）。三条纪律：①观察者永不隔离（坏文件/坏行跳过
+  证据原地留）；②**「读不到」≠「没发生」**——目录 ENOENT = 诚实零（子块在场计 0），读目录
+  抛别的错 = 子块**缺席** + warn，两种「没数」绝不混同（HANDS-M4 同款）；③host 只出原始
+  计数，**比率全在呈现层折**（打回率 = 打回/已决；每百次调用比率只在分母在场且 >0 时算）。
+  落点 = `HealthSnapshot.effectSignals` 可选字段（缺席 = host 未接线）+ admin 体检面板
+  「效果信号」卡（复用 hh-heal 样式零新 CSS，7 组 i18n 键双语，sw CACHE v20→v21——预缓存的
+  app-core 缺新键会让运行时新鲜的 admin.js 在 renderHealth 里抛）。阿同 `my_status`
+  **刻意不扩行**：六行合同被测试钉死，扩行要动合同换的只是重复 admin 面板已有的数字——
+  这张卡就是这份数据的面；将来真有 IM 里问效果的高频需求再按需开工具，不预造。
 - 判定全确定性零 LLM；投影披露 ⊆ 既有面（inbox/audit/usage 全是 admin 已见数据）。
 
 ## 四、里程碑
@@ -120,7 +129,7 @@ for 每档 tier（来自档位表文件）:
 | M0 | 本篇计划落档 | 文档 + 导航钩 |
 | M1 ✅ | `scripts/effect-matrix.mjs` + `pnpm effect:matrix`；mock 档全链 CI 门（`pnpm check:effect-matrix`） | 已落：mock 档零 key 跑绿；换刀走 cli 真件 `buildPutBody`（export→PUT echo 纪律免复刻）+ 换刀后 export 复核 provider；冒烟包死端点设计使「绿=换刀的证据」；两道变异（摘换刀/粉饰红判定）各红在该红断言上 |
 | M2 ✅ | 转派事实行（host 层：escalate 咽喉 + factory 接 `<space>/butler/escalate`——memory 兄弟目录，presence/prefs 同款落位理由） | 已落：5 单测（append 形状含 pre-flight 失败臂 / 失败 warn 不连累转派 / 缺席零 fs / 敌意 id 穿不出**沙箱套层才看得见**）；两道变异各红在该红例；host 3160 + 全仓 typecheck 净 |
-| M3 | 效果信号零 LLM 投影 + admin 面板卡 | 三态合同测试；真机 round-trip |
+| M3 ✅ | 效果信号零 LLM 投影 + admin 面板卡 | 已落：纯读者 6 单测 + admin-health 三态 3 例（缺席/在场/抛→缺席）；两道变异各红在该红例（ENOENT 混同→诚实零例红；批准压过打回→三分法例红）；真机 round-trip（授权 API 精确载荷 + 卡中英双渲染 + 命中测试 + console 零错误）；host 3169 + web 1663 |
 | M4 | 首次真档矩阵报告（**用户门**：用户给档位表与 key） | 曲线快照记档，指出补位件的下一刀 |
 
 ## 五、边界（不可破）

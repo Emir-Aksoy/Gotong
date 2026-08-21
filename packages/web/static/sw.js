@@ -58,7 +58,10 @@
 // v20 (EXCH-M1): app.js grew the deliverable-envelope import card (loader +
 // bindings) and app-core.js its meExchange* strings; a stale app.js against a
 // fresh app.html would render the card with no wiring at all.
-const CACHE = 'gotong-shell-v20'
+// v21 (EFF-M3): app-core.js grew healthEffect* strings that the (runtime-
+// fetched, always fresh) admin.js health card calls — a stale precached
+// app-core would make renderHealth throw on t.healthEffectTitle.
+const CACHE = 'gotong-shell-v21'
 
 // Stable, role-agnostic static shell. app.html is excluded on purpose
 // (role-injected); admin.js / identity-ui.js etc. are left to the runtime

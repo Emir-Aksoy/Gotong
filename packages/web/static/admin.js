@@ -3954,7 +3954,29 @@
             </li>`).join("")}
         </ul>
       </div>`;
-      return head + signalList + nextHtml + roster + renderSelfHealHtml(snap) + renderHealthAdaptationsHtml(lastAdaptations);
+      return head + signalList + nextHtml + roster + renderSelfHealHtml(snap) + renderEffectSignalsHtml(snap) + renderHealthAdaptationsHtml(lastAdaptations);
+    }
+    function renderEffectSignalsHtml(snap) {
+      const es = snap?.effectSignals;
+      if (!es || typeof es.windowDays !== "number") return "";
+      const lines = [];
+      if (es.parks) {
+        const p = es.parks;
+        const decided = p.approved + p.rejected + p.changesRequested;
+        const pct = decided > 0 ? Math.round(p.changesRequested / decided * 100) : null;
+        lines.push(t6.healthEffectParks(p.approved, p.rejected, p.changesRequested, pct));
+      } else lines.push(t6.healthEffectParksUnreadable);
+      if (es.escalations) lines.push(t6.healthEffectEscalations(es.escalations.total, es.escalations.ok));
+      else lines.push(t6.healthEffectEscalationsUnreadable);
+      if (typeof es.llmCalls === "number") {
+        const per100 = (n) => es.llmCalls > 0 ? (n * 100 / es.llmCalls).toFixed(1) : null;
+        const parkPer = es.parks ? per100(es.parks.approved + es.parks.rejected + es.parks.changesRequested) : null;
+        lines.push(t6.healthEffectCalls(es.llmCalls, parkPer, es.escalations ? per100(es.escalations.total) : null));
+      } else lines.push(t6.healthEffectNoDenominator);
+      return `<div class="hh-heal">
+      <h3 class="hh-heal-title">${escapeHtml6(t6.healthEffectTitle(es.windowDays))}</h3>
+      <ul class="hh-heal-list">${lines.map((l) => `<li class="hh-heal-row">${escapeHtml6(l)}</li>`).join("")}</ul>
+    </div>`;
     }
     function renderSelfHealHtml(snap) {
       const rows = snap?.selfHeal;

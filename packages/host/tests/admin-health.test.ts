@@ -44,6 +44,8 @@ function svc(opts: {
   readUpdateAvailable?: () => { current: string; latest: string } | null | undefined
   // HEAL-M1 — 自愈台账读取;same optional-dep contract.
   selfHealRecent?: () => Promise<Record<string, unknown>[]>
+  // EFF-M3 — 效果信号读取;same optional-dep contract.
+  effectSignals?: () => Promise<{ windowDays: number; llmCalls?: number }>
 }) {
   return createAdminHealthService({
     listAgents: async () => opts.agents,
@@ -60,6 +62,7 @@ function svc(opts: {
     ...(opts.routingHealth ? { routingHealth: opts.routingHealth } : {}),
     ...(opts.readUpdateAvailable ? { readUpdateAvailable: opts.readUpdateAvailable } : {}),
     ...(opts.selfHealRecent ? { selfHealRecent: opts.selfHealRecent } : {}),
+    ...(opts.effectSignals ? { effectSignals: opts.effectSignals } : {}),
   })
 }
 
@@ -456,6 +459,33 @@ describe('selfHeal (HEAL-M1)', () => {
       },
     }).snapshot()
     expect(s.selfHeal).toEqual([])
+    expect(s.checkedAt).toBeTruthy()
+  })
+})
+
+describe('effectSignals (EFF-M3)', () => {
+  it('absent dep → snapshot has no effectSignals field (honest unknown)', async () => {
+    const s = await svc({ agents: [] }).snapshot()
+    expect('effectSignals' in s).toBe(false)
+  })
+
+  it('present dep → row carried through as-is', async () => {
+    const s = await svc({
+      agents: [],
+      effectSignals: async () => ({ windowDays: 30, llmCalls: 7 }),
+    }).snapshot()
+    expect(s.effectSignals).toEqual({ windowDays: 30, llmCalls: 7 })
+  })
+
+  // thunk 的合同是永不抛;这条钉的是「就算它违约,快照也不塌」的降级姿态。
+  it('dep fault → field absent (unlike selfHeal: no honest-empty shape to fall to), snapshot survives', async () => {
+    const s = await svc({
+      agents: [],
+      effectSignals: async () => {
+        throw new Error('boom')
+      },
+    }).snapshot()
+    expect('effectSignals' in s).toBe(false)
     expect(s.checkedAt).toBeTruthy()
   })
 })

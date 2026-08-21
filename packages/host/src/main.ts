@@ -208,6 +208,7 @@ function findOwnerUserId(identity: IdentityStore): string | null {
 
 import { createAdminHealthService, type AdminHealthSurface } from './admin-health.js'
 import { startSelfHealLog } from './self-heal-log.js'
+import { buildEffectSignalsReader } from './effect-signals.js'
 import { RoutingHealthTracker } from './routing-health.js'
 import { readOutageSnapshotFile } from './llm-outage.js'
 import { BUTLER_PATROL_INTERVAL_MS } from './personal-butler-patrol.js'
@@ -2257,6 +2258,8 @@ async function main(): Promise<void> {
     // B② — new-version notice from the opt-in probe (knob off ⇒ undefined ⇒ absent).
     readUpdateAvailable: () => versionCheck?.latest(),
     selfHealRecent: () => selfHealLog.recent(10), // HEAL-M1 自愈台账最近 10 条
+    // EFF-M3 — 效果信号(park 三计数+转派行+LLM 调用分母;identity 缺席 = 分母如实缺席)。
+    effectSignals: buildEffectSignalsReader({ spaceRoot: space.root, ...(identity ? { countLlmCalls: (s: number) => identity!.aggregateLedger({ groupBy: 'day', since: s }).reduce((n, r) => n + r.calls, 0) } : {}) }),
   })
   patrolHealthRef = adminHealth
 
