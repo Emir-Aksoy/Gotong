@@ -190,6 +190,17 @@ describe('durability & honest failure', () => {
     }
   })
 
+  it('lastRenderSettled survives the save/load round-trip (segment-end accounting depends on it)', async () => {
+    const a = makeStore()
+    await a.create({ taskId: 't1', userId: 'u-alice', objective: '目标' })
+    await a.mutate('t1', (d) => {
+      d.lastRenderSettled = 2
+    })
+    const res = await makeStore().load('t1')
+    expect(res.kind).toBe('ok')
+    if (res.kind === 'ok') expect(res.dossier.lastRenderSettled).toBe(2)
+  })
+
   it('missing and corrupt are DISTINGUISHABLE; corrupt is quarantined with bytes preserved', async () => {
     const store = makeStore()
     expect(await store.load('never-made')).toEqual({ kind: 'missing' })
@@ -575,6 +586,8 @@ describe('journal & rendering', () => {
     })
     const prompt = renderRelayPrompt(d, [{ seg: 6, at: 9, did: '分组进行中', next: '继续按月份分组' }])
     expect(prompt).toContain('第 7 段')
+    // 任务 ID 行是段三件工具的寻址锚 —— 提示不带它,模型就没法传对 task_id。
+    expect(prompt).toContain('任务 ID: demo-task(调用长期任务工具时')
     expect(prompt).toContain('[x] 找到全部照片')
     expect(prompt).toContain('[ ] 按月份分组')
     expect(prompt).toContain('[c1] 扫描相册目录 — ✓ 找到 1.2 万张')
@@ -599,6 +612,7 @@ describe('journal & rendering', () => {
     const d = baseDossier()
     const p = renderWindDownPrompt(d, [], 'time')
     expect(p).toContain('收尾段')
+    expect(p).toContain('任务 ID: demo-task(调用长期任务工具时')
     expect(p).toContain('时间预算')
     expect(p).toContain('不要再开始任何新的实质工作')
     expect(p).toContain(LONGRUN_TOOL_NAMES.complete)

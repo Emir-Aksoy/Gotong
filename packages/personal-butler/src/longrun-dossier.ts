@@ -109,6 +109,15 @@ export interface LongRunDossier {
   waitStreak: number
   /** Last segment did not end cleanly (crash / reclaim) — the relay says so. */
   interrupted: boolean
+  /**
+   * M2 — settled-children count SNAPSHOTTED at segment start (what the relay
+   * prompt actually showed). Segment end feeds THIS number (not a re-count) to
+   * `markChildResultsSeen`: a child that settles mid-segment was never rendered,
+   * and marking it "seen" would swallow its result forever. Persisted (not held
+   * in memory) because the segment can park for hours / survive a restart
+   * between render and finish. Optional: absent on pre-M2 dossiers ⇒ 0.
+   */
+  lastRenderSettled?: number
   blockedQuestion?: string
   doneSummary?: string
   createdAt: number
@@ -627,6 +636,9 @@ function resetWait(d: LongRunDossier): LongRunDossier {
 export function renderRelayPrompt(d: LongRunDossier, tail: readonly LongRunJournalEntry[]): string {
   const parts: string[] = []
   parts.push(`【长期任务 · 第 ${d.segments + 1} 段】`)
+  // taskId 过了 LONGRUN_TASK_ID_RE 才进得了 store,直印安全;不印它,模型在
+  // 段里调工具时只能猜 task_id——猜错一次就是一轮浪费。
+  parts.push(`任务 ID: ${d.taskId}(调用长期任务工具时,task_id 一律传这个值)`)
   parts.push('你在继续一项分段执行的长期任务。各段之间不携带对话记忆——下面这份盘上档案就是全部交接。')
   parts.push('')
   parts.push(renderObjectiveBlock(d))
@@ -672,6 +684,7 @@ export function renderWindDownPrompt(
   const reasonLabel = reason === 'tokens' ? 'token 预算' : reason === 'time' ? '时间预算' : '段数上限'
   const parts: string[] = []
   parts.push('【长期任务 · 收尾段】')
+  parts.push(`任务 ID: ${d.taskId}(调用长期任务工具时,task_id 一律传这个值)`)
   parts.push(`这项任务的预算已经用完(超限项: ${reasonLabel})。这是最后一段:不要再开始任何新的实质工作。`)
   parts.push('')
   parts.push(renderObjectiveBlock(d))
@@ -863,4 +876,58 @@ function requireJournalText(field: string, value: unknown, maxChars: number): st
     throw new ButlerError('longrun_invalid', `journal.${field} 太长(> ${maxChars} 字)`)
   }
   return cleaned
+}
+
+// ─── M2 — 接力挂起状态 & 段任务 payload 标记 ─────────────────────────────────
+//
+// 接力(relay)与 governed park 是**两种挂起共存于同一个 suspended_tasks 基质**:
+// park 的 state 打包整段 messages(批准后原轮续跑);接力的 state 刻意只有
+// taskId——段间一律冷启动,交接走盘上 dossier,不走进程记忆。这是设计不是省事:
+// 段与段之间隔着小时级的 resumeAt,messages 快照只会腐;dossier 才是真相。
+//
+// payload 标记(LONGRUN_SEGMENT_PAYLOAD_KEY)钉在派发段任务的 payload 上,
+// handleTask / handleResume 用它把段任务从普通聊天里分流出来。两个读取器都
+// tolerant + RE 复验:认不出 → null → 走既有路径,伪造的串永远寻址不到 store
+// 之外的东西(store 自己还会再验一遍 id)。
+
+/** 接力挂起 state 的版本号(独立于 BUTLER_GATE_STATE_V,两族状态互不认领)。 */
+export const LONGRUN_RELAY_STATE_V = 1
+
+/** 段任务 payload 上的标记键——值 = taskId。 */
+export const LONGRUN_SEGMENT_PAYLOAD_KEY = '__gotongLongRunSegment'
+
+/** Build the relay suspend state: taskId only — NEVER messages (see header). */
+export function longRunRelayState(taskId: string): { longrunRelay: { v: number; taskId: string } } {
+  return { longrunRelay: { v: LONGRUN_RELAY_STATE_V, taskId } }
+}
+
+/**
+ * Read a relay suspend state back. Tolerant of the same top-level / nested
+ * `{state: {...}}` wrapping `readButlerGateState` tolerates (resume plumbing
+ * differs by host path). Returns the taskId, or null when this isn't ours.
+ */
+export function readLongRunRelayState(state: unknown): string | null {
+  const fromCandidate = (candidate: unknown): string | null => {
+    if (typeof candidate !== 'object' || candidate === null) return null
+    const relay = (candidate as { longrunRelay?: unknown }).longrunRelay
+    if (typeof relay !== 'object' || relay === null) return null
+    const r = relay as { v?: unknown; taskId?: unknown }
+    if (r.v !== LONGRUN_RELAY_STATE_V) return null
+    if (typeof r.taskId !== 'string' || !LONGRUN_TASK_ID_RE.test(r.taskId)) return null
+    return r.taskId
+  }
+  const direct = fromCandidate(state)
+  if (direct !== null) return direct
+  if (typeof state === 'object' && state !== null) {
+    return fromCandidate((state as { state?: unknown }).state)
+  }
+  return null
+}
+
+/** Read the segment marker off a task payload. Null when absent / malformed. */
+export function readLongRunSegmentMarker(payload: unknown): string | null {
+  if (typeof payload !== 'object' || payload === null) return null
+  const value = (payload as Record<string, unknown>)[LONGRUN_SEGMENT_PAYLOAD_KEY]
+  if (typeof value !== 'string' || !LONGRUN_TASK_ID_RE.test(value)) return null
+  return value
 }

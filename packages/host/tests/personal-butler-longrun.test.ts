@@ -1,0 +1,328 @@
+/**
+ * LONG-M2 — host 六件长期任务工具 vs 真 dossier store。
+ *
+ * 包内驱动器测试盖「段循环怎么转」;这里盖「模型的手怎么落在档案上」:
+ *   - 段三件(record/complete/block):校验拒绝逐条带病名、终态拒绝逐条有
+ *     话、日志先落再动计划(整份替换)、missing/corrupt 分得开。
+ *   - 控制三件(start/list/cancel):start 先建档后派发(店面拒绝 → 零派发)、
+ *     标记 payload 形状钉死、settle 三臂(suspended/ok 安静;failed/reject
+ *     push 提醒)、cancel 幂等非错、list 渲染。
+ */
+
+import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+
+import {
+  LONGRUN_SEGMENT_PAYLOAD_KEY,
+  openLongRunDossierStore,
+  type LongRunDossierStore,
+} from '@gotong/personal-butler'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+
+import {
+  buildButlerLongRunControlToolset,
+  buildButlerLongRunSegmentToolset,
+} from '../src/personal-butler-longrun.js'
+
+type ToolResult = { content: { type: string; text?: string }[]; isError?: boolean }
+
+function textOf(res: ToolResult): string {
+  return res.content.map((c) => c.text ?? '').join('')
+}
+
+/** 记录派发的假 hub;`mode` 决定 settle 臂。 */
+function fakeHub(mode: 'suspended' | 'ok' | 'failed' | 'no_participant' | 'reject' = 'suspended') {
+  const dispatches: Record<string, unknown>[] = []
+  return {
+    dispatches,
+    dispatch: async (task: Record<string, unknown>) => {
+      dispatches.push(task)
+      if (mode === 'reject') throw new Error('hub down')
+      if (mode === 'failed') return { kind: 'failed', error: 'segment blew up' }
+      if (mode === 'no_participant') return { kind: 'no_participant' }
+      return { kind: mode }
+    },
+  }
+}
+
+/** 等 fire-and-forget 的 dispatch promise 落定(两拍微任务足够)。 */
+async function settle(): Promise<void> {
+  await new Promise((r) => setTimeout(r, 0))
+  await new Promise((r) => setTimeout(r, 0))
+}
+
+let root: string
+let dir: string
+let store: LongRunDossierStore
+
+beforeEach(() => {
+  root = mkdtempSync(join(tmpdir(), 'gotong-host-longrun-'))
+  dir = join(root, 'lr')
+  store = openLongRunDossierStore({ dir, now: Date.now })
+})
+
+afterEach(() => {
+  rmSync(root, { recursive: true, force: true })
+})
+
+// ── 段三件 ─────────────────────────────────────────────────────────────────
+
+describe('butler longrun segment toolset', () => {
+  const build = () => buildButlerLongRunSegmentToolset({ store })
+
+  it('progress:日志落在 segments+1,plan 传了整份替换', async () => {
+    await store.create({ taskId: 'job', userId: 'alice', objective: '整理发票' })
+    await store.mutate('job', (d) => {
+      d.segments = 2
+      d.plan = [{ text: '旧计划', done: false }]
+    })
+    const ts = build()
+    const res = (await ts.callTool('record_longrun_progress', {
+      task_id: 'job',
+      did: '按月份分了类',
+      facts: ['共 214 张'],
+      next: '核对金额',
+      plan: [
+        { text: '分类', done: true },
+        { text: '核对金额' },
+      ],
+    })) as ToolResult
+    expect(res.isError).toBeUndefined()
+    expect(textOf(res)).toContain('进展已记入档案(第 3 段)。')
+    expect(textOf(res)).toContain('计划已整份更新(2 条)。')
+
+    const tail = await store.readJournalTail('job')
+    expect(tail).toHaveLength(1)
+    expect(tail[0]).toMatchObject({ seg: 3, did: '按月份分了类', facts: ['共 214 张'], next: '核对金额' })
+    const loaded = await store.load('job')
+    if (loaded.kind !== 'ok') throw new Error('dossier gone')
+    expect(loaded.dossier.plan).toEqual([
+      { text: '分类', done: true },
+      { text: '核对金额', done: false },
+    ])
+  })
+
+  it('progress:校验拒绝逐条带病名,坏 plan 一个字节不落', async () => {
+    await store.create({ taskId: 'job', userId: 'alice', objective: '整理发票' })
+    const ts = build()
+    const cases: [Record<string, unknown>, string][] = [
+      [{ did: 'x' }, '缺 task_id'],
+      [{ task_id: 'job' }, '缺 did'],
+      [{ task_id: 'job', did: 'x', facts: 'oops' }, 'facts 要是字符串数组'],
+      [{ task_id: 'job', did: 'x', plan: 'oops' }, 'plan 要是 {text, done?} 数组'],
+      [{ task_id: 'job', did: 'x', plan: [{ done: true }] }, 'plan 每条要有非空 text'],
+    ]
+    for (const [args, msg] of cases) {
+      const res = (await ts.callTool('record_longrun_progress', args)) as ToolResult
+      expect(res.isError).toBe(true)
+      expect(textOf(res)).toContain(msg)
+    }
+    // 拒绝路径零副作用:日志空、计划没动。
+    expect(await store.readJournalTail('job')).toHaveLength(0)
+    const loaded = await store.load('job')
+    if (loaded.kind !== 'ok') throw new Error('dossier gone')
+    expect(loaded.dossier.plan).toEqual([])
+  })
+
+  it('progress:终态各有各的拒绝话术;missing 与 corrupt 分得开', async () => {
+    const ts = build()
+    await store.create({ taskId: 'done-job', userId: 'alice', objective: 'x' })
+    await store.mutate('done-job', (d) => {
+      d.status = 'done'
+    })
+    let res = (await ts.callTool('record_longrun_progress', { task_id: 'done-job', did: 'x' })) as ToolResult
+    expect(res.isError).toBe(true)
+    expect(textOf(res)).toContain('这项任务已完成,进展记不进去了')
+
+    await store.create({ taskId: 'blocked-job', userId: 'alice', objective: 'x' })
+    await store.mutate('blocked-job', (d) => {
+      d.status = 'blocked'
+    })
+    res = (await ts.callTool('record_longrun_progress', { task_id: 'blocked-job', did: 'x' })) as ToolResult
+    expect(res.isError).toBe(true)
+    expect(textOf(res)).toContain('挂起等成员输入中')
+
+    res = (await ts.callTool('record_longrun_progress', { task_id: 'nope', did: 'x' })) as ToolResult
+    expect(res.isError).toBe(true)
+    expect(textOf(res)).toContain('没有 id 为「nope」的长期任务档案')
+
+    // corrupt:直接把 dossier.json 写坏 —— 拒绝要说「损坏」而不是「不存在」。
+    mkdirSync(join(dir, 'bad-job'), { recursive: true })
+    writeFileSync(join(dir, 'bad-job', 'dossier.json'), 'not json at all')
+    res = (await ts.callTool('record_longrun_progress', { task_id: 'bad-job', did: 'x' })) as ToolResult
+    expect(res.isError).toBe(true)
+    expect(textOf(res)).toContain('已损坏(坏件已隔离)')
+  })
+
+  it('complete:落 done + 总结 + 清 waitingForChildren;重复 complete / 已取消拒绝', async () => {
+    await store.create({ taskId: 'job', userId: 'alice', objective: '整理发票' })
+    await store.mutate('job', (d) => {
+      d.waitingForChildren = true
+    })
+    const ts = build()
+    const res = (await ts.callTool('complete_longrun_task', { task_id: 'job', summary: '全部归档完毕' })) as ToolResult
+    expect(res.isError).toBeUndefined()
+    expect(textOf(res)).toContain('任务已标记完成')
+    const loaded = await store.load('job')
+    if (loaded.kind !== 'ok') throw new Error('dossier gone')
+    expect(loaded.dossier.status).toBe('done')
+    expect(loaded.dossier.doneSummary).toBe('全部归档完毕')
+    expect(loaded.dossier.waitingForChildren).toBe(false)
+
+    const dup = (await ts.callTool('complete_longrun_task', { task_id: 'job', summary: '再来一次' })) as ToolResult
+    expect(dup.isError).toBe(true)
+    expect(textOf(dup)).toContain('已经标过完成了')
+
+    await store.create({ taskId: 'c-job', userId: 'alice', objective: 'x' })
+    await store.mutate('c-job', (d) => {
+      d.status = 'cancelled'
+    })
+    const onCancelled = (await ts.callTool('complete_longrun_task', { task_id: 'c-job', summary: 'x' })) as ToolResult
+    expect(onCancelled.isError).toBe(true)
+    expect(textOf(onCancelled)).toContain('已被取消,不能再标完成')
+  })
+
+  it('blocked:落 blocked + 问题;已挂起再挂拒绝', async () => {
+    await store.create({ taskId: 'job', userId: 'alice', objective: '订酒店' })
+    const ts = build()
+    const res = (await ts.callTool('block_longrun_task', { task_id: 'job', question: '预算多少?' })) as ToolResult
+    expect(res.isError).toBeUndefined()
+    expect(textOf(res)).toContain('任务已挂起等成员回答')
+    const loaded = await store.load('job')
+    if (loaded.kind !== 'ok') throw new Error('dossier gone')
+    expect(loaded.dossier.status).toBe('blocked')
+    expect(loaded.dossier.blockedQuestion).toBe('预算多少?')
+
+    const again = (await ts.callTool('block_longrun_task', { task_id: 'job', question: '还有?' })) as ToolResult
+    expect(again.isError).toBe(true)
+    expect(textOf(again)).toContain('已经在等成员输入了')
+  })
+})
+
+// ── 控制三件 ───────────────────────────────────────────────────────────────
+
+describe('butler longrun control toolset', () => {
+  it('start:先建档后派发,标记 payload 形状钉死;suspended settle 安静零 push', async () => {
+    const hub = fakeHub('suspended')
+    const pushes: string[] = []
+    const ts = buildButlerLongRunControlToolset({
+      userId: 'alice',
+      butlerId: 'butler',
+      store,
+      hub,
+      push: async (_u, msg) => {
+        pushes.push(msg)
+      },
+    })
+    const res = (await ts.callTool('start_longrun_task', {
+      task_id: 'job',
+      objective: '整理 2025 年的发票',
+      plan: ['找目录', '分类'],
+      time_budget_minutes: 90,
+    })) as ToolResult
+    expect(res.isError).toBeUndefined()
+    expect(textOf(res)).toContain('长期任务「job」已建档并在后台启动')
+
+    const loaded = await store.load('job')
+    if (loaded.kind !== 'ok') throw new Error('dossier gone')
+    expect(loaded.dossier.plan.map((p) => p.text)).toEqual(['找目录', '分类'])
+    expect(loaded.dossier.budget.timeBudgetSec).toBe(5400)
+
+    await settle()
+    expect(hub.dispatches).toHaveLength(1)
+    const task = hub.dispatches[0]!
+    expect(task.strategy).toEqual({ kind: 'explicit', to: 'butler' })
+    expect(task.origin).toEqual({ orgId: 'local', userId: 'alice' })
+    expect(task.payload).toEqual({ [LONGRUN_SEGMENT_PAYLOAD_KEY]: 'job', prompt: '[longrun:job]' })
+    expect(pushes).toEqual([]) // suspended = 链已 armed,不打扰成员
+  })
+
+  it('start:店面拒绝(重复 id / 坏参数)→ 零派发零建档', async () => {
+    await store.create({ taskId: 'job', userId: 'alice', objective: 'x' })
+    const hub = fakeHub()
+    const ts = buildButlerLongRunControlToolset({ userId: 'alice', butlerId: 'butler', store, hub })
+
+    const dup = (await ts.callTool('start_longrun_task', { task_id: 'job', objective: 'y' })) as ToolResult
+    expect(dup.isError).toBe(true)
+
+    const badMinutes = (await ts.callTool('start_longrun_task', {
+      task_id: 'job2',
+      objective: 'y',
+      time_budget_minutes: -5,
+    })) as ToolResult
+    expect(badMinutes.isError).toBe(true)
+    expect(textOf(badMinutes)).toContain('time_budget_minutes 要是正数')
+    expect((await store.load('job2')).kind).toBe('missing') // 参数拒绝在建档之前
+
+    await settle()
+    expect(hub.dispatches).toHaveLength(0)
+  })
+
+  it('start:首段 failed / 派发 reject / no_participant → push 提醒各有其词', async () => {
+    for (const [mode, expected] of [
+      ['failed', '首段失败'],
+      ['reject', '派发失败'],
+      ['no_participant', '管家不在线'],
+    ] as const) {
+      const hub = fakeHub(mode)
+      const pushes: string[] = []
+      const s = openLongRunDossierStore({ dir: join(root, `lr-${mode}`), now: Date.now })
+      const ts = buildButlerLongRunControlToolset({
+        userId: 'alice',
+        butlerId: 'butler',
+        store: s,
+        hub,
+        push: async (_u, msg) => {
+          pushes.push(msg)
+        },
+        logger: { warn: () => {}, error: () => {} },
+      })
+      const res = (await ts.callTool('start_longrun_task', { task_id: 'job', objective: 'x' })) as ToolResult
+      expect(res.isError).toBeUndefined()
+      await settle()
+      expect(pushes).toHaveLength(1)
+      expect(pushes[0]).toContain('没能启动')
+      expect(pushes[0]).toContain(expected)
+    }
+  })
+
+  it('list:空与非空;cancel:幂等非错、done 拒绝、missing 拒绝', async () => {
+    const hub = fakeHub()
+    const ts = buildButlerLongRunControlToolset({ userId: 'alice', butlerId: 'butler', store, hub })
+
+    let res = (await ts.callTool('list_longrun_tasks', {})) as ToolResult
+    expect(textOf(res)).toBe('这位成员目前没有长期任务档案。')
+
+    await store.create({ taskId: 'job', userId: 'alice', objective: '整理发票' })
+    await store.mutate('job', (d) => {
+      d.segments = 4
+    })
+    res = (await ts.callTool('list_longrun_tasks', {})) as ToolResult
+    expect(textOf(res)).toContain('「job」进行中 · 已跑 4 段 · 整理发票')
+
+    res = (await ts.callTool('cancel_longrun_task', { task_id: 'job' })) as ToolResult
+    expect(res.isError).toBeUndefined()
+    expect(textOf(res)).toContain('已标记取消')
+    const loaded = await store.load('job')
+    if (loaded.kind !== 'ok') throw new Error('dossier gone')
+    expect(loaded.dossier.status).toBe('cancelled')
+
+    // 幂等:再取消不是错误(成员连说两次「取消」不该收到红字)。
+    res = (await ts.callTool('cancel_longrun_task', { task_id: 'job' })) as ToolResult
+    expect(res.isError).toBeUndefined()
+    expect(textOf(res)).toContain('本来就已取消')
+
+    await store.create({ taskId: 'd-job', userId: 'alice', objective: 'x' })
+    await store.mutate('d-job', (d) => {
+      d.status = 'done'
+    })
+    res = (await ts.callTool('cancel_longrun_task', { task_id: 'd-job' })) as ToolResult
+    expect(res.isError).toBe(true)
+    expect(textOf(res)).toContain('已经完成了,不用取消')
+
+    res = (await ts.callTool('cancel_longrun_task', { task_id: 'nope' })) as ToolResult
+    expect(res.isError).toBe(true)
+    expect(textOf(res)).toContain('没有 id 为「nope」的长期任务档案')
+  })
+})

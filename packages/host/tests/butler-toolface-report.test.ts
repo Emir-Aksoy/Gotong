@@ -27,6 +27,7 @@ import {
   createKnowledgeLibraryToolset,
   createTaskNotebookToolset,
   openKnowledgeLibrary,
+  openLongRunDossierStore,
   openTaskNotebook,
 } from '@gotong/personal-butler'
 
@@ -38,6 +39,10 @@ import {
 } from '../src/butler-toolface-report.js'
 import { buildButlerAskAgentToolset } from '../src/personal-butler-ask-agent.js'
 import { buildButlerEscalateToolset } from '../src/personal-butler-escalate.js'
+import {
+  buildButlerLongRunControlToolset,
+  buildButlerLongRunSegmentToolset,
+} from '../src/personal-butler-longrun.js'
 import { buildButlerAskPeerToolset } from '../src/personal-butler-ask-peer.js'
 import {
   buildButlerBackupPackToolset,
@@ -96,6 +101,8 @@ const MEASURED_BUILDERS: Record<string, string> = {
   diagnose: 'buildButlerDiagnoseToolset',
   'ask-agent': 'buildButlerAskAgentToolset',
   escalate: 'buildButlerEscalateToolset',
+  'longrun-segment': 'buildButlerLongRunSegmentToolset',
+  'longrun-control': 'buildButlerLongRunControlToolset',
   peers: 'buildButlerPeersToolset',
   llms: 'buildButlerLlmsToolset',
   wizard: 'buildButlerWorkflowWizardToolset',
@@ -187,6 +194,25 @@ function buildFullFace(): ToolFaceEntry[] {
         roster: stub(),
         hub: stub(),
         logger: stub(),
+      }),
+    },
+    // LONG-M2 长期任务两组:段三件 + 控制三件。真 store 指 tmp(构造零副作用,
+    // mkdir 只在 create 里;listTools 静态,这条路上盘不被碰)。
+    {
+      module: 'longrun-segment',
+      kind: 'benign',
+      toolset: buildButlerLongRunSegmentToolset({
+        store: openLongRunDossierStore({ dir: join(tmp, 'longrun'), now: Date.now }),
+      }),
+    },
+    {
+      module: 'longrun-control',
+      kind: 'benign',
+      toolset: buildButlerLongRunControlToolset({
+        userId: U,
+        butlerId: 'butler-x',
+        store: openLongRunDossierStore({ dir: join(tmp, 'longrun'), now: Date.now }),
+        hub: stub(),
       }),
     },
     { module: 'peers', kind: 'benign', toolset: buildButlerPeersToolset({ peers: stub(), logger: stub() }) },

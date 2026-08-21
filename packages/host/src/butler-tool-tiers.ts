@@ -55,6 +55,12 @@ export const BUTLER_FIRST_CLASS_BENIGN = [
   // 被开箱陪跑卡正文点名(理由②);卡只在 onboarding 期出现,过后 schema 仍小
   'set_onboarding_done',
   'check_llm_key',
+  // LONG-M2 段三件 — 被接力/收尾提示逐字点名(理由②的最强形态:提示是
+  // 机器渲染的确定性文本,LONGRUN_TOOL_NAMES 常量与提示词同源钉死);段里
+  // 模型每段都要用它们记档/收束,折进目录=接力提示指空。
+  'record_longrun_progress',
+  'complete_longrun_task',
+  'block_longrun_task',
 ] as const
 
 /** 目录 benign 长尾(一次性配置 / 低频自省 / 按需诊断):经 use_tool 取用。 */
@@ -111,6 +117,12 @@ export const BUTLER_DIRECTORY_BENIGN = [
   'list_panel_content',
   'read_panel_content',
   'write_panel_content',
+  // LONG-M2 控制三件 — 低频生命周期(开一项长跑/查档/取消);start 的自派发
+  // 是 escalate 同款 benign 论证(分解≠授权:段里做的事仍各走各闸)。三件
+  // 互相不点名;段三件的描述也不点名它们(段提示只点段三件)。
+  'start_longrun_task',
+  'list_longrun_tasks',
+  'cancel_longrun_task',
 ] as const
 
 export type ButlerFirstClassBenign = (typeof BUTLER_FIRST_CLASS_BENIGN)[number]

@@ -39,6 +39,7 @@ export {
   PersonalButlerAgent,
   BUTLER_MAX_TOOL_ROUNDS,
   type PersonalButlerAgentOptions,
+  type ButlerLongRunDriver,
 } from './agent.js'
 
 export {
@@ -177,10 +178,15 @@ export {
   markChildResultsSeen,
   renderRelayPrompt,
   renderWindDownPrompt,
+  longRunRelayState,
+  readLongRunRelayState,
+  readLongRunSegmentMarker,
   LONGRUN_DOSSIER_V,
   LONGRUN_LIMITS,
   LONGRUN_TOOL_NAMES,
   LONGRUN_TASK_ID_RE,
+  LONGRUN_RELAY_STATE_V,
+  LONGRUN_SEGMENT_PAYLOAD_KEY,
   type LongRunDossier,
   type LongRunStatus,
   type LongRunPlanItem,

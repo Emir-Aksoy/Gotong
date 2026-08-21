@@ -37,6 +37,7 @@ import {
   createKnowledgeLibraryToolset,
   createTaskNotebookToolset,
   openKnowledgeLibrary,
+  openLongRunDossierStore,
   openTaskNotebook,
 } from '@gotong/personal-butler'
 import { ownerDir } from '@gotong/service-memory-file'
@@ -52,6 +53,10 @@ import type { StewardAgentDirectory, StewardWorkflowEditor } from './hub-steward
 import { buildButlerKnowledgeIndexCard } from './butler-knowledge-index.js'
 import { buildButlerAskAgentToolset, type ButlerAskRosterSource } from './personal-butler-ask-agent.js'
 import { buildButlerEscalateToolset, type ButlerEscalatePush } from './personal-butler-escalate.js'
+import {
+  buildButlerLongRunControlToolset,
+  buildButlerLongRunSegmentToolset,
+} from './personal-butler-longrun.js'
 import {
   buildButlerBackupPackToolset,
   buildButlerBackupStatusToolset,
@@ -452,6 +457,31 @@ export function buildButlerFactory(deps: ButlerFactoryDeps): ButlerFactory {
                 logger: log,
               })
             : undefined
+        // LONG-M2 — 长期任务:per-user dossier store(memory 的兄弟目录,
+        // presence/prefs/escalate 同款落位理由——不进记忆树,MU-M5 git 快照
+        // 不被它搅动)+ 段三件(接力提示逐字点名 = 一等)+ 控制三件(低频
+        // 生命周期 = 目录长尾)+ 接力驱动器。三个消费者共享**同一个** store
+        // 实例 = 同一条 per-store 串行写链;store 构造零副作用(mkdir 只在
+        // create 里)。永远在(remindersToolset 同款):分段长跑是管家的地板,
+        // 不是开关——没人用时盘上零字节。
+        const longRunStore = openLongRunDossierStore({
+          dir: ownerDir(join(dirname(memoryRoot), 'longrun'), { kind: 'user', id: userId }),
+          now: Date.now,
+          logger: log,
+        })
+        const longRunSegmentToolset = buildButlerLongRunSegmentToolset({
+          store: longRunStore,
+          logger: log,
+        })
+        const longRunPush = refs.memberPush
+        const longRunControlToolset = buildButlerLongRunControlToolset({
+          userId,
+          butlerId: base.id,
+          store: longRunStore,
+          hub,
+          ...(longRunPush ? { push: longRunPush } : {}),
+          logger: log,
+        })
         // NET-M1 — benign "看看互联了哪些 hub": org-level mesh roster, sanitized
         // (no endpoint/token/ACL detail). Read-only; the outbound ACTION arrives
         // in NET-M2 as a governed gate resolving targets against this same surface.
@@ -666,6 +696,8 @@ export function buildButlerFactory(deps: ButlerFactoryDeps): ButlerFactory {
           ...(diagnoseToolset ? [diagnoseToolset] : []),
           ...(askAgentToolset ? [askAgentToolset] : []),
           ...(escalateToolset ? [escalateToolset] : []),
+          longRunSegmentToolset,
+          longRunControlToolset,
           ...(peersToolset ? [peersToolset] : []),
           ...(llmsToolset ? [llmsToolset] : []),
           ...(backupStatusToolset ? [backupStatusToolset] : []),
@@ -691,6 +723,9 @@ export function buildButlerFactory(deps: ButlerFactoryDeps): ButlerFactory {
           ...(onboardingToolset ? [onboardingToolset] : []),
         ]
         const longTail = [
+          // LONG-M2 — 控制三件折进目录(低频生命周期);段三件**刻意留一等**:
+          // 接力提示逐字点名它们(AFR「指路不指空」),折进目录会指空。
+          longRunControlToolset,
           ...(diagnoseToolset ? [diagnoseToolset] : []),
           ...(llmsToolset ? [llmsToolset] : []),
           ...(backupStatusToolset ? [backupStatusToolset] : []),
@@ -771,6 +806,15 @@ export function buildButlerFactory(deps: ButlerFactoryDeps): ButlerFactory {
           // bot "forgets" mid-conversation). See MemorySession.refresh().
           frozenRefreshPerTask: true,
           captureMeta: { userId },
+          // LONG-M2 — 接力驱动器:带 marker 的段任务在 handleTask/handleResume
+          // 被截获走冷启动接力(渲染档案成唯一 user 消息,不重放 messages);
+          // push 是 best-effort 成员通知(缺席 = web-only,结果留 transcript)。
+          longRun: {
+            store: longRunStore,
+            now: Date.now,
+            ...(longRunPush ? { push: (text: string) => longRunPush(userId, text) } : {}),
+            logger: log,
+          },
           ...(benign.length > 0 ? { benign } : {}),
           ...(governed.length > 0 ? { governed } : {}),
           // CARE-M4 probe slot, composed: the current-time card LEADS (a butler

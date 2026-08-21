@@ -1,6 +1,6 @@
 # 阿同长任务执行(LONG track)— 分段长跑
 
-> Status: **M0 完(计划+三岔口拍板 2026-08-21) · M1 完(档案纯核 2026-08-21) · M2 待做**。方向: **主 T 兼 M**
+> Status: **M0 完(计划+三岔口拍板 2026-08-21) · M1 完(档案纯核 2026-08-21) · M2 完(分段执行器+接力驱动 2026-08-21) · M3 待做**。方向: **主 T 兼 M**
 > (循环骨架/工具面/验证预算属 T;任务级工作记忆/压缩/交接属 M)。
 > 拍板结果:驱动器=骑 suspended_tasks 自挂起+resume sweep;配置面=扩
 > ManagedAgentSpec additive;范围=先只给管家阿同。
@@ -284,10 +284,42 @@ tool-loop;接力(relay)是段末自挂起+到点冷启动;工种槽把组合里�
   `Date.now`/`new Date(`,`now` 是必填注入**——投影零时钟先例)。38 单测 8 组+三道
   变异各红在恰好该红那些例(转义神经化⇒3 例/终态序让位预算⇒1 例/摘 journal 尾部
   字节顶⇒1 例),python 精确替换复原+shasum 对拍。
-- **M2 分段执行器+接力驱动**(host):段末自挂起(**接力挂起不打包 messages**,与 park
-  相区分)/resume 唤醒建段/段末四分支确定性裁决/预算双轨入账;段内 park 与接力共存
-  e2e;工具面 persist_progress/complete(benign,AFR 三件套);中断标记(上段被打断
-  →接力提示如实说)。
+- ✅ **M2 分段执行器+接力驱动**(2026-08-21 落地;驱动器住 `personal-butler/src/agent.ts`
+  ~350 行 + host 工具面 `personal-butler-longrun.ts` 六件两 builder):
+  - **驱动通道**:payload 带 `LONGRUN_SEGMENT_PAYLOAD_KEY` 标记的任务绕过普通聊天
+    (零 episodic 捕获零逐轮探针,记忆预热照跑——人设/冻结块仍在 system);唤醒段的
+    **全部输入=盘上档案的确定性渲染**(单条 user 消息,原派发 payload 的机器占位串
+    不进模型;接力挂起只带 `{longrunRelay:{v,taskId}}`,**刻意不打包 messages**——
+    接力 ≠ 重放,与 governed park 两种挂起一个基质共存,resume 入口按 state 判别:
+    relay 赢在最前,gate state 走段内续跑,认不出的一律当新唤醒绝不落普通聊天续跑)。
+  - **段末结账一次 mutate**:`recordSegmentUsage`(token 四维求和+**活跃墙钟**——
+    park 睡眠的小时数刻意不计费,park 时先 flush 已花的、resume 重开自己的表,段数
+    只在段真结束时 +1)→ `markChildResultsSeen(draft.lastRenderSettled)`(**吃渲染
+    时刻快照不重数**——段中途落地的子结果保持未读,下次唤醒真渲染给模型才记账;快照
+    在 arm-mutate 时随 `interrupted=true` 一起落盘)→ 清中断旗。日志兜底:模型没调
+    progress 就机械落一行 `(自动记录)`,下一段不空手交接。
+  - **裁决五臂**:complete→done+push 总结;blocked→push 要问的问题;预算耗尽→先标
+    winding_down 再接力一次,收尾段模型仍不 complete→**强制诚实部分交付**(doneSummary
+    前缀 `(预算用尽,自动收尾)`);wait_children→退避再挂;默认→relay 5s 接力。终态
+    守卫在模型调用**之前**(取消的任务下次唤醒零模型调用安静收束);**取消赢过批准**
+    ——governed park 批准落地前成员取消,批准的动作一步不执行。
+  - **崩溃诚实**:段执行抛错→花费入账+失败日志行+push「接力就此停止」+任务结果
+    `failed`,档案留盘 `interrupted=true`;下次(手动)唤醒提示带 ⚠ 中断行,干净收尾
+    才清旗。**残余如实**:错误停链后 dossier 停在 active 但没有链在跑(僵档)——
+    v1 出路=成员取消后换 id 重开,或问阿同进展;自动重试判为过度设计不做。
+  - **工具面六件两层**(AFR 三件套全过):段三件 record/complete/block **一等**
+    (接力提示逐字点名,折目录=指路指空;普通聊天轮也能调=成员说「标完成」直接落档,
+    链下次唤醒自然收束——特性不是漏洞);控制三件 start/list/cancel **目录**(低频
+    生命周期;start=escalate 同款 fire-and-forget:先建档后自派发一条标记任务,店面
+    拒绝→零派发,settle 三臂 suspended/ok 安静、failed/reject push 提醒;cancel 幂等
+    非错)。全 benign:store per-user 由工厂开在 ownerDir 下,task_id 结构性只够到
+    本成员档案;**分解≠授权**——段里做的事仍各走各闸(对外发送照 park)。
+  - 验收:personal-butler **280**(+13:驱动 e2e 12+dossier 补 1)、host **3194**(+9
+    工具面)、全仓 typecheck 净、四门 PASS(旋钮 116 零新增——段长/预算/延迟全常量,
+    main.ts 2810/2810 **未动**,接线全在 factory);**三道变异三次全红且只红该红那些**
+    (摘清中断旗⇒恰 3 例[两条干净收尾+崩溃复跑]/摘 park 时 flush⇒恰 1 例[park 时刻
+    花费已入账]/段末记账改重数⇒恰 1 例[中途子结果被吞]),python 精确替换复原+shasum
+    对拍。
 - **M3 分解-回收**:spawn_subtask + 结果回写父 dossier 事实行 + 醒来零 LLM 查账 +
   汇总段;escalate 黑洞补账。
 - **M4 工种×模型配置面**:core additive spec 字段 + web 三缝 echo(manifest/

@@ -119,10 +119,11 @@ EXCH-M5 gotong-client 包 = 域 C(协作) × 法「形态兼容」;EFF 效果回
   24 条发现分六档(立刻可做 12 / 值得开票 8 / 摆岔口 3 / 已对 / 不抄 / 残余),
   含 M、C 两方向条目;逐条开工前仍走完整收口
 - 工具面按档瘦身(NA 显式推迟项「先度量后动」,度量尺已在)
-- **LONG 长任务执行**(主 T 兼 M,M0+M1 已落 2026-08-21):分段长跑——dossier
+- **LONG 长任务执行**(主 T 兼 M,M0→M2 已落 2026-08-21):分段长跑——dossier
   盘上真相 / 段末自挂起接力 / 零 LLM 段末裁决 / 分解-回收 / 工种×模型槽;
   三岔口已拍板(骑 suspended_tasks / 扩 ManagedAgentSpec / butler-first),
-  M1 档案纯核完,M2 分段执行器待做 — [`ATONG-LONG-RUN.md`](ATONG-LONG-RUN.md)
+  M1 档案纯核 + M2 分段执行器+接力驱动(六工具两层上脸)完,M3 分解-回收待做 —
+  [`ATONG-LONG-RUN.md`](ATONG-LONG-RUN.md)
 
 ### M 记忆管理能力
 

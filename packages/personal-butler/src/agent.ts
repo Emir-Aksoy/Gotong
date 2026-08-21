@@ -46,6 +46,43 @@ import {
   readButlerGateState,
 } from './checkpoint.js'
 import { GovernedActionToolset, type GovernedVerdict } from './governed-toolset.js'
+import {
+  LONGRUN_LIMITS,
+  checkLongRunBudget,
+  clipLongRunText,
+  countSettledChildren,
+  decideSegmentVerdict,
+  longRunRelayState,
+  markChildResultsSeen,
+  precheckLongRunWake,
+  readLongRunRelayState,
+  readLongRunSegmentMarker,
+  recordSegmentUsage,
+  renderRelayPrompt,
+  renderWindDownPrompt,
+  type LongRunDossier,
+  type LongRunDossierStore,
+} from './longrun-dossier.js'
+
+/**
+ * LONG-M2 — everything the segment driver needs from the host, as ONE injected
+ * bundle (mirrors the store's own dependency posture: injected clock, duck
+ * logger, no host imports). Absent ⇒ the butler has no long-run lane at all —
+ * a segment-marked task then gets an HONEST "驱动器未接" reply instead of a
+ * silently-normal chat turn that would strand the dossier.
+ */
+export interface ButlerLongRunDriver {
+  store: LongRunDossierStore
+  /** Injected clock — segment wall-time and relay resumeAt derive from THIS,
+   *  never from `Date.now()` (the dossier core's zero-wall-clock rule extends
+   *  to the driver so tests can steer time). */
+  now: () => number
+  /** Best-effort member push (done summary / blocked question / failure
+   *  notice). Absent ⇒ silent; a throw is warn-and-continue — delivery must
+   *  never decide a segment's fate. */
+  push?: (text: string) => unknown | Promise<unknown>
+  logger?: { warn(msg: string, meta?: Record<string, unknown>): void }
+}
 
 export interface PersonalButlerAgentOptions
   extends Omit<MemoryAugmentedAgentOptions, 'tools'> {
@@ -106,6 +143,13 @@ export interface PersonalButlerAgentOptions
    * null (advisor discipline, same as `contextProbe`).
    */
   stableContext?: () => Promise<string | null>
+  /**
+   * LONG-M2 — the segmented long-run driver (dossier store + clock + push).
+   * OPTIONAL: absent ⇒ no long-run lane; a segment-marked task answers with an
+   * honest "驱动器未接" instead of running as normal chat. See
+   * {@link ButlerLongRunDriver}.
+   */
+  longRun?: ButlerLongRunDriver
 }
 
 /**
@@ -155,6 +199,15 @@ export class PersonalButlerAgent extends MemoryAugmentedAgent {
   private readonly stableContext: (() => Promise<string | null>) | undefined
   /** The current stable card; refreshed per task AND per resume (state, not advice). */
   private stableCard: string | null = null
+  /** LONG-M2 — segment driver bundle; undefined ⇒ no long-run lane. */
+  private readonly longRun: ButlerLongRunDriver | undefined
+  /** Hub-task ids currently executing a long-run segment (usage-metering gate).
+   *  Keyed by the HUB task id (not the long-run taskId): the accumulator must
+   *  meter exactly the provider calls of THIS execution, and `task.id` is the
+   *  only key `streamWithAuthHook` can see. */
+  private readonly longRunActive = new Set<string>()
+  /** Per-execution token meter: sum of every usage report while active. */
+  private readonly longRunUsage = new Map<string, number>()
 
   constructor(opts: PersonalButlerAgentOptions) {
     const benignList = opts.benign
@@ -196,6 +249,7 @@ export class PersonalButlerAgent extends MemoryAugmentedAgent {
     this.governedGates = governedList
     this.contextProbe = opts.contextProbe
     this.stableContext = opts.stableContext
+    this.longRun = opts.longRun
   }
 
   /** LIB-M3 — refresh the stable card; a sick provider degrades to null. */
@@ -215,6 +269,13 @@ export class PersonalButlerAgent extends MemoryAugmentedAgent {
    * degrades to "no injection" — chat must survive a sick probe.
    */
   protected override async handleTask(task: Task): Promise<unknown> {
+    // LONG-M2 — a segment-marked task takes the driver lane and DELIBERATELY
+    // bypasses `super.handleTask`: no episodic capture (the machine-rendered
+    // relay prompt would pollute the conversation log every segment) and no
+    // per-turn context probe (segments are unattended background work — the
+    // dossier IS the context). Memory warm-up is done inside the driver.
+    const segTask = readLongRunSegmentMarker(task.payload)
+    if (segTask !== null) return this.longRunSegmentEntry(task, segTask)
     this.turnContext = null
     if (this.contextProbe) {
       try {
@@ -232,6 +293,23 @@ export class PersonalButlerAgent extends MemoryAugmentedAgent {
    *  STABLE card is the opposite: it re-reads (state reflects now — the frozen
    *  block after a restart behaves the same way). */
   protected override async handleResume(task: Task, state: unknown): Promise<unknown> {
+    // LONG-M2 — detection order is load-bearing. (1) A RELAY suspend carries
+    // only the long-run taskId (cold start between segments — relay ≠ replay);
+    // it wins first because its state matches nothing else. (2) A segment task
+    // that parked MID-segment (governed approval / provider quota gate) carries
+    // butler gate state AND the payload marker → resume the segment body, then
+    // run segment-end accounting. (3) A marker with any OTHER state shape falls
+    // back to a fresh wake from the dossier — never to normal-chat resume,
+    // which would capture the segment into episodic memory.
+    const relayTask = readLongRunRelayState(state)
+    if (relayTask !== null) return this.longRunSegmentEntry(task, relayTask)
+    const segTask = readLongRunSegmentMarker(task.payload)
+    if (segTask !== null) {
+      if (this.longRun && readButlerGateState(state)) {
+        return this.resumeLongRunSegment(task, segTask, state)
+      }
+      return this.longRunSegmentEntry(task, segTask)
+    }
     this.turnContext = null
     await this.refreshStableCard()
     return super.handleResume(task, state)
@@ -263,6 +341,27 @@ export class PersonalButlerAgent extends MemoryAugmentedAgent {
       req.systemVolatile = req.system ? `\n\n${this.turnContext}` : this.turnContext
     }
     return req
+  }
+
+  /**
+   * LONG-M2 — meter every provider response of an ACTIVE segment execution.
+   * Sits on the one choke point every LLM call already flows through (fresh
+   * rounds, resumed rounds, retries — all of them), so the segment's token
+   * ledger can't miss a call and can't double-count one. All four usage
+   * dimensions sum: cache reads are cheaper, not free, and the budget is a
+   * work-done meter, not a bill.
+   */
+  protected override async streamWithAuthHook(req: LlmRequest, task: Task): Promise<LlmResponse> {
+    const res = await super.streamWithAuthHook(req, task)
+    if (this.longRunActive.has(task.id) && res.usage) {
+      const u = res.usage
+      let sum = 0
+      for (const n of [u.inputTokens, u.outputTokens, u.cacheCreationTokens, u.cacheReadTokens]) {
+        if (typeof n === 'number' && Number.isFinite(n) && n > 0) sum += n
+      }
+      this.longRunUsage.set(task.id, (this.longRunUsage.get(task.id) ?? 0) + sum)
+    }
+    return res
   }
 
   /** The first governed gate that governs `name`, or `undefined` if none does
@@ -509,5 +608,399 @@ export class PersonalButlerAgent extends MemoryAugmentedAgent {
         isError: true,
       }
     }
+  }
+
+  // ─── LONG-M2 — segmented long-run driver ────────────────────────────────────
+  //
+  // The chain: start (host toolset self-dispatch) → segment runs → segment end
+  // throws a RELAY SuspendTaskError carrying ONLY the long-run taskId → the
+  // resume sweep wakes it → the next segment COLD-STARTS from the on-disk
+  // dossier. Two suspend kinds share the one `suspended_tasks` substrate: a
+  // governed PARK packs `messages` (the same conversation resumes); a relay
+  // deliberately does not (segments hand over via the dossier — relay ≠
+  // replay). Segment wall-time = active execution only: the meter starts at
+  // segment entry and flushes at park/finish, so hours parked in an inbox or
+  // sleeping between segments never count against the time budget.
+
+  /** Shared entry for a fresh wake (dispatch or relay resume). */
+  private async longRunSegmentEntry(task: Task, lrTaskId: string): Promise<unknown> {
+    if (!this.longRun) {
+      return {
+        text: `[长期任务 ${lrTaskId}] 这台管家没有接长期任务驱动器,段无法执行;盘上档案(若有)原样保留。`,
+      }
+    }
+    return this.runLongRunSegment(task, lrTaskId)
+  }
+
+  /** One full segment: terminal guard → zero-LLM precheck → render → arm → run. */
+  private async runLongRunSegment(task: Task, lrTaskId: string): Promise<unknown> {
+    const lr = this.longRun!
+    const loaded = await lr.store.load(lrTaskId)
+    if (loaded.kind !== 'ok') return this.longRunUnreadable(lrTaskId, loaded.kind)
+    const d = loaded.dossier
+
+    // Terminal pre-guard: a settled task's chain stops HERE, quietly. This is
+    // also what makes member-driven chat verbs safe — complete / cancel while
+    // a relay sleeps means the next wake sees the terminal status and stands
+    // down instead of running a segment against a task nobody wants anymore.
+    if (d.status === 'done' || d.status === 'blocked' || d.status === 'cancelled') {
+      return { text: this.longRunTerminalLine(d) }
+    }
+
+    // Zero-LLM wake precheck: waiting on children with nothing new settled →
+    // straight back to sleep with exponential backoff. No model call, no
+    // render. Field-level bump (never a wholesale write of the stale snapshot
+    // — a child could have settled since `load`).
+    const pre = precheckLongRunWake(d, lr.now())
+    if (pre.action === 'resuspend') {
+      try {
+        await lr.store.mutate(lrTaskId, (draft) => {
+          draft.waitStreak = draft.waitStreak + 1
+        })
+      } catch (err) {
+        lr.logger?.warn('[longrun] waitStreak bump failed', { taskId: lrTaskId, err: String(err) })
+      }
+      throw new SuspendTaskError({ resumeAt: pre.resumeAtMs, state: longRunRelayState(lrTaskId) })
+    }
+
+    const budget = checkLongRunBudget(d)
+    const windDown = d.status === 'winding_down' || budget.exhausted
+    const tail = await lr.store.readJournalTail(lrTaskId)
+
+    // RENDER BEFORE ARM (load-bearing order): the prompt must show the
+    // PREVIOUS segment's true `interrupted` flag — arming first would show the
+    // ⚠-crash line on every single segment. `renderedSettled` is snapshotted
+    // from the SAME dossier the prompt rendered, so segment-end bookkeeping
+    // marks exactly what the model saw and nothing that settled later.
+    const prompt = windDown
+      ? renderWindDownPrompt(d, tail, budget.exhausted ? budget.reason : 'time')
+      : renderRelayPrompt(d, tail)
+    const renderedSettled = countSettledChildren(d)
+
+    try {
+      await lr.store.mutate(lrTaskId, (draft) => {
+        draft.interrupted = true
+        draft.waitStreak = 0
+        draft.lastRenderSettled = renderedSettled
+        if (windDown && draft.status === 'active') draft.status = 'winding_down'
+      })
+    } catch (err) {
+      // Can't arm ⇒ don't run: an unarmed crash would masquerade as a clean
+      // finish, and "interrupted" exists precisely to make crashes visible.
+      return {
+        text: `[长期任务 ${lrTaskId}] 档案写入失败,本段没有执行:${err instanceof Error ? err.message : String(err)}`,
+      }
+    }
+
+    return this.runSegmentWork(task, lrTaskId, async () => {
+      await this.warmLongRunContext()
+      const base = this.buildRequest(task)
+      const req: LlmRequest = { ...base, messages: [{ role: 'user', content: prompt }] }
+      return this.runToolLoop(task, req)
+    })
+  }
+
+  /**
+   * Resume a segment that parked MID-segment (governed approval / quota gate).
+   * The gate state carries the conversation; the dossier only gets a terminal
+   * re-check — a member who cancelled while the approval sat in the inbox must
+   * win over the approval (the approved action is NOT executed).
+   */
+  private async resumeLongRunSegment(task: Task, lrTaskId: string, state: unknown): Promise<unknown> {
+    const lr = this.longRun!
+    const loaded = await lr.store.load(lrTaskId)
+    if (loaded.kind !== 'ok') return this.longRunUnreadable(lrTaskId, loaded.kind)
+    const d = loaded.dossier
+    if (d.status === 'done' || d.status === 'blocked' || d.status === 'cancelled') {
+      return { text: `${this.longRunTerminalLine(d)} 批准前任务已收束,这次批准的动作没有执行。` }
+    }
+    return this.runSegmentWork(task, lrTaskId, async () => {
+      await this.warmLongRunContext()
+      return this.resumeBody(task, state)
+    })
+  }
+
+  /** Accumulator scope + park-flush + settle, shared by fresh and resumed
+   *  segments. The catch wraps ONLY `body` — `finishLongRunSegment`'s own
+   *  relay throw must pass through untouched (its meter is already consumed;
+   *  catching it here would double-flush). */
+  private async runSegmentWork(
+    task: Task,
+    lrTaskId: string,
+    body: () => Promise<unknown>,
+  ): Promise<unknown> {
+    const lr = this.longRun!
+    const startMs = lr.now()
+    this.longRunActive.add(task.id)
+    this.longRunUsage.set(task.id, 0)
+    try {
+      const work = async (): Promise<unknown> => {
+        let out: unknown
+        try {
+          out = await body()
+        } catch (err) {
+          if (isSuspendTaskError(err)) {
+            // Mid-segment park: flush what the segment already spent (tokens +
+            // active seconds) into the ledger NOW — the parked wait can last
+            // hours and is deliberately not billed; the resume restarts its
+            // own clock. No segments+1: parked, not finished.
+            await this.flushLongRunSpend(lrTaskId, task.id, startMs)
+          } else {
+            await this.recordLongRunFailure(lrTaskId, task.id, startMs, err)
+          }
+          throw err
+        }
+        return this.finishLongRunSegment(task, lrTaskId, out, startMs)
+      }
+      if (this.toolset?.runForTask) {
+        return await this.toolset.runForTask(
+          { id: task.id, from: task.from, ancestry: task.ancestry },
+          work,
+        )
+      }
+      return await work()
+    } finally {
+      this.longRunActive.delete(task.id)
+      this.longRunUsage.delete(task.id)
+    }
+  }
+
+  /** Segment-entry memory warm-up. The normal path's warm-up lives in
+   *  `MemoryAugmentedAgent.handleTask`, which segments bypass (no episodic
+   *  capture of machine prompts) — so the driver warms the same seams itself:
+   *  fresh frozen block, fresh stable card, NO per-turn probe. */
+  private async warmLongRunContext(): Promise<void> {
+    this.memorySession.refresh()
+    await this.memorySession.ensureFrozenBlock()
+    await this.refreshStableCard()
+    this.turnContext = null
+  }
+
+  /**
+   * Segment end: consume the meter, guarantee a journal line, settle the
+   * dossier in ONE mutate, then act on the zero-LLM verdict. Every mutate here
+   * is field-level / clone-based on the CURRENT draft — never a write-back of
+   * this method's own stale reads.
+   */
+  private async finishLongRunSegment(
+    task: Task,
+    lrTaskId: string,
+    out: unknown,
+    startMs: number,
+  ): Promise<unknown> {
+    const lr = this.longRun!
+    // Read-then-zero the meter IMMEDIATELY: the verdict below can throw a
+    // relay suspend, and `runSegmentWork`'s finally only deletes entries —
+    // consuming here is what makes a double flush structurally impossible.
+    const tokens = this.longRunUsage.get(task.id) ?? 0
+    this.longRunUsage.set(task.id, 0)
+    const rawSec = (lr.now() - startMs) / 1000
+    const seconds = Number.isFinite(rawSec) && rawSec > 0 ? rawSec : 0
+
+    const loaded = await lr.store.load(lrTaskId)
+    if (loaded.kind !== 'ok') {
+      lr.logger?.warn('[longrun] dossier unreadable at segment end — chain stops', {
+        taskId: lrTaskId,
+        kind: loaded.kind,
+      })
+      return out
+    }
+
+    // Journal fallback: a segment that never called record_longrun_progress
+    // still leaves ONE mechanical line — the next segment must never cold-start
+    // from an empty handoff just because the model forgot to write one.
+    const running = loaded.dossier.segments + 1
+    try {
+      const tail = await lr.store.readJournalTail(lrTaskId)
+      if (!tail.some((e) => e.seg === running)) {
+        const fallback = this.longRunTextOf(out) ?? '本段结束,模型没有留下进展记录。'
+        await lr.store.appendJournal(lrTaskId, {
+          seg: running,
+          did: clipLongRunText(`(自动记录) ${fallback}`, LONGRUN_LIMITS.maxJournalDidChars),
+        })
+      }
+    } catch (err) {
+      lr.logger?.warn('[longrun] fallback journal failed', { taskId: lrTaskId, err: String(err) })
+    }
+
+    let final: LongRunDossier
+    try {
+      final = await lr.store.mutate(lrTaskId, (draft) => {
+        const withUsage = recordSegmentUsage(draft, { tokens, seconds })
+        // Feed the RENDER-time snapshot, not a re-count: a child that settled
+        // mid-segment was never shown to the model, and must stay "unseen" so
+        // the next wake renders it instead of swallowing it.
+        const seen = markChildResultsSeen(withUsage, draft.lastRenderSettled ?? 0)
+        seen.interrupted = false
+        return seen
+      })
+    } catch (err) {
+      lr.logger?.warn('[longrun] settle mutate failed — chain stops', {
+        taskId: lrTaskId,
+        err: String(err),
+      })
+      return out
+    }
+
+    const verdict = decideSegmentVerdict(final, lr.now())
+    switch (verdict.kind) {
+      case 'done': {
+        await this.longRunPush(
+          `[长期任务 ${lrTaskId}] 完成 ✓` +
+            String.fromCharCode(0x0a) +
+            (final.doneSummary ?? '(模型没有留下总结)'),
+        )
+        return out
+      }
+      case 'blocked': {
+        await this.longRunPush(
+          `[长期任务 ${lrTaskId}] 需要你的输入才能继续:` +
+            String.fromCharCode(0x0a) +
+            (final.blockedQuestion ?? '(模型没有写清要问什么)') +
+            String.fromCharCode(0x0a) +
+            '回复我之后,可以让我重新开一项长期任务接着做。',
+        )
+        return out
+      }
+      case 'cancelled':
+        // The member already asked for silence; the cancel verb answered them.
+        return out
+      case 'deliver_partial': {
+        // The wind-down segment ran and the model STILL didn't complete —
+        // force an honest partial close so an exhausted task can never relay
+        // forever. The model's final text is the best summary available.
+        const summary = clipLongRunText(
+          `(预算用尽,自动收尾) ${this.longRunTextOf(out) ?? '模型没有提交收尾总结。'}`,
+          LONGRUN_LIMITS.maxObjectiveChars,
+        )
+        try {
+          await lr.store.mutate(lrTaskId, (draft) => {
+            if (draft.status === 'winding_down') {
+              draft.status = 'done'
+              draft.doneSummary = summary
+              draft.waitingForChildren = false
+            }
+          })
+        } catch (err) {
+          lr.logger?.warn('[longrun] partial close failed', { taskId: lrTaskId, err: String(err) })
+        }
+        await this.longRunPush(
+          `[长期任务 ${lrTaskId}] 预算用尽,已收尾(部分交付):` + String.fromCharCode(0x0a) + summary,
+        )
+        return out
+      }
+      case 'wind_down': {
+        // Budget just crossed the line: mark it and relay ONCE more — the next
+        // wake renders the wind-down prompt and closes honestly. If the mark
+        // fails, the next wake still recomputes exhaustion from the (monotonic)
+        // ledger, so the transition cannot be lost.
+        try {
+          await lr.store.mutate(lrTaskId, (draft) => {
+            if (draft.status === 'active') draft.status = 'winding_down'
+          })
+        } catch (err) {
+          lr.logger?.warn('[longrun] wind-down mark failed', { taskId: lrTaskId, err: String(err) })
+        }
+        throw new SuspendTaskError({
+          resumeAt: lr.now() + LONGRUN_LIMITS.relayDelayMs,
+          state: longRunRelayState(lrTaskId),
+        })
+      }
+      case 'wait_children':
+      case 'relay':
+        throw new SuspendTaskError({
+          resumeAt: verdict.resumeAtMs,
+          state: longRunRelayState(lrTaskId),
+        })
+    }
+  }
+
+  /** Flush the meter mid-flight (park / failure): tokens + active seconds into
+   *  the ledger, NO segments+1 — the segment isn't finished. Consumes the
+   *  accumulator so a later settle can't re-bill the same spend. */
+  private async flushLongRunSpend(lrTaskId: string, execId: string, startMs: number): Promise<void> {
+    const lr = this.longRun
+    if (!lr) return
+    const tokens = this.longRunUsage.get(execId) ?? 0
+    this.longRunUsage.set(execId, 0)
+    const rawSec = (lr.now() - startMs) / 1000
+    const seconds = Number.isFinite(rawSec) && rawSec > 0 ? rawSec : 0
+    if (tokens <= 0 && seconds <= 0) return
+    try {
+      await lr.store.mutate(lrTaskId, (draft) => {
+        draft.budget.tokensUsed += tokens
+        draft.budget.timeUsedSec += seconds
+      })
+    } catch (err) {
+      lr.logger?.warn('[longrun] spend flush failed', { taskId: lrTaskId, err: String(err) })
+    }
+  }
+
+  /** A segment threw a NON-suspend error: flush spend, journal a mechanical
+   *  failure line, tell the member the chain stopped. Caller rethrows — the
+   *  dispatch fails honestly; the dossier stays on disk (documented residual:
+   *  its status remains `active` with no chain — cancel + restart to resume). */
+  private async recordLongRunFailure(
+    lrTaskId: string,
+    execId: string,
+    startMs: number,
+    err: unknown,
+  ): Promise<void> {
+    await this.flushLongRunSpend(lrTaskId, execId, startMs)
+    const lr = this.longRun
+    if (!lr) return
+    const msg = err instanceof Error ? err.message : String(err)
+    try {
+      const loaded = await lr.store.load(lrTaskId)
+      if (loaded.kind === 'ok') {
+        await lr.store.appendJournal(lrTaskId, {
+          seg: loaded.dossier.segments + 1,
+          did: clipLongRunText(`(段执行失败,接力停止) ${msg}`, LONGRUN_LIMITS.maxJournalDidChars),
+        })
+      }
+    } catch (jErr) {
+      lr.logger?.warn('[longrun] failure journal failed', { taskId: lrTaskId, err: String(jErr) })
+    }
+    await this.longRunPush(
+      `[长期任务 ${lrTaskId}] 本段执行失败,后台接力就此停止:${clipLongRunText(msg, 200)}` +
+        String.fromCharCode(0x0a) +
+        '档案仍在盘上;要继续可以先取消这项任务再重新开一项,或直接问我它的进展。',
+    )
+  }
+
+  private longRunTerminalLine(d: LongRunDossier): string {
+    const label =
+      d.status === 'done' ? '已完成' : d.status === 'cancelled' ? '已取消' : '挂起等成员输入中'
+    return `[长期任务 ${d.taskId}] ${label},本段不再执行。`
+  }
+
+  private longRunUnreadable(lrTaskId: string, kind: 'missing' | 'corrupt'): { text: string } {
+    return {
+      text:
+        kind === 'missing'
+          ? `[长期任务 ${lrTaskId}] 档案不存在(可能已被清理),后台接力就此停止。`
+          : `[长期任务 ${lrTaskId}] 档案损坏(坏件已隔离在原目录),后台接力就此停止,请人工检查。`,
+    }
+  }
+
+  /** Best-effort member push — delivery must never decide a segment's fate. */
+  private async longRunPush(text: string): Promise<void> {
+    const lr = this.longRun
+    if (!lr?.push) return
+    try {
+      await lr.push(text)
+    } catch (err) {
+      lr.logger?.warn('[longrun] member push failed', { err: String(err) })
+    }
+  }
+
+  /** Duck-read a task output's text (LlmTaskOutput / plain string), else null. */
+  private longRunTextOf(out: unknown): string | null {
+    if (typeof out === 'string') return out.trim() || null
+    if (out && typeof out === 'object') {
+      const t = (out as { text?: unknown }).text
+      if (typeof t === 'string' && t.trim()) return t.trim()
+    }
+    return null
   }
 }
