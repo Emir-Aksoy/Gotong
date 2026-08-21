@@ -35,6 +35,7 @@
 - [`PERSONAL-MODE.md`](PERSONAL-MODE.md) — 个人 / 主权 hub 心智
 - [`COMPETITIVE-LANDSCAPE.md`](COMPETITIVE-LANDSCAPE.md) · [`PRODUCT-MATRIX.md`](PRODUCT-MATRIX.md) — 赛道地图 + 产品级矩阵
 - [`STRATEGY-2026-07.md`](STRATEGY-2026-07.md) · [`STRATEGY-2026-08.md`](STRATEGY-2026-08.md) — 战略盘点姊妹篇：市场格局与路线裁决（07）+ 能力评测 · 可调节性 · 跨用户互联（08）；**两条提升方向定调**（LLM 自适应 × 形态兼容 × 能力搬家）见 08 篇 §十 与 [`CHARTER.md`](CHARTER.md) §5
+- [`EFFECT-LOOP.md`](EFFECT-LOOP.md) — **效果回路**（方向 A 的证据端：golden-run × 模型档矩阵 + 生产效果信号零 LLM 投影；不立标准，数字只与自己比）
 
 ## ③ 动手用 / 建（能力 how-to）
 
