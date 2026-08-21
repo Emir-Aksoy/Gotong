@@ -259,10 +259,12 @@ park(park 尝试一律 refuse 并把理由推回管家)。理由与他们一致:
 
 ## 六、残余(本次没读的,防止将来以为看过了)
 
-- ⚠️ **resume / fork 会话持久化**——任务点名的 M 子题,**没读**(最大漏网)。
-  入口已定位:`core/src/thread_manager.rs`、`thread_rollout_truncation.rs`、
-  `rollout/`(14.8k 行)、**`thread-store/`(29.6k 行,全仓最大 crate)**。它同时是
-  「M 记忆」与「重启透明」两条线的交点,**下次侦察从这里起手**。
+- ~~resume / fork 会话持久化~~ ✅ **已读(2026-08-21 二轮侦察)**——thread-store/
+  rollout/compact/`ext/goal` 主线一手逐行,发现全数合流进
+  [`ATONG-LONG-RUN.md`](ATONG-LONG-RUN.md) §四(存储全量上下文视图/零拷贝 fork/
+  一等中断标记/goal 自动续跑驱动/无轮数上限/FINAL_ANSWER 反面教训)。crate 内
+  仍未读:`live_writer.rs`/`writer_lock.rs`/`revert_thread.rs`、
+  `core/src/tasks/mod.rs` 主体、`ext/goal/` 的 extension.rs/tool.rs、全部测试。
 - `sandboxing/` 实现层(seatbelt/bwrap/landlock/windows + `policy_transforms.rs`
   + `violation.rs` 沙箱违规如何回报给模型)——与 HANDS 两条腿直接可比。
 - `hooks/`(13.7k) + `plugin/` + `ext/extension-api/`——与我们 `*Surface` 鸭子

@@ -38,6 +38,7 @@
 - [`STRATEGY-2026-07.md`](STRATEGY-2026-07.md) · [`STRATEGY-2026-08.md`](STRATEGY-2026-08.md) — 战略盘点姊妹篇：市场格局与路线裁决（07）+ 能力评测 · 可调节性 · 跨用户互联（08）；**方法论层定调**（LLM 自适应 × 形态兼容 × 能力搬家）见 08 篇 §十 与 [`CHARTER.md`](CHARTER.md) §5；聚焦域层（三大方向）见 [`DIRECTIONS.md`](DIRECTIONS.md)
 - [`EFFECT-LOOP.md`](EFFECT-LOOP.md) — **效果回路**（方向 A 的证据端：golden-run × 模型档矩阵 + 生产效果信号零 LLM 投影；不立标准，数字只与自己比）
 - [`CODEX-HARNESS-NOTES.md`](CODEX-HARNESS-NOTES.md) — Codex 开源 harness 借鉴清单（2026-08-21 一手代码侦察：24 条发现按「立刻可做 / 开票 / 摆岔口 / 已对 / 不抄 / 残余」六档，全部带 file:line）
+- [`ATONG-LONG-RUN.md`](ATONG-LONG-RUN.md) — **阿同长任务执行（LONG track）**：分段长跑 M0 计划（诊断 = 差距在长循环骨架非工具面；三原则 = 分段持久化地板 × 按工种派档 × 压缩值得强模型；Codex thread-store/goal 驱动一手侦察 + 自家零件盘点 + dossier/段/接力设计 + 岔口）
 
 ## ③ 动手用 / 建（能力 how-to）
 
