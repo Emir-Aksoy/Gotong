@@ -1,0 +1,80 @@
+# 效果矩阵冒烟包 (EFF-M1) — 只给 scripts/effect-matrix.mjs --check 用的确定性夹具。
+#
+# 刻意的三个设计:
+#   1. agent 出厂是 openai-compatible + 一个永远连不上的死端点、不带 key ——
+#      于是 runner 的「换刀」(export → PUT → provider:mock) 是**真实且可观测**的:
+#      换刀没发生的话, 绿用例会因为连不上端点而变红, 绿本身就是换刀成功的证据。
+#   2. 两条验收用例一绿一红: mock provider 恒回「[mock reply to: …]」, 绿用例断言
+#      这个恒真子串; 红用例断言一个结构性不可能出现的哨兵串(哨兵不进任何载荷,
+#      所以 mock 的回显也带不出它) —— 证明 runner 如实记红, 不粉饰。
+#   3. 形状逐字镜像 examples/morning-brief-hub (走过生产验收的最小骨架),
+#      不发明新结构。
+#
+# 本文件不进模板画廊 (CURATED 不收), 只被 --check 模式导入临时 space。
+schema: gotong.template/v1
+template:
+  name: effect-matrix-smoke
+  description: |-
+    效果矩阵 runner 的 CI 冒烟夹具: 1 个 agent + 1 条工作流 + 一绿一红两条黄金用例。
+    agent 出厂指向死端点, 换刀到 mock 后绿用例才可能绿 —— 绿即换刀的证据。
+  version: 1
+
+  agents:
+    - id: matrix-smoke-writer
+      displayName: 矩阵冒烟写手
+      capabilities: [matrix.smoke]
+      kind: llm
+      provider: openai-compatible
+      baseURL: http://127.0.0.1:9/v1
+      providerLabel: dead-endpoint
+      model: never-called
+      system: |
+        你是矩阵冒烟写手。被派到就回一句话。(本 agent 在 --check 里总会被换刀成
+        mock provider, 这段 system 永远不会被真模型读到。)
+
+  workflows:
+    - id: matrix-smoke-flow
+      name: 矩阵冒烟流
+      description: 一步派发给矩阵冒烟写手, 输出它的回复。
+      governance:
+        data_sensitivity: internal
+        notes: CI 夹具, 零外部系统。
+      trigger:
+        capability: matrix.smoke.request
+        payload_schema:
+          - id: focus
+            label: 冒烟主题
+            type: text
+            required: false
+      surface:
+        me:
+          enabled: true
+          label: 跑一次矩阵冒烟
+          description: CI 夹具工作流。
+          allowed_roles: [owner, admin, member]
+          user_scope_field: reader_id
+      steps:
+        - id: compose
+          description: 写手回一句。
+          dispatch:
+            strategy: { kind: capability, capabilities: [matrix.smoke] }
+            title: 冒烟一笔
+            payload:
+              focus: $trigger.payload.focus
+              reader_id: $trigger.payload.reader_id
+      output:
+        brief: $compose.output
+
+  acceptance:
+    - id: green-mock-echo
+      workflowId: matrix-smoke-flow
+      trigger: { focus: "冒烟" }
+      assert:
+        contains: ["mock reply"]
+      note: mock provider 恒回「[mock reply to:…]」; 此用例绿 = 换刀真的发生了
+    - id: red-never-said
+      workflowId: matrix-smoke-flow
+      trigger: { focus: "冒烟" }
+      assert:
+        contains: ["红路径哨兵-此串不在任何载荷里"]
+      note: 刻意红 —— 哨兵不进载荷, mock 的回显带不出它; 证明 runner 如实记红
