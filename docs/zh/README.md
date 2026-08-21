@@ -37,6 +37,7 @@
 - [`COMPETITIVE-LANDSCAPE.md`](COMPETITIVE-LANDSCAPE.md) · [`PRODUCT-MATRIX.md`](PRODUCT-MATRIX.md) — 赛道地图 + 产品级矩阵
 - [`STRATEGY-2026-07.md`](STRATEGY-2026-07.md) · [`STRATEGY-2026-08.md`](STRATEGY-2026-08.md) — 战略盘点姊妹篇：市场格局与路线裁决（07）+ 能力评测 · 可调节性 · 跨用户互联（08）；**方法论层定调**（LLM 自适应 × 形态兼容 × 能力搬家）见 08 篇 §十 与 [`CHARTER.md`](CHARTER.md) §5；聚焦域层（三大方向）见 [`DIRECTIONS.md`](DIRECTIONS.md)
 - [`EFFECT-LOOP.md`](EFFECT-LOOP.md) — **效果回路**（方向 A 的证据端：golden-run × 模型档矩阵 + 生产效果信号零 LLM 投影；不立标准，数字只与自己比）
+- [`CODEX-HARNESS-NOTES.md`](CODEX-HARNESS-NOTES.md) — Codex 开源 harness 借鉴清单（2026-08-21 一手代码侦察：24 条发现按「立刻可做 / 开票 / 摆岔口 / 已对 / 不抄 / 残余」六档，全部带 file:line）
 
 ## ③ 动手用 / 建（能力 how-to）
 
