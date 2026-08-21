@@ -7,6 +7,9 @@
  *   - 控制三件(start/list/cancel):start 先建档后派发(店面拒绝 → 零派发)、
  *     标记 payload 形状钉死、settle 三臂(suspended/ok 安静;failed/reject
  *     push 提醒)、cancel 幂等非错、list 渲染。
+ *   - M3 spawn(分解-回收):行先落盘再派发、守卫全在 mutate 里(终态/收尾/
+ *     两道上限)拒绝零派发、settle 五臂由驱动器代码写事实行(no_participant
+ *     黑洞收口 / suspended 诚实按失败记 / 取消赛跑不复活行)。
  */
 
 import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from 'node:fs'
@@ -14,6 +17,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import {
+  LONGRUN_CHILD_PAYLOAD_KEY,
+  LONGRUN_LIMITS,
   LONGRUN_SEGMENT_PAYLOAD_KEY,
   openLongRunDossierStore,
   type LongRunDossierStore,
@@ -31,8 +36,11 @@ function textOf(res: ToolResult): string {
   return res.content.map((c) => c.text ?? '').join('')
 }
 
-/** 记录派发的假 hub;`mode` 决定 settle 臂。 */
-function fakeHub(mode: 'suspended' | 'ok' | 'failed' | 'no_participant' | 'reject' = 'suspended') {
+/** 记录派发的假 hub;`mode` 决定 settle 臂(ok 可带 output 供回收器取文字)。 */
+function fakeHub(
+  mode: 'suspended' | 'ok' | 'failed' | 'no_participant' | 'reject' = 'suspended',
+  okOutput?: unknown,
+) {
   const dispatches: Record<string, unknown>[] = []
   return {
     dispatches,
@@ -41,6 +49,7 @@ function fakeHub(mode: 'suspended' | 'ok' | 'failed' | 'no_participant' | 'rejec
       if (mode === 'reject') throw new Error('hub down')
       if (mode === 'failed') return { kind: 'failed', error: 'segment blew up' }
       if (mode === 'no_participant') return { kind: 'no_participant' }
+      if (mode === 'ok') return { kind: 'ok', ...(okOutput !== undefined ? { output: okOutput } : {}) }
       return { kind: mode }
     },
   }
@@ -69,7 +78,14 @@ afterEach(() => {
 // ── 段三件 ─────────────────────────────────────────────────────────────────
 
 describe('butler longrun segment toolset', () => {
-  const build = () => buildButlerLongRunSegmentToolset({ store })
+  const build = (hub: ReturnType<typeof fakeHub> = fakeHub()) =>
+    buildButlerLongRunSegmentToolset({
+      userId: 'alice',
+      butlerId: 'butler',
+      store,
+      hub,
+      now: Date.now,
+    })
 
   it('progress:日志落在 segments+1,plan 传了整份替换', async () => {
     await store.create({ taskId: 'job', userId: 'alice', objective: '整理发票' })
@@ -324,5 +340,221 @@ describe('butler longrun control toolset', () => {
     res = (await ts.callTool('cancel_longrun_task', { task_id: 'nope' })) as ToolResult
     expect(res.isError).toBe(true)
     expect(textOf(res)).toContain('没有 id 为「nope」的长期任务档案')
+  })
+})
+
+// ── M3 spawn(分解-回收) ────────────────────────────────────────────────────
+
+describe('butler longrun spawn toolset (M3)', () => {
+  const buildSeg = (hub: ReturnType<typeof fakeHub>) =>
+    buildButlerLongRunSegmentToolset({
+      userId: 'alice',
+      butlerId: 'butler',
+      store,
+      hub,
+      now: Date.now,
+    })
+
+  it('spawn happy path:行先落盘(pending + waitingForChildren)再派发;ok settle 由驱动器写事实行', async () => {
+    await store.create({ taskId: 'job', userId: 'alice', objective: '查三地天气' })
+    // 「行先落盘」要在派发那一刻取证:假 hub 的 dispatch 里读一次档案快照。
+    const seenAtDispatch: { status?: string; waiting?: boolean } = {}
+    const dispatches: Record<string, unknown>[] = []
+    const hub = {
+      dispatches,
+      dispatch: async (task: Record<string, unknown>) => {
+        dispatches.push(task)
+        const at = await store.load('job')
+        if (at.kind === 'ok') {
+          seenAtDispatch.status = at.dossier.children[0]?.status
+          seenAtDispatch.waiting = at.dossier.waitingForChildren
+        }
+        return { kind: 'ok' as const, output: { text: '子活答案:吉隆坡 33 度' } }
+      },
+    }
+    const ts = buildButlerLongRunSegmentToolset({
+      userId: 'alice',
+      butlerId: 'butler',
+      store,
+      hub,
+      now: Date.now,
+    })
+
+    const res = (await ts.callTool('spawn_longrun_subtask', {
+      task_id: 'job',
+      ask: '查吉隆坡今天的天气,只要气温',
+    })) as ToolResult
+    expect(res.isError).toBeUndefined()
+    expect(textOf(res)).toContain('子活「c1」已派出')
+    expect(textOf(res)).toContain('【子活】区')
+
+    await settle()
+    // 派发那一刻行已在盘上(pending)且等待旗已立 —— 行先落盘,派发在后。
+    expect(seenAtDispatch).toEqual({ status: 'pending', waiting: true })
+
+    // 派发形状:CHILD 标记(≠ 段标记)+ 自派发 + 成员归属。
+    expect(dispatches).toHaveLength(1)
+    const task = dispatches[0]!
+    expect(task.strategy).toEqual({ kind: 'explicit', to: 'butler' })
+    expect(task.origin).toEqual({ orgId: 'local', userId: 'alice' })
+    expect(task.payload).toEqual({
+      [LONGRUN_CHILD_PAYLOAD_KEY]: 'job',
+      prompt: '查吉隆坡今天的天气,只要气温',
+    })
+    expect(String(task.title)).toContain('子活 c1')
+
+    const loaded = await store.load('job')
+    if (loaded.kind !== 'ok') throw new Error('dossier gone')
+    expect(loaded.dossier.children).toHaveLength(1)
+    expect(loaded.dossier.nextChildId).toBe(2)
+    const row = loaded.dossier.children[0]!
+    expect(row.summary).toContain('查吉隆坡今天的天气')
+    expect(row.status).toBe('ok')
+    expect(row.result).toBe('子活答案:吉隆坡 33 度')
+    expect(typeof row.at).toBe('number')
+    // settle 只写行,永不动等待旗(唤醒预检按 pending 数收账)。
+    expect(loaded.dossier.waitingForChildren).toBe(true)
+  })
+
+  it('spawn 守卫:缺参 / ask 过长 / 终态 / 收尾中 / 挂起中 → 拒绝零派发零行', async () => {
+    const hub = fakeHub('ok')
+    const ts = buildSeg(hub)
+
+    let res = (await ts.callTool('spawn_longrun_subtask', { ask: 'x' })) as ToolResult
+    expect(res.isError).toBe(true)
+    expect(textOf(res)).toContain('缺 task_id')
+
+    res = (await ts.callTool('spawn_longrun_subtask', { task_id: 'job' })) as ToolResult
+    expect(res.isError).toBe(true)
+    expect(textOf(res)).toContain('缺 ask')
+
+    await store.create({ taskId: 'job', userId: 'alice', objective: 'x' })
+    res = (await ts.callTool('spawn_longrun_subtask', {
+      task_id: 'job',
+      ask: '长'.repeat(LONGRUN_LIMITS.maxObjectiveChars + 1),
+    })) as ToolResult
+    expect(res.isError).toBe(true)
+    expect(textOf(res)).toContain('ask 太长')
+
+    await store.mutate('job', (d) => {
+      d.status = 'done'
+    })
+    res = (await ts.callTool('spawn_longrun_subtask', { task_id: 'job', ask: 'x' })) as ToolResult
+    expect(res.isError).toBe(true)
+    expect(textOf(res)).toContain('这项任务已完成,不再开新的子活')
+
+    await store.mutate('job', (d) => {
+      d.status = 'winding_down'
+    })
+    res = (await ts.callTool('spawn_longrun_subtask', { task_id: 'job', ask: 'x' })) as ToolResult
+    expect(res.isError).toBe(true)
+    expect(textOf(res)).toContain('收尾中,不再开新的子活')
+
+    await store.mutate('job', (d) => {
+      d.status = 'blocked'
+    })
+    res = (await ts.callTool('spawn_longrun_subtask', { task_id: 'job', ask: 'x' })) as ToolResult
+    expect(res.isError).toBe(true)
+    expect(textOf(res)).toContain('挂起等成员输入中,先别派子活')
+
+    res = (await ts.callTool('spawn_longrun_subtask', { task_id: 'nope', ask: 'x' })) as ToolResult
+    expect(res.isError).toBe(true)
+    expect(textOf(res)).toContain('没有 id 为「nope」的长期任务档案')
+
+    await settle()
+    expect(hub.dispatches).toHaveLength(0)
+    const loaded = await store.load('job')
+    if (loaded.kind !== 'ok') throw new Error('dossier gone')
+    expect(loaded.dossier.children).toHaveLength(0)
+  })
+
+  it('两道上限:总数顶(10 件)与在途顶(3 件)各有其词,拒绝零派发', async () => {
+    const hub = fakeHub('ok')
+    const ts = buildSeg(hub)
+
+    await store.create({ taskId: 'full', userId: 'alice', objective: 'x' })
+    await store.mutate('full', (d) => {
+      for (let i = 1; i <= LONGRUN_LIMITS.maxChildren; i++) {
+        d.children.push({ id: `c${i}`, summary: `活${i}`, status: 'ok' })
+      }
+      d.nextChildId = LONGRUN_LIMITS.maxChildren + 1
+    })
+    let res = (await ts.callTool('spawn_longrun_subtask', { task_id: 'full', ask: 'x' })) as ToolResult
+    expect(res.isError).toBe(true)
+    expect(textOf(res)).toContain(`子活总数已到上限(${LONGRUN_LIMITS.maxChildren} 件)`)
+
+    await store.create({ taskId: 'busy', userId: 'alice', objective: 'x' })
+    await store.mutate('busy', (d) => {
+      for (let i = 1; i <= LONGRUN_LIMITS.maxPendingChildren; i++) {
+        d.children.push({ id: `c${i}`, summary: `活${i}`, status: 'pending' })
+      }
+      d.nextChildId = LONGRUN_LIMITS.maxPendingChildren + 1
+    })
+    res = (await ts.callTool('spawn_longrun_subtask', { task_id: 'busy', ask: 'x' })) as ToolResult
+    expect(res.isError).toBe(true)
+    expect(textOf(res)).toContain(`在途子活已有 ${LONGRUN_LIMITS.maxPendingChildren} 件`)
+
+    await settle()
+    expect(hub.dispatches).toHaveLength(0)
+  })
+
+  it('settle 各臂如实记行:failed 带病名 / no_participant 黑洞收口 / suspended 诚实按失败记 / reject 臂', async () => {
+    for (const [mode, wantStatus, wantText] of [
+      ['failed', 'failed', '失败:segment blew up'],
+      ['no_participant', 'failed', '管家不在线,子活没有执行。'],
+      ['suspended', 'failed', '批准后的结果不回写档案'],
+      ['reject', 'failed', '派发失败,子活没有执行。'],
+    ] as const) {
+      const hub = fakeHub(mode)
+      const s = openLongRunDossierStore({ dir: join(root, `lr-spawn-${mode}`), now: Date.now })
+      const ts = buildButlerLongRunSegmentToolset({
+        userId: 'alice',
+        butlerId: 'butler',
+        store: s,
+        hub,
+        now: Date.now,
+        logger: { warn: () => {}, error: () => {} },
+      })
+      await s.create({ taskId: 'job', userId: 'alice', objective: 'x' })
+      const res = (await ts.callTool('spawn_longrun_subtask', { task_id: 'job', ask: '去干活' })) as ToolResult
+      expect(res.isError).toBeUndefined() // 回执在 settle 之前就发了
+      await settle()
+      const loaded = await s.load('job')
+      if (loaded.kind !== 'ok') throw new Error('dossier gone')
+      const row = loaded.dossier.children[0]!
+      expect(row.status).toBe(wantStatus)
+      expect(String(row.result)).toContain(wantText)
+    }
+  })
+
+  it('ok 但没有可用文字输出 → 兜底句,不留空行', async () => {
+    await store.create({ taskId: 'job', userId: 'alice', objective: 'x' })
+    const hub = fakeHub('ok') // ok 无 output
+    const ts = buildSeg(hub)
+    await ts.callTool('spawn_longrun_subtask', { task_id: 'job', ask: '去干活' })
+    await settle()
+    const loaded = await store.load('job')
+    if (loaded.kind !== 'ok') throw new Error('dossier gone')
+    expect(loaded.dossier.children[0]!.status).toBe('ok')
+    expect(loaded.dossier.children[0]!.result).toBe('(子活完成但没有文字结果)')
+  })
+
+  it('取消赛跑:settle 只落在仍 pending 的行上,且永不把取消的任务复活', async () => {
+    await store.create({ taskId: 'job', userId: 'alice', objective: 'x' })
+    const hub = fakeHub('ok', { text: '来晚了的结果' })
+    const ts = buildSeg(hub)
+    await ts.callTool('spawn_longrun_subtask', { task_id: 'job', ask: '去干活' })
+    // settle 之前成员取消了任务,顺手把行也标掉(取消路径的将来形状)。
+    await store.mutate('job', (d) => {
+      d.status = 'cancelled'
+      d.children[0]!.status = 'failed'
+      d.children[0]!.result = '任务取消,不等它了'
+    })
+    await settle()
+    const loaded = await store.load('job')
+    if (loaded.kind !== 'ok') throw new Error('dossier gone')
+    // 行已非 pending → settle 一个字节不写;任务状态更是纹丝不动。
+    expect(loaded.dossier.children[0]!.result).toBe('任务取消,不等它了')
+    expect(loaded.dossier.status).toBe('cancelled')
   })
 })

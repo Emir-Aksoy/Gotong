@@ -40,6 +40,9 @@ import {
   markChildResultsSeen,
   renderRelayPrompt,
   renderWindDownPrompt,
+  readLongRunChildMarker,
+  LONGRUN_CHILD_PAYLOAD_KEY,
+  LONGRUN_SEGMENT_PAYLOAD_KEY,
   type LongRunDossier,
   type LongRunDossierStore,
   type LongRunJournalEntry,
@@ -619,5 +622,43 @@ describe('journal & rendering', () => {
     expect(p).toContain('不要把部分完成说成完成')
     expect(renderWindDownPrompt(d, [], 'tokens')).toContain('token 预算')
     expect(renderWindDownPrompt(d, [], 'segments')).toContain('段数上限')
+  })
+})
+
+// ─── Group 8: M3 分解-回收 — child marker & spawn's prompt presence ──────────
+
+describe('M3 decomposition (child marker & prompts)', () => {
+  it('spawn tool name is registered and the relay prompt teaches it', () => {
+    expect(LONGRUN_TOOL_NAMES.spawn).toBe('spawn_longrun_subtask')
+    const prompt = renderRelayPrompt(baseDossier(), [])
+    // The segment discipline line names spawn verbatim — the M3 tool ships on
+    // the segment face, so the machine-rendered prompt must not point at air.
+    expect(prompt).toContain(LONGRUN_TOOL_NAMES.spawn)
+    expect(prompt).toContain('自包含的子活')
+  })
+
+  it('the wind-down prompt deliberately does NOT teach spawn', () => {
+    // 收尾段不开新的子活 — teaching spawn there would invite exactly the
+    // "start new substantive work" the wind-down text forbids.
+    const p = renderWindDownPrompt(baseDossier(), [], 'tokens')
+    expect(p).not.toContain(LONGRUN_TOOL_NAMES.spawn)
+  })
+
+  it('child marker round-trips; malformed shapes and bad ids read as null', () => {
+    expect(readLongRunChildMarker({ [LONGRUN_CHILD_PAYLOAD_KEY]: 'demo-task', prompt: 'x' })).toBe('demo-task')
+    expect(readLongRunChildMarker(null)).toBeNull()
+    expect(readLongRunChildMarker('demo-task')).toBeNull()
+    expect(readLongRunChildMarker({ prompt: 'x' })).toBeNull()
+    expect(readLongRunChildMarker({ [LONGRUN_CHILD_PAYLOAD_KEY]: 42 })).toBeNull()
+    // Id shape guard rides the same whitelist RE as every dossier address.
+    expect(readLongRunChildMarker({ [LONGRUN_CHILD_PAYLOAD_KEY]: '../evil' })).toBeNull()
+    expect(readLongRunChildMarker({ [LONGRUN_CHILD_PAYLOAD_KEY]: 'UPPER' })).toBeNull()
+  })
+
+  it('child and segment markers are DISTINCT keys — depth 1 is structural', () => {
+    // A child payload carries the CHILD key only: no segment key means no
+    // dossier / relay / verdict lane for it, so the tree cannot deepen.
+    expect(LONGRUN_CHILD_PAYLOAD_KEY).not.toBe(LONGRUN_SEGMENT_PAYLOAD_KEY)
+    expect(readLongRunChildMarker({ [LONGRUN_SEGMENT_PAYLOAD_KEY]: 'demo-task' })).toBeNull()
   })
 })

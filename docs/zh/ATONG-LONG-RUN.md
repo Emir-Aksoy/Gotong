@@ -1,6 +1,6 @@
 # 阿同长任务执行(LONG track)— 分段长跑
 
-> Status: **M0 完(计划+三岔口拍板 2026-08-21) · M1 完(档案纯核 2026-08-21) · M2 完(分段执行器+接力驱动 2026-08-21) · M3 待做**。方向: **主 T 兼 M**
+> Status: **M0 完(计划+三岔口拍板 2026-08-21) · M1 完(档案纯核 2026-08-21) · M2 完(分段执行器+接力驱动 2026-08-21) · M3 完(分解-回收 2026-08-21) · M4 待做**。方向: **主 T 兼 M**
 > (循环骨架/工具面/验证预算属 T;任务级工作记忆/压缩/交接属 M)。
 > 拍板结果:驱动器=骑 suspended_tasks 自挂起+resume sweep;配置面=扩
 > ManagedAgentSpec additive;范围=先只给管家阿同。
@@ -320,8 +320,48 @@ tool-loop;接力(relay)是段末自挂起+到点冷启动;工种槽把组合里�
     (摘清中断旗⇒恰 3 例[两条干净收尾+崩溃复跑]/摘 park 时 flush⇒恰 1 例[park 时刻
     花费已入账]/段末记账改重数⇒恰 1 例[中途子结果被吞]),python 精确替换复原+shasum
     对拍。
-- **M3 分解-回收**:spawn_subtask + 结果回写父 dossier 事实行 + 醒来零 LLM 查账 +
-  汇总段;escalate 黑洞补账。
+- **M3 分解-回收 ✅(2026-08-21)**:段工具面长出第四件 `spawn_longrun_subtask`(一等
+  benign,接力提示【本段纪律】逐字点名它),把自包含子活拆出去并行做;**结果由驱动器
+  代码从 `TaskResult` 写进父 dossier 事实行**——绝不走文本信封前缀(FINAL_ANSWER 可
+  伪造的反面教训:settle 锚在代码级结构,模型伪造不出),escalate fire-and-forget 收
+  不回的黑洞在这里补上(`no_participant`→事实行「管家不在线,子活没有执行」)。醒来
+  零 LLM 查账/等待环 M2 已建(wait 裁决+预检),M3 只补供它查的账。
+  - **行先落盘,派发在后**:childId 在 mutate 里分配(`c<nextChildId>`),行 append
+    + `waitingForChildren=true` 同一次 mutate 落盘之后才 dispatch——结果结构性不可能
+    赶在行存在之前回来;门在假 hub 的 dispatch 回调里取证(派发那一刻盘上已有
+    pending 行+等待旗)。**守卫全在 mutate 回调内**(终态/收尾中/挂起中/总数顶 10/
+    在途顶 3——`maxPendingChildren` 是 M3 唯一新常量;per-store promise 链串行化=
+    零 TOCTOU),拒绝=零派发零行,守卫抛错文本骑 callTool 既有 catch 直达模型自纠。
+  - **settle 五臂如实记行**:ok→取 `output.text`(string/`{text}` 两形,没有可用
+    文字→兜底句「(子活完成但没有文字结果)」);failed→带病名;no_participant→黑洞
+    收口句;**suspended→按失败记+诚实句「批准后的结果不回写档案」**(dispatch
+    promise 在 park 那一刻就 resolve 成 suspended,批准后的续跑走 inbox-resume→成员
+    推送,结构性回不到这只 promise;记 pending 会把零成本等待环永远困死——诚实降级
+    好过假等待);dispatch reject 臂同失败。settle 只写仍 `pending` 的行(取消赛跑
+    不复活),写失败 warn 不炸,**永不碰 `waitingForChildren`/`waitStreak`**(唤醒
+    预检按 pending 数收账,settle 靠数字唤醒父任务,不做旗手术)。
+  - **子活通道(agent.ts child lane)**:CHILD 标记 `__gotongLongRunChild`(值=父任务
+    id,白名单正则先于一切)走独立分支——一回合有界 turn,**花费计入父档案预算**
+    (`flushLongRunSpend` 在 `finally`:累加器消费式读清=park 半途也入账、续跑半段只
+    记增量、两半相加不重复计;没表的子活=静默预算洞,直撞边界⑥);**不进 episodic**
+    (机器任务书,与段同纪律——门配对照腿钉死普通聊天照常捕获,否则「零捕获」空洞地
+    真);不接力不算段不落段日志。governed park 照常 park 子活自身(分解≠授权);
+    没接驱动器时标记惰性当普通聊天(子活自包含,无档可拒)。
+  - **深度 1 是结构性的不是口头的**:子活带 CHILD 标记不带 SEGMENT 标记→无档案无
+    接力无裁决,树长不深(两把 payload key 不同,段 key 喂 child 读者=null,门钉死);
+    学到父 id 的子活最多加兄弟(两道上限封着)。**残余如实**:取消不追在途子活
+    (结果落在已取消档案的行上,无害——settle 只写行不动任务状态,门钉死不复活);
+    子活 park 批准后的结果只进 transcript/成员推送,不回事实行(suspended 臂的另一
+    面,段里读不到——高价值子活别走会 park 的路,或成员批后把结果说给阿同)。
+  - 验收:personal-butler **288**(+8:dossier M3 组 4[spawn 注册+接力提示点名/收尾
+    段不点名/CHILD 标记 round-trip 敌意形状全拒/两把 key 不同+段 key 喂 child 读者
+    =null]+驱动子活通道 4[token 四维+活跃秒入父账、段数 0 零日志/零捕获+对照腿/
+    governed park 两半相加不重复计/无驱动器惰性+垃圾 resume 状态从任务书重跑])、
+    host **3200**(+6 spawn/settle:行先落盘取证/守卫七拒/两道上限/settle 四臂矩阵/
+    ok 无文字兜底/取消赛跑不复活)、全仓 typecheck 净、四门 PASS(旋钮 116 零新增,
+    main.ts 2810/2810 未动,接线在 factory);**三道变异三次全红且只红该红那些**
+    (摘 spawn 的等待旗⇒恰 1 例/摘 no_participant 事实行⇒恰 1 例/摘子活 finally
+    flush⇒恰 2 例[两条计费测]),python 精确替换复原+shasum 对拍。
 - **M4 工种×模型配置面**:core additive spec 字段 + web 三缝 echo(manifest/
   agents-routes/admin capture-echo,maintenanceModel/fallbacks 先例)+ pool 槽解析。
 - **M5 随档刻度接线**〔用户门:等 EFF 出数,段长/压缩节律/转派阈值随组合调〕。

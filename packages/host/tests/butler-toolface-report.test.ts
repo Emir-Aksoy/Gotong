@@ -202,7 +202,11 @@ function buildFullFace(): ToolFaceEntry[] {
       module: 'longrun-segment',
       kind: 'benign',
       toolset: buildButlerLongRunSegmentToolset({
+        userId: U,
+        butlerId: 'butler-x',
         store: openLongRunDossierStore({ dir: join(tmp, 'longrun'), now: Date.now }),
+        hub: stub(),
+        now: Date.now,
       }),
     },
     {

@@ -61,6 +61,8 @@ export const BUTLER_FIRST_CLASS_BENIGN = [
   'record_longrun_progress',
   'complete_longrun_task',
   'block_longrun_task',
+  // LONG-M3 spawn — 同一理由:接力提示的【本段纪律】逐字点名它(分解-回收)。
+  'spawn_longrun_subtask',
 ] as const
 
 /** 目录 benign 长尾(一次性配置 / 低频自省 / 按需诊断):经 use_tool 取用。 */

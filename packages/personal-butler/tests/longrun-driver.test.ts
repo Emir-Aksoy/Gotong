@@ -14,6 +14,9 @@
  *      成员在批准落地前取消 → 批准的动作一步不执行(取消赢过批准)。
  *   5. 崩溃诚实 — 段执行抛错:花费入账 + 失败日志 + push,档案留盘;下次唤醒
  *      的提示带 ⚠ 中断行,干净收尾后清掉。
+ *   6. M3 子活通道 — CHILD 标记的任务是段派出去的一回合 turn:花费计入父档案
+ *      预算、不进 episodic、不接力不算段;governed park 照常(分解≠授权);
+ *      没接驱动器时标记惰性。
  */
 
 import { mkdtempSync, rmSync } from 'node:fs'
@@ -35,6 +38,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import {
   GovernedActionToolset,
+  LONGRUN_CHILD_PAYLOAD_KEY,
   LONGRUN_LIMITS,
   LONGRUN_SEGMENT_PAYLOAD_KEY,
   PersonalButlerAgent,
@@ -171,7 +175,7 @@ function segmentSimToolset(store: LongRunDossierStore): LlmAgentToolset {
           if (child) {
             child.status = 'ok'
             child.result = String(args.result ?? '')
-            child.at = new Date(now()).toISOString()
+            child.at = now()
           }
         })
         return { content: [{ type: 'text', text: '子活已落地。' }] }
@@ -204,6 +208,14 @@ const segTask = (id: string, lrTaskId: string): Task => ({
   from: 'user:alice',
   strategy: { kind: 'explicit', to: 'butler' },
   payload: { [LONGRUN_SEGMENT_PAYLOAD_KEY]: lrTaskId, prompt: `[longrun:${lrTaskId}]` },
+})
+
+/** M3 子活任务:payload 带 CHILD 标记(spawn 工具派发的形状,值 = 父任务 id)。 */
+const childTask = (id: string, parentId: string, ask: string): Task => ({
+  id,
+  from: 'user:alice',
+  strategy: { kind: 'explicit', to: 'butler' },
+  payload: { [LONGRUN_CHILD_PAYLOAD_KEY]: parentId, prompt: ask },
 })
 
 async function expectPark(p: Promise<unknown>): Promise<SuspendTaskError> {
@@ -579,5 +591,127 @@ describe('LONG-M2 驱动器 — 子结果段末记账', () => {
     if (loaded.kind !== 'ok') throw new Error('dossier gone')
     // 这次渲染真的把结果给模型看了 → 段末记账推进到 1。
     expect(loaded.dossier.childResultsSeen).toBe(1)
+  })
+})
+
+// ── ⑥ M3 子活通道:一回合 turn,花费入父账,不是段 ─────────────────────────
+
+describe('LONG-M3 驱动器 — 子活通道', () => {
+  it('子活 turn = 普通一回合:回复原样返回;token+活跃秒计入父档案预算;段数不动、零日志、不接力', async () => {
+    await store.create({ taskId: 'job', userId: 'alice', objective: '查三地签证' })
+    const provider = new ScriptProvider(
+      [
+        textTurn('吉隆坡签证:免签 30 天', {
+          inputTokens: 100,
+          outputTokens: 30,
+          cacheCreationTokens: 15,
+          cacheReadTokens: 5,
+        }),
+      ],
+      () => {
+        nowMs += 90_000
+      },
+    )
+    const agent = buildAgent({ provider, store })
+
+    const res = (await agent.onTask(childTask('ct1', 'job', '查吉隆坡的签证政策,给要点'))) as {
+      kind: string
+      output?: { text?: string }
+    }
+    expect(res.kind).toBe('ok')
+    expect(res.output?.text).toContain('吉隆坡签证')
+    // 子活的全部输入 = spawn 写的自包含任务书,不是档案渲染。
+    expect(provider.requests[0]!.messages[0]!.content as string).toContain('查吉隆坡的签证政策')
+
+    const loaded = await store.load('job')
+    if (loaded.kind !== 'ok') throw new Error('dossier gone')
+    expect(loaded.dossier.budget.tokensUsed).toBe(150) // 四维求和入父账(预算一等公民)
+    expect(loaded.dossier.budget.timeUsedSec).toBe(90) // 活跃墙钟入父账
+    expect(loaded.dossier.segments).toBe(0) // 子活不是段
+    expect(await store.readJournalTail('job')).toHaveLength(0) // 不落段日志
+  })
+
+  it('子活不进 episodic 记忆(对照:普通聊天在同一台 agent 上照常捕获)', async () => {
+    await store.create({ taskId: 'job', userId: 'alice', objective: '查签证' })
+    const mem = emptyMemory()
+    const provider = new ScriptProvider([textTurn('好的,记住了'), textTurn('子活跑完了')])
+    const agent = new PersonalButlerAgent({
+      id: 'butler',
+      provider,
+      memory: mem,
+      system: '人设',
+      captureTurns: true,
+      longRun: { store, now },
+    })
+
+    // 对照腿:先证捕获路径活着,否则「子活零捕获」可能空洞地真。
+    await agent.onTask({
+      id: 'n1',
+      from: 'user:alice',
+      strategy: { kind: 'explicit', to: 'butler' },
+      payload: { prompt: '你好' },
+    })
+    const afterChat = (await mem.list()).length
+    expect(afterChat).toBeGreaterThan(0)
+
+    // 子活腿:同一台 agent、同一份记忆——列表长度一字不动。
+    await agent.onTask(childTask('ct1', 'job', '查吉隆坡签证'))
+    expect((await mem.list()).length).toBe(afterChat)
+  })
+
+  it('子活里 governed park:park 前花费先入父账;批准续跑走子活通道重计增量,动作照执行', async () => {
+    await store.create({ taskId: 'job', userId: 'alice', objective: '清理旧 agent' })
+    const exec: string[] = []
+    const provider = new ScriptProvider([
+      toolTurn({ id: 'c1', name: 'delete_agent', input: { handle: 'mailer' } }, { inputTokens: 80, outputTokens: 20 }),
+      textTurn('删完了', { inputTokens: 40, outputTokens: 20 }),
+    ])
+    const agent = buildAgent({ provider, store, governed: governedToolset(exec) })
+
+    const t = childTask('ct1', 'job', '把 mailer 这个旧 agent 清掉')
+    const gatePark = await expectPark(agent.onTask(t))
+    expect(readLongRunRelayState(gatePark.state)).toBeNull() // 子活不接力
+    expect(readButlerGateState(gatePark.state)).not.toBeNull()
+    let loaded = await store.load('job')
+    if (loaded.kind !== 'ok') throw new Error('dossier gone')
+    expect(loaded.dossier.budget.tokensUsed).toBe(100) // park 前的花费已入父账
+    expect(loaded.dossier.segments).toBe(0)
+    expect(loaded.dossier.interrupted).toBe(false) // 段的中断标记从不被子活碰
+    expect(exec).toEqual([]) // 批准前零副作用
+
+    const res = (await agent.onResume(t, { ...(gatePark.state as object), answer: { approved: true } })) as {
+      kind: string
+      output?: { text?: string }
+    }
+    expect(res.kind).toBe('ok')
+    expect(res.output?.text).toContain('删完了')
+    expect(exec).toEqual(['delete:mailer'])
+    loaded = await store.load('job')
+    if (loaded.kind !== 'ok') throw new Error('dossier gone')
+    expect(loaded.dossier.budget.tokensUsed).toBe(160) // 两半相加,不重复计
+  })
+
+  it('没接驱动器 → 子活标记惰性当普通聊天;垃圾 resume 状态 → 从任务书重跑而非普通聊天恢复', async () => {
+    // 没接驱动器:标记不劫持(对照段任务的诚实拒绝——子活自包含,无档可拒)。
+    const p1 = new ScriptProvider([textTurn('普通回复')])
+    const inert = buildAgent({ provider: p1, store, noDriver: true })
+    const r1 = (await inert.onTask(childTask('ct1', 'job', '查签证'))) as {
+      kind: string
+      output?: { text?: string }
+    }
+    expect(r1.kind).toBe('ok')
+    expect(r1.output?.text).toContain('普通回复')
+
+    // 垃圾 resume 状态(既非接力也非治理闸)→ 子活通道从 payload 任务书重跑。
+    await store.create({ taskId: 'job', userId: 'alice', objective: '查签证' })
+    const p2 = new ScriptProvider([textTurn('重跑的回答')])
+    const agent = buildAgent({ provider: p2, store })
+    const r2 = (await agent.onResume(childTask('ct2', 'job', '重新查吉隆坡签证'), 'garbage-state')) as {
+      kind: string
+      output?: { text?: string }
+    }
+    expect(r2.kind).toBe('ok')
+    expect(r2.output?.text).toContain('重跑的回答')
+    expect(p2.requests[0]!.messages[0]!.content as string).toContain('重新查吉隆坡签证')
   })
 })

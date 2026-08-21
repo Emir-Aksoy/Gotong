@@ -101,7 +101,10 @@ export interface LongRunDossier {
   budget: LongRunBudget
   /** Segments COMPLETED so far (the running segment is `segments + 1`). */
   segments: number
-  /** Model said "I'm waiting on children" at last segment end. */
+  /** Set true by the spawn tool (M3) in the same mutate that appends the child
+   * row; cleared by the complete tool and the wind-down arm. Deliberately
+   * sticky across settles — the wake precheck requires pending > 0 too, so a
+   * stale flag can never stall a finished brood. */
   waitingForChildren: boolean
   /** Settled-children count consumed at last segment start (wake precheck). */
   childResultsSeen: number
@@ -150,6 +153,8 @@ export const LONGRUN_LIMITS = {
   maxChildren: 10,
   maxChildSummaryChars: 300,
   maxChildResultChars: 1000,
+  /** M3 — at most this many children in flight at once(并发上限常量). */
+  maxPendingChildren: 3,
   /** A member runs at most this many concurrently-live long tasks. */
   maxActiveTasks: 3,
   defaultTokenBudget: 500_000,
@@ -169,6 +174,7 @@ export const LONGRUN_TOOL_NAMES = {
   progress: 'record_longrun_progress',
   complete: 'complete_longrun_task',
   blocked: 'block_longrun_task',
+  spawn: 'spawn_longrun_subtask',
 } as const
 
 /** taskId is a filename — whitelist shape BEFORE any path join (PANEL_ID_RE family). */
@@ -664,6 +670,7 @@ export function renderRelayPrompt(d: LongRunDossier, tail: readonly LongRunJourn
       '- 以盘上现状为权威:先查看相关文件与状态的现状,再决定下一步;不要凭档案断言「已经做完」——核实过才算。',
       '- 不许缩水目标:不要把成功重新定义成一个更小、更容易或只是「兼容」的任务。',
       `- 本段是有界的:专注推进一到两步,然后用 ${LONGRUN_TOOL_NAMES.progress} 把进度落盘(做了什么/关键事实/下一步),信任下一段会继续。`,
+      `- 一件活可以拆出去并行做:用 ${LONGRUN_TOOL_NAMES.spawn} 派自包含的子活(子活看不到本档案,要什么背景就写什么);派完照常收段,结果会出现在之后段的【子活】区。`,
       `- 认为目标全部完成时,用 ${LONGRUN_TOOL_NAMES.complete} 提交,并逐条给出完成证据——「没发现剩余工作」不算证据。`,
       `- 被卡住、需要成员输入才能继续时,用 ${LONGRUN_TOOL_NAMES.blocked} 写清要问成员什么。`,
     ].join(String.fromCharCode(0x0a)),
@@ -928,6 +935,23 @@ export function readLongRunRelayState(state: unknown): string | null {
 export function readLongRunSegmentMarker(payload: unknown): string | null {
   if (typeof payload !== 'object' || payload === null) return null
   const value = (payload as Record<string, unknown>)[LONGRUN_SEGMENT_PAYLOAD_KEY]
+  if (typeof value !== 'string' || !LONGRUN_TASK_ID_RE.test(value)) return null
+  return value
+}
+
+/**
+ * M3 — 子活任务 payload 上的标记键——值 = **父任务**(dossier)的 taskId。
+ * 子活走驱动器的子活通道:花费计入父预算、绕过 episodic 捕获(机器提示不是
+ * 成员对话),但**不带段标记**——子活没有自己的 dossier,不接力、不裁决。
+ * 深度 1 由此是结构性质:往下派需要一份自己的档案,而子活没有;它顶多把
+ * 兄弟行加进父档案(受同一并发/总数上限),树不会变深。
+ */
+export const LONGRUN_CHILD_PAYLOAD_KEY = '__gotongLongRunChild'
+
+/** Read the child marker off a task payload. Null when absent / malformed. */
+export function readLongRunChildMarker(payload: unknown): string | null {
+  if (typeof payload !== 'object' || payload === null) return null
+  const value = (payload as Record<string, unknown>)[LONGRUN_CHILD_PAYLOAD_KEY]
   if (typeof value !== 'string' || !LONGRUN_TASK_ID_RE.test(value)) return null
   return value
 }

@@ -18,6 +18,18 @@
  * the rest. Decomposition ≠ authorization: everything a segment DOES still
  * gates through the butler's own benign/governed toolsets.
  *
+ * ── Spawn(M3 分解-回收,骑段工具面) ─────────────────────────────────────────
+ * `spawn_longrun_subtask` joins the segment face: a segment forks one bounded
+ * CHILD turn at the butler itself (fire-and-forget, escalate discipline) and
+ * keeps going. The settle arm — DRIVER code, never the model — maps the real
+ * `TaskResult` onto the child's dossier row (the FINAL_ANSWER lesson: results
+ * anchor in code-level structure, not in text a child could forge). That is
+ * also where the escalate-style fire-and-forget black hole closes: EVERY
+ * outcome, `no_participant` included, lands as a fact row the next segment
+ * reads. Decomposition ≠ authorization: a governed tool inside a child parks
+ * the child itself; depth 1 is structural (the child payload carries the
+ * CHILD marker, never the segment marker — no dossier, no relay, no grandkids).
+ *
  * ── Why benign ───────────────────────────────────────────────────────────────
  * Same argument as the task notebook + escalate: these verbs edit the member's
  * OWN ledger files and dispatch to the member's OWN butler. The store is
@@ -26,7 +38,9 @@
  * structural, not checked.
  */
 
+import type { TaskResult } from '@gotong/core'
 import {
+  LONGRUN_CHILD_PAYLOAD_KEY,
   LONGRUN_LIMITS,
   LONGRUN_SEGMENT_PAYLOAD_KEY,
   LONGRUN_TOOL_NAMES,
@@ -50,7 +64,14 @@ interface LongRunLogger {
 }
 
 export interface ButlerLongRunSegmentDeps {
+  /** The member this butler serves — child dispatches are scoped/attributed to them. */
+  userId: string
+  /** The butler agent's OWN id — spawn's dispatch target (self, child lane). */
+  butlerId: string
   store: LongRunDossierStore
+  hub: ButlerAskDispatch
+  /** Injected clock (the driver's `now`) — settle rows stamp `at` from it. */
+  now: () => number
   logger?: LongRunLogger
 }
 
@@ -139,6 +160,24 @@ const BLOCKED_TOOL: LlmToolDefinition = {
   },
 }
 
+const SPAWN_TOOL: LlmToolDefinition = {
+  name: LONGRUN_TOOL_NAMES.spawn,
+  description:
+    '长期任务专用:把一件自包含的子活拆出去并行做。ask 要写全背景(子活看不到任务档案与本段对话);结果由驱动器如实记回档案的【子活】区,之后的段落读它收账。派完不用原地等——本段继续或照常收段。',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      task_id: { type: 'string', description: '长期任务 id(接力提示里印着)。' },
+      ask: {
+        type: 'string',
+        description: '子活的完整任务书(自包含:背景 + 要做什么 + 期望产出)。',
+      },
+    },
+    required: ['task_id', 'ask'],
+    additionalProperties: false,
+  },
+}
+
 const START_TOOL: LlmToolDefinition = {
   name: 'start_longrun_task',
   description:
@@ -196,7 +235,7 @@ class ButlerLongRunSegmentToolset implements LlmAgentToolset {
   constructor(private readonly deps: ButlerLongRunSegmentDeps) {}
 
   listTools(): LlmToolDefinition[] {
-    return [PROGRESS_TOOL, COMPLETE_TOOL, BLOCKED_TOOL]
+    return [PROGRESS_TOOL, COMPLETE_TOOL, BLOCKED_TOOL, SPAWN_TOOL]
   }
 
   async callTool(name: string, args: Record<string, unknown>): Promise<LlmToolCallResult> {
@@ -208,12 +247,16 @@ class ButlerLongRunSegmentToolset implements LlmAgentToolset {
           return await this.complete(args)
         case LONGRUN_TOOL_NAMES.blocked:
           return await this.blocked(args)
+        case LONGRUN_TOOL_NAMES.spawn:
+          return await this.spawn(args)
         default:
           return text(`未知工具:${name}`, true)
       }
     } catch (err) {
       // Store validation (ButlerError) carries a model-facing reason — hand it
       // back as an isError result so the model can self-correct in-round.
+      // Spawn's in-mutate guards ride the same channel (they throw plain
+      // Errors inside the mutate, which aborts before any write).
       return text(err instanceof Error ? err.message : String(err), true)
     }
   }
@@ -301,6 +344,146 @@ class ButlerLongRunSegmentToolset implements LlmAgentToolset {
       draft.blockedQuestion = clipped
     })
     return text('任务已挂起等成员回答;问题会主动发给成员。')
+  }
+
+  /**
+   * M3 spawn — fork one bounded child turn at the butler itself.
+   *
+   * Every guard lives INSIDE the mutate callback: the store's per-dossier
+   * promise chain makes check-and-append atomic, so two spawns from the same
+   * segment can't both squeeze under a cap, and a thrown guard aborts before
+   * any byte is written (mutate clones, runs fn, THEN saves). Row first,
+   * dispatch second — the settle arm edits the row by id, so it must already
+   * be on disk before a result can race back.
+   */
+  private async spawn(args: Record<string, unknown>): Promise<LlmToolCallResult> {
+    const { store, hub, userId, butlerId } = this.deps
+    const taskId = strArg(args.task_id)
+    const ask = strArg(args.ask)
+    if (!taskId) return text('缺 task_id。', true)
+    if (!ask) return text('缺 ask — 子活任务书要自包含(子活看不到本档案与本段对话)。', true)
+    if (Array.from(ask).length > LONGRUN_LIMITS.maxObjectiveChars) {
+      return text(
+        `ask 太长(> ${LONGRUN_LIMITS.maxObjectiveChars} 字)——子活任务书要砍到要点再派,不许截断着派。`,
+        true,
+      )
+    }
+    // loadOr first only for the nicer missing/corrupt refusal lines; the
+    // authoritative status/cap checks re-run inside the mutate below.
+    const probe = await this.loadOr(taskId)
+    if (typeof probe === 'string') return text(probe, true)
+
+    let childId = ''
+    await store.mutate(taskId, (draft) => {
+      if (draft.status === 'done' || draft.status === 'cancelled') {
+        throw new Error(`这项任务${STATUS_LABEL[draft.status]},不再开新的子活。`)
+      }
+      if (draft.status === 'blocked') {
+        throw new Error('这项任务挂起等成员输入中,先别派子活。')
+      }
+      if (draft.status === 'winding_down') {
+        throw new Error('这项任务在收尾中,不再开新的子活——用手头已有的结果交差。')
+      }
+      if (draft.children.length >= LONGRUN_LIMITS.maxChildren) {
+        throw new Error(`子活总数已到上限(${LONGRUN_LIMITS.maxChildren} 件),不能再拆;用已有结果继续。`)
+      }
+      const pending = draft.children.filter((c) => c.status === 'pending').length
+      if (pending >= LONGRUN_LIMITS.maxPendingChildren) {
+        throw new Error(
+          `在途子活已有 ${pending} 件(上限 ${LONGRUN_LIMITS.maxPendingChildren});等结果回来再拆下一件。`,
+        )
+      }
+      childId = `c${draft.nextChildId}`
+      draft.nextChildId += 1
+      draft.children.push({
+        id: childId,
+        summary: clipLongRunText(ask, LONGRUN_LIMITS.maxChildSummaryChars),
+        status: 'pending',
+      })
+      // Sticky by design — the wake precheck also requires pending > 0, so
+      // this flag alone can never stall a finished brood (dossier field doc).
+      draft.waitingForChildren = true
+    })
+
+    // Fire-and-forget (escalate discipline) — but the settle arm is DRIVER
+    // code writing the REAL TaskResult onto the row, so unlike escalate the
+    // outcome can't black-hole: no_participant / rejection land as fact rows
+    // the next segment reads. The child payload carries the CHILD marker
+    // (never the segment marker): depth 1 is structural, and its spend meters
+    // into THIS dossier's budget via the driver's child lane.
+    void hub
+      .dispatch({
+        from: userId,
+        origin: { orgId: 'local', userId },
+        strategy: { kind: 'explicit', to: butlerId },
+        payload: { [LONGRUN_CHILD_PAYLOAD_KEY]: taskId, prompt: ask },
+        title: `长期任务「${taskId}」子活 ${childId}:${clipLongRunText(ask, 40)}`,
+      })
+      .then(
+        (result) => this.settleChild(taskId, childId, result),
+        (err) => {
+          this.deps.logger?.warn('butler longrun: child dispatch failed', { taskId, childId, err })
+          return this.settleChildRow(taskId, childId, 'failed', '派发失败,子活没有执行。')
+        },
+      )
+
+    return text(`子活「${childId}」已派出(并行进行);结果会出现在之后段落的【子活】区。本段继续或照常收段即可。`)
+  }
+
+  /** Map a settled TaskResult onto the child's dossier row (driver-truth). */
+  private async settleChild(taskId: string, childId: string, result: TaskResult): Promise<void> {
+    switch (result.kind) {
+      case 'ok':
+        return this.settleChildRow(
+          taskId,
+          childId,
+          'ok',
+          childReplyText(result.output) ?? '(子活完成但没有文字结果)',
+        )
+      case 'failed':
+        return this.settleChildRow(taskId, childId, 'failed', `失败:${result.error || '未知原因'}`)
+      case 'no_participant':
+        return this.settleChildRow(taskId, childId, 'failed', '管家不在线,子活没有执行。')
+      case 'cancelled':
+        return this.settleChildRow(taskId, childId, 'failed', '子活被取消。')
+      case 'suspended':
+        // hub.dispatch resolves 'suspended' AT park time; the post-approval
+        // result flows via inbox-resume → member push, never back to this
+        // promise. 'pending' here would stall the zero-cost wait loop forever
+        // — record the honest bounded imprecision instead.
+        return this.settleChildRow(
+          taskId,
+          childId,
+          'failed',
+          '子活中途需成员批准,批准后的结果不回写档案;按没拿到结果处理。',
+        )
+    }
+  }
+
+  /**
+   * Write one settled outcome onto the row. Field-level edit of a row still
+   * 'pending' (a cancel/complete may have raced — never resurrect), and NEVER
+   * touches waitingForChildren / waitStreak: settles wake the parent via the
+   * precheck's settled-count math, not by flag surgery here. Store failures
+   * are warned away — the settle arm must not throw into a void promise.
+   */
+  private async settleChildRow(
+    taskId: string,
+    childId: string,
+    status: 'ok' | 'failed',
+    resultText: string,
+  ): Promise<void> {
+    try {
+      await this.deps.store.mutate(taskId, (draft) => {
+        const row = draft.children.find((c) => c.id === childId)
+        if (!row || row.status !== 'pending') return
+        row.status = status
+        row.result = clipLongRunText(resultText, LONGRUN_LIMITS.maxChildResultChars)
+        row.at = this.deps.now()
+      })
+    } catch (err) {
+      this.deps.logger?.warn('butler longrun: child settle write failed', { taskId, childId, err })
+    }
   }
 
   /** Load, mapping missing/corrupt to a model-facing refusal line. */
@@ -449,6 +632,20 @@ class ButlerLongRunControlToolset implements LlmAgentToolset {
 
 function strArg(v: unknown): string {
   return typeof v === 'string' ? v.trim() : ''
+}
+
+/**
+ * Extract the child's reply text from a TaskResult output (escalate's
+ * two-shape discipline: butler turns settle as a string or `{ text }`).
+ * Null when there is nothing usable — the caller records that honestly.
+ */
+function childReplyText(output: unknown): string | null {
+  if (typeof output === 'string' && output.trim() !== '') return output.trim()
+  if (output !== null && typeof output === 'object') {
+    const t = (output as { text?: unknown }).text
+    if (typeof t === 'string' && t.trim() !== '') return t.trim()
+  }
+  return null
 }
 
 function text(t: string, isError = false): LlmToolCallResult {

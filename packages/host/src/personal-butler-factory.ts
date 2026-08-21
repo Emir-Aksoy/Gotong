@@ -469,8 +469,15 @@ export function buildButlerFactory(deps: ButlerFactoryDeps): ButlerFactory {
           now: Date.now,
           logger: log,
         })
+        // M3 — the segment face carries spawn too, so it needs the dispatch
+        // deps the control trio already has: child turns are self-dispatches
+        // at this same butler (child lane; spend meters into the dossier).
         const longRunSegmentToolset = buildButlerLongRunSegmentToolset({
+          userId,
+          butlerId: base.id,
           store: longRunStore,
+          hub,
+          now: Date.now,
           logger: log,
         })
         const longRunPush = refs.memberPush

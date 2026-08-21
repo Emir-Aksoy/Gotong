@@ -55,6 +55,7 @@ import {
   longRunRelayState,
   markChildResultsSeen,
   precheckLongRunWake,
+  readLongRunChildMarker,
   readLongRunRelayState,
   readLongRunSegmentMarker,
   recordSegmentUsage,
@@ -276,6 +277,12 @@ export class PersonalButlerAgent extends MemoryAugmentedAgent {
     // dossier IS the context). Memory warm-up is done inside the driver.
     const segTask = readLongRunSegmentMarker(task.payload)
     if (segTask !== null) return this.longRunSegmentEntry(task, segTask)
+    // LONG-M3 — a child-marked task is one bounded turn a segment spawned:
+    // same lane hygiene as segments (no episodic capture, no per-turn probe),
+    // and its spend meters into the PARENT dossier's budget. Without a driver
+    // the marker is inert and the task is just chat.
+    const childOf = readLongRunChildMarker(task.payload)
+    if (childOf !== null && this.longRun) return this.runLongRunChildTurn(task, childOf)
     this.turnContext = null
     if (this.contextProbe) {
       try {
@@ -309,6 +316,14 @@ export class PersonalButlerAgent extends MemoryAugmentedAgent {
         return this.resumeLongRunSegment(task, segTask, state)
       }
       return this.longRunSegmentEntry(task, segTask)
+    }
+    // LONG-M3 — a child that parked mid-turn (governed approval) resumes in
+    // the child lane so the resumed half re-meters into the parent budget.
+    // Any other state shape re-runs the turn fresh from the payload prompt —
+    // never normal-chat resume (episodic capture of a machine prompt).
+    const childOf = readLongRunChildMarker(task.payload)
+    if (childOf !== null && this.longRun) {
+      return this.runLongRunChildTurn(task, childOf, readButlerGateState(state) ? state : undefined)
     }
     this.turnContext = null
     await this.refreshStableCard()
@@ -718,6 +733,48 @@ export class PersonalButlerAgent extends MemoryAugmentedAgent {
       await this.warmLongRunContext()
       return this.resumeBody(task, state)
     })
+  }
+
+  /**
+   * LONG-M3 — one bounded CHILD turn spawned by a segment. Child ≠ segment:
+   * no dossier of its own, no relay, no verdict — just the butler's normal
+   * governed tool-loop over the spawn-rendered prompt, with two lane
+   * properties: (1) spend meters into the PARENT dossier's budget(预算一等
+   * 公民 — an unmetered child would be a silent budget hole); the flush sits
+   * in `finally` so a mid-turn park still bills what ran, and the resumed
+   * half re-meters itself (each flush CONSUMES the accumulator — no double
+   * bill). (2) no episodic capture / per-turn probe (machine prompt, same as
+   * segments). Governance is untouched: a governed tool inside a child parks
+   * the child itself(分解≠授权).
+   */
+  private async runLongRunChildTurn(
+    task: Task,
+    parentId: string,
+    resumeState?: unknown,
+  ): Promise<unknown> {
+    const startMs = this.longRun!.now()
+    this.longRunActive.add(task.id)
+    this.longRunUsage.set(task.id, 0)
+    try {
+      const work = async (): Promise<unknown> => {
+        await this.warmLongRunContext()
+        if (resumeState !== undefined) return this.resumeBody(task, resumeState)
+        return this.runToolLoop(task, this.buildRequest(task))
+      }
+      if (this.toolset?.runForTask) {
+        return await this.toolset.runForTask(
+          { id: task.id, from: task.from, ancestry: task.ancestry },
+          work,
+        )
+      }
+      return await work()
+    } finally {
+      // Never throws over the turn's own outcome (store errors are warned away
+      // inside); consumes the meter so `finally`'s delete loses nothing.
+      await this.flushLongRunSpend(parentId, task.id, startMs)
+      this.longRunActive.delete(task.id)
+      this.longRunUsage.delete(task.id)
+    }
   }
 
   /** Accumulator scope + park-flush + settle, shared by fresh and resumed
