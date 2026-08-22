@@ -544,6 +544,54 @@ async function readTailUtf8(file: string, maxBytes: number): Promise<string> {
 /** Fold one finished segment's spend into the ledger. Non-finite / negative
  * inputs count as 0 (a broken meter must never corrupt the ledger — but the
  * segment itself still counts, so the segment backstop always advances). */
+/**
+ * Cost weights for the segment budget's token meter.
+ *
+ * M2 summed all four usage dimensions 1:1, reasoning that "cache reads are
+ * cheaper, not free, and the budget is a work-done meter, not a bill."
+ * Production falsified that on the first real run (2026-08-22): across three
+ * segments, cache reads were ~95% of everything metered. The meter had stopped
+ * measuring work done and started measuring context-size × call-count, so a
+ * task burned 62% of its budget while doing almost no work — and a LONGER
+ * objective silently bought a SHORTER task.
+ *
+ * So the meter is weighted by cost, using the standard prompt-cache ratios
+ * (a cache read ~0.1× fresh input, a cache write ~1.25×). It is still not a
+ * bill — it reads no price table and knows no model — it is a per-token cost
+ * PROXY, which makes `tokenBudget` mean "this many fresh-input-equivalent
+ * tokens". Actual money is the usage ledger's `cost_micros`.
+ */
+export const LONGRUN_TOKEN_WEIGHTS = {
+  input: 1,
+  output: 1,
+  cacheCreation: 1.25,
+  cacheRead: 0.1,
+} as const
+
+/**
+ * Fold one LLM response's usage into weighted tokens. Total: every dimension is
+ * optional and any non-finite / negative value contributes zero — a provider
+ * that reports nothing costs nothing here rather than poisoning the budget with
+ * NaN (which would compare false against every threshold and make the task
+ * immortal). Rounded so the ledger stays integral.
+ */
+export function weighLongRunUsage(u: {
+  inputTokens?: number
+  outputTokens?: number
+  cacheCreationTokens?: number
+  cacheReadTokens?: number
+}): number {
+  const w = LONGRUN_TOKEN_WEIGHTS
+  const take = (n: number | undefined, weight: number): number =>
+    typeof n === 'number' && Number.isFinite(n) && n > 0 ? n * weight : 0
+  return Math.round(
+    take(u.inputTokens, w.input) +
+      take(u.outputTokens, w.output) +
+      take(u.cacheCreationTokens, w.cacheCreation) +
+      take(u.cacheReadTokens, w.cacheRead),
+  )
+}
+
 export function recordSegmentUsage(
   d: LongRunDossier,
   usage: { tokens: number; seconds: number },
@@ -666,12 +714,18 @@ function resetWait(d: LongRunDossier): LongRunDossier {
  * The relay prompt — the ENTIRE handoff a new segment receives (relay ≠
  * replay). Pure function of dossier + journal tail: same inputs, same bytes.
  */
-export function renderRelayPrompt(d: LongRunDossier, tail: readonly LongRunJournalEntry[]): string {
+export function renderRelayPrompt(
+  d: LongRunDossier,
+  tail: readonly LongRunJournalEntry[],
+  nowLabel?: string,
+): string {
   const parts: string[] = []
   parts.push(`【长期任务 · 第 ${d.segments + 1} 段】`)
   // taskId 过了 LONGRUN_TASK_ID_RE 才进得了 store,直印安全;不印它,模型在
   // 段里调工具时只能猜 task_id——猜错一次就是一轮浪费。
   parts.push(`任务 ID: ${d.taskId}(调用长期任务工具时,task_id 一律传这个值)`)
+  const clock = renderClockBlock(nowLabel)
+  if (clock) parts.push(clock)
   parts.push('你在继续一项分段执行的长期任务。各段之间不携带对话记忆——下面这份盘上档案就是全部交接。')
   parts.push('')
   parts.push(renderObjectiveBlock(d))
@@ -719,11 +773,14 @@ export function renderWindDownPrompt(
   d: LongRunDossier,
   tail: readonly LongRunJournalEntry[],
   reason: 'tokens' | 'time' | 'segments',
+  nowLabel?: string,
 ): string {
   const reasonLabel = reason === 'tokens' ? 'token 预算' : reason === 'time' ? '时间预算' : '段数上限'
   const parts: string[] = []
   parts.push('【长期任务 · 收尾段】')
   parts.push(`任务 ID: ${d.taskId}(调用长期任务工具时,task_id 一律传这个值)`)
+  const clock = renderClockBlock(nowLabel)
+  if (clock) parts.push(clock)
   parts.push(`这项任务的预算已经用完(超限项: ${reasonLabel})。这是最后一段:不要再开始任何新的实质工作。`)
   parts.push('')
   parts.push(renderObjectiveBlock(d))
@@ -745,6 +802,32 @@ export function renderWindDownPrompt(
     ].join(String.fromCharCode(0x0a)),
   )
   return parts.join(String.fromCharCode(0x0a))
+}
+
+/**
+ * The segment's sense of "now" — one caller-rendered line plus ONE load-bearing
+ * sentence about the future.
+ *
+ * A segment deliberately bypasses the per-turn context probe (the dossier IS
+ * its context), so without this it has no clock at all. Giving it the time is
+ * only half the fix: production showed a model reading a FUTURE travel plan out
+ * of the knowledge base, taking the largest date it could see as "now", and
+ * asking the member "how did training go after your trip?" — days before the
+ * trip. Unattended work has nobody to correct that, and the next segment copies
+ * the mistake out of the journal. So the block says the quiet part out loud.
+ *
+ * `nowLabel` is framework-rendered (see `renderClockCard`), never member or
+ * model text; it is still clipped to its first line so a exotic locale can't
+ * break the prompt's block structure. Absent ⇒ null ⇒ byte-identical to M4b.
+ */
+function renderClockBlock(nowLabel: string | undefined): string | null {
+  if (typeof nowLabel !== 'string') return null
+  const line = nowLabel.split(String.fromCharCode(0x0a))[0]?.trim() ?? ''
+  if (!line) return null
+  return [
+    line,
+    '(档案、知识库、成员的话里都可能出现晚于这个时刻的日期——那是计划或行程,还没有发生。判断「现在」只看上面这一行。)',
+  ].join(String.fromCharCode(0x0a))
 }
 
 function renderObjectiveBlock(d: LongRunDossier): string {

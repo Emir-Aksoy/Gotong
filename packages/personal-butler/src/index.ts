@@ -45,6 +45,7 @@ export {
 } from './agent.js'
 
 export {
+  buildButlerClockLabel,
   buildButlerClockProbe,
   renderClockCard,
   type ButlerClockProbeOptions,
@@ -173,6 +174,8 @@ export {
   escapeXmlText,
   clipLongRunText,
   recordSegmentUsage,
+  weighLongRunUsage,
+  LONGRUN_TOKEN_WEIGHTS,
   checkLongRunBudget,
   decideSegmentVerdict,
   precheckLongRunWake,

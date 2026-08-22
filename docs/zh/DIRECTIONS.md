@@ -119,7 +119,7 @@ EXCH-M5 gotong-client 包 = 域 C(协作) × 法「形态兼容」;EFF 效果回
   24 条发现分六档(立刻可做 12 / 值得开票 8 / 摆岔口 3 / 已对 / 不抄 / 残余),
   含 M、C 两方向条目;逐条开工前仍走完整收口
 - 工具面按档瘦身(NA 显式推迟项「先度量后动」,度量尺已在)
-- **LONG 长任务执行**(主 T 兼 M,M0→M4b + M6 capstone 已落 2026-08-21):分段长跑——dossier
+- **LONG 长任务执行**(主 T 兼 M,M0→M4b + M6 capstone 2026-08-21,M6.1 首跑三修 2026-08-22):分段长跑——dossier
   盘上真相 / 段末自挂起接力 / 零 LLM 段末裁决 / 分解-回收 / 工种×模型槽;
   三岔口已拍板(骑 suspended_tasks / 扩 ManagedAgentSpec / butler-first),
   M1 档案纯核 + M2 分段执行器+接力驱动(六工具两层上脸)+ M3 分解-回收
@@ -128,7 +128,10 @@ EXCH-M5 gotong-client 包 = 域 C(协作) × 法「形态兼容」;EFF 效果回
   写路径,五 echo 面全核)+ M4b 槽解析+消费者(llm `providerFor` 缝 + 驱动器
   synthesizer/compactor 两消费者 + pool 槽解析叶子,main.ts 零触碰)+ M6 capstone
   (`examples/atong-longrun`:失忆模型四幕 74 断言——接力/kill-restart/预算收尾/
-  分解-回收,零 key 零网络)完,M5 随档刻度〔用户门:等 EFF 出数〕待 —
+  分解-回收,零 key 零网络)+ M6.1 首条真实生产长任务的三修(段里结构性没有钟
+  ⇒ 与每轮探针共用同一只 label + 「晚于此刻的日期是计划不是现在」那句;预算把
+  cache_read 按 1:1 计 ⇒ 按成本加权;compactor 槽没配而静默 ⇒ 生产补 model-only
+  槽,零新 key)完,M5 随档刻度〔用户门:等 EFF 出数〕待 —
   [`ATONG-LONG-RUN.md`](ATONG-LONG-RUN.md)
 
 ### M 记忆管理能力

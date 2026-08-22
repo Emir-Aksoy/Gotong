@@ -65,6 +65,7 @@ import {
   renderCompactorInput,
   renderRelayPrompt,
   renderWindDownPrompt,
+  weighLongRunUsage,
   type LongRunDossier,
   type LongRunDossierStore,
 } from './longrun-dossier.js'
@@ -115,6 +116,14 @@ export interface ButlerLongRunDriver {
    * improve a segment, never strand one.
    */
   slotProvider?: (slot: LongRunSlotName) => Promise<LongRunSlotResolution | null>
+  /**
+   * What time is it — rendered by the SAME builder and timezone the per-turn
+   * clock probe uses (`buildButlerClockLabel`), because a segment structurally
+   * skips that probe. Absent ⇒ no clock line ⇒ prompts byte-identical to M4b.
+   * Total by contract: a throw here would strand a segment over a cosmetic
+   * line, so the driver treats a failure as "no clock".
+   */
+  clockLabel?: () => string
   logger?: { warn(msg: string, meta?: Record<string, unknown>): void }
 }
 
@@ -407,19 +416,15 @@ export class PersonalButlerAgent extends MemoryAugmentedAgent {
    * LONG-M2 — meter every provider response of an ACTIVE segment execution.
    * Sits on the one choke point every LLM call already flows through (fresh
    * rounds, resumed rounds, retries — all of them), so the segment's token
-   * ledger can't miss a call and can't double-count one. All four usage
-   * dimensions sum: cache reads are cheaper, not free, and the budget is a
-   * work-done meter, not a bill.
+   * ledger can't miss a call and can't double-count one. Weighted by cost
+   * (`weighLongRunUsage`) rather than summed 1:1 — see LONGRUN_TOKEN_WEIGHTS
+   * for why the 1:1 version had to go.
    */
   protected override async streamWithAuthHook(req: LlmRequest, task: Task): Promise<LlmResponse> {
     const res = await super.streamWithAuthHook(req, task)
     if (this.longRunActive.has(task.id) && res.usage) {
-      const u = res.usage
-      let sum = 0
-      for (const n of [u.inputTokens, u.outputTokens, u.cacheCreationTokens, u.cacheReadTokens]) {
-        if (typeof n === 'number' && Number.isFinite(n) && n > 0) sum += n
-      }
-      this.longRunUsage.set(task.id, (this.longRunUsage.get(task.id) ?? 0) + sum)
+      const weighted = weighLongRunUsage(res.usage)
+      this.longRunUsage.set(task.id, (this.longRunUsage.get(task.id) ?? 0) + weighted)
     }
     return res
   }
@@ -743,9 +748,18 @@ export class PersonalButlerAgent extends MemoryAugmentedAgent {
     // ⚠-crash line on every single segment. `renderedSettled` is snapshotted
     // from the SAME dossier the prompt rendered, so segment-end bookkeeping
     // marks exactly what the model saw and nothing that settled later.
+    // 段里的钟(见 `clockLabel` 注释)。这一行是装饰性的,所以它自己的失败
+    // 绝不能顶掉一整段活——抛了就当没有钟,提示逐字节退回 M4b 形态。
+    let nowLabel: string | undefined
+    try {
+      nowLabel = lr.clockLabel?.()
+    } catch (err) {
+      lr.logger?.warn('[longrun] clock label failed', { taskId: lrTaskId, err: String(err) })
+    }
+
     const prompt = windDown
-      ? renderWindDownPrompt(d, tail, budget.exhausted ? budget.reason : 'time')
-      : renderRelayPrompt(d, tail)
+      ? renderWindDownPrompt(d, tail, budget.exhausted ? budget.reason : 'time', nowLabel)
+      : renderRelayPrompt(d, tail, nowLabel)
     const renderedSettled = countSettledChildren(d)
 
     try {

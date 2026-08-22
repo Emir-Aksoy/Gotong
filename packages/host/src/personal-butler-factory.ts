@@ -31,6 +31,7 @@ import type { Embedder } from '@gotong/personal-memory'
 import {
   BUTLER_MAX_TOOL_ROUNDS,
   PersonalButlerAgent,
+  buildButlerClockLabel,
   buildButlerClockProbe,
   buildButlerSessionHintProbe,
   composeContextProbes,
@@ -369,6 +370,10 @@ export function buildButlerFactory(deps: ButlerFactoryDeps): ButlerFactory {
           'reply-language.json',
         )
         const languageToolset = buildButlerLanguageToolset({ file: languageFile, logger: log })
+        // 段任务结构性跳过 contextProbe(agent.handleTask 走驱动器通道),所以接力
+        // 提示得自己带钟。两处共用**同一个** label 构造器 ⇒ 同一次时区解析,
+        // 「每轮的钟」与「段里的钟」结构上不可能各说各话。
+        const clockLabel = buildButlerClockLabel()
         const { tools, ...rest } = base
         // BF-M7 — the per-user governed action set, scoped to THIS member (the
         // executor's RBAC keys off `userId`). Built only when the flag is on AND
@@ -823,6 +828,7 @@ export function buildButlerFactory(deps: ButlerFactoryDeps): ButlerFactory {
             // LONG-M4b — 工种×模型槽:pool 从行的 longRunModels 建的解析器,缺席 =
             // 两个角色都骑主链(逐字节 M2/M3)。
             ...(extras?.longRunSlots ? { slotProvider: extras.longRunSlots } : {}),
+            clockLabel,
             logger: log,
           },
           ...(benign.length > 0 ? { benign } : {}),
@@ -838,7 +844,7 @@ export function buildButlerFactory(deps: ButlerFactoryDeps): ButlerFactory {
           // then the task-notebook recitation digest. All but the clock self-gate
           // per turn (null → not injected → byte-identical prompt).
           contextProbe: composeContextProbes(
-            buildButlerClockProbe(),
+            buildButlerClockProbe({ label: clockLabel }),
             buildButlerLastSeenProbe({ file: presenceFile, logger: log }),
             buildButlerLanguageProbe({ file: languageFile, logger: log }),
             buildButlerSourceProbe(),

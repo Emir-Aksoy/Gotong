@@ -77,8 +77,11 @@ const now = (): number => nowMs
 const tick = (): Promise<void> => new Promise((r) => setTimeout(r, 0))
 
 const CALL_SECONDS = 3
-const USAGE = { inputTokens: 100, outputTokens: 30, cacheCreationTokens: 15, cacheReadTokens: 5 }
-const CALL_TOKENS = 150 // 四维求和,驱动器就是这么记账的
+// 刻意配一座「缓存读的山」:裸加起来 238,按成本加权只值 150。生产实测里
+// cache_read 能占到一段总量的 95%,1:1 记账会让预算量的是「上下文有多大」
+// 而不是「干了多少活」——写长一点的目标就等于悄悄买了一个短一点的任务。
+const USAGE = { inputTokens: 100, outputTokens: 30, cacheCreationTokens: 8, cacheReadTokens: 100 }
+const CALL_TOKENS = 150 // 100 + 30 + 8×1.25 + 100×0.1,驱动器就是这么记账的
 const COMPACTOR_USAGE = { inputTokens: 40, outputTokens: 10 }
 const COMPACTOR_TOKENS = 50
 

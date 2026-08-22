@@ -250,6 +250,8 @@ interface BuildOpts {
   slots?: (slot: LongRunSlotName) => Promise<LongRunSlotResolution | null>
   /** 收驱动器 warn 行(M4b 失败路径全是 warn + 继续)。 */
   logs?: string[]
+  /** 段里的钟(host 侧与每轮探针共用的那只 label 的替身)。 */
+  clockLabel?: () => string
 }
 
 function buildAgent(opts: BuildOpts): PersonalButlerAgent {
@@ -277,6 +279,7 @@ function buildAgent(opts: BuildOpts): PersonalButlerAgent {
                 }
               : {}),
             ...(opts.slots ? { slotProvider: opts.slots } : {}),
+            ...(opts.clockLabel ? { clockLabel: opts.clockLabel } : {}),
             ...(logs
               ? {
                   logger: {
@@ -333,7 +336,10 @@ describe('LONG-M2 驱动器 — 段生命周期与接力', () => {
     if (loaded.kind !== 'ok') return
     expect(loaded.dossier.segments).toBe(1)
     expect(loaded.dossier.interrupted).toBe(false)
-    expect(loaded.dossier.budget.tokensUsed).toBe(150)
+    // 成本加权而非四维求和:100 + 30 + 15×1.25 + 5×0.1 = 149.25 → 149。
+    // 缓存读按 0.1 计是这条断言的全部意义——生产里它占了 95% 的量,1:1
+    // 会让预算量的是「上下文有多大」而不是「干了多少活」。
+    expect(loaded.dossier.budget.tokensUsed).toBe(149)
     expect(loaded.dossier.budget.timeUsedSec).toBe(4)
 
     // 模型没调 record_longrun_progress → 机械兜底一行,下一段不空手交接。
@@ -651,7 +657,7 @@ describe('LONG-M3 驱动器 — 子活通道', () => {
 
     const loaded = await store.load('job')
     if (loaded.kind !== 'ok') throw new Error('dossier gone')
-    expect(loaded.dossier.budget.tokensUsed).toBe(150) // 四维求和入父账(预算一等公民)
+    expect(loaded.dossier.budget.tokensUsed).toBe(149) // 成本加权入父账(100+30+15×1.25+5×0.1)
     expect(loaded.dossier.budget.timeUsedSec).toBe(90) // 活跃墙钟入父账
     expect(loaded.dossier.segments).toBe(0) // 子活不是段
     expect(await store.readJournalTail('job')).toHaveLength(0) // 不落段日志
@@ -743,6 +749,41 @@ describe('LONG-M3 驱动器 — 子活通道', () => {
 })
 
 // ── ⑦ M4b 工种×模型槽:synthesizer 收尾段 + compactor 交接 ───────────────
+
+describe('段里的钟', () => {
+  it('label 到达段提示;抛错只是没有钟,段照跑完', async () => {
+    await store.create({ taskId: 'job', userId: 'alice', objective: '整理发票' })
+    const provider = new ScriptProvider([
+      textTurn('第一段', { inputTokens: 10, outputTokens: 5 }),
+      textTurn('第二段', { inputTokens: 10, outputTokens: 5 }),
+    ])
+    let boom = false
+    const agent = buildAgent({
+      provider,
+      store,
+      logs: [],
+      clockLabel: () => {
+        if (boom) throw new Error('tz 炸了')
+        return '【当前时间】2026-08-22 星期五 20:50（Asia/Shanghai, UTC+08:00）· UTC 2026-08-22T12:50Z'
+      },
+    })
+
+    await expectPark(agent.onTask(segTask('t1', 'job')))
+    const first = provider.requests[0]!.messages[0]!.content as string
+    expect(first).toContain('【当前时间】2026-08-22')
+    expect(first).toContain('那是计划或行程,还没有发生')
+
+    // 钟是装饰性的:它自己坏掉不许顶掉一整段活。
+    boom = true
+    await expectPark(agent.onResume(segTask('t2', 'job'), longRunRelayState('job')))
+    const second = provider.requests[1]!.messages[0]!.content as string
+    expect(second).not.toContain('【当前时间】')
+    expect(second).toContain('<objective>')
+    const loaded = await store.load('job')
+    if (loaded.kind !== 'ok') throw new Error('dossier gone')
+    expect(loaded.dossier.segments).toBe(2)
+  })
+})
 
 describe('LONG-M4b 驱动器 — 工种×模型槽', () => {
   /** 收尾段夹具:100 token 预算,段 1 烧 250 → wind_down 裁决 → 下次唤醒 = 收尾段。 */

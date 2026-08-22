@@ -103,14 +103,41 @@ export function renderClockCard(ms: number, timeZone: string, locale = 'zh-CN'):
 }
 
 /**
+ * A bound "what time is it" thunk: same renderer, same defaults, same resolved
+ * timezone as the per-turn probe below.
+ *
+ * It exists because the clock has a SECOND consumer that is not a chat turn —
+ * LONG's relay/wind-down prompts (a segment deliberately bypasses the per-turn
+ * probe: `PersonalButlerAgent.handleTask` returns into the driver lane before
+ * `contextProbe` runs, because the dossier IS a segment's context). A segment
+ * with no clock is worse than a chat turn with no clock: unattended work has
+ * nobody around to correct it, so it reads the largest date it can see in the
+ * dossier — a FUTURE travel plan in the knowledge base, say — as "now" and
+ * confidently builds an entire assessment on a wrong timeline (observed in
+ * production 2026-08-22).
+ *
+ * Both consumers resolve the zone through THIS function, so the segment's sense
+ * of "now" and the chat turn's can never drift apart.
+ */
+export function buildButlerClockLabel(opts: ButlerClockProbeOptions = {}): () => string {
+  const now = opts.now ?? Date.now
+  const locale = opts.locale ?? 'zh-CN'
+  const timeZone = opts.timeZone ?? resolveSystemTimeZone()
+  return () => renderClockCard(now(), timeZone, locale)
+}
+
+/**
  * A `ButlerContextProbe` that injects the current date/time every turn. Always
  * returns a non-null card — knowing "now" is table stakes for an assistant, and
  * the card rides the variable prompt tail (never the cached frozen block). Wire
  * it FIRST in the factory's `composeContextProbes(...)` so time leads the tail.
  */
-export function buildButlerClockProbe(opts: ButlerClockProbeOptions = {}): ButlerContextProbe {
-  const now = opts.now ?? Date.now
-  const locale = opts.locale ?? 'zh-CN'
-  const timeZone = opts.timeZone ?? resolveSystemTimeZone()
-  return async () => renderClockCard(now(), timeZone, locale)
+export function buildButlerClockProbe(
+  opts: ButlerClockProbeOptions & { label?: () => string } = {},
+): ButlerContextProbe {
+  // `label` lets a caller hand in an ALREADY-bound clock so the probe and a
+  // non-probe consumer (LONG's segment prompts) share one timezone resolution
+  // instead of each doing their own and hoping the defaults stay equal.
+  const label = opts.label ?? buildButlerClockLabel(opts)
+  return async () => label()
 }
