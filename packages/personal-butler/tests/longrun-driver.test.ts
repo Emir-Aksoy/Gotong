@@ -24,7 +24,7 @@
  *      裁决不压缩;没配槽 = 逐字节 M2。
  */
 
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -47,6 +47,7 @@ import {
   LONGRUN_COMPACTOR_SYSTEM,
   LONGRUN_LIMITS,
   LONGRUN_SEGMENT_PAYLOAD_KEY,
+  LONGRUN_TOOL_NAMES,
   PersonalButlerAgent,
   longRunRelayState,
   openLongRunDossierStore,
@@ -150,6 +151,7 @@ function segmentSimToolset(store: LongRunDossierStore): LlmAgentToolset {
         { name: 'record_longrun_progress', description: '把本段进展记进档案', inputSchema: schema },
         { name: 'complete_longrun_task', description: '提交完成', inputSchema: schema },
         { name: 'block_longrun_task', description: '标记等成员输入', inputSchema: schema },
+        { name: 'standby_longrun_task', description: '此刻没有可推进的事,待命', inputSchema: schema },
         { name: 'settle_child', description: '(测试件)把首个子活标成 ok', inputSchema: schema },
       ]
     },
@@ -179,6 +181,18 @@ function segmentSimToolset(store: LongRunDossierStore): LlmAgentToolset {
           d.blockedQuestion = String(args.question ?? '')
         })
         return { content: [{ type: 'text', text: '已标记等成员输入。' }] }
+      }
+      if (name === 'standby_longrun_task') {
+        const at = now()
+        const hours = typeof args.check_back_hours === 'number' ? args.check_back_hours : 24
+        await store.mutate(id, (d) => {
+          d.standby = {
+            sinceMs: at,
+            checkBackAtMs: at + hours * 60 * 60 * 1000,
+            note: String(args.note ?? ''),
+          }
+        })
+        return { content: [{ type: 'text', text: '已待命。' }] }
       }
       if (name === 'settle_child') {
         await store.mutate(id, (d) => {
@@ -252,6 +266,8 @@ interface BuildOpts {
   logs?: string[]
   /** 段里的钟(host 侧与每轮探针共用的那只 label 的替身)。 */
   clockLabel?: () => string
+  /** M6.2 成员活动戳(host 侧 readLastSeen 的替身)。 */
+  memberLastSeenMs?: () => number | null
 }
 
 function buildAgent(opts: BuildOpts): PersonalButlerAgent {
@@ -280,6 +296,7 @@ function buildAgent(opts: BuildOpts): PersonalButlerAgent {
               : {}),
             ...(opts.slots ? { slotProvider: opts.slots } : {}),
             ...(opts.clockLabel ? { clockLabel: opts.clockLabel } : {}),
+            ...(opts.memberLastSeenMs ? { memberLastSeenMs: opts.memberLastSeenMs } : {}),
             ...(logs
               ? {
                   logger: {
@@ -1056,5 +1073,142 @@ describe('LONG-M4b 驱动器 — 工种×模型槽', () => {
     if (exp.kind !== 'ok') throw new Error('dossier gone')
     expect(exp.dossier.budget).toEqual(controlDossier.dossier.budget)
     expect(exp.dossier.handover).toBeUndefined()
+  })
+})
+
+// ── ⑧ M6.2 待命语义:无事可做 → 睡到成员开口 ──────────────────────────────
+
+describe('LONG-M6.2 驱动器 — 待命语义', () => {
+  /** 建一份「已经在待命」的档案(上一段的产物);返回待命那一刻的水位线。 */
+  async function standing(taskId: string, note = '成员报新的体重'): Promise<number> {
+    await store.create({ taskId, userId: 'alice', objective: '跟踪我的体重' })
+    const since = now()
+    await store.mutate(taskId, (d) => {
+      d.standby = { sinceMs: since, checkBackAtMs: since + 86_400_000, note }
+    })
+    return since
+  }
+
+  it('模型调待命 → 按待命节律挂起(不是 5s 接力)、零推送、压缩者一次都不问', async () => {
+    await store.create({ taskId: 'weight', userId: 'alice', objective: '跟踪我的体重' })
+    const pushes: string[] = []
+    const asked: string[] = []
+    const provider = new ScriptProvider([
+      toolTurn({
+        id: 'c1',
+        name: LONGRUN_TOOL_NAMES.standby,
+        input: { task_id: 'weight', note: '成员报新的体重', check_back_hours: 24 },
+      }),
+      textTurn('这段没有可以推进的事,先待命。'),
+    ])
+    const agent = buildAgent({
+      provider,
+      store,
+      pushes,
+      benign: segmentSimToolset(store),
+      slots: async (slot) => {
+        asked.push(slot)
+        return { model: 'never-used' }
+      },
+    })
+
+    const park = await expectPark(agent.onTask(segTask('t1', 'weight')))
+    // 30min,不是 5s——这正是这一刀要换掉的那个数。
+    expect(park.resumeAt).toBe(nowMs + LONGRUN_LIMITS.standbyPollMs)
+    expect(readLongRunRelayState(park.state)).toBe('weight')
+    // 待命不打扰成员:这是它与 blocked 的唯一实质区别。
+    expect(pushes).toEqual([])
+    // 也不问压缩者:没有新东西可蒸馏,而一项长期任务可能这样轮上几个月。
+    expect(asked).toEqual([])
+
+    const loaded = await store.load('weight')
+    if (loaded.kind !== 'ok') throw new Error('dossier gone')
+    expect(loaded.dossier.standby?.note).toBe('成员报新的体重')
+    expect(loaded.dossier.status).toBe('active')
+    expect(loaded.dossier.handover).toBeUndefined()
+  })
+
+  it('唤醒:成员没开口 + 回看时间未到 → 零模型调用、零字节写入,再挂一次', async () => {
+    const since = await standing('weight')
+    const before = readFileSync(join(root, 'lr', 'weight', 'dossier.json'), 'utf8')
+    const provider = new ScriptProvider([textTurn('不该被调用')])
+    const agent = buildAgent({
+      provider,
+      store,
+      // 成员的最后一次开口早于待命那一刻 —— 正是启动这项任务的那次对话。
+      // 水位线是承重件:少了它,这个戳会把任务永远吵醒。
+      memberLastSeenMs: () => since - 60_000,
+    })
+
+    nowMs += 30 * 60_000
+    const park = await expectPark(agent.onTask(segTask('t2', 'weight')))
+    expect(park.resumeAt).toBe(nowMs + LONGRUN_LIMITS.standbyPollMs)
+    // 预检在模型之前:一次唤醒的全部成本是读一个文件。
+    expect(provider.requests).toHaveLength(0)
+    // 与 children 退避不同,待命这条连 waitStreak 都不用记 —— 盘上逐字节不变。
+    expect(readFileSync(join(root, 'lr', 'weight', 'dossier.json'), 'utf8')).toBe(before)
+  })
+
+  it('唤醒:成员开口了 → 跑一段,提示里带【上一段:待命】;段末清旗(非 sticky)', async () => {
+    await standing('weight')
+    const provider = new ScriptProvider([
+      toolTurn({
+        id: 'c1',
+        name: 'record_longrun_progress',
+        input: { task_id: 'weight', did: '记下成员报的 72.4kg' },
+      }),
+      textTurn('已记录'),
+    ])
+    const agent = buildAgent({
+      provider,
+      store,
+      benign: segmentSimToolset(store),
+      memberLastSeenMs: () => nowMs + 1,
+    })
+
+    nowMs += 60_000
+    const park = await expectPark(agent.onTask(segTask('t2', 'weight')))
+    // 醒来跑的是普通一段:段末回到 5s 接力(它这次真做了事)。
+    expect(park.resumeAt).toBe(nowMs + LONGRUN_LIMITS.relayDelayMs)
+    const prompt = String(provider.requests[0]?.messages[0]?.content ?? '')
+    expect(prompt).toContain('【上一段:待命】')
+    expect(prompt).toContain('成员报新的体重')
+    expect(prompt).toContain('再待命一次就是正确答案')
+
+    const loaded = await store.load('weight')
+    if (loaded.kind !== 'ok') throw new Error('dossier gone')
+    // 非 sticky:arm mutate 消费掉它。留着会让一份真有活干的档案被判去睡觉。
+    expect(loaded.dossier.standby).toBeUndefined()
+    expect(loaded.dossier.segments).toBe(1)
+  })
+
+  it('唤醒:回看时间到了 → 即使成员一直没开口也跑一段', async () => {
+    await standing('weight')
+    const provider = new ScriptProvider([textTurn('看了一眼,还是没有新数据。')])
+    const agent = buildAgent({ provider, store, memberLastSeenMs: () => null })
+
+    nowMs += 86_400_000
+    await expectPark(agent.onTask(segTask('t2', 'weight')))
+    expect(provider.requests).toHaveLength(1)
+  })
+
+  it('成员活动读挂了 → 当成员没开口:任务照样在回看时间醒,不会因为一次读盘失败被吵醒', async () => {
+    await standing('weight')
+    const logs: string[] = []
+    const provider = new ScriptProvider([textTurn('不该被调用')])
+    const agent = buildAgent({
+      provider,
+      store,
+      logs,
+      memberLastSeenMs: () => {
+        throw new Error('presence disk on fire')
+      },
+    })
+
+    nowMs += 60_000
+    const park = await expectPark(agent.onTask(segTask('t2', 'weight')))
+    expect(park.resumeAt).toBe(nowMs + LONGRUN_LIMITS.standbyPollMs)
+    expect(provider.requests).toHaveLength(0)
+    expect(logs.some((l) => l.includes('last-seen'))).toBe(true)
   })
 })

@@ -124,6 +124,18 @@ export interface ButlerLongRunDriver {
    * line, so the driver treats a failure as "no clock".
    */
   clockLabel?: () => string
+  /**
+   * M6.2 — when this member last spoke to the butler (ms, injected-clock
+   * scale), for the standby wake check. The host reads the SAME per-turn
+   * presence stamp the greeting probe writes, which is exactly "成员开口":
+   * segments structurally bypass that probe, so a segment can never move this
+   * stamp and can never wake itself.
+   *
+   * Best-effort by contract: absent, throwing, or null all read as "member
+   * silent" — the task then wakes only at its own check-back, which is a
+   * latency cost, never a correctness one. It must never strand a segment.
+   */
+  memberLastSeenMs?: () => number | null | Promise<number | null>
   logger?: { warn(msg: string, meta?: Record<string, unknown>): void }
 }
 
@@ -723,18 +735,28 @@ export class PersonalButlerAgent extends MemoryAugmentedAgent {
       return { text: this.longRunTerminalLine(d) }
     }
 
-    // Zero-LLM wake precheck: waiting on children with nothing new settled →
-    // straight back to sleep with exponential backoff. No model call, no
-    // render. Field-level bump (never a wholesale write of the stale snapshot
-    // — a child could have settled since `load`).
-    const pre = precheckLongRunWake(d, lr.now())
+    // Zero-LLM wake precheck: waiting on children with nothing new settled, or
+    // standing by with the member still quiet → straight back to sleep. No
+    // model call, no render.
+    //
+    // Only the children arm writes (a field-level `waitStreak` bump — never a
+    // wholesale write of the stale snapshot, since a child could have settled
+    // since `load`). The standby arm writes NOTHING: its wake is a pure
+    // function of the dossier already on disk plus the member's last-seen
+    // stamp, so a task that stands by for a week costs zero tokens AND zero
+    // writes. That is the whole point of M6.2 — the relay arm it displaces
+    // was spending a model call every five seconds to discover there was
+    // nothing to do.
+    const pre = precheckLongRunWake(d, lr.now(), await this.readMemberLastSeen(lrTaskId))
     if (pre.action === 'resuspend') {
-      try {
-        await lr.store.mutate(lrTaskId, (draft) => {
-          draft.waitStreak = draft.waitStreak + 1
-        })
-      } catch (err) {
-        lr.logger?.warn('[longrun] waitStreak bump failed', { taskId: lrTaskId, err: String(err) })
+      if (pre.reason === 'children') {
+        try {
+          await lr.store.mutate(lrTaskId, (draft) => {
+            draft.waitStreak = draft.waitStreak + 1
+          })
+        } catch (err) {
+          lr.logger?.warn('[longrun] waitStreak bump failed', { taskId: lrTaskId, err: String(err) })
+        }
       }
       throw new SuspendTaskError({ resumeAt: pre.resumeAtMs, state: longRunRelayState(lrTaskId) })
     }
@@ -767,6 +789,14 @@ export class PersonalButlerAgent extends MemoryAugmentedAgent {
         draft.interrupted = true
         draft.waitStreak = 0
         draft.lastRenderSettled = renderedSettled
+        // M6.2 — standby is consumed HERE, in the same mutate that arms the
+        // segment: the flag survives exactly long enough for the render above
+        // to show it, then it is gone. A segment that still has nothing to do
+        // must say so again. (Contrast `waitingForChildren`, which is sticky
+        // because the verdict's own `pending > 0` guard makes a stale flag
+        // harmless — standby has no such second guard, and a stale one would
+        // park a task that DOES have work.)
+        draft.standby = undefined
         if (windDown && draft.status === 'active') draft.status = 'winding_down'
       })
     } catch (err) {
@@ -992,6 +1022,14 @@ export class PersonalButlerAgent extends MemoryAugmentedAgent {
     // segment's handover. Terminal verdicts (done / blocked / cancelled /
     // deliver_partial) get none: there is no next segment to hand over to,
     // and a model call that nobody will read is budget burned for nothing.
+    //
+    // M6.2 — `standby` is a continuing verdict that is ALSO left out, for the
+    // symmetric reason: a segment that concluded "nothing advanced" has
+    // nothing new to distil, the previous handover is untouched on disk and
+    // still stands, and the one thing that did change (the standby note) gets
+    // its own rendered block. A standing task can poll for months; paying the
+    // strongest configured model per poll to re-summarize an unchanged dossier
+    // is the same silent waste the weighted-budget fix just removed.
     if (verdict.kind === 'relay' || verdict.kind === 'wait_children' || verdict.kind === 'wind_down') {
       await this.compactLongRunHandover(task, lrTaskId, final)
     }
@@ -1059,11 +1097,37 @@ export class PersonalButlerAgent extends MemoryAugmentedAgent {
         })
       }
       case 'wait_children':
+      case 'standby':
       case 'relay':
+        // All three park the same way — the difference is only WHEN they wake
+        // and what it costs to find out. Standby is deliberately SILENT: not
+        // having anything to do is not news, and pushing it would erase the
+        // one distinction that matters between standby and `blocked`.
         throw new SuspendTaskError({
           resumeAt: verdict.resumeAtMs,
           state: longRunRelayState(lrTaskId),
         })
+    }
+  }
+
+  /**
+   * M6.2 — the member-activity stamp for the standby wake check, with the
+   * never-throws contract enforced HERE rather than trusted: a reader that
+   * throws or answers with a non-finite number degrades to "member silent".
+   * A presence file that can't be read must cost latency, never a segment.
+   */
+  private async readMemberLastSeen(lrTaskId: string): Promise<number | null> {
+    const read = this.longRun?.memberLastSeenMs
+    if (!read) return null
+    try {
+      const at = await read()
+      return typeof at === 'number' && Number.isFinite(at) ? at : null
+    } catch (err) {
+      this.longRun?.logger?.warn('[longrun] member last-seen read failed', {
+        taskId: lrTaskId,
+        err: String(err),
+      })
+      return null
     }
   }
 

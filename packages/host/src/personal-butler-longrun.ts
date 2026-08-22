@@ -44,6 +44,8 @@ import {
   LONGRUN_LIMITS,
   LONGRUN_SEGMENT_PAYLOAD_KEY,
   LONGRUN_TOOL_NAMES,
+  clampStandbyCheckBackHours,
+  cleanLongRunText,
   clipLongRunText,
   type LongRunDossier,
   type LongRunDossierStore,
@@ -160,6 +162,29 @@ const BLOCKED_TOOL: LlmToolDefinition = {
   },
 }
 
+const STANDBY_TOOL: LlmToolDefinition = {
+  name: LONGRUN_TOOL_NAMES.standby,
+  description:
+    '长期任务专用:此刻确实没有可推进的事(在等成员提供东西、等一个还没到的时间点,或这项任务本来就是长期看着)时,让任务待命。' +
+    '待命不打扰成员;成员一开口、或到了 check_back_hours,任务会自动醒来继续。' +
+    '这是一段的正常收法——没有新进展时用它,别去编造进展。需要成员回答才能继续的事用 ' +
+    LONGRUN_TOOL_NAMES.blocked +
+    ',不要用它。',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      task_id: { type: 'string', description: '长期任务 id(接力提示里印着)。' },
+      note: { type: 'string', description: '在等什么(一句话,用成员看得懂的说法)。' },
+      check_back_hours: {
+        type: 'number',
+        description: '可选:最长多久回看一次(小时,1-168,默认 24)。成员一开口不受它影响,照样立刻醒。',
+      },
+    },
+    required: ['task_id', 'note'],
+    additionalProperties: false,
+  },
+}
+
 const SPAWN_TOOL: LlmToolDefinition = {
   name: LONGRUN_TOOL_NAMES.spawn,
   description:
@@ -235,7 +260,7 @@ class ButlerLongRunSegmentToolset implements LlmAgentToolset {
   constructor(private readonly deps: ButlerLongRunSegmentDeps) {}
 
   listTools(): LlmToolDefinition[] {
-    return [PROGRESS_TOOL, COMPLETE_TOOL, BLOCKED_TOOL, SPAWN_TOOL]
+    return [PROGRESS_TOOL, COMPLETE_TOOL, BLOCKED_TOOL, STANDBY_TOOL, SPAWN_TOOL]
   }
 
   async callTool(name: string, args: Record<string, unknown>): Promise<LlmToolCallResult> {
@@ -247,6 +272,8 @@ class ButlerLongRunSegmentToolset implements LlmAgentToolset {
           return await this.complete(args)
         case LONGRUN_TOOL_NAMES.blocked:
           return await this.blocked(args)
+        case LONGRUN_TOOL_NAMES.standby:
+          return await this.standby(args)
         case LONGRUN_TOOL_NAMES.spawn:
           return await this.spawn(args)
         default:
@@ -344,6 +371,49 @@ class ButlerLongRunSegmentToolset implements LlmAgentToolset {
       draft.blockedQuestion = clipped
     })
     return text('任务已挂起等成员回答;问题会主动发给成员。')
+  }
+
+  /**
+   * M6.2 standby — "nothing to advance right now, keep watching."
+   *
+   * Deliberately NOT `blocked`: blocked pushes a question at the member and
+   * settles the task terminally, which is the wrong answer for a STANDING
+   * objective (track my weight, watch for X) where the member owes nothing and
+   * the right behaviour is to wait cheaply. Production ran the other way: with
+   * only relay available, a standing task was asked what it advanced every
+   * five seconds and started inventing advancement — so the tool that lets the
+   * model say "nothing yet" is the fix, and its receipt says so out loud.
+   */
+  private async standby(args: Record<string, unknown>): Promise<LlmToolCallResult> {
+    const taskId = strArg(args.task_id)
+    const note = strArg(args.note)
+    if (!taskId) return text('缺 task_id。', true)
+    if (!note) return text('缺 note — 在等什么要写清楚。', true)
+    const d = await this.liveDossier(taskId)
+    if (typeof d === 'string') return text(d, true)
+    // A wind-down segment is the LAST one: standing by there would stall the
+    // honest partial delivery an exhausted budget is owed.
+    if (d.status === 'winding_down') {
+      return text('这项任务预算已用完、正在收尾,请提交收尾总结,不要待命。', true)
+    }
+    const hours = clampStandbyCheckBackHours(args.check_back_hours)
+    // Fold at ingest, like every other free text that ends up in a rendered
+    // block: the note is model-authored and lands inside 【上一段:待命】, so a
+    // newline in it would render as one more bullet, indistinguishable from
+    // framework text. Same reason the clock label keeps only its first line.
+    const clipped = clipLongRunText(cleanLongRunText(note, { multiline: false }), LONGRUN_LIMITS.maxStandbyNoteChars)
+    if (!clipped) return text('缺 note — 在等什么要写清楚。', true)
+    const now = this.deps.now()
+    await this.deps.store.mutate(taskId, (draft) => {
+      draft.standby = {
+        sinceMs: now,
+        checkBackAtMs: now + hours * 60 * 60 * 1000,
+        note: clipped,
+      }
+    })
+    return text(
+      `已待命(在等: ${clipped})。成员一开口就会醒;最长 ${hours} 小时后也会自己回来看一次。这段不打扰成员。`,
+    )
   }
 
   /**

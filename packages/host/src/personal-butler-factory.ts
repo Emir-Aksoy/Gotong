@@ -87,7 +87,7 @@ import {
   buildButlerLanguageProbe,
   buildButlerLanguageToolset,
 } from './personal-butler-language.js'
-import { buildButlerLastSeenProbe } from './personal-butler-last-seen.js'
+import { buildButlerLastSeenProbe, readLastSeen } from './personal-butler-last-seen.js'
 import { buildButlerSourceProbe } from './personal-butler-source.js'
 import { buildButlerPendingProbe, type ButlerPendingSource } from './personal-butler-pending.js'
 import { buildButlerPeersToolset, type ButlerPeerSurface } from './personal-butler-peers.js'
@@ -829,6 +829,10 @@ export function buildButlerFactory(deps: ButlerFactoryDeps): ButlerFactory {
             // 两个角色都骑主链(逐字节 M2/M3)。
             ...(extras?.longRunSlots ? { slotProvider: extras.longRunSlots } : {}),
             clockLabel,
+            // M6.2 — 待命唤醒的「成员开口」信号,读的就是每轮问候探针写的那份
+            // presence 戳。这一点是结构性的:段任务跳过 contextProbe,所以段
+            // 自己永远动不了这个戳——「成员开口」不可能被后台自己伪造出来。
+            memberLastSeenMs: () => readLastSeen(presenceFile),
             logger: log,
           },
           ...(benign.length > 0 ? { benign } : {}),

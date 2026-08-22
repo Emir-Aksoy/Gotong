@@ -63,6 +63,10 @@ export const BUTLER_FIRST_CLASS_BENIGN = [
   'block_longrun_task',
   // LONG-M3 spawn — 同一理由:接力提示的【本段纪律】逐字点名它(分解-回收)。
   'spawn_longrun_subtask',
+  // M6.2 standby — 同一理由,且这一件尤其不能折进目录:它存在的意义就是给
+  // 「此刻没事可做」一个正当收法,而折目录 = 模型在最该用它的那一刻看不见它,
+  // 只剩下编造进展或去打扰成员两条路。
+  'standby_longrun_task',
 ] as const
 
 /** 目录 benign 长尾(一次性配置 / 低频自省 / 按需诊断):经 use_tool 取用。 */

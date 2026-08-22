@@ -136,8 +136,53 @@ export interface LongRunDossier {
    * an enhancement layer must not be able to kill the task it enhances.
    */
   handover?: LongRunHandover
+  /**
+   * M6.2 — the model's own "nothing to advance right now" declaration (see
+   * `LongRunStandby`). NON-STICKY BY CONSTRUCTION: cleared in the arm mutate,
+   * so every segment must re-declare it. That is deliberately the opposite of
+   * `waitingForChildren` (sticky, because the verdict's own `pending > 0`
+   * guard already makes a stale flag harmless): a stale standby flag has no
+   * such second guard — it would park a task that DOES have work to do. The
+   * loader DROPS a malformed one rather than quarantining the dossier: the
+   * cost of losing it is one relay segment, never the task.
+   */
+  standby?: LongRunStandby
   createdAt: number
   updatedAt: number
+}
+
+/**
+ * M6.2 — standby: the fourth thing a segment can end with, next to "made
+ * progress" / "done" / "stuck".
+ *
+ * The production failure this exists for: a STANDING objective (track my
+ * weight, watch for X) has nothing to do until the member reports something,
+ * but the relay verdict re-fires every 5 seconds, so the model — asked ten
+ * times in fourteen minutes what it advanced — invents advancement. It wrote
+ * a future-dated commitment into its own append-only journal, then read that
+ * back as history and walked a month forward in five segments. Forcing a turn
+ * on a task with no input is what manufactures the fiction; the fix is to let
+ * the model say "nothing yet" and have the framework sleep for free.
+ *
+ * Two independent wake conditions, both checked with ZERO model calls:
+ * the member spoke since `sinceMs`, or `checkBackAtMs` arrived. The
+ * member-activity read is best-effort — absent or unreadable degrades to
+ * "member silent", i.e. the task still wakes at `checkBackAtMs` and never
+ * pretends to have seen something it didn't.
+ */
+export interface LongRunStandby {
+  /**
+   * Injected-clock ms when standby was declared — the watermark member
+   * activity is compared against. Not a display value.
+   */
+  sinceMs: number
+  /**
+   * Injected-clock ms of the unconditional check-back — the floor that keeps
+   * a permanently silent member from parking the task forever.
+   */
+  checkBackAtMs: number
+  /** What it is waiting for, in the member's terms. Clipped on write. */
+  note: string
 }
 
 /** M4b — compactor-written handover (see `LongRunDossier.handover`). */
@@ -193,6 +238,17 @@ export const LONGRUN_LIMITS = {
   maxHandoverChars: 1200,
   /** M4b — the compactor's single bounded call (no tools, one shot). */
   compactorMaxTokens: 1024,
+  /**
+   * M6.2 standby — the zero-LLM re-poll cadence while a task waits on the
+   * member. A CEILING only: a nearer check-back wins, so a self-set deadline
+   * fires on time instead of up to a cadence late. Same 30-minute ceiling the
+   * children backoff tops out at — one concept, not two.
+   */
+  standbyPollMs: 30 * 60_000,
+  standbyCheckBackDefaultHours: 24,
+  standbyCheckBackMinHours: 1,
+  standbyCheckBackMaxHours: 24 * 7,
+  maxStandbyNoteChars: 300,
 } as const
 
 /** Tool names a segment is told to use — fixed HERE so the M2 toolset and the
@@ -202,6 +258,7 @@ export const LONGRUN_TOOL_NAMES = {
   complete: 'complete_longrun_task',
   blocked: 'block_longrun_task',
   spawn: 'spawn_longrun_subtask',
+  standby: 'standby_longrun_task',
 } as const
 
 /** taskId is a filename — whitelist shape BEFORE any path join (PANEL_ID_RE family). */
@@ -255,6 +312,22 @@ export function clipLongRunText(value: string, maxChars: number): string {
   const points = Array.from(value)
   if (points.length <= maxChars) return value
   return `${points.slice(0, maxChars).join('')}…`
+}
+
+/**
+ * M6.2 — the model's requested check-back window, clamped into [min, max]
+ * hours. CLAMPS rather than refuses on purpose: the number is a hint about
+ * cadence, not a fact about the task, and bouncing a segment over "18 months"
+ * would burn a whole turn to correct a knob whose safe answer is obvious. A
+ * missing / non-finite value takes the default — the floor is that a standing
+ * task always has SOME unconditional wake, never none.
+ */
+export function clampStandbyCheckBackHours(raw: unknown): number {
+  const n = typeof raw === 'number' && Number.isFinite(raw) ? raw : LONGRUN_LIMITS.standbyCheckBackDefaultHours
+  return Math.min(
+    LONGRUN_LIMITS.standbyCheckBackMaxHours,
+    Math.max(LONGRUN_LIMITS.standbyCheckBackMinHours, Math.round(n)),
+  )
 }
 
 // ─── Store ────────────────────────────────────────────────────────────────────
@@ -619,17 +692,24 @@ export type SegmentVerdict =
   | { kind: 'wind_down'; reason: 'tokens' | 'time' | 'segments' }
   | { kind: 'deliver_partial' }
   | { kind: 'wait_children'; resumeAtMs: number }
+  | { kind: 'standby'; resumeAtMs: number }
   | { kind: 'done' }
   | { kind: 'blocked' }
   | { kind: 'cancelled' }
 
 /**
- * The segment-end four-way verdict — zero-LLM, and the ORDER is load-bearing:
+ * The segment-end verdict — zero-LLM, and the ORDER is load-bearing:
  * terminal statuses (the model's explicit complete/blocked, or a member
  * cancel) win over everything, INCLUDING an exhausted budget — a task the
  * model just finished must never be sent into a wind-down segment. Then the
  * already-ran wind-down delivers partial; then exhaustion triggers wind-down;
- * then waiting-on-children suspends; otherwise relay.
+ * then waiting-on-children suspends; then standby; otherwise relay.
+ *
+ * M6.2 — standby sits BELOW wait_children on purpose: a pending child is real
+ * work already in flight, and its result is the thing the next segment must
+ * consume. Standing by on it would swap a 60-second wake for a 30-minute one
+ * and delay the harvest for no reason. It sits ABOVE relay because relay is
+ * exactly the arm standby exists to displace.
  */
 export function decideSegmentVerdict(d: LongRunDossier, nowMs: number): SegmentVerdict {
   if (d.status === 'done') return { kind: 'done' }
@@ -642,46 +722,110 @@ export function decideSegmentVerdict(d: LongRunDossier, nowMs: number): SegmentV
   if (d.waitingForChildren && pending > 0) {
     return { kind: 'wait_children', resumeAtMs: nowMs + LONGRUN_LIMITS.waitBaseDelayMs }
   }
+  if (d.standby) {
+    return { kind: 'standby', resumeAtMs: standbyResumeAt(d.standby, nowMs) }
+  }
   return { kind: 'relay', resumeAtMs: nowMs + LONGRUN_LIMITS.relayDelayMs }
+}
+
+/**
+ * When to re-poll a standing task: the poll ceiling, or the self-set
+ * check-back if that lands sooner. Always strictly after `nowMs` — the
+ * callers only reach this while the check-back is still in the future, and a
+ * malformed (already-past / non-finite) one degrades to the ceiling rather
+ * than to a zero-delay spin.
+ */
+function standbyResumeAt(sb: LongRunStandby, nowMs: number): number {
+  const ceiling = nowMs + LONGRUN_LIMITS.standbyPollMs
+  if (!Number.isFinite(sb.checkBackAtMs) || sb.checkBackAtMs <= nowMs) return ceiling
+  return Math.min(ceiling, sb.checkBackAtMs)
+}
+
+/**
+ * Has the member spoken since standby was declared? Best-effort by contract:
+ * absent / unreadable / non-finite ⇒ FALSE = "member silent", which costs one
+ * check-back's worth of latency and never invents activity that didn't happen.
+ */
+function memberSpokeSince(sinceMs: number, memberLastSeenMs: number | null | undefined): boolean {
+  return typeof memberLastSeenMs === 'number' && Number.isFinite(memberLastSeenMs) && memberLastSeenMs > sinceMs
 }
 
 export type LongRunWakePrecheck =
   | { action: 'run_segment'; dossier: LongRunDossier }
-  | { action: 'resuspend'; resumeAtMs: number; dossier: LongRunDossier }
+  | {
+      action: 'resuspend'
+      /**
+       * Which sleep this is — the driver writes a `waitStreak` bump for
+       * `children` and NOTHING AT ALL for `standby`. That asymmetry is the
+       * point: the children backoff is stateful (it has to grow), while a
+       * standing task's wake is a pure function of the dossier already on
+       * disk plus the member's last-seen stamp, so its poll writes zero bytes
+       * however long it lasts.
+       */
+      reason: 'children' | 'standby'
+      resumeAtMs: number
+      dossier: LongRunDossier
+    }
 
 /**
- * The zero-LLM wake precheck: a segment that was waiting on children wakes,
- * reads the ledger, and — if nothing new settled — goes straight back to
- * sleep with exponential backoff, burning ZERO model calls. New results (or
- * all children settled, or an exhausted budget that must wind down, or a
- * non-active status the driver must handle) → run the segment.
+ * The zero-LLM wake precheck — the arm that makes both kinds of waiting free.
+ *
+ * Children: a segment that was waiting wakes, reads the ledger, and — if
+ * nothing new settled — goes straight back to sleep with exponential backoff.
+ * Standby (M6.2): a standing task wakes, checks whether the member has spoken
+ * since it stood down (and whether its own check-back is due), and otherwise
+ * sleeps again. Neither path renders a prompt or calls a model.
+ *
+ * New results / all children settled / a due check-back / member activity / an
+ * exhausted budget that must wind down / a non-active status the driver must
+ * handle → run the segment.
  *
  * Deliberately NOT consumed here: `childResultsSeen` (the renderer still
  * needs it to point at the fresh results — the driver marks them seen at
  * segment END via `markChildResultsSeen`) and `waitingForChildren` (sticky:
  * a weak model that declared "waiting" once keeps sleeping through pending
  * children without re-declaring; the verdict's wait branch already requires
- * pending > 0, so a stale flag can never stall a finished brood).
+ * pending > 0, so a stale flag can never stall a finished brood). `standby`
+ * gets the opposite treatment — see `LongRunDossier.standby`.
  */
-export function precheckLongRunWake(d: LongRunDossier, nowMs: number): LongRunWakePrecheck {
-  if (d.status !== 'active' || !d.waitingForChildren) {
+export function precheckLongRunWake(
+  d: LongRunDossier,
+  nowMs: number,
+  memberLastSeenMs?: number | null,
+): LongRunWakePrecheck {
+  if (d.status !== 'active') {
     return { action: 'run_segment', dossier: resetWait(d) }
   }
   if (checkLongRunBudget(d).exhausted) {
     return { action: 'run_segment', dossier: resetWait(d) }
   }
-  const settled = countSettledChildren(d)
-  const pending = d.children.length - settled
-  if (settled > d.childResultsSeen || pending === 0) {
-    return { action: 'run_segment', dossier: resetWait(d) }
+  if (d.waitingForChildren) {
+    const settled = countSettledChildren(d)
+    const pending = d.children.length - settled
+    if (settled > d.childResultsSeen || pending === 0) {
+      return { action: 'run_segment', dossier: resetWait(d) }
+    }
+    const delay = Math.min(
+      LONGRUN_LIMITS.waitBaseDelayMs * 2 ** d.waitStreak,
+      LONGRUN_LIMITS.waitMaxDelayMs,
+    )
+    const next = structuredClone(d)
+    next.waitStreak = d.waitStreak + 1
+    return { action: 'resuspend', reason: 'children', resumeAtMs: nowMs + delay, dossier: next }
   }
-  const delay = Math.min(
-    LONGRUN_LIMITS.waitBaseDelayMs * 2 ** d.waitStreak,
-    LONGRUN_LIMITS.waitMaxDelayMs,
-  )
-  const next = structuredClone(d)
-  next.waitStreak = d.waitStreak + 1
-  return { action: 'resuspend', resumeAtMs: nowMs + delay, dossier: next }
+  if (d.standby) {
+    const due = Number.isFinite(d.standby.checkBackAtMs) && nowMs >= d.standby.checkBackAtMs
+    if (due || memberSpokeSince(d.standby.sinceMs, memberLastSeenMs)) {
+      return { action: 'run_segment', dossier: resetWait(d) }
+    }
+    return {
+      action: 'resuspend',
+      reason: 'standby',
+      resumeAtMs: standbyResumeAt(d.standby, nowMs),
+      dossier: d,
+    }
+  }
+  return { action: 'run_segment', dossier: resetWait(d) }
 }
 
 export function countSettledChildren(d: LongRunDossier): number {
@@ -733,6 +877,11 @@ export function renderRelayPrompt(
     parts.push('')
     parts.push('⚠ 上一段没有正常收尾(进程重启或中途被打断),盘上进度可能落后于实际——先核实现状再继续。')
   }
+  const standby = renderStandbyBlock(d)
+  if (standby) {
+    parts.push('')
+    parts.push(standby)
+  }
   const handover = renderHandoverBlock(d)
   if (handover) {
     parts.push('')
@@ -758,7 +907,8 @@ export function renderRelayPrompt(
       `- 本段是有界的:专注推进一到两步,然后用 ${LONGRUN_TOOL_NAMES.progress} 把进度落盘(做了什么/关键事实/下一步),信任下一段会继续。`,
       `- 一件活可以拆出去并行做:用 ${LONGRUN_TOOL_NAMES.spawn} 派自包含的子活(子活看不到本档案,要什么背景就写什么);派完照常收段,结果会出现在之后段的【子活】区。`,
       `- 认为目标全部完成时,用 ${LONGRUN_TOOL_NAMES.complete} 提交,并逐条给出完成证据——「没发现剩余工作」不算证据。`,
-      `- 被卡住、需要成员输入才能继续时,用 ${LONGRUN_TOOL_NAMES.blocked} 写清要问成员什么。`,
+      `- 此刻确实没有可推进的事(在等成员提供东西、等一个还没到的时间点,或这项任务本来就是长期看着)时,用 ${LONGRUN_TOOL_NAMES.standby} 待命:它不打扰成员,成员一开口、或到了你自己定的回看时间,任务会自动醒。待命是正常的一段收法,不是失败——别为了「有事可写」去编造进展。`,
+      `- 只有必须成员回答才能继续时,才用 ${LONGRUN_TOOL_NAMES.blocked}:它会立刻把问题推给成员。等得到答案的事用待命,等不到答案的事才用它。`,
     ].join(String.fromCharCode(0x0a)),
   )
   return parts.join(String.fromCharCode(0x0a))
@@ -827,6 +977,31 @@ function renderClockBlock(nowLabel: string | undefined): string | null {
   return [
     line,
     '(档案、知识库、成员的话里都可能出现晚于这个时刻的日期——那是计划或行程,还没有发生。判断「现在」只看上面这一行。)',
+  ].join(String.fromCharCode(0x0a))
+}
+
+/**
+ * M6.2 — what the previous segment decided, when it decided "nothing yet".
+ *
+ * It renders the reason it stood down and then says the quiet part out loud:
+ * standing by AGAIN is a correct ending. Without that line the model reads a
+ * wake as a demand for progress and manufactures some — which is precisely
+ * how the production task walked a month forward in five segments.
+ *
+ * Note the prompt does NOT say WHY this wake happened (member spoke vs
+ * check-back due). The dossier doesn't know — the precheck does — and
+ * rendering an absolute check-back time would need a timezone and a
+ * `new Date(`, which this module structurally forbids. Telling the model to
+ * look for new情况 first covers both cases with bytes that stay deterministic.
+ */
+function renderStandbyBlock(d: LongRunDossier): string | null {
+  const sb = d.standby
+  if (!sb) return null
+  return [
+    '【上一段:待命】',
+    `上一段判断此刻没有可以推进的事,进入了待命,在等: ${escapeXmlText(sb.note)}`,
+    '- 先看有没有新情况(成员是不是说了什么、要等的东西是不是到了),再决定这一段做什么。',
+    '- 如果确实还是没有新进展:再待命一次就是正确答案。不要编造推进,也不要把还没到的日期当成已经过去了。',
   ].join(String.fromCharCode(0x0a))
 }
 
@@ -1040,6 +1215,24 @@ function parseDossierFile(raw: string, logger?: LongRunLoggerDuck): LongRunDossi
         taskId: d.taskId,
       })
       delete (json as { handover?: unknown }).handover
+    }
+  }
+  // M6.2 — same posture for standby, for the same reason and with a smaller
+  // blast radius: dropping it costs one relay segment (the task wakes and
+  // re-decides), while quarantining the dossier would cost the task.
+  if (d.standby !== undefined) {
+    const sb = d.standby as Partial<LongRunStandby> | null
+    const ok =
+      typeof sb === 'object' &&
+      sb !== null &&
+      typeof sb.sinceMs === 'number' &&
+      typeof sb.checkBackAtMs === 'number' &&
+      typeof sb.note === 'string'
+    if (!ok) {
+      logger?.warn('longrun: malformed standby dropped (task wakes and re-decides)', {
+        taskId: d.taskId,
+      })
+      delete (json as { standby?: unknown }).standby
     }
   }
   return json as LongRunDossier
