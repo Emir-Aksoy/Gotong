@@ -27,6 +27,7 @@ import {
   type LlmAgentToolset,
   type LlmContentBlock,
   type LlmMessage,
+  type LlmProvider,
   type LlmRequest,
   type LlmResponse,
   type LlmToolResultBlock,
@@ -47,8 +48,10 @@ import {
 } from './checkpoint.js'
 import { GovernedActionToolset, type GovernedVerdict } from './governed-toolset.js'
 import {
+  LONGRUN_COMPACTOR_SYSTEM,
   LONGRUN_LIMITS,
   checkLongRunBudget,
+  cleanLongRunText,
   clipLongRunText,
   countSettledChildren,
   decideSegmentVerdict,
@@ -59,11 +62,32 @@ import {
   readLongRunRelayState,
   readLongRunSegmentMarker,
   recordSegmentUsage,
+  renderCompactorInput,
   renderRelayPrompt,
   renderWindDownPrompt,
   type LongRunDossier,
   type LongRunDossierStore,
 } from './longrun-dossier.js'
+
+/**
+ * LONG-M4b — the two role slots the driver consults(工种×模型:按工种派档).
+ * Closed set mirroring core `LongRunModelSlots`; `planner` is deliberately
+ * absent (the v1 driver has no re-planning call site — a slot nobody reads
+ * is dead configuration).
+ */
+export type LongRunSlotName = 'compactor' | 'synthesizer'
+
+/**
+ * LONG-M4b — a resolved slot. `model` is always present (the slot's whole
+ * point is "this role speaks to THAT model"); `provider` only when the slot
+ * crosses providers (host built a dedicated provider from the slot's
+ * provider/baseURL/apiKeyEnv). Model-only = the main chain with another model
+ * name — the NA-M5 `maintenanceModel` semantics.
+ */
+export interface LongRunSlotResolution {
+  provider?: LlmProvider
+  model: string
+}
 
 /**
  * LONG-M2 — everything the segment driver needs from the host, as ONE injected
@@ -82,6 +106,15 @@ export interface ButlerLongRunDriver {
    *  notice). Absent ⇒ silent; a throw is warn-and-continue — delivery must
    *  never decide a segment's fate. */
   push?: (text: string) => unknown | Promise<unknown>
+  /**
+   * LONG-M4b — role-slot resolver (host builds it from the row's
+   * `longRunModels`; absent ⇒ BOTH roles ride the main chain = byte-identical
+   * to M2). Asked once per use, never cached here (the host resolver caches
+   * its own successes). The never-throws contract is enforced by the driver:
+   * a throw / a malformed answer ⇒ warn + "unconfigured" — a slot can only ever
+   * improve a segment, never strand one.
+   */
+  slotProvider?: (slot: LongRunSlotName) => Promise<LongRunSlotResolution | null>
   logger?: { warn(msg: string, meta?: Record<string, unknown>): void }
 }
 
@@ -209,6 +242,11 @@ export class PersonalButlerAgent extends MemoryAugmentedAgent {
   private readonly longRunActive = new Set<string>()
   /** Per-execution token meter: sum of every usage report while active. */
   private readonly longRunUsage = new Map<string, number>()
+  /** LONG-M4b — per-execution role-slot override (synthesizer segment / the
+   *  compactor's call). Keyed by HUB task id like the meter: `providerFor` and
+   *  `buildRequest` read it per call, so it scopes to exactly the execution
+   *  that installed it and the two `finally` blocks below clear it. */
+  private readonly longRunSlotOverride = new Map<string, LongRunSlotResolution>()
 
   constructor(opts: PersonalButlerAgentOptions) {
     const benignList = opts.benign
@@ -355,6 +393,13 @@ export class PersonalButlerAgent extends MemoryAugmentedAgent {
     if (this.turnContext) {
       req.systemVolatile = req.system ? `\n\n${this.turnContext}` : this.turnContext
     }
+    // LONG-M4b — the role slot's model name rides the request at this ONE
+    // place every segment / resume request is built (`resumeBody` rebuilds
+    // through here too), so a wind-down segment that parked and resumed still
+    // speaks to the slot's model. Model-only slots (no `provider`) are exactly
+    // this line.
+    const slot = this.longRunSlotOverride.get(task.id)
+    if (slot) req.model = slot.model
     return req
   }
 
@@ -377,6 +422,17 @@ export class PersonalButlerAgent extends MemoryAugmentedAgent {
       this.longRunUsage.set(task.id, (this.longRunUsage.get(task.id) ?? 0) + sum)
     }
     return res
+  }
+
+  /**
+   * LONG-M4b — route one execution's calls to its role-slot provider. Sits on
+   * the llm `providerFor` seam, so the stream source, the usage-sink
+   * attribution and the output's `by` follow the override TOGETHER: a segment
+   * that ran on the synthesizer can never be billed or labelled as the
+   * primary. No override ⇒ base behaviour, byte-identical.
+   */
+  protected override providerFor(task: Task): LlmProvider {
+    return this.longRunSlotOverride.get(task.id)?.provider ?? super.providerFor(task)
   }
 
   /** The first governed gate that governs `name`, or `undefined` if none does
@@ -707,7 +763,15 @@ export class PersonalButlerAgent extends MemoryAugmentedAgent {
       }
     }
 
+    // M4b — 收尾段走 synthesizer 槽(低频×高杠杆 → 组合里最强的模型)。Resolved
+    // ONCE per segment, AFTER the arm (a resolver hiccup must never leave the
+    // dossier unarmed) and BEFORE the work; installed inside the work so
+    // `runSegmentWork`'s finally always clears it. Null (unconfigured or
+    // unbuildable) ⇒ main chain, byte-identical to M2.
+    const synth = windDown ? await this.resolveLongRunSlot('synthesizer', lrTaskId) : null
+
     return this.runSegmentWork(task, lrTaskId, async () => {
+      if (synth) this.longRunSlotOverride.set(task.id, synth)
       await this.warmLongRunContext()
       const base = this.buildRequest(task)
       const req: LlmRequest = { ...base, messages: [{ role: 'user', content: prompt }] }
@@ -729,7 +793,15 @@ export class PersonalButlerAgent extends MemoryAugmentedAgent {
     if (d.status === 'done' || d.status === 'blocked' || d.status === 'cancelled') {
       return { text: `${this.longRunTerminalLine(d)} 批准前任务已收束,这次批准的动作没有执行。` }
     }
+    // M4b — a wind-down segment that parked mid-segment resumes on the SAME
+    // synthesizer slot it started on: `winding_down` is only ever set at a
+    // wind-down arm or a wind-down verdict (whose relay re-enters through the
+    // fresh-wake path), so at THIS entry the status names the segment's own
+    // kind. `resumeBody` rebuilds its request through `buildRequest`, which
+    // reads the override — the resumed rounds keep the slot's model.
+    const synth = d.status === 'winding_down' ? await this.resolveLongRunSlot('synthesizer', lrTaskId) : null
     return this.runSegmentWork(task, lrTaskId, async () => {
+      if (synth) this.longRunSlotOverride.set(task.id, synth)
       await this.warmLongRunContext()
       return this.resumeBody(task, state)
     })
@@ -774,6 +846,7 @@ export class PersonalButlerAgent extends MemoryAugmentedAgent {
       await this.flushLongRunSpend(parentId, task.id, startMs)
       this.longRunActive.delete(task.id)
       this.longRunUsage.delete(task.id)
+      this.longRunSlotOverride.delete(task.id)
     }
   }
 
@@ -819,6 +892,7 @@ export class PersonalButlerAgent extends MemoryAugmentedAgent {
     } finally {
       this.longRunActive.delete(task.id)
       this.longRunUsage.delete(task.id)
+      this.longRunSlotOverride.delete(task.id)
     }
   }
 
@@ -900,6 +974,13 @@ export class PersonalButlerAgent extends MemoryAugmentedAgent {
     }
 
     const verdict = decideSegmentVerdict(final, lr.now())
+    // M4b — on every CONTINUING verdict the compactor slot writes the next
+    // segment's handover. Terminal verdicts (done / blocked / cancelled /
+    // deliver_partial) get none: there is no next segment to hand over to,
+    // and a model call that nobody will read is budget burned for nothing.
+    if (verdict.kind === 'relay' || verdict.kind === 'wait_children' || verdict.kind === 'wind_down') {
+      await this.compactLongRunHandover(task, lrTaskId, final)
+    }
     switch (verdict.kind) {
       case 'done': {
         await this.longRunPush(
@@ -969,6 +1050,103 @@ export class PersonalButlerAgent extends MemoryAugmentedAgent {
           resumeAt: verdict.resumeAtMs,
           state: longRunRelayState(lrTaskId),
         })
+    }
+  }
+
+  /**
+   * LONG-M4b — ask the host's slot resolver, enforcing its never-throws
+   * contract here: a throw or a malformed answer is warned and read as
+   * "unconfigured". A slot may only ever improve a segment; it must never be
+   * able to strand one.
+   */
+  private async resolveLongRunSlot(
+    slot: LongRunSlotName,
+    lrTaskId: string,
+  ): Promise<LongRunSlotResolution | null> {
+    const lr = this.longRun
+    if (!lr?.slotProvider) return null
+    try {
+      const r = await lr.slotProvider(slot)
+      if (!r || typeof r.model !== 'string' || r.model.trim() === '') return null
+      return r
+    } catch (err) {
+      lr.logger?.warn('[longrun] slot resolver failed — falling back to the main chain', {
+        taskId: lrTaskId,
+        slot,
+        err: String(err),
+      })
+      return null
+    }
+  }
+
+  /**
+   * LONG-M4b — ONE bounded, tool-less call on the compactor slot that distills
+   * the dossier into the next segment's handover(随档刻度:「压缩记忆这种核心
+   * 工作值得用强模型」). Never throws and never blocks the chain: resolver
+   * null, provider error, empty text, store error — each ⇒ warn + the
+   * mechanical journal floor stands. Its spend is billed into the SAME dossier
+   * budget in the SAME mutate as the handover(边界⑥ 预算一等公民): the meter
+   * accumulator (already consumed by the segment's own settle) collects this
+   * call's usage through the metering override, and is read-then-zeroed here
+   * the same way. The slot override is installed for the call and restored
+   * after it, so the ledger names the compactor for exactly this call.
+   */
+  private async compactLongRunHandover(task: Task, lrTaskId: string, d: LongRunDossier): Promise<void> {
+    const lr = this.longRun!
+    const slot = await this.resolveLongRunSlot('compactor', lrTaskId)
+    if (!slot) return
+    const startMs = lr.now()
+    const prev = this.longRunSlotOverride.get(task.id)
+    let text: string | undefined
+    try {
+      const tail = await lr.store.readJournalTail(lrTaskId)
+      this.longRunSlotOverride.set(task.id, slot)
+      const res = await this.streamWithAuthHook(
+        {
+          system: LONGRUN_COMPACTOR_SYSTEM,
+          messages: [{ role: 'user', content: renderCompactorInput(d, tail) }],
+          model: slot.model,
+          maxTokens: LONGRUN_LIMITS.compactorMaxTokens,
+        },
+        task,
+      )
+      if (res.stopReason === 'error') {
+        lr.logger?.warn('[longrun] compactor returned an error — journal floor stands', {
+          taskId: lrTaskId,
+        })
+      } else {
+        const cleaned = cleanLongRunText(res.text ?? '', { multiline: true }).trim()
+        if (cleaned) text = clipLongRunText(cleaned, LONGRUN_LIMITS.maxHandoverChars)
+      }
+    } catch (err) {
+      lr.logger?.warn('[longrun] compactor call failed — journal floor stands', {
+        taskId: lrTaskId,
+        err: String(err),
+      })
+    } finally {
+      if (prev) this.longRunSlotOverride.set(task.id, prev)
+      else this.longRunSlotOverride.delete(task.id)
+    }
+    // Consume the meter (this call's usage landed in it — the execution is
+    // still active) and bill it WITH the handover, one mutate, field-level.
+    const tokens = this.longRunUsage.get(task.id) ?? 0
+    this.longRunUsage.set(task.id, 0)
+    const rawSec = (lr.now() - startMs) / 1000
+    const seconds = Number.isFinite(rawSec) && rawSec > 0 ? rawSec : 0
+    if (!text && tokens <= 0 && seconds <= 0) return
+    const seg = d.segments
+    const at = lr.now()
+    try {
+      await lr.store.mutate(lrTaskId, (draft) => {
+        draft.budget.tokensUsed += tokens
+        draft.budget.timeUsedSec += seconds
+        if (text) draft.handover = { text, seg, at }
+      })
+    } catch (err) {
+      lr.logger?.warn('[longrun] handover write failed — journal floor stands', {
+        taskId: lrTaskId,
+        err: String(err),
+      })
     }
   }
 

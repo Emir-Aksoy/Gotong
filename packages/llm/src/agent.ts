@@ -346,6 +346,21 @@ export class LlmAgent extends AgentParticipant {
   }
 
   /**
+   * LONG-M4b — THE one seam every provider read goes through (the stream
+   * source, the usage-sink attribution, the output's `by`). Default = the
+   * constructor's provider, byte-identical to before the seam existed. A
+   * subclass may route ONE task to another provider (the butler's long-run
+   * role slots: a wind-down segment on the synthesizer, a handover on the
+   * compactor) and, because all three reads funnel through here, a routed
+   * call can never be billed or labelled as the primary — the ledger names
+   * whoever really answered. Called per call, not per task: the override
+   * may change between rounds (it is keyed by what the subclass decides).
+   */
+  protected providerFor(_task: Task): LlmProvider {
+    return this.provider
+  }
+
+  /**
    * Phase 8 M5 — wrap `provider.stream` so all call sites (the
    * single-shot path and the multi-round tool-use loop) get auth
    * detection + per-chunk emission identically.
@@ -370,9 +385,12 @@ export class LlmAgent extends AgentParticipant {
     req: LlmRequest,
     task: Task,
   ): Promise<LlmResponse> {
+    // Resolve ONCE per call so the usage attribution below names the same
+    // provider that actually streamed (the seam may change between calls).
+    const provider = this.providerFor(task)
     let stream: AsyncIterable<LlmStreamChunk>
     try {
-      stream = this.provider.stream(req)
+      stream = provider.stream(req)
     } catch (err) {
       await this.runAuthFailureHook(err, task)
       throw err
@@ -437,7 +455,7 @@ export class LlmAgent extends AgentParticipant {
         try {
           await this.usageSink(task, usage, {
             model: req.model ?? this.defaults.model ?? 'unknown',
-            provider: this.provider.name,
+            provider: provider.name,
             stopReason,
           })
         } catch (sinkErr) {
@@ -536,13 +554,13 @@ export class LlmAgent extends AgentParticipant {
    */
   protected parseResponse(
     response: LlmResponse,
-    _task: Task,
+    task: Task,
     toolRounds = 0,
   ): LlmTaskOutput {
     const out: LlmTaskOutput = {
       text: response.text,
       stopReason: response.stopReason,
-      by: this.provider.name,
+      by: this.providerFor(task).name,
     }
     if (response.usage) out.usage = response.usage
     if (toolRounds > 0) out.toolRounds = toolRounds

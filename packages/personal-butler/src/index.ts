@@ -40,6 +40,8 @@ export {
   BUTLER_MAX_TOOL_ROUNDS,
   type PersonalButlerAgentOptions,
   type ButlerLongRunDriver,
+  type LongRunSlotName,
+  type LongRunSlotResolution,
 } from './agent.js'
 
 export {
@@ -185,11 +187,14 @@ export {
   LONGRUN_DOSSIER_V,
   LONGRUN_LIMITS,
   LONGRUN_TOOL_NAMES,
+  LONGRUN_COMPACTOR_SYSTEM,
+  renderCompactorInput,
   LONGRUN_TASK_ID_RE,
   LONGRUN_RELAY_STATE_V,
   LONGRUN_SEGMENT_PAYLOAD_KEY,
   LONGRUN_CHILD_PAYLOAD_KEY,
   type LongRunDossier,
+  type LongRunHandover,
   type LongRunStatus,
   type LongRunPlanItem,
   type LongRunChildRow,

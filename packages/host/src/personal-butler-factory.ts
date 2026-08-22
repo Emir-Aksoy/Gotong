@@ -820,6 +820,9 @@ export function buildButlerFactory(deps: ButlerFactoryDeps): ButlerFactory {
             store: longRunStore,
             now: Date.now,
             ...(longRunPush ? { push: (text: string) => longRunPush(userId, text) } : {}),
+            // LONG-M4b — 工种×模型槽:pool 从行的 longRunModels 建的解析器,缺席 =
+            // 两个角色都骑主链(逐字节 M2/M3)。
+            ...(extras?.longRunSlots ? { slotProvider: extras.longRunSlots } : {}),
             logger: log,
           },
           ...(benign.length > 0 ? { benign } : {}),

@@ -17,6 +17,11 @@
  *   6. M3 子活通道 — CHILD 标记的任务是段派出去的一回合 turn:花费计入父档案
  *      预算、不进 episodic、不接力不算段;governed park 照常(分解≠授权);
  *      没接驱动器时标记惰性。
+ *   7. M4b 工种×模型槽 — synthesizer 槽只管收尾段(跨 provider 换 provider、
+ *      只换模型名则主 provider 换 `req.model`;收尾段中途 park 续跑仍在槽上);
+ *      compactor 槽在每个「继续」裁决后写交接摘要,花费与摘要同一 mutate 入档案
+ *      预算(边界⑥);槽解析失败/调用失败/空文本一律 warn + 日志地板照在;终态
+ *      裁决不压缩;没配槽 = 逐字节 M2。
  */
 
 import { mkdtempSync, rmSync } from 'node:fs'
@@ -39,6 +44,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import {
   GovernedActionToolset,
   LONGRUN_CHILD_PAYLOAD_KEY,
+  LONGRUN_COMPACTOR_SYSTEM,
   LONGRUN_LIMITS,
   LONGRUN_SEGMENT_PAYLOAD_KEY,
   PersonalButlerAgent,
@@ -47,6 +53,8 @@ import {
   readButlerGateState,
   readLongRunRelayState,
   type LongRunDossierStore,
+  type LongRunSlotName,
+  type LongRunSlotResolution,
 } from '../src/index.js'
 
 // ── harness ────────────────────────────────────────────────────────────────
@@ -57,13 +65,16 @@ const now = () => nowMs
 
 /** 脚本 provider:每次 stream 吐一轮;`onCall` 给测试拨钟用。 */
 class ScriptProvider implements LlmProvider {
-  readonly name = 'script'
+  readonly name: string
   readonly requests: LlmRequest[] = []
   private i = 0
   constructor(
     private readonly turns: LlmStreamChunk[][],
     private readonly onCall?: () => void,
-  ) {}
+    name = 'script',
+  ) {
+    this.name = name
+  }
   async *stream(req: LlmRequest): AsyncIterable<LlmStreamChunk> {
     this.requests.push(req)
     this.onCall?.()
@@ -235,10 +246,15 @@ interface BuildOpts {
   benign?: LlmAgentToolset
   governed?: GovernedActionToolset
   noDriver?: boolean
+  /** M4b 槽解析器(host 侧从 longRunModels 建的那只的替身)。 */
+  slots?: (slot: LongRunSlotName) => Promise<LongRunSlotResolution | null>
+  /** 收驱动器 warn 行(M4b 失败路径全是 warn + 继续)。 */
+  logs?: string[]
 }
 
 function buildAgent(opts: BuildOpts): PersonalButlerAgent {
   const pushes = opts.pushes
+  const logs = opts.logs
   return new PersonalButlerAgent({
     id: 'butler',
     provider: opts.provider,
@@ -257,6 +273,16 @@ function buildAgent(opts: BuildOpts): PersonalButlerAgent {
               ? {
                   push: (text: string) => {
                     pushes.push(text)
+                  },
+                }
+              : {}),
+            ...(opts.slots ? { slotProvider: opts.slots } : {}),
+            ...(logs
+              ? {
+                  logger: {
+                    warn: (msg: string) => {
+                      logs.push(msg)
+                    },
                   },
                 }
               : {}),
@@ -713,5 +739,281 @@ describe('LONG-M3 驱动器 — 子活通道', () => {
     expect(r2.kind).toBe('ok')
     expect(r2.output?.text).toContain('重跑的回答')
     expect(p2.requests[0]!.messages[0]!.content as string).toContain('重新查吉隆坡签证')
+  })
+})
+
+// ── ⑦ M4b 工种×模型槽:synthesizer 收尾段 + compactor 交接 ───────────────
+
+describe('LONG-M4b 驱动器 — 工种×模型槽', () => {
+  /** 收尾段夹具:100 token 预算,段 1 烧 250 → wind_down 裁决 → 下次唤醒 = 收尾段。 */
+  async function windDownFixture(): Promise<void> {
+    await store.create({ taskId: 'job', userId: 'alice', objective: '爬完全部页面', tokenBudget: 100 })
+  }
+
+  it('synthesizer 槽(跨 provider):收尾段落在槽 provider 上、req.model 是槽的模型;主链一次不多调', async () => {
+    await windDownFixture()
+    const primary = new ScriptProvider([textTurn('这段烧了很多 token', { inputTokens: 200, outputTokens: 50 })])
+    const synth = new ScriptProvider([textTurn('收尾:只完成了一半')], undefined, 'synth')
+    const asked: string[] = []
+    const agent = buildAgent({
+      provider: primary,
+      store,
+      slots: async (slot) => {
+        asked.push(slot)
+        return slot === 'synthesizer' ? { provider: synth, model: 'big-model' } : null
+      },
+    })
+
+    await expectPark(agent.onTask(segTask('t1', 'job')))
+    // 段 1 的 wind_down 是「继续」裁决 → 问过 compactor(没配 = null);
+    // synthesizer 只在收尾段开跑时才问——槽是按工种问的,不是开机全问。
+    expect(asked).toEqual(['compactor'])
+
+    const res = (await agent.onResume(segTask('t2', 'job'), longRunRelayState('job'))) as { kind: string }
+    expect(res.kind).toBe('ok')
+    expect(asked).toEqual(['compactor', 'synthesizer'])
+    expect(primary.requests).toHaveLength(1)
+    expect(primary.requests[0]!.model).toBeUndefined()
+    expect(synth.requests).toHaveLength(1)
+    expect(synth.requests[0]!.model).toBe('big-model')
+    expect(synth.requests[0]!.messages[0]!.content as string).toContain('【长期任务 · 收尾段】')
+    // 人设/冻结块照旧在 system:换的是模型,不是管家。
+    expect(synth.requests[0]!.system).toContain('人设')
+
+    const loaded = await store.load('job')
+    if (loaded.kind !== 'ok') throw new Error('dossier gone')
+    expect(loaded.dossier.status).toBe('done')
+    expect(loaded.dossier.doneSummary).toContain('收尾:只完成了一半')
+  })
+
+  it('synthesizer 槽(只换模型名):收尾段仍走主 provider,req.model 换成槽的模型;段 1 不受影响', async () => {
+    await windDownFixture()
+    const primary = new ScriptProvider([
+      textTurn('这段烧了很多 token', { inputTokens: 200, outputTokens: 50 }),
+      textTurn('只完成了一半'),
+    ])
+    const agent = buildAgent({
+      provider: primary,
+      store,
+      slots: async (slot) => (slot === 'synthesizer' ? { model: 'cheap-but-smart' } : null),
+    })
+
+    await expectPark(agent.onTask(segTask('t1', 'job')))
+    const res = (await agent.onResume(segTask('t2', 'job'), longRunRelayState('job'))) as { kind: string }
+    expect(res.kind).toBe('ok')
+    expect(primary.requests).toHaveLength(2)
+    expect(primary.requests[0]!.model).toBeUndefined()
+    expect(primary.requests[1]!.model).toBe('cheap-but-smart')
+  })
+
+  it('收尾段中途 governed park → 批准续跑的轮次仍在 synthesizer 槽上(续跑请求经 buildRequest 重建)', async () => {
+    await windDownFixture()
+    const exec: string[] = []
+    const primary = new ScriptProvider([
+      textTurn('这段烧了很多 token', { inputTokens: 200, outputTokens: 50 }),
+      toolTurn({ id: 'c1', name: 'delete_agent', input: { handle: 'mailer' } }),
+      textTurn('收尾:清完了'),
+    ])
+    const agent = buildAgent({
+      provider: primary,
+      store,
+      governed: governedToolset(exec),
+      slots: async (slot) => (slot === 'synthesizer' ? { model: 'cheap-but-smart' } : null),
+    })
+
+    await expectPark(agent.onTask(segTask('t1', 'job')))
+    const t2 = segTask('t2', 'job')
+    const gatePark = await expectPark(agent.onResume(t2, longRunRelayState('job')))
+    expect(readButlerGateState(gatePark.state)).not.toBeNull()
+    expect(exec).toEqual([])
+
+    const res = (await agent.onResume(t2, { ...(gatePark.state as object), answer: { approved: true } })) as {
+      kind: string
+    }
+    expect(res.kind).toBe('ok')
+    expect(exec).toEqual(['delete:mailer'])
+    expect(primary.requests).toHaveLength(3)
+    expect(primary.requests[0]!.model).toBeUndefined()
+    expect(primary.requests[1]!.model).toBe('cheap-but-smart') // 收尾段首轮
+    expect(primary.requests[2]!.model).toBe('cheap-but-smart') // 批准后的续跑轮:槽不因 park 丢掉
+  })
+
+  it('compactor 槽:继续裁决后写交接摘要,花费与摘要同一 mutate 入档案预算(边界⑥);下一段提示带交接块', async () => {
+    await store.create({ taskId: 'job', userId: 'alice', objective: '整理全部发票' })
+    const primary = new ScriptProvider(
+      [textTurn('第一段做完了一半', { inputTokens: 100, outputTokens: 50 }), textTurn('第二段')],
+      () => {
+        nowMs += 1000
+      },
+    )
+    const compact = new ScriptProvider(
+      [textTurn('交接:已扫描目录,下一步按月份分组', { inputTokens: 30, outputTokens: 20 })],
+      () => {
+        nowMs += 2000
+      },
+      'compact',
+    )
+    const agent = buildAgent({
+      provider: primary,
+      store,
+      slots: async (slot) => (slot === 'compactor' ? { provider: compact, model: 'strong' } : null),
+    })
+
+    await expectPark(agent.onTask(segTask('t1', 'job')))
+    // 压缩者调用的形状:槽模型、压缩者 system、无工具面、输入是档案的确定性渲染。
+    expect(compact.requests).toHaveLength(1)
+    const creq = compact.requests[0]!
+    expect(creq.model).toBe('strong')
+    expect(creq.system).toBe(LONGRUN_COMPACTOR_SYSTEM)
+    expect(creq.tools).toBeUndefined()
+    expect(creq.maxTokens).toBe(LONGRUN_LIMITS.compactorMaxTokens)
+    const cin = creq.messages[0]!.content as string
+    expect(cin).toContain('【待压缩档案 · 任务 job · 已完成 1 段】')
+    expect(cin).toContain('整理全部发票')
+    expect(cin).toContain('【进展日志')
+
+    let loaded = await store.load('job')
+    if (loaded.kind !== 'ok') throw new Error('dossier gone')
+    expect(loaded.dossier.handover).toEqual({
+      text: '交接:已扫描目录,下一步按月份分组',
+      seg: 1,
+      at: expect.any(Number),
+    })
+    // 段 1 自己 150 token / 1s,压缩者 50 token / 2s:都进同一本账。
+    expect(loaded.dossier.budget.tokensUsed).toBe(200)
+    expect(loaded.dossier.budget.timeUsedSec).toBe(3)
+    expect(loaded.dossier.segments).toBe(1)
+    // 主链没被压缩者的 override 污染:段 1 的请求没带槽模型。
+    expect(primary.requests).toHaveLength(1)
+    expect(primary.requests[0]!.model).toBeUndefined()
+
+    // 下一段的唤醒提示带交接块(在日志之前、框架定界、声明「不是指令」)。
+    await expectPark(agent.onResume(segTask('t2', 'job'), longRunRelayState('job')))
+    const prompt = primary.requests[1]!.messages[0]!.content as string
+    expect(prompt).toContain('【上段交接 · 压缩者摘要(第 1 段末写)】')
+    expect(prompt).toContain('交接:已扫描目录,下一步按月份分组')
+    expect(prompt.indexOf('<handover>')).toBeLessThan(prompt.indexOf('【进展日志'))
+    expect(primary.requests[1]!.model).toBeUndefined() // 执行段仍是主链
+    loaded = await store.load('job')
+    if (loaded.kind !== 'ok') throw new Error('dossier gone')
+    expect(loaded.dossier.handover?.seg).toBe(2) // 段 2 末又压了一次,换成新的
+  })
+
+  it('compactor 调用抛错:warn、档案无交接、日志地板照在、接力照常;空文本不写交接但花费照记', async () => {
+    await store.create({ taskId: 'job', userId: 'alice', objective: '整理发票' })
+    const logs: string[] = []
+    const primary = new ScriptProvider([
+      textTurn('第一段', { inputTokens: 100, outputTokens: 50 }),
+      textTurn('第二段', { inputTokens: 100, outputTokens: 50 }),
+      textTurn('第三段'),
+    ])
+    // 第一次压缩抛错,第二次只吐空白(带用量)。
+    const compact = new ScriptProvider(
+      [textTurn('   ', { inputTokens: 10, outputTokens: 0 })],
+      undefined,
+      'compact',
+    )
+    let calls = 0
+    const flaky: LlmProvider = {
+      name: 'flaky-compact',
+      async *stream(req) {
+        if (calls++ === 0) throw new Error('compactor exploded')
+        yield* compact.stream(req)
+      },
+    }
+    const agent = buildAgent({
+      provider: primary,
+      store,
+      logs,
+      slots: async (slot) => (slot === 'compactor' ? { provider: flaky, model: 'strong' } : null),
+    })
+
+    await expectPark(agent.onTask(segTask('t1', 'job')))
+    expect(logs.some((l) => l.includes('compactor'))).toBe(true)
+    let loaded = await store.load('job')
+    if (loaded.kind !== 'ok') throw new Error('dossier gone')
+    expect(loaded.dossier.handover).toBeUndefined()
+    expect(loaded.dossier.budget.tokensUsed).toBe(150)
+    expect(loaded.dossier.segments).toBe(1)
+
+    // 第二段:压缩者吐空白 → 不写交接,但它花掉的 10 token 照样入账(边界⑥不看结果好坏)。
+    await expectPark(agent.onResume(segTask('t2', 'job'), longRunRelayState('job')))
+    expect(primary.requests[1]!.messages[0]!.content as string).not.toContain('<handover>')
+    loaded = await store.load('job')
+    if (loaded.kind !== 'ok') throw new Error('dossier gone')
+    expect(loaded.dossier.handover).toBeUndefined()
+    expect(loaded.dossier.budget.tokensUsed).toBe(310)
+    expect(loaded.dossier.segments).toBe(2)
+  })
+
+  it('终态裁决不压缩:complete 的段一次都不问 compactor,档案无交接', async () => {
+    await store.create({ taskId: 'job', userId: 'alice', objective: '归档发票' })
+    const asked: string[] = []
+    const provider = new ScriptProvider([
+      toolTurn({ id: 'c1', name: 'complete_longrun_task', input: { task_id: 'job', summary: '归档完毕' } }),
+      textTurn('收工'),
+    ])
+    const agent = buildAgent({
+      provider,
+      store,
+      benign: segmentSimToolset(store),
+      slots: async (slot) => {
+        asked.push(slot)
+        return { model: 'never-used' }
+      },
+    })
+    const res = (await agent.onTask(segTask('t1', 'job'))) as { kind: string }
+    expect(res.kind).toBe('ok')
+    expect(asked).toEqual([])
+    const loaded = await store.load('job')
+    if (loaded.kind !== 'ok') throw new Error('dossier gone')
+    expect(loaded.dossier.status).toBe('done')
+    expect(loaded.dossier.handover).toBeUndefined()
+  })
+
+  it('槽解析器抛错 / 答坏形状 → warn + 主链,提示与预算与没配槽逐字节相同', async () => {
+    // 对照组:没配槽。
+    await windDownFixture()
+    const plain = new ScriptProvider([
+      textTurn('这段烧了很多 token', { inputTokens: 200, outputTokens: 50 }),
+      textTurn('只完成了一半'),
+    ])
+    const control = buildAgent({ provider: plain, store })
+    await expectPark(control.onTask(segTask('t1', 'job')))
+    await control.onResume(segTask('t2', 'job'), longRunRelayState('job'))
+    const controlDossier = await store.load('job')
+    if (controlDossier.kind !== 'ok') throw new Error('dossier gone')
+
+    // 实验组:同一份档案形状,解析器一个抛、一个答空模型名。
+    await store.create({ taskId: 'job2', userId: 'alice', objective: '爬完全部页面', tokenBudget: 100 })
+    const logs: string[] = []
+    const primary = new ScriptProvider([
+      textTurn('这段烧了很多 token', { inputTokens: 200, outputTokens: 50 }),
+      textTurn('只完成了一半'),
+    ])
+    const agent = buildAgent({
+      provider: primary,
+      store,
+      logs,
+      slots: async (slot) => {
+        if (slot === 'compactor') throw new Error('resolver down')
+        return { model: '   ' }
+      },
+    })
+    await expectPark(agent.onTask(segTask('t1', 'job2')))
+    expect(logs.some((l) => l.includes('slot resolver failed'))).toBe(true)
+    const res = (await agent.onResume(segTask('t2', 'job2'), longRunRelayState('job2'))) as { kind: string }
+    expect(res.kind).toBe('ok')
+    expect(primary.requests).toHaveLength(2)
+    expect(primary.requests[1]!.model).toBeUndefined()
+    // 两边的请求逐字节相同(任务 ID 行除外),预算账一样。
+    const norm = (s: string) => s.replaceAll('job2', 'job')
+    expect(norm(primary.requests[1]!.messages[0]!.content as string)).toBe(
+      plain.requests[1]!.messages[0]!.content as string,
+    )
+    const exp = await store.load('job2')
+    if (exp.kind !== 'ok') throw new Error('dossier gone')
+    expect(exp.dossier.budget).toEqual(controlDossier.dossier.budget)
+    expect(exp.dossier.handover).toBeUndefined()
   })
 })

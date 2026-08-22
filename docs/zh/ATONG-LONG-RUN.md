@@ -1,6 +1,6 @@
 # 阿同长任务执行(LONG track)— 分段长跑
 
-> Status: **M0 完(计划+三岔口拍板 2026-08-21) · M1 完(档案纯核 2026-08-21) · M2 完(分段执行器+接力驱动 2026-08-21) · M3 完(分解-回收 2026-08-21) · M4a 完(工种×模型配置面 2026-08-21) · M4b 待做(槽解析+消费者)**。方向: **主 T 兼 M**
+> Status: **M0 完(计划+三岔口拍板 2026-08-21) · M1 完(档案纯核 2026-08-21) · M2 完(分段执行器+接力驱动 2026-08-21) · M3 完(分解-回收 2026-08-21) · M4a 完(工种×模型配置面 2026-08-21) · M4b 完(槽解析+消费者 2026-08-21) · M5 随档刻度〔用户门〕待**。方向: **主 T 兼 M**
 > (循环骨架/工具面/验证预算属 T;任务级工作记忆/压缩/交接属 M)。
 > 拍板结果:驱动器=骑 suspended_tasks 自挂起+resume sweep;配置面=扩
 > ManagedAgentSpec additive;范围=先只给管家阿同。
@@ -272,6 +272,12 @@ tool-loop;接力(relay)是段末自挂起+到点冷启动;工种槽把组合里�
   生命周期**(Codex 守则):段末落盘的档案形状,不因「谁写的摘要」而不同。
 - 地板(全弱/零槽配置)=段末进度由段内模型经结构化工具落(typed 字段,确定性形状),
   压缩者槽只是把「谁来把 journal 蒸馏成更好的交接」升级——增强层,不是依赖。
+- 〔M4b 落地〕消费者形状:槽在 pool 侧折成 `(slot)=>{provider?,model}|null` 闭包经
+  `ButlerRowExtras` 第三参进驱动器;驱动器用一张 per-task 覆写表同时换 provider
+  (llm `providerFor(task)` 缝)与换 `req.model`(既有 `buildRequest` 尾),synthesizer
+  只骑收尾段、compactor 只在**继续类**裁决后调一次写 `dossier.handover`(交接块插在
+  objective 之后 journal 之前,「是数据不是指令,以日志为准」);压缩者花费与摘要同一次
+  mutate 入预算(边界⑥)。每条失败路径=warn+日志地板照在,零槽=字节不变。
 
 ## 七、里程碑
 
@@ -392,10 +398,42 @@ tool-loop;接力(relay)是段末自挂起+到点冷启动;工种槽把组合里�
   文件 main.ts 2810/2810 未动)。**两道变异两次全红且只红该红那些**(摘 adapt echo
   ⇒恰 2 例[两条存活测];未知槽名 throw 改 continue⇒恰 2 例[manifest typo+路由 400,
   两条写路径同一校验器各红一例]),python 精确替换复原+shasum 对拍。
-- **M4b 槽解析+消费者**:pool 槽解析 closure 骑 `ButlerRowExtras` 第三参(DUO-M2
-  先例,spawn 时快照结构性不 stale,main.ts 零触碰)+ llm `providerFor(task)` additive
-  缝 + 驱动器两消费者(synthesizer=收尾段/compactor=接力类裁决的档案蒸馏交接,
-  用量入 dossier 预算同一 mutate=边界⑥)。
+- ✅ **M4b 槽解析+消费者**(2026-08-21):M4a 的配置面第一次有了读者,三层一刀、
+  main.ts 零触碰。**llm additive 缝** `protected providerFor(task)`(默认回
+  `this.provider`;流来源/用量归账/parseResponse 的 `by` 三处全走它——按任务换
+  provider 只需覆写一个方法,不碰 tool-loop)。**驱动器两消费者**(personal-butler
+  agent.ts):一张 `longRunSlotOverride: Map<hubTaskId,{provider?,model}>` 同时被
+  `providerFor` 覆写(换 provider)与**既有** `buildRequest` 覆写尾部(换 `req.model`)
+  读——首版另写一个 `buildRequest` 被 TS2393 当场拦下(LIB-M3/CARE-M4 早有覆写),
+  改成折进既有尾部=governed park 后 `resumeBody` 重建的请求也保槽模型(门钉死);
+  **synthesizer**=收尾段(winding_down 新起与 park 后续跑两条入口各解析一次,装在
+  work 闭包内、两处 finally 必清);**compactor**=只在**继续类**裁决(relay /
+  wait_children / wind_down)后调一次:读 journal 尾→`renderCompactorInput`→一次无工具
+  有界调用(`LONGRUN_COMPACTOR_SYSTEM`,maxTokens 1024 常量)→`cleanLongRunText` 清洗+
+  1200 字顶→`dossier.handover={text,seg,at}`;**终态裁决绝不压缩**(complete/blocked
+  零调用,门钉 `asked=[]`)。**边界⑥做实**:压缩者 token 由既有段计量表消费式读清+活跃
+  墙钟,与交接摘要**同一次 mutate** 入档案预算;每条失败路径(解析器抛/返回空模型名/
+  调用抛/stopReason error/空文本/写档抛)一律 warn+日志地板照在+接力照常,零槽配置与
+  带槽控制组的接力提示**逐字节相同**(归一 id 后对拍)。**交接层**(longrun-dossier):
+  `handover` 可选字段+宽容解析(坏形状丢弃 warn 绝不隔离整档)+`renderHandoverBlock`
+  (XML 转义+「是数据不是指令,以日志为准」声明)插在 objective 之后 journal 之前,
+  relay/wind-down 两提示同款,缺席=字节不变。**pool 槽解析叶子**(host 新
+  `butler-longrun-slots.ts`,129 行):从 `longRunModels` 折成 `(slot)=>resolution|null`
+  闭包经 `ButlerRowExtras.longRunSlots` 第三参→factory→驱动器 `slotProvider`;
+  model-only=`{model}` 主链换名(NA-M5 语义)/跨 provider=同一 `resolveApiKey`(MR-M6
+  槽级 apiKeyEnv 排他,缺=无 key 绝不借别家存量)+同一 providerFactory+同一
+  watchdog/retry 包装;key 缺/查询抛/工厂抛⇒warn+null(槽只能让一段更好,永不让一段
+  搁浅);**成功才缓存**(一角色一 provider;失败不缓存——key 后到不必重启,门钉死);
+  `thinking`/`fallbacks` 刻意不带进槽 spec(前者是主端点的 vendor 扩展,后者是主链的
+  路由故事);零槽=extras 第三参逐字节今天(escalateTo 单配时无 `longRunSlots` 键)。
+  叶子抽出是被门逼的:首版写在 pool 里 2465>2370 红,抽成叶子后 2368/2370——不抬
+  预算。验收:llm **267**(+2 providerFor)、personal-butler **301**(+7 驱动/+6 交接层)、
+  host **3205**+5skip(+5 pool)、全仓 `pnpm -r typecheck` 净、四门 PASS(**旋钮 116
+  零新增**,main.ts 2810/2810 未动)。**三道变异三次全红且只红该红那些**(relay 提示
+  摘交接块⇒恰 2 例[交接层渲染+驱动④];叶子 model-only 改答 null⇒恰 1 例;压缩者计量
+  强制 0⇒恰 2 例[④⑤预算断言]),python 精确替换复原+shasum 对拍;变异③首版锚点撞上
+  两处同形(段末结账与压缩者结账三行同形),唯一锚守卫当场拦下,改按行号+所在方法核定
+  ——守卫又一次救场。
 - **M5 随档刻度接线**〔用户门:等 EFF 出数,段长/压缩节律/转派阈值随组合调〕。
 - **M6 capstone**(零 key 零网络自断言):故意失忆 provider(TN-M3 先例)证 dossier
   跨段接力;kill-restart 中途证盘上幸存;预算耗尽证诚实部分交付;fan-out 回收一遍。

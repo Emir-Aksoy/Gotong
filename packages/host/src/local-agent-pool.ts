@@ -60,6 +60,7 @@ import type { ServerSecretSource } from './oauth-secret-source.js'
 import { buildButlerMcpToolsets } from './personal-butler-mcp.js'
 import { declineElicitations } from './mcp-elicitation.js'
 import { mergeButlerBonusMcpSpecs } from './butler-web-search.js'
+import { buildButlerLongRunSlotResolver, type ButlerLongRunSlotResolver } from './butler-longrun-slots.js'
 import { RemoteMcpToolset, parseRemoteMcpRef } from './mcp-proxy.js'
 import {
   resolveOwner,
@@ -229,6 +230,12 @@ export interface ButlerMcpHandoff {
  */
 export interface ButlerRowExtras {
   escalateTo?: string
+  /**
+   * LONG-M4b — 工种×模型槽解析器 built from the row's `longRunModels` (see
+   * `butler-longrun-slots.ts`). Absent = no slot configured → the driver
+   * rides the main chain for every role (byte-identical to M2/M3).
+   */
+  longRunSlots?: ButlerLongRunSlotResolver
 }
 
 export type ButlerFactory = (
@@ -1227,12 +1234,25 @@ export class LocalAgentPool implements ManagedAgentLifecycle {
           })
         }
       }
-      // DUO-M2 — hand the row's escalate target through (spawn-time snapshot;
-      // edits restart the row, so this can't go stale). Unset = no extras.
+      // DUO-M2 / LONG-M4b — hand the row's extras through (spawn-time
+      // snapshots: edits restart the row, so neither can go stale). Neither
+      // configured = no extras object at all (byte-identical third arg).
+      const longRunSlots = buildButlerLongRunSlotResolver(record.id, record.managed, {
+        resolveKey: async (provider, apiKeyEnv) =>
+          (await this.resolveApiKey(record.id, provider, apiKeyEnv))?.apiKey,
+        // Same construction + resilience wrappers as the main chain's leaves.
+        buildProvider: (slotSpec, key) =>
+          withTransientRetry(withCallWatchdog(this.providerFactory(slotSpec, key, this.artifactResolver))),
+        warn: (msg, data) => log.warn(msg, data),
+      })
+      const extras: ButlerRowExtras = {
+        ...(record.managed.escalateTo ? { escalateTo: record.managed.escalateTo } : {}),
+        ...(longRunSlots ? { longRunSlots } : {}),
+      }
       agent = this.butlerFactory!(
         butlerBase,
         mcpHandoff,
-        record.managed.escalateTo ? { escalateTo: record.managed.escalateTo } : undefined,
+        Object.keys(extras).length > 0 ? extras : undefined,
       )
     } else {
       switch (record.managed.kind) {
