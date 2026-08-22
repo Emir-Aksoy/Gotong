@@ -61,6 +61,10 @@
     "./im-credentials": {
       "types": "./dist/im-credentials-service.d.ts",
       "import": "./dist/im-credentials-service.js"
+    },
+    "./butler-longrun": {
+      "types": "./dist/personal-butler-longrun.d.ts",
+      "import": "./dist/personal-butler-longrun.js"
     }
   },
   "files": [

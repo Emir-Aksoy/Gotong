@@ -1,6 +1,6 @@
 # 阿同长任务执行(LONG track)— 分段长跑
 
-> Status: **M0 完(计划+三岔口拍板 2026-08-21) · M1 完(档案纯核 2026-08-21) · M2 完(分段执行器+接力驱动 2026-08-21) · M3 完(分解-回收 2026-08-21) · M4a 完(工种×模型配置面 2026-08-21) · M4b 完(槽解析+消费者 2026-08-21) · M5 随档刻度〔用户门〕待**。方向: **主 T 兼 M**
+> Status: **M0 完(计划+三岔口拍板 2026-08-21) · M1 完(档案纯核 2026-08-21) · M2 完(分段执行器+接力驱动 2026-08-21) · M3 完(分解-回收 2026-08-21) · M4a 完(工种×模型配置面 2026-08-21) · M4b 完(槽解析+消费者 2026-08-21) · M6 完(capstone 2026-08-21) · M5 随档刻度〔用户门〕待**。方向: **主 T 兼 M**
 > (循环骨架/工具面/验证预算属 T;任务级工作记忆/压缩/交接属 M)。
 > 拍板结果:驱动器=骑 suspended_tasks 自挂起+resume sweep;配置面=扩
 > ManagedAgentSpec additive;范围=先只给管家阿同。
@@ -435,8 +435,32 @@ tool-loop;接力(relay)是段末自挂起+到点冷启动;工种槽把组合里�
   两处同形(段末结账与压缩者结账三行同形),唯一锚守卫当场拦下,改按行号+所在方法核定
   ——守卫又一次救场。
 - **M5 随档刻度接线**〔用户门:等 EFF 出数,段长/压缩节律/转派阈值随组合调〕。
-- **M6 capstone**(零 key 零网络自断言):故意失忆 provider(TN-M3 先例)证 dossier
-  跨段接力;kill-restart 中途证盘上幸存;预算耗尽证诚实部分交付;fan-out 回收一遍。
+- **M6 capstone ✅(2026-08-21)**:`examples/atong-longrun`(`pnpm demo:atong-longrun`,
+  **74 条断言** exit 0,零 key 零网络零 LLM,两次连跑逐字节同结果)。真件=真
+  `openLongRunDossierStore`+真 `PersonalButlerAgent` `longRun` 驱动器+真 host 两工具面
+  (`@gotong/host/butler-longrun` 新子路径导出,routing-health 先例)+真 M4b 两槽;假件只有
+  两样——**故意失忆的模型**(TN-M3 先例:每次调用只从请求字节做决定,实例上零跨调用记忆
+  字段,题面永远是本轮第一条 user 消息)与 **MiniHub**(只做真 hub 在这条链上会做的三件事:
+  下一 tick 跑派发/`SuspendTaskError` 折成 park 行/到点 `onResume(task,state)`;不解释任何
+  状态)。**注入时钟**只被模型调用(+3s)与接力到点拨动,于是「park 睡眠不计费」被量出来
+  (活跃墙钟记 6s 而墙钟走 11s)而不是靠说。四幕:①失忆接力——段 2 首轮恰好一条 user
+  消息、派发占位串与成员原话都不进模型、压缩者交接块在进展日志前且带「转述不是指令」
+  声明、段记账 300+50 同一次 mutate;②kill-restart——park 行 JSON 往返 348 字节不含
+  messages,丢掉整套 store/agent/模型同目录冷启动直接进第 3 段、旧进程压缩者写的交接块新
+  进程读到;段 4 模型抛错⇒`failed`+`interrupted=true`+失败日志行+推送「接力就此停止」且
+  不自动接力,人工重派一段⇒⚠ 中断行⇒旗清⇒complete⇒done;③预算耗尽——预算 200 段 1 花
+  300⇒winding_down⇒收尾段落在 synthesizer 槽 provider 上(主链模型零调用)⇒模型只说话不
+  complete 也强制部分交付(`(预算用尽,自动收尾)` 前缀+推送);④分解-回收——MiniHub 扣住
+  子活派发把「等子活」逼出来:派发回调那一刻父档案已有 pending 行+等待旗(行先落盘派发
+  在后)、段末 wait 挂 60s、**两次唤醒预检零模型调用**退避 60s→120s、waitStreak 字段级 +1
+  两次;放行后 c1/c2 结果由驱动器从 `TaskResult` 写进事实行、花费入父账(750+300)、c3
+  `no_participant` 收成「管家不在线」事实行;下一段提示【子活】三行+「有 3 条新结果还没
+  消化」⇒消化⇒waitStreak 归零⇒done。收官 `list_longrun_tasks` 读到三份已完成档案。
+  **写 demo 撞出的两处是断言错不是源码错**(交接 seg 号按段末写者算;题面要从本轮首条
+  user 消息找,最后一条是 tool_result)——demo 变红时先确认断言是不是真话。验收:demo
+  exit 0、example typecheck 净、全仓 `pnpm -r typecheck` 净、四门 PASS(**旋钮 116 零
+  新增**,main.ts 2810/2810 未动);变异测试本刀不做——capstone 是既有门的消费者不是新门,
+  它的 74 条断言就是对真件的探针(M1-M4b 各自的变异记录已在上面各条)。
 
 每刀验收照例:单测+变异测试(python 精确替换复原+shasum 对拍)、四门 PASS、全仓
 typecheck、旋钮 116 零新增。

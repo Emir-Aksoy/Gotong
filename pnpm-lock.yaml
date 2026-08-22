@@ -128,6 +128,24 @@ importers:
         specifier: workspace:*
         version: link:../../packages/services-sdk
 
+  examples/atong-longrun:
+    dependencies:
+      '@gotong/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      '@gotong/host':
+        specifier: workspace:*
+        version: link:../../packages/host
+      '@gotong/llm':
+        specifier: workspace:*
+        version: link:../../packages/llm
+      '@gotong/personal-butler':
+        specifier: workspace:*
+        version: link:../../packages/personal-butler
+      '@gotong/services-sdk':
+        specifier: workspace:*
+        version: link:../../packages/services-sdk
+
   examples/atong-recovery:
     dependencies:
       '@gotong/cli':

@@ -1,0 +1,18 @@
+{
+  "name": "@gotong/example-atong-longrun",
+  "version": "0.0.0",
+  "type": "module",
+  "private": true,
+  "description": "LONG-M6 capstone — the long-run lane end to end with a deliberately amnesiac model: reception → start_longrun_task → segment relay over the on-disk dossier (every segment is a cold start: one user message, zero carried conversation); a park record round-tripped through JSON, the process 'killed' and a fresh store + agent resumed over the same directory; a mid-segment provider crash that honestly stops the chain and a re-dispatch that surfaces the ⚠ interrupted line; a token budget that runs out and forces a synthesizer-slot wind-down segment with an honest partial delivery; and a fan-out of three child tasks whose results are written into the parent dossier by driver code (one child 'offline' → the black-hole fact row). Deterministic, no network, no API key, no LLM.",
+  "scripts": {
+    "start": "tsx src/demo.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@gotong/core": "workspace:*",
+    "@gotong/host": "workspace:*",
+    "@gotong/llm": "workspace:*",
+    "@gotong/personal-butler": "workspace:*",
+    "@gotong/services-sdk": "workspace:*"
+  }
+}
