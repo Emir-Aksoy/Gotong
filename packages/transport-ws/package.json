@@ -35,10 +35,10 @@
   "dependencies": {
     "@gotong/core": "workspace:*",
     "@gotong/protocol": "workspace:*",
-    "ws": "^8.21.1"
+    "ws": "^8.21.3"
   },
   "devDependencies": {
     "@types/ws": "^8.5.13",
-    "vitest": "^4.1.10"
+    "vitest": "^4.1.11"
   }
 }
