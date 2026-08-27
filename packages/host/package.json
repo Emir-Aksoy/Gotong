@@ -85,7 +85,6 @@
   },
   "dependencies": {
     "@gotong/a2a": "workspace:*",
-    "@gotong/acp-agent": "workspace:*",
     "@gotong/cli-agent": "workspace:*",
     "@gotong/cli": "workspace:*",
     "@gotong/core": "workspace:*",

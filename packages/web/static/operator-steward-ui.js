@@ -8,7 +8,7 @@
  *   POST /api/admin/steward/plan    propose (zero side effects)
  *   POST /api/admin/steward/apply   execute ONE accepted action
  *
- * Self-contained module; same activation pattern as acp-ui.js / a2a-ui.js
+ * Self-contained module; same activation pattern as a2a-ui.js
  * (owner/admin, MutationObserver on <body data-active-tab>, targets its own
  * panel by id). Unlike the federation panels it fetches nothing on tab focus —
  * it's a chat box that starts empty.
@@ -387,7 +387,7 @@
     if (inbox && inbox.scrollIntoView) inbox.scrollIntoView({ behavior: 'smooth', block: 'start' })
   }
 
-  // ---- activation (mirror acp-ui.js) ------------------------------------
+  // ---- activation (mirror a2a-ui.js) -------------------------------------
 
   function init() {
     const root = document.querySelector('#operator-steward-panel')

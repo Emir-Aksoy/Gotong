@@ -86,24 +86,23 @@ self-hosted sovereignty into one runnable, file-first package.
 ```
 
 …and the three columns shown are just examples. The same `Participant` slot also
-holds **CLI / ACP coding agents** (Claude Code, Codex), **external A2A agents**,
+holds **CLI coding agents** (Claude Code, Codex), **external A2A agents**,
 and **LangGraph / CrewAI adapters** — all transparent to the scheduler.
 
 ---
 
-## The four edges — how Gotong connects to the world
+## The three edges — how Gotong connects to the world
 
-Gotong reaches the rest of the ecosystem over four edges. It **speaks open
+Gotong reaches the rest of the ecosystem over three edges. It **speaks open
 protocols where they exist** — it doesn't reinvent them:
 
 | Edge | Protocol | Direction | What it carries |
 |---|---|---|---|
 | Tools & data | **MCP** | both | Agents call external MCP tools; external clients (Claude Desktop, Cursor) drive the Hub. |
 | Agent ↔ agent | **A2A** | both | An inbound `message/send` becomes a dispatch; an outbound call drives a remote A2A agent. |
-| Coding agents | **ACP** | outbound | The Hub spawns and holds a session with Claude Code / Codex and drives it turn by turn. |
 | Hub ↔ hub | **HubLink** | both | Gotong's own federation link between two hubs — where the per-link trust contracts, cross-org task forwarding, and approval gates live. |
 
-The first three are ecosystem standards Gotong implements. HubLink is the one
+The first two are ecosystem standards Gotong implements. HubLink is the one
 piece it owns — **not** as a clever wire format (it's WebSocket + bearer token +
 JSON-RPC underneath) but as the **contract for what two governed hubs exchange**:
 a capability manifest, ancestry-preserving task forwarding, and the per-link
@@ -166,9 +165,9 @@ The headline path is **two ways to add an LLM agent**:
 
 …and because everything is the same `Participant`, the same room also takes:
 
-- **CLI / ACP coding agents** — the Hub drives Claude Code / Codex over a held
-  ACP session (real-machine verified), with a danger-action gate that can park
-  destructive commands for human approval.
+- **CLI coding agents** — the Hub spawns Claude Code / Codex per turn (a
+  bounded shell-out), with a danger-action gate that can park destructive
+  commands for human approval.
 - **External A2A agents** — register a remote agent under a capability; a
   workflow step routes to it like any other.
 - **Framework adapters** — wrap a LangGraph graph or a CrewAI crew as a

@@ -733,7 +733,7 @@ export class Hub {
     }
     // R10 — the resumed task must not carry the original dispatch's stale
     // absolute `deadlineMs`. Strip it once here so every caller (the host
-    // sweep, the inbox two-step resume, the ACP escalation resume) gets a
+    // sweep, the inbox two-step resume, the butler governed-park resume) gets a
     // deadline-free envelope, and so a suspend-again re-persists the same
     // clean envelope rather than re-stamping the stale value.
     const resumedTask = stripStaleDeadline(task)

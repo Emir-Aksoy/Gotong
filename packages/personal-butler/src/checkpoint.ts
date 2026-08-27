@@ -6,18 +6,17 @@
  * stays a thin leaf. `agent.ts` wires these into park (`SuspendTaskError`) and
  * resume (decision injection).
  *
- * The model mirrors `@gotong/acp-agent`'s `acp-checkpoint.ts` but the carried
- * state is RE-RUNNABLE, not a live in-memory handle: a butler park rides the
- * tool-loop conversation (`messages`) + the round's `toolUses`, so a fresh
- * process can answer the deferred tool call after approval. That makes a butler
- * park durable across a hub restart (unlike an ACP permission park).
+ * The carried state is RE-RUNNABLE, not a live in-memory handle: a butler park
+ * rides the tool-loop conversation (`messages`) + the round's `toolUses`, so a
+ * fresh process can answer the deferred tool call after approval. That is what
+ * makes a butler park durable across a hub restart.
  */
 
 import type { LlmMessage, LlmToolUseBlock } from '@gotong/llm'
 
 /**
- * Sentinel `resumeAt` meaning "never auto-resume" — same value the inbox and
- * the ACP adapter use, duplicated locally so this leaf stays dependency-light.
+ * Sentinel `resumeAt` meaning "never auto-resume" — the same value the inbox
+ * uses, duplicated locally so this leaf stays dependency-light.
  * A governed-action park is woken ONLY by a human decision (`hub.resumeTask`
  * via the `/me` inbox), never the 30s sweep, so its `resumeAt` must sit beyond
  * any real wall-clock.
@@ -120,7 +119,7 @@ export function butlerGateState(args: {
 /**
  * Read the carried gate state out of a resume payload, if present. Tolerates
  * both the top-level shape (`{ v, messages, ... }`) and a nested `{ state: {...} }`
- * shape, mirroring `readAcpCheckpointState`. Returns null when it isn't ours —
+ * shape. Returns null when it isn't ours —
  * the caller then falls back to the base `LlmAgent` resume.
  */
 export function readButlerGateState(state: unknown): ButlerGateState | null {

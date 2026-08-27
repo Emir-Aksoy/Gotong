@@ -119,9 +119,10 @@ versioning），就是该 adapter 的验收门——和项目里其它「无漂�
 | **Amazon Q Dev CLI** | AWS | ✅ | — | T1 | |
 | **Qwen Code** | 阿里 | ✅ | — | T1 | 国内场景相关 |
 
-\* T2 需该 CLI 暴露 per-tool-call hook；多数现在只做到回合级，诚实标 T1。**经 ACP 桥接的
-Claude Code/Codex 达成真 T2**：ACP 的 `session/request_permission` 反向请求**就是**那个逐
-动作 hook，比 shell-out 的 spawn 前 regex 闸粒度更细（`@gotong/acp-agent` + `examples/acp-coding-bridge`）。
+\* 这一栏答的是「能不能钻进那个 agent **自己的**工具循环里逐个批改」——要 CLI 暴露
+per-tool-call hook；多数现在只做到回合级，诚实标 T1。**硬性 bar 不靠这一栏兑现**：按 §3 的
+黑盒兜底，`dangerousCommandGate` 在 hub 这侧、spawn **之前**按 argv 拦（fail-closed，危险
+命令挂起等人批），副作用面因此是 T2。
 
 ### 6.2 Agent 框架（出站 = P5 鸭子 adapter）
 
@@ -170,17 +171,6 @@ Claude Code/Codex 达成真 T2**：ACP 的 `session/request_permission` 反向�
    resume `onResume` 无漂移 / terminate `onTaskCancelled`→SIGTERM→SIGKILL），外加 `dangerousCommandGate`
    动作闸（危险命令 spawn 前挂起等人批，fail-closed）。验收门 = `packages/host/tests/cli-agent-e2e.test.ts`
    照 §5 故事跑真 Hub+suspendNotifier→identity+FileInboxStore。详见 `docs/zh/ledger/V5-E2-CLI-ADAPTER.md`。
-   1.5. ✅ **P0+｜ACP 长连接 adapter**（`examples/acp-coding-bridge/`）——**已落地**（acp-agent
-   M0-M8）。模仿 OpenClaw「从启动→hold session→分派」：`@gotong/acp-agent` 把编码 agent 当
-   **长生命周期子进程** spawn 一次、ACP 握手、**hold 住 session**、反复 `session/prompt` 到**同一
-   session**（上下文保留），是 P0 一次性 shell-out 的**互补**。同样五缝齐全且达成**真 T2**——
-   `session/request_permission` 是逐动作闸（比 spawn 前 regex 更细）。`ACP_PRESETS`: claude-code-acp
-   (`npx @zed-industries/claude-code-acp`) / codex-acp。验收门 = `packages/host/tests/acp-agent-e2e.test.ts`
-   （确定性 mock）。**M8 真机门**（`start:live`，非 hermetic）真跑 `claude-code-acp`：adapter 把真
-   bridge 一路驱动过 `initialize`→`session/new`（真 NDJSON over stdio，「从启动→hold session」在真
-   Claude Code 基建跑通），并**逮到 mock 逮不到的真 bug**（`session/new` 漏 ACP 必填 `mcpServers`→真
-   bridge zod `-32602`）；编码轮在「Claude Code 会话内嵌套」环境下被 bridge 自己的嵌套保护挡（环境约束
-   非 adapter 缺陷，普通终端不撞）。
 2. **P1｜A2A-native（Antigravity / Google ADK / 企业平台）**——出入站代码 Phase 18 已就绪，
    只差注册配置 + 文档，近乎白捡。
 3. **P2｜补框架 adapter**——AutoGen / ADK(py) / OpenAI Agents SDK / Pydantic AI / LlamaIndex /

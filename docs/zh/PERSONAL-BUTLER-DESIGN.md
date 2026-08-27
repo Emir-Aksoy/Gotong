@@ -117,7 +117,7 @@
 | ③ 有界 + 强制蒸馏 + 冻结注入 | `handle.ts:196` byte-cap 砍旧的一半(非蒸馏);`personal-growth-context.ts` 有 `COMPACT_TRIGGER` 触发器模式 | 缺(有可泛化的触发器) |
 | ④ 真主动节奏 | **Stream D heartbeat**(`HeartbeatParticipant`,per-agent interval,`HEARTBEAT_OK` 抑制,checklist) | ✅ 近 1:1 |
 | ⑤ 跨重启持久任务 | **Phase 11** `SuspendTaskError` + `suspended_tasks` SQLite + resume sweep;诚实标注 A2A in-mem 不持久 | ✅ 已达(个人范围;kanban 级超范围) |
-| ⑥ 真执行 + 隔离 + 子代理 | **ACP/CLI adapter** 驱动真 Claude Code/Codex + `DispatchToolset`(深度 5 / 环路 / allow-list 闸)+ `dangerousCommandGate` | ✅ 达 OpenClaw(其默认更差)/ 略低 Hermes(缺可插拔 Docker 后端,见推迟) |
+| ⑥ 真执行 + 隔离 + 子代理 | **CLI adapter** 驱动真 Claude Code/Codex + `DispatchToolset`(深度 5 / 环路 / allow-list 闸)+ `dangerousCommandGate` | ✅ 达 OpenClaw(其默认更差)/ 略低 Hermes(缺可插拔 Docker 后端,见推迟) |
 
 **6 条里 4 条已达或超过。** 真活集中在 ①②③ = 记忆 / 会话引擎。
 
@@ -247,7 +247,7 @@ MemoryReviewParticipant:蒸馏近段 episodic → semantic profile      ← M3 /
 ## 十、显式推迟 / 风险
 
 **推迟(不进基础估)**:
-- **可插拔 Docker/SSH/Modal 沙箱终端后端**(Hermes 天花板)——我们带闸的 CLI/ACP 已超 OpenClaw 裸跑默认;真要执行隔离对齐 Hermes,单列 **+1–1.5 周**。
+- **可插拔 Docker/SSH/Modal 沙箱终端后端**(Hermes 天花板)——我们带闸的 CLI 已超 OpenClaw 裸跑默认;真要执行隔离对齐 Hermes,单列 **+1–1.5 周**。
 - **kanban 级任务板编排**(Hermes)——超「个人记忆 + 执行」范围,我们已有 suspend/resume 持久底座。
 - **向量 / 图记忆当默认**——默认子串+时近 + 可选 chroma-mcp 足够;真要默认语义检索再评估。
 - **fold 进 host main.ts 当一等公民**——example-first 先,稳定后再收。

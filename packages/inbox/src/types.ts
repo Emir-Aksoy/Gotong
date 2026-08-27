@@ -129,7 +129,7 @@ export interface InboxItem {
    * IMA-M1 — may this item be resolved from an IM chat (`/approve <id>`)?
    * A WHITELIST flag, fail-closed: only writers that explicitly opt in set it
    * (the workflow human-step broker; the butler park for hub-internal actions).
-   * Unset — every pre-existing item, ACP escalations, steward parks, any future
+   * Unset — every pre-existing item, steward parks, any future
    * writer — stays web-only with zero registration needed. Deciding this at
    * WRITE time (not at IM-read time) keeps the risk call in one authoritative
    * place; the IM surface only ever reads the flag.

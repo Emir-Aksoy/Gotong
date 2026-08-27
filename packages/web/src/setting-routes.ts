@@ -4,7 +4,7 @@
  * the same host `ops-core`). Web is a thin requireAdmin → resolveActor → echo;
  * the host `SettingOpsSurface` owns ops-core's deps + the audit binding + the
  * tier chokepoint. Web carries ZERO `@gotong/host` runtime dependency — it
- * mirrors the surface structurally, exactly like `AdminHealthSurface` / the ACP
+ * mirrors the surface structurally, exactly like `AdminHealthSurface` / the A2A
  * admin surface.
  *
  *   GET  /api/admin/setting/commands   the full ops catalog, annotated for the

@@ -110,7 +110,6 @@ import {
   type IdentityStore,
   type PeerRegistration,
   type A2aOutboundAgent,
-  type AcpOutboundAgent,
 } from '@gotong/identity'
 
 import { OrgApiPool } from './org-api-pool.js'
@@ -156,8 +155,6 @@ import { serveWebSocket } from '@gotong/transport-ws'
 import { PeerRegistry, buildPeerTokenResolver } from './peer-registry.js'
 import { A2aServer } from './a2a-server.js'
 import { A2aOutboundManager } from './a2a-outbound.js'
-import { AcpOutboundManager } from './acp-outbound.js'
-import { acpApprovalItemFor } from './acp-escalation.js'
 import { type ImBridgesHandle } from './im-bridge.js'
 import { armImBridgeWiring } from './im-bridge-wiring.js'
 import { buildAgentRestarter } from './im-credentials-service.js'
@@ -183,8 +180,6 @@ import {
   type SamlProviderAdminSurface,
   type A2aAgentAdminSurface,
   type A2aAgentView,
-  type AcpAgentAdminSurface,
-  type AcpAgentView,
 } from '@gotong/web'
 
 /**
@@ -685,11 +680,6 @@ async function main(): Promise<void> {
   }
 
   const identityForSuspend = identity
-  // ACP-HITL — set further down (near the ACP outbound manager) once the member
-  // inbox + an owner are resolved. The notifier funnels every park, so it asks
-  // this sink to turn an ACP permission park into a /me approval item; it is a
-  // no-op for every other kind of park (and unset when escalation isn't wired).
-  let acpEscalationSink: ((task: Task, by: string, state: unknown) => Promise<void>) | undefined
   // BF-M4 — the sibling sink for the resident butler. A governed butler action
   // parks with a `ButlerGateState`; this turns that park into a /me approval item
   // (no-op for a pure-memory butler, which never parks for approval). Set further
@@ -720,13 +710,11 @@ async function main(): Promise<void> {
               state: suspend.state,
               taskJson: JSON.stringify(task),
             })
-            // An outbound ACP agent that escalated a destructive tool becomes a
-            // /me approval here (the leaf adapter can't reach the inbox). Awaited
-            // so the item exists before dispatch returns `suspended`.
-            await acpEscalationSink?.(task, by, suspend.state)
-            // BF-M4 — same for a resident butler that parked a governed action.
-            // Returns null (no write) for every non-governed park, so calling it
-            // for every suspend is safe (no double-write with the ACP / inbox /
+            // BF-M4 — a resident butler that parked a governed action becomes a
+            // /me approval here (the leaf agent can't reach the inbox). Awaited
+            // so the item exists before dispatch returns `suspended`. Returns
+            // null (no write) for every non-governed park, so calling it for
+            // every suspend is safe (no double-write with the inbox /
             // approval-gate sinks, which key off their own state shapes).
             await butlerEscalationSink?.(task, by, suspend.state)
           },
@@ -1745,7 +1733,7 @@ async function main(): Promise<void> {
     // Item 2 (Y) — an outbound A2A agent flagged `requireApprovalOutbound` is
     // wrapped in an ApprovalGatedParticipant: each send parks for a /me approval
     // before it leaves the hub. The approver is the org owner, the same one the
-    // ACP escalation and the Phase 18 mesh outbound gate use. A row that requires
+    // Phase 18 mesh outbound gate uses. A row that requires
     // approval but has no inbox/owner stays persisted-but-inactive (fail-closed).
     const a2aApprover = inboxStore ? findOwnerUserId(identity) : null
     a2aOutbound = new A2aOutboundManager({
@@ -1760,46 +1748,6 @@ async function main(): Promise<void> {
     // Stream H — let the workflow controller's off-hub capability view see live
     // external A2A agents (lazy closure forward-declared above).
     a2aOutboundRef = a2aOutbound
-  }
-
-  // ACP-OUT-M2/M4 — OpenClaw-style outbound ACP agents. Each stored row
-  // (identity `acp_outbound_agents`) becomes a local Participant that drives a
-  // coding agent (Claude Code / Codex) over a long-lived ACP session: spawn once,
-  // hold the session, dispatch many tasks. Unlike A2A there is no secret to
-  // resolve — an ACP bridge rides the underlying agent's own login. The manager
-  // also lets the admin CRUD routes push add/update/delete onto the running hub
-  // without a restart. NOTE: ACP agents are LOCAL participants, not cross-hub
-  // destinations, so they are NOT fed into the workflow off-hub capability view.
-  let acpOutbound: AcpOutboundManager | undefined
-  if (identity) {
-    // ACP-HITL — when a member inbox + an owner exist, a destructive coding
-    // action ESCALATES to a /me approval (the sink writes the item; resolve runs
-    // the two-step recovery) instead of being denied inline. GOTONG_ACP_DANGER=deny
-    // forces the old hard-deny for unattended hubs (no one to approve → a park
-    // would wait forever). The approver is the org owner, mirroring the Phase 18
-    // outbound cross-org approval gate.
-    const forceDeny = process.env.GOTONG_ACP_DANGER === 'deny'
-    const acpApprover = inboxStore && !forceDeny ? findOwnerUserId(identity) : null
-    let escalateDanger = false
-    if (inboxStore && acpApprover) {
-      const store = inboxStore
-      const approver = acpApprover
-      acpEscalationSink = async (task, by, state) => {
-        const item = acpApprovalItemFor(task, by, state, { approver })
-        if (item) await store.write(item)
-      }
-      escalateDanger = true
-      log.info('outbound ACP destructive actions escalate to /me approval', { approver })
-    }
-    acpOutbound = new AcpOutboundManager({
-      hub,
-      source: identity,
-      logger: log,
-      escalateDanger,
-      // Item 2 — per-agent outbound quota window (mirrors GOTONG_PEER_LINK_QUOTA_WINDOW_MS).
-      quotaWindowMs: envInt('GOTONG_ACP_OUTBOUND_QUOTA_WINDOW_MS', 60_000),
-    })
-    acpOutbound.registerAllFromStore()
   }
 
   // GO-LIVE GL-1 — outbound IM bridges (Telegram, …). OFF unless a bridge's
@@ -2153,51 +2101,6 @@ async function main(): Promise<void> {
     }
   }
 
-  // ACP-OUT-M4 — outbound ACP agent registry CRUD (admin). Joins identity's
-  // acp_outbound_agents facade with the AcpOutboundManager so each edit both
-  // PERSISTS and takes effect on the running hub (refresh/remove), and the view
-  // reports honest runtime liveness. There is no secret of any kind: ACP rides
-  // the agent's own login, so the whole record (command/args/cwd) rides the
-  // projection — nothing ever needs hiding.
-  let acpAgentAdmin: AcpAgentAdminSurface | undefined
-  if (identity && acpOutbound) {
-    const idForAcp = identity
-    const mgr = acpOutbound
-    const toView = (a: AcpOutboundAgent, st: { active: boolean; reason?: string }): AcpAgentView => ({
-      id: a.id,
-      capabilities: a.capabilities,
-      command: a.command,
-      args: a.args,
-      cwd: a.cwd,
-      // Item 2 (Z-M1) — outbound gate config (governance for a local coding
-      // subprocess); copy the readonly allowlist to a mutable array (null = all).
-      allowedDataClasses: a.allowedDataClasses ? [...a.allowedDataClasses] : null,
-      outboundQuotaBudget: a.outboundQuotaBudget,
-      enabled: a.enabled,
-      label: a.label,
-      createdAt: a.createdAt,
-      updatedAt: a.updatedAt,
-      active: st.active,
-      ...(st.reason ? { inactiveReason: st.reason } : {}),
-    })
-    acpAgentAdmin = {
-      list: () => idForAcp.listAcpAgents().map((a) => toView(a, mgr.statusOf(a.id))),
-      add: (input) => {
-        const a = idForAcp.addAcpAgent(input)
-        return toView(a, mgr.refresh(a.id))
-      },
-      update: (id, patch) => {
-        const a = idForAcp.updateAcpAgent(id, patch)
-        return toView(a, mgr.refresh(id))
-      },
-      remove: (id) => {
-        const ok = idForAcp.removeAcpAgent(id)
-        if (ok) mgr.remove(id)
-        return ok
-      },
-    }
-  }
-
   // FDE-M1b/M3 — durable template-intent registries: the import route records
   // each installed pack's declared `requires.connectors[]` and `schedules[]`
   // here (via the web-injected sinks below); 体检 / 定时卡 read them back.
@@ -2533,8 +2436,6 @@ async function main(): Promise<void> {
     ...(samlAdmin ? { samlAdmin } : {}),
     // Route B P1-M11c — admin outbound A2A agent registry CRUD (undefined → 503).
     ...(a2aAgentAdmin ? { a2aAgents: a2aAgentAdmin } : {}),
-    // ACP-OUT-M4 — admin outbound ACP agent registry CRUD (undefined → 503).
-    ...(acpAgentAdmin ? { acpAgents: acpAgentAdmin } : {}),
     // Route B P0-M7 — bearer token for the internal `/metrics` scrape route.
     // Lets Prometheus pull the same body as /api/admin/metrics without a
     // machine-admin token. Unset/empty (env() already maps '' → undefined) →

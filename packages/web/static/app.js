@@ -4520,7 +4520,7 @@
     { tab: 'usage', srcs: ['/usage-ui.js'] },
     {
       tab: 'federation',
-      srcs: ['/peer-admin-ui.js', '/peer-manifest-ui.js', '/peer-summary-ui.js', '/a2a-ui.js', '/acp-ui.js'],
+      srcs: ['/peer-admin-ui.js', '/peer-manifest-ui.js', '/peer-summary-ui.js', '/a2a-ui.js'],
     },
     { tab: 'oidc', srcs: ['/oidc-ui.js'] },
     { tab: 'saml', srcs: ['/saml-ui.js'] },

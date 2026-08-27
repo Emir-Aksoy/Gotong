@@ -920,6 +920,11 @@ const MIGRATIONS: Migration[] = [
     `,
   },
   {
+    // RETIRED in v39 (2026-08-27) — this table is dropped there. Kept
+    // byte-identical because migration history is append-only: v34 ALTERs
+    // this table, so a fresh DB still has to create it first. What follows
+    // describes the feature AS IT WAS.
+    //
     // ACP-OUT-M1 — outbound ACP agent registrations. An entry makes a local
     // capability dispatch SPAWN and drive an external coding agent (Claude Code
     // / Codex) over ACP, OpenClaw-style: spawn once, hold one session, dispatch
@@ -1117,6 +1122,9 @@ const MIGRATIONS: Migration[] = [
     `,
   },
   {
+    // (The `acp_outbound_agents` half of this migration is retired in v39;
+    // the ALTERs stay so the chain replays from empty. The A2A half is live.)
+    //
     // Item 2 — route the RAW A2A/ACP outbound edges through the P4-M4
     // chokepoint. `A2aRemoteParticipant` / `AcpParticipant` are LOCAL
     // participants that never cross a `RemoteHubViaLink`, so the mesh
@@ -1281,6 +1289,27 @@ const MIGRATIONS: Migration[] = [
         ON device_pairing_codes(user_id);
       CREATE INDEX IF NOT EXISTS idx_device_pairing_codes_expires
         ON device_pairing_codes(expires_at);
+    `,
+  },
+  {
+    // Retire the outbound ACP adapter (2026-08-27). The whole outbound
+    // long-lived-ACP-session product — `@gotong/acp-agent`, the host manager,
+    // the permission escalation, the admin CRUD — is gone, so this table has
+    // no reader left. A table nobody reads is worse than no table: the next
+    // person finds rows describing coding agents nothing can drive.
+    //
+    // v26 (create) and v34 (the two ALTERs) are left BYTE-IDENTICAL on
+    // purpose. Migration history is append-only: editing v26 out would make
+    // v34's `ALTER TABLE acp_outbound_agents` fail on a FRESH database with
+    // "no such table". So the create still happens, and this drops it — the
+    // chain stays replayable from empty.
+    //
+    // Data safety: production carried 0 rows (verified before the cut), and a
+    // row would be meaningless anyway once the adapter that reads it is gone.
+    version: 39,
+    name: 'drop-acp-outbound-agents',
+    sql: `
+      DROP TABLE IF EXISTS acp_outbound_agents;
     `,
   },
 ]

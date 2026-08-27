@@ -232,8 +232,7 @@ IM bridges (Telegram, Lark, Slack, and QQ today; Discord and Matrix planned), an
 interactive CLI/REPL,
 MCP for tools and external clients, and an installable PWA. Gotong speaks the
 ecosystem's open protocols where they exist — **MCP** (tools and data, both
-directions), **A2A** (agent-to-agent, both directions), **ACP** (driving a held
-coding-agent session) — and owns exactly one of its own: **HubLink**, the
+directions), **A2A** (agent-to-agent, both directions) — and owns exactly one of its own: **HubLink**, the
 governed federation link between two hubs.
 
 And templates carry whole hubs: one file packs N agents, N workflows, addressable

@@ -339,7 +339,7 @@ IM bridge / `/me` PWA / 原生 app 只是同一套 `/me` API 的不同前端。�
 |---|---|---|
 | 孩子 hub 授权调家长导师(跨 hub 能力派发) | 「通告=授权」`remoteCapabilities ← outboundCaps` + 两步恢复 + 三不变量 | [Stream G](./ledger/V5-G-FINAL.md) |
 | per-link 信任契约(能力/配额/data-class/审批/KB) | `peers` v15 + v17 + v23 + v27 列 | [P4](./ledger/V4-PHASE19-P4-FINAL.md) · [C-M1](./ledger/V5-C-FINAL.md) · [E5](./ledger/V5-E5-FINAL.md) |
-| 出站 data-class 闸(锁孩子数据) | `checkOutboundDataClasses`(mesh/A2A/ACP 共用纯函数) | [P4-M4](./ledger/V4-PHASE19-P4-FINAL.md) · [Item 2](./ledger/V5-H-FINAL.md) |
+| 出站 data-class 闸(锁孩子数据) | `checkOutboundDataClasses`(mesh/A2A 共用纯函数) | [P4-M4](./ledger/V4-PHASE19-P4-FINAL.md) · [Item 2](./ledger/V5-H-FINAL.md) |
 | 配额 fail-closed(限花费/时长) | `usage_ledger` + budget peek + per-link `FixedWindowLimiter` | [Phase 17](./ledger/V4-PHASE17-FINAL.md) · [P4-M4](./ledger/V4-PHASE19-P4-FINAL.md) |
 | 家长审批越界主题(挂起→收件箱→恢复) | `human:` YAML 糖 → `gotong.human/v1` + 两步恢复 | [Phase 16](./ledger/V4-PHASE16-FINAL.md) |
 | 成员(孩子)为自己发起 + 脱敏 agent | `surface.me` + `userScopeField` + `/me` 脱敏投影 | [Phase 14](./ledger/V4-PHASE14-FINAL.md) · [P1](./ledger/V4-PHASE19-P1-FINAL.md) |
@@ -389,7 +389,7 @@ mcp-obsidian / `/me` PWA / IM bridge),所以是「把现成零件接成真能部
 
 **诚实边界(example-first)**:导师 + 工作流 + KB 槽位**经模板导入进真 `gotong start`**(一等
 公民);但**确定性闸参与者**是运行时接线的 example 代码(`src/participants.ts`)——它们是确定性
-capability 参与者,不能当模板托管 agent(同 CLI / ACP 编码 agent)。把本垂直 fold 进生产 host
+capability 参与者,不能当模板托管 agent(同 CLI 编码 agent)。把本垂直 fold 进生产 host
 `main.ts` 是**显式推迟**项(§十二 ④,北极星 example-first:模板即产品化载体)。`src/index.real.ts`
 已是这层薄接线的可跑参照。
 

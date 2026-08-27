@@ -56,15 +56,6 @@ importers:
         specifier: workspace:*
         version: link:../../packages/workflow
 
-  examples/acp-coding-bridge:
-    dependencies:
-      '@gotong/acp-agent':
-        specifier: workspace:*
-        version: link:../../packages/acp-agent
-      '@gotong/core':
-        specifier: workspace:*
-        version: link:../../packages/core
-
   examples/activepieces-bridge:
     dependencies:
       '@gotong/core':
@@ -866,16 +857,6 @@ importers:
         specifier: ^4.1.10
         version: 4.1.10(@types/node@26.1.1)(vite@8.1.5(@types/node@26.1.1)(esbuild@0.28.1)(tsx@4.23.1)(yaml@2.9.0))
 
-  packages/acp-agent:
-    dependencies:
-      '@gotong/core':
-        specifier: workspace:*
-        version: link:../core
-    devDependencies:
-      vitest:
-        specifier: ^4.1.10
-        version: 4.1.10(@types/node@26.1.1)(vite@8.1.5(@types/node@26.1.1)(esbuild@0.28.1)(tsx@4.23.1)(yaml@2.9.0))
-
   packages/cli:
     dependencies:
       '@gotong/a2a':
@@ -973,9 +954,6 @@ importers:
       '@gotong/a2a':
         specifier: workspace:*
         version: link:../a2a
-      '@gotong/acp-agent':
-        specifier: workspace:*
-        version: link:../acp-agent
       '@gotong/cli':
         specifier: workspace:*
         version: link:../cli

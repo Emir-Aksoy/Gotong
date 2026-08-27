@@ -33,7 +33,7 @@ import type {
 import { ButlerError } from './errors.js'
 
 /**
- * A governed-tool verdict — three-way, mirroring the ACP permission gate:
+ * A governed-tool verdict — three-way:
  *   - `allow`   → run inline; no human.
  *   - `approve` → park for a human (the HANDOFF seam → `/me` inbox).
  *   - `refuse`  → fail-closed inline; the model gets an `isError` result and

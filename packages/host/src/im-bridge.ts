@@ -4,7 +4,7 @@
  *
  * OFF by default: with no platform configured (env vars unset AND no
  * `im_bridge` vault rows), `startImBridges()` returns `undefined` and
- * nothing changes — exactly how the A2A / ACP outbound managers stay
+ * nothing changes — exactly how the A2A outbound manager stays
  * inert without their config. That zero-behaviour-change-when-unset
  * property is the whole point of the gate: an existing deployment that
  * doesn't want IM is byte-for-byte unaffected. (The `hotStart` option
@@ -1533,7 +1533,7 @@ export async function startImBridges(
     } catch (err) {
       // One platform's bad credential must not abort the others or the host
       // boot (these are independent transports, mirroring the best-effort
-      // A2A / ACP outbound managers). Log loudly and skip it; the platforms
+      // A2A outbound manager). Log loudly and skip it; the platforms
       // that DO start still run. Clean up the half-started bridge so it
       // leaves no listener / socket behind.
       opts.log.error('im bridge start failed', {

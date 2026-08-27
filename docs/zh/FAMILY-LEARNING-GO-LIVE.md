@@ -57,7 +57,7 @@
 > `gotong start`**（一等公民）。但**确定性闸参与者**（`topic.screen` / `content.moderate` /
 > `records.append` / `report.to-guardian` / `explore.local`）是**运行时接线的 example 代码**
 > （[`src/participants.ts`](../../examples/family-learning-hub/src/participants.ts)）——它们是确定性
-> capability 参与者，**不能**当模板里的托管 agent（同 CLI / ACP 编码 agent 不能进模板）。所以
+> capability 参与者，**不能**当模板里的托管 agent（同 CLI 编码 agent 不能进模板）。所以
 > Tier 2 的家长 / 孩子 host 是「`gotong start` + 复制 / 适配 `src/participants.ts` 的薄接线」。把
 > 这个垂直 fold 进生产 host `main.ts` 是**显式推迟**项（设计 §十二 ④，北极星 example-first：模板
 > 即产品化载体）。`src/index.real.ts` 已是这层薄接线的可跑参照。

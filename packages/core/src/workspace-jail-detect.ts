@@ -95,7 +95,7 @@ export function resetFsJailCache(): void {
 
 /** Result of {@link prepareFsJail} — a ready-to-thread spec plus the honest degradation signal. */
 export interface PreparedFsJail {
-  /** Hand this to an adapter (`CliRunOptions.fsJail` / `AcpSpawnOptions.fsJail`). */
+  /** Hand this to an adapter (`CliRunOptions.fsJail`). */
   readonly spec: FsJailSpec
   /** True when an OS kernel jail will actually confine the child tree. */
   readonly jailed: boolean
@@ -115,8 +115,8 @@ export interface PrepareFsJailOptions extends DetectFsJailOptions {
  * ready to hand an adapter. When no enforcer is available (`kind: 'none'`),
  * `jailed` is false and `warning` carries the reason — the caller MUST log it and
  * pair the spawn with a human gate, never run unconfined silently. Folds the
- * detect → spec → degrade dance into one place so cli-agent / acp-agent / the
- * host don't each re-implement it.
+ * detect → spec → degrade dance into one place so cli-agent / the host don't
+ * each re-implement it.
  */
 export async function prepareFsJail(opts: PrepareFsJailOptions): Promise<PreparedFsJail> {
   const detectOpts: DetectFsJailOptions = {

@@ -79,25 +79,24 @@ file-first 包里的底座。
                         .gotong/secrets.enc.json …)
 ```
 
-……图里这三列只是举例。同一个 `Participant` 槽位还装得下 **CLI / ACP 编码
+……图里这三列只是举例。同一个 `Participant` 槽位还装得下 **CLI 编码
 agent**（Claude Code、Codex）、**外部 A2A agent**、以及 **LangGraph /
 CrewAI 适配器**——对调度器全都透明。
 
 ---
 
-## 四条边 — Gotong 怎么连接世界
+## 三条边 — Gotong 怎么连接世界
 
-Gotong 经四条边连到生态里。**有现成开放协议的地方就用现成的**——它不重新
+Gotong 经三条边连到生态里。**有现成开放协议的地方就用现成的**——它不重新
 发明：
 
 | 边 | 协议 | 方向 | 传什么 |
 |---|---|---|---|
 | 工具 & 数据 | **MCP** | 双向 | agent 调外部 MCP 工具；外部客户端（Claude Desktop、Cursor）反过来驱动 Hub。 |
 | agent ↔ agent | **A2A** | 双向 | 入站 `message/send` 变成一次 dispatch；出站调一个远端 A2A agent。 |
-| 编码 agent | **ACP** | 出站 | Hub spawn 并 hold 住一个 Claude Code / Codex 的 session，一轮一轮驱动它。 |
 | Hub ↔ Hub | **HubLink** | 双向 | Gotong 自己的 hub 间联邦链路——逐链信任契约、跨组织任务转发、审批闸都住在这。驱动方可以是工作流步，也可以是成员对管家的一句大白话（管家出网，见 [`NET-AGENT-NETWORK.md`](NET-AGENT-NETWORK.md)）。 |
 
-前三个是 Gotong 实现的生态标准。HubLink 是它唯一自己拥有的那块——**不是**
+前两个是 Gotong 实现的生态标准。HubLink 是它唯一自己拥有的那块——**不是**
 作为某种精巧的线协议（底层就是 WebSocket + bearer token + JSON-RPC），而是
 作为**两个受治理的 hub 之间交换什么**的契约：能力 manifest、保留 ancestry 的
 任务转发、以及下面那份逐链信任契约。
@@ -159,9 +158,8 @@ Gotong 经四条边连到生态里。**有现成开放协议的地方就用现�
 
 ……而因为一切都是同一个 `Participant`，同一个 room 还接得下：
 
-- **CLI / ACP 编码 agent**——Hub 经一个 hold 住的 ACP session 驱动 Claude
-  Code / Codex（已真机验证），并带一个危险动作闸，能把破坏性命令挂起
-  等人批准。
+- **CLI 编码 agent**——Hub 每一轮 spawn 一次 Claude Code / Codex（有界
+  shell-out），并带一个危险动作闸，能把破坏性命令挂起等人批准。
 - **外部 A2A agent**——把一个远端 agent 注册到某个 capability 下；工作流的
   一步就像派给任何别人一样路由到它。
 - **框架适配器**——用 Python SDK 把一个 LangGraph graph 或 CrewAI crew 包成

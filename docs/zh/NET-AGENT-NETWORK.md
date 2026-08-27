@@ -1,7 +1,7 @@
 # NET — agent 网络 track:管家出网 + hub 名片/发现
 
 > 北极星第 2 层(人/agent ↔ 别的人/agent/机构)的**管道已全通**(federation、
-> A2A 入+出、ACP、信任契约、跨 hub 工作流、配额 fail-closed),但**故事是薄的**:
+> A2A 入+出、信任契约、跨 hub 工作流、配额 fail-closed),但**故事是薄的**:
 > 普通成员今天没有任何一条对话式入口能让自己的 AI 代表自己跟对端 hub 打交道;
 > 两台 hub 互联唯一入口是场外换 token(`mint-peer-token` + `connect`),撑不起
 > 「网络」。NET track 补这两块:**A = 管家出网**(先),**B = hub 名片/发现**(后)。

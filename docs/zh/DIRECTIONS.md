@@ -167,7 +167,7 @@ EXCH-M5 gotong-client 包 = 域 C(协作) × 法「形态兼容」;EFF 效果回
 
 - 联邦 mesh(HubLink / 公开 wire 规范)+ 分级信任 GT(T0-T3 四档 × 动作风险
   矩阵、PIN 公钥、引荐不传递)— `MESH-PROTOCOL.md` · `GRADED-TRUST.md`
-- 互操作协议面:A2A v1.0(名片 + ES256 签名 + 消费侧验签)、ACP/CLI 出站
+- 互操作协议面:A2A v1.0(名片 + ES256 签名 + 消费侧验签)、CLI 出站
   adapter、MCP 双侧 — `STD-STANDARDS-ALIGNMENT.md` · `AGENT-ADAPTER-CONTRACT.md`
 - 交付物信封 + 多宿主技能包(EXCH:`gotong.envelope/v1` 人肉中继 + pi/dsh/
   WorkBuddy 包 + gotong-client 直连包)— `EXCHANGE-ENVELOPE.md`

@@ -94,7 +94,6 @@ pnpm demo                          # = hello-collab（官方第一步，见 QUIC
 | 例子 | 一句话 | 前置 |
 |---|---|---|
 | [`coding-agent-bridge`](../../examples/coding-agent-bridge) | hub 驱动编码 CLI（Claude Code/Codex/Aider/Goose…）当 Participant，五缝全展示（mock CLI） | 零 |
-| [`acp-coding-bridge`](../../examples/acp-coding-bridge) | hub HOLD 一个 ACP 会话反复派任务（OpenClaw 式），逐动作权限闸（mock ACP） | 零 |
 | [`a2a-workflow-step`](../../examples/a2a-workflow-step) | 外部 A2A agent 当工作流步（message/send 立即回，injected fetch） | 零 |
 | [`a2a-long-running-step`](../../examples/a2a-long-running-step) | 会挂起的 A2A 步：远端 working→completed，整个 run park 到收敛 | 零 |
 | [`codex-deepseek-hub`](../../examples/codex-deepseek-hub) | 一个 router LLM 管 Codex + DeepSeek TUI 编码 agent，同一 repo 共享 AGENTS.md/PROGRESS.md | 零 |

@@ -187,8 +187,7 @@ des ponts IM (Telegram, Lark, Slack et QQ aujourd'hui ; Discord et Matrix prévu
 CLI/REPL interactif,
 MCP pour les outils et les clients externes, et une PWA installable. Gotong parle les
 protocoles ouverts de l'écosystème là où ils existent — **MCP** (outils et données, les deux
-directions), **A2A** (agent-à-agent, les deux directions), **ACP** (piloter une session
-d'agent de codage maintenue) — et possède exactement l'un des siens : **HubLink**, le
+directions), **A2A** (agent-à-agent, les deux directions) — et possède exactement l'un des siens : **HubLink**, le
 lien de fédération gouverné entre deux hubs.
 
 Et les modèles portent des hubs entiers : un fichier contient N agents, N workflows, des créneaux de

@@ -65,8 +65,8 @@ export interface A2aOutboundManagerOptions {
    * `ApprovalGatedParticipant` so a person must approve each outbound send from
    * their `/me` inbox before it crosses the boundary (the same machinery the
    * Phase 18 mesh outbound gate uses). BOTH must be present for the gate to
-   * engage; main.ts injects the shared inbox store + the org owner (the same
-   * approver the ACP escalation uses). If a row requires approval but these are
+   * engage; main.ts injects the shared inbox store + the org owner. If a row
+   * requires approval but these are
    * absent, the row is persisted-but-inactive (`approval_unconfigured`) —
    * fail-closed, never an ungated send.
    */

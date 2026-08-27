@@ -41,7 +41,6 @@
     "demo:atong-hands": "pnpm --filter @gotong/example-atong-hands start",
     "demo:atong-longrun": "pnpm --filter @gotong/example-atong-longrun start",
     "demo:coding-agent-bridge": "pnpm --filter @gotong/example-coding-agent-bridge start",
-    "demo:acp-coding-bridge": "pnpm --filter @gotong/example-acp-coding-bridge start",
     "demo:personal-coding-hub": "pnpm --filter @gotong/example-personal-coding-hub start",
     "demo:personal-coding-hub:real": "pnpm --filter @gotong/example-personal-coding-hub start:real",
     "demo:personal-coding-hub:cli": "pnpm --filter @gotong/example-personal-coding-hub start:cli",

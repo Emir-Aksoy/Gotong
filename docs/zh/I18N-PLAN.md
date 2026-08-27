@@ -49,7 +49,7 @@ i18n 引擎已经存在，住在 [`packages/web/static/app-core.js`](../../packa
 | `identity-ui.js` | 83 | 用户/会话/审计 |
 | `a2a-ui.js` | 59 | 出站 A2A agent |
 | `peer-admin-ui.js` | 55 | 联邦 peer onboarding |
-| `acp-ui.js` | 51 | 出站 ACP agent |
+| ~~`acp-ui.js`~~ | 51 | 出站 ACP agent（2026-08-27 随出站 ACP 适配器一起退役） |
 | `saml-ui.js` | 48 | SAML IdP |
 | `oidc-ui.js` | 44 | OIDC IdP |
 | `admin-wf-assist.js` | 34 | 工作流 AI 助手（已用 Gotong×4）|

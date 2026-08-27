@@ -106,7 +106,6 @@ import { handleOAuthConnectorAdminRoute, type OAuthConnectorAdminSurface } from 
 import { handleSamlRoute, type SamlLoginSurface } from './saml-routes.js'
 import { handleSamlAdminRoute, type SamlProviderAdminSurface } from './saml-admin-routes.js'
 import { handleA2aAdminRoute, type A2aAgentAdminSurface } from './a2a-admin-routes.js'
-import { handleAcpAdminRoute, type AcpAgentAdminSurface } from './acp-admin-routes.js'
 import { handleSettingRoute, type SettingOpsSurface } from './setting-routes.js'
 import {
   handleWorkflowScheduleRoute,
@@ -138,7 +137,6 @@ export type { OAuthConnectorAdminSurface, OAuthConnectorView } from './oauth-con
 export type { SamlLoginSurface } from './saml-routes.js'
 export type { SamlProviderAdminSurface, SamlProviderView } from './saml-admin-routes.js'
 export type { A2aAgentAdminSurface, A2aAgentView } from './a2a-admin-routes.js'
-export type { AcpAgentAdminSurface, AcpAgentView } from './acp-admin-routes.js'
 export type {
   SettingOpsSurface,
   SettingOpsActor,
@@ -402,7 +400,6 @@ export function serveWeb(hub: Hub, opts: WebServerOptions = {}): Promise<WebServ
     oidcAdmin: opts.oidcAdmin,
     samlAdmin: opts.samlAdmin,
     a2aAgents: opts.a2aAgents,
-    acpAgents: opts.acpAgents,
     settingOps: opts.settingOps,
     workflowSchedules: opts.workflowSchedules,
     httpStats: new HttpStats(),
@@ -628,8 +625,6 @@ interface HandlerCtx {
   samlAdmin: SamlProviderAdminSurface | undefined
   /** Route B P1-M11c — see WebServerOptions.a2aAgents doc above. */
   a2aAgents: A2aAgentAdminSurface | undefined
-  /** ACP-OUT-M3 — see WebServerOptions.acpAgents doc above. */
-  acpAgents: AcpAgentAdminSurface | undefined
   /** setting-ops M4 — see WebServerOptions.settingOps doc above. */
   settingOps: SettingOpsSurface | undefined
   /** LIFE-L1-M3 — see WebServerOptions.workflowSchedules doc above. */
@@ -1727,18 +1722,6 @@ async function handle(
     const handled = await handleA2aAdminRoute(
       {
         a2aAgents: ctx.a2aAgents,
-        requireAdmin: (rq, rs) => requireAdmin(ctx, rq, rs),
-      },
-      req, res, method, path,
-    )
-    if (handled) return
-  }
-
-  // ACP-OUT-M3 — admin outbound ACP agent registry CRUD (Claude Code / Codex).
-  if (path === '/api/admin/acp-agents' || path.startsWith('/api/admin/acp-agents/')) {
-    const handled = await handleAcpAdminRoute(
-      {
-        acpAgents: ctx.acpAgents,
         requireAdmin: (rq, rs) => requireAdmin(ctx, rq, rs),
       },
       req, res, method, path,

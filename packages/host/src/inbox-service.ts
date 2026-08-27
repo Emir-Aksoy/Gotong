@@ -385,9 +385,9 @@ export class HostInboxService {
     // Merge the persisted park state UNDER `{ answer }`. The human-step broker /
     // approval gate only read `.answer` (returning the decision / forwarding the
     // send), so the extra fields are inert for them. But a participant whose
-    // handleResume needs its carried state — the ACP adapter re-finds its
-    // in-memory `permissionToken` from `row.state` to answer a still-open
-    // permission request — gets both the state AND the decision in one payload.
+    // handleResume needs its carried state — the resident butler re-finds the
+    // parked tool call and its tool-loop conversation from `row.state` — gets
+    // both the state AND the decision in one payload.
     const result = await this.hub.resumeTask(row.agentId, childTask, {
       ...asObject(row.state),
       answer: decision,

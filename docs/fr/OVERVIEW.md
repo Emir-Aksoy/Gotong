@@ -91,25 +91,24 @@ package exécutable, axé sur les fichiers.
 ```
 
 …et les trois colonnes montrées ne sont que des exemples. Le même slot `Participant`
-accueille aussi les **agents de codage CLI / ACP** (Claude Code, Codex), les
+accueille aussi les **agents de codage CLI** (Claude Code, Codex), les
 **agents A2A externes**, et les **adaptateurs LangGraph / CrewAI** — tous
 transparents pour le planificateur.
 
 ---
 
-## Les quatre bords — comment Gotong se connecte au monde
+## Les trois bords — comment Gotong se connecte au monde
 
-Gotong atteint le reste de l'écosystème par quatre bords. Il **parle des protocoles
+Gotong atteint le reste de l'écosystème par trois bords. Il **parle des protocoles
 ouverts là où ils existent** — il ne les réinvente pas :
 
 | Bord | Protocole | Direction | Ce qu'il transporte |
 |---|---|---|---|
 | Outils & données | **MCP** | les deux | Les agents appellent des outils MCP externes ; les clients externes (Claude Desktop, Cursor) pilotent le Hub. |
 | Agent ↔ agent | **A2A** | les deux | Un `message/send` entrant devient une répartition ; un appel sortant pilote un agent A2A distant. |
-| Agents de codage | **ACP** | sortant | Le Hub lance et maintient une session avec Claude Code / Codex et le pilote tour par tour. |
 | Hub ↔ hub | **HubLink** | les deux | Le lien de fédération propre d'Gotong entre deux hubs — où vivent les contrats de confiance par lien, le transfert de tâches inter-organisations, et les portes d'approbation. |
 
-Les trois premiers sont des standards de l'écosystème qu'Gotong implémente.
+Les deux premiers sont des standards de l'écosystème qu'Gotong implémente.
 HubLink est la seule pièce qu'il possède — **pas** comme un format wire intelligent
 (c'est WebSocket + bearer token + JSON-RPC en dessous) mais comme le **contrat pour
 ce que deux hubs gouvernés échangent** : un manifeste de capacités, le transfert de
@@ -168,9 +167,9 @@ Le chemin principal consiste en **deux façons d'ajouter un agent LLM** :
 
 …et parce que tout est le même `Participant`, la même salle accueille aussi :
 
-- **Agents de codage CLI / ACP** — le Hub pilote Claude Code / Codex via une session
-  ACP maintenue (vérifiée sur machine réelle), avec une porte d'action dangereuse qui
-  peut parquer les commandes destructives pour approbation humaine.
+- **Agents de codage CLI** — le Hub lance Claude Code / Codex à chaque tour (un
+  shell-out borné), avec une porte d'action dangereuse qui peut parquer les commandes
+  destructives pour approbation humaine.
 - **Agents A2A externes** — enregistrez un agent distant sous une capacité ; une étape
   de workflow y route comme n'importe quelle autre.
 - **Adaptateurs de framework** — enveloppez un graphe LangGraph ou un crew CrewAI

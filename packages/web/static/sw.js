@@ -61,7 +61,7 @@
 // v21 (EFF-M3): app-core.js grew healthEffect* strings that the (runtime-
 // fetched, always fresh) admin.js health card calls — a stale precached
 // app-core would make renderHealth throw on t.healthEffectTitle.
-const CACHE = 'gotong-shell-v21'
+const CACHE = 'gotong-shell-v22'
 
 // Stable, role-agnostic static shell. app.html is excluded on purpose
 // (role-injected); admin.js / identity-ui.js etc. are left to the runtime

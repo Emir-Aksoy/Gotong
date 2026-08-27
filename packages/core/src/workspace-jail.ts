@@ -4,7 +4,7 @@
  *
  * # The two-layer sandbox (this is layer 1)
  *
- * The hub drives external commands (cli-agent / acp-agent / the butler's
+ * The hub drives external commands (cli-agent / the butler's own
  * governed shell tool). We want them confined to allowed folders WITHOUT the
  * weight of Docker. Two layers, composed:
  *
@@ -197,8 +197,8 @@ export interface WrappedCommand {
  * Optional layer-2 hardening on top of the write perimeter (HANDS-M2). Every
  * field is opt-in and ABSENT means the enforcer argv/profile is byte-identical
  * to the un-hardened jail the outbound adapters have always used — the hub's
- * own hands (`personal-butler-hands`) turn these on; cli-agent / acp-agent
- * keep their agent-friendly defaults (network + reads allowed).
+ * own hands (`personal-butler-hands`) turn these on; cli-agent keeps its
+ * agent-friendly defaults (network + reads allowed).
  */
 export interface FsJailHardening {
   /**
@@ -299,10 +299,10 @@ export interface WrapWithFsJailOptions {
 }
 
 /**
- * The per-spawn jail config a caller threads to an adapter (cli-runner /
- * acp-session): the resolved enforcer `kind` (from {@link detectFsJail}) + the
- * writable roots. The adapter merges in the command/args/cwd at spawn time. One
- * shared shape so the two outbound adapters don't drift apart.
+ * The per-spawn jail config a caller threads to an adapter (cli-runner): the
+ * resolved enforcer `kind` (from {@link detectFsJail}) + the writable roots.
+ * The adapter merges in the command/args/cwd at spawn time. One shared shape so
+ * every caller reads the same definition rather than drifting apart.
  */
 export interface FsJailSpec {
   /** Directories the spawned process tree may write to. Relative → resolved against the spawn cwd. */
@@ -332,10 +332,9 @@ export interface FsJailSpec {
  * Why a helper instead of spreading the fields at each adapter: the copy is
  * **total by construction** (`...rest` carries every field this function has
  * never heard of), so a field added to the spec later reaches every adapter
- * without anyone remembering to thread it. The two outbound adapters
- * (cli-runner, acp-session) used to hand-copy `allowedRoots`/`kind`/
- * `extraWritableRoots`, which is exactly how `hardening` would have gone
- * missing in silence.
+ * without anyone remembering to thread it. The outbound adapters used to
+ * hand-copy `allowedRoots`/`kind`/`extraWritableRoots`, which is exactly how
+ * `hardening` would have gone missing in silence.
  */
 export function jailWrapOptions(
   spec: FsJailSpec,

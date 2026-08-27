@@ -148,7 +148,7 @@ describe('wrapWithFsJail', () => {
 
 // HANDS-M2 hardening: every knob is additive. The load-bearing assertion is the
 // first one — an absent / empty `hardening` MUST build the exact classic argv
-// and profile, because cli-agent / acp-agent never pass it and their jail must
+// and profile, because cli-agent never passes it and its jail must
 // not move an inch when the hub's own hands learn to cut the network.
 describe('wrapWithFsJail hardening (HANDS-M2)', () => {
   const posixOnly = it.skipIf(process.platform === 'win32')

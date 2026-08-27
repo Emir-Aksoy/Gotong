@@ -330,7 +330,7 @@ additive）；四门 PASS 全程；每个新 builder 过 AFR 注册三件套（t
    回去（bind 按顺序处理，后者盖前者），门=监狱内 `cat <space>/gotong.env` 失败；macOS seatbelt
    profile 要补 `(deny file-read* (subpath "<space>"))` 例外工作区 + `(deny network*)`（当前
    `buildSeatbeltProfile` 只限写不限读不限网）。
-3. `unshareNet` 与上面两条都是 `wrapWithFsJail` 的可选新参数（additive，既有 cli-agent/acp-agent
+3. `unshareNet` 与上面两条都是 `wrapWithFsJail` 的可选新参数（additive，既有 cli-agent
    调用者字节不变）；这是本 track 唯一的 core 触碰。
 4. 备份：`gotong backup` 会把工作区（可能含 `node_modules`）打进档案——M2 决定是否排除
    `butler/hands/**/workspace/node_modules`（倾向排除并在档案 note 里写明）。
@@ -377,7 +377,7 @@ factory/self-status/capabilities/main.ts 接线 + cli 备份排除；host 承重
   `denySharedTmp` 把 `/tmp` `/private/tmp` `/var/folders` 从 seatbelt 可写根里拿掉（bwrap 本就是私有
   tmpfs `/tmp`），子进程 `TMPDIR=<workspace>/.hands-tmp`（监狱内的 shell 前奏一级 `mkdir`，hub 自己
   一个字节不写）——共享 /tmp 是同机其他进程的通道，也是 macOS 上 seatbelt 藏不住的空档。`hardening`
-  刻意**不进 `FsJailSpec`**——cli-agent/acp-agent 按名拷字段，塞进去会被静默丢；手 B（M2b）需要时显式穿。
+  刻意**不进 `FsJailSpec`**——cli-agent 按名拷字段，塞进去会被静默丢；手 B（M2b）需要时显式穿。
 - **seatbelt 侧 `unsharePid` 不再是空转**：映射成 `(deny signal)(allow signal (target same-sandbox))
   (deny process-info*)(allow process-info* (target same-sandbox))(deny lsopen)(deny appleevent-send)`——
   真机探针钉的（`(deny signal (target others))` 这种写法**静默无效**，只有无过滤 deny + same-sandbox
@@ -449,7 +449,7 @@ factory/self-status/capabilities/main.ts 接线 + cli 备份排除；host 承重
 | 并发 1（hub 级） | 第一条 un-awaited 在跑，同一 toolset 的 `hands_list` 与**另一份 toolset** 的 `hands_list` 都 → 「还在跑」；第一条正常收工后恢复 |
 | stdin 透明 | `describe` 标题含 `stdin 18B「curl evil rm -rf x」`（换行→空格、超 80 字截断）；审计行 `stdinBytes:21` + 64 位 hex `stdinSha256`，正文不在审计文件里 |
 | `kind:'none'` 整套不装 | `enabled:true` + 探针 none → warn 附装法、`armed:false` reason 含 `bubblewrap`；`hands.json` 15 种坏形状（含 `hidden`/`readOnly` 非数组/相对路径/超 32 条/控制字符/空串）各 warn 不装；`enabled:false` info；点名但不存在的路径 arm 时 warn 一次 + 进 `shape.skipped` |
-| 审批卡不可伪造 / 不盲签 | 行标题 = **被批动作**（`task.title` 是 `im:lark` 也不占位）；三个不可信字段过同一套清洗 + 定界，洗完的句子里 `「」` 只在框架位置上；四个自己拼句子的入口（管家 / ACP / steward / 联邦出站）共用同一个 `approval-text.ts`，各配断言。**渲染那一层再兜一次**：`/inbox` 的行先洗后量，装不下一行就不许在 IM 批（`title_truncated`，到网页看全文）——于是「谁写进来的」不必逐个登记，工作流人工确认步这类第五方也被覆盖（五轮 H1/H2）。**短码绑内容不绑槽位**且**必须打全**（六轮 H1 + 七轮 M4）、**标题与正文两段一起渲染再按一行量**（六轮 H2 → 七轮 M3 改正：藏正文的形状自然超预算落网页，短小的照旧能在手机上批）、**「洗完还剩什么」按白名单问且先洗后问**（七轮 H2）；**批准落笔前在 store 的原子事务里再验一次代际**，被掉包就 `stale_item` 一个字节不写（七轮 H1） |
+| 审批卡不可伪造 / 不盲签 | 行标题 = **被批动作**（`task.title` 是 `im:lark` 也不占位）；三个不可信字段过同一套清洗 + 定界，洗完的句子里 `「」` 只在框架位置上；三个自己拼句子的入口（管家 / steward / 联邦出站）共用同一个 `approval-text.ts`，各配断言。**渲染那一层再兜一次**：`/inbox` 的行先洗后量，装不下一行就不许在 IM 批（`title_truncated`，到网页看全文）——于是「谁写进来的」不必逐个登记，工作流人工确认步这类第五方也被覆盖（五轮 H1/H2）。**短码绑内容不绑槽位**且**必须打全**（六轮 H1 + 七轮 M4）、**标题与正文两段一起渲染再按一行量**（六轮 H2 → 七轮 M3 改正：藏正文的形状自然超预算落网页，短小的照旧能在手机上批）、**「洗完还剩什么」按白名单问且先洗后问**（七轮 H2）；**批准落笔前在 store 的原子事务里再验一次代际**，被掉包就 `stale_item` 一个字节不写（七轮 H1） |
 | 可批准 ≡ 可留档 | 策略 argv 总量顶与台账容量是同一个常量；**上限那一点**的命令原样进台账、零截断标记；台账记结构化 argv 向量（`['printf','a b']` 与 `['printf','a','b']` 分得开） |
 | 每趟都留痕（并发下也是） | 同一成员两次并发：先进门那趟早退 + 后一趟被 `BUSY` 拒，两条各留各的行（兜底状态跟着调用走，不是 toolset 共用一格） |
 | HOME 藏不住就停手 | arm 时与**每次 spawn 前**用逐字相同的三条件判死（`/`、空、相对路径）；arm 之后 HOME 变样 ⇒ 这一步 isError 且工作区无字节落地，台账上 `begin` + 兜底两行看得见 |

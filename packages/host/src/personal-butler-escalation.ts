@@ -1,7 +1,6 @@
 /**
  * personal-butler-escalation.ts — bridge a butler governed-action PARK into a
- * `/me` inbox approval. The sibling of `acp-escalation.ts`, for the resident
- * butler instead of the outbound ACP coding agent.
+ * `/me` inbox approval, for the resident butler.
  *
  * `PersonalButlerAgent` (a core+llm+personal-memory leaf) parks its bounded
  * tool-loop with `SuspendTaskError` carrying a `ButlerGateState` whenever the
@@ -19,8 +18,8 @@
  * Pure + deterministic (clock injected). Returns `null` for any park that is
  * NOT a butler governed-action park (a non-governed butler suspend with no
  * `pending`, or another participant's park entirely), so the notifier can call
- * it for every suspend with no double-write — the human-step broker, approval
- * gate, and ACP helper already write their own.
+ * it for every suspend with no double-write — the human-step broker and the
+ * approval gate already write their own.
  */
 
 import type { Task, TaskResult } from '@gotong/core'
@@ -81,7 +80,7 @@ export function butlerApprovalItemFor(
   if (typeof approver !== 'string' || approver.length === 0) return null
 
   // Derive parentKind from ancestry exactly like HumanInboxParticipant /
-  // ApprovalGatedParticipant / the ACP helper: a workflow-dispatched butler task
+  // ApprovalGatedParticipant: a workflow-dispatched butler task
   // parks its OWN run too, so resolve must run the two-step recovery (child
   // butler turn THEN the workflow run); a direct / agent dispatch only resumes
   // the held butler turn.
@@ -155,8 +154,8 @@ export function butlerApprovalItemFor(
  * an inbox item. This is the discriminator + phrasing for the push-back:
  *
  *   - only a BUTLER governed-action item opts in (`source === 'butler'`); a
- *     workflow human step / ACP escalation / steward park leaves `source` unset
- *     and returns null — they don't push;
+ *     workflow human step / steward park leaves `source` unset and returns
+ *     null — they don't push;
  *   - the resumed butler turn phrases its OWN outcome and returns
  *     `{ kind:'ok', output:{ text } }` for BOTH approve (the action ran) and
  *     reject (fail-closed), so forward that text verbatim;

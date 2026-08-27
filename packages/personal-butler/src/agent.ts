@@ -10,8 +10,8 @@
  * separate "propose → apply" engine, the butler runs ONE tool-loop where the
  * dangerous tools simply park the task (`SuspendTaskError` → `/me` inbox) until
  * a human approves. Benign tools (recall / dispatch / workflow-start / mcp) run
- * inline. This is the same mechanism `@gotong/acp-agent`'s permission gate uses,
- * adapted from a live subprocess to a re-runnable conversation.
+ * inline. The park is a RE-RUNNABLE conversation rather than a live subprocess
+ * handle, which is what lets it survive a hub restart.
  *
  * Why override `runToolLoop` (rather than seam into the base loop): the base
  * `LlmAgent` loop deliberately maps EVERY `callTool` throw to an `isError` tool

@@ -68,7 +68,7 @@ Gotong 的三条北极星守则恰好压住 FDE 的三个经典事故源：
 |---|---|
 | [`TEMPLATE-GALLERY.md`](TEMPLATE-GALLERY.md) 模板画廊 + [`FLAGSHIP-TEMPLATES.md`](FLAGSHIP-TEMPLATES.md) | **先翻画廊再造轮子**：50 个 example（[`EXAMPLES.md`](EXAMPLES.md) 分七级）+ 旗舰模板，多数场景改模板比从零快 |
 | [`PARTICIPANT.md`](PARTICIPANT.md) | 真要写代码时：**20 行一个 Participant**，agent / 人 / 服务同一契约 |
-| [`AGENT-ADAPTER-CONTRACT.md`](AGENT-ADAPTER-CONTRACT.md) + [`QUICK-CONNECT.md`](QUICK-CONNECT.md) | 对方已有 agent（Claude Code / Codex / LangGraph / CrewAI / A2A / ACP…）：过「双向 + 五控制缝（可观测/可拦截/可移交/可续跑/可终止）」验收门再上岗，接管粒度对表 Tier 1/2 |
+| [`AGENT-ADAPTER-CONTRACT.md`](AGENT-ADAPTER-CONTRACT.md) + [`QUICK-CONNECT.md`](QUICK-CONNECT.md) | 对方已有 agent（Claude Code / Codex / LangGraph / CrewAI / A2A…）：过「双向 + 五控制缝（可观测/可拦截/可移交/可续跑/可终止）」验收门再上岗，接管粒度对表 Tier 1/2 |
 | [`MCP-CONNECTOR-DIRECTORY.md`](MCP-CONNECTOR-DIRECTORY.md) + [`KB-CONNECTORS.md`](KB-CONNECTORS.md) · [`RAG-VIA-MCP.md`](RAG-VIA-MCP.md) | 接数据源（日历 / 笔记 / 知识库）全走 MCP，**框架不存知识**；连接器目录里挑，运行时挂到 agent 上 |
 
 **过关判据**：agent 出现在 roster 且能力注册可见；配置体检

@@ -46,9 +46,9 @@ what lets the butler suspend **before** the side effect, then run the very same
                                               └─ deny    → fail-closed isError
 ```
 
-This is the same suspend/resume machinery as `@gotong/inbox` (human steps) and
-`@gotong/acp-agent`'s permission gate — adapted from a live subprocess to a
-**re-runnable** conversation, so a butler park is durable across a hub restart.
+This is the same suspend/resume machinery as `@gotong/inbox` (human steps).
+What a butler park holds is a **re-runnable** conversation rather than a live
+subprocess handle — which is what lets it survive a hub restart.
 
 ## Three verdicts
 

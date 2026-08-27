@@ -57,11 +57,6 @@ export type IdentityErrorCode =
   //   `a2a_agent_not_found`  get/update/remove targeted an id with no row.
   | 'a2a_agent_exists'
   | 'a2a_agent_not_found'
-  // ACP-OUT-M1 — outbound ACP agent registry (OpenClaw-style coding agents).
-  //   `acp_agent_exists`     addAcpAgent reused an existing participant id (PK).
-  //   `acp_agent_not_found`  get/update/remove targeted an id with no row.
-  | 'acp_agent_exists'
-  | 'acp_agent_not_found'
   // C-M2-M2 — outbound OAuth 2.0 connector registry (接入现实生活 track).
   //   `oauth_connector_exists`     registerOAuthConnector reused an id (PK).
   //   `oauth_connector_not_found`  get/update/remove/token-op targeted an id

@@ -9,8 +9,7 @@
 
 ## 一句话
 
-hub 会驱动外部命令（cli-agent 一次性 shell-out、acp-agent 长连接编码 agent、未来管家的
-shell 工具）。我们要把它们关在**允许的文件夹**里，避免它们误改服务器 / 电脑上别的目录——
+hub 会驱动外部命令（cli-agent 一次性 shell-out、管家自己的 hands 工具）。我们要把它们关在**允许的文件夹**里，避免它们误改服务器 / 电脑上别的目录——
 但**不背 Docker 的重量**。做法是**两层围栏**叠在一起：
 
 ```
@@ -147,13 +146,12 @@ if (!jail.jailed) log.warn(jail.warning)   // none → 必须记日志 + 配人�
 
 ## 五、接线（JAIL-M3）
 
-围栏在**和 `dangerousCommandGate` / `dangerousToolGate` 同一条 spawn 前的缝**接进来。两个真正
-会起子进程、且会自由读写文件的适配器各加了一个**可选** `fsJail` 选项（缺省 = 旧行为逐字节不变）：
+围栏在**和 `dangerousCommandGate` / `dangerousToolGate` 同一条 spawn 前的缝**接进来。真正会
+起子进程、且会自由读写文件的适配器加了一个**可选** `fsJail` 选项（缺省 = 旧行为逐字节不变）：
 
 | 适配器 | spawn 点 | 接线 |
 |---|---|---|
 | **cli-agent** | `cli-runner.ts` `runCliCommand` | `CliRunOptions.fsJail` → 第 2 层包裹；`CliParticipant.fsJail` 透传 |
-| **acp-agent** | `acp-session.ts` `spawnChild` | `AcpSpawnOptions.fsJail` → 包**长生命周期** bridge（整个 session 的写都被关住）；`AcpParticipant.fsJail` 透传 |
 
 host / example 侧组合（一次 `prepareFsJail` → 把 `spec` 交给 participant）：
 
@@ -207,7 +205,7 @@ skip。
 | 其它 / Windows | 无 | — | ⚠️ `kind: 'none'` → 降级 |
 
 **降级语义**（`kind: 'none'`）：第 2 层透传不裹，`prepareFsJail` 返 `jailed: false` + `warning`。
-调用方**必须**：① 记下告警；② 配人工闸（cli 的 `gate` / acp 的 `gate` + 收件箱）。绝不当作
+调用方**必须**：① 记下告警；② 配人工闸（cli 的 `gate` + 收件箱）。绝不当作
 「已经关住了」静默裸跑——这正是「证不了就问人」的 fail-closed 立场。
 
 ---
@@ -221,7 +219,7 @@ skip。
 | core | `workspace-jail-real.test.ts`（M3）| 2 — **真机**内核确实关住（skip-if-none）|
 | cli-agent | `cli-runner.test.ts`（M3 段）| +2 — **真机**走 `runCliCommand` 全管线 |
 
-core 395 全绿 / cli-agent 38 / acp-agent 60，零回归（`fsJail` 全程可选，缺省字节不变）。
+core 395 全绿 / cli-agent 38，零回归（`fsJail` 全程可选，缺省字节不变）。
 
 ---
 

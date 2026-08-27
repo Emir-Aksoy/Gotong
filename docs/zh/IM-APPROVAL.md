@@ -20,7 +20,7 @@ UX-A1 还会在 IM 里提醒「有 N 件事等你批」。但**批准动作只�
 |---|---|
 | web 审批走鸭子 `InboxSurface.resolve({itemId,userId,decision})`,ownership/race guard/审计都在 surface 内 | `packages/web/src/me-routes.ts` handleMeResolveInbox → `packages/host/src/inbox-service.ts` resolve(markResolved 先行=race guard;`InboxError.code` 映射 HTTP) |
 | **审批结果推回 IM 的管道早已在**(S1-M3 `onResolved` hook → butlerResolvePushback → reachable push) | `inbox-service.ts:149` + `personal-butler-escalation.ts:113` — IM 缺的只有「决定」方向 |
-| `InboxItem` 有 `source?`('butler'=管家 park;human 步/ACP/steward 均 unset)、`kind`(approval/choice/edit 交互形状)、`parentKind`——**没有风险级字段** | `packages/inbox/src/types.ts:102` |
+| `InboxItem` 有 `source?`('butler'=管家 park;human 步/steward 均 unset)、`kind`(approval/choice/edit 交互形状)、`parentKind`——**没有风险级字段** | `packages/inbox/src/types.ts:102` |
 | park 时能拿到被批工具的确切名字 | `ButlerGateState.pending.toolUses` + `approvedId`(`packages/personal-butler/src/checkpoint.ts:77`) |
 | host 喂的 governed 名单天然两类:hub 内配置动作(create/edit/delete_agent、create/edit_workflow)vs 出盒动作(`ask_peer`、MCP `<server>__<tool>`) | `personal-butler-governed.ts:101` / `personal-butler-ask-peer.ts` / `personal-butler-mcp.ts` |
 | IM 命令消费点:`handleImMessage` switch + `HostImConfig` 可选鸭子;「未接=回未启用」有先例(`resolveWorkflow`) | `packages/host/src/im-bridge.ts:249` |
@@ -40,7 +40,7 @@ IM 里批**;未标 = web-only。谁标:
   这种盲签形状),七轮核出它误伤 21 条本来短小、本来该能在手机上批的画廊 human 步
   ——标题在场 ≠ 正文被藏起来,真正的修法是**两段一起渲染**。
 - `butlerApprovalItemFor`(管家 governed park)——按钉子②的规则标。
-- 其余来源(ACP 权限升级、steward park、未来新来源)**什么都不用做**,天然
+- 其余来源(steward park、未来新来源)**什么都不用做**,天然
   web-only。新来源默认安全,不存在「忘了登记就 fail-open」。
 
 ### 钉子② web-only 逐条列举(2026-08 改口:原为按名字形状排除)
@@ -168,8 +168,8 @@ IM 消息 → parseImCommand → handleImMessage 新 case
 - **零新 env 旋钮**:`approvals` surface 接不接就是开关(镜像 llmKeyProbe 先例)。
 - **v1 只做 approval 二值**:`choice`/`edit` 项 IM 里只列不批(带选项/自由文本的
   应答值得独立设计,不硬塞)。
-- **owner 面不动**:steward dangerous/cross_hub、联邦出站审批(outbound-approval)、
-  ACP 权限升级仍 web-only——它们是管理面/编码代理面,不是成员日常动线。
+- **owner 面不动**:steward dangerous/cross_hub、联邦出站审批(outbound-approval)
+  仍 web-only——它们是管理面,不是成员日常动线。
 - **不做各平台 inline 按钮**(Telegram inline keyboard 等):各桥能力不一,v1 纯
   文本命令六桥同款;按钮属平台增强,将来按需在单桥叠加,不进共享层。
 - **不做 IM 二次确认短语**:方案 b 的分级已把高危挡在 web;低危项再加确认短语=

@@ -37,9 +37,6 @@ export type {
   A2aOutboundAgent,
   AddA2aOutboundAgentInput,
   UpdateA2aOutboundAgentInput,
-  AcpOutboundAgent,
-  AddAcpOutboundAgentInput,
-  UpdateAcpOutboundAgentInput,
   // C-M2-M2 — outbound OAuth connector registry (接入现实生活 track).
   OAuthConnector,
   RegisterOAuthConnectorInput,

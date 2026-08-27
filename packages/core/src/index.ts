@@ -155,10 +155,10 @@ export type {
 //
 // `checkOutboundDataClasses` is the canonical data-class gate (P4-M4). It lives
 // inside `RemoteHubViaLink` for mesh edges; re-exported here so the OTHER
-// outbound edges — `A2aRemoteParticipant` / `AcpParticipant`, which are local
-// participants that never cross a `RemoteHubViaLink` (Item 2) — gate on the
-// SAME function rather than a divergent re-implementation. Anti-drift: one
-// place, both edges learn new data-class semantics at once.
+// outbound edge — `A2aRemoteParticipant`, a local participant that never
+// crosses a `RemoteHubViaLink` (Item 2) — gates on the SAME function rather
+// than a divergent re-implementation. Anti-drift: one place, every edge learns
+// new data-class semantics at once.
 export { extractRequiredCapabilities, checkOutboundDataClasses } from './peer-acl.js'
 export type { OutboundVerdict } from './peer-acl.js'
 

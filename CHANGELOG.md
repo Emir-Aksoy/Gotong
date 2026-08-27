@@ -4,6 +4,27 @@ All notable changes to Gotong are recorded here. The format follows [Keep a Chan
 
 The npm scope is `@gotong/*`; the PyPI package is `gotong`. The wire protocol has its own version (currently `1.2`) and is governed by `docs/PROTOCOL.md` — major changes to the wire protocol bump that version, independent of these package versions.
 
+## Unreleased
+
+### Removed
+
+- **Outbound ACP long-connection adapter** (`@gotong/acp-agent`, `examples/acp-coding-bridge`)
+  — retired in full, together with its host wiring (`acp-outbound.ts`, `acp-escalation.ts`),
+  its identity store and `acp_outbound_agents` table, its admin routes, and its
+  `acp-ui.js` bundle. The adapter spawned a coding agent (Claude Code / Codex via Zed's
+  Agent Client Protocol) as a **long-lived** subprocess and held one JSON-RPC session
+  across dispatches. That held session was the whole point of it — and it is also what
+  made it a poor fit: Gotong's audience is end users rather than IDE developers, so the
+  one edge it bought (in-session context reuse for a coding agent) never earned the
+  surface it cost. Migration **v39** drops the table; production was verified to hold
+  zero rows before the cut.
+
+  **`@gotong/cli-agent` is unaffected** and remains the supported way to drive Claude
+  Code / Codex from the hub: a bounded shell-out per turn, the same five seams
+  (observe / intercept / handoff / resume / terminate), and the same `dangerousCommandGate`
+  that parks destructive commands for human approval. The historical record of the ACP
+  adapter stays in [`docs/zh/ledger/V5-ACP-ADAPTER.md`](docs/zh/ledger/V5-ACP-ADAPTER.md).
+
 ## 3.2.0 — 2026-06-08 — Federation, identity, and the member workbench
 
 The first tagged release since 3.1.0. It folds in months of work spanning three generations of internal planning — v4 Phases 1–19, v5 Streams 0–H2/H2-OUT, and the v6 "Route B" hardening pass. This entry captures the headline themes; the milestone-by-milestone record lives in [`docs/zh/PROGRESS-LEDGER.md`](docs/zh/PROGRESS-LEDGER.md) and the per-phase finals under [`docs/zh/`](docs/zh/) (`V4-PHASE*`, `V5-*-FINAL`, `FEDERATION-RUNBOOK`).

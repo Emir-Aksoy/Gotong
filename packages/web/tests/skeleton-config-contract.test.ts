@@ -148,18 +148,20 @@ describe('SHELL-M4.5 — skeleton wire contract (text level)', () => {
     }
   })
 
-  it('bundle map: 15 bundles total, every mapped tab is a real registry id', () => {
+  it('bundle map: 14 bundles total, every mapped tab is a real registry id', () => {
     const ids = new Set(registryEntries.map((e) => e.id))
     for (const tab of bundleTabs) {
       expect(ids.has(tab), tab).toBe(true)
     }
-    // The historical serial chain had exactly these 15; by-config loading may
-    // trim at runtime but the MAP must still account for every one of them —
-    // a bundle dropped from the map would silently never load for anyone.
+    // The historical serial chain had exactly these 14 (it was 15 until the
+    // outbound ACP adapter and its acp-ui.js were retired, 2026-08-27);
+    // by-config loading may trim at runtime but the MAP must still account
+    // for every one of them — a bundle dropped from the map would silently
+    // never load for anyone.
     expect(coreBundles).toEqual(['/admin-wf-assist.js', '/admin.js'])
-    expect(coreBundles.length + bundleSrcs.length).toBe(15)
+    expect(coreBundles.length + bundleSrcs.length).toBe(14)
     // No duplicates across the map.
-    expect(new Set([...coreBundles, ...bundleSrcs]).size).toBe(15)
+    expect(new Set([...coreBundles, ...bundleSrcs]).size).toBe(14)
   })
 
   it('every mapped bundle src exists in static/ (a typo would 404 the chain)', () => {
@@ -340,11 +342,11 @@ const ALL_BUNDLES = [
   '/admin-wf-assist.js', '/admin.js', '/operator-steward-ui.js', '/setting-ops-ui.js',
   '/identity-ui.js', '/quotas-ui.js', '/reputation-ui.js', '/usage-ui.js',
   '/peer-admin-ui.js', '/peer-manifest-ui.js', '/peer-summary-ui.js', '/a2a-ui.js',
-  '/acp-ui.js', '/oidc-ui.js', '/saml-ui.js',
+  '/oidc-ui.js', '/saml-ui.js',
 ]
 
 describe('SHELL-M4.5 — skeleton behaviour (real app.js in a VM)', () => {
-  it('no config → role-default skeleton, all 15 bundles, byte-identical default', async () => {
+  it('no config → role-default skeleton, all 14 bundles, byte-identical default', async () => {
     const vm = bootVm({ role: 'owner' })
     await vm.fireDomReady()
     expect(vm.renderedTabs()).toEqual(ALL_IDS)

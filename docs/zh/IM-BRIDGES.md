@@ -67,7 +67,7 @@ gotong start
 
 - **逐平台独立**：某平台 env 齐才构造它的桥，全 push 进同一个 `bridges` 数组。
 - **best-effort 起桥**：一个平台凭证坏只 log + skip，不阻断其他平台、不阻断 host 启动
-  （镜像 A2A / ACP 出站 manager）。
+  （镜像 A2A 出站 manager）。
 - **零行为变化**：全没设 → 返回 `undefined`，现有部署逐字节不受影响。
 
 要完全自定义 router（改 help 文案 / 加 `/agents` / `/workflow` hook），复制

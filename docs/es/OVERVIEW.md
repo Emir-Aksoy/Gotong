@@ -89,25 +89,24 @@ con prioridad de archivos.
 ```
 
 …y las tres columnas mostradas son solo ejemplos. El mismo slot de `Participant`
-también alberga **agentes de codificación CLI / ACP** (Claude Code, Codex), **agentes
+también alberga **agentes de codificación CLI** (Claude Code, Codex), **agentes
 A2A externos** y **adaptadores de LangGraph / CrewAI** — todos transparentes para el
 planificador.
 
 ---
 
-## Las cuatro aristas — cómo Gotong se conecta al mundo
+## Las tres aristas — cómo Gotong se conecta al mundo
 
-Gotong llega al resto del ecosistema a través de cuatro aristas. **Habla protocolos
+Gotong llega al resto del ecosistema a través de tres aristas. **Habla protocolos
 abiertos donde existen** — no los reinventa:
 
 | Arista | Protocolo | Dirección | Qué lleva |
 |---|---|---|---|
 | Herramientas y datos | **MCP** | ambas | Los agentes llaman herramientas MCP externas; los clientes externos (Claude Desktop, Cursor) manejan el Hub. |
 | Agente ↔ agente | **A2A** | ambas | Un `message/send` entrante se convierte en un dispatch; una llamada saliente maneja un agente A2A remoto. |
-| Agentes de codificación | **ACP** | saliente | El Hub genera y mantiene una sesión con Claude Code / Codex y lo maneja turno a turno. |
 | Hub ↔ hub | **HubLink** | ambas | El enlace de federación propio de Gotong entre dos hubs — donde viven los contratos de confianza por enlace, el reenvío de tareas entre organizaciones y las puertas de aprobación. |
 
-Los primeros tres son estándares del ecosistema que Gotong implementa. HubLink es el
+Los primeros dos son estándares del ecosistema que Gotong implementa. HubLink es el
 único que le pertenece — **no** como un formato de cable inteligente (es WebSocket +
 token de portador + JSON-RPC debajo) sino como el **contrato sobre lo que dos hubs
 gobernados intercambian**: un manifiesto de capacidades, reenvío de tareas que preserva
@@ -166,9 +165,9 @@ El camino principal son **dos formas de añadir un agente LLM**:
 
 …y porque todo es el mismo `Participant`, la misma sala también admite:
 
-- **Agentes de codificación CLI / ACP** — el Hub maneja Claude Code / Codex a través de
-  una sesión ACP mantenida (verificada en máquina real), con una puerta de acción
-  peligrosa que puede aparcar comandos destructivos para aprobación humana.
+- **Agentes de codificación CLI** — el Hub lanza Claude Code / Codex en cada turno (un
+  shell-out acotado), con una puerta de acción peligrosa que puede aparcar comandos
+  destructivos para aprobación humana.
 - **Agentes A2A externos** — registra un agente remoto bajo una capacidad; un paso de
   flujo de trabajo lo enruta como cualquier otro.
 - **Adaptadores de framework** — envuelve un grafo de LangGraph o un equipo de CrewAI

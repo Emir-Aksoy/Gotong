@@ -221,7 +221,7 @@ pnpm --filter @gotong/host test family-child-me-e2e
 | `TopicWhitelistGate`(selective 出站闸) | `host/src/outbound-approval.ts` `ApprovalGatedParticipant`(`installPeerLink({wrapOutbound})`)+ 白名单作为家长 per-link 策略 |
 | `resolveHumanStep` 两步恢复 | `host/src/inbox-service.ts` `HostInboxService.resolve` + `/me` 收件箱(或 IM)点批准 |
 | `parked` Map(suspendNotifier) | identity `suspended_tasks` 表 + resume sweep |
-| `allowedDataClasses` 出站闸 | `core` `checkOutboundDataClasses`(P4-M4,mesh/A2A/ACP 出站边共用同一纯函数) |
+| `allowedDataClasses` 出站闸 | `core` `checkOutboundDataClasses`(P4-M4,mesh/A2A 出站边共用同一纯函数) |
 | `LessonTutorStandin`(家长 hub 的 `/teach` 导师) | `src/real-agents.ts` 的真 `LlmAgent`(DeepSeek + mcp-obsidian 读 `learning-records/`) |
 
 ## 决策落地(锁定的三个 + 数据 / 模板分离 + 分层审核)

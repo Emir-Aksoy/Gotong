@@ -61,7 +61,6 @@ import type { OidcProviderAdminSurface } from './oidc-admin-routes.js'
 import type { SamlLoginSurface } from './saml-routes.js'
 import type { SamlProviderAdminSurface } from './saml-admin-routes.js'
 import type { A2aAgentAdminSurface } from './a2a-admin-routes.js'
-import type { AcpAgentAdminSurface } from './acp-admin-routes.js'
 import type { SettingOpsSurface } from './setting-routes.js'
 import type { WorkflowScheduleAdminSurface } from './workflow-schedule-routes.js'
 
@@ -589,15 +588,6 @@ export interface WebServerOptions {
    * bearer is read from, and the view also carries host-joined runtime liveness.
    */
   a2aAgents?: A2aAgentAdminSurface
-  /**
-   * ACP-OUT-M3 — host-injected outbound ACP agent registry (admin CRUD). When
-   * wired, `/api/admin/acp-agents[/:id]` lets an admin register the coding agents
-   * (Claude Code / Codex) this hub drives over long-lived ACP sessions. Absent
-   * (no identity store) → those routes 503. There is NO secret in the view at all
-   * (ACP rides the agent's own login); the view carries host-joined runtime
-   * liveness so the UI can show "saved but inactive: disabled" honestly.
-   */
-  acpAgents?: AcpAgentAdminSurface
   /**
    * setting-ops M4 — host-injected deterministic ops console surface (the WEB
    * face of `ops-core`). When wired, `/api/admin/setting/*` lets an admin run the

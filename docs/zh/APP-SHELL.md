@@ -479,10 +479,10 @@ usage/reputation/federation/oidc/saml 一个不松);`app.html` 的
 更新 ⇒ 忽略 tabs 回落角色默认——这个回落**天然无害**:角色默认只会在角色内
 显示**更多**,永远不会越过角色显示不该显示的。
 
-**15 个 admin bundle 改按需加载(B2 的主要增量)**:`CORE_ADMIN_BUNDLES`
-(admin.js + wf-assist)在任一 admin 页签幸存时装,其余 15 个按
+**14 个 admin bundle 改按需加载(B2 的主要增量)**:`CORE_ADMIN_BUNDLES`
+(admin.js + wf-assist)在任一 admin 页签幸存时装,其余 12 个按
 `TAB_BUNDLES` 映射(overview→steward/setting-ops,users→identity-ui,
-federation→peer 三件+a2a+acp,……)只装配置里出现过的。**按配置选,不按
+federation→peer 三件+a2a,……)只装配置里出现过的。**按配置选,不按
 simple-mode 选**——simple mode 是 localStorage 活开关,关掉的瞬间 bundle 必须
 已经在场;而配置变更走整页重载,是安全的选择时机。**boot 顺序因此是刻意的**:
 `await resolveTabConfig()`(4s AbortController 有界,失败 fail-soft 角色默认)
