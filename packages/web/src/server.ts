@@ -61,6 +61,7 @@ import {
   type MeChatSessionSurface,
   type MeButlerChatSurface,
 } from './me-routes.js'
+import { handleOpenAiCompatRoute } from './openai-compat-routes.js'
 import { handleAdminPanelRoute, type MePanelDataSurface, type MePanelSurface } from './panel-routes.js'
 import type { MeNativePushSurface, MeWebPushSurface } from './push-routes.js'
 import { handleDeviceClaimRoute, type MeDeviceSurface } from './device-routes.js'
@@ -978,6 +979,18 @@ async function handle(
     })
     res.end(text)
     return
+  }
+
+  // --- OpenAI 兼容入站面（OPENAI-M1，docs/zh/OPENAI-COMPAT-API.md）---------
+  // CSRF 门之前 + requireAdmin 之外，与 /metrics、A2A 同一档：OpenAI SDK 不是
+  // 浏览器，不发 Origin、也没有 ambient cookie 可供一次 CSRF 去花，**bearer
+  // 就是授权**（鉴权是这个面做的第一件事）。挂顶层 `/v1/*` 而不是 `/api/v1`：
+  // 每个 OpenAI 客户端都会往自己的 base_url 后面拼 `/chat/completions`，
+  // 非标准 base_url 会把「对方零改动」这个理由本身废掉。没接 identity ⇒
+  // 这个面根本不存在。
+  if (ctx.identity && path.startsWith('/v1')) {
+    const oa = { identity: ctx.identity, hub: ctx.hub, loginLimiter: ctx.adminLoginLimiter, meAgents: ctx.meAgents, meAgentAdmin: ctx.meAgentAdmin, meButlerChat: ctx.meButlerChat, inbox: ctx.inbox }
+    if (await handleOpenAiCompatRoute(oa, req, res, method, path)) return
   }
 
   // --- CSRF defence: non-GET/HEAD/OPTIONS writes must originate from an

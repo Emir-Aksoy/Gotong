@@ -49,6 +49,7 @@
 - [`AGENT.md`](AGENT.md) — 把它接进已在跑的 hub（in-process vs remote SDK）
 - [`AGENT-ADAPTER-CONTRACT.md`](AGENT-ADAPTER-CONTRACT.md) — 主流 agent 适配器契约（双向 + 可快速接管验收门）
 - [`QUICK-CONNECT.md`](QUICK-CONNECT.md) — 入站快捷接入
+- [`OPENAI-COMPAT-API.md`](OPENAI-COMPAT-API.md) — **把 hub 里的 agent 当成一个 OpenAI 模型来调**（`POST /v1/chat/completions` + `/v1/models`，对方零改动）
 
 **工作流**
 - [`WORKFLOW-ARCHITECT.md`](WORKFLOW-ARCHITECT.md) — 大白话 → YAML + 讲解 + 配图
