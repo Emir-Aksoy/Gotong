@@ -7,8 +7,9 @@
 > 父亲打开是农事关怀面,母亲打开是本地新闻面,operator 打开是全家看板。
 >
 > Track 代号:**SDUI**(Server-Driven UI)。Status: **M1–M4 + C1 组件做实已落
-> (2026-07-26/27),12 个可摆组件全部接真数据**(原 13 项中 `image-card`
-> 于 SHELL-M3 退役——它是唯一从没长出渲染器的一项,见 §六)。原 M5「壳与分发」
+> (2026-07-26/27),13 个可摆组件全部接真数据**(原 13 项中 `image-card`
+> 于 SHELL-M3 退役——它是唯一从没长出渲染器的一项;OBS-M2 于 2026-08-28
+> 补上第 15 项 `longrun-list`。均见 §六)。原 M5「壳与分发」
 > 侦察后确认装不进一格,已展开成独立的 **SHELL track**,见
 > [`APP-SHELL.md`](APP-SHELL.md)(形态拍板:真壳 = 本地资源 + `CapacitorHttp`;
 > **⏸ 壳 app 方向 2026-08-02 已搁置**,声明与恢复路径见该文档顶部——**本 track
@@ -184,6 +185,7 @@
 | `schedules.mine` | 定时流(自己名下) | SEN-M4 |
 | `usage.mine` | 用量 | 成员用量面 |
 | `status.hub` | hub/管家状态 | SEN-M1/M3 同源 |
+| `longrun.mine` | 长任务进度(自己名下) | OBS-M2 盘上档案只读观察者 |
 | `connector:weather` / `connector:news` / … | 只读连接器槽位 | MCP 目录(缺槽=组件渲染「未接入」占位) |
 | `content:<fileId>` | 管家写的展示内容文件(markdown) | 见 §六 markdown-card |
 
@@ -235,6 +237,7 @@
 | 12 | `schedule-list` | 定时流列表 | schedules.mine |
 | 13 | `quick-actions` | 快捷动作按钮 | 动作白名单(见下) |
 | ~~14~~ | ~~`image-card`~~ | **已退役**(SHELL-M3 `f6aa7be`) | — |
+| 15 | `longrun-list` | 长任务进度(目标/阶段/预算/计划/子活/最近日志) | longrun.mine |
 
 **`image-card` 为什么被退役**:它是这张表里**唯一**从没长出渲染器的一项——
 校验器放行、渲染器永远答「即将上线」、管家的组件小抄还广告它可用。一个闭集
@@ -242,6 +245,14 @@
 尺寸校验,那是一个里程碑不是一个脚注;全仓无人引用,诚实的修法是不再列它。
 闭集自此 **13 → 12**(表内 1–13 项,其中 `section`/`heading` 以顶层结构表达),
 并立了防腐门:**每个 KNOWN_TYPE 必须有真渲染器**。
+
+**2026-08-28 补上第 15 项 `longrun-list`**(OBS-M2):长任务的进度此前只活在
+盘上(dossier + journal),成员想知道「那件事跑到哪了」只有一条路——去问阿同。它进
+`DEFAULT_PANEL`,默认就在;数据由一只**永不隔离的观察者**直读盘上档案(不走
+驱动器的串行写链、也不给写者的文件改名),详见
+[`ATONG-LONG-RUN.md`](ATONG-LONG-RUN.md) 的 OBS-M2 节。闭集自此 **12 → 13**。
+号给了 15 而不是复用退役的 14——那个号是历史,复用它会让「第 14 项是什么」
+有两个答案。
 
 **quick-actions 的动作白名单**:按钮动作只能是预定义动词
 (`open_chat` / `start_workflow:<id>` / `open_inbox` / `compose_brief`…),

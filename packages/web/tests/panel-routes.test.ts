@@ -129,6 +129,18 @@ class StubPanelData implements MePanelDataSurface {
   }
 }
 
+/** OBS-M2 — 一台没升级的 host 身上**根本没有**这只 getter;新的这只则把
+ * 服务端钉下来的 userId 与展示用的封顶数一起记下来。 */
+class StubPanelDataWithLongRun extends StubPanelData {
+  readonly askedLongRun: Array<{ userId: string; maxFinished: number | undefined }> = []
+  out: { tasks: unknown[]; more: number } | null = { tasks: [], more: 0 }
+
+  async longRunForUser(userId: string, maxFinished?: number) {
+    this.askedLongRun.push({ userId, maxFinished })
+    return this.out
+  }
+}
+
 /** SHELL-M3 — the base StubPanel deliberately has NO contract (older-host
  * case: no block on the wire, and clients treat that as today's behaviour). */
 class StubPanelWithContract extends StubPanel {
@@ -539,6 +551,75 @@ describe('/api/me/panel — SDUI member panel config (M2 read + M3 write)', () =
     expect(stub.askedContent).toEqual([
       { userId: b.memberUserId, fileId: 'briefing' },
       { userId: b.memberUserId, fileId: 'connector.weather' },
+    ])
+  })
+
+  // ---- OBS-M2 longrun route ------------------------------------------------
+
+  it('longrun: 老 host 根本没有这只 getter ⇒ {available:false},不是 500', async () => {
+    // 整个 surface 缺席那条已经由上面那圈盖住;这一条盖的是**方法**缺席
+    // ——一台没升级的 host 挂着 panelData 却不认识长任务,渲染层该看到
+    // 「数据源未接入」而不是一次崩溃。
+    b = await boot({ panelData: new StubPanelData() })
+    const r = await req('GET', { path: '/api/me/panel/data/longrun' })
+    expect(r.status).toBe(200)
+    expect(r.json).toEqual({ available: false })
+    // 鉴权与方法门在派发**之前**——长任务这条路没有例外。
+    expect((await req('GET', { path: '/api/me/panel/data/longrun', auth: false })).status).toBe(401)
+    expect((await req('POST', { path: '/api/me/panel/data/longrun', body: {} })).status).toBe(405)
+  })
+
+  it('longrun: 行与 more 一起过线(截了就说),userId 由会话钉死', async () => {
+    const data = new StubPanelDataWithLongRun()
+    data.out = {
+      tasks: [{ taskId: 'weekly', objective: '跟踪体重', status: 'active', segments: 3 }],
+      more: 2,
+    }
+    b = await boot({ panelData: data })
+    const r = await req('GET', { path: '/api/me/panel/data/longrun?userId=someone-else' })
+    expect(r.json).toEqual({ available: true, tasks: data.out.tasks, more: 2 })
+    // 查询串里的 userId 被忽略——会话说了算。
+    expect(data.askedLongRun).toEqual([{ userId: b.memberUserId, maxFinished: undefined }])
+  })
+
+  it('longrun: getter 答 null ⇒ {available:false}', async () => {
+    const data = new StubPanelDataWithLongRun()
+    data.out = null
+    b = await boot({ panelData: data })
+    expect((await req('GET', { path: '/api/me/panel/data/longrun' })).json).toEqual({
+      available: false,
+    })
+  })
+
+  it('longrun: ?limit= 是 1..10 的展示参数,写坏了退回观察者缺省而不是把卡弄空', async () => {
+    const data = new StubPanelDataWithLongRun()
+    b = await boot({ panelData: data })
+    const cases = [
+      '',
+      '?limit=3',
+      '?limit=1',
+      '?limit=10',
+      '?limit=0',
+      '?limit=11',
+      '?limit=abc',
+      '?limit=2.5',
+      '?limit=-1',
+      '?limit=',
+    ]
+    for (const qs of cases) {
+      expect((await req('GET', { path: `/api/me/panel/data/longrun${qs}` })).status).toBe(200)
+    }
+    expect(data.askedLongRun.map((a) => a.maxFinished)).toEqual([
+      undefined,
+      3,
+      1,
+      10,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
     ])
   })
 

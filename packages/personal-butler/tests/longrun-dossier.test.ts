@@ -52,6 +52,7 @@ import {
   type LongRunDossierStore,
   type LongRunJournalEntry,
   type LongRunStandby,
+  readLongRunSnapshot,
 } from '../src/index.js'
 
 let dir: string
@@ -1095,5 +1096,125 @@ describe('M6.2 standby (待命语义)', () => {
     expect(wind).not.toContain(LONGRUN_TOOL_NAMES.standby)
     expect(wind).not.toContain('【上一段:待命】')
     expect(wind).toContain(LONGRUN_TOOL_NAMES.complete)
+  })
+})
+
+// ─── Group 14: OBS-M2 observer snapshot ─────────────────────────────────────
+
+describe('OBS-M2 观察者快照(readLongRunSnapshot)', () => {
+  it('目录从没建过 ⇒ 诚实的空,不是错', async () => {
+    const snap = await readLongRunSnapshot(join(dir, 'nobody-opened-one'), { logger })
+    expect(snap).toEqual({ tasks: [], more: 0 })
+    expect(warns).toEqual([])
+  })
+
+  it('坏档只是跳过——不隔离、不改名、一个字节不写', async () => {
+    const store = makeStore()
+    await store.create({ taskId: 'good', userId: 'u', objective: '好的那份' })
+    // 坏档:目录与文件都在,内容不是一份合法档案。
+    mkdirSync(join(dir, 'broken'), { recursive: true })
+    const badFile = join(dir, 'broken', 'dossier.json')
+    writeFileSync(badFile, '{ 这不是 JSON')
+    const before = readFileSync(badFile, 'utf8')
+
+    const snap = await readLongRunSnapshot(dir, { logger })
+
+    expect(snap.tasks.map((t) => t.dossier.taskId)).toEqual(['good'])
+    // 隔离是**写者的特权**:观察者跑完之后,盘上恰好还是那两个目录,
+    // 坏档一个字节没动,也没有多出一份 `.corrupt-<ts>`。
+    expect(readdirSync(dir).slice().sort()).toEqual(['broken', 'good'])
+    expect(readdirSync(join(dir, 'broken'))).toEqual(['dossier.json'])
+    expect(readFileSync(badFile, 'utf8')).toBe(before)
+    // 对照组:同一份坏档交给 store,它**会**隔离。两条路的差别在这儿被钉死。
+    const res = await store.load('broken')
+    expect(res.kind).toBe('corrupt')
+    expect(readdirSync(join(dir, 'broken')).some((f) => f.startsWith('dossier.json.corrupt-'))).toBe(true)
+  })
+
+  it('目录名与内嵌 taskId 对不上 ⇒ 跳过(寻址键是目录名)', async () => {
+    const store = makeStore()
+    await store.create({ taskId: 'real', userId: 'u', objective: '真的' })
+    mkdirSync(join(dir, 'impostor'), { recursive: true })
+    writeFileSync(
+      join(dir, 'impostor', 'dossier.json'),
+      readFileSync(join(dir, 'real', 'dossier.json'), 'utf8'),
+    )
+    const snap = await readLongRunSnapshot(dir, { logger })
+    expect(snap.tasks.map((t) => t.dossier.taskId)).toEqual(['real'])
+    expect(snap.more).toBe(0)
+  })
+
+  it('没完的在前、再按最近更新——这是 maxFinished 能安全截尾的前提', async () => {
+    const store = makeStore()
+    clock = 1_000_000
+    await store.create({ taskId: 'live-1', userId: 'u', objective: '还在跑' })
+    clock += 10
+    await store.create({ taskId: 'live-2', userId: 'u', objective: '卡住了' })
+    // blocked 也算「没完」——那恰恰是成员最需要看见的一个(而它不占那道
+    // 3 个在跑的闸,所以下面三份才建得出来)。
+    await store.mutate('live-2', (d) => {
+      d.status = 'blocked'
+    })
+    // 三份已结束的,updatedAt 全都晚于那两份在跑的。
+    for (const [id, status] of [
+      ['fin-a', 'done'],
+      ['fin-b', 'cancelled'],
+      ['fin-c', 'done'],
+    ] as const) {
+      clock += 100_000
+      await store.create({ taskId: id, userId: 'u', objective: id })
+      clock += 10
+      await store.mutate(id, (d) => {
+        d.status = status
+      })
+    }
+
+    const snap = await readLongRunSnapshot(dir, { maxFinished: 1, logger })
+    // 两份在跑的一个都没被挤掉,尽管它们的 updatedAt 比被截掉的那两份还早。
+    expect(snap.tasks.map((t) => t.dossier.taskId)).toEqual(['live-2', 'live-1', 'fin-c'])
+    // 截了就说(no silent caps)。
+    expect(snap.more).toBe(2)
+  })
+
+  it('maxFinished 0 ⇒ 只剩在跑的,而 more 如实报被留下的数目', async () => {
+    const store = makeStore()
+    await store.create({ taskId: 'live', userId: 'u', objective: '在跑' })
+    await store.create({ taskId: 'fin', userId: 'u', objective: '完了' })
+    await store.mutate('fin', (d) => {
+      d.status = 'done'
+    })
+    const snap = await readLongRunSnapshot(dir, { maxFinished: 0, logger })
+    expect(snap.tasks.map((t) => t.dossier.taskId)).toEqual(['live'])
+    expect(snap.more).toBe(1)
+  })
+
+  it('日志尾巴取最新的、旧→新;坏行跳过而任务照出', async () => {
+    const store = makeStore()
+    await store.create({ taskId: 't1', userId: 'u', objective: '目标' })
+    for (const seg of [1, 2, 3, 4]) {
+      clock += 10
+      await store.appendJournal('t1', { seg, did: `第 ${seg} 段做的事`, next: `下一步 ${seg}` })
+    }
+    appendFileSync(join(dir, 't1', 'journal.jsonl'), '{ 半行坏的\n')
+
+    const snap = await readLongRunSnapshot(dir, { journalTail: 2, logger })
+    expect(snap.tasks).toHaveLength(1)
+    expect(snap.tasks[0]!.journal.map((e) => e.seg)).toEqual([3, 4])
+    expect(warns.some((w) => w.msg.includes('bad journal line skipped'))).toBe(true)
+  })
+
+  it('journalTail 0 ⇒ 根本不去打开日志文件;日志读不动 ⇒ 任务照出只是没日志', async () => {
+    const store = makeStore()
+    await store.create({ taskId: 't1', userId: 'u', objective: '目标' })
+    await store.appendJournal('t1', { seg: 1, did: '做了点事' })
+
+    expect((await readLongRunSnapshot(dir, { journalTail: 0, logger })).tasks[0]!.journal).toEqual([])
+
+    // 把日志换成一个目录 ⇒ 读它必抛;任务本体必须照出。
+    rmSync(join(dir, 't1', 'journal.jsonl'))
+    mkdirSync(join(dir, 't1', 'journal.jsonl'))
+    const snap = await readLongRunSnapshot(dir, { logger })
+    expect(snap.tasks.map((t) => t.dossier.taskId)).toEqual(['t1'])
+    expect(snap.tasks[0]!.journal).toEqual([])
   })
 })

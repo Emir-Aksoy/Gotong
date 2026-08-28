@@ -58,6 +58,10 @@ export const PANEL_COMPONENT_TYPES = [
   'status-card',
   'schedule-list',
   'quick-actions',
+  // OBS-M2 长期任务的进展。刻意不复用 `list`——一项长任务不是一行待办:
+  // 把它挤进去就会丢掉状态、「为什么不动」、预算、段数、子活与日志——
+  // 而那几样恰好就是长任务唯一值得看的东西。
+  'longrun-list',
 ] as const
 
 export type PanelComponentType = (typeof PANEL_COMPONENT_TYPES)[number]
@@ -77,6 +81,7 @@ export const PANEL_FIXED_SOURCES = [
   'schedules.mine',
   'usage.mine',
   'status.hub',
+  'longrun.mine',
 ] as const
 
 /**
@@ -282,6 +287,11 @@ export const PANEL_COMPONENT_CONTRACTS: Readonly<Record<PanelComponentType, Comp
     params: { days: { kind: 'int', min: 1, max: 7 } },
   },
   'status-card': { source: 'required', sources: ['status.hub'] },
+  'longrun-list': {
+    source: 'required',
+    sources: ['longrun.mine'],
+    params: { limit: { kind: 'int', min: 1, max: 10 } },
+  },
   'schedule-list': {
     source: 'required',
     sources: ['schedules.mine'],
@@ -631,7 +641,15 @@ export const DEFAULT_PANEL: PanelConfig = {
   schemaVersion: PANEL_SCHEMA_VERSION,
   sections: [
     { components: [{ type: 'chat' }] },
-    { components: [{ type: 'approval-inbox' }, { type: 'list', source: 'tasks.mine' }] },
+    {
+      components: [
+        { type: 'approval-inbox' },
+        { type: 'list', source: 'tasks.mine' },
+        // 长任务的进展不在默认面板上 = 它对一个从没改过面板的成员结构性
+        // 不可见;而长任务恰恰是那种你开完就离开、过几小时才想起来问的东西。
+        { type: 'longrun-list', source: 'longrun.mine' },
+      ],
+    },
     {
       components: [
         { type: 'status-card', source: 'status.hub' },

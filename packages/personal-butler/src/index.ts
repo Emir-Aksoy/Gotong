@@ -194,6 +194,8 @@ export {
   renderCompactorInput,
   LONGRUN_TASK_ID_RE,
   clampStandbyCheckBackHours,
+  // OBS-M2 观察者快照 —— 只读,不隔离不写盘,不走驱动器的串行链。
+  readLongRunSnapshot,
   LONGRUN_RELAY_STATE_V,
   LONGRUN_SEGMENT_PAYLOAD_KEY,
   LONGRUN_CHILD_PAYLOAD_KEY,
@@ -208,6 +210,9 @@ export {
   type LongRunDossierStore,
   type LongRunLoadResult,
   type LongRunSummary,
+  type LongRunSnapshot,
+  type LongRunSnapshotEntry,
+  type ReadLongRunSnapshotOptions,
   type LongRunBudgetVerdict,
   type SegmentVerdict,
   type LongRunWakePrecheck,

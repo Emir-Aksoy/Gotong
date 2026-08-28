@@ -335,6 +335,19 @@
   border-radius: 0 6px 6px 0;
 }
 
+/* OBS-M2 — longrun-list (long-run dossier: plan + segment journal + budget).
+   Deliberately thin: the rows reuse the task / chart / feed vocabulary that is
+   already on this page, so a long-run card reads as part of the same panel. */
+.sdui-lr-item { padding: 0.5em 0; border-bottom: 1px solid var(--sdui-border-soft); }
+.sdui-lr-item:last-child { border-bottom: none; }
+.sdui-lr-head { display: flex; align-items: center; gap: 0.5em; flex-wrap: wrap; }
+.sdui-lr-obj { font-weight: 600; word-break: break-word; }
+.sdui-lr-sub { margin: 0.25em 0 0; padding-left: 0.9em; }
+.sdui-lr-sub > p.sdui-meta { margin: 0.2em 0 0; }
+.sdui-lr-done { opacity: 0.6; text-decoration: line-through; }
+.sdui-lr-j { font-size: 0.92em; }
+.sdui-lr-j p { margin: 0.1em 0; }
+
 @media (max-width: 720px) {
   .sdui-cal-grid { grid-template-columns: repeat(7, minmax(4.2em, 1fr)); }
   .sdui-chart-meta { font-size: 0.85em; }

@@ -14,27 +14,38 @@
  *    patrol uses, and a failing probe degrades to [] (never throws into the
  *    route);
  *  - usageForUser (C1-b) windows the ledger aggregate to 7/30 days and
- *    re-sorts chronologically (the SQL orders by cost DESC — chart order).
+ *    re-sorts chronologically (the SQL orders by cost DESC — chart order);
+ *  - longRunForUser (OBS-M2) reads the REAL dossier layout the driver writes
+ *    (butlerLongRunRoot + ownerDir), and its two load-bearing folds hold: the
+ *    sticky `waitingForChildren` flag only reads as 「在等」 when a child is
+ *    actually in flight, and every truncation reports what it dropped.
  */
 import { mkdir, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { openTaskNotebook } from '@gotong/personal-butler'
+import { openLongRunDossierStore, openTaskNotebook } from '@gotong/personal-butler'
 import { ownerDir } from '@gotong/service-memory-file'
 
 import type { HealthSnapshot } from '../src/admin-health.js'
+import { butlerLongRunRoot } from '../src/butler-space-dirs.js'
 import { buildMePanelData } from '../src/me-panel-data.js'
 
+let butlerRoot: string
 let memoryRoot: string
 
 beforeEach(async () => {
-  memoryRoot = await mkdtemp(join(tmpdir(), 'gotong-panel-data-'))
+  // 镜像生产布局:`<space>/butler/memory` 与 `<space>/butler/longrun` 是**兄弟**
+  // 目录。夹具必须给 memoryRoot 一个自己的父目录——直接拿 mkdtemp 的结果当
+  // memoryRoot,它的兄弟就落进了系统临时目录本身(测试之间共享,还会漏在盘上)。
+  butlerRoot = await mkdtemp(join(tmpdir(), 'gotong-panel-data-'))
+  memoryRoot = join(butlerRoot, 'memory')
+  await mkdir(memoryRoot, { recursive: true })
 })
 
 afterEach(async () => {
-  await rm(memoryRoot, { recursive: true, force: true })
+  await rm(butlerRoot, { recursive: true, force: true })
 })
 
 function build(overrides?: Partial<Parameters<typeof buildMePanelData>[0]>) {
@@ -224,5 +235,140 @@ describe('me-panel-data: usageForUser (C1-b)', () => {
     })
     expect(await data.usageForUser('alice', 'week')).toEqual([])
     expect(warns.length).toBe(1)
+  })
+})
+
+describe('me-panel-data: longRunForUser (OBS-M2)', () => {
+  /** 在成员真实的档案目录上开一个 store —— 驱动器写的就是这个布局。 */
+  function driverStore(userId: string) {
+    return openLongRunDossierStore({
+      dir: ownerDir(butlerLongRunRoot(memoryRoot), { kind: 'user', id: userId }),
+      now: () => 1_700_000_000_000,
+    })
+  }
+
+  it('从没开过长任务 ⇒ 空快照(不是 null、更不是错)', async () => {
+    expect(await build().longRunForUser('alice')).toEqual({ tasks: [], more: 0 })
+  })
+
+  it('敌意 userId 过不了 ownerDir 那道 assert ⇒ 空快照', async () => {
+    expect(await build().longRunForUser('../../etc')).toEqual({ tasks: [], more: 0 })
+  })
+
+  it('投影出计划 / 预算 / 子活 / 日志,自由文本按码点截断且总数随行', async () => {
+    const store = driverStore('alice')
+    await store.create({ taskId: 'photos', userId: 'alice', objective: '整理照片库' })
+    await store.mutate('photos', (d) => {
+      // 计划 14 条 > PLAN_ROWS 12;子活 8 条 > CHILD_ROWS 6。
+      d.plan = Array.from({ length: 14 }, (_, i) => ({ text: `第 ${i} 步`, done: i < 5 }))
+      d.children = Array.from({ length: 8 }, (_, i) => ({
+        id: `c${i}`,
+        summary: `子活 ${i}`,
+        status: 'ok' as const,
+      }))
+      d.budget = { tokensUsed: 300, tokenBudget: 1000, timeUsedSec: 60, timeBudgetSec: 600 }
+      d.segments = 3
+    })
+    for (const seg of [1, 2, 3, 4]) {
+      await store.appendJournal('photos', { seg, did: `第 ${seg} 段`, next: '继续' })
+    }
+
+    const snap = await build().longRunForUser('alice')
+    expect(snap).not.toBeNull()
+    const row = snap!.tasks[0]!
+    expect(row.taskId).toBe('photos')
+    expect(row.segments).toBe(3)
+    // 截了要说:列出来的是 12 条,而盘上真实是 14 条、已勾 5 条。
+    expect(row.plan).toHaveLength(12)
+    expect(row.planTotal).toBe(14)
+    expect(row.planDone).toBe(5)
+    // 子活取**最后** 6 条(最近的那些),总数随行。
+    expect(row.children.map((c) => c.id)).toEqual(['c2', 'c3', 'c4', 'c5', 'c6', 'c7'])
+    expect(row.childrenTotal).toBe(8)
+    expect(row.childrenPending).toBe(0)
+    expect(row.budget).toEqual({ tokensUsed: 300, tokenBudget: 1000, timeUsedSec: 60, timeBudgetSec: 600 })
+    // 日志只取最近 3 段,旧→新。
+    expect(row.journal.map((e) => e.seg)).toEqual([2, 3, 4])
+  })
+
+  it('objective 按码点截断——增补平面的字不会被劈成两半', async () => {
+    const store = driverStore('alice')
+    // 250 个四字节码点。按码元截会在第 200 个「半个字」上断开。
+    const wide = '\u{1F600}'.repeat(250)
+    await store.create({ taskId: 'wide', userId: 'alice', objective: wide })
+    const row = (await build().longRunForUser('alice'))!.tasks[0]!
+    expect(Array.from(row.objective)).toHaveLength(201) // 200 + 省略号
+    expect(row.objective.endsWith('\u2026')).toBe(true)
+    expect(Array.from(row.objective).slice(0, 200).every((c) => c === '\u{1F600}')).toBe(true)
+  })
+
+  it('sticky 的等待旗:收齐了就不该再显示「在等」', async () => {
+    const store = driverStore('alice')
+    await store.create({ taskId: 't', userId: 'alice', objective: '目标' })
+    await store.mutate('t', (d) => {
+      // 旗还立着(裁决那边靠第二道 `pending > 0` 守卫,故它可以 sticky),
+      // 但两件子活都结算完了。照旗直报 = 卡上永远「在等」。
+      d.waitingForChildren = true
+      d.children = [
+        { id: 'c1', summary: '一', status: 'ok' },
+        { id: 'c2', summary: '二', status: 'failed' },
+      ]
+    })
+    let row = (await build().longRunForUser('alice'))!.tasks[0]!
+    expect(row.waiting).toBeNull()
+    expect(row.childrenPending).toBe(0)
+
+    // 真有一件在飞 ⇒ 这时候才是「在等」。
+    await store.mutate('t', (d) => {
+      d.children.push({ id: 'c3', summary: '三', status: 'pending' })
+    })
+    row = (await build().longRunForUser('alice'))!.tasks[0]!
+    expect(row.waiting).toBe('children')
+    expect(row.childrenPending).toBe(1)
+  })
+
+  it('等子活压过待命——位序镜像段末裁决自己的臂序', async () => {
+    const store = driverStore('alice')
+    await store.create({ taskId: 't', userId: 'alice', objective: '跟踪体重' })
+    await store.mutate('t', (d) => {
+      d.standby = { sinceMs: 1, checkBackAtMs: 999, note: '等成员报数' }
+    })
+    let row = (await build().longRunForUser('alice'))!.tasks[0]!
+    expect(row.waiting).toBe('standby')
+    expect(row.standbyNote).toBe('等成员报数')
+    expect(row.standbyCheckBackAt).toBe(999)
+
+    await store.mutate('t', (d) => {
+      d.waitingForChildren = true
+      d.children = [{ id: 'c1', summary: '在飞', status: 'pending' }]
+    })
+    row = (await build().longRunForUser('alice'))!.tasks[0]!
+    expect(row.waiting).toBe('children')
+    // 不是这一档就不带这一档的字段——渲染层因此不必自己判该显示哪句。
+    expect(row.standbyNote).toBeUndefined()
+    expect(row.standbyCheckBackAt).toBeUndefined()
+  })
+
+  it('maxFinished 透传给观察者,more 如实报被留下的数目', async () => {
+    const store = driverStore('alice')
+    await store.create({ taskId: 'live', userId: 'alice', objective: '在跑' })
+    for (const id of ['a', 'b']) {
+      await store.create({ taskId: id, userId: 'alice', objective: id })
+      await store.mutate(id, (d) => {
+        d.status = 'done'
+      })
+    }
+    const snap = await build().longRunForUser('alice', 0)
+    expect(snap!.tasks.map((t) => t.taskId)).toEqual(['live'])
+    expect(snap!.more).toBe(2)
+  })
+
+  it('坏档跳过 —— 隔离仍然只是写者的特权', async () => {
+    const dir = ownerDir(butlerLongRunRoot(memoryRoot), { kind: 'user', id: 'alice' })
+    await mkdir(join(dir, 'broken'), { recursive: true })
+    await writeFile(join(dir, 'broken', 'dossier.json'), '{ 不是 JSON')
+    const snap = await build().longRunForUser('alice')
+    expect(snap).toEqual({ tasks: [], more: 0 })
+    expect(await readdir(join(dir, 'broken'))).toEqual(['dossier.json'])
   })
 })

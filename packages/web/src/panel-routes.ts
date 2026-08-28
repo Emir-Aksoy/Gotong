@@ -94,6 +94,14 @@ export interface MePanelDataSurface {
   tasksForUser(userId: string): Promise<unknown[] | null>
   hubStatus(): Promise<unknown[] | null>
   usageForUser(userId: string, range: 'week' | 'month'): Promise<unknown[] | null>
+  /** OBS-M2 long-run progress. Optional — an older host without it makes
+   * /data/longrun answer { available:false }, same as `readContent`. Returns an
+   * object rather than a bare array so the `more` overflow count travels on the
+   * wire (no silent caps). */
+  longRunForUser?(
+    userId: string,
+    maxFinished?: number,
+  ): Promise<{ tasks: unknown[]; more: number } | null>
 }
 
 export interface MePanelRouteDeps {
@@ -103,12 +111,26 @@ export interface MePanelRouteDeps {
 }
 
 /** Exact-match table — unknown /data/* subpaths fall through to the site 404. */
-const PANEL_DATA_ROUTES: Record<string, 'schedules' | 'tasks' | 'status' | 'usage' | 'content'> = {
+const PANEL_DATA_ROUTES: Record<
+  string,
+  'schedules' | 'tasks' | 'status' | 'usage' | 'content' | 'longrun'
+> = {
   '/api/me/panel/data/schedules': 'schedules',
   '/api/me/panel/data/tasks': 'tasks',
   '/api/me/panel/data/status': 'status',
   '/api/me/panel/data/usage': 'usage',
   '/api/me/panel/data/content': 'content',
+  '/api/me/panel/data/longrun': 'longrun',
+}
+
+/** `?limit=` 只封顶**已结束**那一截(见 host 侧 `longRunForUser`);上下界
+ * 与 panel schema 里那个 `limit` 参数逐字同(1..10)。读不出数就交回
+ * undefined 用观察者自己的缺省——一个写坏的展示参数不该把整张卡弄空。 */
+function parseLongRunLimit(raw: string | null): number | undefined {
+  if (raw === null) return undefined
+  const n = Number(raw)
+  if (!Number.isInteger(n) || n < 1 || n > 10) return undefined
+  return n
 }
 
 function storeErrorStatus(err: unknown): number {
@@ -202,6 +224,15 @@ export async function handleMePanelRoute(
         const q = new URL(req.url ?? '/', 'http://x').searchParams.get('range')
         const rows = d ? await d.usageForUser(userId, q === 'month' ? 'month' : 'week') : null
         sendJson(res, rows === null ? { available: false } : { available: true, days: rows })
+      } else if (dataKind === 'longrun') {
+        // ?limit= is a whitelisted DISPLAY param and caps only the FINISHED
+        // tail — live tasks always all come back. userId stays session-pinned.
+        const limit = parseLongRunLimit(new URL(req.url ?? '/', 'http://x').searchParams.get('limit'))
+        const out = d && typeof d.longRunForUser === 'function' ? await d.longRunForUser(userId, limit) : null
+        sendJson(
+          res,
+          out === null ? { available: false } : { available: true, tasks: out.tasks, more: out.more },
+        )
       } else if (dataKind === 'content') {
         // C1-c — rides the panel surface itself (the content store lives in
         // the same file family). ?id= names the file; the STORE is the id

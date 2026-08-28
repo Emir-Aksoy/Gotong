@@ -43,6 +43,8 @@ import {
 } from '@gotong/personal-butler'
 import { ownerDir } from '@gotong/service-memory-file'
 
+import { butlerLongRunRoot } from './butler-space-dirs.js'
+
 import type { AdminHealthSurface } from './admin-health.js'
 import { createButlerRouter } from './butler-router.js'
 import type { HostButlerMemoryService } from './butler-memory-service.js'
@@ -480,7 +482,7 @@ export function buildButlerFactory(deps: ButlerFactoryDeps): ButlerFactory {
         // create 里)。永远在(remindersToolset 同款):分段长跑是管家的地板,
         // 不是开关——没人用时盘上零字节。
         const longRunStore = openLongRunDossierStore({
-          dir: ownerDir(join(dirname(memoryRoot), 'longrun'), { kind: 'user', id: userId }),
+          dir: ownerDir(butlerLongRunRoot(memoryRoot), { kind: 'user', id: userId }),
           now: Date.now,
           logger: log,
         })

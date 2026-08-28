@@ -542,23 +542,7 @@ export function openLongRunDossierStore(opts: OpenLongRunStoreOptions): LongRunD
       }),
 
     readJournalTail: (taskId, max = LONGRUN_LIMITS.journalTailEntries) =>
-      enqueue(async () => {
-        const file = journalPath(taskId)
-        let raw: string
-        try {
-          raw = await readTailUtf8(file, LONGRUN_LIMITS.journalReadMaxBytes)
-        } catch {
-          return []
-        }
-        const entries: LongRunJournalEntry[] = []
-        for (const line of raw.split(String.fromCharCode(0x0a))) {
-          if (line.trim().length === 0) continue
-          const parsed = parseJournalLine(line)
-          if (parsed) entries.push(parsed)
-          else opts.logger?.warn('longrun: bad journal line skipped', { file })
-        }
-        return entries.slice(-Math.max(1, max))
-      }),
+      enqueue(() => readJournalTailFile(journalPath(taskId), max, opts.logger)),
 
     list: () => enqueue(() => listSummaries(opts, loadRaw)),
   }
@@ -610,6 +594,120 @@ async function readTailUtf8(file: string, maxBytes: number): Promise<string> {
   } finally {
     await fh.close()
   }
+}
+
+/**
+ * 日志尾段的**唯一**读者。store 的方法与观察者快照都走它:两个视图
+ * 各写一份解析,就是两份会漂的真相。坑行跳过 + 证据原地留。
+ */
+async function readJournalTailFile(
+  file: string,
+  max: number,
+  logger?: LongRunLoggerDuck,
+): Promise<LongRunJournalEntry[]> {
+  let raw: string
+  try {
+    raw = await readTailUtf8(file, LONGRUN_LIMITS.journalReadMaxBytes)
+  } catch {
+    return []
+  }
+  const entries: LongRunJournalEntry[] = []
+  for (const line of raw.split(String.fromCharCode(0x0a))) {
+    if (line.trim().length === 0) continue
+    const parsed = parseJournalLine(line)
+    if (parsed) entries.push(parsed)
+    else logger?.warn('longrun: bad journal line skipped', { file })
+  }
+  return entries.slice(-Math.max(1, max))
+}
+
+// ─── Observer snapshot (read-only) ──────────────────────────────
+
+/** 一份档案在**观察者**眼里的样子:记录本体 + 一段有界的日志尾巴。 */
+export interface LongRunSnapshotEntry {
+  dossier: LongRunDossier
+  /** 旧→新,至多 `journalTail` 条;读不动就是 `[]`(任务本身照出)。 */
+  journal: LongRunJournalEntry[]
+}
+
+export interface LongRunSnapshot {
+  tasks: LongRunSnapshotEntry[]
+  /** 盘上还有多少份档案没被返回(no silent caps)。 */
+  more: number
+}
+
+export interface ReadLongRunSnapshotOptions {
+  /** 只封顶**已结束**那截尾巴;没完的任务永远不会被截掉。缺省 3。 */
+  maxFinished?: number
+  /** 每任务的日志条数(取最新的)。0 = 根本不去打开日志文件。缺省 3。 */
+  journalTail?: number
+  logger?: LongRunLoggerDuck
+}
+
+/**
+ * 给**观察者**(/me 面板)的只读快照。
+ *
+ * 刻意不走 `openLongRunDossierStore`。两个理由各自都够:存储层每一次读
+ * 都排在**驱动器自己那条串行链**上(一次面板刷新会排在一段正在写盘
+ * 的活后面);而它的 loader 会把坏档**改名隔离**——rename 是一次写,一个会
+ * 改写者文件名的读者不是观察者。这里目录不在/档案解析不动/目录名与
+ * 内嵌 id 对不上/日志读不动,一律降级成「不显示」**并且仅此而已**:不改名、
+ * 不建目录、不写一个字节(TN-M2 `readTaskNotesSnapshot` 同一纪律)。驱动器的段
+ * 仍是这个目录唯一的写者,而落盘走 rename,所以一次面板刷新跟一段撞上时,
+ * 读到的要么是旧字节要么是新字节,**不会是一半**。
+ *
+ * 排序是「没完的在前,再按最近更新」。这不是展示偏好,是 `maxFinished` 能
+ * 安全截尾的**前提**:一个还在跑的任务永远不可能被一堆已结束的挤出去。
+ */
+export async function readLongRunSnapshot(
+  dir: string,
+  opts: ReadLongRunSnapshotOptions = {},
+): Promise<LongRunSnapshot> {
+  const maxFinished = Math.max(0, opts.maxFinished ?? 3)
+  const tailMax = Math.max(0, opts.journalTail ?? 3)
+  let names: string[]
+  try {
+    names = await readdir(dir)
+  } catch {
+    // 目录从没建过 = 这位成员从没开过长期任务。诚实的空,不是错。
+    return { tasks: [], more: 0 }
+  }
+  const found: LongRunDossier[] = []
+  for (const name of names) {
+    if (!LONGRUN_TASK_ID_RE.test(name)) continue
+    let raw: string
+    try {
+      raw = await readFile(join(dir, name, 'dossier.json'), 'utf8')
+    } catch {
+      continue
+    }
+    // 同一个 `parseDossierFile`:投影层不可能在「什么算一份合法档案」上与写者分歧。
+    const parsed = parseDossierFile(raw, opts.logger)
+    // 坏档 / 目录名对不上:跳过,证据原地留着。隔离是**写者的特权**。
+    if (!parsed || parsed.taskId !== name) continue
+    found.push(parsed)
+  }
+  const byRecency = (a: LongRunDossier, b: LongRunDossier): number => b.updatedAt - a.updatedAt
+  const live = found.filter((d) => isUnfinishedLongRun(d.status)).sort(byRecency)
+  const finished = found.filter((d) => !isUnfinishedLongRun(d.status)).sort(byRecency)
+  const kept = [...live, ...finished.slice(0, maxFinished)]
+  const tasks: LongRunSnapshotEntry[] = []
+  for (const dossier of kept) {
+    const journal =
+      tailMax === 0
+        ? []
+        : await readJournalTailFile(join(dir, dossier.taskId, 'journal.jsonl'), tailMax, opts.logger)
+    tasks.push({ dossier, journal })
+  }
+  return { tasks, more: found.length - kept.length }
+}
+
+/**
+ * 给**观察者**用的「还没完」。刻意比 `maxActiveTasks` 那道闸宽——那道只
+ * 数 active/winding_down,而一个 `blocked` 的任务恰恰是成员最需要看见的那个。
+ */
+function isUnfinishedLongRun(status: LongRunStatus): boolean {
+  return status !== 'done' && status !== 'cancelled'
 }
 
 // ─── Accounting & verdicts (pure) ────────────────────────────────────────────

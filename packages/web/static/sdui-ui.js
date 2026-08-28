@@ -134,6 +134,32 @@
       sduiActionNotAllowed: '这个工作流没有对你开放。',
       sduiActionFailed: '发起失败',
       sduiBriefPrefill: '给我来一份今天的简报吧。',
+      // OBS-M2 — longrun-list（长任务进度：计划 + 段日志 + 预算）
+      sduiLongRunEmpty: '还没有长任务。',
+      sduiLongRunStatus: (s) =>
+        ({
+          active: '进行中',
+          winding_down: '收尾中',
+          done: '已完成',
+          blocked: '卡住了',
+          cancelled: '已取消',
+        })[s] ?? String(s),
+      sduiLongRunSegs: (n) => `已跑 ${n} 段`,
+      sduiLongRunPlan: (a, b) => `计划 ${a}/${b}`,
+      sduiLongRunMoreRows: (n) => `还有 ${n} 条没有列出`,
+      sduiLongRunChildren: (a, b) => `子活 ${a} 件（${b} 件在飞）`,
+      sduiLongRunWaitChildren: (n) => `在等 ${n} 件子活做完`,
+      sduiLongRunStandby: '待命中——暂时没事可做，等你开口',
+      sduiLongRunCheckBack: (w) => `最迟 ${w} 自己再看一次`,
+      sduiLongRunBlocked: '卡住了，在等你回话',
+      sduiLongRunInterrupted: '上一段没有干净收尾',
+      sduiLongRunDelivered: '交付',
+      sduiLongRunJournal: '最近做了什么',
+      sduiLongRunSeg: (n) => `第 ${n} 段`,
+      sduiLongRunNext: (s) => `下一步：${s}`,
+      sduiLongRunTokens: 'token',
+      sduiLongRunTime: '时间',
+      sduiLongRunMore: (n) => `还有 ${n} 项已经结束的没有列出`,
     },
     en: {
       sduiBadgePending: (n) => `${n} pending approval${n === 1 ? '' : 's'}`,
@@ -210,6 +236,32 @@
       sduiActionNotAllowed: 'This workflow is not enabled for you.',
       sduiActionFailed: 'Failed to start',
       sduiBriefPrefill: "Give me today's brief, please.",
+      // OBS-M2 — longrun-list (long-run progress: plan + segment journal + budget)
+      sduiLongRunEmpty: 'No long-running tasks yet.',
+      sduiLongRunStatus: (s) =>
+        ({
+          active: 'Running',
+          winding_down: 'Wrapping up',
+          done: 'Done',
+          blocked: 'Blocked',
+          cancelled: 'Cancelled',
+        })[s] ?? String(s),
+      sduiLongRunSegs: (n) => `${n} segment${n === 1 ? '' : 's'} so far`,
+      sduiLongRunPlan: (a, b) => `Plan ${a}/${b}`,
+      sduiLongRunMoreRows: (n) => `${n} more not listed`,
+      sduiLongRunChildren: (a, b) => `${a} subtask${a === 1 ? '' : 's'} (${b} in flight)`,
+      sduiLongRunWaitChildren: (n) => `Waiting on ${n} subtask${n === 1 ? '' : 's'}`,
+      sduiLongRunStandby: 'On standby — nothing to do right now, waiting on you',
+      sduiLongRunCheckBack: (w) => `will check back by ${w}`,
+      sduiLongRunBlocked: 'Blocked — waiting for your answer',
+      sduiLongRunInterrupted: 'Last segment did not finish cleanly',
+      sduiLongRunDelivered: 'Delivered',
+      sduiLongRunJournal: 'Recent segments',
+      sduiLongRunSeg: (n) => `Segment ${n}`,
+      sduiLongRunNext: (s) => `Next: ${s}`,
+      sduiLongRunTokens: 'tokens',
+      sduiLongRunTime: 'time',
+      sduiLongRunMore: (n) => `${n} finished task${n === 1 ? '' : 's'} not listed`,
     },
   }
 
@@ -262,6 +314,7 @@
     'status-card',
     'schedule-list',
     'quick-actions',
+    'longrun-list',
   ]
 
   // ---- NDJSON reader (verbatim semantics of app.js readNdjsonStream) ------
@@ -952,6 +1005,140 @@
       })
   }
 
+  // ---- longrun-list (longrun.mine, OBS-M2) ---------------------------------
+  // 一项长任务此刻在干什么，本来只有阿同知道——档案与日志躺在盘上，人要问一句
+  // 才拿得到。这张卡就是那份档案的脸：计划（勾到哪了）、它为什么不动、烧了多少
+  // 预算、最近三段各做了什么。**读的是同一份盘上真相**，没有第二个权威。
+  //
+  // 截断一律说出来（`more` / `planTotal` / `childrenTotal` 由 host 侧带上来）：
+  // 一张悄悄少列了两条的进度卡，比没有这张卡更坏。
+
+  /** 一条「它为什么不动」的注记。kind 决定左边条的颜色，不决定它说什么。 */
+  function lrNote(kind, text, sub) {
+    var row = el('div', 'sdui-status-item sdui-status-' + kind)
+    row.appendChild(el('strong', null, text))
+    if (sub) row.appendChild(el('p', 'sdui-meta', sub))
+    return row
+  }
+
+  /** 预算条。复用 chart 那套栅格与条形——同一个视觉语汇，零新 CSS。 */
+  function lrBudgetRow(label, used, total) {
+    var pct = total > 0 ? Math.min(100, Math.round((used / total) * 100)) : 0
+    var row = el('div', 'sdui-chart-row')
+    row.appendChild(el('span', 'sdui-chart-day', label))
+    var wrap = el('div', 'sdui-chart-bar-wrap')
+    var bar = el('div', 'sdui-chart-bar')
+    // 0% 也留 CSS 那道 2px 发丝——把「没花」画成一条空槽反而看不出是不是没渲染。
+    bar.style.width = pct + '%'
+    wrap.appendChild(bar)
+    row.appendChild(wrap)
+    row.appendChild(el('span', 'sdui-meta sdui-chart-meta', pct + '%'))
+    return row
+  }
+
+  function renderLongRunList(component) {
+    var params = componentParams(component)
+    // limit 只封顶**已结束**那一截（见 host 侧 longRunForUser）；在跑的永远全回。
+    // 与 chart 的 range 同一姿态：它进 fetch 缓存键，故同一张面板上的
+    // limit=3 与 limit=10 两张卡不会互相喂对方的响应。
+    var limit = typeof params.limit === 'number' ? params.limit : null
+    var qs = limit === null ? '' : 'limit=' + limit
+    return dataCard('sdui-longrun', 'longrun', function (body, j) {
+      var rows = Array.isArray(j.tasks) ? j.tasks : []
+      if (rows.length === 0) { body.appendChild(emptyState('clock', t('sduiLongRunEmpty'))); return }
+      rows.forEach(function (r) {
+        var item = el('div', 'sdui-lr-item')
+
+        var head = el('div', 'sdui-lr-head')
+        head.appendChild(el('span', 'sdui-lr-obj', String(r.objective || r.taskId)))
+        head.appendChild(el('span',
+          'sdui-chip' + (r.status === 'blocked' ? ' sdui-chip-red' : ''),
+          t('sduiLongRunStatus', String(r.status || ''))))
+        item.appendChild(head)
+
+        // 为什么它此刻不动。位序镜像段末裁决自己的臂序（等子活压过待命），
+        // 而 blocked 排在最前——那一条是唯一在等**人**的。
+        if (r.status === 'blocked' && r.blockedQuestion) {
+          item.appendChild(lrNote('red', t('sduiLongRunBlocked'), String(r.blockedQuestion)))
+        } else if (r.waiting === 'children') {
+          item.appendChild(lrNote('yellow', t('sduiLongRunWaitChildren', r.childrenPending || 0)))
+        } else if (r.waiting === 'standby') {
+          item.appendChild(lrNote('yellow', t('sduiLongRunStandby'),
+            String(r.standbyNote || '') +
+            (r.standbyCheckBackAt ? ' · ' + t('sduiLongRunCheckBack', fmtWhen(r.standbyCheckBackAt)) : '')))
+        }
+        if (r.interrupted) item.appendChild(lrNote('yellow', t('sduiLongRunInterrupted')))
+        if (r.doneSummary) {
+          var d = el('p', 'sdui-meta sdui-lr-sub')
+          d.textContent = t('sduiLongRunDelivered') + '：' + String(r.doneSummary)
+          item.appendChild(d)
+        }
+
+        // 计划——这就是那份 todo。勾没勾上是内容不是装饰，故画在字里。
+        var plan = Array.isArray(r.plan) ? r.plan : []
+        if (plan.length > 0 || r.planTotal > 0) {
+          item.appendChild(el('p', 'sdui-meta', t('sduiLongRunPlan', r.planDone || 0, r.planTotal || 0)))
+          var pw = el('div', 'sdui-lr-sub')
+          plan.forEach(function (p) {
+            var prow = el('div', 'sdui-task-item')
+            prow.appendChild(el('span',
+              'sdui-task-title' + (p.done ? ' sdui-lr-done' : ''),
+              (p.done ? '\u2713 ' : '\u25cb ') + String(p.text || '')))
+            pw.appendChild(prow)
+          })
+          if (r.planTotal > plan.length) {
+            pw.appendChild(el('p', 'sdui-meta', t('sduiLongRunMoreRows', r.planTotal - plan.length)))
+          }
+          item.appendChild(pw)
+        }
+
+        // 预算。两条各画各的：token 烧完与时间烧完是两种不同的收尾理由。
+        var b = r.budget || {}
+        var bw = el('div', 'sdui-lr-sub')
+        bw.appendChild(lrBudgetRow(t('sduiLongRunTokens'), b.tokensUsed || 0, b.tokenBudget || 0))
+        bw.appendChild(lrBudgetRow(t('sduiLongRunTime'), b.timeUsedSec || 0, b.timeBudgetSec || 0))
+        item.appendChild(bw)
+
+        var kids = Array.isArray(r.children) ? r.children : []
+        if (r.childrenTotal > 0) {
+          item.appendChild(el('p', 'sdui-meta',
+            t('sduiLongRunChildren', r.childrenTotal, r.childrenPending || 0)))
+          var kw = el('div', 'sdui-lr-sub')
+          kids.forEach(function (c) {
+            var krow = el('div', 'sdui-task-item')
+            krow.appendChild(el('span', 'sdui-task-title', String(c.summary || c.id)))
+            krow.appendChild(el('span', 'sdui-meta sdui-task-progress', String(c.status || '')))
+            kw.appendChild(krow)
+          })
+          if (r.childrenTotal > kids.length) {
+            kw.appendChild(el('p', 'sdui-meta', t('sduiLongRunMoreRows', r.childrenTotal - kids.length)))
+          }
+          item.appendChild(kw)
+        }
+
+        // 段日志——旧→新，条目自带段号。这是「回放」那一半。
+        var jr = Array.isArray(r.journal) ? r.journal : []
+        if (jr.length > 0) {
+          item.appendChild(el('p', 'sdui-meta', t('sduiLongRunJournal')))
+          jr.forEach(function (e) {
+            var box = el('div', 'sdui-feed-item sdui-lr-j')
+            box.appendChild(el('p', 'sdui-meta',
+              t('sduiLongRunSeg', e.seg) + ' · ' + fmtWhen(e.at)))
+            box.appendChild(el('p', 'sdui-md-p', String(e.did || '')))
+            if (e.next) box.appendChild(el('p', 'sdui-meta', t('sduiLongRunNext', String(e.next))))
+            item.appendChild(box)
+          })
+        }
+
+        item.appendChild(el('p', 'sdui-meta',
+          t('sduiLongRunSegs', r.segments || 0) + ' · ' + t('sduiContentUpdated', fmtWhen(r.updatedAt))))
+        body.appendChild(item)
+      })
+      // 截了就说。`more` 只数已经结束的那一截——在跑的一条都没有被藏起来。
+      if (j.more > 0) body.appendChild(el('p', 'sdui-meta', t('sduiLongRunMore', j.more)))
+    }, qs)
+  }
+
   // The CLOSED registry — M2 shipped chat / approval-inbox / divider; C1a adds
   // the four hub-internal data components (schedules / tasks / status); C1-b
   // adds chart (usage.mine) + quick-actions; C1-c adds the content/relay trio
@@ -971,6 +1158,7 @@
     'markdown-card': renderMarkdownCard,
     weather: renderWeather,
     'card-feed': renderCardFeed,
+    'longrun-list': renderLongRunList,
   }
 
   function renderComponent(component) {
