@@ -509,6 +509,83 @@ export async function applyEnvKnob(
   }
 }
 
+/**
+ * Remove one whitelisted env knob from `<space>/gotong.env` so the host falls
+ * back to its built-in default on the next restart.
+ *
+ * This is a distinct OPERATION rather than "set it to the default value", and
+ * the distinction is load-bearing. Writing the default leaves a line on disk, so
+ * the file keeps claiming the operator pinned that knob: the settings page then
+ * has to go on reporting "you set this" about a knob they just asked to stop
+ * setting, and the pin silently freezes the default of the day even after a
+ * later release changes it. Nor can a value stand in for the operation — the
+ * empty string already means "explicitly cleared" for the five sensory knobs
+ * (see `identifier`), and a free-text knob may legitimately hold any string, so
+ * there is no value that means "no value".
+ *
+ * Same refusal order as `applyEnvKnob` minus the value check (there is no value
+ * to validate): secret-name hard-refuse → whitelist lookup → read-merge-write.
+ * An absent key is success with `removed:false` and ZERO bytes written — being
+ * asked to unset something already unset is the requested state, not a failure,
+ * and it must not conjure a managed file onto a hub that never had one.
+ */
+export async function unsetEnvKnob(
+  input: { key: string },
+  deps: EnvKnobWriteDeps,
+): Promise<ConfigWriteResult> {
+  const key = (input.key ?? '').trim()
+  if (!key) throw new OpsError('invalid_input', 'a config key is required.')
+
+  // Secret names are refused on this door too. Not because removing a line could
+  // leak anything, but because the editor must have exactly ONE answer to "which
+  // keys do you touch" — a second, laxer door is how a whitelist rots.
+  if (isSecretKey(key)) {
+    throw new OpsError(
+      'secret_key_refused',
+      `'${key}' looks like a secret — secrets never go in the managed env file. Use the vault / setup wizard / \`setting rotate-master-key\`.`,
+    )
+  }
+  const spec = knobSpec(key)
+  if (!spec) {
+    const allowed = ENV_KNOBS.map((k) => k.key).join(', ')
+    throw new OpsError('unknown_knob', `'${key}' is not a settable config knob. Settable: ${allowed}.`)
+  }
+
+  // Read-merge-write inside one queue slot, exactly like the setter: a delete has
+  // the same lost-update window as a set.
+  const removed = await serializeByPath(deps.envFilePath, async () => {
+    const current = parseEnvFile(await readFileOr(deps.envFilePath, '', deps))
+    if (!current.has(key)) return false
+    current.delete(key)
+    await writeFileAt(deps.envFilePath, serializeEnvFile(current), deps)
+    return true
+  })
+
+  try {
+    deps.audit?.({ kind: 'env-unset', surface: deps.surface, key, removed, takesEffectOnRestart: true })
+  } catch {
+    // never mask a succeeded write on an audit fault
+  }
+
+  const fallback = spec.defaultValue === '' ? 'unset' : spec.defaultValue
+  return {
+    lines: removed
+      ? [
+          `removed ${key} from ${deps.envFilePath} (falls back to the built-in default: ${fallback})`,
+          'takes effect on the NEXT host restart (no hot-reload).',
+        ]
+      : [`${key} was not set in ${deps.envFilePath} — already on the built-in default: ${fallback}. Nothing written.`],
+    data: {
+      kind: 'env-unset',
+      key,
+      removed,
+      defaultValue: spec.defaultValue,
+      path: deps.envFilePath,
+      takesEffectOnRestart: true,
+    },
+  }
+}
+
 // ───────────────────────────────────────────────────────────────────────────
 // config-write: upsert a pricing.json override
 // ───────────────────────────────────────────────────────────────────────────
@@ -613,11 +690,30 @@ export interface EffectiveKnobView {
   default: string
   /** Value in the managed `gotong.env` (null when not set there). */
   fileValue: string | null
-  /** Value currently live in the process env (null when unset). */
+  /**
+   * Value set in the environment from OUTSIDE this hub (null when unset).
+   *
+   * NOT simply `process.env[key]`. UXCFG-M1 made the host read the managed env
+   * file at boot and inject it into `process.env` itself, so the raw lookup
+   * would report the hub's own file as an environment override — every knob
+   * would read "set by the environment" one restart after anyone saved, and the
+   * settings page locks those controls. See `EffectiveConfigDeps.envInjectedKeys`.
+   */
   envValue: string | null
 }
 
 export interface EffectiveConfigView {
+  /**
+   * The managed env file this hub reads at boot (UXCFG-M1) and writes on
+   * `config-set` — the absolute path, not a `<space>/…` stand-in.
+   *
+   * It is in the view because it is the settings page's whole thesis: what you
+   * change here lands in THIS file, and you can go read it. Without the field a
+   * UI has two options, and both are worse — print a placeholder that is not a
+   * path anyone can `cat`, or reconstruct one from `pricing.path`, which is only
+   * right as long as nobody overrides one of the two seams independently.
+   */
+  envFilePath: string
   /** The whitelisted knobs, file-vs-live so the operator sees pending-vs-active. */
   knobs: EffectiveKnobView[]
   /** Secret env vars: name + set/unset ONLY. */
@@ -634,6 +730,21 @@ export interface EffectiveConfigDeps extends FsWriteSeams {
   envFilePath?: string
   /** Defaults to `<space>/pricing.json`. */
   pricingPath?: string
+  /**
+   * Keys THIS host injected into `process.env` at boot from the managed env
+   * file (`loadManagedEnv().applied`). They are subtracted from the environment
+   * when computing `envValue`, because the hub echoing its own file back is not
+   * an external override — and the settings page disables any control it
+   * believes the environment owns.
+   *
+   * Safe by construction: `loadManagedEnv` puts a key in `applied` only when it
+   * actually wrote it, and a variable the real environment already had lands in
+   * `shadowed` instead (the environment wins, the file stands down). So a
+   * genuine external override can never be hidden by this subtraction.
+   *
+   * Absent → no subtraction (the pre-boot CLI path, where nothing was injected).
+   */
+  envInjectedKeys?: readonly string[]
 }
 
 /** Build the read-only effective-config view (read tier). */
@@ -642,12 +753,13 @@ export async function readEffectiveConfig(deps: EffectiveConfigDeps): Promise<Ef
   const pricingPath = deps.pricingPath ?? join(deps.spaceDir, 'pricing.json')
 
   const fileMap = parseEnvFile(await readFileOr(envFilePath, '', deps))
+  const injected = new Set(deps.envInjectedKeys ?? [])
   const knobs: EffectiveKnobView[] = ENV_KNOBS.map((k) => ({
     key: k.key,
     summary: k.summary,
     default: k.defaultValue,
     fileValue: fileMap.get(k.key) ?? null,
-    envValue: deps.env[k.key] ?? null,
+    envValue: injected.has(k.key) ? null : (deps.env[k.key] ?? null),
   }))
 
   const secrets = SECRET_ENV_VARS.map((key) => ({ key, set: !!deps.env[key]?.trim() }))
@@ -664,5 +776,5 @@ export async function readEffectiveConfig(deps: EffectiveConfigDeps): Promise<Ef
     }
   }
 
-  return { knobs, secrets, pricing, envTemplate: generateEnvTemplate() }
+  return { envFilePath, knobs, secrets, pricing, envTemplate: generateEnvTemplate() }
 }

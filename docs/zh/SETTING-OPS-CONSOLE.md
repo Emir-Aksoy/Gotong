@@ -5,7 +5,7 @@
 > 支持命令行操作, 也可以在服务器本地网页操作, 还可以在 im 通道(使用一个指令进入命令行
 > 模式)操作, 这些不依赖大模型。」
 >
-> Last updated: 2026-06-26 · setting-ops M1–M7
+> Last updated: 2026-08-28 · setting-ops M1–M7 · UXCFG-M1/M2/M3
 
 ---
 
@@ -95,6 +95,7 @@ IM 面对 config-write 的那句拒绝文案因此也改口了 —— 从「owne
 | `config` | read | 托管 env 旋钮 + 密钥 env 变量(只显示 已设/未设)+ pricing 覆盖状态 |
 | `fix-dirs` | safe-mutate | 确保工作区目录存在(`mkdir -p`; 幂等可逆) |
 | `config-set` | config-write | 在 `<space>/gotong.env` 写一个白名单非密钥 env 旋钮(重启生效) |
+| `config-unset` | config-write | 把一个旋钮从 `<space>/gotong.env` **删掉**, 交还给默认值(UXCFG-M3; 见 §5.1a) |
 | `config-price` | config-write | 在 `<space>/pricing.json` upsert 一个模型价格(落盘前校验, 重启生效) |
 | `cold-start` | destructive-offline | 预检 → 校验定义 → 启动 host。**CLI-only** |
 | `restore` | destructive-offline | 把备份 tar 解进全新工作区(跑 verify.sh)。**CLI-only** |
@@ -211,6 +212,21 @@ IM 面对 config-write 的那句拒绝文案因此也改口了 —— 从「owne
 镜像管家「只存环境变量名永不携明文」纪律。凭证仍走既有 vault / setup-owner-llm-key /
 rotate-master-key 专用流, **绝不**进这个编辑器。
 
+### 5.1a 「恢复默认」是一个动作, 不是一个值(`config-unset`, UXCFG-M3)
+
+判据 3 说「改回去等于没发生过」。**写默认值做不到这件事**: 盘上会留下一行钉子,
+而那一行钉的是**今天这个版本的默认值** —— 哪天默认改了(它们本来就该能改), 这台
+hub 会带着一个谁也没决定过的旧值继续跑, 而设置页会理直气壮地显示「你设的」。
+
+所以「恢复默认」走一条**自己的动词** `config-unset <KEY>`: 把那一行从文件里删掉,
+让这个旋钮重新落回代码里的默认。三条细节:
+
+- **`''` 不能当"未设"的哨兵** —— 它对五个感官旋钮已经是「显式清除」的合法值
+  (§5.1 第二条)。同一个字符串没法同时表示两件事, 所以必须是另一个动词。
+- **键本来就不在文件里 = 零字节写入**, 也不留审计"成功写入"。什么都没发生就是
+  什么都没发生, 不假装做过一次。
+- **白名单与密钥硬拒照旧** —— 删也只能删 `ENV_KNOBS` 里的键, 走同一个 `isSecretKey()`。
+
 ### 5.2 pricing.json 编辑器(`config-price`)
 
 host 真读的那一个配置文件。写前确定性校验形状(畸形→拒, 不留到 boot 才炸), 审计。
@@ -262,8 +278,40 @@ POST /api/admin/setting/run        跑一条 read / safe-mutate / config-write(o
 `serveWeb(hub, { settingOps })` 注入鸭子 surface `SettingOpsSurface`(web 零 host 运行时依赖,
 端到端先例 = adminHealth)。每 handler `await ctx.requireAdmin`(未认证→401); `!ctx.settingOps`→503
 让 tab 隐藏。**无破坏性路由**(根本不存在; 即便伪造也 404)。错误码: 两个 `OpsTierError`→403,
-`unknown_command`→404。SPA tab 渲染 read 快照 + 安全建目录钮 +(owner)config 编辑表单 +
-**列出**破坏性 / IM 命令配「去 CLI 跑」说明(无破坏性控件)。
+`unknown_command`→404。
+
+#### UXCFG-M3 —— 这一页重写过(2026-08-28)
+
+改之前它是一个**命令控制台的网页版**: 一个命令下拉 + 一个自由文本参数框, 你得先知道
+`config-set` 这个动词、再知道旋钮叫 `GOTONG_BUTLER_MEMORY_LIBRARIAN`、再知道它收什么值。
+那是给写过这套东西的人用的。现在它是**一页有名字的设置**:
+
+- **23 个旋钮各自一行**, 按人关心的事分九组(访问与界面 / 阿同在后台做什么 / 多久做一次 /
+  阿同的感官 / 对外 / 凭证 / 模型价格 / 维护动作 / 危险区)。控件形状**跟着校验器走** ——
+  闭集出下拉、布尔出开关、时长与标识符出输入框, 于是「打错值」这件事在多数行上根本
+  发生不了。每行配一句人话说明, 键名 `GOTONG_*` 缩成一枚小 code 标签留在旁边(照着改
+  systemd 或写文档的人仍然找得到它, 但它不再是这一行的主语)。
+- **每行如实标出这个值是谁定的**: 默认 / 你设的 / 被环境覆盖。被环境覆盖的行**控件禁用**
+  并附一句「这个值只存在于启动环境里, 在这里写会被它盖住, 所以先去那边改」 —— 这正是
+  §七不变量 2 在界面上的样子。让人在一个注定不生效的框里打字, 是设置页最坏的一种谎。
+  - 这里有一处**必须**做的减法: UXCFG-M1 之后 host 自己会把 `gotong.env` 注进
+    `process.env`, 于是**这台 hub 自己写的文件会以"外部环境覆盖"的身份回头把控件锁上**
+    —— 人改了一次, 就再也改不了第二次。判定因此要减掉 `loadManagedEnv()` 亲口说
+    **它写进去的那些键**(`applied`)。这个减法是安全的: 真实环境里已经有的键会落进
+    `shadowed` 而不是 `applied`, 所以它**结构上**藏不掉一条真的 `Environment=` / `export`。
+- **改动先攒着, 一次保存**。底部出现「有 N 项改动还没保存 / 放弃改动 / 保存」的条; 保存
+  逐条走 `config-set`(或 `config-unset`), **停在第一个失败上** —— 后面的没写, 页面接着
+  显示它们仍未保存, 而不是留下一半写了一半没写、人还以为全成了。
+- **「恢复默认」是一个按钮**(见 §5.1a), 按下先变成「将恢复默认 / 撤销」的**待保存**状态,
+  保存了才真删。
+- **危险区隔离**: 破坏性命令仍然**列在页面上**(人得知道它们存在、知道该去哪跑), 但那一
+  区只有说明和一行可复制的 `gotong setting <id>`, **没有任何按钮**。
+- **回执跟着语言走**: 保存/失败那句话存的是「怎么说这句话」而不是「说好的那句话」 ——
+  切语言会整块重画, 一句冻在旧语言里的回执会跟旁边每一个字都换了语言的界面对不上。
+
+样式落在**自己的** `static/setting-ui.css`(不塞进 3.6K 行的 `styles.css`), 与
+`setting-ops-ui.js` **成对**走 service worker 的运行时 stale-while-revalidate 路径、
+**刻意都不进 PRECACHE** —— 一进一不进就会出现 SHELL-M3 那种「一对文件各自陈旧」。
 
 ### 6.3 IM 通道 —— `/setting` 命令模式(加性接进生产 `im-bridge.ts`)
 
@@ -379,6 +427,9 @@ ExecStart=/usr/bin/node /opt/gotong/dist/main.js
 | M5 | IM 加性 `/setting` 命令模式(owner/operator 闸) | `setting-im-e2e.test.ts` —— hermetic FakeBridge, 进/拒/exit/help 字节不变 |
 | M6 | 物理边界 + config-write E2E(承重 #2) | `setting-ops-boundary-e2e.test.ts` —— 真 restore 只经 CLI + 三面 read 一致 + config-write 三面边界 |
 | M7 | launcher source env + 收口文档 + 登记 + 回归 | launcher dry-run smoke(`GOTONG_LAUNCH_DRY_RUN=1`)+ `pnpm -r build` + host/web/cli vitest 全绿 |
+| UXCFG-M1 | host boot 自己读 `<space>/gotong.env`(§七) | `managed-env.test.ts` —— 白名单 / `process.env` 赢 / 非法值不注入 / 读不动响亮 |
+| UXCFG-M2 | `ENV_KNOBS` 4 → 23(手机上能改的同步变宽) | `ops-config-write.test.ts` —— 逐旋钮校验 + 布尔归一 + 拒收名单 |
+| UXCFG-M3 | 设置页重写 + `config-unset` + 出处判定减去自注入 | `setting-ui-contract.test.ts`(24) + `ops-config-write.test.ts`(70) + `setting-ops-boundary-e2e.test.ts`(6) |
 
 ---
 

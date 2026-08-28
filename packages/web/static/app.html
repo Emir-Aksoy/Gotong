@@ -38,6 +38,14 @@
          /sdui-standalone.html). Loading both here is not a duplicate — the
          sdui block was CUT out of styles.css, it lives in exactly one file. -->
     <link rel="stylesheet" href="/sdui-ui.css" />
+    <!-- UXCFG-M3: the settings console's own stylesheet. Same reasoning as the
+         line above — a scoped token block under .set-root, cut into its own
+         file rather than retrofitted into styles.css (3.7k lines, zero custom
+         properties, 17 tabs of ripple nobody can verify). It is deliberately
+         NOT in the service worker's PRECACHE: it rides the same runtime cache
+         path as its renderer, so the pair can never go stale independently
+         (the SHELL-M3 「一对文件各自陈旧」 trap). -->
+    <link rel="stylesheet" href="/setting-ui.css" />
     <!-- SHELL-M2: the choke point that decides which hub this client talks to.
          Must run before anything that reaches the hub — it installs the fetch
          patch and owns hubUrl(). `defer` preserves document order. -->
@@ -676,16 +684,24 @@
            which are two of the five pieces the settings page stitches. -->
       <section id="hub-health" class="hub-health" data-tab="settings" hidden></section>
 
-      <!-- setting-ops M4 — the unified deterministic "运维 / 设置" console. The
-           WEB surface of the host ops-core engine (CLI + web + IM share it).
-           Owner/admin only (gated by main[data-roles] above) + the
+      <!-- setting-ops M4 / UXCFG-M3 — the unified deterministic "运维 / 设置"
+           console. The WEB surface of the host ops-core engine (CLI + web + IM
+           share it). Owner/admin only (gated by main[data-roles] above) + the
            /api/admin/setting routes; rendered by /setting-ops-ui.js. Starts
            hidden and self-reveals once the catalog loads; on 503 (host didn't
-           wire the surface) it stays hidden, like #hub-health. Lists the FULL
-           ops lifecycle but only runs the safe online subset — destructive ops
-           (cold-start / restore / rotate-master-key) are listed with a "去 CLI
-           跑" hint and no button (CLI-only by physics). DEPLOY-B3 moved it
-           onto the admin 设置 page alongside the 体检 panel. -->
+           wire the surface) it stays hidden, like #hub-health.
+
+           UXCFG-M3 rebuilt what gets rendered inside. It used to be the ops
+           catalog echoed one-command-per-row, with `config-set` presented as a
+           raw argv textbox — a surface that only helped people who already
+           knew the knob names. Now the SAME engine drives labelled controls:
+           the panel consumes `config` as its data source, `config-set` as its
+           save button, and `config-price` as a real form; the read-only /
+           idempotent commands stay as action rows; and the destructive ones
+           (cold-start / restore / rotate-master-key) sit in a quarantined
+           danger zone with the exact CLI command and no button — CLI-only by
+           physics, since the hub is down or being replaced while they run.
+           DEPLOY-B3 moved it onto the admin 设置 page alongside 体检. -->
       <section id="setting-ops-panel" class="setting-ops-panel" data-tab="settings" hidden></section>
 
       <!-- SW-M9 A-M8 — the OPERATOR-console hub steward ("站点管家"). The

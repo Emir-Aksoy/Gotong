@@ -14,6 +14,7 @@ import { describe, it, expect } from 'vitest'
 
 import {
   applyEnvKnob,
+  unsetEnvKnob,
   applyPricingUpsert,
   readEffectiveConfig,
   isSecretKey,
@@ -241,6 +242,85 @@ describe('applyEnvKnob', () => {
   })
 })
 
+// ---------------------------------------------------------------------------
+// unsetEnvKnob (config-unset) — the way BACK to the built-in default
+//
+// Why this is its own verb rather than `config-set <KEY> <default>`: writing the
+// default still leaves a pin on disk. The page then goes on reporting "you set
+// this" about a knob the operator just asked to stop setting, and that pin
+// freezes today's default across every future release. `''` can't stand in for
+// "unset" either — it is already an *explicit clear* for the five sensory knobs.
+// ---------------------------------------------------------------------------
+
+describe('unsetEnvKnob', () => {
+  it('removes just that line and leaves its neighbours alone', async () => {
+    const fs = fakeFs({ [ENV_PATH]: 'GOTONG_WEB_PORT=3001\nGOTONG_MODE=team\n' })
+    const res = await unsetEnvKnob({ key: 'GOTONG_MODE' }, { envFilePath: ENV_PATH, surface: 'cli', ...fs })
+    const after = parseEnvFile(fs.files.get(ENV_PATH)!)
+    expect(after.has('GOTONG_MODE')).toBe(false)
+    expect(after.get('GOTONG_WEB_PORT')).toBe('3001')
+    expect((res.data as Record<string, unknown>).removed).toBe(true)
+    expect(res.lines.join(' ')).toContain('personal') // reports the default it falls back to
+  })
+
+  it('an absent key is a success that writes ZERO bytes', async () => {
+    // Load-bearing: `serializeEnvFile` always emits the header, so a blind
+    // read-merge-write here would conjure a managed gotong.env onto a hub that
+    // never had one — just because someone clicked "reset" on a knob that was
+    // already sitting on its default.
+    const fs = fakeFs()
+    const res = await unsetEnvKnob({ key: 'GOTONG_MODE' }, { envFilePath: ENV_PATH, surface: 'cli', ...fs })
+    expect(fs.writes).toBe(0)
+    expect(fs.files.has(ENV_PATH)).toBe(false)
+    expect((res.data as Record<string, unknown>).removed).toBe(false)
+  })
+
+  it('refuses a secret name on this door too — no write, no audit', async () => {
+    // Removing a secret line could not leak anything; the refusal is here so the
+    // editor has exactly ONE answer to "which keys do you touch". A second,
+    // laxer door is how a whitelist rots.
+    const fs = fakeFs({ [ENV_PATH]: 'ANTHROPIC_API_KEY=sk-live\n' })
+    const audit = fakeAudit()
+    await expect(
+      unsetEnvKnob({ key: 'ANTHROPIC_API_KEY' }, { envFilePath: ENV_PATH, surface: 'cli', audit: audit.sink, ...fs }),
+    ).rejects.toMatchObject({ code: 'secret_key_refused' })
+    expect(fs.writes).toBe(0)
+    expect(audit.calls).toHaveLength(0)
+    expect(parseEnvFile(fs.files.get(ENV_PATH)!).get('ANTHROPIC_API_KEY')).toBe('sk-live')
+  })
+
+  it('refuses an unknown (non-whitelisted) knob', async () => {
+    const fs = fakeFs({ [ENV_PATH]: 'GOTONG_FANCY=x\n' })
+    await expect(
+      unsetEnvKnob({ key: 'GOTONG_FANCY' }, { envFilePath: ENV_PATH, surface: 'cli', ...fs }),
+    ).rejects.toMatchObject({ code: 'unknown_knob' })
+    expect(fs.writes).toBe(0)
+  })
+
+  it('writes an audit row that says which key went away, and from where', async () => {
+    const fs = fakeFs({ [ENV_PATH]: 'GOTONG_MODE=team\n' })
+    const audit = fakeAudit()
+    await unsetEnvKnob({ key: 'GOTONG_MODE' }, { envFilePath: ENV_PATH, surface: 'butler', audit: audit.sink, ...fs })
+    expect(audit.calls).toHaveLength(1)
+    expect(audit.calls[0]).toMatchObject({
+      kind: 'env-unset',
+      surface: 'butler',
+      key: 'GOTONG_MODE',
+      removed: true,
+      takesEffectOnRestart: true,
+    })
+  })
+
+  it('says "unset" — not an empty default — for a knob whose default is empty', async () => {
+    // Five sensory knobs default to ''. Printing "falls back to the built-in
+    // default: " with nothing after the colon reads like a truncated message.
+    const fs = fakeFs({ [ENV_PATH]: 'GOTONG_BUTLER_VOICE_MODEL=mimo-v2.5-tts\n' })
+    const res = await unsetEnvKnob({ key: 'GOTONG_BUTLER_VOICE_MODEL' }, { envFilePath: ENV_PATH, surface: 'cli', ...fs })
+    expect(res.lines[0]).toContain('unset')
+    expect(parseEnvFile(fs.files.get(ENV_PATH)!).has('GOTONG_BUTLER_VOICE_MODEL')).toBe(false)
+  })
+})
+
 // ───────────────────────────────────────────────────────────────────────────
 // applyPricingUpsert (config-price)
 // ───────────────────────────────────────────────────────────────────────────
@@ -326,6 +406,21 @@ describe('readEffectiveConfig', () => {
     expect(JSON.stringify(view)).not.toContain('super-secret-value')
   })
 
+  it('names the env file it is describing — the settings page prints this path', async () => {
+    // UXCFG-M3: the view has to answer "where does this land?" itself. A UI that
+    // has to reconstruct the path (from `pricing.path`, say) is right only until
+    // someone overrides one of the two seams independently.
+    const fs = fakeFs()
+    const view = await readEffectiveConfig({
+      spaceDir: '/space',
+      env: {},
+      envFilePath: ENV_PATH,
+      pricingPath: PRICING_PATH,
+      readFileImpl: fs.readFileImpl,
+    })
+    expect(view.envFilePath).toBe(ENV_PATH)
+  })
+
   it('splits knob file value vs live env value', async () => {
     const fs = fakeFs({ [ENV_PATH]: 'GOTONG_MODE=team\n' })
     const view = await readEffectiveConfig({
@@ -341,6 +436,69 @@ describe('readEffectiveConfig', () => {
     expect(mode.envValue).toBe(null)
     expect(port.fileValue).toBe(null)
     expect(port.envValue).toBe('9000')
+  })
+
+  // ── envInjectedKeys: the hub echoing its own file back is not an override ──
+  //
+  // UXCFG-M1 made the host read the managed env file at boot and inject it into
+  // `process.env`. From that moment `deps.env[key]` returns the hub's OWN value,
+  // and a naive read reports "set by the environment" — which the settings page
+  // renders as a LOCKED control. The three tests below pin the whole rule: what
+  // we injected is subtracted, what we did not is not.
+
+  it("does not mistake the hub's own boot injection for an environment override", async () => {
+    // The file says team; the host injected that same value at boot. This is a
+    // FILE-controlled knob and the operator must still be able to change it.
+    const fs = fakeFs({ [ENV_PATH]: 'GOTONG_MODE=team\n' })
+    const view = await readEffectiveConfig({
+      spaceDir: '/space',
+      env: { GOTONG_MODE: 'team' },
+      envInjectedKeys: ['GOTONG_MODE'],
+      envFilePath: ENV_PATH,
+      pricingPath: PRICING_PATH,
+      readFileImpl: fs.readFileImpl,
+    })
+    const mode = view.knobs.find((k) => k.key === 'GOTONG_MODE')!
+    expect(mode.fileValue).toBe('team')
+    expect(mode.envValue).toBe(null)
+  })
+
+  it('reads as default again the moment the file line is gone, even before restart', async () => {
+    // The reset-to-default path: `config-unset` removed the line, but the value
+    // this host injected at boot is still sitting in `process.env` and will be
+    // until the next restart. Without the subtraction the operator would watch a
+    // successful reset turn into "set by the environment".
+    const fs = fakeFs({ [ENV_PATH]: '' })
+    const view = await readEffectiveConfig({
+      spaceDir: '/space',
+      env: { GOTONG_MODE: 'team' },
+      envInjectedKeys: ['GOTONG_MODE'],
+      envFilePath: ENV_PATH,
+      pricingPath: PRICING_PATH,
+      readFileImpl: fs.readFileImpl,
+    })
+    const mode = view.knobs.find((k) => k.key === 'GOTONG_MODE')!
+    expect(mode.fileValue).toBe(null)
+    expect(mode.envValue).toBe(null)
+  })
+
+  it('still reports a GENUINE external override — it is never in the injected set', async () => {
+    // The safety net. `loadManagedEnv` records a key in `applied` only when it
+    // actually wrote it; a variable the real environment already had lands in
+    // `shadowed` instead. So the subtraction structurally cannot hide a real
+    // `Environment=` / `export`, and the control stays locked as it should.
+    const fs = fakeFs({ [ENV_PATH]: 'GOTONG_MODE=team\n' })
+    const view = await readEffectiveConfig({
+      spaceDir: '/space',
+      env: { GOTONG_MODE: 'team', GOTONG_WEB_PORT: '9000' },
+      envInjectedKeys: ['GOTONG_MODE'],
+      envFilePath: ENV_PATH,
+      pricingPath: PRICING_PATH,
+      readFileImpl: fs.readFileImpl,
+    })
+    const port = view.knobs.find((k) => k.key === 'GOTONG_WEB_PORT')!
+    expect(port.envValue).toBe('9000')
+    expect(port.fileValue).toBe(null)
   })
 
   it('reports pricing absent / present / corrupt honestly', async () => {
@@ -400,6 +558,36 @@ describe('runOpsCommand config-write gate', () => {
     expect(res.tier).toBe('config-write')
     expect(parseEnvFile(fs.files.get(ENV_PATH)!).get('GOTONG_MODE')).toBe('team')
     expect(audit.calls).toHaveLength(1)
+  })
+
+  it('refuses config-unset from IM too — the way back is the same tier as the way in', async () => {
+    const fs = fakeFs({ [ENV_PATH]: 'GOTONG_MODE=team\n' })
+    await expect(runOpsCommand('config-unset', ['GOTONG_MODE'], IM, depsWith(fs))).rejects.toMatchObject({
+      code: 'config_write_not_permitted',
+      tier: 'config-write',
+    })
+    expect(fs.writes).toBe(0)
+  })
+
+  it('set then unset THROUGH the chokepoint leaves the file with no pin at all', async () => {
+    // The round-trip the settings page needs: this is what "reset to default"
+    // has to mean. Setting the default value instead would leave a line behind
+    // and the page would keep answering "you set this".
+    const fs = fakeFs()
+    const set = await runOpsCommand('config-set', ['GOTONG_MODE', 'team'], CLI, depsWith(fs))
+    expect(set.command).toBe('config-set')
+    expect(parseEnvFile(fs.files.get(ENV_PATH)!).get('GOTONG_MODE')).toBe('team')
+
+    const unset = await runOpsCommand('config-unset', ['GOTONG_MODE'], CLI, depsWith(fs))
+    expect(unset.command).toBe('config-unset')
+    expect(unset.tier).toBe('config-write')
+    expect(parseEnvFile(fs.files.get(ENV_PATH)!).has('GOTONG_MODE')).toBe(false)
+  })
+
+  it('config-unset without a key is a usage error, not a silent no-op', async () => {
+    const fs = fakeFs()
+    await expect(runOpsCommand('config-unset', [], CLI, depsWith(fs))).rejects.toBeInstanceOf(OpsError)
+    expect(fs.writes).toBe(0)
   })
 
   it('runs the config READ view on any surface (no gate)', async () => {

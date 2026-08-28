@@ -72,6 +72,13 @@ export interface SettingOpsServiceDeps {
   envFilePath?: string
   /** Pricing override file `config-price` writes. Defaults to <space>/pricing.json. */
   pricingPath?: string
+  /**
+   * Env keys THIS host injected at boot from the managed env file
+   * (`loadManagedEnv().applied`). Without them the settings page reads the hub's
+   * own file back out of `process.env` and calls it an environment override —
+   * which it renders as a LOCKED control. Absent → no subtraction.
+   */
+  envInjectedKeys?: readonly string[]
   /** Best-effort audit sink for config writes (the IdentityStore satisfies it). */
   audit?: SettingAuditSink
 }
@@ -123,6 +130,7 @@ export function createSettingOpsService(deps: SettingOpsServiceDeps): SettingOps
       ...(deps.backupDir ? { backupDir: deps.backupDir } : {}),
       ...(deps.envFilePath ? { envFilePath: deps.envFilePath } : {}),
       ...(deps.pricingPath ? { pricingPath: deps.pricingPath } : {}),
+      ...(deps.envInjectedKeys ? { envInjectedKeys: deps.envInjectedKeys } : {}),
       ...(audit ? { audit } : {}),
     }
   }

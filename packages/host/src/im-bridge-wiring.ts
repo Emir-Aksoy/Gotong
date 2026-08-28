@@ -46,6 +46,12 @@ export interface ImBridgeWiringDeps {
   log: ImLogger
   /** Workspace 根(GOTONG_SPACE)。reachable / runtime / butler 路径都从它长。 */
   spaceRoot: string
+  /**
+   * Env keys this host injected at boot from the managed env file. `/setting
+   * config` subtracts them so the hub's own file is not reported as an
+   * environment override. See `EffectiveConfigDeps.envInjectedKeys`.
+   */
+  envInjectedKeys?: readonly string[]
   /** 与 web 总览同一个 live 体检面——IM `status` 不许有第二个真相。 */
   health: AdminHealthSurface
   /** host 已解析的 GOTONG_DEFAULT_LANG——断供文案随它,不二次读 env。 */
@@ -153,7 +159,12 @@ export async function armImBridgeWiring(deps: ImBridgeWiringDeps): Promise<ImBri
   // host 生命周期一张 Map。
   const imSettingMode = new Map<string, boolean>()
   const imOpsCaller = { surface: 'im' as const, allowConfigWrite: false }
-  const imOpsDeps = { spaceDir: deps.spaceRoot, env: process.env, health: deps.health }
+  const imOpsDeps = {
+    spaceDir: deps.spaceRoot,
+    env: process.env,
+    health: deps.health,
+    ...(deps.envInjectedKeys ? { envInjectedKeys: deps.envInjectedKeys } : {}),
+  }
   // HANDS-M3b — `GOTONG_PUBLIC_URL` is knob #111, already the answer to "what
   // address do people reach this hub at". Reusing it keeps the count at 116 and,
   // more to the point, means a hub that is reachable has working links without

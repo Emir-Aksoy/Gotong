@@ -1064,7 +1064,7 @@ async function main(): Promise<void> {
   // HANDS-M3c — 基础设置写面(tier 2「每次 park」):角色判定与 pack_backup 同源,写走 ops-core 同一咽喉与同一审计 action;identity 缺席 ⇒ 不装(同姿态)。
   const butlerConfigOps = identityForBackup
     ? buildButlerConfigOps({
-        ops: { spaceDir: space.root, env: process.env },
+        ops: { spaceDir: space.root, env: process.env, envInjectedKeys: managedEnv.applied },
         membershipRole: (uid: string) => identityForBackup.getMembership(uid)?.role,
         audit: identityForBackup,
         logger: log,
@@ -2245,6 +2245,9 @@ async function main(): Promise<void> {
   const settingOps = createSettingOpsService({
     spaceDir: space.root,
     env: process.env,
+    // What WE injected at boot is not an environment override — without this the
+    // page locks every knob one save later. See EffectiveConfigDeps.envInjectedKeys.
+    envInjectedKeys: managedEnv.applied,
     health: adminHealth,
     ...(identity ? { audit: identity } : {}),
   })
@@ -2256,6 +2259,7 @@ async function main(): Promise<void> {
       identity,
       log,
       spaceRoot: space.root,
+      envInjectedKeys: managedEnv.applied,
       health: adminHealth,
       defaultLang: config.defaultLang,
       // VOICE-M3/ASR-M3/VIS-M3/PUSH-M3 — opt-in 语音回复+收听+图片识别+Web Push 补位;未配 undefined = 字节不变。

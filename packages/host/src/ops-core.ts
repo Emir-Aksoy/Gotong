@@ -54,6 +54,7 @@ import {
 import type { AdminHealthSurface, HealthSnapshot } from './admin-health.js'
 import {
   applyEnvKnob,
+  unsetEnvKnob,
   applyPricingUpsert,
   readEffectiveConfig,
   type ConfigWriteAuditSink,
@@ -193,6 +194,14 @@ export interface OpsDeps {
   envFilePath?: string
   /** Pricing override file written by `config-price`. Defaults to <space>/pricing.json. */
   pricingPath?: string
+  /**
+   * Env keys a RUNNING host injected from the managed env file at boot
+   * (`loadManagedEnv().applied`). Present only on the surfaces a live host wires
+   * (web / IM); absent in the pre-boot CLI path, where nothing was injected.
+   * `config` subtracts them so the hub's own file is not misread as an external
+   * environment override. See `EffectiveConfigDeps.envInjectedKeys`.
+   */
+  envInjectedKeys?: readonly string[]
   /**
    * Best-effort audit sink for config-write. The SURFACE binds the actor context
    * (CLI = system, web owner = their session) and passes a sink here; ops-core
@@ -509,6 +518,14 @@ const COMMANDS: OpsCommandDef[] = [
     run: runConfigSet,
   },
   {
+    id: 'config-unset',
+    tier: 'config-write',
+    title: 'Unset an env knob',
+    summary: 'Remove one env knob from <space>/gotong.env so the built-in default applies again (takes effect on restart).',
+    whereToRun: OWNER_HINT,
+    run: runConfigUnset,
+  },
+  {
     id: 'config-price',
     tier: 'config-write',
     title: 'Set a model price',
@@ -745,10 +762,18 @@ async function runConfig(_args: readonly string[], _caller: OpsCaller, deps: Ops
     env: deps.env ?? {},
     envFilePath: envFileOf(deps),
     pricingPath: pricingFileOf(deps),
+    ...(deps.envInjectedKeys ? { envInjectedKeys: deps.envInjectedKeys } : {}),
     ...(deps.readFileImpl ? { readFileImpl: deps.readFileImpl } : {}),
   })
 
-  const lines: string[] = ['config (effective — managed knobs take effect on the NEXT restart):', '  knobs:']
+  const lines: string[] = [
+    'config (effective — managed knobs take effect on the NEXT restart):',
+    // Where it lands. Every other surface says "<space>/gotong.env"; a reader
+    // who wants to `cat` it deserves the real path, and UXCFG-M1 made this the
+    // file the hub actually reads at boot.
+    `  file: ${view.envFilePath}`,
+    '  knobs:',
+  ]
   for (const k of view.knobs) {
     const file = k.fileValue ?? '—'
     const env = k.envValue ?? '—'
@@ -782,6 +807,30 @@ async function runConfigSet(args: readonly string[], caller: OpsCaller, deps: Op
     },
   )
   return { command: 'config-set', tier: 'config-write', lines: result.lines, data: result.data }
+}
+
+/**
+ * config-write tier — remove one env knob so the built-in default applies again.
+ *
+ * Deliberately its own verb rather than `config-set <KEY> <default>`: setting the
+ * default still leaves a pin on disk, which keeps reporting as an operator choice
+ * and freezes today's default across future releases. See `unsetEnvKnob`.
+ */
+async function runConfigUnset(args: readonly string[], caller: OpsCaller, deps: OpsDeps): Promise<OpsResult> {
+  const [key] = args
+  if (!key) throw new OpsError('invalid_input', 'usage: config-unset <KEY>')
+  const result = await unsetEnvKnob(
+    { key },
+    {
+      envFilePath: envFileOf(deps),
+      surface: caller.surface,
+      ...(deps.audit ? { audit: deps.audit } : {}),
+      ...(deps.readFileImpl ? { readFileImpl: deps.readFileImpl } : {}),
+      ...(deps.writeFileImpl ? { writeFileImpl: deps.writeFileImpl } : {}),
+      ...(deps.mkdirpImpl ? { mkdirpImpl: deps.mkdirpImpl } : {}),
+    },
+  )
+  return { command: 'config-unset', tier: 'config-write', lines: result.lines, data: result.data }
 }
 
 /** config-write tier — upsert one model's price in pricing.json (validated first). */

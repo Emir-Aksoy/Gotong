@@ -32,7 +32,7 @@
  */
 
 import { execFileSync } from 'node:child_process'
-import { existsSync, mkdirSync, readFileSync, readdirSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
@@ -440,5 +440,55 @@ maybe('setting-ops M6 — physical tier boundary across CLI / web / IM (real sta
       },
       (e: unknown) => expect(e).toBeInstanceOf(OpsError),
     )
+  })
+
+  // ⑤ ─────────────────────────────────────────────────────────────────────────
+  it('\u2464 the hub\u2019s own boot injection is not reported as an environment override', async () => {
+    // UXCFG-M1 has the host read the managed env file at boot and inject it into
+    // `process.env`. From then on the raw lookup reports the hub's OWN file as an
+    // environment override — and the settings page renders that as a LOCKED
+    // control, so every knob would go read-only one restart after any save.
+    //
+    // This walks the REAL service (depsFor -> runOpsCommand -> readEffectiveConfig),
+    // which is the chain `main.ts` feeds, and pins both directions at once.
+    writeFileSync(cfgEnv, 'GOTONG_MODE=team\n', 'utf8')
+    const bootEnv: Record<string, string | undefined> = {
+      GOTONG_MODE: 'team', // what WE injected at boot, from the file above
+      GOTONG_WEB_PORT: '9000', // a genuine external `Environment=` / `export`
+    }
+    const owner = { userId: null, isOwner: true }
+
+    const aware = createSettingOpsService({
+      spaceDir,
+      env: bootEnv,
+      envFilePath: cfgEnv,
+      pricingPath: cfgPricing,
+      envInjectedKeys: ['GOTONG_MODE'],
+    })
+    const view = ((await aware.run('config', [], owner)).data ?? {}) as {
+      knobs: Array<{ key: string; fileValue: string | null; envValue: string | null }>
+    }
+    const mode = view.knobs.find((k) => k.key === 'GOTONG_MODE')!
+    const port = view.knobs.find((k) => k.key === 'GOTONG_WEB_PORT')!
+    // Ours: file-controlled, and therefore still editable on the page.
+    expect(mode.fileValue).toBe('team')
+    expect(mode.envValue).toBe(null)
+    // Theirs: untouched. `loadManagedEnv` only lists keys it actually wrote, so a
+    // variable the environment already had is never in the injected set and this
+    // subtraction structurally cannot hide it.
+    expect(port.envValue).toBe('9000')
+
+    // Without the option (the pre-boot CLI path, where nothing was injected) the
+    // view is unchanged from before this fix — the seam is additive.
+    const plain = createSettingOpsService({
+      spaceDir,
+      env: bootEnv,
+      envFilePath: cfgEnv,
+      pricingPath: cfgPricing,
+    })
+    const plainView = ((await plain.run('config', [], owner)).data ?? {}) as {
+      knobs: Array<{ key: string; envValue: string | null }>
+    }
+    expect(plainView.knobs.find((k) => k.key === 'GOTONG_MODE')!.envValue).toBe('team')
   })
 })

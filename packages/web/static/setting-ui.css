@@ -1,0 +1,451 @@
+/*
+ * UXCFG-M3 — 设置台的作用域样式。
+ *
+ * ## 为什么是一个独立文件、并且只作用在 `.set-root` 里
+ *
+ * `styles.css` 有 3700 行、零个 CSS 变量、没有暗色主题;把 token 体系倒灌回去
+ * 是一次波及 17 个标签页的整壳重做,远超「设置页面的前端要重新设计过」这一刀
+ * 该有的爆炸半径。所以走 POLISH-M1 给 `sdui-ui.css` 立过的先例:**一份作用域
+ * 化的 token 块**,整段样式随它服务的那个渲染器一起旅行,壳的其余部分一个字节
+ * 不动。
+ *
+ * 与 `sdui-ui.css` 同一条纪律:本文件与 `setting-ui.js` 成对,且**刻意不进
+ * service worker 的 PRECACHE**——预缓存的一半配上运行时新鲜的另一半,就是
+ * SHELL-M3 记过档的那种「一对文件各自陈旧」的坑。
+ *
+ * ## 单主题是一个决定,不是一处遗漏
+ *
+ * admin 壳自己没有暗色模式(`styles.css` 里零个 `prefers-color-scheme`)。在
+ * 一个浅色壳里嵌一块深色设置台,得到的不是「支持暗色」,是不协调。所以这里**每
+ * 一个颜色都显式画出来**、不继承、也不跟随系统——将来整壳上暗色时,改的是这
+ * 一处 token 块。
+ *
+ * ## 配色的出处
+ *
+ * 强调色 `#0f6a72` 是壳里 `h1::before` 那颗青点 `#6cc` 的深版——不是新发明的
+ * 一个色,是把产品已有的那点身份加深到能承载正文对比度。全部前景/背景对都用
+ * WCAG 相对亮度算过(最低 5.4:1,正文 17.6:1),不是目测。
+ *
+ * ## 排版:标签是人的字,值是文件里的字
+ *
+ * 这条是本页的设计主张。端口、周期、模型 id、文件路径一律等宽 + `tabular-nums`,
+ * 因为它们**真的就是 `<space>/gotong.env` 里的那几行字节**;说明文字用系统 UI
+ * 字体。刻意不引 Google Fonts:这个 admin 面板由 hub 自己在局域网/离线机器上
+ * 服务,一个外部字体请求要么是一次不该有的出网、要么在离线时静默回落——对一个
+ * 自托管产品来说两者都是错的。
+ */
+
+.set-root {
+  /* ── 颜色 ── */
+  --set-ink: #191917;          /* 17.61:1 on surface */
+  --set-muted: #63625c;        /* 6.12:1 on surface */
+  --set-faint: #8a8981;
+  --set-surface: #ffffff;
+  --set-ground: #f7f7f5;       /* 与壳 body 同底 */
+  --set-line: #e4e3de;
+  --set-line-strong: #d2d1ca;
+
+  --set-accent: #0f6a72;       /* 6.32:1 on surface, 白字反色同为 6.32:1 */
+  --set-accent-soft: #e8f2f2;
+  --set-accent-line: #b9d7d9;
+
+  --set-ok: #1e6b3a;
+  --set-ok-soft: #e7f3ea;
+  --set-warn: #8a5a06;
+  --set-warn-soft: #fdf4e3;
+  --set-danger: #a8322a;
+  --set-danger-soft: #fbeceb;
+  --set-env: #5b4a86;          /* 「被环境覆盖」——一条你此刻管不着的行 */
+  --set-env-soft: #f0edf8;
+
+  /* ── 排版 ── */
+  --set-ui: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+    "Hiragino Sans GB", "Microsoft YaHei", Roboto, sans-serif;
+  --set-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
+    "Liberation Mono", monospace;
+  --set-fs: 0.94rem;
+  --set-fs-sm: 0.82rem;
+  --set-fs-xs: 0.74rem;
+
+  /* ── 尺度 ── */
+  --set-radius: 10px;
+  --set-radius-sm: 6px;
+  --set-gap: 1rem;
+  --set-touch: 38px;
+
+  font-family: var(--set-ui);
+  font-size: var(--set-fs);
+  line-height: 1.55;
+  color: var(--set-ink);
+  background: var(--set-ground);
+  padding: 1.25rem 1.25rem 2rem;
+  max-width: 62rem;
+}
+
+/* ── 页眉 ────────────────────────────────────────────────────────────── */
+
+.set-head { margin: 0 0 1.25rem; }
+.set-head h2 {
+  margin: 0 0 0.35rem;
+  font-size: 1.32rem;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  text-wrap: balance;
+  color: var(--set-ink);
+}
+.set-lede {
+  margin: 0;
+  max-width: 46rem;
+  color: var(--set-muted);
+  font-size: var(--set-fs-sm);
+}
+
+/* 文件卡 —— 本页的论点:配置不在某个藏起来的数据库里,就是这个文件。 */
+.set-file {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.4rem 0.75rem;
+  margin-top: 0.9rem;
+  padding: 0.7rem 0.85rem;
+  background: var(--set-accent-soft);
+  border: 1px solid var(--set-accent-line);
+  border-radius: var(--set-radius);
+}
+.set-file-label {
+  font-size: var(--set-fs-xs);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--set-accent);
+  font-weight: 600;
+}
+.set-file-path {
+  font-family: var(--set-mono);
+  font-size: var(--set-fs-sm);
+  color: var(--set-ink);
+  word-break: break-all;
+}
+.set-file-note {
+  flex-basis: 100%;
+  font-size: var(--set-fs-xs);
+  color: var(--set-muted);
+  margin: 0;
+}
+
+.set-status {
+  min-height: 1.3em;
+  margin: 0.75rem 0 0;
+  font-size: var(--set-fs-sm);
+  color: var(--set-muted);
+}
+.set-status.is-error { color: var(--set-danger); }
+.set-status.is-ok { color: var(--set-ok); }
+
+/* 读不动 env 文件时的响亮横幅 —— 「改了不生效」必须说出来。 */
+.set-alarm {
+  margin: 0.9rem 0 0;
+  padding: 0.7rem 0.85rem;
+  border-radius: var(--set-radius);
+  background: var(--set-danger-soft);
+  border: 1px solid var(--set-danger);
+  color: var(--set-danger);
+  font-size: var(--set-fs-sm);
+}
+
+/* ── 分组卡 ──────────────────────────────────────────────────────────── */
+
+.set-group {
+  margin-top: var(--set-gap);
+  background: var(--set-surface);
+  border: 1px solid var(--set-line);
+  border-radius: var(--set-radius);
+  overflow: hidden;
+}
+.set-group-head {
+  padding: 0.85rem 1rem 0.7rem;
+  border-bottom: 1px solid var(--set-line);
+  background: var(--set-surface);
+}
+.set-group-head h3 {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 620;
+  color: var(--set-ink);
+}
+.set-group-note {
+  margin: 0.2rem 0 0;
+  font-size: var(--set-fs-sm);
+  color: var(--set-muted);
+}
+
+/* ── 一行一个旋钮 ────────────────────────────────────────────────────── */
+
+.set-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 15rem;
+  gap: 0.5rem 1.25rem;
+  align-items: start;
+  padding: 0.85rem 1rem;
+  border-top: 1px solid var(--set-line);
+}
+.set-group-head + .set-row { border-top: 0; }
+.set-row.is-dirty { background: var(--set-warn-soft); }
+
+.set-row-label {
+  margin: 0;
+  font-weight: 560;
+  color: var(--set-ink);
+}
+.set-row-help {
+  margin: 0.15rem 0 0;
+  font-size: var(--set-fs-sm);
+  color: var(--set-muted);
+}
+.set-row-key {
+  margin: 0.25rem 0 0;
+  font-family: var(--set-mono);
+  font-size: var(--set-fs-xs);
+  color: var(--set-faint);
+  word-break: break-all;
+}
+
+.set-row-ctl {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.4rem;
+  min-width: 0;
+}
+
+.set-ctl {
+  font-family: var(--set-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--set-fs-sm);
+  color: var(--set-ink);
+  background: var(--set-surface);
+  border: 1px solid var(--set-line-strong);
+  border-radius: var(--set-radius-sm);
+  padding: 0 0.55rem;
+  height: var(--set-touch);
+  width: 100%;
+  box-sizing: border-box;
+}
+select.set-ctl { font-family: var(--set-ui); padding-right: 0.35rem; }
+.set-ctl:focus-visible {
+  outline: 2px solid var(--set-accent);
+  outline-offset: 1px;
+  border-color: var(--set-accent);
+}
+.set-ctl:disabled {
+  background: var(--set-ground);
+  color: var(--set-faint);
+  cursor: not-allowed;
+}
+
+/* 布尔用真开关而不是又一个下拉框 —— 「开/关」是这一页最常按的动作。 */
+.set-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  min-height: var(--set-touch);
+  cursor: pointer;
+  font-size: var(--set-fs-sm);
+  color: var(--set-ink);
+}
+.set-switch input { position: absolute; opacity: 0; width: 0; height: 0; }
+.set-switch-track {
+  flex: none;
+  width: 42px;
+  height: 24px;
+  border-radius: 12px;
+  background: #cfcec7;
+  border: 1px solid var(--set-line-strong);
+  position: relative;
+  transition: background 0.15s ease;
+}
+.set-switch-track::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
+  transition: transform 0.15s ease;
+}
+.set-switch input:checked + .set-switch-track { background: var(--set-accent); border-color: var(--set-accent); }
+.set-switch input:checked + .set-switch-track::after { transform: translateX(18px); }
+.set-switch input:focus-visible + .set-switch-track { outline: 2px solid var(--set-accent); outline-offset: 2px; }
+.set-switch input:disabled + .set-switch-track { opacity: 0.5; }
+.set-switch input:disabled ~ .set-switch-text { color: var(--set-faint); }
+
+/* ── 出处徽章 —— 这一格现在到底是谁说了算 ───────────────────────────── */
+
+.set-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem 0.6rem;
+}
+.set-prov {
+  display: inline-block;
+  padding: 0.1rem 0.45rem;
+  border-radius: 999px;
+  font-size: var(--set-fs-xs);
+  font-weight: 600;
+  white-space: nowrap;
+}
+.set-prov.is-default { background: var(--set-ground); color: var(--set-muted); border: 1px solid var(--set-line); }
+.set-prov.is-file { background: var(--set-ok-soft); color: var(--set-ok); }
+.set-prov.is-env { background: var(--set-env-soft); color: var(--set-env); }
+.set-prov.is-dirty { background: var(--set-warn-soft); color: var(--set-warn); }
+
+.set-linkbtn {
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  font-size: var(--set-fs-xs);
+  color: var(--set-accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+.set-linkbtn:hover { color: var(--set-ink); }
+.set-linkbtn:focus-visible { outline: 2px solid var(--set-accent); outline-offset: 2px; border-radius: 2px; }
+.set-linkbtn[hidden] { display: none; }
+
+/* 被环境覆盖的行:控件仍然显示真实生效值,但改不动——并且说清楚为什么。 */
+.set-shadow-note {
+  margin: 0;
+  font-size: var(--set-fs-xs);
+  color: var(--set-env);
+}
+
+/* ── 保存条 ──────────────────────────────────────────────────────────── */
+
+.set-bar {
+  position: sticky;
+  bottom: 0;
+  z-index: 5;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.6rem 0.9rem;
+  margin-top: var(--set-gap);
+  padding: 0.75rem 1rem;
+  background: var(--set-surface);
+  border: 1px solid var(--set-accent-line);
+  border-radius: var(--set-radius);
+  box-shadow: 0 -2px 12px rgba(25, 25, 23, 0.08);
+}
+.set-bar[hidden] { display: none; }
+.set-bar-text { flex: 1 1 14rem; font-size: var(--set-fs-sm); color: var(--set-muted); }
+.set-bar-text strong { color: var(--set-ink); }
+
+.set-btn {
+  font: inherit;
+  font-size: var(--set-fs-sm);
+  font-weight: 560;
+  min-height: var(--set-touch);
+  padding: 0 1rem;
+  border-radius: var(--set-radius-sm);
+  border: 1px solid var(--set-line-strong);
+  background: var(--set-surface);
+  color: var(--set-ink);
+  cursor: pointer;
+}
+.set-btn:hover { border-color: var(--set-accent); color: var(--set-accent); }
+.set-btn:focus-visible { outline: 2px solid var(--set-accent); outline-offset: 2px; }
+.set-btn[disabled] { opacity: 0.55; cursor: not-allowed; }
+.set-btn.is-primary {
+  background: var(--set-accent);
+  border-color: var(--set-accent);
+  color: #fff;
+}
+.set-btn.is-primary:hover { background: #0b565c; border-color: #0b565c; color: #fff; }
+
+/* ── 凭证 / 动作 / 危险区 ────────────────────────────────────────────── */
+
+.set-chiprow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  padding: 0.85rem 1rem;
+}
+.set-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.28rem 0.6rem;
+  border-radius: 999px;
+  border: 1px solid var(--set-line);
+  background: var(--set-ground);
+  font-family: var(--set-mono);
+  font-size: var(--set-fs-xs);
+  color: var(--set-muted);
+}
+.set-chip.is-set { background: var(--set-ok-soft); border-color: var(--set-ok-soft); color: var(--set-ok); }
+
+.set-act {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.4rem 1rem;
+  align-items: center;
+  padding: 0.75rem 1rem;
+  border-top: 1px solid var(--set-line);
+}
+.set-group-head + .set-act { border-top: 0; }
+.set-act-name { margin: 0; font-weight: 560; }
+.set-act-note { margin: 0.1rem 0 0; font-size: var(--set-fs-sm); color: var(--set-muted); }
+.set-out {
+  grid-column: 1 / -1;
+  margin: 0.5rem 0 0;
+  padding: 0.6rem 0.7rem;
+  background: var(--set-ground);
+  border: 1px solid var(--set-line);
+  border-radius: var(--set-radius-sm);
+  font-family: var(--set-mono);
+  font-size: var(--set-fs-xs);
+  line-height: 1.5;
+  color: var(--set-ink);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 22rem;
+  overflow: auto;
+}
+.set-out.is-error { color: var(--set-danger); border-color: var(--set-danger); background: var(--set-danger-soft); }
+.set-out[hidden] { display: none; }
+
+.set-group.is-danger { border-color: var(--set-danger); }
+.set-group.is-danger .set-group-head { background: var(--set-danger-soft); border-bottom-color: var(--set-danger); }
+.set-group.is-danger .set-group-head h3 { color: var(--set-danger); }
+.set-cli {
+  grid-column: 1 / -1;
+  margin: 0.35rem 0 0;
+  padding: 0.5rem 0.6rem;
+  background: var(--set-ink);
+  color: #f4f3ee;
+  border-radius: var(--set-radius-sm);
+  font-family: var(--set-mono);
+  font-size: var(--set-fs-xs);
+  overflow-x: auto;
+  white-space: pre;
+}
+
+/* ── 窄屏 ────────────────────────────────────────────────────────────── */
+
+@media (max-width: 720px) {
+  .set-root { padding: 1rem 0.75rem 2rem; }
+  .set-row,
+  .set-act { grid-template-columns: minmax(0, 1fr); }
+  .set-row-ctl { max-width: 22rem; }
+  .set-act > .set-btn { justify-self: start; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .set-switch-track,
+  .set-switch-track::after { transition: none; }
+}
