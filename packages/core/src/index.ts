@@ -89,6 +89,10 @@ export type {
 } from './scheduler.js'
 
 export { Transcript } from './transcript.js'
+// perf audit A③ (修订) —— 「哪些流片段值得落盘」的唯一判据。导出是为了让
+// @gotong/host 的防腐门能拿真判据去对 `LlmStreamChunk` 那个联合逐个点名:
+// 白名单的代价是「新加的动作型片段会被静默丢掉」,那道门把它变成红灯。
+export { chunkDeservesDisk } from './transcript.js'
 
 export { createLogger } from './logger.js'
 export type { Logger, LogLevel, LoggerOptions } from './logger.js'

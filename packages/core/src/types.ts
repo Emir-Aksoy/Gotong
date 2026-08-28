@@ -302,14 +302,19 @@ export type TranscriptEntry =
    * task + agent attribution so a single SSE stream can multiplex
    * many concurrent agents.
    *
-   * EPHEMERAL since perf audit A③: producers use
-   * `Transcript.emitEphemeral`, so chunks reach live observers
-   * (hub.onEvent → admin SSE / stdout line / chunk sinks) but are
-   * never pushed to the in-memory log or persisted to disk — the
-   * final task_result carries the full text, so stored chunks were
-   * pure redundancy growing RAM + transcript.jsonl without bound.
-   * The kind stays in this union because transcripts persisted
-   * BEFORE the change still replay entries of it through `load()`.
+   * SPLIT since perf audit A③: producers use `Transcript.emitChunk`,
+   * which routes on chunk type. Prose (`text` / `usage` / `end` /
+   * `error`) is EPHEMERAL — it reaches live observers (hub.onEvent →
+   * admin SSE / stdout line / chunk sinks) but is never pushed to the
+   * in-memory log or persisted, because the final task_result carries
+   * the full text and stored chunks were pure redundancy growing RAM +
+   * transcript.jsonl without bound. `tool_use` IS persisted: nothing
+   * else on disk records which tool an agent ran (a task_result carries
+   * `toolRounds`, a number), so A③'s original blanket left "what did
+   * this agent actually do" unanswerable after the process exits.
+   * Consumers must therefore treat an absent chunk kind as normal —
+   * an entry of this kind may be a durable action record OR a replayed
+   * entry from a transcript persisted before A③.
    *
    * `chunk` is the provider-neutral `LlmStreamChunk` payload (text /
    * tool_use / usage / end / error). Declared as `unknown` here to

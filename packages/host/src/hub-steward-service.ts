@@ -502,10 +502,13 @@ export function createHubStewardService(deps: {
   agentOpts.maxTokens = config.maxTokens ?? 2048
   agentOpts.onStreamChunk = (chunk, task) => {
     // Mirror the assistant: fan chunks out to live transcript observers so
-    // an operator watching the SSE stream sees the steward typing. Ephemeral
-    // (perf audit A③) — never stored. Best-effort.
+    // an operator watching the SSE stream sees the steward typing. Routed
+    // through `emitChunk`: the steward has no tools today, so every chunk it
+    // emits is ephemeral (perf audit A③) — going through the one router
+    // anyway means that the day it grows tools, its actions reach disk
+    // without anyone having to remember this line. Best-effort.
     try {
-      hub.transcript.emitEphemeral({
+      hub.transcript.emitChunk({
         ts: Date.now(),
         kind: 'llm_stream_chunk',
         data: { taskId: task.id, agentId: ids.agentId, chunk },

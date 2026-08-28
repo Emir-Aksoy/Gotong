@@ -157,7 +157,7 @@ function fakeRoster(
     chunks,
     hub: {
       register: (p: Participant) => registered.push(p),
-      transcript: { emitEphemeral: (e: { data?: unknown }) => chunks.push(e.data as Record<string, unknown>) },
+      transcript: { emitChunk: (e: { data?: unknown }) => chunks.push(e.data as Record<string, unknown>) },
     },
     space: {
       agents: async () => rows,

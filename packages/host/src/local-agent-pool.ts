@@ -1046,18 +1046,18 @@ export class LocalAgentPool implements ManagedAgentLifecycle {
     // real provider HTTP path is hard to drive from a unit test).
     const onAuthFailure = this.buildAuthFailureHook(record, resolution)
 
-    // Phase 8 M6 — fan LLM stream chunks out to live transcript observers
-    // so the admin UI (M7) can show real-time agent output. Ephemeral since
-    // perf audit A③: chunks reach hub.onEvent (SSE / stdout) but are never
-    // stored — the final result carries the full text, so persisting every
-    // token only grew RAM + disk. Best-effort: a failing emit is logged and
-    // streaming continues so the agent still produces its final response.
+    // Phase 8 M6 — fan LLM stream chunks out to live transcript observers so
+    // the admin UI (M7) can show real-time output. `emitChunk` is the router:
+    // text/usage/end stay ephemeral (perf audit A③); `tool_use` is persisted
+    // because nothing else on disk records WHICH tool ran (a task_result
+    // carries `toolRounds`, a number), and this is the only emitter here that
+    // can produce one. Best-effort: a failing emit is logged, streaming goes on.
     const hubRef = this.hub
     const agentIdRef = record.id
     const chunkSinks = this.chatChunkSinks
     const onStreamChunk = (chunk: unknown, task: Task): void => {
       try {
-        hubRef.transcript.emitEphemeral({
+        hubRef.transcript.emitChunk({
           ts: Date.now(),
           kind: 'llm_stream_chunk',
           data: { taskId: task.id, agentId: agentIdRef, chunk },
@@ -1276,9 +1276,10 @@ export class LocalAgentPool implements ManagedAgentLifecycle {
       services: record.managed.uses
         ? record.managed.uses.map((u) => `${u.type}:${u.impl}`)
         : [],
-      mcpServers: record.managed.mcpServers
-        ? record.managed.mcpServers.map((m) => m.name)
-        : [],
+      // The EFFECTIVE set, not the declaration: registry refs (`mcpServerRefs`)
+      // and the WSE bonus join after `record.managed.mcpServers`, so an agent
+      // really holding tavily logged `mcpServers: []` — worse than no line.
+      mcpServers: mcpSpecs.map((m) => m.name),
       // Phase 10 M4: log dispatch allow-list summary for spawn auditing.
       ...(dispatchToolset
         ? {

@@ -52,7 +52,7 @@ export const HANDS_CODER_CAPABILITY = 'hands.coder'
 /** hub 的窄切片:注册参与者 + 把实时输出播出去(观察缝)。 */
 export interface CoderHubDeps {
   register(p: Participant): void
-  transcript: { emitEphemeral(entry: Omit<TranscriptEntry, 'seq'>): unknown }
+  transcript: { emitChunk(entry: Omit<TranscriptEntry, 'seq'>): unknown }
 }
 
 /** agents.json 的窄切片(`Space` 正好是这个形状)。 */
@@ -183,7 +183,9 @@ export async function armButlerCoder(opts: ArmButlerCoderOptions): Promise<Butle
     // `llm_stream_chunk`),人能看着它干活——而不是等十五分钟看一个结论。
     onChunk: (taskId, c) => {
       try {
-        opts.hub.transcript.emitEphemeral({
+        // 走 `emitChunk` 这一个分流点。这里的 chunk 恒为 text 故恒是易逝的,
+        // 但落盘策略只该有一处执法点——第二份拷贝正是两半开始漂移的方式。
+        opts.hub.transcript.emitChunk({
           ts: Date.now(),
           kind: 'llm_stream_chunk',
           // `chunk` 是 unknown:流别塞在里面,不去挤 data 那张闭集表。

@@ -13,12 +13,18 @@
  *   3. the persisted log tolerates the seq gaps ephemeral entries leave
  *      (`load()` takes the max — the counter never regresses);
  *   4. a throwing observer doesn't break the emit or its siblings.
+ *
+ * `emitChunk` — the router every emitter goes through — is pinned below it:
+ * A③'s blanket also dropped `tool_use`, and its argument never covered that
+ * case (a task_result carries `toolRounds`, a number — not the tool's name,
+ * its input, or the fact it ran). So prose stays ephemeral and actions land
+ * on disk, decided in ONE place.
  */
 
 import { describe, expect, it } from 'vitest'
 
 import type { Storage } from '../src/storage/index.js'
-import { Transcript } from '../src/transcript.js'
+import { Transcript, chunkDeservesDisk } from '../src/transcript.js'
 import type { TranscriptEntry } from '../src/types.js'
 
 /** Minimal in-memory Storage recording every persisted entry. */
@@ -41,11 +47,11 @@ function msg(text: string): Omit<TranscriptEntry, 'seq'> {
   } as Omit<TranscriptEntry, 'seq'>
 }
 
-function chunk(type: string): Omit<TranscriptEntry, 'seq'> {
+function chunk(type: string, extra: Record<string, unknown> = {}): Omit<TranscriptEntry, 'seq'> {
   return {
     ts: 1,
     kind: 'llm_stream_chunk',
-    data: { taskId: 't-1', agentId: 'a-1', chunk: { type } },
+    data: { taskId: 't-1', agentId: 'a-1', chunk: { type, ...extra } },
   } as Omit<TranscriptEntry, 'seq'>
 }
 
@@ -108,5 +114,68 @@ describe('Transcript.emitEphemeral (perf audit A③)', () => {
     const out = t.emitEphemeral(chunk('text'))
     expect(out.seq).toBe(1)
     expect(seen).toEqual(['llm_stream_chunk'])
+  })
+})
+
+describe('chunkDeservesDisk (A③ revised — prose out, actions in)', () => {
+  it('only tool_use earns a place on disk', () => {
+    expect(chunkDeservesDisk({ type: 'tool_use', toolUse: { name: 'x' } })).toBe(true)
+    for (const t of ['text', 'usage', 'end', 'error']) {
+      expect(chunkDeservesDisk({ type: t })).toBe(false)
+    }
+  })
+
+  it('is a whitelist: an unrecognised type is display-only', () => {
+    // The direction the default errs matters. A provider inventing a new
+    // high-volume chunk type must not silently start filling the disk; the
+    // mirror risk (a new ACTION-bearing type silently dropped) is what the
+    // host-side gate against the `LlmStreamChunk` union exists to catch.
+    expect(chunkDeservesDisk({ type: 'thinking_delta' })).toBe(false)
+    expect(chunkDeservesDisk({ type: 'audio' })).toBe(false)
+  })
+
+  it('tolerates any shape — `chunk` is typed unknown on the entry', () => {
+    // core does not depend on @gotong/llm, so nothing guarantees the payload
+    // is even an object. Every non-conforming value is display-only rather
+    // than a throw: a malformed chunk must not take the agent's reply down.
+    for (const bad of [undefined, null, 'tool_use', 42, [], {}, { type: 7 }]) {
+      expect(chunkDeservesDisk(bad)).toBe(false)
+    }
+  })
+})
+
+describe('Transcript.emitChunk (the one router)', () => {
+  it('persists tool_use and drops the prose around it, in one live stream', async () => {
+    const { storage, persisted } = memStorage()
+    const t = new Transcript(storage)
+    const seen: string[] = []
+    t.onAppend((e) => seen.push((e.data as { chunk: { type: string } }).chunk.type))
+
+    t.emitChunk(chunk('text'))
+    t.emitChunk(chunk('tool_use', { toolUse: { id: 'i1', name: 'tavily_search', input: { q: 'k' } } }))
+    t.emitChunk(chunk('usage'))
+    t.emitChunk(chunk('end'))
+
+    // Live: the observer still sees all four — routing changes what is KEPT,
+    // never what is shown. The typing preview loses nothing.
+    expect(seen).toEqual(['text', 'tool_use', 'usage', 'end'])
+
+    // Recorded: the action, and only the action.
+    expect(t.all().length).toBe(1)
+    await new Promise((r) => setImmediate(r))
+    expect(persisted.length).toBe(1)
+    const kept = persisted[0]!.data as { chunk: { toolUse: { name: string } } }
+    expect(kept.chunk.toolUse.name).toBe('tavily_search')
+  })
+
+  it('a persisted chunk takes a seq like any other entry; the gaps stay gaps', async () => {
+    const { storage, persisted } = memStorage()
+    const t = new Transcript(storage)
+    t.append(msg('one')) // 1
+    t.emitChunk(chunk('text')) // 2 — burned, stored nowhere
+    t.emitChunk(chunk('tool_use', { toolUse: { name: 'x' } })) // 3 — stored
+    t.append(msg('two')) // 4
+    await new Promise((r) => setImmediate(r))
+    expect(persisted.map((e) => e.seq)).toEqual([1, 3, 4])
   })
 })

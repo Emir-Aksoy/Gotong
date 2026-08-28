@@ -378,13 +378,15 @@ export function createWorkflowAssistAgent(deps: {
   // Phase 13 follow-up — fan LLM stream chunks out to live transcript
   // observers so the admin UI's assist modal can show the LLM typing in
   // real time (mirrors what LocalAgentPool does for user-authored managed
-  // agents). Ephemeral (perf audit A③) — never stored. Without this hook
+  // agents). Routed through `emitChunk`: this agent only writes YAML and
+  // has no tools, so in practice every chunk stays ephemeral (perf audit
+  // A③) — the router is shared so that stops being a guess. Without this hook
   // every assist call looks like a 30-40s silent pause to the user; with
   // it they get incremental feedback. Best-effort: a failure to emit a
   // single chunk shouldn't break the assist call itself, so log + continue.
   agentOpts.onStreamChunk = (chunk, task) => {
     try {
-      hub.transcript.emitEphemeral({
+      hub.transcript.emitChunk({
         ts: Date.now(),
         kind: 'llm_stream_chunk',
         data: { taskId: task.id, agentId: WORKFLOW_ASSISTANT_DEFAULT_ID, chunk },

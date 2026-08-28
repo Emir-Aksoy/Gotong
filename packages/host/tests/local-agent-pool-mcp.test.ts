@@ -594,6 +594,57 @@ describe('LocalAgentPool — agent with mcpServers attaches a toolset', () => {
     expect(result.kind).toBe('ok')
     await pool.stopAll()
   })
+
+  // ①-b —— 启动横幅报的是「实际挂上的」而不是「行里写着的」。
+  //
+  // 这条不是在测一句日志的措辞,是在测那句日志回答的是哪个问题。运维在生产上
+  // 读 `spawned` 那行就是为了答「这个 agent 手里有什么」;而 `mcpServers:` 曾
+  // 打的是 `record.managed.mcpServers`(只有内联那一半),于是一台真的挂着
+  // tavily 的 hub 在自己的启动日志里报 `mcpServers: []`——一句答错问题的话
+  // 比没有这句话更坏,因为它看起来像个答案。
+  //
+  // 用例故意配成「只有 registry 引用、零内联声明」:旧写法下 'shared' 这个名字
+  // 结构上不可能出现在那行里,所以这条一旦回退当场变红。
+  it('the spawn banner names the EFFECTIVE mcp servers, not just the inline declaration', async () => {
+    await space.upsertMcpServer({
+      spec: { name: 'shared', command: process.execPath, args: [FAKE_MCP_SERVER] },
+    })
+    await persistAgent({
+      id: 'effective-log-bot',
+      allowedCapabilities: ['draft'],
+      createdAt: new Date().toISOString(),
+      managed: {
+        kind: 'llm',
+        provider: 'mock',
+        system: 'registry-only, zero inline',
+        useMcpServers: ['shared'],
+      },
+    })
+
+    // 直接截 stdout:这个 pool 的 logger 是模块级的,注入不进去,而 `defaultOut`
+    // 是在每次写的那一刻才去拿 `process.stdout.write` 的,所以截得住。
+    const lines: string[] = []
+    const real = process.stdout.write.bind(process.stdout)
+    ;(process.stdout as unknown as { write: (s: string) => boolean }).write = (s: string) => {
+      lines.push(String(s))
+      return true
+    }
+    const pool = new LocalAgentPool({ hub, space })
+    try {
+      await pool.start()
+    } finally {
+      ;(process.stdout as unknown as { write: unknown }).write = real
+    }
+
+    // 先证这个 agent 真的挂上了那台 server(否则下面断言可能空洞地真)。
+    expect(pool.mcpServersForAgent('effective-log-bot')).toEqual(['shared'])
+
+    const banner = lines.find((l) => l.includes('spawned') && l.includes('effective-log-bot'))
+    expect(banner, 'the spawn banner should have been logged').toBeDefined()
+    // 不对格式下注(json / pretty 由 TTY 决定),只问那个名字在不在。
+    expect(banner!).toContain('shared')
+    await pool.stopAll()
+  })
 })
 
 // A tiny escape valve so unused-imports don't trip on this test file.
