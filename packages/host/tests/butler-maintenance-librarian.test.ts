@@ -75,7 +75,7 @@ describe('LIB-M4 — the 6h sweep shelves topical facts only when librarian mode
     const counter = { calls: 0 }
 
     const now = 2_000_000_000_000
-    const summary = await runButlerMaintenanceOnce({
+    const res = await runButlerMaintenanceOnce({
       rootDir: tmp, userId: 'alice', summarize: librarianSummarize(counter),
       logger: silentLogger, now: () => now, librarian: true,
     })
@@ -94,7 +94,9 @@ describe('LIB-M4 — the 6h sweep shelves topical facts only when librarian mode
     expect(isActive(shelved!, now)).toBe(false)
     expect(shelved!.meta?.[META_PROMOTED_TO]).toBe('projects/装修.md')
     expect(isActive((await bySubstr(mem, '奶茶'))!, now)).toBe(true)
-    expect(summary).toContain('librarian: shelved 2 facts')
+    expect(res.summary).toContain('librarian: shelved 2 facts')
+    // M-HEALTH — 干净的一趟,errors 必须是空的(否则扫描会把它计成 failed)。
+    expect(res.errors).toEqual([])
   })
 
   it('收敛:第二 tick 候选掉到门槛下 → 零模型调用,盘上字节不漂移', async () => {

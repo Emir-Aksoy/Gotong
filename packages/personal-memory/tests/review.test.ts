@@ -223,4 +223,33 @@ describe('composeReviewers', () => {
     expect(out.summary).toMatch(/review error: semantic_overflow/)
     expect(out.summary).toMatch(/second ok/)
   })
+
+  // M-HEALTH — 摘要是给人读的散文,上游拿它做判断就会把「出错了」读成「干活了」。
+  // 失败必须同时结构化地走 `errors`,散文那半一个字节不变。
+  it('M-HEALTH 承重 — 抛出的 pass 同时进 errors,散文摘要不变', async () => {
+    const out = await composeReviewers(
+      () => {
+        throw new Error('semantic_overflow: too big')
+      },
+      () => ({ summary: 'second ok' }),
+    )(ctx())
+    expect(out.errors).toEqual(['semantic_overflow: too big'])
+    expect(out.summary).toBe('review error: semantic_overflow: too big; second ok')
+  })
+
+  it('M-HEALTH — 一条都没抛就没有 errors 字段(不是空数组)', async () => {
+    const out = await composeReviewers(
+      () => ({ summary: 'a' }),
+      () => ({ summary: 'b' }),
+    )(ctx())
+    expect(out.errors).toBeUndefined()
+  })
+
+  it('M-HEALTH — 嵌套组合把里层的 errors 带上来', async () => {
+    const inner = composeReviewers(() => {
+      throw new Error('inner boom')
+    })
+    const out = await composeReviewers(inner, () => ({ summary: 'outer ok' }))(ctx())
+    expect(out.errors).toEqual(['inner boom'])
+  })
 })

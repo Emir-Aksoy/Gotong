@@ -109,6 +109,11 @@ export class RoutingHealthTracker implements RoutingHealthRecorder {
         cur.lastOutcome = 'error'
         cur.lastErrorKind = ev.errorKind
         cur.lastErrorAt = this.now()
+        // M-HEALTH 补的 `ev.message`(provider 原话)**刻意不落进这一行**。这行
+        // 会经 `snapshot()` 走进 LSA-M1 的 `list_my_llms` —— 那是模型上下文与成员
+        // 可见面,而 provider 的错误正文可能带端点、请求 id、甚至回声一段请求。
+        // 排错要的那一份已经在 `routing: candidate failed…` 那条 warn 日志里,
+        // 那才是人查故障时会去看的地方,也没有把它转述给 LLM 的问题。
         break
       case 'breaker_open':
         cur.breakerOpen = true

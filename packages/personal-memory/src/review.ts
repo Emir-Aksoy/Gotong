@@ -77,6 +77,21 @@ export interface ReviewOutcome {
   summary?: string
   /** How many episodic entries were folded into the profile (M3 reports this). */
   consolidated?: number
+  /**
+   * M-HEALTH — the sub-reviewer passes that THREW this tick, one message each.
+   *
+   * `composeReviewers` keeps swallowing a throwing pass (one bad pass must never
+   * starve the others) AND still notes it in `summary` — but a note buried in a
+   * human-readable string is not a signal anything downstream can act on: the
+   * sweep read "produced a summary" as "did work", so a tick where EVERY pass
+   * failed still logged `info: sweep complete {active:1}`. That is how two weeks
+   * of total maintenance failure stayed silent in production (2026-08).
+   *
+   * So failure now travels structurally as well. Absent / empty = no pass threw.
+   * The distinction callers need is "produced work" vs "produced only apologies",
+   * and only this field answers it.
+   */
+  errors?: readonly string[]
 }
 
 /**
@@ -101,12 +116,15 @@ export type MemoryReviewer = (ctx: ReviewContext) => Promise<ReviewOutcome> | Re
  *
  * Best-effort: a throwing sub-reviewer is caught and surfaced as an error note
  * in the summary (so e.g. `semantic_overflow` is still visible) rather than
- * aborting the remaining passes — one bad pass never starves the others.
+ * aborting the remaining passes — one bad pass never starves the others. The
+ * same messages also come back in {@link ReviewOutcome.errors}, so a caller can
+ * tell "did work" from "only apologised" without parsing the summary string.
  */
 export function composeReviewers(...reviewers: ReadonlyArray<MemoryReviewer>): MemoryReviewer {
   const list = reviewers.filter(Boolean)
   return async (ctx: ReviewContext): Promise<ReviewOutcome> => {
     const summaries: string[] = []
+    const errors: string[] = []
     let consolidated = 0
     for (const r of list) {
       try {
@@ -114,12 +132,25 @@ export function composeReviewers(...reviewers: ReadonlyArray<MemoryReviewer>): M
         const s = out.summary?.trim()
         if (s) summaries.push(s)
         if (typeof out.consolidated === 'number') consolidated += out.consolidated
+        // A nested composition (or a reviewer reporting its own partial failure)
+        // already speaks this vocabulary — carry it up, rather than letting an
+        // error vanish one level below the caller that has to act on it.
+        if (out.errors && out.errors.length > 0) errors.push(...out.errors)
       } catch (err) {
-        summaries.push(`review error: ${err instanceof Error ? err.message : String(err)}`)
+        const msg = err instanceof Error ? err.message : String(err)
+        // BOTH destinations, deliberately: the note still goes into `summary`
+        // because STATUS.md is what the member reads in their own vault, and
+        // into `errors` because that is the half a caller can branch on.
+        summaries.push(`review error: ${msg}`)
+        errors.push(msg)
       }
     }
     if (summaries.length === 0) return {}
-    return { summary: summaries.join('; '), ...(consolidated > 0 ? { consolidated } : {}) }
+    return {
+      summary: summaries.join('; '),
+      ...(consolidated > 0 ? { consolidated } : {}),
+      ...(errors.length > 0 ? { errors } : {}),
+    }
   }
 }
 

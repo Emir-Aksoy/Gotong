@@ -32,6 +32,11 @@ import type {
   LlmToolDefinition,
 } from '@gotong/llm'
 
+import {
+  MEMORY_FAILED_SWEEPS_THRESHOLD,
+  MEMORY_STALE_MS,
+  type ButlerMemoryHealth,
+} from './butler-memory-health.js'
 import { tierLabel, type ButlerBackupOps } from './personal-butler-backup.js'
 import type { ButlerHandsStatus } from './personal-butler-hands.js'
 import { outageHeadline } from './personal-butler-hub-sense.js'
@@ -66,6 +71,15 @@ export interface ButlerSelfStatusDeps {
   usage?: ButlerUsageSurface
   /** S2-M1 同源记忆快照服务(HostButlerMemoryService 结构性满足)。 */
   memory?: SelfStatusMemoryReader
+  /**
+   * M-HEALTH — 记忆维护台账的读者(`() => readButlerMemoryHealth(file)`)。
+   *
+   * 为什么计数与 `lastDream` 不够:那两个数字**看起来永远是对的**——三百条
+   * 长期记忆、上次蒸馏 5 天前,句子本身没撒谎,但我没有任何判据知道「5 天前」
+   * 对一个 6 小时的活来说已经是坏了。判断要一个门槛,门槛住在台账里。
+   * 缺席 = 不接这半句(pre-M-HEALTH 调用点逐字节不变)。
+   */
+  memoryHealth?: () => Promise<ButlerMemoryHealth | null>
   /** TN-M1 本成员任务笔记本(窄到只剩 list)。 */
   notebook?: { list(): Promise<ReadonlyArray<{ status: string }>> }
   /** AFR-M7 备份事实(hub 级)。 */
@@ -159,6 +173,33 @@ function usageLine(deps: ButlerSelfStatusDeps): string {
   }
 }
 
+/**
+ * M-HEALTH — 记忆行的后半句:后台维护到底还在不在跑。
+ *
+ * 只在**有话说**的时候出现:台账缺席(还没扫过 / 读不动)= 未知,一个字不加,
+ * 绝不把「我不知道」渲染成「一切正常」也不渲染成「坏了」;干净跑成的常态
+ * 同样不加——每一轮都报一句「维护正常」是噪音,记忆行的主语是记忆不是运维。
+ * 读失败只 warn,绝不连累整张自检卡(与本文件其余读者同姿态)。
+ */
+async function maintenanceHalf(deps: ButlerSelfStatusDeps, now: number): Promise<string> {
+  if (!deps.memoryHealth) return ''
+  let h: ButlerMemoryHealth | null
+  try {
+    h = await deps.memoryHealth()
+  } catch (err) {
+    warnRead(deps, 'memoryHealth', err)
+    return ''
+  }
+  if (!h) return ''
+  if (h.consecutiveFailedSweeps >= MEMORY_FAILED_SWEEPS_THRESHOLD) {
+    return `;⚠️ 后台维护连续 ${h.consecutiveFailedSweeps} 轮出错,长期记忆正停在旧样子`
+  }
+  if (h.lastOkAt !== undefined && now - h.lastOkAt > MEMORY_STALE_MS) {
+    return `;⚠️ 后台维护上次跑成还是 ${fmtAgo(now - h.lastOkAt)},看着是停了`
+  }
+  return ''
+}
+
 async function memoryLine(deps: ButlerSelfStatusDeps, now: number): Promise<string> {
   if (!deps.memory) return NOT_WIRED
   try {
@@ -167,7 +208,7 @@ async function memoryLine(deps: ButlerSelfStatusDeps, now: number): Promise<stri
     const dream = snap.lastDream
       ? `;上次蒸馏 ${fmtAgo(now - snap.lastDream.firedAt)}(提升 ${snap.lastDream.promoted} 条,封存 ${snap.lastDream.pruned} 条)`
       : ';还没跑过蒸馏'
-    return base + dream
+    return base + dream + (await maintenanceHalf(deps, now))
   } catch (err) {
     warnRead(deps, 'memory', err)
     return READ_FAILED

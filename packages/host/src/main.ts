@@ -1084,6 +1084,9 @@ async function main(): Promise<void> {
   // HANDS-M2b — 手 B:骑手 A 那座监狱装一个外驱 coding CLI(`hands.json` 的 coder 块)。
   // 名册行 + owner 授权都在里面落,阿同 escalate 转派那道 fail-closed 检查才过得去。
   if (identityForBackup) await armButlerCoder({ hands: butlerHands, hub, space, grants: identityForBackup, logger: log })
+  // M-HEALTH — 维护健康台账:维护扫描写,巡检与 my_status 读。一条路径三处引用
+  // ——分开写会漂,而漂了之后「没出牌」与「没在跑」从外面看一模一样。
+  const butlerMemoryHealthFile = join(space.root, 'butler', 'memory-health.json')
   // Per-user butler assembly lives in personal-butler-factory.ts (GUARD
   // extraction); refs() reads the forward-declared refs at butler-build time.
   const butlerFactory: ButlerFactory = buildButlerFactory({
@@ -1131,6 +1134,7 @@ async function main(): Promise<void> {
     hands: butlerHands, // HANDS-M2 手 A(status 恒传给自检;toolset 只在 armed 时装)
     ...(butlerConfigOps ? { configOps: butlerConfigOps } : {}), // HANDS-M3c set_hub_config
     spaceRoot: space.root, // HANDS-M4 环境卡:只拿去 statfs 量剩余磁盘,路径不进输出
+    memoryHealthFile: butlerMemoryHealthFile, // M-HEALTH my_status 那半句
     // SEN-M5 — 成员名单投影源(岔口 A 全员见名+角色+id;email 结构性不进投影)。
     ...(identityForBackup
       ? { members: { users: () => identityForBackup.listUsers(),
@@ -1190,6 +1194,7 @@ async function main(): Promise<void> {
       links: butlerMemoryLinksOn,
       reconcile: butlerMemoryReconcileOn,
       librarian: butlerMemoryLibrarianOn,
+      healthFile: butlerMemoryHealthFile, // M-HEALTH 每轮落一条事实行(成 / 败 / 连败几轮)
     })
     butlerMaintenanceSweeper.start()
   }
@@ -1717,6 +1722,7 @@ async function main(): Promise<void> {
       // CARE-M6 断供文件(持续超阈值升级红牌;恢复静默交给 CARE-M2/M5)。
       outageFile: join(space.root, 'runtime', 'llm-outage.json'),
       selfHealRecent: () => selfHealLog.recent(30), // HEAL-M4 自愈事件事后播报
+      memoryHealthFile: butlerMemoryHealthFile, // M-HEALTH 维护停了要出牌,不能只在日志里
     },
     // TN-M2 — 卡壳任务提醒骑管家总开关;零 LLM 纯时间戳分诊,节律常量零新旋钮。
     taskNudge: { on: butlerDefaultOn },

@@ -53,6 +53,12 @@ import type { Logger } from '@gotong/core'
 
 import type { AdminHealthSurface, HealthSnapshot } from './admin-health.js'
 import { translateLlmFailureKind } from './failure-translator.js'
+import {
+  MEMORY_FAILED_SWEEPS_THRESHOLD,
+  MEMORY_STALE_MS,
+  readButlerMemoryHealth,
+  type ButlerMemoryHealth,
+} from './butler-memory-health.js'
 import { readOutageSnapshotFile, type LlmOutageSnapshot } from './llm-outage.js'
 import { guideBreadcrumb } from './personal-butler-guide.js'
 import { readButlerRunBroadcastConfig } from './personal-butler-run-broadcast.js'
@@ -170,6 +176,47 @@ export function outageEscalationCard(
     severity: 'red',
     label: '管家大脑持续断供',
     fact: `管家大脑已经断供约 ${mins} 分钟(${t.headline})——不是临时抖动了,查查 provider 状态 / key / 额度。命令面(/help /agents /workflow)仍照常。${guideBreadcrumb('llm-outage', '恢复后想看完整修法')}`,
+  }
+}
+
+/** 记忆维护牌的稳定 id。 */
+export const MEMORY_MAINTENANCE_CARD_ID = 'memory:maintenance'
+
+/**
+ * M-HEALTH — 把记忆维护台账(另一模块写的事实)折成一张巡检牌。CARE-M6 的
+ * `outageEscalationCard` 同一形状:巡检不认识维护那条链,只读它落下的事实。
+ *
+ * **两个触发口,同一张牌**:
+ *   (a) 连续 ≥2 轮出错 —— 「一直在错」;
+ *   (b) 上次干净跑成已过 48h —— 「压根没在跑了」。后者才抓得住 sweeper
+ *       自己没转起来的形态(那时根本不会有新的失败记录产生)。
+ *
+ * **只有一档黄牌**,不设红:巡检对同一 id 只在**出现**那一刻播,severity
+ * 漂移是静默写回的(「一张牌一场事,不重播」),黄→红翻面没人会知道;而红
+ * 是留给 `space:unwritable` / `llm:outage` 那种「hub 现在就不工作了」的,
+ * 记忆维护死掉是慢性退化,不是当场停摆。
+ *
+ * 台账缺席(null)→ 不出牌:那是**未知**,不是坏。一台还没扫过第一轮的
+ * hub 不该自称有病(EFF-M3「读不动 ≠ 没发生」的另一面)。
+ */
+export function memoryMaintenanceCard(
+  health: ButlerMemoryHealth | null,
+  now: number,
+): PatrolCard | null {
+  if (!health) return null
+  const failing = health.consecutiveFailedSweeps >= MEMORY_FAILED_SWEEPS_THRESHOLD
+  const staleMs = health.lastOkAt === undefined ? 0 : now - health.lastOkAt
+  const stale = health.lastOkAt !== undefined && staleMs > MEMORY_STALE_MS
+  if (!failing && !stale) return null
+  const why = failing
+    ? `连续 ${health.consecutiveFailedSweeps} 轮维护出错`
+    : `已经约 ${Math.max(1, Math.round(staleMs / (60 * 60 * 1000)))} 小时没有成功跑过一轮维护`
+  const sample = health.lastErrors.length > 0 ? `最近一条:${health.lastErrors[0]}。` : ''
+  return {
+    id: MEMORY_MAINTENANCE_CARD_ID,
+    severity: 'yellow',
+    label: '记忆维护没在正常跑',
+    fact: `记忆的后台维护(蒸馏 / 校正 / 上架)${why}。${sample}日常聊天照常,但长期记忆会停在旧样子——新说的事进不了长期档。`,
   }
 }
 
@@ -366,6 +413,12 @@ export interface ButlerPatrolSweeperOptions {
    * 状态文件也不长新字段(pre-HEAL 调用点字节不变)。
    */
   selfHealRecent?: () => Promise<SelfHealEntry[]>
+  /**
+   * M-HEALTH — 记忆维护台账路径(`<space>/butler/memory-health.json`,
+   * `ButlerMaintenanceSweeper` 写的那份)。给了它,巡检每轮读一次新值,
+   * 维护持续失败 / 长期没跑成就多一张黄牌。缺省 → 不读不出牌。
+   */
+  memoryHealthFile?: string
 }
 
 export class ButlerPatrolSweeper {
@@ -378,6 +431,7 @@ export class ButlerPatrolSweeper {
   private readonly now: () => number
   private readonly outageFile?: string
   private readonly outageEscalationMs: number
+  private readonly memoryHealthFile?: string
 
   private readonly selfHealRecent?: () => Promise<SelfHealEntry[]>
 
@@ -395,6 +449,7 @@ export class ButlerPatrolSweeper {
     if (opts.outageFile) this.outageFile = opts.outageFile
     this.outageEscalationMs = opts.outageEscalationMs ?? OUTAGE_ESCALATION_MS
     if (opts.selfHealRecent) this.selfHealRecent = opts.selfHealRecent
+    if (opts.memoryHealthFile) this.memoryHealthFile = opts.memoryHealthFile
   }
 
   /** 与姊妹 sweep 同姿态:不在启动瞬间跑,首 tick 一个 interval 之后。 */
@@ -437,7 +492,11 @@ export class ButlerPatrolSweeper {
       const escalation = this.outageFile
         ? outageEscalationCard(await readOutageSnapshotFile(this.outageFile), this.now(), this.outageEscalationMs)
         : null
-      const currentAll = escalation ? [...current, escalation] : current
+      // M-HEALTH — 记忆维护牌:同样是「读别人写的事实文件」,与断供升级并列。
+      const memHealth = this.memoryHealthFile
+        ? memoryMaintenanceCard(await readButlerMemoryHealth(this.memoryHealthFile), this.now())
+        : null
+      const currentAll = [...current, ...(escalation ? [escalation] : []), ...(memHealth ? [memHealth] : [])]
       const prev = await loadPatrolState(this.stateFile)
       const { appeared, recovered } = diffPatrolCards(prev.cards, currentAll)
 

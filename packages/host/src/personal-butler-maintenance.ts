@@ -95,6 +95,7 @@ import {
 import { ownerDir } from '@gotong/service-memory-file'
 import type { MemoryHandle } from '@gotong/services-sdk'
 
+import { recordMaintenanceSweep } from './butler-memory-health.js'
 import { snapshotMemoryTree, type GitRunner } from './butler-memory-git.js'
 import { projectButlerVault } from './butler-obsidian.js'
 import { butlerMemoryWriters } from './personal-butler-writers.js'
@@ -336,17 +337,32 @@ export interface RunButlerMaintenanceOnceOptions {
 }
 
 /**
+ * M-HEALTH — what one member's maintenance pass actually did.
+ *
+ * This used to be a bare `string`, and that string was the ONLY thing a caller
+ * got: a tick where every pass threw returned `"review error: …"`, which the
+ * sweeper's `if (summary) active++` counted as work. Failure has to be a field,
+ * not a substring, or it reads as success at every layer above.
+ */
+export interface ButlerMaintenanceResult {
+  /** The reviewer's one-line summary, `''` when the pass had nothing to say. */
+  summary: string
+  /** Messages from sub-passes that THREW. Empty = the pass ran clean. */
+  errors: readonly string[]
+}
+
+/**
  * Run ONE maintenance pass for ONE member: distil their captured episodic into the
  * curated per-cluster profile and record what it did to STATUS.md. The single
  * source of truth shared by the background {@link ButlerMaintenanceSweeper} (per
  * tick, per member) and the on-demand "整理记忆" butler tool (S2-M2), so the two
  * can never drift. Opens a fresh file-backed handle on the member's namespace —
  * the butler's own handle points at the SAME jsonl, so its next-turn `refresh()`
- * picks up whatever this pass consolidated. Returns the reviewer's summary (or '').
+ * picks up whatever this pass consolidated.
  */
 export async function runButlerMaintenanceOnce(
   opts: RunButlerMaintenanceOnceOptions,
-): Promise<string> {
+): Promise<ButlerMaintenanceResult> {
   const now = opts.now ?? Date.now
   const memory: MemoryHandle = openButlerMemory({
     rootDir: opts.rootDir,
@@ -390,7 +406,7 @@ export async function runButlerMaintenanceOnce(
     now: now(),
     ...(opts.tierConfig ? { tierConfig: opts.tierConfig } : {}),
   })
-  return out.summary ?? ''
+  return { summary: out.summary ?? '', errors: out.errors ?? [] }
 }
 
 export interface ButlerMaintenanceSweeperOptions {
@@ -450,6 +466,14 @@ export interface ButlerMaintenanceSweeperOptions {
    * and maintenance never writes `knowledge/` (byte-identical).
    */
   librarian?: boolean
+  /**
+   * M-HEALTH — where to keep the health ledger (`<space>/butler/memory-health.json`).
+   * The path comes from the caller for the same reason patrol's `stateFile` does:
+   * this class knows the MEMORY root, and the ledger is a runtime fact about the
+   * sweep, not a member's memory. Omitted = no ledger written, and then the patrol
+   * card simply has nothing to read — 未知,而未知不产生任何牌。
+   */
+  healthFile?: string
 }
 
 /**
@@ -479,6 +503,7 @@ export class ButlerMaintenanceSweeper {
   private readonly links: boolean
   private readonly reconcile: boolean
   private readonly librarian: boolean
+  private readonly healthFile?: string
 
   private timer?: ReturnType<typeof setInterval>
   private running = false
@@ -500,6 +525,7 @@ export class ButlerMaintenanceSweeper {
     this.links = opts.links ?? false
     this.reconcile = opts.reconcile ?? false
     this.librarian = opts.librarian ?? false
+    this.healthFile = opts.healthFile
   }
 
   /** Start the interval. `.unref()` so a pending tick never keeps the process alive. */
@@ -575,22 +601,50 @@ export class ButlerMaintenanceSweeper {
         ...(this.maxTokens !== undefined ? { maxTokens: this.maxTokens } : {}),
       })
 
+      // M-HEALTH — 三分,不是二分。以前只有 `active`,而「产出了一句话」被
+      // 当成「干了活」,于是一轮全线失败与一轮全部干完长得一模一样。
+      //   failed = 这个成员有 pass 抛了,或整个 tick 抛了
+      //   active = 没有错 **且** 真产出了摘要
+      //   其余    = 干净的空转(没到触发线,这是正常的多数情况)
+      // 部分成功(既干了活又有 pass 抛了)一律计 failed:运维视角上
+      // 「一半坏了」就是不健康;成员在自己 STATUS.md 里看到的那半句
+      // 仍逐字保留,两个视角各自诚实。
       let active = 0
+      let failed = 0
+      const errors: string[] = []
       for (const userId of userIds) {
         try {
-          const summary = await this.maintainOne(userId, summarize)
-          if (summary) active++
+          const res = await this.maintainOne(userId, summarize)
+          if (res.errors.length > 0) {
+            failed++
+            errors.push(...res.errors)
+          } else if (res.summary) {
+            active++
+          }
         } catch (err) {
-          this.log.warn('butler maintenance: member tick failed', {
-            userId,
-            err: err instanceof Error ? err.message : String(err),
-          })
+          failed++
+          const msg = err instanceof Error ? err.message : String(err)
+          errors.push(msg)
+          this.log.warn('butler maintenance: member tick failed', { userId, err: msg })
         }
       }
-      this.log.info('butler maintenance: sweep complete', {
-        members: userIds.length,
-        active,
-      })
+      const fields = { members: userIds.length, active, failed }
+      if (failed > 0) {
+        // 这一行就是那两周里本该出现而没有出现的东西。
+        this.log.warn('butler maintenance: sweep completed with failures', {
+          ...fields,
+          errors: errors.slice(0, 3),
+        })
+      } else {
+        this.log.info('butler maintenance: sweep complete', fields)
+      }
+      if (this.healthFile) {
+        await recordMaintenanceSweep(
+          this.healthFile,
+          { at: this.now(), members: userIds.length, active, failed, errors },
+          this.log,
+        )
+      }
     } finally {
       this.running = false
     }
@@ -621,9 +675,12 @@ export class ButlerMaintenanceSweeper {
     }
   }
 
-  /** Run the maintenance reviewer once for one member; returns its summary (or ''). */
-  private async maintainOne(userId: string, summarize: MemorySummarizer): Promise<string> {
-    const summary = await runButlerMaintenanceOnce({
+  /** Run the maintenance reviewer once for one member; returns what it did. */
+  private async maintainOne(
+    userId: string,
+    summarize: MemorySummarizer,
+  ): Promise<ButlerMaintenanceResult> {
+    const res = await runButlerMaintenanceOnce({
       rootDir: this.rootDir,
       userId,
       summarize,
@@ -647,7 +704,7 @@ export class ButlerMaintenanceSweeper {
         ...(this.git ? { git: this.git } : {}),
       })
     }
-    return summary
+    return res
   }
 
   /**

@@ -87,13 +87,25 @@ class ButlerConsolidateToolset implements LlmAgentToolset {
       ...(this.deps.maxTokens !== undefined ? { maxTokens: this.deps.maxTokens } : {}),
     })
     try {
-      const summary = await runButlerMaintenanceOnce({
+      const res = await runButlerMaintenanceOnce({
         rootDir: this.deps.rootDir,
         userId: this.deps.userId,
         summarize,
         logger: this.deps.logger,
       })
-      const detail = summary.trim()
+      const detail = res.summary.trim()
+      // M-HEALTH — 同一个谎的第三处,而且是最坏的一处:这一句是**当着人说的**。
+      // `composeReviewers` 会把抛错的 pass 折成一句 `review error: …` 摘要,旧
+      // 代码照单拼进「记忆整理好了。」后面按成功返回 —— 成员刚亲口让我去整理,
+      // 我答「整理好了」,而底下一条都没整理成。有错就说没成,别把道歉裹在
+      // 报喜里(HANDS 交叉审 H3a:一条被吞掉的失败比一次响亮的报错更接近撒谎)。
+      if (res.errors.length > 0) {
+        this.deps.logger.warn('butler consolidate: pass reported errors', {
+          userId: this.deps.userId,
+          errors: res.errors.slice(0, 3),
+        })
+        return text(`记忆没能整理完:${res.errors.join(';')}`, true)
+      }
       return text(detail ? `记忆整理好了。\n${detail}` : '记忆整理好了,暂时没有需要合并的新内容。')
     } catch (err) {
       this.deps.logger.error('butler consolidate: maintenance pass failed', {

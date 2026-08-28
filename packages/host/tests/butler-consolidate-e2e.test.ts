@@ -148,6 +148,27 @@ describe('S2-M2 — butler on-demand "整理一下记忆" tool', () => {
     expect(await episodicCount(memRoot, 'alice')).toBe(40)
   })
 
+  it('M-HEALTH 承重 — pass 里有 reviewer 抛了 ⇒ 说没成,绝不答「整理好了」', async () => {
+    // 同一个谎的第三处,而且是最坏的一处:成员刚亲口让我去整理,我答「整理好了」
+    // 而底下一条都没整理成。`composeReviewers` 把抛错的 pass 折成一句
+    // `review error: …` 摘要(那是对的),旧代码照单拼进报喜文案后面。
+    await seedEpisodic(memRoot, 'alice', 40)
+    const boom: LlmProvider = {
+      name: 'boom',
+      // eslint-disable-next-line require-yield
+      async *stream() {
+        throw new Error('MiMo 502 upstream')
+      },
+    }
+    const ts = toolset('alice', async () => boom)
+
+    const res = await ts.callTool('consolidate_my_memory', {})
+    expect(res.isError).toBe(true)
+    expect(resultText(res)).toContain('记忆没能整理完')
+    expect(resultText(res)).toContain('MiMo 502 upstream')
+    expect(resultText(res)).not.toContain('记忆整理好了')
+  })
+
   it('no-leak: consolidating alice never touches bob namespace', async () => {
     await seedEpisodic(memRoot, 'alice', 40)
     await seedEpisodic(memRoot, 'bob', 40)

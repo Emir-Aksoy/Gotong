@@ -567,6 +567,58 @@ active 时,融合召回「我住哪」返回**吉隆坡 + 槟城并存**(陈旧�
 **验收**:personal-memory `reconcile-recall.test.ts` 3 例 + host `butler-maintenance-reconcile.test.ts` 3 例全绿;
 personal-memory **417** / host **2077** 全绿,四门 PASS(main.ts 3000/3000,旋钮 **114**,kernel-deps 不破)。
 
+### M-HEALTH —— 维护自己的健康:「跑过了」与「跑成了」不是同一件事 ✅
+
+**病根不是某一行写错了,是三块各自正确的零件合起来撒了一个谎。** 生产上真发生过:两周里
+`consolidate_my_memory` 每次都答「记忆整理好了」,长期记忆一条没进,日志里**一条 warn 都没有**。
+逐层看每一块都对 —— `composeReviewers` 把抛错的 pass 折成一句 `review error: …` **摘要**继续跑
+(韧性,对的);`maintainOne` 把摘要原样交上去(转述,对的);扫描器 `if (summary) active++`
+把「产出了摘要」读成「干了活」(**这里就是那个谎**);于是 sweep 落 `level:"info"` 的
+`sweep complete`。**失败只活在散文里,而上游拿散文当判断依据。**
+
+这是 EFF-M3「把『读不动』计成 0 会谎报『一切安静』」与 HANDS 交叉审 H3a「一条被吞掉的删除失败
+比一次响亮的报错更接近撒谎」的第三次出现,这次出现在记忆维护上。
+
+**修法=让失败结构化地旅行,散文那半一个字节不动。** `ReviewOutcome` 加 additive
+`errors?: readonly string[]`,`composeReviewers` 抛错时**两处都写**:`summaries`(成员在自己
+vault 的 STATUS.md 里读到的那半句,逐字保留)与 `errors`(调用方能 branch 的那半)。四处消费:
+
+1. **扫描三分**(`personal-butler-maintenance.ts`):`active` / `failed` / 空转三分,
+   **一半坏了也算 failed**(`res.errors.length > 0` 优先于 `res.summary`);`failed > 0` 走
+   `log.warn('butler maintenance: sweep completed with failures')`,那条 `info` 结构性不出现
+   —— **这一行就是那两周里本该出现而没有出现的东西**。
+2. **结构化事实行**(`butler-memory-health.ts`,`<space>/butler/memory-health.json`,与 self-heal
+   台账同族):`foldMaintenanceSweep` 是纯函数,`lastOkAt` 是**高水位**(失败时把上一次的原样抬过去
+   —— 「多久没成功过」这个问题只在失败的时候才有人问);错误样本 3 条顶、单条 200 字顶、折成一行;
+   写盘 best-effort(一次磁盘打嗝不该把「维护正常」变成「维护失败」)。
+3. **说给人听的两处**:CARE 巡检**黄牌**(连续 2 轮出错 / 48h 没跑成过)+ `my_status` 记忆行多一句
+   `⚠️ 后台维护连续 N 轮出错,长期记忆正停在旧样子`。三条刻意:**台账缺席 ⇒ 不出牌**(未知不是坏,
+   与 connectorSlots 三态同规);**只有黄牌一档**(巡检无 severity 边沿,一张牌一场事不重播);
+   **没配 provider 的 tick 零字节写入**(一台没 key 的 hub 不该自报有病)。
+4. **`candidate_error` 带原话**(`routing-provider.ts`):`kind` 只分到 6 个档,事后查不出是哪一家、
+   哪一句。`message` 折成一行截 200 字随事件走。**刻意不进** `RoutingHealthTracker` 的健康行 ——
+   那条投影喂 LSA-M1 的 `list_my_llms`(成员可见 / 进模型上下文),provider 原始错误文本的归属是
+   hub 侧 warn 日志,不是披露面。
+
+**同一个谎的第三处,而且是最坏的一处**:`consolidate_my_memory` 是**成员刚亲口让我去整理**的那一次,
+旧代码把 `review error: …` 拼进「记忆整理好了。」后面按成功返回。改成有错就说没成
+(`isError` + 「记忆没能整理完:…」)。
+
+**四条边界**:① 热路径零 LLM(三分 / 折叠 / 出牌全是纯函数);② 成员那半字节不变(STATUS.md 与
+散文摘要逐字保留,新的只是结构化的那半);③ 披露不放宽(provider 原话只到 hub 日志);
+④ 零新旋钮(**114 冻结** —— 台账是惰性事实文件,`healthFile` 不传=零字节写入,既有调用点字节不变)。
+
+**显式不做**:web 体检面板那一格(要给 `admin-health` 加新 dep,而且面板是 pull-only —— 那两周里
+没有人去看它;CARE-M6 与 CARE-M7 当初分成两个里程碑正是为这条分界)。
+
+**验收**:host 新门 `butler-memory-health.test.ts` **22** 例五组(纯函数高水位 / 台账读写含
+ENOTDIR 降级 / 出牌三态 / **扫描三分 e2e** / `my_status` 记忆行)+ consolidate e2e **+1** +
+personal-memory `review.test.ts` **+3** + llm `routing-provider.test.ts` **+1**;
+personal-memory **420** / llm **268** / host **3278**+5skip 全绿,全仓 `pnpm -r typecheck` 净,
+四门 PASS(旋钮 **114 零新增**,main.ts 2742/2760)。**六道变异六次全红且只红该红那些**
+—— 其中「`composeReviewers` 不推 `errors`」那道**跨两个包共红 4 例**(personal-memory 2 +
+host 2),这正是这条缝端到端接通的硬证据,而不是只在纯核里自娱自乐。
+
 ### M-EMB2(N 路融合泛化)—— 超越/不做
 
 实测判定为**投机泛化**:没有第三个**打分**信号在等这条缝,图模式走**池扩展**(M-GRAPH 已按池扩展形状接线,

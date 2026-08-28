@@ -21,7 +21,7 @@ function trackerAt(clock: { t: number }): RoutingHealthTracker {
 
 const served = (i: number, label = `c${i}`): RoutingEvent => ({ type: 'served', candidate: label, index: i })
 const errored = (i: number, kind: LlmErrorKind, label = `c${i}`): RoutingEvent =>
-  ({ type: 'candidate_error', candidate: label, index: i, errorKind: kind })
+  ({ type: 'candidate_error', candidate: label, index: i, errorKind: kind, message: 'boom from provider' })
 const opened = (i: number, openUntil: number, label = `c${i}`): RoutingEvent =>
   ({ type: 'breaker_open', candidate: label, index: i, openUntil })
 const closed = (i: number, label = `c${i}`): RoutingEvent => ({ type: 'breaker_close', candidate: label, index: i })

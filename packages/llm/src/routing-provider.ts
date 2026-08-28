@@ -67,10 +67,39 @@ export const DEFAULT_BREAKER: BreakerConfig = {
 /** 路由事件(MR-M3 健康投影消费;M1 只负责发出)。 */
 export type RoutingEvent =
   | { type: 'served'; candidate: string; index: number }
-  | { type: 'candidate_error'; candidate: string; index: number; errorKind: LlmErrorKind }
+  /**
+   * 一个候选在吐出第一个 chunk 之前硬失败。
+   *
+   * `message` 是 provider 的原话(截断)。M-HEALTH 补的:只带 `errorKind` 时,
+   * 一切 `classifyLlmError` 认不出的病都折成 `kind:'unknown'`,而事后回看
+   * 日志根本无从知道那个 unknown 到底是什么 —— 分类是给机器判决用的,
+   * 原话是给人排错用的,两个都要。
+   */
+  | {
+      type: 'candidate_error'
+      candidate: string
+      index: number
+      errorKind: LlmErrorKind
+      message: string
+    }
   | { type: 'breaker_open'; candidate: string; index: number; openUntil: number }
   | { type: 'breaker_close'; candidate: string; index: number }
   | { type: 'exhausted'; errorKind: LlmErrorKind }
+
+/** provider 原话的字符上限:每次 failover 都倒一段无界文本进日志是噪音源。 */
+const MAX_ERROR_MESSAGE_CHARS = 200
+
+/** 取 provider 的原话,压成一行并截断。永不抛(拿不到就空串)。 */
+function clipErrorMessage(err: unknown): string {
+  let raw: string
+  try {
+    raw = err instanceof Error ? err.message : String(err)
+  } catch {
+    return ''
+  }
+  const one = raw.replace(/\s+/g, ' ').trim()
+  return one.length <= MAX_ERROR_MESSAGE_CHARS ? one : `${one.slice(0, MAX_ERROR_MESSAGE_CHARS)}…`
+}
 
 /** 结构化日志的最小面(host 的 pino 式 logger 结构上满足;不引入依赖)。 */
 export interface RoutingLogger {
@@ -198,9 +227,10 @@ export class RoutingProvider implements LlmProvider {
         lastErr = err
         lastKind = classifyLlmError(err)
         this.recordFailure(i, this.clock())
-        this.emit({ type: 'candidate_error', candidate: label, index: i, errorKind: lastKind })
+        const message = clipErrorMessage(err)
+        this.emit({ type: 'candidate_error', candidate: label, index: i, errorKind: lastKind, message })
         this.logger?.warn(
-          { candidate: label, index: i, kind: lastKind },
+          { candidate: label, index: i, kind: lastKind, message },
           'routing: candidate failed before first chunk — failing over',
         )
         continue

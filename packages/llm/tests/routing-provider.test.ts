@@ -148,7 +148,7 @@ describe('RoutingProvider — failover(首 chunk 前)', () => {
     expect(log).toEqual(['A', 'B'])
   })
 
-  it('candidate_error 事件带上分类后的 errorKind(429 → rate_limited)', async () => {
+  it('candidate_error 事件带上分类后的 errorKind(429 → rate_limited)与 provider 原话', async () => {
     const events: RoutingEvent[] = []
     const rate = Object.assign(new Error('slow down'), { status: 429 })
     const rp = new RoutingProvider({
@@ -159,10 +159,34 @@ describe('RoutingProvider — failover(首 chunk 前)', () => {
       onEvent: (e) => events.push(e),
     })
     await collect(rp.stream(REQ))
+    // M-HEALTH — `kind` 只分到 6 个档,事后查不出是哪一家、哪一句。
+    // 原话得跟着事件走,否则只剩一个分类名字可招。
     expect(events.find((e) => e.type === 'candidate_error')).toMatchObject({
       candidate: 'A',
       errorKind: 'rate_limited',
+      message: 'slow down',
     })
+  })
+
+  it('M-HEALTH — 原话压成一行、截到 200 字,非 Error 也拿得到', async () => {
+    // provider 的 message 可以任意长(有的会把整段请求回声回来),而这个值
+    // 要进日志与事件,不能是一份无界的转储。
+    const events: RoutingEvent[] = []
+    const long = Object.assign(new Error(`x\n\n${'y'.repeat(500)}`), { status: 500 })
+    const rp = new RoutingProvider({
+      candidates: [
+        { provider: stub('A', [{ kind: 'throwSync', err: long }]) },
+        { provider: stub('B', [{ kind: 'throwSync', err: 'plain string throw' }]) },
+        { provider: stub('C', [{ kind: 'chunks', chunks: okChunks('ok') }]) },
+      ],
+      onEvent: (e) => events.push(e),
+    })
+    await collect(rp.stream(REQ))
+    const errs = events.filter((e) => e.type === 'candidate_error')
+    const a = errs[0] as { message: string }
+    expect(a.message.length).toBe(201) // 200 + 省略号
+    expect(a.message.startsWith('x y')).toBe(true) // 换行折成空格
+    expect((errs[1] as { message: string }).message).toBe('plain string throw')
   })
 
   it('全候选失败 → 抛最后一个原始错误(保身份)+ emit exhausted', async () => {

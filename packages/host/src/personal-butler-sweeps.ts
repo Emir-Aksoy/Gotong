@@ -70,6 +70,9 @@ export interface ButlerSweepsOptions {
     /** HEAL-M4 — 自愈台账读者(SelfHealLog.recent);给了它,看门狗重启/
      *  非正常停止会被事后播报(首见基线不倒灌)。缺省 ⇒ 不读不播。 */
     selfHealRecent?: () => Promise<SelfHealEntry[]>
+    /** M-HEALTH — 记忆维护台账(`butler/memory-health.json`,由维护扫描自己写)。
+     *  给了它,连续出错 / 长时间没跑成会出一张黄牌。缺省 ⇒ 不读不出牌。 */
+    memoryHealthFile?: string
   }
   /**
    * TN-M2 stalled-task nudge: gate only (cadence is a constant — the stall
@@ -148,6 +151,7 @@ export function armButlerSweeps(opts: ButlerSweepsOptions): ButlerSweepsHandle {
       intervalMs: opts.patrol.intervalMs,
       ...(opts.patrol.outageFile ? { outageFile: opts.patrol.outageFile } : {}),
       ...(opts.patrol.selfHealRecent ? { selfHealRecent: opts.patrol.selfHealRecent } : {}),
+      ...(opts.patrol.memoryHealthFile ? { memoryHealthFile: opts.patrol.memoryHealthFile } : {}),
     })
     patrol.start()
   }

@@ -75,6 +75,7 @@ import {
 import { buildButlerGovernedToolset } from './personal-butler-governed.js'
 import { buildButlerMcpToolsets } from './personal-butler-mcp.js'
 import { classifyButlerMcpTool } from './butler-web-search.js'
+import { readButlerMemoryHealth } from './butler-memory-health.js'
 import { openButlerMemory } from './personal-butler-memory.js'
 import {
   buildButlerObserveToolset,
@@ -273,12 +274,21 @@ export interface ButlerFactoryDeps {
    * 猜错分区会给出一个看起来很确定的错数字,比诚实的「不知道」坏得多。
    */
   spaceRoot?: string
+  /**
+   * M-HEALTH — 记忆维护台账路径(`butler/memory-health.json`)。给了它,`my_status`
+   * 的记忆行在后台维护连续出错 / 长时间没跑成时多说一句。缺席 ⇒ 不说那半句
+   * (pre-M-HEALTH 调用点逐字节不变)。传路径不传 thunk:读者只有一个,让它留在
+   * `butler-memory-health.ts` 里,装配层不必也认识那份 JSON 的形状。
+   */
+  memoryHealthFile?: string
 }
 
 export function buildButlerFactory(deps: ButlerFactoryDeps): ButlerFactory {
   const { hub, logger: log, memoryRoot } = deps
   // SEN-M5 — 成员 roster 无 per-user 态,工厂级构造一次全员共享。
   const membersSurface = deps.members ? buildButlerMemberSurface(deps.members) : undefined
+  // M-HEALTH — 提到局部 const 才窄得住:闭包里读 `deps.x` 拿不到窄化结果。
+  const memoryHealthFile = deps.memoryHealthFile
   return (base, mcp, extras) => {
     // S1-M2 — split the row's attached MCP (notes / calendar / …) into a benign
     // READ proxy (runs inline) and a governed WRITE toolset (parks for a /me
@@ -596,6 +606,7 @@ export function buildButlerFactory(deps: ButlerFactoryDeps): ButlerFactory {
           ...(refs.memoryView ? { memory: refs.memoryView } : {}),
           notebook: taskNotebook,
           ...(deps.backupOps ? { backup: deps.backupOps } : {}),
+          ...(memoryHealthFile ? { memoryHealth: () => readButlerMemoryHealth(memoryHealthFile) } : {}),
           // 「手」那一行是**说给这个成员听的**:手装在 hub 上、但没开给他的时候,
           // 印「已装,工作区里写/读/跑」就是在许一个他这边兑现不了的承诺。三种
           // 「没有」各自说各自的话——不装、总开关关着、装了但你没有。
