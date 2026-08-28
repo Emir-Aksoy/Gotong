@@ -1200,9 +1200,11 @@ config-write 仍然当场拒），手机上多的是**另一条**两步式的路
 - `hands_*` 的参数是 argv，**想多长有多长**。今天它们在手机上显示不全，是因为那把尺子恰好
   量不下——把 agent id 改短、把框架那句话缩一缩，这道门就会**静默**打开。安全属性不能挂在
   显示长度上，所以它们被**列举**在名单之外。
-- `set_hub_config` 的参数空间是**封闭的**：4 个具名键（`enum` 就是 `ENV_KNOBS` 派生的）、
-  值是枚举或端口号、`additionalProperties: false`。它渲染出来的那一行**结构上就长不了**，
-  也长不出自由文本。
+- `set_hub_config` 的参数空间是**封闭的**：具名键的闭集（`enum` 就是 `ENV_KNOBS` 派生的）、
+  值是枚举 / 布尔 / 端口号 / 有界时长 / 有长度与字符集约束的标识符、`additionalProperties: false`。
+  它渲染出来的那一行**结构上就长不了**，也长不出自由文本。
+  （M3c 当时是 4 个键；**UXCFG-M2 扩到 23 个**，承重的从来不是那个数字，是「闭集 + 值域有界」
+  这条性质——扩名单时逐条对着它审，见 SETTING-OPS-CONSOLE §5.1 的三条判据与拒收清单。）
 
 这条推理有一道门守着：`枚举 ≡ ENV_KNOBS` 的断言。有人往 `ENV_KNOBS` 加一个自由文本旋钮而
 schema 手抄名单没跟上，门就红；变异测试把枚举写死成一份手抄名单，恰好红那一例。
@@ -1356,7 +1358,7 @@ hub 上许一个做不到的诺。
 
 新 `personal-butler-environment.test.ts` **30 例**六组：工具面与只读契约（含上面那条源码级断言）/
 采集逐块降级 / 提案引擎纯函数（端口撞车两支、待生效、没手、工具链、内存、磁盘、出网七类）/
-判别联合承重（凡 `applicable:true` 其 `apply.tool` 恒为 `set_hub_config` 且 key ∈ 四个白名单旋钮；
+判别联合承重（凡 `applicable:true` 其 `apply.tool` 恒为 `set_hub_config` 且 key ∈ 白名单旋钮；
 凡 `applicable:false` 结构上没有 `apply`）/ 渲染（逐行降级 + 敏感事实结构性不出现）/ **真实默认
 探针自己也跑一次**（生产走的就是那条路，只测注入的假探针等于没测过它）。
 
@@ -1609,8 +1611,10 @@ prod compose 粘一个字面 token ⇒ 「值不是字面量」1 例；`GOTONG_W
   SETTING-OPS-CONSOLE §7.2 白纸黑字写着的 `EnvironmentFile=-<space>/gotong.env`；
   compose 那条更硬——prod 用的是**具名卷**，`env_file:` 结构上够不到卷里的文件。
   也就是说「下次重启生效」这句承诺，在三条路上是假的。最干净的修法不是逐条去补启动器，而是
-  **让 host 自己在 boot 读那个文件**（按 `ENV_KNOBS` 白名单只认那四个键、`process.env` 优先），
+  **让 host 自己在 boot 读那个文件**（按 `ENV_KNOBS` 白名单只认名单上的键、`process.env` 优先），
   那样谁来启动都成立，而且它天生进不了秘密。M6 不顺手做，是因为它是另一件事。
+  **→ 已修：UXCFG-M1**（`packages/host/src/managed-env.ts` 的 `loadManagedEnv`，就是上面这个修法，
+  boot 最前面同步跑一次）。见 SETTING-OPS-CONSOLE §七。
 - **镜像发布到 GHCR = 用户门**，不擅自做。
 ---
 

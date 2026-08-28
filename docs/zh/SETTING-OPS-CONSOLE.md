@@ -141,13 +141,70 @@ IM 面对 config-write 的那句拒绝文案因此也改口了 —— 从「owne
 ### 5.1 托管 env 文件 `<GOTONG_SPACE>/gotong.env`(`config-set`)
 
 给**非密钥**确定性 env 旋钮的**白名单**写器。每写**写前**确定性校验, 落盘, 审计。
+**这份名单同时也是**「手机上能改什么」的名单 —— `set_hub_config` 的 `key` 枚举就是从
+`ENV_KNOBS` 派生的(HANDS-M3c「一份定义四处执法」), 加一项进来, IM 那条路当天就多一项。
+
+**收进来的判据三条(缺一不可)**:
+
+1. **值域封闭或有界** —— 闭集 / 布尔 / 有界时长 / 有长度与字符集约束的标识符。
+   这同时是 `set_hub_config` 当初能进 `IM_APPROVABLE_TOOLS` 的理由: 审批卡那一行
+   **结构上就长不了**(见 §2.1)。
+2. **改错了不删数据、不放松安全闸、不把人锁在外面。**
+3. **改回去等于没发生过** —— 写回默认值(或对五个感官旋钮写空串)即复原。
 
 | 旋钮 | 校验 | 默认 |
 |---|---|---|
-| `GOTONG_MODE` | 必须 `personal` 或 `team` | `personal`(未设→自动检测) |
+| `GOTONG_MODE` | 闭集 `personal` / `team` | `personal`(未设→自动检测) |
 | `GOTONG_WEB_PORT` | 整数 1–65535 | `3000` |
 | `GOTONG_WS_PORT` | 整数 1–65535 | `4000` |
 | `GOTONG_OPEN_BROWSER` | 闭集 `0/1/true/false/on/off/yes/no/auto` | `auto` |
+| `GOTONG_DEFAULT_LANG` | 闭集 `zh` / `en` | `zh` |
+| `GOTONG_PROFILE` | 闭集 `hub` / `federation`(**呈现视角, 不改行为**) | `hub` |
+| `GOTONG_BUTLER_MAINTENANCE` | 布尔 | `true` |
+| `GOTONG_BUTLER_PROACTIVE` | 布尔 | `true` |
+| `GOTONG_BUTLER_RUN_BROADCAST` | 布尔 | `true` |
+| `GOTONG_BUTLER_MEMORY_GIT` | 布尔(级联在维护之下) | `false` |
+| `GOTONG_BUTLER_MEMORY_LIBRARIAN` | 布尔(级联在维护之下) | `false` |
+| `GOTONG_BUTLER_MEMORY_RECONCILE` | 布尔(级联在维护之下) | `false` |
+| `GOTONG_BUTLER_MEMORY_LINKS` | 布尔(**刻意不级联** —— 召回扩一跳不需要扫描先跑过) | `false` |
+| `GOTONG_BUTLER_MAINTENANCE_MS` | 时长 1m–24h | `6h` |
+| `GOTONG_BUTLER_PROACTIVE_MS` | 时长 5m–1h | `15m` |
+| `GOTONG_BUTLER_RUN_BROADCAST_MS` | 时长 1m–1h | `1m` |
+| `GOTONG_BUTLER_VOICE_MODEL` | 标识符 ≤96 码点、无控制字符 | 空(=不开口) |
+| `GOTONG_BUTLER_VOICE_VOICE` | 同上(**只接厂商官方系统音色**) | 空 |
+| `GOTONG_BUTLER_ASR_MODEL` | 同上 | 空(=不开耳) |
+| `GOTONG_BUTLER_VISION_MODEL` | 同上 | 空(=不开眼) |
+| `GOTONG_BUTLER_EMBEDDER_MODEL` | 同上 | 空(=不开语义召回) |
+| `GOTONG_UPDATE_CHECK` | 布尔 | `false` |
+| `GOTONG_A2A_SIGN_CARD` | 布尔 | `false` |
+
+三条与直觉相反、但承重的细节:
+
+- **布尔一律归一成 `'true'` / `'false'` 两个字面量**。读侧有**四个互不兼容**的布尔解析器
+  (`onUnlessDisabled` 认 opt-out、`onlyIfEnabled` 认 opt-in、`envBool` **不认 `on`**、
+  版本探针自带一份), 只有 `'true'`/`'false'` 这一对四个都读对。收下 `on` 却写进
+  `envBool` 管的旋钮, 就是界面说开了、进程没开。
+- **五个感官旋钮的空串 = 显式清除**, 不是错误。它们的读侧全是 `(env.X ?? '').trim()`
+  再判真值, 所以 `X=` 与「从没设过」逐字节同义 —— 少了这一条, 人能在网页上把音色打开却
+  再也关不掉, 判据 3 当场失效。
+- **标识符禁控制字符是安全要求不是洁癖**: 值里夹一个换行, `serializeEnvFile` 会把它
+  写成第二行 `KEY=`, 下次 `parseEnvFile` 就读出一个没人写过的旋钮。故意**不**限 ASCII
+  —— 音色 id 本来就是中文(`茉莉`)。
+
+**刻意留在名单外的(每条都有具体原因, 不是"以后再说")**:
+
+| 拒收 | 因为 |
+|---|---|
+| `GOTONG_BUTLER` | **把人锁在外面**: 关掉管家就等于关掉手机上唯一能把它开回来的路(`/setting` 在 IM 上恒 `allowConfigWrite:false`) |
+| `GOTONG_BUTLER_GOVERNED` | 那是审批闸**本身**。让一个要过审批的动作去关掉审批, 是把门的钥匙挂在门上 |
+| `GOTONG_HOST` | `auditBootSecurity` 对它有两条 `fatal` ⇒ 改错直接**拒启**。闭集救不了它: `0.0.0.0` 本身就是那把锁, 不是打错的字。它属于将来一个带引导的「开放到公网」复合动作 |
+| `GOTONG_SPACE_NAME` | `openOrInit` 对**已存在**的空间忽略 `opts.name` ⇒ 写了不生效, 界面会替旋钮撒谎 |
+| `GOTONG_LOG_LEVEL` / `_FORMAT` | 让它们生效的那个模块级求值顺序**只差一行就会失效**, 从设置页改会长期悄悄没反应 |
+| 各 `*_KEEP_DAYS` / `_ARCHIVE_DAYS` / `RUN_KEEP` | **删历史**, 违反判据 2 |
+| `GOTONG_GATING` / `_TRUST_PROXY` / `_COOKIE_SECURE` / `_ALLOW_INSECURE` / `_ALLOWED_HOSTS` / `_PROTOCOL_STRICT` | 放松安全闸, 违反判据 2 |
+| `GOTONG_SPACE` / `_BACKUP_DIR` / `_WORKFLOWS_DIR` | 路径 = 无界自由文本, 违反判据 1 |
+| 一切凭证 | 已被 `isSecretKey()` 兜住(见下), 且各有专用流 |
+| 各 IM 桥 | 它们**根本没有开关旋钮** —— host 按「凭证在不在」决定起不起桥, 关桥的正路是 `/setkey` 那条线 |
 
 **密钥硬排除**: `isSecretKey()` 拒任何 `*_TOKEN` / `*_SECRET` / `*_KEY` / `*_PASSWORD` 结尾,
 或含 `MASTER_KEY` / `PASSWORD` 的键 —— 返回 `secret_key_refused`, **不写不审计成功**。
@@ -226,11 +283,40 @@ env-gate 跑着的飞书 / Telegram 桥直接多一个 `/setting` 命令, 登录
 
 ---
 
-## 七、运维须知 —— launcher / systemd source `gotong.env`
+## 七、这个文件是怎么生效的(UXCFG-M1 起: host 自己读)
 
-config-write 写的是 host 下次启动会读的文件。要让它**生效**, host 启动前得有人 source 它。
-**host 自己仍只读 `process.env`**(boot 读路径逐字节不变)—— 这层 source 跟 systemd 的
-`EnvironmentFile=` 是同一回事。
+config-write 写的是 host 下次启动会读的文件。**host 在 boot 的最前面自己读它**
+(`packages/host/src/managed-env.ts` 的 `loadManagedEnv`), 于是「重启生效」这句话在
+**每一种起法**上都成立 —— 包括 compose 那种宿主根本够不到具名卷里那个路径的形态。
+
+> **为什么这条修在 host 里, 而不是逐条去补启动器。** 在 UXCFG-M1 之前, 那句「下次
+> 重启生效」在四条已发货的启动路径里**只有一条是真的**: 桌面启动器真的 source 它,
+> 而 `deploy/gotong.service` 与 `cloud-quickstart.sh` 读的是 `/etc/gotong.env`、prod
+> compose 结构上够不到。也就是说在最主流的 VPS 部署上, 人在网页上改完、重启、
+> 什么都没变 —— 而界面刚刚亲口说这次会生效。**一个改不动东西的设置页比没有设置页
+> 更坏**, 它把「我配好了」变成幻觉。补启动器要改三个文件, 而 compose 那条根本补不了;
+> host 自己读, 一处覆盖全部形态, 也覆盖将来任何一种新的起法。
+
+三条承重的不变量:
+
+1. **只认白名单** —— 认的键恰好是 §5.1 那份 `ENV_KNOBS`, 也就是**写入方允许写的
+   那一份**。一份定义两处执法: 能写什么, 就认什么。这是安全性质不只是整洁 —— 有人
+   (或一个被注入的模型)往这个文件里写 `GOTONG_MASTER_KEY=…`, 读路径**结构上看不见
+   它**。凭证搬不进来, 不是因为我们记得挡, 而是因为没有那条路。
+2. **`process.env` 永远赢** —— systemd `Environment=` / compose `environment:` /
+   shell export 一律压过盘上的值; 反过来会让几个月前在网页上点过的旧值, 悄悄盖掉
+   运维今天写在 unit 文件里的那一行。「已设」按 `env()` 的语义判: **空串 = 未设**。
+3. **值要过写入方同一个校验器** —— 人手改成非法值时**不注入**比注入更诚实(注入了
+   要么让下游当场抛, 要么被静默回落成默认, 两种都是「我照你说的做了」的谎)。被拒的
+   键走 warn + 启动横幅, 不静默。
+
+读不动的时候: ENOENT = 诚实的「没有这个文件」(绝大多数部署本来就没有), 零噪音;
+其它错(EACCES / EISDIR / EIO)**必须说出来** —— 读不动意味着这个人在网页上改的每一个
+旋钮都不生效, 而 hub 看起来一切正常。**不拒启**: 为一个配置便利层拒启, 会让唯一能修
+它的那个界面也够不着。
+
+下面 7.1 / 7.2 那层外部 source **仍然保留且仍然有效**(两者叠加是幂等的 —— 环境里
+已经有的值, host 侧按不变量 2 让位), 但它不再是「生效」的前提条件。
 
 ### 7.1 便携 launcher(已接线)
 
@@ -251,7 +337,9 @@ source_managed_env() {
 
 ### 7.2 systemd(云端)
 
-`/etc/systemd/system/gotong.service` 的 `[Service]` 段加一行, 让 host 启动前 source 它:
+`/etc/systemd/system/gotong.service` 的 `[Service]` 段可以加一行, 让 host 启动前也
+source 它(**UXCFG-M1 后不再是必需** —— host 自己会读; 这行的用处是让 `systemctl show`
+一眼看得见, 以及让非 host 的同 unit 子进程也拿到):
 
 ```ini
 [Service]
@@ -260,7 +348,7 @@ ExecStart=/usr/bin/node /opt/gotong/dist/main.js
 ```
 
 > ⚠️ **密钥不进这个文件**。`config-set` 白名单按构造拒一切密钥键 —— `gotong.env` 只装
-> `GOTONG_MODE` / `GOTONG_WEB_PORT` / `GOTONG_WS_PORT` / `GOTONG_OPEN_BROWSER` 这类非密钥旋钮。
+> §5.1 表里那些**值域封闭或有界**的非密钥旋钮。
 > `GOTONG_MASTER_KEY` 和各 provider/IM token 仍走 systemd secret(`systemd-creds` /
 > `Environment=` 注入)/ vault, **别**写进 `gotong.env` 明文、**别**提交 git。详见
 > [`GO-LIVE.md`](GO-LIVE.md) §C 与 [`DEPLOY.md`](DEPLOY.md) §C.4。

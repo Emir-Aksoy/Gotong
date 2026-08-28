@@ -408,8 +408,17 @@ export function proposeEnvironmentFixes(env: HubEnvironment): HubEnvProposal[] {
         title: '内存偏小',
         detail: `总共 ${fmtBytes(env.machine.totalMemBytes)}。后台维护(记忆蒸馏 / 图书馆员 / 向量化)都在这台机器上跑,内存紧的时候它们最先出事。`,
         applicable: false,
-        // 这几个开关不在「可改的设置项」白名单里(那里只有四个),所以只能指路。
-        howTo: '这几个开关不在我能改的四个设置项里,要在服务器的 gotong.env 里关(记忆蒸馏 / 图书馆员 / embedder),再重启。',
+        // UXCFG-M2 之前这里写的是「这几个开关不在我能改的四个设置项里」——扩名单之后
+        // 那句话变成了假话:三个开关现在都在白名单上。但**仍然 applicable:false**,
+        // 因为关哪一个是人的取舍(关蒸馏=不再整理记忆 / 关图书馆员=不再上架 /
+        // 关 embedder=退回关键词召回),算不出一个「确定安全」的替代值——与端口撞车
+        // 那支的降级分支同一条理由。能改 ≠ 该替你决定改哪个。
+        howTo:
+          '这三个开关我现在能改(说一声,我会把改动发给你确认):' +
+          'GOTONG_BUTLER_MAINTENANCE 关掉后台记忆整理、' +
+          'GOTONG_BUTLER_MEMORY_LIBRARIAN 关掉知识上架、' +
+          'GOTONG_BUTLER_EMBEDDER_MODEL 留空退回关键词召回。' +
+          '关哪个得你定——三个各有代价,我不替你挑。改完重启生效。',
       })
     }
     const disk = env.machine.diskFreeBytes
@@ -482,14 +491,24 @@ function egressLine(outage: HubEnvironment['outage'], now: number): string {
 function knobLines(knobs: readonly ButlerConfigKnobView[] | null): string[] {
   if (!knobs) return [`- 基础设置:${NOT_WIRED}`]
   if (knobs.length === 0) return ['- 基础设置:读不到当前值']
+  // UXCFG-M2 把白名单从 4 项扩到 23 项。**全列出来不是更诚实,是更吵**:其中绝大多数
+  // 停在默认值,20 行「跟出厂一样」会把真正有人动过的那两三行埋掉。故只列**有人动过
+  // 的**(文件里写了,或环境里设了),其余折成一行并报出条数——不是静默截断,读的人
+  // 知道还有多少、也知道可以点名问。
+  const touched = knobs.filter((k) => k.fileValue !== null || k.envValue !== null)
+  const untouched = knobs.length - touched.length
+  if (touched.length === 0) {
+    return [`- 基础设置:${knobs.length} 项全是默认值(要看某一项当前是什么,点名问我)`]
+  }
   return [
-    '- 基础设置(下次重启会用的值):',
-    ...knobs.map((k) => {
+    '- 基础设置(下次重启会用的值,只列有人动过的):',
+    ...touched.map((k) => {
       const next = nextValueOf(k)
       const live = liveValueOf(k)
       const tail = next === live ? '' : `(现在还是 ${renderKnobValue(k.key, live)})`
       return `  · ${k.key} = ${renderKnobValue(k.key, next)}${tail}`
     }),
+    ...(untouched > 0 ? [`  · 其余 ${untouched} 项都是默认值(点名问我就报给你)`] : []),
   ]
 }
 
@@ -528,7 +547,7 @@ export function renderHubEnvironment(env: HubEnvironment, now: number): string {
 const ENVIRONMENT_TOOL: LlmToolDefinition = {
   name: 'hub_environment',
   description:
-    '看这台 hub 所在机器的环境:几核多少内存多少磁盘、Node 版本、ffmpeg/git/docker 装没装、手(监狱工作区)能不能用、出网通不通、四个基础设置项当前值,以及据此给出的处理建议。回答「这台服务器撑得住吗」「为什么语音条不出来」「怎么没有手」「我改的设置生效了吗」这类问题时用它。只读探测,不跑任何命令、不发任何网络请求;要真改设置得用 set_hub_config(会先送你批准)。',
+    '看这台 hub 所在机器的环境:几核多少内存多少磁盘、Node 版本、ffmpeg/git/docker 装没装、手(监狱工作区)能不能用、出网通不通、基础设置项里有人动过的那些的当前值,以及据此给出的处理建议。回答「这台服务器撑得住吗」「为什么语音条不出来」「怎么没有手」「我改的设置生效了吗」这类问题时用它。只读探测,不跑任何命令、不发任何网络请求;要真改设置得用 set_hub_config(会先送你批准)。',
   inputSchema: { type: 'object', properties: {}, additionalProperties: false },
 }
 

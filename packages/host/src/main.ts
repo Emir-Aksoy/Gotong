@@ -149,6 +149,14 @@ import {
 } from './main-cli.js'
 import { friendlyBootError } from './boot-error.js'
 import { installProcessSafetyNet } from './process-safety.js'
+import { loadManagedEnv } from './managed-env.js'
+
+// UXCFG-M1 —— 把 `<space>/gotong.env`(设置台 / 阿同 `set_hub_config` 写的那份)注入
+// process.env。位置刻意在下一行 `createLogger` **之前**:logger 就在这里构造,而它
+// 在构造那一刻读 GOTONG_LOG_LEVEL / _FORMAT(core/logger.ts `resolveOpts`)。任何读
+// env 的模块级求值都在这条线之后,所以「一处注入、全体受益」才是真的。
+// 此刻还没有 logger 可以报——结果存着,到 main() 里才说话。
+const managedEnv = loadManagedEnv(env('GOTONG_SPACE', '.gotong')!)
 
 const log = createLogger('host')
 import { serveWebSocket } from '@gotong/transport-ws'
@@ -364,6 +372,19 @@ async function main(): Promise<void> {
   // A rejected background timer (butler sweeps etc.) must degrade to a log line,
   // not crash the host on Node's default unhandledRejection → exit (audit P1).
   installProcessSafetyNet(log)
+  // 注入早在模块顶层就发生了(见上),这里只是第一个有 logger 可以说话的地方。
+  if (managedEnv.problem) log.warn(managedEnv.problem, { file: managedEnv.path })
+  if (managedEnv.rejected.length > 0) log.warn('managed env: invalid values skipped', { rejected: managedEnv.rejected })
+  // shadowed **必须响亮**:这条正是本刀要消灭的那个失败模式换了个地方重现——人在设置页
+  // 改了、重启了,而 systemd `Environment=` / compose `environment:` 默默赢了。不说出来,
+  // 就是把一句假话换成了另一句。(`ignored` 刻意不报:凭证行本来就该结构性看不见,
+  // 每次开机把 API key 的**变量名**列一遍是喊狼来了。)
+  if (managedEnv.shadowed.length > 0)
+    log.warn('managed env: shadowed by the process environment — the settings page value is NOT in effect', {
+      keys: managedEnv.shadowed,
+      file: managedEnv.path,
+    })
+  if (managedEnv.applied.length > 0) log.info('managed env applied', { file: managedEnv.path, keys: managedEnv.applied })
   const SPACE_DIR = env('GOTONG_SPACE', '.gotong')!
 
   // Build the SpaceConfig overrides from env. Anything unset falls back to

@@ -110,19 +110,174 @@ function validateOpenBrowser(raw: string): KnobVerdict {
 }
 
 /**
- * The whitelist. Deliberately TINY and grounded: only env vars the host
- * genuinely reads, that are non-secret scalars, and that take effect on restart.
- * NOTE on the absent "IM bridge toggle": the host gates each IM bridge purely on
- * the PRESENCE of its credentials (`GOTONG_TELEGRAM_BOT_TOKEN`, etc.) — there is no
- * boolean toggle env it reads, and those creds are secret-name keys this editor
- * hard-refuses. So there is no honest knob to add; inventing one would write an
- * env the host never reads.
+ * 布尔归一化 —— UXCFG-M2 的承重件。
+ *
+ * host 里有**三套互不兼容**的布尔解析器,而它们读的是同一批旋钮的邻居:
+ *   - `onUnlessDisabled`(butler-env,opt-out 组): 只有 {0,false,off,no} 算关。
+ *   - `onlyIfEnabled`(butler-env,opt-in 组 + version-check): 只有 {1,true,on,yes}
+ *     算开——`enabled` / `Y` / `开` 一律**静默当没开**,不报错,只是不生效。
+ *   - `envBool`(main-cli): 只认 {1,true,yes}——连 `on` 都不认。
+ *
+ * 没有人应该被要求记住这个。所以这里收下宽的一套,**吐出去的只有 `true`/`false`**
+ * ——那两个字面量是上面三套里唯一被三方都正确理解的值。这与 `always`→`true` 是
+ * 同一个判断,而且理由更硬:那次治的是一个解析器的盲点,这次治的是三个解析器
+ * 各说各话。
+ */
+const BOOL_ALIASES = new Map<string, string>([
+  ['1', 'true'], ['true', 'true'], ['on', 'true'], ['yes', 'true'], ['y', 'true'],
+  ['enable', 'true'], ['enabled', 'true'],
+  ['0', 'false'], ['false', 'false'], ['off', 'false'], ['no', 'false'], ['n', 'false'],
+  ['disable', 'false'], ['disabled', 'false'],
+])
+function validateBool(raw: string): KnobVerdict {
+  const canonical = BOOL_ALIASES.get(raw.trim().toLowerCase())
+  if (canonical === undefined) {
+    return { ok: false, reason: 'must be on(1/true/yes/enabled) or off(0/false/no/disabled)' }
+  }
+  return { ok: true, value: canonical }
+}
+
+/** 闭集枚举 —— 值域小到可以逐个印在拒绝语里。 */
+function oneOf(...allowed: readonly string[]): (raw: string) => KnobVerdict {
+  return (raw) => {
+    const t = raw.trim().toLowerCase()
+    if (!allowed.includes(t)) return { ok: false, reason: `must be one of: ${allowed.join(', ')}` }
+    return { ok: true, value: t }
+  }
+}
+
+/**
+ * 模型名 / 音色 id 这类自由标识符。
+ *
+ * **控制字符的禁令是安全要求,不是整洁。** 在这之前每个校验器的值域都是闭集,
+ * 一个换行永远无从进入;这是第一个收自由文本的。而 `serializeEnvFile` 写的是
+ * `KEY=value`、`parseEnvFile` 逐行切——值里夹一个 `\n`,写出去就是**另一行 KEY=**,
+ * 下次 boot 被当成第二个旋钮读回来。凭证注入就是这么来的。故控制字符一律拒。
+ *
+ * 刻意**不**限 ASCII:厂商官方音色 id 本来就是中文(茉莉 / 冰糖 / 苏打 / 白桦)。
+ */
+function identifier(what: string): (raw: string) => KnobVerdict {
+  return (raw) => {
+    const t = raw.trim()
+    // 空串 = **显式清除**,不是错误。用它的五个感官旋钮读侧全是
+    // `(env.X ?? '').trim()` 再判真值(butler-voice / -hearing / -seeing /
+    // -embedder 各自的 *FromEnv),所以 `X=` 与「从没设过」对它们逐字节同义。
+    // 少了这一条,人能在设置页把音色打开却再也关不掉——判据 3(改回去等于没
+    // 发生过)当场失效。其余旋钮不走这个校验器,它们的「改回去」是写回默认值。
+    if (t.length === 0) return { ok: true, value: '' }
+    if (t.length > 96) return { ok: false, reason: `${what} is too long (max 96 chars)` }
+    for (const ch of t) {
+      const c = ch.codePointAt(0)!
+      if (c < 0x20 || c === 0x7f) return { ok: false, reason: `${what} must not contain control characters` }
+    }
+    return { ok: true, value: t }
+  }
+}
+
+/**
+ * 节律(毫秒)。**上下界与 butler-env 的 `cadence()` 钳位逐字同界**——于是
+ * 「过了校验」等价于「逐字生效」:一个通过这里的值永远不会在下游被悄悄钳成
+ * 另一个数。同界这件事不靠我在两处抄对,靠 `ops-config-write.test.ts` 里那条
+ * 跨模块门(把边界值真喂给 `parseButlerEnv`,断言原样出来)。
+ *
+ * 顺手收人话单位:`30m` / `6h` / `90s` 都行,存下去的是毫秒——`always`→`true` 同款,
+ * 界面上让人读得懂,盘上仍是 host 真正会解析的那个值。
+ */
+function cadenceMs(minMs: number, maxMs: number): (raw: string) => KnobVerdict {
+  const human = (ms: number): string => (ms % 3_600_000 === 0 ? `${ms / 3_600_000}h` : `${ms / 60_000}m`)
+  return (raw) => {
+    const t = raw.trim().toLowerCase()
+    const m = /^(\d+)(ms|s|m|h)?$/.exec(t)
+    if (!m) return { ok: false, reason: `must be a duration like 30m / 6h / 90s (range ${human(minMs)}–${human(maxMs)})` }
+    const mult = { ms: 1, s: 1_000, m: 60_000, h: 3_600_000 }[m[2] ?? 'ms']!
+    const ms = Number(m[1]) * mult
+    if (!Number.isSafeInteger(ms) || ms < minMs || ms > maxMs) {
+      return { ok: false, reason: `must be between ${human(minMs)} and ${human(maxMs)}` }
+    }
+    return { ok: true, value: String(ms) }
+  }
+}
+
+/**
+ * 可改旋钮的白名单 —— 这份名单**同时**是四样东西:阿同 `set_hub_config` 的参数
+ * 枚举(M3c)、环境提案 `apply.key` 的类型(M4)、写入方的查表、以及 boot 读回
+ * `<space>/gotong.env` 时认的那一份(UXCFG-M1)。加一行,四处一起长。
+ *
+ * ## 收什么(UXCFG-M2,三条判据全部满足才收)
+ *
+ *   1. **值域封闭或有界** —— 枚举 / 布尔 / 带上下界的时长 / 有长度和字符约束的
+ *      标识符。这条同时是 `set_hub_config` 当初能进 `IM_APPROVABLE_TOOLS` 的
+ *      理由:审批卡上那行字**结构上就长不了**。
+ *   2. **改错了不删数据、不放松安全闸、不把人锁在外面。**
+ *   3. **改回去等于没发生过。**
+ *
+ * ## 刻意拒掉的(每一条都被逐个核过,不是漏了)
+ *
+ *   - `GOTONG_BUTLER` —— 关掉管家就等于关掉手机上唯一那条能把它开回来的路
+ *     (`/setting` 命令台的 config-write 恒 false)。判据 2 的「锁在外面」。
+ *   - `GOTONG_BUTLER_GOVERNED` —— 那是审批闸本身。一句话关掉全部审批,判据 2。
+ *   - `GOTONG_HOST` —— 想开放到公网就得同时设好 `GOTONG_ALLOWED_HOSTS` 与
+ *     `GOTONG_COOKIE_SECURE`,否则 `auditBootSecurity` 两条 **fatal** 直接拒启,
+ *     而救它要的旋钮此刻已经够不着了。**闭集救不了它:`0.0.0.0` 本身就是那把锁,
+ *     不是打错的字。** 这件事该长成一个带前置检查的「开放到公网」引导动作
+ *     (一次原子地设好四个),那是另一个里程碑,不是这份名单里的一行。
+ *   - `GOTONG_SPACE_NAME` —— `Space.openOrInit` 对已存在的 space 直接走
+ *     `Space.open()`,`opts.name` **整个被忽略**;它只在首次 init 落一次盘。
+ *     收一个改了不生效的旋钮,比不收更坏(界面会替它撒谎)。
+ *   - `GOTONG_LOG_LEVEL` / `_FORMAT` —— `createLogger('host')` 在模块顶层求值,
+ *     虽然 UXCFG-M1 的注入排在它前面一行,但那个顺序脆弱到一次 import 重排就会
+ *     静默失效。没有门守得住的生效性,不收。
+ *   - 保留期类(`GOTONG_*_KEEP_DAYS` / `_ARCHIVE_DAYS` / `GOTONG_RUN_KEEP`)——
+ *     调小会**删掉历史**,判据 3 的正反面。
+ *   - 安全闸类(`ALLOW_INSECURE` / `COOKIE_SECURE` / `TRUST_PROXY` /
+ *     `ALLOWED_HOSTS` / `PROTOCOL_STRICT` / `GATING`)—— 判据 2。
+ *   - 路径类(`GOTONG_SPACE` / `_BACKUP_DIR` / `_WORKFLOWS_DIR`)—— 改了等于换一
+ *     台 hub,数据还在旧路径下但界面上看不见,判据 3。
+ *   - 一切凭证 —— 在查这份名单**之前**就被 `isSecretKey` 拒掉,秘密只进金库。
+ *     顺带:IM 桥没有开关旋钮,host 是按凭证在不在决定开不开桥的——发明一个
+ *     toggle 等于写一个 host 从来不读的 env。
  */
 export const ENV_KNOBS = [
+  // ── 基础 ──
   { key: 'GOTONG_MODE', summary: 'Personal vs team mode (auto-detected when unset).', defaultValue: 'personal', validate: validateMode },
   { key: 'GOTONG_WEB_PORT', summary: 'Admin UI / API port.', defaultValue: '3000', validate: validatePort },
   { key: 'GOTONG_WS_PORT', summary: 'Agent WebSocket port.', defaultValue: '4000', validate: validatePort },
   { key: 'GOTONG_OPEN_BROWSER', summary: 'First-run browser auto-open behaviour.', defaultValue: 'auto', validate: validateOpenBrowser },
+  { key: 'GOTONG_DEFAULT_LANG', summary: 'Default UI language for new sessions.', defaultValue: 'zh', validate: oneOf('zh', 'en') },
+  { key: 'GOTONG_PROFILE', summary: 'Which view the console foregrounds: one hub, or a federation of hubs. Presentation only — never changes behaviour.', defaultValue: 'hub', validate: oneOf('hub', 'federation') },
+
+  // ── 阿同的后台节律:开关 ──
+  // 三个 opt-out(默认开)。刻意不收总开关 GOTONG_BUTLER 与审批闸 _GOVERNED,见上。
+  { key: 'GOTONG_BUTLER_MAINTENANCE', summary: 'Butler background memory upkeep (every 6h). Turning this OFF also stops the memory extras below.', defaultValue: 'true', validate: validateBool },
+  { key: 'GOTONG_BUTLER_PROACTIVE', summary: 'Butler proactive daily brief.', defaultValue: 'true', validate: validateBool },
+  { key: 'GOTONG_BUTLER_RUN_BROADCAST', summary: 'Butler announcing workflow run outcomes.', defaultValue: 'true', validate: validateBool },
+  // 四个 opt-in(默认关)。前三个是 6h 扫描里的活,级联在 _MAINTENANCE 之下 ——
+  // summary 必须说出来,否则有人关了维护再来开图书馆员,会得到一个「开了但不跑」
+  // 的旋钮。_MEMORY_LINKS 刻意**不**级联(它只挂在 GOTONG_BUTLER 上:召回扩一跳
+  // 不需要扫描先跑过),所以它的 summary 也不该跟着写那句话。
+  { key: 'GOTONG_BUTLER_MEMORY_GIT', summary: 'Snapshot each member memory tree into git on upkeep (needs butler upkeep ON).', defaultValue: 'false', validate: validateBool },
+  { key: 'GOTONG_BUTLER_MEMORY_LIBRARIAN', summary: 'Let the butler file topical facts into knowledge/ notes on upkeep (needs butler upkeep ON).', defaultValue: 'false', validate: validateBool },
+  { key: 'GOTONG_BUTLER_MEMORY_RECONCILE', summary: 'Let the butler retire stale/contradicting facts on upkeep (needs butler upkeep ON).', defaultValue: 'false', validate: validateBool },
+  { key: 'GOTONG_BUTLER_MEMORY_LINKS', summary: 'Build an association graph across memories, widening recall by one hop.', defaultValue: 'false', validate: validateBool },
+
+  // ── 阿同的后台节律:周期 ──
+  // 上下界与 butler-env 的 cadence() 钳位同界 ⇒ 过了校验 = 逐字生效,不会被悄悄钳走。
+  { key: 'GOTONG_BUTLER_MAINTENANCE_MS', summary: 'How often butler memory upkeep runs.', defaultValue: '6h', validate: cadenceMs(60_000, 24 * 60 * 60 * 1000) },
+  { key: 'GOTONG_BUTLER_PROACTIVE_MS', summary: 'How often the butler checks whether a proactive brief is due.', defaultValue: '15m', validate: cadenceMs(5 * 60 * 1000, 60 * 60 * 1000) },
+  { key: 'GOTONG_BUTLER_RUN_BROADCAST_MS', summary: 'How often the butler checks for finished runs to announce.', defaultValue: '1m', validate: cadenceMs(60_000, 60 * 60 * 1000) },
+
+  // ── 阿同的感官:模型名 ──
+  // 凭证(_URL / _KEY)不在这里 —— 那两个走金库。这里只有「用哪个模型 / 哪个音色」,
+  // 每一个都是非密的短标识符,写错了那项能力诚实退回文字,改回去即恢复。
+  { key: 'GOTONG_BUTLER_VOICE_MODEL', summary: 'Text-to-speech model the butler replies with (needs the voice endpoint + key set).', defaultValue: '', validate: identifier('model name') },
+  { key: 'GOTONG_BUTLER_VOICE_VOICE', summary: 'Vendor system voice id for replies (official system voices only — never a cloned real person).', defaultValue: '', validate: identifier('voice id') },
+  { key: 'GOTONG_BUTLER_ASR_MODEL', summary: 'Speech-to-text model for incoming voice messages.', defaultValue: '', validate: identifier('model name') },
+  { key: 'GOTONG_BUTLER_VISION_MODEL', summary: 'Vision model for incoming images.', defaultValue: '', validate: identifier('model name') },
+  { key: 'GOTONG_BUTLER_EMBEDDER_MODEL', summary: 'Embeddings model for semantic memory recall.', defaultValue: '', validate: identifier('model name') },
+
+  // ── 其它 opt-in ──
+  { key: 'GOTONG_UPDATE_CHECK', summary: 'Daily check for a newer Gotong release (one outbound request/day; off = no network, no timer).', defaultValue: 'false', validate: validateBool },
+  { key: 'GOTONG_A2A_SIGN_CARD', summary: 'Sign this hub\'s public agent card (ES256). Off by default; the signing key is kept across on/off.', defaultValue: 'false', validate: validateBool },
   // `as const satisfies` 而不是 `: readonly EnvKnobSpec[]`——注解会把每个 key 拓宽成
   // `string`,那样下面那个联合类型就只是 `string`,什么也约束不住。
 ] as const satisfies readonly EnvKnobSpec[]
@@ -193,8 +348,9 @@ export function parseEnvFile(text: string): Map<string, string> {
 
 const ENV_FILE_HEADER = [
   '# Gotong managed environment — written by `setting config-set`.',
-  '# Sourced by the launcher / systemd `EnvironmentFile=` BEFORE the host starts,',
-  '# so the host still only reads process.env. Changes take effect on NEXT restart.',
+  '# Read by the host itself at boot (managed-env.ts), whitelist-scoped to the knobs',
+  '# below; anything already set in the real environment WINS over this file.',
+  '# Changes take effect on NEXT restart.',
   '# Only NON-SECRET knobs live here. Secrets (API keys, bridge tokens, the master',
   '# key) NEVER go here — use the vault / setup wizard / `setting rotate-master-key`.',
   '',

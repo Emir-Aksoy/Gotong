@@ -25,6 +25,10 @@ import {
   type EnvKnobKey,
 } from '../src/ops-config-write.js'
 import { runOpsCommand, OpsError, OpsTierError, type OpsCaller, type OpsDeps } from '../src/ops-core.js'
+import { parseButlerEnv, type ButlerEnvConfig } from '../src/butler-env.js'
+import { butlerVoiceFromEnv } from '../src/butler-voice.js'
+import { envBool } from '../src/main-cli.js'
+import { versionCheckEnabled } from '../src/version-check.js'
 
 const ENV_PATH = '/space/gotong.env'
 const PRICING_PATH = '/space/pricing.json'
@@ -526,5 +530,222 @@ describe('read-merge-write safety', () => {
     expect(code).toMatch(/import\s*\{[^}]*\bwriteFileAtomic\b[^}]*\}\s*from\s*'@gotong\/core'/)
     expect(code).not.toMatch(/import\s*\{[^}]*\bwriteFile\b\s*[,}][^}]*\}\s*from\s*'node:fs\/promises'/)
     expect(code).toMatch(/seams\.writeFileImpl\s*\?\?[\s\S]{0,80}writeFileAtomic/)
+  })
+})
+
+// ───────────────────────────────────────────────────────────────────────────
+// UXCFG-M2 — 白名单扩到 23 个之后,写侧校验器与读侧解析器必须说同一种话。
+//
+// 这一组测试**刻意不复制任何一个数字**。上下界抄一遍就是第二份真相,它会跟着
+// 第一份一起漂移而没有人被通知。钉的是行为等价:
+//
+//   设置页收下的值 ⟺ 阿同逐字照跑的值。
+//
+// 谁先动都会红:放宽 `cadenceMs` ⇒ 出现「收了但被钳走」的值;收紧 `cadence()` ⇒
+// 同样一条。而「被钳走」正是界面替旋钮撒谎的那个形状 —— 页面上写着 6h,后台跑的
+// 是别的数。
+// ───────────────────────────────────────────────────────────────────────────
+describe('UXCFG-M2 whitelist ⇄ butler-env agreement', () => {
+  const knob = (key: EnvKnobKey) => ENV_KNOBS.find((k) => k.key === key)!
+
+  const CADENCES = [
+    { key: 'GOTONG_BUTLER_MAINTENANCE_MS' as const, read: (c: ButlerEnvConfig) => c.maintenanceMs },
+    { key: 'GOTONG_BUTLER_PROACTIVE_MS' as const, read: (c: ButlerEnvConfig) => c.proactiveMs },
+    { key: 'GOTONG_BUTLER_RUN_BROADCAST_MS' as const, read: (c: ButlerEnvConfig) => c.runBroadcastMs },
+  ]
+
+  // 从 30s 到 48h,横跨三个旋钮的全部上下界,外加它们的边界前后一格。
+  const PROBES_MS = [
+    1, 1_000, 30_000, 59_999, 60_000, 60_001,
+    5 * 60_000 - 1, 5 * 60_000, 5 * 60_000 + 1,
+    60 * 60_000 - 1, 60 * 60_000, 60 * 60_000 + 1,
+    6 * 60 * 60_000, 24 * 60 * 60_000 - 1, 24 * 60 * 60_000, 24 * 60 * 60_000 + 1,
+    48 * 60 * 60_000,
+  ]
+
+  for (const c of CADENCES) {
+    it(`${c.key}: 收下的一律逐字生效,会被钳走的一律先被拒`, () => {
+      let accepted = 0
+      for (const ms of PROBES_MS) {
+        const verdict = knob(c.key).validate(String(ms))
+        const live = c.read(parseButlerEnv({ [c.key]: String(ms) }, '/space'))
+        if (verdict.ok) {
+          accepted++
+          // 收了就必须原样跑 —— 这条断言就是「界面不许撒谎」。
+          expect(live, `${c.key}=${ms} 被设置页收下,却被 cadence() 钳成 ${live}`).toBe(ms)
+        } else {
+          // 拒了必须真的是因为它会被钳走(而不是拒了一个本来好好的值)。
+          expect(live, `${c.key}=${ms} 被设置页拒绝,但 cadence() 其实原样接受`).not.toBe(ms)
+        }
+      }
+      // 探针集必须真的两边都探到 —— 否则上面两条可能空洞地真。
+      expect(accepted).toBeGreaterThan(0)
+      expect(accepted).toBeLessThan(PROBES_MS.length)
+    })
+
+    it(`${c.key}: 写法不影响裁决,只有数值影响`, () => {
+      // 同一个时长换三种写法必须得到同一个裁决与同一个值 —— 这样就钉住了「形式
+      // 解析」而完全不必在测试里复述这个旋钮的量程(那正是要避免的第二份真相)。
+      for (const [a, b, c2] of [
+        ['1800000', '1800s', '30m'],
+        ['3600000', '3600s', '1h'],
+      ]) {
+        const va = knob(c.key).validate(a)
+        expect(knob(c.key).validate(b)).toEqual(va)
+        expect(knob(c.key).validate(c2)).toEqual(va)
+        expect(knob(c.key).validate(`  ${c2.toUpperCase()} `)).toEqual(va)
+      }
+      // 不是时长的一律拒,绝不 Number() 出个 NaN 再让 `|| fallback` 悄悄兜底。
+      expect(knob(c.key).validate('soon').ok).toBe(false)
+      expect(knob(c.key).validate('6 hours').ok).toBe(false)
+      expect(knob(c.key).validate('-1').ok).toBe(false)
+      expect(knob(c.key).validate('').ok).toBe(false)
+    })
+
+    it(`${c.key}: 默认值本身过得了自己的校验器`, () => {
+      const spec = knob(c.key)
+      const v = spec.validate(spec.defaultValue)
+      expect(v.ok, `${c.key} 的 defaultValue '${spec.defaultValue}' 过不了自己的校验器`).toBe(true)
+    })
+  }
+
+  it('时长的人类写法落到毫秒(在量程最宽的 _MAINTENANCE_MS 上断一次)', () => {
+    const k = knob('GOTONG_BUTLER_MAINTENANCE_MS')
+    expect(k.validate('90s')).toEqual({ ok: true, value: '90000' })
+    expect(k.validate('  30M ')).toEqual({ ok: true, value: '1800000' })
+    expect(k.validate('6h')).toEqual({ ok: true, value: '21600000' })
+    expect(k.validate('21600000')).toEqual({ ok: true, value: '21600000' })
+  })
+
+  // 三套互不兼容的布尔解析器(onUnlessDisabled / onlyIfEnabled / envBool)是本仓
+  // 既有的事实。validateBool 归一化成 'true'/'false' 正是为了同时喂饱它们 ——
+  // 若有人把归一化改成 'on'/'off',envBool 会静默读成 false,这里当场红。
+  const SWITCHES = [
+    { key: 'GOTONG_BUTLER_MAINTENANCE' as const, read: (c: ButlerEnvConfig) => c.maintenanceOn, onWhenUnset: true },
+    { key: 'GOTONG_BUTLER_PROACTIVE' as const, read: (c: ButlerEnvConfig) => c.proactiveOn, onWhenUnset: true },
+    { key: 'GOTONG_BUTLER_RUN_BROADCAST' as const, read: (c: ButlerEnvConfig) => c.runBroadcastOn, onWhenUnset: true },
+    { key: 'GOTONG_BUTLER_MEMORY_GIT' as const, read: (c: ButlerEnvConfig) => c.memoryGitOn, onWhenUnset: false },
+    { key: 'GOTONG_BUTLER_MEMORY_LIBRARIAN' as const, read: (c: ButlerEnvConfig) => c.memoryLibrarianOn, onWhenUnset: false },
+    { key: 'GOTONG_BUTLER_MEMORY_RECONCILE' as const, read: (c: ButlerEnvConfig) => c.memoryReconcileOn, onWhenUnset: false },
+    { key: 'GOTONG_BUTLER_MEMORY_LINKS' as const, read: (c: ButlerEnvConfig) => c.memoryLinksOn, onWhenUnset: false },
+  ]
+
+  for (const s of SWITCHES) {
+    it(`${s.key}: 归一化后的 true/false 真的能两向拨动它`, () => {
+      const on = knob(s.key).validate('yes')
+      const off = knob(s.key).validate('off')
+      expect(on).toEqual({ ok: true, value: 'true' })
+      expect(off).toEqual({ ok: true, value: 'false' })
+      expect(s.read(parseButlerEnv({ [s.key]: on.ok ? on.value : '' }, '/space'))).toBe(true)
+      expect(s.read(parseButlerEnv({ [s.key]: off.ok ? off.value : '' }, '/space'))).toBe(false)
+      // 未设时的样子必须与 defaultValue 声明的一致 —— 面板拿 defaultValue 当
+      // 「你没改过时它是什么」印给人看。
+      expect(s.read(parseButlerEnv({}, '/space'))).toBe(s.onWhenUnset)
+      expect(knob(s.key).defaultValue).toBe(s.onWhenUnset ? 'true' : 'false')
+    })
+  }
+
+  it('归一化后的值必须喂得饱**最挑剔**的那个解析器', () => {
+    // envBool 只认 '1' / 'true' / 'yes' —— 连 'on' 都不认。它读 GOTONG_A2A_SIGN_CARD;
+    // versionCheckEnabled 另有自己一套读 GOTONG_UPDATE_CHECK。把归一化改成 'on'
+    // 之类,这两个旋钮会静默停留在关闭状态,而设置页会显示「已开启」。
+    const on = knob('GOTONG_A2A_SIGN_CARD').validate('enable')
+    const off = knob('GOTONG_A2A_SIGN_CARD').validate('disabled')
+    expect([on, off]).toEqual([{ ok: true, value: 'true' }, { ok: true, value: 'false' }])
+
+    const prev = process.env.GOTONG_A2A_SIGN_CARD
+    try {
+      process.env.GOTONG_A2A_SIGN_CARD = on.ok ? on.value : ''
+      expect(envBool('GOTONG_A2A_SIGN_CARD', false)).toBe(true)
+      process.env.GOTONG_A2A_SIGN_CARD = off.ok ? off.value : ''
+      expect(envBool('GOTONG_A2A_SIGN_CARD', true)).toBe(false)
+    } finally {
+      if (prev === undefined) delete process.env.GOTONG_A2A_SIGN_CARD
+      else process.env.GOTONG_A2A_SIGN_CARD = prev
+    }
+
+    const u = knob('GOTONG_UPDATE_CHECK')
+    expect(versionCheckEnabled({ GOTONG_UPDATE_CHECK: (u.validate('y') as { value: string }).value })).toBe(true)
+    expect(versionCheckEnabled({ GOTONG_UPDATE_CHECK: (u.validate('n') as { value: string }).value })).toBe(false)
+  })
+
+  it('五个感官旋钮:空串 = 显式清除,不是错误', () => {
+    const SENSORY = [
+      'GOTONG_BUTLER_VOICE_MODEL',
+      'GOTONG_BUTLER_VOICE_VOICE',
+      'GOTONG_BUTLER_ASR_MODEL',
+      'GOTONG_BUTLER_VISION_MODEL',
+      'GOTONG_BUTLER_EMBEDDER_MODEL',
+    ] as const
+    for (const key of SENSORY) {
+      expect(knob(key).validate(''), `${key} 收不了空串 = 打开了就再也关不掉`).toEqual({ ok: true, value: '' })
+      expect(knob(key).validate('   ')).toEqual({ ok: true, value: '' })
+    }
+    // 清成空串之后,那条腿必须真的不存在(等同从没设过)。
+    expect(
+      butlerVoiceFromEnv({
+        GOTONG_BUTLER_VOICE_URL: 'https://example.invalid/v1',
+        GOTONG_BUTLER_VOICE_KEY: 'k',
+        GOTONG_BUTLER_VOICE_MODEL: '',
+        GOTONG_BUTLER_VOICE_VOICE: '茉莉',
+      }),
+    ).toBeUndefined()
+  })
+
+  it('标识符类旋钮拒控制字符 —— 一个换行就是往 env 文件里多写一行', () => {
+    const key: EnvKnobKey = 'GOTONG_BUTLER_VOICE_MODEL'
+    const nl = String.fromCharCode(10)
+    const injected = `mimo${nl}GOTONG_MASTER_KEY=pwned`
+    expect(knob(key).validate(injected).ok).toBe(false)
+    expect(knob(key).validate(`a${String.fromCharCode(0)}b`).ok).toBe(false)
+    // 反向:中文音色 id 是合法的(校验器刻意不限 ASCII)。
+    expect(knob(key).validate('茉莉')).toEqual({ ok: true, value: '茉莉' })
+  })
+
+  it('标识符类旋钮有长度上界 —— 「值域有界」这条性质要有人守', () => {
+    // 这条是变异测试逼出来的:把 `if (t.length > 96)` 改成 `> 99999`,本文件
+    // **一条都不红**。也就是说在此之前,「标识符不是一段任意长的自由文本」这条
+    // 性质在单元层没有任何东西守着。
+    //
+    // 它承重,是因为 `set_hub_config` 能进 `IM_APPROVABLE_TOOLS`,靠的正是参数
+    // 空间封闭 + 值域有界(见 personal-butler-config.ts 头注边界 3)。一旦某个
+    // 键能收下任意长的字符串,这件工具就跟 `hands_*` 的 argv 是同一类东西了。
+    const key: EnvKnobKey = 'GOTONG_BUTLER_VOICE_MODEL'
+    const over = knob(key).validate('x'.repeat(97))
+    expect(over.ok).toBe(false)
+    // 拒绝语要说得出**为什么**,不然模型只能瞎试。
+    expect(over.ok === false && over.reason).toContain('96')
+    // 边界就在它自称的地方 —— 否则 96 是个没人核过的数字。
+    expect(knob(key).validate('x'.repeat(96)).ok).toBe(true)
+  })
+
+  it('每个旋钮的 defaultValue 都过得了自己的校验器', () => {
+    for (const spec of ENV_KNOBS) {
+      const v = spec.validate(spec.defaultValue)
+      expect(v.ok, `${spec.key} 的 defaultValue '${spec.defaultValue}' 过不了自己的校验器`).toBe(true)
+    }
+  })
+
+  it('刻意拒收的那几个,确实不在名单上', () => {
+    // 每一条都在 ENV_KNOBS 的头注里写了理由。名单上多出任何一个 = 判据被绕过。
+    const REFUSED = [
+      'GOTONG_BUTLER', // 关掉它 = 关掉手机上唯一能把它开回来的路
+      'GOTONG_BUTLER_GOVERNED', // 审批闸本身
+      'GOTONG_HOST', // 单独设 0.0.0.0 ⇒ auditBootSecurity 两条 fatal ⇒ 拒启
+      'GOTONG_SPACE_NAME', // openOrInit 对已存在的 space 忽略 opts.name
+      'GOTONG_LOG_LEVEL',
+      'GOTONG_LOG_FORMAT',
+      'GOTONG_ALLOW_INSECURE',
+      'GOTONG_COOKIE_SECURE',
+      'GOTONG_TRUST_PROXY',
+      'GOTONG_ALLOWED_HOSTS',
+      'GOTONG_GATING',
+      'GOTONG_SPACE',
+      'GOTONG_AUDIT_KEEP_DAYS',
+      'GOTONG_RUN_KEEP',
+    ]
+    for (const key of REFUSED) {
+      expect(ENV_KNOB_KEYS as readonly string[], `${key} 溜进了可改名单`).not.toContain(key)
+    }
   })
 })

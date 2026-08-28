@@ -26,9 +26,11 @@
  * 2. **classify 是那套规则的预检,不是第二套策略**:顺序逐字镜像
  *    `applyEnvKnob`(密钥名 → 白名单 → 值校验),于是「批准了」蕴含「真的会落
  *    盘」。两边若分叉,人就会为一件根本执行不了的事花掉一次审批。
- * 3. **参数空间由白名单封死**:四个具名旋钮,值是枚举/端口号。整个动作在手机上
- *    一行读得全**不是因为文案短**,是因为它**长不出来**——这与 `hands_*` 的
- *    argv 正相反,那才是它能进 IM 可批名单而手部动作不能的真正理由。
+ * 3. **参数空间由白名单封死**:key 是 `ENV_KNOBS` 派生的闭集 enum,值是端口 / 布尔 /
+ *    有界时长 / 有长度与字符集上限的标识符。整个动作在手机上一行读得全**不是因为
+ *    文案短**,是因为它**长不出来**——这与 `hands_*` 的 argv 正相反,那才是它能进
+ *    IM 可批名单而手部动作不能的真正理由。(M3c 当时是 4 个键,UXCFG-M2 扩到 23 个;
+ *    承重的从来不是那个数字,是「闭集 + 值域有界」这条性质。)
  *
  * 凭证不走这里(`isSecretKey` 当场拒并指 `/setkey`),`config-price` 也不走这里:
  * 五个浮点数在手机上逐个敲,一个数字打错就静默写坏成本表——手机适合做**决定**,
@@ -159,7 +161,7 @@ const REFUSE_ROLE = '改这台 hub 的基础设置只对 owner/admin 开放。'
 const SECRET_HINT = '凭证不走这里——api key / bot token 用 `/setkey`(直贴或 `/setkey link` 出一次性网页表单),它们进金库,永远不进这个配置文件。'
 
 /**
- * 白名单里那四个;写在一处,工具 schema 的 enum 与 classify 都从它派生。
+ * 白名单本身;写在一处,工具 schema 的 enum 与 classify 都从它派生。
  *
  * 类型是 `EnvKnobKey` 不是 `string`——这不是装饰:`HubEnvProposal.apply.key`
  * 也是这个联合,于是「M4 提了一个键 → M3c 收得下」是**编译期**成立的,不是靠
@@ -224,7 +226,11 @@ export function buildButlerConfigToolset(deps: ButlerConfigToolsetDeps): Governe
       {
         name: 'set_hub_config',
         description:
-          '改这台 hub 的一个基础设置项(网页端口 / agent WebSocket 端口 / 个人-团队模式 / 首次启动是否自动开浏览器)。会先把改动送进 /me 收件箱等你批准,批准后写进服务器空间的 gotong.env,**下次重启生效**。仅 owner/admin。api key、bot token 这类凭证不走这里——用 /setkey。模型价格表也不走这里(五个数字在手机上敲容易打错),在网页或服务器命令行改。',
+          // UXCFG-M2 白名单 4→23 之后,这段散文一度用中文把 enum 又讲了一遍(「记忆整理 /
+          // 主动晨报 / 知识上架…」)。**能改的完整清单就是 enum 本身**,重讲一遍既是冗余,
+          // 也是漂移源(将来加一个键,散文忘了跟)。而这是 governed 工具=每一轮都在提示
+          // 里,冗余的字按轮付钱。故只留 enum 讲不出来的三件:归属、生效路径、别走这儿的路。
+          '改这台 hub 的一个基础设置项(端口与模式 / 界面语言与视角 / 管家的后台开关与节律 / 管家各路模型名——完整清单就是 key 的 enum,不在里面的一律改不了)。会先把改动送进 /me 收件箱等你批准,批准后写进服务器空间的 gotong.env,**下次重启生效**。仅 owner/admin。api key、bot token 这类凭证不走这里——用 /setkey;模型价格表也不走这里(五个数字在手机上敲容易打错),在网页或服务器命令行改。',
         inputSchema: {
           type: 'object',
           properties: {
@@ -235,7 +241,8 @@ export function buildButlerConfigToolset(deps: ButlerConfigToolsetDeps): Governe
             },
             value: {
               type: 'string',
-              description: '新值。端口=1-65535 的整数;模式=personal 或 team;自动开浏览器=auto/always/never(1/0 亦可)',
+              description:
+                '新值,按那个键的形状写:端口=1-65535 的整数;开关=true/false;节律=带单位的时长如 6h / 15m / 90s;模型名与音色 id=原样的名字,**留空 = 关掉那一路**;其余为闭集。写错了不会落盘,我会把这个键的可选值报给你。',
             },
           },
           required: ['key', 'value'],

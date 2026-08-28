@@ -116,8 +116,12 @@ describe('HANDS-M3c — classify:真规则的预检', () => {
     expect(v.reason).not.toContain('不是可改的设置项')
   })
 
-  it('白名单外 ⇒ refuse 并列出可改的四项', async () => {
-    const v = await toolset(fakeOps()).classify('set_hub_config', { key: 'GOTONG_PROFILE', value: 'hub' })
+  it('白名单外 ⇒ refuse 并列出可改的都有哪些', async () => {
+    // 例子刻意用 GOTONG_BUTLER:它是**必须**留在名单外的那个 —— 关掉管家就等于
+    // 关掉手机上唯一能把它开回来的路(`/setting` 在 IM 上恒 allowConfigWrite:false)。
+    // UXCFG-M2 扩名单时,原本这里用的 GOTONG_PROFILE 被收了进去,这条测试当场变红:
+    // 它本来就该在「有东西进了名单」时说话。
+    const v = await toolset(fakeOps()).classify('set_hub_config', { key: 'GOTONG_BUTLER', value: 'off' })
     expect(v.decision).toBe('refuse')
     for (const k of ENV_KNOBS) expect(v.reason).toContain(k.key)
   })
@@ -180,10 +184,36 @@ describe('HANDS-M3c — describe:手机上那一行', () => {
     expect(line).not.toContain('abc')
   })
 
-  it('一行装得下:最长的合法参数组合也远短于 IM 一行的 80 码点预算', () => {
+  // UXCFG-M2 —— 这两条以前是一条,写作「最长的合法参数组合也远短于 80 码点」,而它
+  // 拿一个**固定的五位数** '65535' 去量每一个键。白名单从 4 项(端口/枚举)扩到 23 项
+  // (多了模型名与音色 id,值域上界 96 码点)之后,那个夹具**不再代表值域**——测试照绿,
+  // 量的却是一个不会发生的最坏情况。绿的测试跨过变了的值域什么也证明不了。
+  //
+  // 拆开之后各自钉住一件真事:
+  //   ① 值域**有界**——这才是与 `hands_*` 的分界线(那边 argv 想多长有多长),也是这件
+  //      工具能进 `IM_APPROVABLE_TOOLS` 的真正理由。承重的从来不是 80 这个数字。
+  //   ② 一行**读得全**——只对值本身短的那些键成立。值长到一行装不下时,既有的渲染层
+  //      (`imRowText` → `title_truncated`)会把它降级成「去网页看完整内容」,而不是
+  //      截断一行安全相关的字给人批。降级是设计,不是这一层要防的事。
+  it('值域有界:没有任何一个旋钮的校验器会放行一段任意长的自由文本', () => {
+    const huge = 'x'.repeat(500)
+    for (const k of ENV_KNOBS) {
+      const v = k.validate(huge)
+      if (v.ok) {
+        // 放行了就必须是**它自己截短过 / 归一过**的短值,绝不能把 500 个字原样带走。
+        expect([...v.value].length, `${k.key} 放行了一段 500 字的自由文本`).toBeLessThanOrEqual(96)
+      }
+    }
+  })
+
+  it('一行读得全:值本身短的那些键,渲染出来仍在 IM 一行的 80 码点预算内', () => {
     const gov = toolset(fakeOps())
+    // 用每个键**自己的出厂值**量——那是它实际会被渲染成的样子。空值(= 关掉那一路)
+    // 会渲染成 `(值不合法)`,对长度只会更短,不影响这条上界。
     const longest = Math.max(
-      ...ENV_KNOBS.map((k) => [...gov.describe('set_hub_config', { key: k.key, value: '65535' })].length),
+      ...ENV_KNOBS.map(
+        (k) => [...gov.describe('set_hub_config', { key: k.key, value: k.defaultValue || '65535' })].length,
+      ),
     )
     expect(longest).toBeLessThan(80)
   })

@@ -19,6 +19,7 @@ import {
   type HubEnvironment,
   type HubEnvProbe,
 } from '../src/personal-butler-environment.js'
+import { ENV_KNOB_KEYS } from '../src/ops-config-write.js'
 
 const GIB = 1024 * 1024 * 1024
 
@@ -429,6 +430,53 @@ describe('HANDS-M4 渲染', () => {
     expect(out).not.toContain('INJECTED')
     // 合法的那个照常印出来——这条门守的是「不合法不回显」,不是「都别印」。
     expect(out).toContain('GOTONG_WS_PORT = 4000')
+  })
+
+  it('全是默认值时折成一行并报条数,不刷 23 行', () => {
+    // UXCFG-M2 把白名单扩到 23 项后,「全列出来」会让 20 行「跟出厂一样」把真正
+    // 有人动过的那两三行埋掉。折叠**必须报出条数**——不是静默截断。
+    const out = renderHubEnvironment(
+      healthyEnv({
+        knobs: [
+          knob('GOTONG_WEB_PORT', null, null, '3000'),
+          knob('GOTONG_WS_PORT', null, null, '4000'),
+          knob('GOTONG_DEFAULT_LANG', null, null, 'zh'),
+        ],
+      }),
+      0,
+    )
+    expect(out).toContain('3 项全是默认值')
+    expect(out).not.toContain('GOTONG_WEB_PORT =')
+  })
+
+  it('有人动过的照常逐行列,没动过的折成一行', () => {
+    const out = renderHubEnvironment(
+      healthyEnv({
+        knobs: [
+          knob('GOTONG_WEB_PORT', '8080', '3000', '3000'),
+          knob('GOTONG_WS_PORT', null, null, '4000'),
+          knob('GOTONG_DEFAULT_LANG', null, null, 'zh'),
+        ],
+      }),
+      0,
+    )
+    expect(out).toContain('GOTONG_WEB_PORT = 8080(现在还是 3000)')
+    expect(out).toContain('其余 2 项都是默认值')
+    expect(out).not.toContain('GOTONG_WS_PORT =')
+  })
+
+  it('内存那条点名的开关必须真在白名单上(能改 ≠ 该替你决定改哪个)', () => {
+    // 这条门守的是**能力声明的诚实**:UXCFG-M2 之前这段文案写着「不在我能改的四个
+    // 设置项里」,扩名单当天就变成了假话。反过来也一样——将来谁把这几个从白名单上
+    // 拿掉,这里就会开始许一个做不到的诺。
+    const tight = proposeEnvironmentFixes(
+      healthyEnv({ machine: { cpus: 1, totalMemBytes: GIB, freeMemBytes: 100 * 1024 * 1024, diskFreeBytes: 20 * GIB, nodeVersion: 'v20.20.2', platform: 'linux/x64', pathDirs: [] } }),
+    ).find((x) => x.id === 'low-memory')
+    expect(tight).toBeTruthy()
+    expect(tight!.applicable).toBe(false)   // 关哪一个是人的取舍,算不出确定安全的值
+    const named = (tight!.applicable ? '' : tight!.howTo).match(/GOTONG_[A-Z_]+/g) ?? []
+    expect(named.length).toBeGreaterThan(0)
+    for (const k of named) expect(ENV_KNOB_KEYS).toContain(k)
   })
 
   it('出网那行明说是被动看的,不主动探', () => {
