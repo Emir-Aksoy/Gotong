@@ -129,6 +129,10 @@ export const BUTLER_DIRECTORY_BENIGN = [
   'start_longrun_task',
   'list_longrun_tasks',
   'cancel_longrun_task',
+  // STOR-M1 空间账本只读 — 低频按需自省(「hub 占了多少地方」「磁盘是不是
+  // 快满了」);同域 hub_health / my_status 一族。只读 6h 节律落盘的账本,
+  // 不丈量不删除;描述零工具点名(M3 的 set_retention 落地前更没得点)。
+  'space_report',
 ] as const
 
 export type ButlerFirstClassBenign = (typeof BUTLER_FIRST_CLASS_BENIGN)[number]

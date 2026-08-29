@@ -198,6 +198,39 @@ describe('retention sweeper (perf audit A⑤)', () => {
     expect(pruned).toEqual(['audit'])
   })
 
+  // STOR-M1 — the space-ledger census rides this sweep as a FOURTH independent
+  // best-effort block: measured on the same 6h rhythm, and a census fault never
+  // blocks retention (nor the reverse — the families run before it).
+  it('calls the space-ledger census thunk on a sweep tick', async () => {
+    let measured = 0
+    await retentionSweepOnce(
+      baseOpts({
+        env: { GOTONG_RUN_KEEP: '5' },
+        runs: fakeRuns(),
+        spaceLedger: async () => {
+          measured++
+          return null
+        },
+      }),
+    )
+    expect(measured).toBe(1)
+  })
+
+  it('a census fault never blocks the sweep (families already ran, result intact)', async () => {
+    const runs = fakeRuns()
+    const out = await retentionSweepOnce(
+      baseOpts({
+        env: { GOTONG_RUN_KEEP: '5' },
+        runs,
+        spaceLedger: async () => {
+          throw new Error('census boom')
+        },
+      }),
+    )
+    expect(out.archivedRuns).toBe(1)
+    expect(runs.calls.length).toBe(1)
+  })
+
   it('the armed timer ticks on its cadence and stop() ends it', async () => {
     const runs = fakeRuns()
     const handle = armRetentionSweeper(

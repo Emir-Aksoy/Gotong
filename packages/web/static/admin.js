@@ -3958,7 +3958,7 @@
             </li>`).join("")}
         </ul>
       </div>`;
-      return head + signalList + nextHtml + roster + renderSelfHealHtml(snap) + renderEffectSignalsHtml(snap) + renderHealthAdaptationsHtml(lastAdaptations);
+      return head + signalList + nextHtml + roster + renderSelfHealHtml(snap) + renderEffectSignalsHtml(snap) + renderSpaceLedgerHtml(snap) + renderHealthAdaptationsHtml(lastAdaptations);
     }
     function renderEffectSignalsHtml(snap) {
       const es = snap?.effectSignals;
@@ -3980,6 +3980,35 @@
       return `<div class="hh-heal">
       <h3 class="hh-heal-title">${escapeHtml6(t6.healthEffectTitle(es.windowDays))}</h3>
       <ul class="hh-heal-list">${lines.map((l) => `<li class="hh-heal-row">${escapeHtml6(l)}</li>`).join("")}</ul>
+    </div>`;
+    }
+    function renderSpaceLedgerHtml(snap) {
+      const sp = snap?.space;
+      if (sp === void 0) return "";
+      let body;
+      if (!sp) {
+        body = `<ul class="hh-heal-list"><li class="hh-heal-row">${escapeHtml6(t6.healthSpaceNotYet)}</li></ul>`;
+      } else {
+        const fmt = (n) => {
+          if (!Number.isFinite(n) || n < 0) return "0 B";
+          if (n < 1024) return `${n} B`;
+          if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+          if (n < 1024 * 1024 * 1024) return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+          return `${(n / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+        };
+        const when = escapeHtml6(new Date(sp.at).toLocaleString());
+        const lines = [`<li class="hh-heal-row"><span class="hh-heal-when">${when}</span> ${escapeHtml6(t6.healthSpaceTotal(fmt(sp.totalBytes), sp.totalEntries))}</li>`];
+        const cats = Array.isArray(sp.categories) ? sp.categories : [];
+        for (const c of cats.slice(0, 8)) {
+          lines.push(`<li class="hh-heal-row">${escapeHtml6(t6.healthSpaceCat(c.id, fmt(c.bytes), c.entries))}</li>`);
+        }
+        if (cats.length > 8) lines.push(`<li class="hh-heal-row">${escapeHtml6(t6.healthSpaceMore(cats.length - 8))}</li>`);
+        if (sp.truncated) lines.push(`<li class="hh-heal-row">${escapeHtml6(t6.healthSpaceTruncated)}</li>`);
+        body = `<ul class="hh-heal-list">${lines.join("")}</ul>`;
+      }
+      return `<div class="hh-heal">
+      <h3 class="hh-heal-title">${escapeHtml6(t6.healthSpaceTitle)}</h3>
+      ${body}
     </div>`;
     }
     function renderSelfHealHtml(snap) {

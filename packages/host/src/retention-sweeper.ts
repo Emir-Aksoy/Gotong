@@ -58,6 +58,13 @@ export interface RetentionSweeperOptions {
   /** Identity store, or null on a degraded (no-identity) host. */
   identity: RetentionStore | null
   log: Logger
+  /**
+   * STOR-M1 — optional space-ledger census thunk (`spaceLedgerAt(...).measure`).
+   * The census rides this existing 6h cadence instead of opening its own timer;
+   * measurement only, never deletes. The thunk's own contract is never-throw,
+   * but it gets the same independent best-effort block as the three families.
+   */
+  spaceLedger?: () => Promise<unknown>
   /** Injectable clock (tests). */
   now?: () => number
   /** Injectable cadence (tests only — NOT an operator knob). */
@@ -138,6 +145,14 @@ export async function retentionSweepOnce(
     }
   } catch (err) {
     opts.log.warn('runtime identity retention failed', { err })
+  }
+
+  // STOR-M1 — fourth independent block: refresh the space ledger on the same
+  // rhythm the policies run on. A failing census never blocks retention.
+  try {
+    if (opts.spaceLedger) await opts.spaceLedger()
+  } catch (err) {
+    opts.log.warn('runtime space ledger census failed', { err })
   }
 
   return result

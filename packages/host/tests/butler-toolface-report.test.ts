@@ -56,6 +56,7 @@ import { buildButlerMembersToolset } from '../src/personal-butler-members.js'
 import { buildButlerSchedulesToolset } from '../src/personal-butler-schedules.js'
 import { buildButlerEnvironmentToolset } from '../src/personal-butler-environment.js'
 import { buildButlerSelfStatusToolset } from '../src/personal-butler-self-status.js'
+import { buildButlerSpaceReportToolset } from '../src/space-ledger.js'
 import { buildButlerCapabilitiesToolset } from '../src/personal-butler-capabilities.js'
 import { buildButlerConsolidateToolset } from '../src/personal-butler-consolidate.js'
 import { buildButlerDailyBriefToolset } from '../src/personal-butler-daily-brief.js'
@@ -132,6 +133,7 @@ const MEASURED_BUILDERS: Record<string, string> = {
   schedules: 'buildButlerSchedulesToolset',
   members: 'buildButlerMembersToolset',
   panel: 'buildButlerPanelToolset',
+  'space-report': 'buildButlerSpaceReportToolset',
 }
 
 /**
@@ -413,6 +415,12 @@ function buildFullFace(): ToolFaceEntry[] {
           writeContent: async () => undefined,
         },
       }),
+    },
+    // STOR-M1 空间账本只读:benign,listTools 不碰 ledger(schema 度量与真账本无关)。
+    {
+      module: 'space-report',
+      kind: 'benign',
+      toolset: buildButlerSpaceReportToolset({ ledger: async () => null }),
     },
   ]
 }

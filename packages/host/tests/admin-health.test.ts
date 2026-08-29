@@ -46,6 +46,8 @@ function svc(opts: {
   selfHealRecent?: () => Promise<Record<string, unknown>[]>
   // EFF-M3 — 效果信号读取;same optional-dep contract.
   effectSignals?: () => Promise<{ windowDays: number; llmCalls?: number }>
+  // STOR-M1 — 空间账本读取;same optional-dep contract.
+  readSpaceLedger?: () => Promise<import('../src/space-ledger.js').SpaceLedgerFile | null>
 }) {
   return createAdminHealthService({
     listAgents: async () => opts.agents,
@@ -63,6 +65,7 @@ function svc(opts: {
     ...(opts.readUpdateAvailable ? { readUpdateAvailable: opts.readUpdateAvailable } : {}),
     ...(opts.selfHealRecent ? { selfHealRecent: opts.selfHealRecent } : {}),
     ...(opts.effectSignals ? { effectSignals: opts.effectSignals } : {}),
+    ...(opts.readSpaceLedger ? { readSpaceLedger: opts.readSpaceLedger } : {}),
   })
 }
 
@@ -487,5 +490,44 @@ describe('effectSignals (EFF-M3)', () => {
     }).snapshot()
     expect('effectSignals' in s).toBe(false)
     expect(s.checkedAt).toBeTruthy()
+  })
+})
+
+describe('space (STOR-M1)', () => {
+  const ledgerRow = {
+    v: 1 as const,
+    at: 1_800_000_000_000,
+    totalBytes: 1397,
+    totalEntries: 13,
+    truncated: false,
+    categories: [{ id: 'transcript', bytes: 350, entries: 3 }],
+  }
+
+  it('absent dep → snapshot has no space field (honest unknown, not zero)', async () => {
+    const s = await svc({ agents: [] }).snapshot()
+    expect('space' in s).toBe(false)
+  })
+
+  it('wired but never measured → space: null (「还没量过」≠「空」)', async () => {
+    const s = await svc({ agents: [], readSpaceLedger: async () => null }).snapshot()
+    expect(s.space).toBe(null)
+  })
+
+  it('measured → the ledger row passes through verbatim', async () => {
+    const s = await svc({ agents: [], readSpaceLedger: async () => ledgerRow }).snapshot()
+    expect(s.space).toEqual(ledgerRow)
+  })
+
+  // thunk 合同是自身永不抛(宽容读者);这条钉「就算违约,快照不塌、字段缺席」——
+  // 与 effectSignals 同姿态:没有诚实的空形状可落,缺席好过冒充 null=「量过且没账」。
+  it('dep fault → field absent, snapshot survives', async () => {
+    const s = await svc({
+      agents: [managed('a1', 'openai')],
+      readSpaceLedger: async () => {
+        throw new Error('boom')
+      },
+    }).snapshot()
+    expect('space' in s).toBe(false)
+    expect(s.managedCount).toBe(1)
   })
 })

@@ -67,7 +67,7 @@
 // `longrun-list` in DEFAULT_PANEL, which a stale renderer answers with
 // 「需要升级客户端」. Honest, but it is a wrong-looking card on everybody's
 // default panel; bumping CACHE evicts the pair so the first load is right.
-const CACHE = 'gotong-shell-v23'
+const CACHE = 'gotong-shell-v24'
 
 // Stable, role-agnostic static shell. app.html is excluded on purpose
 // (role-injected); admin.js / identity-ui.js etc. are left to the runtime

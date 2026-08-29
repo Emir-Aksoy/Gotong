@@ -109,6 +109,7 @@ import {
   defaultHubEnvProbe,
 } from './personal-butler-environment.js'
 import { buildButlerSelfStatusToolset } from './personal-butler-self-status.js'
+import { buildButlerSpaceReportToolset, readSpaceLedger } from './space-ledger.js'
 import { buildButlerHandsToolset, type ButlerHands } from './personal-butler-hands.js'
 import {
   buildButlerOnboardingProbe,
@@ -283,6 +284,14 @@ export interface ButlerFactoryDeps {
    * `butler-memory-health.ts` 里,装配层不必也认识那份 JSON 的形状。
    */
   memoryHealthFile?: string
+  /**
+   * STOR-M1 — 空间账本路径(`runtime/space-ledger.json`)。给了它,目录层多一件
+   * `space_report` 只读工具 + `my_status` 多一行「空间」。缺席 ⇒ 都不装
+   * (pre-STOR 调用点逐字节不变)。传路径不传 thunk,与 memoryHealthFile 同理:
+   * 读者留在 `space-ledger.ts`,装配层不必认识账本 JSON 的形状。工具只读
+   * 落盘账本、不现场丈量——丈量骑 6h 节律,归 main.ts 接的那条线管。
+   */
+  spaceLedgerFile?: string
 }
 
 export function buildButlerFactory(deps: ButlerFactoryDeps): ButlerFactory {
@@ -291,6 +300,14 @@ export function buildButlerFactory(deps: ButlerFactoryDeps): ButlerFactory {
   const membersSurface = deps.members ? buildButlerMemberSurface(deps.members) : undefined
   // M-HEALTH — 提到局部 const 才窄得住:闭包里读 `deps.x` 拿不到窄化结果。
   const memoryHealthFile = deps.memoryHealthFile
+  // STOR-M1 — 同上;账本读者/工具无 per-user 态,工厂级构造一次全员共享。
+  const spaceLedgerFile = deps.spaceLedgerFile
+  const spaceReportToolset = spaceLedgerFile
+    ? buildButlerSpaceReportToolset({
+        ledger: () => readSpaceLedger(spaceLedgerFile),
+        logger: log,
+      })
+    : undefined
   return (base, mcp, extras) => {
     // S1-M2 — split the row's attached MCP (notes / calendar / …) into a benign
     // READ proxy (runs inline) and a governed WRITE toolset (parks for a /me
@@ -609,6 +626,8 @@ export function buildButlerFactory(deps: ButlerFactoryDeps): ButlerFactory {
           notebook: taskNotebook,
           ...(deps.backupOps ? { backup: deps.backupOps } : {}),
           ...(memoryHealthFile ? { memoryHealth: () => readButlerMemoryHealth(memoryHealthFile) } : {}),
+          // STOR-M1 — 「空间」行读同一份落盘账本(不现场丈量,自检是只读动作)。
+          ...(spaceLedgerFile ? { space: () => readSpaceLedger(spaceLedgerFile) } : {}),
           // 「手」那一行是**说给这个成员听的**:手装在 hub 上、但没开给他的时候,
           // 印「已装,工作区里写/读/跑」就是在许一个他这边兑现不了的承诺。三种
           // 「没有」各自说各自的话——不装、总开关关着、装了但你没有。
@@ -728,6 +747,7 @@ export function buildButlerFactory(deps: ButlerFactoryDeps): ButlerFactory {
           ...(backupStatusToolset ? [backupStatusToolset] : []),
           ...(hubHealthToolset ? [hubHealthToolset] : []),
           ...(restartHistoryToolset ? [restartHistoryToolset] : []),
+          ...(spaceReportToolset ? [spaceReportToolset] : []),
           ...(schedulesToolset ? [schedulesToolset] : []),
           ...(membersToolset ? [membersToolset] : []),
           ...(panelToolset ? [panelToolset] : []),
@@ -756,6 +776,7 @@ export function buildButlerFactory(deps: ButlerFactoryDeps): ButlerFactory {
           ...(backupStatusToolset ? [backupStatusToolset] : []),
           ...(hubHealthToolset ? [hubHealthToolset] : []),
           ...(restartHistoryToolset ? [restartHistoryToolset] : []),
+          ...(spaceReportToolset ? [spaceReportToolset] : []),
           ...(schedulesToolset ? [schedulesToolset] : []),
           ...(membersToolset ? [membersToolset] : []),
           ...(panelToolset ? [panelToolset] : []),

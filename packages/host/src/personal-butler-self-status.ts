@@ -15,11 +15,13 @@
  *   任务     ← TN-M1 本成员任务笔记本,只数 open
  *   备份     ← AFR-M7 `lastBackup()` 事实(hub 级,同 backup_status)
  *   手       ← HANDS-M2 `armButlerHands` 的结果(装了=监狱种类;没装=原因)
+ *   空间     ← STOR-M1 `space-ledger.ts` 落盘账本(6h 节律丈量;这里只读账本,
+ *              不现场丈量——自检不该为一行状态扫一遍磁盘)
  *
  * ── 逐行降级,绝不整卡失效 ────────────────────────────────────────────────
- * 七块 dep 全部可选:缺席 = 该行「(未接)」;读失败 = 该行「(读取失败)」
- * + warn。一块碎片的死活永远不连累其余六行——自检卡的价值恰恰在
- * 「我看不到哪块」也是状态的一部分(honest-unknown,固定七行不跳行,
+ * 八块 dep 全部可选:缺席 = 该行「(未接)」;读失败 = 该行「(读取失败)」
+ * + warn。一块碎片的死活永远不连累其余七行——自检卡的价值恰恰在
+ * 「我看不到哪块」也是状态的一部分(honest-unknown,固定八行不跳行,
  * 与 hub_health 的问题导向跳行姿态刻意不同)。
  *
  * 复用纪律:病名翻译走 hub-sense 的 outageHeadline、成本格式走 observe 的
@@ -42,6 +44,7 @@ import type { ButlerHandsStatus } from './personal-butler-hands.js'
 import { outageHeadline } from './personal-butler-hub-sense.js'
 import type { ButlerLlmSurface } from './personal-butler-llms.js'
 import { fmtCost, type ButlerUsageSurface } from './personal-butler-observe.js'
+import { spaceSummaryLine, type SpaceLedgerFile } from './space-ledger.js'
 
 /** 体检面的最小切片:这张卡只读 `llmOutage` 一格,别的字段结构性不声明。 */
 export interface SelfStatusHealthSlice {
@@ -86,6 +89,12 @@ export interface ButlerSelfStatusDeps {
   backup?: Pick<ButlerBackupOps, 'lastBackup'>
   /** HANDS-M2 手装没装(hub 级事实,boot 时定)。 */
   hands?: ButlerHandsStatus
+  /**
+   * STOR-M1 — 空间账本的读者(`spaceLedgerAt(...).read`)。读的是 6h 节律丈量后
+   * 落盘的事实文件,**不现场丈量**——自检是只读动作,不该为一行状态扫一遍磁盘。
+   * 缺席 = 「(未接)」;账本还没写过 = 如实「还没量过」,绝不冒充零占用。
+   */
+  space?: () => Promise<SpaceLedgerFile | null>
   now?: () => number
   logger?: { warn: (msg: string, meta?: Record<string, unknown>) => void }
 }
@@ -96,7 +105,7 @@ const READ_FAILED = '(读取失败)'
 const STATUS_TOOL: LlmToolDefinition = {
   name: 'my_status',
   description:
-    '看你(阿同)自己当下的状态汇总:大脑模型链健不健康、有没有断供、累计用量、记忆规模与上次蒸馏、手上进行中的任务数、hub 上次备份、手(监狱工作区)装没装。成员问「你还好吗」「你现在什么状态」,或你自己怀疑状态不对劲时用它。只读自检,不改任何东西。',
+    '看你(阿同)自己当下的状态汇总:大脑模型链健不健康、有没有断供、累计用量、记忆规模与上次蒸馏、手上进行中的任务数、hub 上次备份、手(监狱工作区)装没装、hub 空间占了多少。成员问「你还好吗」「你现在什么状态」,或你自己怀疑状态不对劲时用它。只读自检,不改任何东西。',
   inputSchema: { type: 'object', properties: {}, additionalProperties: false },
 }
 
@@ -248,7 +257,24 @@ function handsLine(deps: ButlerSelfStatusDeps): string {
   return h.armed ? `已装(${h.kind} 监狱,工作区里写/读/跑;联网命令先请你确认)` : `未装(${h.reason})`
 }
 
-/** 纯投影渲染(零 LLM 决策):七块碎片 → 固定七行自检卡。导出给测试直打。 */
+/**
+ * STOR-M1 「空间」行:只读 6h 节律落盘的账本,不现场丈量。null = 账本文件
+ * 还不在(刚装上 / 还没到节律)——如实说「还没量过」,绝不把「读不到」渲染成
+ * 「零占用」(space-ledger 边界①的读者侧)。
+ */
+async function spaceLine(deps: ButlerSelfStatusDeps, now: number): Promise<string> {
+  if (!deps.space) return NOT_WIRED
+  try {
+    const row = await deps.space()
+    if (!row) return '还没量过(账本随 6 小时节律更新)'
+    return spaceSummaryLine(row, now)
+  } catch (err) {
+    warnRead(deps, 'space', err)
+    return READ_FAILED
+  }
+}
+
+/** 纯投影渲染(零 LLM 决策):八块碎片 → 固定八行自检卡。导出给测试直打。 */
 export async function renderSelfStatus(deps: ButlerSelfStatusDeps): Promise<string> {
   const now = deps.now?.() ?? Date.now()
   return [
@@ -260,6 +286,7 @@ export async function renderSelfStatus(deps: ButlerSelfStatusDeps): Promise<stri
     `- 手上任务:${await notebookLine(deps)}`,
     `- hub 备份:${backupLine(deps, now)}`,
     `- 手:${handsLine(deps)}`,
+    `- 空间:${await spaceLine(deps, now)}`,
   ].join('\n')
 }
 

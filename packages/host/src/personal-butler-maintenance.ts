@@ -474,6 +474,15 @@ export interface ButlerMaintenanceSweeperOptions {
    * card simply has nothing to read — 未知,而未知不产生任何牌。
    */
   healthFile?: string
+  /**
+   * STOR-M1 — optional space-ledger census thunk (`spaceLedgerAt(...).measure`).
+   * main.ts passes it here ONLY when the retention sweeper isn't armed (exactly
+   * one carrier for the census, never two), so it rides this existing 6h cadence
+   * instead of opening its own timer. It runs at the TOP of each tick — before
+   * the member/provider gates — because measurement needs no model and no
+   * members. Measurement only; the census never deletes anything.
+   */
+  spaceLedger?: () => Promise<unknown>
 }
 
 /**
@@ -504,6 +513,7 @@ export class ButlerMaintenanceSweeper {
   private readonly reconcile: boolean
   private readonly librarian: boolean
   private readonly healthFile?: string
+  private readonly spaceLedger?: () => Promise<unknown>
 
   private timer?: ReturnType<typeof setInterval>
   private running = false
@@ -526,6 +536,7 @@ export class ButlerMaintenanceSweeper {
     this.reconcile = opts.reconcile ?? false
     this.librarian = opts.librarian ?? false
     this.healthFile = opts.healthFile
+    this.spaceLedger = opts.spaceLedger
   }
 
   /** Start the interval. `.unref()` so a pending tick never keeps the process alive. */
@@ -568,6 +579,17 @@ export class ButlerMaintenanceSweeper {
     }
     this.running = true
     try {
+      // STOR-M1 — refresh the space ledger FIRST, before the member/provider
+      // gates below: measurement needs no model and no members, so a hub with
+      // zero butler namespaces (or no key yet) still keeps an honest ledger.
+      // The thunk's own contract is never-throw; this catch is belt-and-braces
+      // so a mis-wired thunk can never stall the maintenance tick.
+      try {
+        if (this.spaceLedger) await this.spaceLedger()
+      } catch (err) {
+        this.log.warn('butler maintenance: space ledger census failed', { err })
+      }
+
       const userIds = await this.listUserIds()
       if (userIds.length === 0) return
 

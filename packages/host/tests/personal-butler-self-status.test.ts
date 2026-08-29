@@ -83,11 +83,11 @@ describe('SEN-M3 — renderSelfStatus(六块碎片拼图)', () => {
     expect(out).toContain('- 手:已装(bwrap 监狱,工作区里写/读/跑;联网命令先请你确认)')
   })
 
-  it('all deps absent → seven lines all render 「(未接)」, never a crash or a skipped row', async () => {
+  it('all deps absent → eight lines all render 「(未接)」, never a crash or a skipped row', async () => {
     const out = await renderSelfStatus({ userId: 'u1', now: () => NOW })
     const lines = out.split('\n')
-    expect(lines).toHaveLength(8) // header + 7 fixed rows
-    expect(lines.filter((l) => l.endsWith('(未接)'))).toHaveLength(7)
+    expect(lines).toHaveLength(9) // header + 8 fixed rows
+    expect(lines.filter((l) => l.endsWith('(未接)'))).toHaveLength(8)
   })
 
   it('HANDS-M2 手 three states: absent → 未接 / not armed → 未装(原因) / armed → 已装(kind)', async () => {
@@ -99,6 +99,38 @@ describe('SEN-M3 — renderSelfStatus(六块碎片拼图)', () => {
     expect(off).toContain('- 手:未装(未开启(<space>/hands.json 缺席或未 enabled))')
     const on = await renderSelfStatus(fullDeps({ hands: { armed: true, kind: 'sandbox-exec' } }))
     expect(on).toContain('- 手:已装(sandbox-exec 监狱')
+  })
+
+  it('STOR-M1 空间 three states: wired-but-no-ledger → 还没量过 / row → summary / throw → 读取失败', async () => {
+    // 账本文件还不在(刚装上/还没到 6h 节律)——诚实说「还没量过」,不是错误,
+    // 更不是「零占用」(space-ledger 边界①的读者侧)。
+    const notYet = await renderSelfStatus(fullDeps({ space: async () => null }))
+    expect(notYet).toContain('- 空间:还没量过(账本随 6 小时节律更新)')
+
+    // 有账本行 → spaceSummaryLine 形状(总占用 + 最大类目 + 相对时刻)。
+    const row = await renderSelfStatus(
+      fullDeps({
+        space: async () => ({
+          v: 1 as const,
+          at: NOW - 2 * HOUR,
+          totalBytes: 5_000_000,
+          totalEntries: 321,
+          truncated: false,
+          categories: [
+            { id: 'transcript', bytes: 3_000_000, entries: 12 },
+            { id: 'other', bytes: 2_000_000, entries: 309 },
+          ],
+        }),
+      }),
+    )
+    expect(row).toContain('- 空间:总 4.8 MB,最大类目 transcript(2.9 MB);丈量于 2 小时前')
+
+    // thunk 抛错只降级本行,邻居完好(与记忆行同一纪律)。
+    const boom = await renderSelfStatus(
+      fullDeps({ space: async () => { throw new Error('disk') } }),
+    )
+    expect(boom).toContain('- 空间:(读取失败)')
+    expect(boom).toContain('- 手:已装(bwrap 监狱')
   })
 
   it('one fragment throwing degrades ONLY its line — the other five stay intact', async () => {
@@ -211,7 +243,7 @@ describe('SEN-M3 — buildButlerSelfStatusToolset(工具姿态)', () => {
     expect(tools.map((t) => t.name)).toEqual(['my_status'])
     // 防漂移:schema 描述绝不点名目录工具(渲染文本点名 list_my_llms 是
     // 另一回事——LSA-M1 先例,目录内部互指)。
-    for (const banned of ['list_my_llms', 'hub_health', 'backup_status', 'gotong_guide']) {
+    for (const banned of ['list_my_llms', 'hub_health', 'backup_status', 'gotong_guide', 'space_report']) {
       expect(tools[0]!.description).not.toContain(banned)
     }
   })

@@ -1483,7 +1483,7 @@ import { createWorkflows } from './workflows.js'
             </li>`).join('')}
         </ul>
       </div>`
-    return head + signalList + nextHtml + roster + renderSelfHealHtml(snap) + renderEffectSignalsHtml(snap) + renderHealthAdaptationsHtml(lastAdaptations)
+    return head + signalList + nextHtml + roster + renderSelfHealHtml(snap) + renderEffectSignalsHtml(snap) + renderSpaceLedgerHtml(snap) + renderHealthAdaptationsHtml(lastAdaptations)
   }
 
   // EFF-M3 — 效果信号卡(内部回路的仪表,不是榜单:数字只与自己比)。host 未接/
@@ -1510,6 +1510,41 @@ import { createWorkflows } from './workflows.js'
     return `<div class="hh-heal">
       <h3 class="hh-heal-title">${escapeHtml(t.healthEffectTitle(es.windowDays))}</h3>
       <ul class="hh-heal-list">${lines.map((l) => `<li class="hh-heal-row">${escapeHtml(l)}</li>`).join('')}</ul>
+    </div>`
+  }
+
+  // STOR-M1 — 空间账本卡(只丈量不删除;数字来自 6h 节律落盘的 runtime/
+  // space-ledger.json,呈现层不现场丈量)。三态:字段缺席(host 未接)→ 整卡
+  // 不渲染;null(还没量过/账本读不动)→ 卡在但如实说还没有账本;有行 → 总
+  // 占用 + 最大类目 top 8。截断 = 下界不是全量,如实印 —— 呈现层不把
+  // 「量不完」装成「就这么多」。时间走浏览器 locale(全仓惯例)。
+  function renderSpaceLedgerHtml(snap) {
+    const sp = snap?.space
+    if (sp === undefined) return ''
+    let body
+    if (!sp) {
+      body = `<ul class="hh-heal-list"><li class="hh-heal-row">${escapeHtml(t.healthSpaceNotYet)}</li></ul>`
+    } else {
+      const fmt = (n) => {
+        if (!Number.isFinite(n) || n < 0) return '0 B'
+        if (n < 1024) return `${n} B`
+        if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`
+        if (n < 1024 * 1024 * 1024) return `${(n / (1024 * 1024)).toFixed(1)} MB`
+        return `${(n / (1024 * 1024 * 1024)).toFixed(2)} GB`
+      }
+      const when = escapeHtml(new Date(sp.at).toLocaleString())
+      const lines = [`<li class="hh-heal-row"><span class="hh-heal-when">${when}</span> ${escapeHtml(t.healthSpaceTotal(fmt(sp.totalBytes), sp.totalEntries))}</li>`]
+      const cats = Array.isArray(sp.categories) ? sp.categories : []
+      for (const c of cats.slice(0, 8)) {
+        lines.push(`<li class="hh-heal-row">${escapeHtml(t.healthSpaceCat(c.id, fmt(c.bytes), c.entries))}</li>`)
+      }
+      if (cats.length > 8) lines.push(`<li class="hh-heal-row">${escapeHtml(t.healthSpaceMore(cats.length - 8))}</li>`)
+      if (sp.truncated) lines.push(`<li class="hh-heal-row">${escapeHtml(t.healthSpaceTruncated)}</li>`)
+      body = `<ul class="hh-heal-list">${lines.join('')}</ul>`
+    }
+    return `<div class="hh-heal">
+      <h3 class="hh-heal-title">${escapeHtml(t.healthSpaceTitle)}</h3>
+      ${body}
     </div>`
   }
 

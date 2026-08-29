@@ -166,6 +166,9 @@ function buildButler(provider: LlmProvider, root: string, singleTier?: boolean, 
     members: { users: () => [], membershipRole: () => null },
     // HEAL-M1 — 最大脸必须带自愈台账切片,restart_history 才在(surface 缺席由工具自答「未接入」)。
     selfHeal: () => undefined,
+    // STOR-M1 — 最大脸必须带账本路径,space_report 才在。文件不存在 = 读者答
+    // null = 工具如实「还没量过」——工具在不在只看路径接没接,不看账本写没写。
+    spaceLedgerFile: join(root, 'runtime', 'space-ledger.json'),
     // HANDS-M2 — 最大脸必须带 armed 的手,五个 hands_* governed 工具才在;
     // 构造零副作用(工作区懒建),这里的宿主目录不会被真碰。
     ...(handsMode === 'armed' || handsMode === 'no-role'

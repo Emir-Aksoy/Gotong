@@ -34,6 +34,7 @@ import { access, constants as FS } from 'node:fs/promises'
 
 import type { HealthEffectSignalsRow } from './effect-signals.js'
 import type { HealthRoutingRow } from './routing-health.js'
+import type { SpaceLedgerFile } from './space-ledger.js'
 
 /** One managed LLM agent's at-a-glance health. */
 export interface HealthAgentRow {
@@ -142,6 +143,13 @@ export interface HealthSnapshot {
    * 数字只与自己比 —— 这张卡是内部回路的仪表,不是榜单。
    */
   effectSignals?: HealthEffectSignalsRow
+  /**
+   * STOR-M1 — 空间账本(6h 节律丈量的磁盘占用分桶),喂体检面板「空间」卡。
+   * 三态:字段缺席 → host 未接账本(诚实未知);null → 接了但还没量过(账本
+   * 文件不在/读不出 —— 「读不动」绝不冒充「零占用」);行 → 上次丈量的数字。
+   * 只丈量不删除;账本本身由 space-ledger.ts 的 6h 节律写。
+   */
+  space?: SpaceLedgerFile | null
   /** ISO timestamp the snapshot was taken. */
   checkedAt: string
 }
@@ -294,6 +302,12 @@ export interface AdminHealthDeps {
    * 合同是自身永不抛(子块各自降级);这里仍套 try 只为镜像兄弟字段的降级姿态。
    */
   effectSignals?(): Promise<HealthEffectSignalsRow>
+  /**
+   * STOR-M1 — 读空间账本(host 注入 `spaceLedgerAt(...).read` 的 thunk)。可选:
+   * absent → snapshot 不含 space(诚实未知)。thunk 的合同是自身永不抛(宽容
+   * 读者,坏档 → null);这里仍套 try 只为镜像兄弟字段的降级姿态。
+   */
+  readSpaceLedger?(): Promise<SpaceLedgerFile | null>
 }
 
 /** The duck-typed surface injected into `serveWeb`. */
@@ -483,6 +497,17 @@ export function createAdminHealthService(deps: AdminHealthDeps): AdminHealthSurf
         }
       }
 
+      // STOR-M1 — 空间账本。thunk 合同是永不抛(宽容读者,坏档 → null);catch
+      // 只镜像兄弟字段的降级姿态(抛了 → 字段缺席,快照其余部分不被连累)。
+      let space: SpaceLedgerFile | null | undefined
+      if (deps.readSpaceLedger) {
+        try {
+          space = await deps.readSpaceLedger()
+        } catch {
+          space = undefined
+        }
+      }
+
       return {
         agents: rows,
         agentsMissingKey: rows.filter((r) => r.missingKey).length,
@@ -506,6 +531,7 @@ export function createAdminHealthService(deps: AdminHealthDeps): AdminHealthSurf
         ...(updateAvailable !== undefined ? { updateAvailable } : {}),
         ...(selfHeal !== undefined ? { selfHeal } : {}),
         ...(effectSignals !== undefined ? { effectSignals } : {}),
+        ...(space !== undefined ? { space } : {}),
         checkedAt: new Date().toISOString(),
       }
     },

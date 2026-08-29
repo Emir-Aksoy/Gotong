@@ -235,6 +235,42 @@ describe('BF-M8 — butler 蒸馏 + 6h maintenance in the production host sweep'
     expect(providerBuilds).toBe(0) // returns before building — nothing to distill
   })
 
+  // STOR-M1 — the census hook sits BEFORE the zero-members early-return and the
+  // provider gate: measurement needs no model and no members, so a fresh hub
+  // with zero butler namespaces still keeps an honest space ledger.
+  it('STOR-M1 — zero members on disk still measures the space ledger', async () => {
+    const pool = butlerPool()
+    let measured = 0
+    const sw = sweeper(pool, {
+      spaceLedger: async () => {
+        measured++
+        return null
+      },
+    })
+    await sw.runOnce() // no <root>/user/* dirs — tick early-returns AFTER the census
+    expect(measured).toBe(1)
+  })
+
+  it('STOR-M1 — a census fault never stalls the tick (distillation still runs)', async () => {
+    await space.upsertAgent({
+      id: 'assistant',
+      allowedCapabilities: ['chat'],
+      createdAt: new Date().toISOString(),
+      managed: { kind: 'llm', provider: 'mock', system: 'butler' },
+    })
+    const pool = butlerPool()
+    await seedEpisodic(memRoot, 'alice', 40)
+
+    await sweeper(pool, {
+      spaceLedger: async () => {
+        throw new Error('census boom')
+      },
+    }).runOnce()
+
+    // The member's maintenance happened anyway — the fold to keepRecent(8) ran.
+    expect(await episodicCount(memRoot, 'alice')).toBe(8)
+  })
+
   it('MU-M5 — gitSnapshot opt-in reaches the member dir; default off invokes no git', async () => {
     await space.upsertAgent({
       id: 'assistant',

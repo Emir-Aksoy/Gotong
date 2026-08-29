@@ -1,7 +1,7 @@
 # 存储管家(STOR)—— VPS 存储空间的自动整理与删除
 
 > **方向: 主 T 兼 M**(工具调用能力——给阿同一双管理自己存储空间的手;记忆树阶梯兼记忆管理)。
-> Status: **M0 计划落档(2026-08-29)**;M1 空间账本 → M2 死物清与类②开箱 → M3 成员内容阶梯 → M4 提案卡 + capstone 待做。
+> Status: **M0 计划落档 + M1 空间账本 ✅(2026-08-29)**;M2 死物清与类②开箱 → M3 成员内容阶梯 → M4 提案卡 + capstone 待做。
 >
 > 用户原话(2026-08-29):「vps存储空间管理应该建设起来,多余的内容要能自动整理并删除。」
 > 「atong 目前具备自己使用各种方式管理文件、记忆,并有效的执行还要管理给予它的 vps 存储空间的能力吗?
@@ -107,7 +107,7 @@ boot 应用 + 6h runtime sweeper 双接线,默认全关(不设 = 字节不变)�
 
 ## 六、里程碑
 
-### M1 空间账本(先有尺,后动刀)
+### M1 空间账本(先有尺,后动刀)✅ 2026-08-29
 
 - `host/src/space-ledger.ts` 纯核:有界流式遍历(`opendirSync` 逐项,hands `measureTree` 同款姿态,
   上限步数防挂死)按顶层类目分桶丈量(transcript+archive / identity+wal / butler 分子目录 / runtime /
@@ -118,6 +118,30 @@ boot 应用 + 6h runtime sweeper 双接线,默认全关(不设 = 字节不变)�
   ③benign 只读工具 `space_report`(目录层,AFR 注册三件套)。
 - 丈量骑既有 6h retention sweeper 的节律(sweeper 未 arm 时由维护 sweep 兜底)——不开新定时器。
 - **不删任何东西**。M1 的全部产出是数字。
+
+**落地记(2026-08-29)**——四条承重判断全部变异测试钉死:
+
+1. **根读不动 = null 绝不零行**(`measureSpaceLedger` 空间根 `opendirSync` 抛 ⇒ warn + 返回 null,
+   盘上不落文件)——一行全零的账本读起来像「空间是空的」,而真相是「我看不见」;EFF-M3
+   「把『读不动』计成 0 会谎报『一切安静』」第四次现身。变异(伪造零行)恰红 1 例。
+2. **钩子位置是正确性不是风格**:维护 sweep 侧的丈量钩挂在 `runOnce()` 最前、`listUserIds()`
+   与零成员 early-return **之前**——丈量不需要模型也不需要成员,一台零成员/没 key 的 hub 也该有
+   诚实的空间账本。变异(钩子挪到 early-return 之后)恰红 1 例(零成员仍丈量那例),census 抛错
+   不拖垮蒸馏那例保持绿。
+3. **载体二选一,main.ts 按 `retentionConfigured()` 定夺**:retention sweeper 已 arm ⇒ 骑它的
+   第四段独立 try/catch(三族清完才量,census 抛错不连累 retention,反向同理);未 arm(生产现状)
+   ⇒ 骑维护 sweep;外加 boot 一次 fire-and-forget。永远恰好一个载体,不开新定时器。
+4. **读者宽容,权威是盘上那份**:`readSpaceLedger` 无缓存逐次读,`isLedger`/`isCategory` 全形状
+   校验(数值 `Number.isFinite`、`truncated` 布尔、`v===1`),坏档=null 不隔离不改名(观察者永不
+   隔离,`readButlerMemoryHealth` 同纪律)。变异(摘 `truncated` 形状检查)恰红 1 例。
+   `.bak-` 分桶规则(目录名/文件名两处)变异恰红 1 例;`space_report` 从
+   `BUTLER_DIRECTORY_BENIGN` 摘除 ⇒ tiers 双向名册门**两面各红 1 例**。
+
+验收:host **3317**+5skip(+25:space-ledger 16 / admin-health 4 / retention 2 / maintenance 2 /
+self-status·tiers·toolface 同步)、web **1690**(面板卡由既有契约门盖)、全仓 `pnpm -r typecheck`
+RC=0、四门 PASS(**旋钮 114 零新增**——账本是惰性事实文件不是开关;main.ts 2754/2760);五道变异
+五次全红且只红该红那些,复原一律 python 精确替换 + `shasum` 对拍。admin 面板「空间」卡 6 个
+`healthSpace*` i18n 键双语,sw CACHE v23→**v24**。
 
 ### M2 死物清道夫 + 类②生产开箱
 
