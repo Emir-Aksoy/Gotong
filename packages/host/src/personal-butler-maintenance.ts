@@ -475,14 +475,16 @@ export interface ButlerMaintenanceSweeperOptions {
    */
   healthFile?: string
   /**
-   * STOR-M1 — optional space-ledger census thunk (`spaceLedgerAt(...).measure`).
+   * STOR-M1/M2 — optional space upkeep thunk (`spaceUpkeepAt(...).run`): dead-file
+   * sweep first, then the ledger census, so the ledger reflects post-sweep truth.
    * main.ts passes it here ONLY when the retention sweeper isn't armed (exactly
-   * one carrier for the census, never two), so it rides this existing 6h cadence
-   * instead of opening its own timer. It runs at the TOP of each tick — before
-   * the member/provider gates — because measurement needs no model and no
-   * members. Measurement only; the census never deletes anything.
+   * one carrier for the upkeep pass, never two), so it rides this existing 6h
+   * cadence instead of opening its own timer. It runs at the TOP of each tick —
+   * before the member/provider gates — because neither half needs a model or
+   * members. The sweep touches only orphan tmp files, surplus `.corrupt-*`, and
+   * space-root `.bak-` generations (see space-sweeper.ts), never member content.
    */
-  spaceLedger?: () => Promise<unknown>
+  spaceUpkeep?: () => Promise<unknown>
 }
 
 /**
@@ -513,7 +515,7 @@ export class ButlerMaintenanceSweeper {
   private readonly reconcile: boolean
   private readonly librarian: boolean
   private readonly healthFile?: string
-  private readonly spaceLedger?: () => Promise<unknown>
+  private readonly spaceUpkeep?: () => Promise<unknown>
 
   private timer?: ReturnType<typeof setInterval>
   private running = false
@@ -536,7 +538,7 @@ export class ButlerMaintenanceSweeper {
     this.reconcile = opts.reconcile ?? false
     this.librarian = opts.librarian ?? false
     this.healthFile = opts.healthFile
-    this.spaceLedger = opts.spaceLedger
+    this.spaceUpkeep = opts.spaceUpkeep
   }
 
   /** Start the interval. `.unref()` so a pending tick never keeps the process alive. */
@@ -579,15 +581,16 @@ export class ButlerMaintenanceSweeper {
     }
     this.running = true
     try {
-      // STOR-M1 — refresh the space ledger FIRST, before the member/provider
-      // gates below: measurement needs no model and no members, so a hub with
-      // zero butler namespaces (or no key yet) still keeps an honest ledger.
-      // The thunk's own contract is never-throw; this catch is belt-and-braces
-      // so a mis-wired thunk can never stall the maintenance tick.
+      // STOR-M1/M2 — run space upkeep (dead-file sweep, then ledger census)
+      // FIRST, before the member/provider gates below: neither half needs a
+      // model or members, so a hub with zero butler namespaces (or no key yet)
+      // still sweeps orphans and keeps an honest ledger. The thunk's own
+      // contract is never-throw; this catch is belt-and-braces so a mis-wired
+      // thunk can never stall the maintenance tick.
       try {
-        if (this.spaceLedger) await this.spaceLedger()
+        if (this.spaceUpkeep) await this.spaceUpkeep()
       } catch (err) {
-        this.log.warn('butler maintenance: space ledger census failed', { err })
+        this.log.warn('butler maintenance: space upkeep failed', { err })
       }
 
       const userIds = await this.listUserIds()

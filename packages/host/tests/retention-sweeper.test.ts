@@ -198,16 +198,16 @@ describe('retention sweeper (perf audit A⑤)', () => {
     expect(pruned).toEqual(['audit'])
   })
 
-  // STOR-M1 — the space-ledger census rides this sweep as a FOURTH independent
-  // best-effort block: measured on the same 6h rhythm, and a census fault never
-  // blocks retention (nor the reverse — the families run before it).
-  it('calls the space-ledger census thunk on a sweep tick', async () => {
+  // STOR-M1/M2 — space upkeep (sweep + census) rides this sweep as a FOURTH
+  // independent best-effort block: fired on the same 6h rhythm, and an upkeep
+  // fault never blocks retention (nor the reverse — the families run before it).
+  it('calls the space upkeep thunk on a sweep tick', async () => {
     let measured = 0
     await retentionSweepOnce(
       baseOpts({
         env: { GOTONG_RUN_KEEP: '5' },
         runs: fakeRuns(),
-        spaceLedger: async () => {
+        spaceUpkeep: async () => {
           measured++
           return null
         },
@@ -216,13 +216,13 @@ describe('retention sweeper (perf audit A⑤)', () => {
     expect(measured).toBe(1)
   })
 
-  it('a census fault never blocks the sweep (families already ran, result intact)', async () => {
+  it('an upkeep fault never blocks the sweep (families already ran, result intact)', async () => {
     const runs = fakeRuns()
     const out = await retentionSweepOnce(
       baseOpts({
         env: { GOTONG_RUN_KEEP: '5' },
         runs,
-        spaceLedger: async () => {
+        spaceUpkeep: async () => {
           throw new Error('census boom')
         },
       }),

@@ -235,14 +235,15 @@ describe('BF-M8 — butler 蒸馏 + 6h maintenance in the production host sweep'
     expect(providerBuilds).toBe(0) // returns before building — nothing to distill
   })
 
-  // STOR-M1 — the census hook sits BEFORE the zero-members early-return and the
-  // provider gate: measurement needs no model and no members, so a fresh hub
-  // with zero butler namespaces still keeps an honest space ledger.
-  it('STOR-M1 — zero members on disk still measures the space ledger', async () => {
+  // STOR-M1/M2 — the upkeep hook sits BEFORE the zero-members early-return and
+  // the provider gate: neither the sweep nor the census needs a model or
+  // members, so a fresh hub with zero butler namespaces still sweeps orphans
+  // and keeps an honest space ledger.
+  it('STOR-M1/M2 — zero members on disk still runs space upkeep', async () => {
     const pool = butlerPool()
     let measured = 0
     const sw = sweeper(pool, {
-      spaceLedger: async () => {
+      spaceUpkeep: async () => {
         measured++
         return null
       },
@@ -251,7 +252,7 @@ describe('BF-M8 — butler 蒸馏 + 6h maintenance in the production host sweep'
     expect(measured).toBe(1)
   })
 
-  it('STOR-M1 — a census fault never stalls the tick (distillation still runs)', async () => {
+  it('STOR-M1/M2 — an upkeep fault never stalls the tick (distillation still runs)', async () => {
     await space.upsertAgent({
       id: 'assistant',
       allowedCapabilities: ['chat'],
@@ -262,7 +263,7 @@ describe('BF-M8 — butler 蒸馏 + 6h maintenance in the production host sweep'
     await seedEpisodic(memRoot, 'alice', 40)
 
     await sweeper(pool, {
-      spaceLedger: async () => {
+      spaceUpkeep: async () => {
         throw new Error('census boom')
       },
     }).runOnce()

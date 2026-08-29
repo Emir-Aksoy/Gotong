@@ -131,7 +131,7 @@ import { recoverMasterKeyRotation } from './master-key-recovery.js'
 import { deriveSpaceSecretsKey, unifySpaceSecrets } from './space-secrets-unify.js'
 import { applyRunRetention, parseRunRetention } from './run-retention.js'
 import { armRetentionSweeper, retentionConfigured } from './retention-sweeper.js'
-import { spaceLedgerAt } from './space-ledger.js'
+import { spaceUpkeepAt } from './space-sweeper.js'
 import { armVersionCheck } from './version-check.js'
 import { applyTranscriptRetention, parseTranscriptRetention } from './transcript-retention.js'
 import { describe } from './transcript-line.js'
@@ -1088,12 +1088,12 @@ async function main(): Promise<void> {
   // M-HEALTH — 维护健康台账:维护扫描写,巡检与 my_status 读。一条路径三处引用
   // ——分开写会漂,而漂了之后「没出牌」与「没在跑」从外面看一模一样。
   const butlerMemoryHealthFile = join(space.root, 'butler', 'memory-health.json')
-  // STOR-M1 — 空间账本:丈量骑既有 6h 节律(retention 配置了归它,否则维护 sweep
-  // 兜底,至多一个载体),不开新定时器;boot 先量一次,重启后面板/自检不用等 6h。
-  // 只丈量不删除;丈量失败绝不连累任何一条节律(两侧钩子各自 best-effort)。
-  const spaceLedger = spaceLedgerAt(space.root, log)
+  // STOR-M1/M2 — 空间维护:先清死物(孤儿 tmp/超额 corrupt/根部 .bak- 轮转)再
+  // 丈量,账本反映清扫后真相;骑既有 6h 节律(retention 配置了归它,否则维护 sweep
+  // 兜底,至多一个载体),不开新定时器;boot 先跑一次。每半各自 best-effort。
+  const spaceUpkeep = spaceUpkeepAt(space.root, log)
   const spaceOnRetention = retentionConfigured(process.env, Date.now())
-  void spaceLedger.measure()
+  void spaceUpkeep.run()
   // Per-user butler assembly lives in personal-butler-factory.ts (GUARD
   // extraction); refs() reads the forward-declared refs at butler-build time.
   const butlerFactory: ButlerFactory = buildButlerFactory({
@@ -1142,7 +1142,7 @@ async function main(): Promise<void> {
     ...(butlerConfigOps ? { configOps: butlerConfigOps } : {}), // HANDS-M3c set_hub_config
     spaceRoot: space.root, // HANDS-M4 环境卡:只拿去 statfs 量剩余磁盘,路径不进输出
     memoryHealthFile: butlerMemoryHealthFile, // M-HEALTH my_status 那半句
-    spaceLedgerFile: spaceLedger.ledgerFile, // STOR-M1 space_report + my_status 空间行(只读账本)
+    spaceLedgerFile: spaceUpkeep.ledgerFile, // STOR-M1 space_report + my_status 空间行(只读账本)
     // SEN-M5 — 成员名单投影源(岔口 A 全员见名+角色+id;email 结构性不进投影)。
     ...(identityForBackup
       ? { members: { users: () => identityForBackup.listUsers(),
@@ -1204,7 +1204,7 @@ async function main(): Promise<void> {
       librarian: butlerMemoryLibrarianOn,
       healthFile: butlerMemoryHealthFile, // M-HEALTH 每轮落一条事实行(成 / 败 / 连败几轮)
       // STOR-M1 — retention 没配时由维护 sweep 兜底丈量(至多一个载体)。
-      ...(spaceOnRetention ? {} : { spaceLedger: spaceLedger.measure }),
+      ...(spaceOnRetention ? {} : { spaceUpkeep: spaceUpkeep.run }),
     })
     butlerMaintenanceSweeper.start()
   }
@@ -1428,7 +1428,7 @@ async function main(): Promise<void> {
     runs: workflowController,
     identity: identity ?? null,
     log,
-    spaceLedger: spaceLedger.measure, // STOR-M1 第四独立块(未配置=null-armed=不跑)
+    spaceUpkeep: spaceUpkeep.run, // STOR-M1/M2 第四独立块(未配置=null-armed=不跑)
   })
 
   // Perf audit B② — opt-in daily new-version probe (GOTONG_UPDATE_CHECK);
@@ -2201,7 +2201,7 @@ async function main(): Promise<void> {
     selfHealRecent: () => selfHealLog.recent(10), // HEAL-M1 自愈台账最近 10 条
     // EFF-M3 — 效果信号(park 三计数+转派行+LLM 调用分母;identity 缺席 = 分母如实缺席)。
     effectSignals: buildEffectSignalsReader({ spaceRoot: space.root, ...(identity ? { countLlmCalls: (s: number) => identity!.aggregateLedger({ groupBy: 'day', since: s }).reduce((n, r) => n + r.calls, 0) } : {}) }),
-    readSpaceLedger: spaceLedger.read, // STOR-M1 空间卡(只读落盘账本,不现场丈量)
+    readSpaceLedger: spaceUpkeep.read, // STOR-M1 空间卡(只读落盘账本,不现场丈量)
   })
   patrolHealthRef = adminHealth
 

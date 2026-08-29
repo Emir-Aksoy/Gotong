@@ -59,12 +59,13 @@ export interface RetentionSweeperOptions {
   identity: RetentionStore | null
   log: Logger
   /**
-   * STOR-M1 — optional space-ledger census thunk (`spaceLedgerAt(...).measure`).
-   * The census rides this existing 6h cadence instead of opening its own timer;
-   * measurement only, never deletes. The thunk's own contract is never-throw,
-   * but it gets the same independent best-effort block as the three families.
+   * STOR-M1/M2 — optional space upkeep thunk (`spaceUpkeepAt(...).run`): dead-file
+   * sweep first (STOR-M2), then the ledger census (STOR-M1), so the ledger always
+   * reflects post-sweep truth. Rides this existing 6h cadence instead of opening
+   * its own timer. The thunk's own contract is never-throw, but it gets the same
+   * independent best-effort block as the three families.
    */
-  spaceLedger?: () => Promise<unknown>
+  spaceUpkeep?: () => Promise<unknown>
   /** Injectable clock (tests). */
   now?: () => number
   /** Injectable cadence (tests only — NOT an operator knob). */
@@ -147,12 +148,13 @@ export async function retentionSweepOnce(
     opts.log.warn('runtime identity retention failed', { err })
   }
 
-  // STOR-M1 — fourth independent block: refresh the space ledger on the same
-  // rhythm the policies run on. A failing census never blocks retention.
+  // STOR-M1/M2 — fourth independent block: sweep dead files then refresh the
+  // space ledger, on the same rhythm the policies run on. A failing upkeep pass
+  // never blocks retention.
   try {
-    if (opts.spaceLedger) await opts.spaceLedger()
+    if (opts.spaceUpkeep) await opts.spaceUpkeep()
   } catch (err) {
-    opts.log.warn('runtime space ledger census failed', { err })
+    opts.log.warn('runtime space upkeep failed', { err })
   }
 
   return result
