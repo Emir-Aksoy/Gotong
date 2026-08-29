@@ -299,6 +299,12 @@ export interface ButlerFactoryDeps {
    * 落盘账本、不现场丈量——丈量骑 6h 节律,归 main.ts 接的那条线管。
    */
   spaceLedgerFile?: string
+  /**
+   * STOR-M4 — `space_report` 尾部的提案节 thunk(`storageProposalsAt(...)`
+   * 结构性满足)。缺席 ⇒ 报告与 M1 形态逐字节不变。只在 spaceLedgerFile
+   * 在场时有意义(没有 space_report 这件工具,节无处可挂)。
+   */
+  storageProposals?: () => Promise<string>
 }
 
 export function buildButlerFactory(deps: ButlerFactoryDeps): ButlerFactory {
@@ -312,6 +318,7 @@ export function buildButlerFactory(deps: ButlerFactoryDeps): ButlerFactory {
   const spaceReportToolset = spaceLedgerFile
     ? buildButlerSpaceReportToolset({
         ledger: () => readSpaceLedger(spaceLedgerFile),
+        proposals: deps.storageProposals,
         logger: log,
       })
     : undefined

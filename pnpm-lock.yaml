@@ -152,6 +152,12 @@ importers:
         specifier: workspace:*
         version: link:../../packages/identity
 
+  examples/atong-storage:
+    dependencies:
+      '@gotong/host':
+        specifier: workspace:*
+        version: link:../../packages/host
+
   examples/bar-ops:
     dependencies:
       '@gotong/core':

@@ -65,6 +65,10 @@
     "./butler-longrun": {
       "types": "./dist/personal-butler-longrun.d.ts",
       "import": "./dist/personal-butler-longrun.js"
+    },
+    "./space-steward": {
+      "types": "./dist/space-steward.d.ts",
+      "import": "./dist/space-steward.js"
     }
   },
   "files": [

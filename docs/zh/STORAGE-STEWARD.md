@@ -1,7 +1,7 @@
 # 存储管家(STOR)—— VPS 存储空间的自动整理与删除
 
 > **方向: 主 T 兼 M**(工具调用能力——给阿同一双管理自己存储空间的手;记忆树阶梯兼记忆管理)。
-> Status: **M0 计划落档 + M1 空间账本 + M2 死物清扫(代码半) + M3a 保留阶梯与 set_retention + M3b archive 族旋钮白名单与设置页卡 ✅(2026-08-29)**;M2 配置半随部署同刀 → M4 提案卡 + capstone 待做。
+> Status: **M0 计划落档 + M1 空间账本 + M2 死物清扫(代码半) + M3a 保留阶梯与 set_retention + M3b archive 族旋钮白名单与设置页卡 + M4 提案卡与 capstone ✅(2026-08-29)——STOR track 代码面全完**;仅余 M2 配置半(类②三族生产 env 数字)随下次部署同刀。
 >
 > 用户原话(2026-08-29):「vps存储空间管理应该建设起来,多余的内容要能自动整理并删除。」
 > 「atong 目前具备自己使用各种方式管理文件、记忆,并有效的执行还要管理给予它的 vps 存储空间的能力吗?
@@ -293,6 +293,59 @@ ENV_KNOBS 白名单准入 ≠ env 注册表新增,四个旋钮 M0 起就在 114 
   **提案不是新写入口**。
 - capstone `examples/atong-storage`:零 LLM 零网络,真 space-ledger + 真 sweeper + 真阶梯,
   四幕自断言(账本分桶正确 / 死物清而类④原地 / 无策略零删除字节不变 / 岔口 1 前置真拦)。
+
+**M4 落地记(2026-08-29)**——host 新 `space-proposals.ts`(187 行纯核)+ capstone
+`examples/atong-storage`(五幕 36 断言);**七条承重判断,五道变异全钉**:
+
+1. **判别联合是结构不是注释**(HANDS-M4 同款):`StorageProposal` 两支——`applicable:true`
+   带 `apply:{tool:'set_retention', key, days}`,`applicable:false` 那支**类型上就没有
+   `apply` 字段**只有 `howTo`;测试反向断言 `hasOwnProperty('apply')===false`(运行期越权
+   不该只靠编译器拦)。**恰好两类提案**:P1 `retention:<key>`(某成员内容桶 ≥256MiB 且
+   `retention.json` 里该键**缺席**⇒「保留期还没生效」,apply 只指 `set_retention` 既有
+   key+days 参数空间=**提案不是新写入口**,days 取固定推荐值 365/180/90)与 P2
+   `backup:no-net`(阶梯 state 有 `skippedNoNet>0` ⇒ 「没进备份安全网被跳过」,
+   `applicable:false`,howTo 指 `gotong backup`——跑备份要 CLI 与主钥决策,阿同**不该**能
+   一键替人做)。计划原文「30 天增长率/磁盘余量百分比」如实改口:账本是单次快照没有历史,
+   增长率要先建时序;实际阈值=桶字节数+策略缺席两个都能从盘上一次读出的事实。
+2. **P2 排最前=根因先说**:成员内容被跳过删不掉的根因是没备份,不是保留期没设;先劝
+   `set_retention` 再提备份会让人白批一次改动然后发现照样删不了。
+3. **P2 的消音判据只认全量备份不认 git 快照**——M3a 岔口① 的镜像:`skippedNoNet` 计的
+   三个目录里 dossier/会话窗是记忆树**兄弟**目录,git 快照结构性照不到;拿快照消音等于把
+   「隔壁有备份」读成「我有备份」。判据=`fullBackupAt !== null && fullBackupAt > state.at`
+   (备份晚于最近一次跳过才算数)。
+4. **引擎是纯函数零墙钟**:`proposeStorageActions({ledger, policy, state, fullBackupAt})`
+   不读盘不看表,同输入同输出;`renderStorageProposals` 空列表返回**空串**(没有建议就一个
+   字不说,不渲染空卡);头行如实自报「按固定阈值算出来的」+「其中 K 条我能帮你改,改之前
+   会先送你批准」。
+5. **载体=string-thunk 骑 `space_report` 尾部,一根字符串的缝**:`ButlerSpaceReportDeps`
+   加可选 `proposals?: () => Promise<string>`,报告工具面在正文后 try/catch 追加——thunk
+   抛错报告原样返回(一张算不出的提案卡不该弄丢整份空间报告);`storageProposalsAt(spaceDir,
+   ledger, log)` 在 main.ts 组装(账本 thunk 复用 `spaceUpkeep.read`),**string-thunk 使
+   space-ledger 结构性不 import space-proposals**(反向依赖在类型层就长不出来)。缺席=
+   报告字节与 M1 形态相同;零新工具零新旋钮(`space_report` 本就 benign 在目录层)。
+6. **barrel `space-steward.ts` + host 第 13 条子路径导出** `./space-steward`:账本/清扫/
+   阶梯/提案四件**逐名** re-export(**刻意不用 `export *`**——星号导出对撞名静默丢,逐名让
+   冲突在编译期响亮;GitRunner 族刻意不进 barrel);子路径是必须的,host 根入口
+   `import './main.js'` 会把整台 host 跑起来(AFR-M8 判例)。
+7. **五道变异五次全红且只红该红那些**:摘「策略已设则不提案」⇒**恰 2**(policy-respect
+   两例)/给 P2 那支塞 apply⇒恰 1(反向 hasOwnProperty 门)/阈值门断线(判定不再读
+   `PROPOSE_BUCKET_MIN_BYTES`)⇒恰 1/摘报告面 try/catch⇒恰 1(thunk 抛错连累整份报告)/
+   摘 P2 备份消音⇒**恰 2**;复原一律 python 精确替换+`shasum` 对拍逐字节同基线。**排错记**:
+   变异③第一版把常量改 0 **没红**——门槛永真恰与探针同向,红不出来;换成「判定断开不读
+   常量」才真钉住(变异不红先怀疑变异打法,HANDS 判例第 N 次)。
+
+**capstone `examples/atong-storage`**(`pnpm demo:atong-storage`,**36 条断言** exit 0,
+两次连跑同结果;注入时钟 `T=2026-08-29 UTC`,git 探针 stub 返回非零=零真 git,全程
+`@gotong/host/space-steward` 子路径引真件零复刻):计划的四幕落成**五幕**——提案卡自己
+也该有一幕。①账本(分桶诚实:transcript+archive 合桶/butler/ 恰展开一层/`.bak-`→bak/
+落盘可回读)②清扫(tmp 24h 年龄门/corrupt 保 5/根部 bak 族保 3/`butler/` 结构性不进视野/
+类④哨兵逐字节不动/4 条台账行只有文件名——**先落账再动手**)③无策略(阶梯 thunk 返回 null
+且**连 `runtime/` 目录都不建**=零字节)④岔口① 硬前置(无备份⇒`skippedNoNet=3` 零删除,
+备份事实落盘⇒同一份策略真删 4 件、活人/新鲜/未翻篇幸存、3 个 scope 4 条 retention 台账行)
+⑤提案闭环(P2+P1 齐出且 P2 在前→真 `writeRetentionPolicy` 落策略⇒P1 静默→备份事实
+补上⇒P2 静默→**空串**)。验收:host **3444**+5skip(+18 `space-proposals.test.ts`)、
+全仓 `pnpm -r typecheck` RC=0、四门 PASS(**旋钮 114 零新增**——提案是渲染产物不是开关,
+阈值/天数全代码常量;main.ts 2775/2790)。
 
 ---
 

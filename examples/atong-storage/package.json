@@ -1,0 +1,14 @@
+{
+  "name": "@gotong/example-atong-storage",
+  "version": "0.0.0",
+  "type": "module",
+  "private": true,
+  "description": "STOR capstone:存储管家四件套(空间账本/死物清扫/成员内容保留阶梯/提案卡)的五幕自断言 demo——真 @gotong/host space-steward 代码零重写,零 LLM 零网络零 key,注入时钟确定性可重跑。",
+  "scripts": {
+    "start": "tsx src/demo.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@gotong/host": "workspace:*"
+  }
+}

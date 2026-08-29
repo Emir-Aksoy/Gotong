@@ -131,6 +131,7 @@ import { recoverMasterKeyRotation } from './master-key-recovery.js'
 import { deriveSpaceSecretsKey, unifySpaceSecrets } from './space-secrets-unify.js'
 import { applyRunRetention, parseRunRetention } from './run-retention.js'
 import { armRetentionSweeper, retentionConfigured } from './retention-sweeper.js'
+import { storageProposalsAt } from './space-proposals.js'
 import { spaceUpkeepAt } from './space-sweeper.js'
 import { buildRetentionLadder } from './space-retention.js'
 import { armVersionCheck } from './version-check.js'
@@ -1161,6 +1162,7 @@ async function main(): Promise<void> {
     spaceRoot: space.root, // HANDS-M4 环境卡:只拿去 statfs 量剩余磁盘,路径不进输出
     memoryHealthFile: butlerMemoryHealthFile, // M-HEALTH my_status 那半句
     spaceLedgerFile: spaceUpkeep.ledgerFile, // STOR-M1 space_report + my_status 空间行(只读账本)
+    storageProposals: storageProposalsAt(space.root, spaceUpkeep.read, log), // STOR-M4 提案卡(固定阈值,零 LLM)
     // SEN-M5 — 成员名单投影源(岔口 A 全员见名+角色+id;email 结构性不进投影)。
     ...(identityForBackup
       ? { members: { users: () => identityForBackup.listUsers(),

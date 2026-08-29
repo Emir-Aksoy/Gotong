@@ -40,6 +40,7 @@
     "demo:atong-dual-brain": "pnpm --filter @gotong/example-atong-dual-brain start",
     "demo:atong-hands": "pnpm --filter @gotong/example-atong-hands start",
     "demo:atong-longrun": "pnpm --filter @gotong/example-atong-longrun start",
+    "demo:atong-storage": "pnpm --filter @gotong/example-atong-storage start",
     "demo:coding-agent-bridge": "pnpm --filter @gotong/example-coding-agent-bridge start",
     "demo:personal-coding-hub": "pnpm --filter @gotong/example-personal-coding-hub start",
     "demo:personal-coding-hub:real": "pnpm --filter @gotong/example-personal-coding-hub start:real",

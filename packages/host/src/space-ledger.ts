@@ -383,6 +383,11 @@ const SPACE_TOOL: LlmToolDefinition = {
 export interface ButlerSpaceReportDeps {
   /** 账本读者(`() => readSpaceLedger(file)`;`spaceLedgerAt(...).read` 结构性满足)。 */
   ledger: () => Promise<SpaceLedgerFile | null>
+  /**
+   * STOR-M4 提案节(渲染好的文本,'' = 没建议不占地方)。缺席 ⇒ 报告
+   * 与 M1 形态逐字节不变;thunk 抛错只丢这一节,绝不连累账本本体。
+   */
+  proposals?: () => Promise<string>
   now?: () => number
   logger?: Logger
 }
@@ -401,9 +406,17 @@ class ButlerSpaceReportToolset implements LlmAgentToolset {
     try {
       const row = await this.deps.ledger()
       // null 走 renderSpaceReport 的诚实分支——「还没量过」是正常回答,不是错误。
-      return {
-        content: [{ type: 'text', text: renderSpaceReport(row, this.deps.now?.() ?? Date.now()) }],
+      let text = renderSpaceReport(row, this.deps.now?.() ?? Date.now())
+      if (this.deps.proposals) {
+        try {
+          const extra = await this.deps.proposals()
+          if (extra) text += `\n\n${extra}`
+        } catch (err) {
+          // 建议是派生物,账本才是承重半:建议算不出来绝不连累报告本体。
+          this.deps.logger?.warn('butler space report: proposals failed', { err })
+        }
       }
+      return { content: [{ type: 'text', text }] }
     } catch (err) {
       this.deps.logger?.warn('butler space report: ledger read failed', { err })
       return { content: [{ type: 'text', text: '暂时读不到空间账本,稍后再试。' }], isError: true }

@@ -54,6 +54,7 @@ pnpm demo                          # = hello-collab（官方第一步，见 QUIC
 | [`atong-librarian`](../../examples/atong-librarian) | LIB capstone：知识自治四幕——真图书馆员把进货区主题事实上架进 knowledge/（文件先落盘才双时态下架，可逆带出处，第二 tick 零模型调用）→ 树长 25× 常驻索引卡**逐字节不变**（M1 尺量的，胖索引被 ≤500tk 顶封死）→ 归档不真删 → 真管家靠索引卡导航读出待办，对外发送照样 park（知识≠授权） | 零（无网络无 key） |
 | [`atong-hands`](../../examples/atong-hands) | HANDS capstone：一双手和它够不到的每一样东西——监狱缺席则手根本不装 → 注入写配置**两层各拒一次**（`agents.json` 逐字节不变）→ `net:true` park，批准前盘上零痕迹、批准后真跑完 → 工作区直写不 park、监狱里 `node test.js` 真出 `TESTS PASS`，同一个 `cat` 读不到 `<space>/gotong.env` → `/setkey` 秘密只到金库（整个 `<space>` 扫不到明文，渲染/日志/审计零回显）；两处配**控制组**，不让「够不到」空洞地真 | 零（无网络无 key） |
 | [`atong-longrun`](../../examples/atong-longrun) | LONG capstone：故意失忆的模型跑完分段长任务——段 2 首轮恰好一条 user 消息（全部输入来自盘上档案）→ park 行 JSON 往返后丢掉整套 store/agent 同目录冷启动接段 3、崩溃诚实停链重派清旗 → 预算耗尽收尾段落在 synthesizer 槽、强制部分交付 → 派三个子活：两次唤醒预检零模型调用指数退避、结果由驱动器写进事实行、`no_participant` 黑洞收口；真 dossier store + 真驱动器 + 真 host 工具面 + 真工种槽，假的只有模型与一个只做三件事的 MiniHub | 零（无网络无 key） |
+| [`atong-storage`](../../examples/atong-storage) | STOR capstone：存储管家五幕——空间账本按类目分桶落盘可回读 → 死物清扫（tmp 年龄门/corrupt 保 5/根部 .bak 保 3，`butler/` 结构性不进视野，类④凭证逐字节不动，**先落账再动手**）→ 无策略零删除（连 runtime/ 都不建）→ 保留阶梯硬前置：没进全量备份就跳过+响亮计数，备份落地同一份策略才真删 → 提案卡按阈值触发（P2 备份缺口在前，P1 的 apply 只指 `set_retention` 既有参数空间），策略落地/备份补上则逐条闭嘴到空串；真 space-steward 四件零重写，注入时钟确定性 | 零（无网络无 key） |
 
 ## ③ 接真东西（需 key / 本地 MCP server / 跨进程）
 
