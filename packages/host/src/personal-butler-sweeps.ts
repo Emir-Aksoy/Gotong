@@ -73,6 +73,9 @@ export interface ButlerSweepsOptions {
     /** M-HEALTH — 记忆维护台账(`butler/memory-health.json`,由维护扫描自己写)。
      *  给了它,连续出错 / 长时间没跑成会出一张黄牌。缺省 ⇒ 不读不出牌。 */
     memoryHealthFile?: string
+    /** STOR-M3 — 空间根;给了它,巡检读 `runtime/retention-state.json`,阶梯因缺
+     *  备份安全网跳过删除会出一张黄牌。缺省 ⇒ 不读不出牌。 */
+    retentionSpaceDir?: string
   }
   /**
    * TN-M2 stalled-task nudge: gate only (cadence is a constant — the stall
@@ -152,6 +155,7 @@ export function armButlerSweeps(opts: ButlerSweepsOptions): ButlerSweepsHandle {
       ...(opts.patrol.outageFile ? { outageFile: opts.patrol.outageFile } : {}),
       ...(opts.patrol.selfHealRecent ? { selfHealRecent: opts.patrol.selfHealRecent } : {}),
       ...(opts.patrol.memoryHealthFile ? { memoryHealthFile: opts.patrol.memoryHealthFile } : {}),
+      ...(opts.patrol.retentionSpaceDir ? { retentionSpaceDir: opts.patrol.retentionSpaceDir } : {}),
     })
     patrol.start()
   }

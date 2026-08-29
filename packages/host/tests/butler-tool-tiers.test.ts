@@ -164,6 +164,13 @@ function buildButler(provider: LlmProvider, root: string, singleTier?: boolean, 
       spaceDir: '/fake/space',
     },
     members: { users: () => [], membershipRole: () => null },
+    // STOR-M3 — 最大脸必须带保留策略 ops,set_retention 才在(全假件不碰盘;
+    // key 是 3 键闭集 enum、值有界、零自由文本——参数空间封闭正是它能上 IM 名单的理由)。
+    retentionOps: {
+      privileged: () => true,
+      current: async () => null,
+      write: async () => ({}),
+    },
     // HEAL-M1 — 最大脸必须带自愈台账切片,restart_history 才在(surface 缺席由工具自答「未接入」)。
     selfHeal: () => undefined,
     // STOR-M1 — 最大脸必须带账本路径,space_report 才在。文件不存在 = 读者答
@@ -236,6 +243,9 @@ const GOVERNED_TOOLS = [
   'hands_rm',
   // HANDS-M3c — 基础设置写(tier 2 每次 park);参数空间封闭 ⇒ 在 IM 可批名单上。
   'set_hub_config',
+  // STOR-M3 — 内容保留策略写(每次 park);与 set_hub_config 同款封闭参数空间
+  // (key 是 3 键闭集 enum,值有界 30-3650,零自由文本)⇒ 同在 IM 可批名单上。
+  'set_retention',
 ] as const
 const MEMORY_TOOLS = ['remember', 'remember_procedure', 'refine_procedure', 'recall', 'forget'] as const
 

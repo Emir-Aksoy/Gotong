@@ -60,6 +60,7 @@ import {
   type ButlerMemoryHealth,
 } from './butler-memory-health.js'
 import { readOutageSnapshotFile, type LlmOutageSnapshot } from './llm-outage.js'
+import { readRetentionState, type RetentionState } from './space-retention.js'
 import { guideBreadcrumb } from './personal-butler-guide.js'
 import { readButlerRunBroadcastConfig } from './personal-butler-run-broadcast.js'
 import type { SelfHealEntry } from './self-heal-log.js'
@@ -217,6 +218,40 @@ export function memoryMaintenanceCard(
     severity: 'yellow',
     label: '记忆维护没在正常跑',
     fact: `记忆的后台维护(蒸馏 / 校正 / 上架)${why}。${sample}日常聊天照常,但长期记忆会停在旧样子——新说的事进不了长期档。`,
+  }
+}
+
+export const RETENTION_SKIP_CARD_ID = 'retention:no-net'
+
+/** 阶梯状态多久内算新鲜——超过它不出牌(策略被 reset 后阶梯不再写状态,旧文件会一直躺着,这个窗让牌自己退场)。 */
+export const RETENTION_SKIP_STALE_MS = 48 * 60 * 60 * 1000
+
+/**
+ * STOR-M3 — 岔口① 硬前置「跳过 + 响亮说」的响亮那一半:阶梯因缺备份安全网
+ * 跳过了过期内容,就出一张黄牌指人去打全量备份。形状同 memoryMaintenanceCard:
+ * 巡检只读别的模块(retentionLadderOnce)落下的事实文件,不认识阶梯那条链。
+ *
+ * 三条刻意:
+ * - state null → 不出牌:那是**未知**,不是坏——没配策略的 hub 根本没有这份
+ *   文件,不该自称有病;
+ * - 状态过旧(> 48h)→ 不出牌:阶梯每 6h 一轮,状态两天没刷新只有两种可能——
+ *   策略被移除了(不写状态是设计)或载体没在转(那是维护牌的事)。两种情况下
+ *   拿旧数字继续喊「去备份」都是误导;
+ * - blockedAudit **刻意不出牌**:台账写不进去时清扫/阶梯每轮已在 warn,巡检
+ *   再出一张就是同一件事两张脸。
+ *
+ * 只有黄牌,与 memoryMaintenanceCard 同一条理由:巡检对同一 id 只在出现那一刻
+ * 播,severity 漂移是静默写回;且「设计内的安全跳过」本来就不是故障。
+ */
+export function retentionSkipCard(state: RetentionState | null, now: number): PatrolCard | null {
+  if (!state) return null
+  if (now - state.at > RETENTION_SKIP_STALE_MS) return null
+  if (state.skippedNoNet <= 0) return null
+  return {
+    id: RETENTION_SKIP_CARD_ID,
+    severity: 'yellow',
+    label: '过期内容缺备份安全网,暂未清理',
+    fact: `有 ${state.skippedNoNet} 份已过保留期的内容,因为还没进过任何全量备份或 git 快照,本轮没有删(设计如此:没有安全网就不动剪刀)。打一份全量备份后,下一轮维护会自动清掉它们。${guideBreadcrumb('backup', '想看备份怎么打')}`,
   }
 }
 
@@ -419,6 +454,12 @@ export interface ButlerPatrolSweeperOptions {
    * 维护持续失败 / 长期没跑成就多一张黄牌。缺省 → 不读不出牌。
    */
   memoryHealthFile?: string
+  /**
+   * STOR-M3 — 空间根。给了它,巡检每轮读 `runtime/retention-state.json`
+   * (retentionLadderOnce 写的那份),阶梯因缺备份安全网跳过了过期内容就多
+   * 一张黄牌。缺省 → 不读不出牌。
+   */
+  retentionSpaceDir?: string
 }
 
 export class ButlerPatrolSweeper {
@@ -432,6 +473,7 @@ export class ButlerPatrolSweeper {
   private readonly outageFile?: string
   private readonly outageEscalationMs: number
   private readonly memoryHealthFile?: string
+  private readonly retentionSpaceDir?: string
 
   private readonly selfHealRecent?: () => Promise<SelfHealEntry[]>
 
@@ -450,6 +492,7 @@ export class ButlerPatrolSweeper {
     this.outageEscalationMs = opts.outageEscalationMs ?? OUTAGE_ESCALATION_MS
     if (opts.selfHealRecent) this.selfHealRecent = opts.selfHealRecent
     if (opts.memoryHealthFile) this.memoryHealthFile = opts.memoryHealthFile
+    if (opts.retentionSpaceDir) this.retentionSpaceDir = opts.retentionSpaceDir
   }
 
   /** 与姊妹 sweep 同姿态:不在启动瞬间跑,首 tick 一个 interval 之后。 */
@@ -496,7 +539,16 @@ export class ButlerPatrolSweeper {
       const memHealth = this.memoryHealthFile
         ? memoryMaintenanceCard(await readButlerMemoryHealth(this.memoryHealthFile), this.now())
         : null
-      const currentAll = [...current, ...(escalation ? [escalation] : []), ...(memHealth ? [memHealth] : [])]
+      // STOR-M3 — 保留阶梯跳过牌:第四张事实文件牌(读者永不抛,null=未知不出牌)。
+      const retentionSkip = this.retentionSpaceDir
+        ? retentionSkipCard(await readRetentionState(this.retentionSpaceDir), this.now())
+        : null
+      const currentAll = [
+        ...current,
+        ...(escalation ? [escalation] : []),
+        ...(memHealth ? [memHealth] : []),
+        ...(retentionSkip ? [retentionSkip] : []),
+      ]
       const prev = await loadPatrolState(this.stateFile)
       const { appeared, recovered } = diffPatrolCards(prev.cards, currentAll)
 

@@ -132,6 +132,7 @@ import { deriveSpaceSecretsKey, unifySpaceSecrets } from './space-secrets-unify.
 import { applyRunRetention, parseRunRetention } from './run-retention.js'
 import { armRetentionSweeper, retentionConfigured } from './retention-sweeper.js'
 import { spaceUpkeepAt } from './space-sweeper.js'
+import { buildRetentionLadder } from './space-retention.js'
 import { armVersionCheck } from './version-check.js'
 import { applyTranscriptRetention, parseTranscriptRetention } from './transcript-retention.js'
 import { describe } from './transcript-line.js'
@@ -272,6 +273,7 @@ import { HostButlerMemoryService } from './butler-memory-service.js'
 // Assembly lives in personal-butler-factory.ts; main.ts only wires refs.
 import { buildButlerBackupOps } from './personal-butler-backup.js'
 import { buildButlerConfigOps } from './personal-butler-config.js'
+import { buildButlerRetentionOps } from './personal-butler-retention.js'
 import { buildButlerFactory } from './personal-butler-factory.js'
 import { armButlerCoder } from './personal-butler-coder.js'
 import { armButlerHands } from './personal-butler-hands.js'
@@ -1071,6 +1073,16 @@ async function main(): Promise<void> {
         logger: log,
       })
     : undefined
+  // STOR-M3 — 内容保留策略写面(governed `set_retention`,每次 park):写只走
+  // retention.json 咽喉,identity 缺席 ⇒ 不装(角色判定与 set_hub_config 同源)。
+  const butlerRetentionOps = identityForBackup
+    ? buildButlerRetentionOps({
+        spaceDir: space.root,
+        membershipRole: (uid: string) => identityForBackup.getMembership(uid)?.role,
+        audit: identityForBackup,
+        logger: log,
+      })
+    : undefined
   // SDUI-M3/M4 — ONE panel store shared by web routes / template sink / butler.
   const mePanelSurface = buildMePanelSurface({ spaceDir: space.root })
   // HEAL-M1 — 自愈台账(开机分类+心跳);看门狗是 deploy 层的另一写入方。
@@ -1088,10 +1100,15 @@ async function main(): Promise<void> {
   // M-HEALTH — 维护健康台账:维护扫描写,巡检与 my_status 读。一条路径三处引用
   // ——分开写会漂,而漂了之后「没出牌」与「没在跑」从外面看一模一样。
   const butlerMemoryHealthFile = join(space.root, 'butler', 'memory-health.json')
-  // STOR-M1/M2 — 空间维护:先清死物(孤儿 tmp/超额 corrupt/根部 .bak- 轮转)再
-  // 丈量,账本反映清扫后真相;骑既有 6h 节律(retention 配置了归它,否则维护 sweep
-  // 兜底,至多一个载体),不开新定时器;boot 先跑一次。每半各自 best-effort。
-  const spaceUpkeep = spaceUpkeepAt(space.root, log)
+  // STOR-M1/M2/M3 — 空间维护:清死物→(可选)成员内容阶梯→丈量,骑既有 6h 节律零新定时器。
+  // 阶梯 thunk 每次新读 retention.json(set_retention 批准后下一轮生效);策略缺席=零字节。
+  const spaceUpkeep = spaceUpkeepAt(space.root, log, {
+    ladder: buildRetentionLadder({
+      spaceDir: space.root,
+      ...(identityForBackup ? { listUserIds: () => identityForBackup.listUsers().map((u) => u.id) } : {}),
+      logger: log,
+    }),
+  })
   const spaceOnRetention = retentionConfigured(process.env, Date.now())
   void spaceUpkeep.run()
   // Per-user butler assembly lives in personal-butler-factory.ts (GUARD
@@ -1140,6 +1157,7 @@ async function main(): Promise<void> {
     selfHeal: () => selfHealLog, // HEAL-M1 restart_history 台账切片
     hands: butlerHands, // HANDS-M2 手 A(status 恒传给自检;toolset 只在 armed 时装)
     ...(butlerConfigOps ? { configOps: butlerConfigOps } : {}), // HANDS-M3c set_hub_config
+    ...(butlerRetentionOps ? { retentionOps: butlerRetentionOps } : {}), // STOR-M3 set_retention
     spaceRoot: space.root, // HANDS-M4 环境卡:只拿去 statfs 量剩余磁盘,路径不进输出
     memoryHealthFile: butlerMemoryHealthFile, // M-HEALTH my_status 那半句
     spaceLedgerFile: spaceUpkeep.ledgerFile, // STOR-M1 space_report + my_status 空间行(只读账本)
@@ -1734,6 +1752,7 @@ async function main(): Promise<void> {
       outageFile: join(space.root, 'runtime', 'llm-outage.json'),
       selfHealRecent: () => selfHealLog.recent(30), // HEAL-M4 自愈事件事后播报
       memoryHealthFile: butlerMemoryHealthFile, // M-HEALTH 维护停了要出牌,不能只在日志里
+      retentionSpaceDir: space.root, // STOR-M3 阶梯缺备份安全网跳过要出牌
     },
     // TN-M2 — 卡壳任务提醒骑管家总开关;零 LLM 纯时间戳分诊,节律常量零新旋钮。
     taskNudge: { on: butlerDefaultOn },

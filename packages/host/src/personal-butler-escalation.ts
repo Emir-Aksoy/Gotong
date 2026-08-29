@@ -45,6 +45,9 @@ export const IM_APPROVABLE_TOOLS: ReadonlySet<string> = new Set([
   // 参数空间是封闭的(4 个具名键 + 枚举/端口值),没有一个自由文本字段。这正是
   // `hands_*` 的反面——那边留在网页侧,恰恰因为 argv 想多长有多长。
   'set_hub_config',
+  // STOR-M3 — `set_retention` 同一条论证:key 是 3 键闭集 enum,值是有界整数
+  // 天数或 reset 布尔,零自由文本字段——这一行结构上长不出来。
+  'set_retention',
 ])
 
 export interface ButlerApprovalItemOptions {

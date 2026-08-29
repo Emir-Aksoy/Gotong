@@ -1,7 +1,7 @@
 # 存储管家(STOR)—— VPS 存储空间的自动整理与删除
 
 > **方向: 主 T 兼 M**(工具调用能力——给阿同一双管理自己存储空间的手;记忆树阶梯兼记忆管理)。
-> Status: **M0 计划落档 + M1 空间账本 + M2 死物清扫(代码半)✅(2026-08-29)**;M2 配置半随部署同刀 → M3 成员内容阶梯 → M4 提案卡 + capstone 待做。
+> Status: **M0 计划落档 + M1 空间账本 + M2 死物清扫(代码半) + M3a 保留阶梯与 set_retention ✅(2026-08-29)**;M2 配置半随部署同刀 → M3b 旋钮白名单 + 设置页卡 → M4 提案卡 + capstone 待做。
 >
 > 用户原话(2026-08-29):「vps存储空间管理应该建设起来,多余的内容要能自动整理并删除。」
 > 「atong 目前具备自己使用各种方式管理文件、记忆,并有效的执行还要管理给予它的 vps 存储空间的能力吗?
@@ -194,7 +194,7 @@ RC=0、四门 PASS(**旋钮 114 零新增**——账本是惰性事实文件不�
 env)刻意不随本 commit**:数字要按生产 M1 账本实测定,随下次部署同刀落 `gotong.env`。已知后果
 如实记:生产首次 boot 会按族轮转根部 `.bak-*`(现况 21 件≈3.5M,保 3/族约删 18 件),每件一行台账。
 
-### M3 成员内容阶梯(retention.json + set_retention)
+### M3 成员内容阶梯(retention.json + set_retention;M3a ✅ 2026-08-29,M3b 待做)
 
 - `<space>/retention.json` file-first 策略文件(`hands.json` 同族读者:缺席=零字节不变=不删;
   坏形状 warn + 整份不装——半开的剪刀比没有剪刀更坏)。v1 键面刻意窄:
@@ -205,9 +205,53 @@ env)刻意不随本 commit**:数字要按生产 M1 账本实测定,随下次部�
   故渲染行结构性长不了**,手机上说人话 → park → `/approve` 一条路走完。
 - 阶梯执行器:活跃→归档(已由图书馆员/双时态承担)→**超保留期删**,删除前逐条过岔口 1 硬前置
   (读 `runtime/last-backup.json` 与 git 快照事实,内容晚于最近安全网 ⇒ 跳过 + 巡检黄牌响亮说)。
-- 设置页一张「存储保留」卡(UXCFG-M3 同款出处徽章:默认/你设的)。
-- 设计点(M3 时决):把类②八个既有旋钮**加进 `ENV_KNOBS` 白名单**让网页/IM 也能改——符合
-  「一个网页完成所有配置」的产品目标,且 archive-not-delete 天然满足 M2 白名单判据「改错了能改回来」。
+- **M3b(待做)**:设置页一张「存储保留」卡(UXCFG-M3 同款出处徽章:默认/你设的)+ 把类②
+  **archive 族**既有旋钮加进 `ENV_KNOBS` 白名单让网页/IM 也能改——符合「一个网页完成所有配置」
+  的产品目标;§六初版写的「八个」按 M2 白名单判据(「改错了能改回来」)在 M3b 收窄:archive
+  类天然可逆进名单,KEEP/删除类另行论证,细则随 M3b 落。
+
+**M3a 落地记(2026-08-29)**——host 新 `space-retention.ts`(阶梯纯核+策略读写)+
+`personal-butler-retention.ts`(governed 工具面),六条承重判断,五道变异全部钉死:
+
+1. **策略读者「未知键=整份 null」**:`loadRetentionPolicy` 缺席=静默 null(不删是缺省不是降级);
+   坏 JSON / 非对象 / 未知键 / 越界(30–3650 天)各自 warn 后**整份 null**——装一半的策略比没有
+   策略更坏(拼错 `dossier_days` 静默忽略=成员以为设了保留而剪刀按「没设」跑,两头都错)。
+   `{}` 合法=显式全保留。变异(未知键不拒)恰红 1 例;`writeRetentionPolicy` 的未知键 throw 是
+   **独立执法点**照绿——写侧拒绝保护写者,读侧拒绝保护盘上被人手改过的档,两道各有测试。
+2. **翻篇判定是闭集**:dossier `closed = status==='done'||'cancelled'`,active/blocked/
+   winding_down **结构性不进候选**——静默跳过且不计 `skippedNoNet`(那不是「缺安全网」是
+   「还活着」,计进去会把黄牌变成常亮噪音)。变异(closed 恒 true)恰红 1 例。
+3. **岔口① 硬前置逐条执行,三层各认各的安全网**:知识归档层 per-file `mtimeMs <= netAt`,
+   `netAt = max(全量备份, 该成员记忆树 git HEAD)`(两个安全网谁新认谁);dossier 与离场会话窗
+   **只认全量备份**——`butlerLongRunRoot`/`butler/sessions` 是记忆树**兄弟**目录,MU-M5 git 快照
+   结构性照不到它们,拿快照当它们的安全网是把「隔壁有备份」读成「我有备份」。`skippedNoNet`
+   响亮计数 + 巡检黄牌 `retention:no-net`(48h 滞回;`blockedAudit` 刻意不上牌——那是 M2 台账
+   故障面的事)。变异(摘 dossier 安全网门)恰红 1 例。生产 `backups/` 现况 0 份 ⇒ dossier/会话窗
+   初期**恒跳过=特性**:没有安全网就不动剪刀(岔口① 拍板原文)。
+4. **先落账再动手**(M2 `deleteWithLedger` 同纪律,retention 有自己的执法件):账 append 失败 ⇒
+   `blockedAudit`++ 且**一个字节不删**;unlink 非 ENOENT 失败 ⇒ `failed`++ 补 `delete_failed` 行;
+   ENOENT=已删(与并发写者赛跑输了=目标已不在)。台账行 `class:'retention'` 与 M2 的
+   `class:'tmp'|'corrupt'|'bak'` 同册分类。变异(先删后落账)恰红 1 例。
+5. **`set_retention` 全套 `set_hub_config` 形状**:classify 预检镜像执行顺序(角色→键 enum→
+   days⊕reset 互斥→范围,拒绝各带病名+回显收窄);读现值失败 try/catch **承重**(warn 后照常
+   approve——该不该问人不依赖那句注解,`set_hub_config` 同判例);execute 批准后重查角色(降权
+   批准救不回);写失败不回显路径。审计 `setting_config_write` 行 `metadata.kind:'retention'`。
+   进 `IM_APPROVABLE_TOOLS` 的理由钉在名单注释里:3 键闭集 enum + 有界整数天数/reset 布尔,
+   零自由文本字段,渲染行结构上长不出来。变异(名单摘 `set_retention`)**恰红 2 例跨两文件**
+   (工具面测 + tiers 双向名册门)=名单缝端到端接通的硬证据。
+6. **读失败有方向性**:候选目录读失败折 `[]`=安全方向(少删);identity 读失败**反方向**——
+   `liveUserIds` 拿不到 ⇒ 离场会话窗**整类跳过** + warn(读不出谁还在,就不能删任何人的窗;
+   把「读不动」当「都离场了」正是 EFF-M3 那句谎的删除版)。
+7. 载体:`spaceUpkeepAt` 长 `extras.ladder` 缝,顺序**清扫→阶梯→丈量**(账本反映动刀后的真相),
+   extras 缺席=M2 形态字节不变;策略缺席时 `buildRetentionLadder` 返回 null 连 state 文件都不落。
+   零新定时器,main.ts 接线走既有载体。
+
+验收:host **3406**+5skip(+77:space-retention 52 / personal-butler-retention 25;tiers 10 /
+toolface 6 同步),首轮全量另有 1 例 `me-exchange-service` replay 时序红(EXCH-M1 fire-and-settle
+面,本刀零触碰,单跑两轮 12/12 全绿,按不可复现 flake 记档);全仓 `pnpm -r typecheck` RC=0、四门
+PASS(**旋钮 114 零新增**——retention.json 是策略文件不是旋钮;main.ts 2773,棘轮 2760→**2790**
+显式抬理由记 gate);五道变异五次全红且只红该红那些,复原一律 python 精确替换 + `shasum` 对拍
+与基线逐字节相同。
 
 ### M4 提案卡 + capstone
 

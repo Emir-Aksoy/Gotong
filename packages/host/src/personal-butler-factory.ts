@@ -67,6 +67,7 @@ import {
 } from './personal-butler-backup.js'
 import { buildButlerCapabilitiesToolset } from './personal-butler-capabilities.js'
 import { buildButlerConfigToolset, type ButlerConfigOps } from './personal-butler-config.js'
+import { buildButlerRetentionToolset, type ButlerRetentionOps } from './personal-butler-retention.js'
 import { buildButlerConsolidateToolset } from './personal-butler-consolidate.js'
 import { buildButlerDailyBriefToolset } from './personal-butler-daily-brief.js'
 import {
@@ -271,6 +272,12 @@ export interface ButlerFactoryDeps {
    * owner/admin 判定钉在 `ops.privileged` —— 与 pack_backup 同姿态,服务端权威。
    */
   configOps?: ButlerConfigOps
+  /**
+   * STOR-M3 — 内容保留策略写面(main.ts 在 identity 在场时构造;缺席 ⇒
+   * `set_retention` 不装)。会删成员内容的策略与端口同档:**每次 park**,
+   * owner/admin 判定钉在 `ops.privileged`,写只走 retention.json 那一个咽喉。
+   */
+  retentionOps?: ButlerRetentionOps
   /**
    * HANDS-M4 — 空间根,**只用来 statfs 量那块盘还剩多少**(环境卡的一个数字),
    * 路径本身永不进任何输出。缺席 ⇒ 磁盘那格如实「未知」,不猜 cwd:
@@ -578,6 +585,13 @@ export function buildButlerFactory(deps: ButlerFactoryDeps): ButlerFactory {
           deps.governedOn && deps.configOps
             ? buildButlerConfigToolset({ userId, ops: deps.configOps, logger: log })
             : undefined
+        // STOR-M3 — governed `set_retention`:与 set_hub_config 同一形状(一件
+        // 工具、封闭参数、工具面不问角色,让 classify 把「只对 owner/admin 开放」
+        // 说出来);写的是 retention.json,阶梯每轮维护新读 ⇒ 批准后下一轮生效。
+        const retentionGov =
+          deps.governedOn && deps.retentionOps
+            ? buildButlerRetentionToolset({ userId, ops: deps.retentionOps, logger: log })
+            : undefined
         // SEN-M1 — benign hub 体检:骑 onboarding 的惰性 adminHealth getter
         // (与巡检/面板同一份投影,main.ts 零新接线);牌面判定复用
         // derivePatrolCards 不另写判据。hub 级只读事实同 backup_status。
@@ -810,6 +824,7 @@ export function buildButlerFactory(deps: ButlerFactoryDeps): ButlerFactory {
           ...(backupPackGov ? [backupPackGov] : []),
           ...(handsGov ? [handsGov] : []),
           ...(configGov ? [configGov] : []),
+          ...(retentionGov ? [retentionGov] : []),
           ...(mcpSplit?.writeGoverned ? [mcpSplit.writeGoverned] : []),
         ]
         // B1 — now that both sets exist, point the capability getter at their

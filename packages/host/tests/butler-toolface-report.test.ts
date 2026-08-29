@@ -64,6 +64,7 @@ import { buildButlerDiagnoseToolset } from '../src/personal-butler-diagnose.js'
 import { buildButlerGovernedToolset } from '../src/personal-butler-governed.js'
 import { buildButlerHandsToolset } from '../src/personal-butler-hands.js'
 import { buildButlerConfigToolset } from '../src/personal-butler-config.js'
+import { buildButlerRetentionToolset } from '../src/personal-butler-retention.js'
 import { buildButlerLanguageToolset } from '../src/personal-butler-language.js'
 import { buildButlerLlmCatalogToolset } from '../src/personal-butler-llm-catalog.js'
 import { buildButlerGuideToolset } from '../src/personal-butler-guide.js'
@@ -126,6 +127,7 @@ const MEASURED_BUILDERS: Record<string, string> = {
   'backup-pack': 'buildButlerBackupPackToolset',
   hands: 'buildButlerHandsToolset',
   config: 'buildButlerConfigToolset',
+  retention: 'buildButlerRetentionToolset',
   'hub-sense': 'buildButlerHubHealthToolset',
   'restart-history': 'buildButlerRestartHistoryToolset',
   'self-status': 'buildButlerSelfStatusToolset',
@@ -354,6 +356,20 @@ function buildFullFace(): ToolFaceEntry[] {
         // 只被脱敏用;这份报告只量 schema,execute 一次不跑。
         spaceDir: '/fake/space',
       },
+      }),
+    },
+    // STOR-M3 内容保留策略写:一件 governed(每次 park),set_hub_config 同款封闭
+    // 参数空间。构造零副作用——schema 从 RETENTION_KEYS 派生,ops 三方法零调用。
+    {
+      module: 'retention',
+      kind: 'governed',
+      toolset: buildButlerRetentionToolset({
+        userId: U,
+        ops: {
+          privileged: () => true,
+          current: async () => null,
+          write: async () => ({}),
+        },
       }),
     },
     // SEN-M1 hub 体检:benign 只读,与巡检/面板同源投影。

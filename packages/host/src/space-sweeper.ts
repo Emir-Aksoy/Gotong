@@ -168,6 +168,40 @@ function newestFirst(a: Candidate, b: Candidate): number {
 }
 
 /**
+ * 台账 appender 工厂——边界④「先落账再动手」的执法件,清扫与 M3 成员内容
+ * 阶梯**共用同一份实现**(两个删除者各自手搭一份,warn 节流与目录懒建迟早
+ * 漂移)。首次失败按 `label` warn 一次,此后静默返回 false(坏盘不刷屏);
+ * 返回 false = 这条账没落下 ⇒ 调用方**不许删**。
+ */
+export function makeAuditAppender(
+  actionsFile: string,
+  logger: Pick<Logger, 'warn'> | undefined,
+  label: string,
+): (entry: SpaceActionEntry) => Promise<boolean> {
+  let dirReady = false
+  let warned = false
+  return async (entry) => {
+    try {
+      if (!dirReady) {
+        await mkdir(dirname(actionsFile), { recursive: true })
+        dirReady = true
+      }
+      await appendFile(actionsFile, JSON.stringify(entry) + '\n', 'utf8')
+      return true
+    } catch (err) {
+      if (!warned) {
+        warned = true
+        logger?.warn(`${label}: audit ledger unwritable, deletions skipped`, {
+          file: actionsFile,
+          err: err instanceof Error ? err.message : String(err),
+        })
+      }
+      return false
+    }
+  }
+}
+
+/**
  * 跑一轮清扫。永不抛(边界⑤);返回逐类计数。删除序:每条先落台账行
  * (边界④),unlink 的 ENOENT 当作已删(与并发写者赛跑输了 = 目标已不在,
  * 不是失败)。
@@ -184,28 +218,8 @@ export async function sweepSpaceOnce(opts: SpaceSweepOptions): Promise<SpaceSwee
   try {
     await pruneSpaceActions(opts.actionsFile)
 
-    // 台账 appender:首次失败 warn 一次,此后静默返回 false(坏盘不刷屏)。
-    let auditDirReady = false
-    let auditWarned = false
-    const appendAudit = async (entry: SpaceActionEntry): Promise<boolean> => {
-      try {
-        if (!auditDirReady) {
-          await mkdir(dirname(opts.actionsFile), { recursive: true })
-          auditDirReady = true
-        }
-        await appendFile(opts.actionsFile, JSON.stringify(entry) + '\n', 'utf8')
-        return true
-      } catch (err) {
-        if (!auditWarned) {
-          auditWarned = true
-          opts.logger?.warn('space sweep: audit ledger unwritable, deletions skipped', {
-            file: opts.actionsFile,
-            err: err instanceof Error ? err.message : String(err),
-          })
-        }
-        return false
-      }
-    }
+    // 台账 appender(边界④):账写不进去就不删。工厂与 M3 阶梯共用。
+    const appendAudit = makeAuditAppender(opts.actionsFile, opts.logger, 'space sweep')
 
     // 视野 = 空间根一层 + runtime/ 一层(边界②)。`.bak-` 轮转只在根。
     const scopes = [
@@ -310,13 +324,18 @@ export async function sweepSpaceOnce(opts: SpaceSweepOptions): Promise<SpaceSwee
 }
 
 /**
- * 装配便利:一只「空间维护」thunk = 先清扫再丈量。载体(retention 第四块 /
- * 管家维护钩)拿到的就是这一只——清扫在丈量**之前**,账本反映清扫后的真相;
- * 清扫失败绝不挡丈量(各自 best-effort)。`read` 透传账本读者。
+ * 装配便利:一只「空间维护」thunk = 清扫 → (可选)成员内容阶梯 → 丈量。
+ * 载体(retention 第四块 / 管家维护钩)拿到的就是这一只——所有会动字节的
+ * 活都排在丈量**之前**,账本反映动手后的真相;每一段各自 best-effort,
+ * 谁失败都不挡后面的(census 无论如何要跑)。`read` 透传账本读者。
  */
 export function spaceUpkeepAt(
   spaceDir: string,
   logger?: Logger,
+  extras?: {
+    /** STOR-M3 成员内容阶梯 thunk;缺席 = 只清扫+丈量(M2 形态字节不变)。 */
+    ladder?: () => Promise<unknown>
+  },
 ): {
   ledgerFile: string
   actionsFile: string
@@ -334,6 +353,15 @@ export function spaceUpkeepAt(
         await sweepSpaceOnce({ spaceDir, actionsFile, logger })
       } catch {
         // sweepSpaceOnce 自己永不抛;这层是双保险——census 无论如何要跑。
+      }
+      if (extras?.ladder) {
+        try {
+          await extras.ladder()
+        } catch (err) {
+          logger?.warn('space upkeep: retention ladder failed', {
+            err: err instanceof Error ? err.message : String(err),
+          })
+        }
       }
       return ledger.measure()
     },
