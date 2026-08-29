@@ -136,6 +136,13 @@ EXCH-M5 gotong-client 包 = 域 C(协作) × 法「形态兼容」;EFF 效果回
   读的是段结构性动不了的 presence 戳,再挂起写零字节,静默不推送,不叫压缩者)完,
   M5 随档刻度〔用户门:等 EFF 出数〕待 —
   [`ATONG-LONG-RUN.md`](ATONG-LONG-RUN.md)
+- **STOR 存储管家**(主 T 兼 M,M0 计划落档 2026-08-29):VPS 存储空间的自动整理
+  与删除,「策略人定一次,执行自动跑」——四类数据规矩(死物无条件清 / 滚动历史
+  轮转保代 / 成员内容阶梯且删除硬前置「已进备份或 git 快照」/ 凭证结构性永不碰);
+  侦察发现类②轮转三族(transcript 分段+归档+seq 水位 / run 归档 / identity 四表
+  修剪)**早已建成**只差生产开箱;真缺口=空间账本可见性、类①死物清道夫、类③
+  `retention.json` + governed `set_retention`(IM 可批)、提案卡。M1→M4 待做 —
+  [`STORAGE-STEWARD.md`](STORAGE-STEWARD.md)
 
 ### M 记忆管理能力
 
