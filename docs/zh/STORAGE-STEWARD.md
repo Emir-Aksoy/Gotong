@@ -1,7 +1,7 @@
 # 存储管家(STOR)—— VPS 存储空间的自动整理与删除
 
 > **方向: 主 T 兼 M**(工具调用能力——给阿同一双管理自己存储空间的手;记忆树阶梯兼记忆管理)。
-> Status: **M0 计划落档 + M1 空间账本 + M2 死物清扫(代码半) + M3a 保留阶梯与 set_retention ✅(2026-08-29)**;M2 配置半随部署同刀 → M3b 旋钮白名单 + 设置页卡 → M4 提案卡 + capstone 待做。
+> Status: **M0 计划落档 + M1 空间账本 + M2 死物清扫(代码半) + M3a 保留阶梯与 set_retention + M3b archive 族旋钮白名单与设置页卡 ✅(2026-08-29)**;M2 配置半随部署同刀 → M4 提案卡 + capstone 待做。
 >
 > 用户原话(2026-08-29):「vps存储空间管理应该建设起来,多余的内容要能自动整理并删除。」
 > 「atong 目前具备自己使用各种方式管理文件、记忆,并有效的执行还要管理给予它的 vps 存储空间的能力吗?
@@ -194,7 +194,7 @@ RC=0、四门 PASS(**旋钮 114 零新增**——账本是惰性事实文件不�
 env)刻意不随本 commit**:数字要按生产 M1 账本实测定,随下次部署同刀落 `gotong.env`。已知后果
 如实记:生产首次 boot 会按族轮转根部 `.bak-*`(现况 21 件≈3.5M,保 3/族约删 18 件),每件一行台账。
 
-### M3 成员内容阶梯(retention.json + set_retention;M3a ✅ 2026-08-29,M3b 待做)
+### M3 成员内容阶梯(retention.json + set_retention;M3a + M3b ✅ 2026-08-29)
 
 - `<space>/retention.json` file-first 策略文件(`hands.json` 同族读者:缺席=零字节不变=不删;
   坏形状 warn + 整份不装——半开的剪刀比没有剪刀更坏)。v1 键面刻意窄:
@@ -205,10 +205,12 @@ env)刻意不随本 commit**:数字要按生产 M1 账本实测定,随下次部�
   故渲染行结构性长不了**,手机上说人话 → park → `/approve` 一条路走完。
 - 阶梯执行器:活跃→归档(已由图书馆员/双时态承担)→**超保留期删**,删除前逐条过岔口 1 硬前置
   (读 `runtime/last-backup.json` 与 git 快照事实,内容晚于最近安全网 ⇒ 跳过 + 巡检黄牌响亮说)。
-- **M3b(待做)**:设置页一张「存储保留」卡(UXCFG-M3 同款出处徽章:默认/你设的)+ 把类②
-  **archive 族**既有旋钮加进 `ENV_KNOBS` 白名单让网页/IM 也能改——符合「一个网页完成所有配置」
-  的产品目标;§六初版写的「八个」按 M2 白名单判据(「改错了能改回来」)在 M3b 收窄:archive
-  类天然可逆进名单,KEEP/删除类另行论证,细则随 M3b 落。
+- **M3b(✅ 2026-08-29)**:类② **archive 族**四旋钮进 `ENV_KNOBS` 白名单(23→27)+ 设置页
+  「存储归档」卡——符合「一个网页完成所有配置」的产品目标;§六初版写的「八个」按 M2 白名单
+  判据(「改错了能改回来」)收窄成 **4+4 分界**:archive 族(TRANSCRIPT_KEEP_SEGMENTS/
+  TRANSCRIPT_ARCHIVE_DAYS/RUN_KEEP/RUN_ARCHIVE_DAYS)只 rename 进 `archive/` 永不删、归档的
+  照样读得到=天然可逆进名单;删除族(LEDGER/AUDIT/PEER_SUMMARY/ALERT_FIRINGS 四个
+  `*_KEEP_DAYS`)是 SQL `DELETE` 不可逆,**仍拒**——同为保留期,分界在机制不在名字。
 
 **M3a 落地记(2026-08-29)**——host 新 `space-retention.ts`(阶梯纯核+策略读写)+
 `personal-butler-retention.ts`(governed 工具面),六条承重判断,五道变异全部钉死:
@@ -252,6 +254,36 @@ toolface 6 同步),首轮全量另有 1 例 `me-exchange-service` replay 时序�
 PASS(**旋钮 114 零新增**——retention.json 是策略文件不是旋钮;main.ts 2773,棘轮 2760→**2790**
 显式抬理由记 gate);五道变异五次全红且只红该红那些,复原一律 python 精确替换 + `shasum` 对拍
 与基线逐字节相同。
+
+**M3b 落地记(2026-08-29)**——`ops-config-write.ts` ENV_KNOBS 23→27 + `setting-ops-ui.js`
+新「存储归档」组四控件,四条承重判断,五道变异全部钉死:
+
+1. **单向 containment 是这次准入的全部安全论证**:`applyEnvKnob` 写的是 boot 时才被
+   `parseTranscriptRetention`/`parseRunRetention` 读的值,而那两个读者对坏形状**抛错拒启**——
+   校验器比读者严=安全,比读者松=重启炸弹,**炸的人正是刚才那个以为「保存成功」的人**。
+   containment 测试不抄读者的规则,拿 `verdict.value`(校验器真正落盘的归一化输出)喂**真 parse**:
+   收下的每个值 parse 必须收、空串必须是显式清除、坏形状必须两头都拒。变异(摘 `RUN_KEEP`
+   整条)**恰红 6 例跨两文件**(containment 四例经 knob() throw + 双向名册门 + UI 对拍)=白名单缝
+   端到端接通的硬证据。
+2. **`boundedInt` 三层各有分工**:`/^\d+$/` 正则管**形制规范性**(拒 `1e3`/`+5`/小数——parse 收
+   得下但人读不懂的形状),`Number.isSafeInteger` + 范围是后卫,归一化 `String(n)` 保证落盘值
+   与校验值同一形状。变异(摘正则)恰红 **3** 例而非 4——`RUN_ARCHIVE_DAYS` 的收窄探针
+   (越界/非整数)恰好被后卫接住,红的三例正是正则独有的活;变异(空串改拒)恰红 5 例
+   (:910 通用 defaultValue 门 + 四条显式清除)。
+3. **UI 上下界不抄常量,对拍真校验器**:设置页 `min/max` 抄一份服务端数字=只证「我抄得和它
+   一样」;门拿边界值 `String(min)`/`String(max)`/`String(max+1)`/`String(min-1)` 喂 ENV_KNOBS
+   里的**真 validate**——谁改了 `boundedInt` 的界而忘了这页,当场红。变异(UI 分组拼错)恰红
+   2 例;变异(makeControl 退回只认 `port` 写死 1/65535)恰红 1 例(文本门钉住 `number` 分支
+   存在且 min/max 从条目读——否则四格静默落进 text 分支,控件照常出现只丢数字键盘与边界,
+   没有任何测试会红)。
+4. **刻意不挂 `needs:` 级联提示**(门钉死):这四个是 boot 时读的,没有哪个父开关能让它
+   「先打开 X」,挂了就是指一个假前提;拒收文案同刀改口——删除族被拒时如实说「归档类可改、
+   删除类不可」,不再一句「storage knobs are env-only」把两族混为一谈。
+
+验收:host `ops-config-write` **86** + `setting-ui-contract` **27**(+3 STOR-M3b describe),
+ripple 三门 142/142;`setting-ops-ui.js` 是嵌入资产(static-assets.ts),改完重跑
+`pnpm --filter @gotong/web build` 重生成嵌入表(POLISH-M4 教训);**旋钮 114 零新增**——
+ENV_KNOBS 白名单准入 ≠ env 注册表新增,四个旋钮 M0 起就在 114 之内。
 
 ### M4 提案卡 + capstone
 

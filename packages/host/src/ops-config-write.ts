@@ -199,6 +199,32 @@ function cadenceMs(minMs: number, maxMs: number): (raw: string) => KnobVerdict {
 }
 
 /**
+ * 有界非负整数(存储归档旋钮,STOR-M3b)。
+ *
+ * 空串 = **显式清除** —— 读侧两个 parse(parseTranscriptRetention /
+ * parseRunRetention)对 `''` 都按「未设 = 不归档」处理,与感官旋钮的
+ * `identifier()` 同一条理由;也是 defaultValue `''` 过得了自己校验器的前提。
+ *
+ * 上下界**严格窄于** boot 解析域,方向不可反:那两个 parse 对坏值是**抛错拒启**
+ * (不是钳位)。校验器比 parse 严,坏值到不了盘;反过来松一寸,写下去的就是一颗
+ * 重启炸弹——一个过了这里却过不了 parse 的值,会让下一次 boot 起不来。这层包含
+ * 关系不靠两处抄对,靠跨模块 containment 门把每个校验通过的值真喂给 parse
+ * (ops-config-write.test.ts)。
+ */
+function boundedInt(what: string, min: number, max: number): (raw: string) => KnobVerdict {
+  return (raw) => {
+    const t = raw.trim()
+    if (t.length === 0) return { ok: true, value: '' }
+    if (!/^\d+$/.test(t)) return { ok: false, reason: `${what} must be a whole number in ${min}–${max}` }
+    const n = Number(t)
+    if (!Number.isSafeInteger(n) || n < min || n > max) {
+      return { ok: false, reason: `${what} must be a whole number in ${min}–${max}` }
+    }
+    return { ok: true, value: String(n) }
+  }
+}
+
+/**
  * 可改旋钮的白名单 —— 这份名单**同时**是四样东西:阿同 `set_hub_config` 的参数
  * 枚举(M3c)、环境提案 `apply.key` 的类型(M4)、写入方的查表、以及 boot 读回
  * `<space>/gotong.env` 时认的那一份(UXCFG-M1)。加一行,四处一起长。
@@ -227,8 +253,11 @@ function cadenceMs(minMs: number, maxMs: number): (raw: string) => KnobVerdict {
  *   - `GOTONG_LOG_LEVEL` / `_FORMAT` —— `createLogger('host')` 在模块顶层求值,
  *     虽然 UXCFG-M1 的注入排在它前面一行,但那个顺序脆弱到一次 import 重排就会
  *     静默失效。没有门守得住的生效性,不收。
- *   - 保留期类(`GOTONG_*_KEEP_DAYS` / `_ARCHIVE_DAYS` / `GOTONG_RUN_KEEP`)——
- *     调小会**删掉历史**,判据 3 的正反面。
+ *   - identity 保留期(`GOTONG_LEDGER/AUDIT/PEER_SUMMARY/ALERT_FIRINGS_KEEP_DAYS`)
+ *     —— 机制是 SQL `DELETE`,调小一次 sweep 行就没了,判据 2/3 的正反面。
+ *     transcript/run 的四个**归档**旋钮不再在此列(STOR-M3b 收进名单):它们只
+ *     rename 进 archive/,一个字节不销毁,归档段/归档 run 仍可读——「调小」最坏
+ *     是搬早了,改回去就不再搬,已搬的照读。同为保留期,分界在机制不在名字。
  *   - 安全闸类(`ALLOW_INSECURE` / `COOKIE_SECURE` / `TRUST_PROXY` /
  *     `ALLOWED_HOSTS` / `PROTOCOL_STRICT` / `GATING`)—— 判据 2。
  *   - 路径类(`GOTONG_SPACE` / `_BACKUP_DIR` / `_WORKFLOWS_DIR`)—— 改了等于换一
@@ -274,6 +303,16 @@ export const ENV_KNOBS = [
   { key: 'GOTONG_BUTLER_ASR_MODEL', summary: 'Speech-to-text model for incoming voice messages.', defaultValue: '', validate: identifier('model name') },
   { key: 'GOTONG_BUTLER_VISION_MODEL', summary: 'Vision model for incoming images.', defaultValue: '', validate: identifier('model name') },
   { key: 'GOTONG_BUTLER_EMBEDDER_MODEL', summary: 'Embeddings model for semantic memory recall.', defaultValue: '', validate: identifier('model name') },
+
+  // ── 存储归档(类②滚动历史,STOR-M3b) ──
+  // 四个都只把旧数据原子 rename 进 archive/,一个字节不销毁:归档段经
+  // FileStorage.loadAll()、归档 run 经 RunStore.readArchived 照读。这正是它们
+  // 能进名单而 identity 四个 *_KEEP_DAYS(SQL DELETE)进不来的分界(见上)。
+  // boot 时读,改完下次重启生效。空串 = 不归档(与从没设过同义)。
+  { key: 'GOTONG_TRANSCRIPT_KEEP_SEGMENTS', summary: 'Sealed transcript segments kept active; older ones MOVE to archive/ (never deleted, still readable). Applies at next restart.', defaultValue: '', validate: boundedInt('segment count', 0, 10_000) },
+  { key: 'GOTONG_TRANSCRIPT_ARCHIVE_DAYS', summary: 'Sealed transcript segments older than this many days MOVE to archive/ (never deleted). Applies at next restart.', defaultValue: '', validate: boundedInt('day count', 1, 3650) },
+  { key: 'GOTONG_RUN_KEEP', summary: 'Finished workflow runs kept active; older ones MOVE to runs/archive/ (never deleted, still readable). Applies at next restart.', defaultValue: '', validate: boundedInt('run count', 0, 10_000) },
+  { key: 'GOTONG_RUN_ARCHIVE_DAYS', summary: 'Finished workflow runs older than this many days MOVE to runs/archive/ (never deleted). Applies at next restart.', defaultValue: '', validate: boundedInt('day count', 1, 3650) },
 
   // ── 其它 opt-in ──
   { key: 'GOTONG_UPDATE_CHECK', summary: 'Daily check for a newer Gotong release (one outbound request/day; off = no network, no timer).', defaultValue: 'false', validate: validateBool },

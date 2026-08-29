@@ -23,7 +23,7 @@
 import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
-import { ENV_KNOB_KEYS, SECRET_ENV_VARS } from '../src/ops-config-write.js'
+import { ENV_KNOBS, ENV_KNOB_KEYS, SECRET_ENV_VARS } from '../src/ops-config-write.js'
 import { listOpsCommands } from '../src/ops-core.js'
 
 const RENDERER = fileURLToPath(new URL('../../web/static/setting-ops-ui.js', import.meta.url))
@@ -260,5 +260,55 @@ describe('UXCFG-M3 装配', () => {
     expect(at, 'createSettingOpsService 的装配形状变了').toBeGreaterThan(-1)
     const block = main.slice(at, main.indexOf('\n  })', at))
     expect(block).toContain('envInjectedKeys: managedEnv.applied')
+  })
+})
+
+describe('STOR-M3b 存储归档四旋钮的前端形状', () => {
+  const KNOB_UI = literalOf('KNOB_UI')
+  const STORAGE_KEYS = [
+    'GOTONG_TRANSCRIPT_KEEP_SEGMENTS',
+    'GOTONG_TRANSCRIPT_ARCHIVE_DAYS',
+    'GOTONG_RUN_KEEP',
+    'GOTONG_RUN_ARCHIVE_DAYS',
+  ] as const
+
+  it('四个都是 storage 组的 number 控件,且不挂级联提示', () => {
+    // number(而不是 text)是这一刀的 UX 主张:归档旋钮是纯数字,给自由文本框
+    // 等于邀请 '1e3' 这类服务端注定 400 的输入。不挂 needs 也是刻意——这四个
+    // 是 boot 时读的,没有哪个父开关能让它「先打开 X」,挂了就是指一个假前提。
+    for (const key of STORAGE_KEYS) {
+      const ui = KNOB_UI[key]
+      expect(ui, `${key} 不在 KNOB_UI 里`).toBeTruthy()
+      expect(ui.group, key).toBe('storage')
+      expect(ui.ctl.kind, key).toBe('number')
+      expect(typeof ui.ctl.min, key).toBe('number')
+      expect(typeof ui.ctl.max, key).toBe('number')
+      expect(ui.needs, `${key} 不该有级联提示`).toBeUndefined()
+    }
+  })
+
+  it('UI 的上下界与服务端校验器逐旋钮对拍 —— 不许两份数字各说各话', () => {
+    // 不抄服务端的常量(抄一份=只证「我抄得和它一样」),拿边界值喂**真校验器**:
+    // min/max 恰好收下、min-1/max+1 恰好拒收。UI 数字与服务端真相绑死之后,
+    // 谁改了 boundedInt 的界而忘了这页,这条当场红。
+    for (const key of STORAGE_KEYS) {
+      const spec = ENV_KNOBS.find((k) => k.key === key)
+      expect(spec, key).toBeTruthy()
+      const { min, max } = KNOB_UI[key].ctl
+      expect(spec!.validate(String(min)).ok, `${key}: min=${min} 该收`).toBe(true)
+      expect(spec!.validate(String(max)).ok, `${key}: max=${max} 该收`).toBe(true)
+      expect(spec!.validate(String(max + 1)).ok, `${key}: max+1 该拒`).toBe(false)
+      if (min > 0) expect(spec!.validate(String(min - 1)).ok, `${key}: min-1 该拒`).toBe(false)
+    }
+  })
+
+  it('makeControl 真的认得 number 这个 kind,并且读的是条目自己的上下界', () => {
+    // KNOB_UI 声明了 number、渲染器却只认 port 的话,这四格会静默落进 text 分支
+    // ——控件照样出现,只是丢掉数字键盘与边界提示,没有任何测试会红。文本门钉住
+    // 分支存在 + min/max 从条目读(而不是写死 port 那对 1/65535)。
+    const body = bodyOf('makeControl')
+    expect(body).toContain("kind === 'port' || kind === 'number'")
+    expect(body).toContain('ui.ctl.min !== undefined')
+    expect(body).toContain('ui.ctl.max !== undefined')
   })
 })

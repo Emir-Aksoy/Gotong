@@ -27,6 +27,8 @@ import {
 } from '../src/ops-config-write.js'
 import { runOpsCommand, OpsError, OpsTierError, type OpsCaller, type OpsDeps } from '../src/ops-core.js'
 import { parseButlerEnv, type ButlerEnvConfig } from '../src/butler-env.js'
+import { parseTranscriptRetention } from '../src/transcript-retention.js'
+import { parseRunRetention } from '../src/run-retention.js'
 import { butlerVoiceFromEnv } from '../src/butler-voice.js'
 import { envBool } from '../src/main-cli.js'
 import { versionCheckEnabled } from '../src/version-check.js'
@@ -929,11 +931,125 @@ describe('UXCFG-M2 whitelist ⇄ butler-env agreement', () => {
       'GOTONG_ALLOWED_HOSTS',
       'GOTONG_GATING',
       'GOTONG_SPACE',
-      'GOTONG_AUDIT_KEEP_DAYS',
-      'GOTONG_RUN_KEEP',
+      'GOTONG_AUDIT_KEEP_DAYS', // identity SQL DELETE 族 —— 行删了就没了;STOR-M3b 收归档族时仍拒
     ]
     for (const key of REFUSED) {
       expect(ENV_KNOB_KEYS as readonly string[], `${key} 溜进了可改名单`).not.toContain(key)
     }
   })
+})
+
+describe('STOR-M3b: 存储归档旋钮的校验域 ⊆ boot 解析域(单向 containment)', () => {
+  // 这四个旋钮与上面 cadence 那批(UXCFG-M2)守的是方向相反的两种谎:cadence 的
+  // 读侧对越界值**钳位**,校验器放松一寸 = 写进去的值被静默改掉;这四个的读侧
+  // (parseTranscriptRetention / parseRunRetention)对坏值是**抛错拒启**,校验器
+  // 放松一寸 = 写进去一颗重启炸弹——设置页存一次,下次 boot 起不来,而炸的人
+  // 正是刚才那个以为「保存成功」的人。
+  //
+  // 所以合同是单向的:凡校验器收下的 verdict.value(applyEnvKnob 真正落盘的是
+  // 它,不是原始输入),喂给**真 parse** 必须不抛、且落到确切的数;反过来 parse
+  // 收得下而校验器拒收('10001'/'1e3')是刻意收窄——安全方向,不是 bug,但要
+  // 钉住,免得哪天有人把收窄当 bug「修」松了。
+  //
+  // containment 必须逐旋钮验,不能按字符串形状一概而论:同一个 '1.5',KEEP 的
+  // parse(要整数)会抛,DAYS 的 parse(要正数)却收得下——校验器唯一的正确姿势
+  // 是比**两个** parse 都严,这正是 `^\d+$` 一条规则同时站得住的原因。
+  const NOW = 1_756_000_000_000
+  const MS_PER_DAY = 24 * 60 * 60 * 1000
+
+  const knob = (key: EnvKnobKey) => {
+    const spec = ENV_KNOBS.find((k) => k.key === key)
+    if (!spec) throw new Error(`${key} 不在 ENV_KNOBS 名单上`)
+    return spec
+  }
+
+  type Family = {
+    key: EnvKnobKey
+    /** 只设这一个键,喂给真 parse,返回它落到的数(undefined = 读成未配置)。 */
+    parsed: (value: string) => number | undefined
+    /** verdict.value 归一后的数 n → parse 应落到的确切值。 */
+    expected: (n: number) => number
+    /** 校验器该收下的(含 trim / 去前导零两个归一化探针)。 */
+    accepted: string[]
+    /** 校验器拒收、真 parse 却收得下的 —— 刻意收窄的证据。 */
+    stricterThanParse: string[]
+    /** 两边都拒的坏形状 —— parse 真的抛,证明校验器守着一道真崖(非空洞)。 */
+    brokenForBoth: string[]
+  }
+
+  const FAMILIES: Family[] = [
+    {
+      key: 'GOTONG_TRANSCRIPT_KEEP_SEGMENTS',
+      parsed: (v) => parseTranscriptRetention({ GOTONG_TRANSCRIPT_KEEP_SEGMENTS: v }, NOW)?.keepLast,
+      expected: (n) => n,
+      accepted: ['0', '1', '8', '007', '  8  ', '10000'],
+      stricterThanParse: ['10001', '1e3', '+5'],
+      brokenForBoth: ['1.5', '-1', 'abc'],
+    },
+    {
+      key: 'GOTONG_TRANSCRIPT_ARCHIVE_DAYS',
+      parsed: (v) => parseTranscriptRetention({ GOTONG_TRANSCRIPT_ARCHIVE_DAYS: v }, NOW)?.before,
+      expected: (n) => NOW - n * MS_PER_DAY,
+      accepted: ['1', '30', '0030', '3650'],
+      stricterThanParse: ['3651', '0.5', '1e2'],
+      brokenForBoth: ['0', '-1', 'abc'],
+    },
+    {
+      key: 'GOTONG_RUN_KEEP',
+      parsed: (v) => parseRunRetention({ GOTONG_RUN_KEEP: v }, NOW)?.keepLast,
+      expected: (n) => n,
+      accepted: ['0', '1', '200', '007', '10000'],
+      stricterThanParse: ['10001', '1e3', '+5'],
+      brokenForBoth: ['1.5', '-1', 'abc'],
+    },
+    {
+      key: 'GOTONG_RUN_ARCHIVE_DAYS',
+      parsed: (v) => parseRunRetention({ GOTONG_RUN_ARCHIVE_DAYS: v }, NOW)?.before,
+      expected: (n) => NOW - n * MS_PER_DAY,
+      accepted: ['1', '30', '3650'],
+      stricterThanParse: ['3651', '0.5'],
+      brokenForBoth: ['0', '-1', 'abc'],
+    },
+  ]
+
+  for (const fam of FAMILIES) {
+    it(`${fam.key}: 收下的每个 verdict.value,boot 解析必须收下且落到同一个数`, () => {
+      const spec = knob(fam.key)
+      for (const raw of fam.accepted) {
+        const v = spec.validate(raw)
+        expect(v.ok, `名单应收下 '${raw}'`).toBe(true)
+        if (!v.ok) continue
+        // 落盘的是 verdict.value(归一化后),containment 必须对真正会写进
+        // gotong.env 的那份字节成立 —— 不是对成员敲进输入框的原始字符串。
+        const n = Number(v.value)
+        expect(fam.parsed(v.value), `parse('${v.value}') ← 校验通过的 '${raw}'`).toBe(fam.expected(n))
+      }
+    })
+
+    it(`${fam.key}: 空串是显式清除 —— 校验器收下,boot 读成「未配置」`, () => {
+      // defaultValue 是 '',「每个旋钮的 defaultValue 都过得了自己的校验器」那道
+      // 通用门也压着这半;这里钉的是另一半:'' 落盘后 parse 把它读成没设过,
+      // 即「清空输入框保存」= 关掉归档,不是一颗坏值炸弹。
+      const v = knob(fam.key).validate('')
+      expect(v.ok).toBe(true)
+      expect(v.ok && v.value).toBe('')
+      expect(fam.parsed('')).toBeUndefined()
+    })
+
+    it(`${fam.key}: 拒收但 parse 收得下的值 —— 刻意收窄,方向安全`, () => {
+      const spec = knob(fam.key)
+      for (const raw of fam.stricterThanParse) {
+        expect(spec.validate(raw).ok, `'${raw}' 应被名单拒收(哪怕 parse 收得下)`).toBe(false)
+        expect(() => fam.parsed(raw), `parse 本身收得下 '${raw}' —— 收窄在名单侧`).not.toThrow()
+      }
+    })
+
+    it(`${fam.key}: 坏形状 parse 真的抛 —— 校验器守的这道崖是真的`, () => {
+      const spec = knob(fam.key)
+      for (const raw of fam.brokenForBoth) {
+        expect(spec.validate(raw).ok, `'${raw}' 应被名单拒收`).toBe(false)
+        expect(() => fam.parsed(raw), `parse('${raw}') 应抛错(= 校验器若放行,写完下次 boot 拒启)`).toThrow()
+      }
+    })
+  }
 })

@@ -185,6 +185,28 @@
       en: ['Embeddings model', 'Used to recall memories by meaning rather than by keyword alone.'],
     },
 
+    // ── 存储归档(STOR-M3b;上下界与服务端校验器一致,权威仍在服务端) ──
+    GOTONG_TRANSCRIPT_KEEP_SEGMENTS: {
+      group: 'storage', ctl: { kind: 'number', min: 0, max: 10000 },
+      zh: ['留几段活跃对话记录', '封存的对话段超过这个数,最旧的搬进 archive/。只搬不删,搬走的照样读得到。'],
+      en: ['Active transcript segments', 'Sealed segments beyond this count move into archive/. Moved, never deleted — still readable.'],
+    },
+    GOTONG_TRANSCRIPT_ARCHIVE_DAYS: {
+      group: 'storage', ctl: { kind: 'number', min: 1, max: 3650 },
+      zh: ['对话记录几天后归档', '封存段超过这个天数就搬进 archive/。只搬不删。'],
+      en: ['Archive transcripts after (days)', 'Sealed segments older than this move into archive/. Moved, never deleted.'],
+    },
+    GOTONG_RUN_KEEP: {
+      group: 'storage', ctl: { kind: 'number', min: 0, max: 10000 },
+      zh: ['留几条跑完的工作流', '跑完的 run 超过这个数,最旧的搬进 runs/archive/。只搬不删,正在跑的碰都不碰。'],
+      en: ['Finished runs kept active', 'Finished runs beyond this count move into runs/archive/. Moved, never deleted; running ones are untouchable.'],
+    },
+    GOTONG_RUN_ARCHIVE_DAYS: {
+      group: 'storage', ctl: { kind: 'number', min: 1, max: 3650 },
+      zh: ['工作流记录几天后归档', '跑完的 run 超过这个天数就搬进 runs/archive/。只搬不删。'],
+      en: ['Archive runs after (days)', 'Finished runs older than this move into runs/archive/. Moved, never deleted.'],
+    },
+
     // ── 对外 ──
     GOTONG_UPDATE_CHECK: {
       group: 'outward', ctl: { kind: 'switch' },
@@ -198,7 +220,7 @@
     },
   }
 
-  const GROUPS = ['access', 'butler', 'cadence', 'senses', 'outward', 'other']
+  const GROUPS = ['access', 'butler', 'cadence', 'senses', 'storage', 'outward', 'other']
 
   // 这个面板自己的话。见文件头「文案住在这里」。
   const L = {
@@ -218,6 +240,8 @@
       gCadenceNote: '可以写 6h / 90m,也可以写毫秒。超出允许范围会被拒绝,不会被悄悄改成别的值。',
       gSenses: '阿同的感官',
       gSensesNote: '这里只有「用哪个模型」。端点地址和 key 是凭证,只进金库,不在这个页面上。留空 = 这项能力不开。',
+      gStorage: '存储归档',
+      gStorageNote: '旧对话段和跑完的工作流,超过多少就搬进 archive/。四项都只搬不删——归档的照样读得到。留空 = 不归档。改完要重启才生效。',
       gOutward: '对外',
       gOutwardNote: '会不会主动往外发请求。两项默认都是关的。',
       gOther: '其他',
@@ -279,6 +303,8 @@
       gCadenceNote: 'Write 6h or 90m, or plain milliseconds. Out-of-range values are refused, never silently clamped to something else.',
       gSenses: 'The butler’s senses',
       gSensesNote: 'Only model names live here. Endpoints and keys are credentials — vault only, never this page. Blank = that sense is off.',
+      gStorage: 'Storage archiving',
+      gStorageNote: 'When old transcript segments and finished runs move into archive/. All four move, never delete — archived data stays readable. Blank = no archiving. Takes effect at next restart.',
       gOutward: 'Outbound',
       gOutwardNote: 'Whether this hub reaches out on its own. Both are off by default.',
       gOther: 'Other',
@@ -450,10 +476,10 @@
     }
 
     const input = el('input', 'set-ctl')
-    if (kind === 'port') {
+    if (kind === 'port' || kind === 'number') {
       input.type = 'number'
-      input.min = '1'
-      input.max = '65535'
+      input.min = String(ui.ctl.min !== undefined ? ui.ctl.min : 1)
+      input.max = String(ui.ctl.max !== undefined ? ui.ctl.max : 65535)
       input.inputMode = 'numeric'
     } else {
       input.type = 'text'
@@ -551,6 +577,7 @@
       butler: [s.gButler, s.gButlerNote],
       cadence: [s.gCadence, s.gCadenceNote],
       senses: [s.gSenses, s.gSensesNote],
+      storage: [s.gStorage, s.gStorageNote],
       outward: [s.gOutward, s.gOutwardNote],
       other: [s.gOther, s.gOtherNote],
     }
