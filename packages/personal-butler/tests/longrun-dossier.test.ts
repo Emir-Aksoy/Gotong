@@ -1099,6 +1099,32 @@ describe('M6.2 standby (待命语义)', () => {
   })
 })
 
+// ─── Group 13b: M6.3 future-date write discipline ───────────────────────────
+
+describe('M6.3 未来日期纪律(禁未来日期承诺)', () => {
+  it('the ban on future-dated journal writes is UNCONDITIONAL — no clock, no standby needed', () => {
+    // The production disease: a pressed model writes future-dated commitments
+    // into its append-only journal; the next segment reads them as history.
+    // The clock caveat covers READING future dates and only renders when a
+    // clock label exists; the standby wake sentence only renders after a
+    // standby. This bullet covers WRITING and must survive with neither.
+    const d = baseDossier({ segments: 2 })
+    const prompt = renderRelayPrompt(d, [{ seg: 2, at: 7, did: '推进', next: '继续' }])
+    expect(prompt).not.toContain('当前时间')
+    expect(prompt).not.toContain('【上一段:待命】')
+    expect(prompt).toContain('日志只记已经发生的事')
+    expect(prompt).toContain('把未来写成过去')
+  })
+
+  it('the wind-down prompt deliberately does NOT carry it (no journal write is taught there)', () => {
+    // 收尾段只教 complete;它自己的诚实句「不要把部分完成说成完成」盖住同一
+    // 病根的收尾形态。往那里再塞一条会稀释「只做一件事」。
+    const wind = renderWindDownPrompt(baseDossier(), [], 'tokens')
+    expect(wind).not.toContain('日志只记已经发生的事')
+    expect(wind).toContain('不要把部分完成说成完成')
+  })
+})
+
 // ─── Group 14: OBS-M2 observer snapshot ─────────────────────────────────────
 
 describe('OBS-M2 观察者快照(readLongRunSnapshot)', () => {
