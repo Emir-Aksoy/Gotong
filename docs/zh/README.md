@@ -40,6 +40,7 @@
 - [`CODEX-HARNESS-NOTES.md`](CODEX-HARNESS-NOTES.md) — Codex 开源 harness 借鉴清单（2026-08-21 一手代码侦察：24 条发现按「立刻可做 / 开票 / 摆岔口 / 已对 / 不抄 / 残余」六档，全部带 file:line）
 - [`ATONG-LONG-RUN.md`](ATONG-LONG-RUN.md) — **阿同长任务执行（LONG track）**：分段长跑 M0 计划（诊断 = 差距在长循环骨架非工具面；三原则 = 分段持久化地板 × 按工种派档 × 压缩值得强模型；Codex thread-store/goal 驱动一手侦察 + 自家零件盘点 + dossier/段/接力设计 + 岔口）
 - [`STORAGE-STEWARD.md`](STORAGE-STEWARD.md) — **存储管家（STOR track）**：VPS 存储空间的自动整理与删除（「策略人定一次，执行自动跑」；四类数据规矩表 + 2026-08-29 生产普查 + 已建成盘点 = 类②轮转三族早已建成只差开箱；M1 空间账本 → M2 死物清 → M3 retention.json + governed `set_retention` 阶梯 → M4 提案卡）
+- [`MEMORY-WRITE-EVAL.md`](MEMORY-WRITE-EVAL.md) — **记忆写侧评测（M-EVAL track）**：把「整理质量」做成可测件（bitemporal close 正确率 / 原子事实自包含率 / 遗忘-投影同步；③ 已被既有门盖死不再立分；两档 = CI 零 key 锁尺子 + 真档用户门，不立标准数字只与自己比）
 
 ## ③ 动手用 / 建（能力 how-to）
 
