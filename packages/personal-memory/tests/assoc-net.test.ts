@@ -115,6 +115,22 @@ describe('① 四类边各自只在该出现时出现', () => {
     expect(near[0]!.weight).toBeGreaterThan(far[0]!.weight)
   })
 
+  it('店不给时间戳的节点:拿不到时序边,但别的边照拿', () => {
+    // knowledge / session 两个店的公开读接口今天确实不吐时间戳。给它编一个
+    // (比如当下时钟)会让这类节点全部落在同一瞬间、互相都成「相邻」,凭空造出
+    // 一张稠密的时序网 —— 缺席比编造诚实。
+    const nodes = [
+      node({ id: 'knowledge:a.md', store: 'knowledge', text: '咖啡机拆洗冲泡头', ts: undefined }),
+      node({ id: 'knowledge:b.md', store: 'knowledge', text: '咖啡机保养要点', ts: undefined }),
+    ]
+    const e = deriveEdges(nodes, { cooccurMin: 0 })
+    expect(pairs(e, 'temporal')).toEqual([])
+    expect(pairs(e, 'cooccur')).toEqual(['knowledge:a.md->knowledge:b.md'])
+    // 一端有一端没有,也照样连不出时序边。
+    const mixed = [nodes[0]!, node({ id: 'memory:m1', store: 'memory', text: '咖啡机坏了', ts: T0 })]
+    expect(pairs(deriveEdges(mixed, { cooccurMin: 0 }), 'temporal')).toEqual([])
+  })
+
   it('边权 = 类型基权 × 该对的强度,类型排序固定', () => {
     expect(EDGE_KIND_WEIGHT.semantic).toBeGreaterThan(EDGE_KIND_WEIGHT.origin)
     expect(EDGE_KIND_WEIGHT.origin).toBeGreaterThan(EDGE_KIND_WEIGHT.cooccur)
@@ -308,11 +324,38 @@ describe('④ 配额与记忆单', () => {
     expect(applyStoreQuota(ranked, perStore).map((x) => x.id)).toEqual(['s1', 'm1'])
   })
 
+  it('正文自带换行时,一行仍然只吐一行', () => {
+    // 有的店天生是多行的:知识库文件是 markdown,长任务档案的段落是整段。
+    // 不把它压平,`maxLines` 数的是「行」、吐出来的却无界 —— 那条上限就成了
+    // 一句不作数的承诺。这是 2026-09-02 在 personal-butler 那侧撞出来的。
+    const sheet = renderMemorySheet([
+      node({ id: 'a', store: 'knowledge', text: '# 标题\n\n第一段\n第二段\n\n- 列表项' }),
+      node({ id: 'b', store: 'memory', text: '普通一句话' }),
+    ])
+    expect(sheet.split('\n')).toHaveLength(2)
+    expect(sheet).toContain('# 标题 第一段 第二段 - 列表项')
+  })
+
+  it('行数上限数的就是真实行数,喂多行正文也撑不破', () => {
+    const rows = Array.from({ length: 20 }, (_, i) =>
+      node({ id: `n${i}`, store: 'memory', text: `第${i}条\n还有下一行\n再一行` }),
+    )
+    const sheet = renderMemorySheet(rows, { maxLines: 3, maxBytes: 10_000 })
+    expect(sheet.split('\n')).toHaveLength(3)
+  })
+
   it('记忆单每行都带日期与出处店名', () => {
     const sheet = renderMemorySheet([
       node({ id: 'knowledge:a.md', store: 'knowledge', text: '拆洗冲泡头', ts: T0 }),
     ])
     expect(sheet).toBe('- [2023-11-14 knowledge] 拆洗冲泡头')
+  })
+
+  it('没有时间戳的行只印店名,不拿今天的日期充数', () => {
+    const sheet = renderMemorySheet([
+      node({ id: 'knowledge:a.md', store: 'knowledge', text: '拆洗冲泡头', ts: undefined }),
+    ])
+    expect(sheet).toBe('- [knowledge] 拆洗冲泡头')
   })
 
   it('字节预算:超预算的行被跳过而不是截断,后面的短行仍能进', () => {

@@ -238,6 +238,28 @@ export {
   type MemoryProjectionPlan,
 } from './obsidian-projection.js'
 
+// 记忆经济 M2b 的真件:跨店记忆网(枚举 → 建网 → 一次跨店召回 → 记忆单)。
+// 只读,不发新 id,零模型调用 —— 网里没有一个字节是孤本。
+export {
+  nodeId as memoryNodeId,
+  parseNodeId as parseMemoryNodeId,
+  enumerateMemoryNodes,
+  buildMemoryNet,
+  crossStoreRecall,
+  renderNetSheet,
+  MEMORY_STORES,
+  NON_MEMORY_SALIENCE,
+  DOSSIER_JOURNAL_TAIL,
+  SEED_FLOOR,
+  DEFAULT_SEED_K,
+  DEFAULT_STORE_QUOTA,
+  type MemoryStore,
+  type MemorySpace,
+  type MemoryNode,
+  type MemoryNet,
+  type CrossStoreRecallOptions,
+} from './memory-net.js'
+
 // 记忆经济 M1 的尺子(整合召回)。住 src 而不是 tests,理由与 personal-memory 的
 // benchmark.ts 同:M2 的真件、将来的真档 runner 都要 import 它,而 tests/ 不进 dist。
 export {
@@ -247,6 +269,7 @@ export {
   scoreIntegration,
   formatIntegrationResult,
   memoryOnlyRecall,
+  netRecall,
   nodeId,
   parseNodeId,
   INTEGRATION_STORES,
@@ -261,4 +284,5 @@ export {
   type IntegrationCase,
   type IntegrationCaseScore,
   type IntegrationBenchResult,
+  type NetRecallOptions,
 } from './memory-integration-benchmark.js'

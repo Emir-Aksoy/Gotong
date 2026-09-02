@@ -63,8 +63,18 @@ export interface AssocNode {
   readonly store: AssocStore
   /** Surface text used for ranking and for the memory sheet. */
   readonly text: string
-  /** Epoch ms of the underlying fact. */
-  readonly ts: number
+  /**
+   * Epoch ms of the underlying fact, when the owning store exposes one.
+   *
+   * OPTIONAL because some stores structurally do not: a knowledge library that
+   * reports path and bytes but no mtime, a session window whose rendered view
+   * has merged turns and dropped their timestamps. Faking one (the wall clock,
+   * say) would be worse than absent — every such node would land on the same
+   * instant and earn `temporal` edges to every other, manufacturing a dense
+   * clique out of nothing. So a node with no `ts` simply gets no temporal edge,
+   * and the memory sheet prints its store without a date.
+   */
+  readonly ts?: number
   /**
    * Keep-value. The caller supplies it on ONE consistent scale (memory nodes go
    * through `effectiveSalience`, other stores get a constant) — the net only
@@ -194,8 +204,10 @@ export function deriveEdges(
       // cooccur — symmetric term overlap (Jaccard), the cross-store workhorse
       const j = jaccard(terms.get(a.id)!, terms.get(b.id)!)
       if (j >= cooccurMin) push('cooccur', a.id, b.id, j)
-      // temporal — written close together
-      if (window > 0) {
+      // temporal — written close together. BOTH ends must carry a timestamp;
+      // a node whose store does not expose one gets no temporal edge at all
+      // rather than a fabricated one (see {@link AssocNode.ts}).
+      if (window > 0 && typeof a.ts === 'number' && typeof b.ts === 'number') {
         const gap = Math.abs(a.ts - b.ts)
         if (gap <= window) push('temporal', a.id, b.id, 1 - gap / (window + 1))
       }
@@ -403,15 +415,23 @@ export interface MemorySheetOptions {
  * OWNING STORE, budgeted in bytes.
  *
  * Attribution is not decoration. A line the model cannot trace back to a store
- * is a line it will treat as its own belief; the `[date . store]` prefix is what
+ * is a line it will treat as its own belief; the `[date store]` prefix is what
  * lets both the model and the reader go check. The date is there for the same
- * reason — a fact without a time cannot be reasoned about as stale.
+ * reason — a fact without a time cannot be reasoned about as stale. A node whose
+ * store exposes no timestamp prints `[store]` alone: saying "no date available"
+ * by omission beats printing today's date on a file of unknown age.
  *
  * Budgeting is by BYTES, measured, because the caller's budget is a token budget
  * and CJK text costs several bytes per character; counting lines alone would let
  * one long row blow the frame. A row that would overflow is SKIPPED (not
  * truncated mid-sentence) and the scan continues — a later short row still gets
  * its place.
+ *
+ * A row's text is FLATTENED (every whitespace run, newlines included, collapses
+ * to one space) so that one row is always exactly one line. Some stores hold
+ * multi-line text — a knowledge file is markdown, a dossier segment is a
+ * paragraph — and without this the line cap counts rows while the output grows
+ * without bound, which makes `maxLines` a promise the function does not keep.
  *
  * Deterministic: same nodes in, same string out. No clock is read.
  */
@@ -427,7 +447,7 @@ export function renderMemorySheet(
   let used = 0
   for (const n of rows) {
     if (lines.length >= maxLines) break
-    const line = `- [${isoDay(n.ts)} ${n.store}] ${n.text}`
+    const line = `- [${n.ts === undefined ? n.store : `${isoDay(n.ts)} ${n.store}`}] ${flatten(n.text)}`
     const cost = utf8Len(line) + (lines.length > 0 ? 1 : 0) // + the newline
     if (used + cost > maxBytes) continue
     used += cost
@@ -439,6 +459,11 @@ export function renderMemorySheet(
 // ---------------------------------------------------------------------------
 // internals
 // ---------------------------------------------------------------------------
+
+/** Collapse every whitespace run to one space, so one row is always one line. */
+function flatten(text: string): string {
+  return text.replace(/\s+/g, ' ').trim()
+}
 
 /** `true` when `b`'s pointer (the part after the store prefix) appears in `a`'s text. */
 function namesPointer(a: AssocNode, b: AssocNode): boolean {

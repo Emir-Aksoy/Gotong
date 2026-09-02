@@ -51,48 +51,34 @@ import {
 } from '@gotong/personal-memory'
 import type { MemoryEntry } from '@gotong/services-sdk'
 
-import { openKnowledgeLibrary, type KnowledgeLibrary } from './knowledge-library.js'
-import { openLongRunDossierStore, type LongRunDossierStore } from './longrun-dossier.js'
+import { openKnowledgeLibrary } from './knowledge-library.js'
+import { openLongRunDossierStore } from './longrun-dossier.js'
+import {
+  buildMemoryNet,
+  crossStoreRecall,
+  enumerateMemoryNodes,
+  MEMORY_STORES,
+  nodeId,
+  parseNodeId,
+  type MemoryNode,
+  type MemorySpace,
+  type MemoryStore,
+} from './memory-net.js'
 import { ButlerSessionWindow } from './session-window.js'
-import { openTaskNotebook, type TaskNotebook } from './task-notebook.js'
-
-/** 七个店折成五个可寻址的面(personal-memory 的三种 kind 共用 `memory:`,
- *  因为它们本来就在一个店里、一个 id 空间里)。 */
-export type IntegrationStore = 'memory' | 'knowledge' | 'task' | 'session' | 'dossier'
-
-export const INTEGRATION_STORES: readonly IntegrationStore[] = [
-  'memory',
-  'knowledge',
-  'task',
-  'session',
-  'dossier',
-] as const
+import { openTaskNotebook } from './task-notebook.js'
 
 /**
- * 节点 id = `<store>:<pointer>`。
- *
- * pointer 是**那个店自己的**寻址方式,不另发一套 id:
- *   - `memory:<MemoryEntry.id>`
- *   - `knowledge:<相对 knowledge/ 的路径>`
- *   - `task:tn-<n>`
- *   - `session:<userId>#<渲染视图下标>`
- *   - `dossier:<taskId>#<seg>`(`#0` = objective 本身,`#n` = 第 n 段日志)
- *
- * 不发新 id 是刻意的:节点 id 必须能**原路指回**盘上那一条,否则 M2 的联想网
- * 会变成第二份真相。
+ * 寻址与列举**已提升为生产件**(M2b),住在 `memory-net.ts`。这里只转出,
+ * 免得尺子和被测件各持一份「什么算存在」——两份实现迟早不一致,而一条静默
+ * 得 0 分的用例比一条红的用例坏得多。
  */
-export function nodeId(store: IntegrationStore, pointer: string): string {
-  return `${store}:${pointer}`
-}
-
-export function parseNodeId(id: string): { store: IntegrationStore; pointer: string } | null {
-  const at = id.indexOf(':')
-  if (at <= 0) return null
-  const store = id.slice(0, at)
-  if (!INTEGRATION_STORES.includes(store as IntegrationStore)) return null
-  const pointer = id.slice(at + 1)
-  if (!pointer) return null
-  return { store: store as IntegrationStore, pointer }
+export {
+  MEMORY_STORES as INTEGRATION_STORES,
+  nodeId,
+  parseNodeId,
+  enumerateMemoryNodes as enumerateNodes,
+  type MemoryStore as IntegrationStore,
+  type MemoryNode as IntegrationNode,
 }
 
 // ---------------------------------------------------------------------------
@@ -119,16 +105,10 @@ export interface IntegrationSpaceSeed {
   }[]
 }
 
-export interface IntegrationSpace {
+export interface IntegrationSpace extends MemorySpace {
   readonly dir: string
-  readonly userId: string
+  /** 固定钟。所有店都吃它,分数才字节稳定。 */
   readonly now: () => number
-  readonly entries: readonly MemoryEntry[]
-  readonly knowledge: KnowledgeLibrary
-  readonly notebook: TaskNotebook
-  readonly sessions: ButlerSessionWindow
-  readonly dossiers: LongRunDossierStore
-  readonly dossierIds: readonly string[]
 }
 
 export interface OpenIntegrationSpaceOptions {
@@ -191,56 +171,6 @@ export async function openIntegrationSpace(opts: OpenIntegrationSpaceOptions): P
     dossiers,
     dossierIds: seed.dossiers.map((d) => d.taskId),
   }
-}
-
-/** 一个节点:id + 它背后那段字。 */
-export interface IntegrationNode {
-  readonly id: string
-  readonly store: IntegrationStore
-  readonly text: string
-}
-
-/**
- * 把空间里**当下能被指到的**节点全列出来。
- *
- * 这既是夹具卫生检查的依据(每个黄金 id 必须真指到东西,拼错的 id 会永远静默
- * 得 0 分),也正是 M2 联想网建索引时要走的那趟读。列举只读不写:不改名、不建
- * 目录、不落一个字节。
- */
-export async function enumerateNodes(space: IntegrationSpace): Promise<IntegrationNode[]> {
-  const out: IntegrationNode[] = []
-
-  for (const e of space.entries) {
-    out.push({ id: nodeId('memory', e.id), store: 'memory', text: e.text })
-  }
-
-  const listing = await space.knowledge.list()
-  for (const f of listing.files) {
-    const doc = await space.knowledge.read(f.path)
-    out.push({ id: nodeId('knowledge', f.path), store: 'knowledge', text: doc.text })
-  }
-
-  for (const t of await space.notebook.list()) {
-    const body = [t.title, ...t.steps.map((s) => s.text), t.note ?? ''].filter(Boolean).join('\n')
-    out.push({ id: nodeId('task', t.id), store: 'task', text: body })
-  }
-
-  const history = await space.sessions.history(space.userId)
-  history.forEach((m, i) => {
-    out.push({ id: nodeId('session', `${space.userId}#${i}`), store: 'session', text: m.content })
-  })
-
-  for (const taskId of space.dossierIds) {
-    const loaded = await space.dossiers.load(taskId)
-    if (loaded.kind !== 'ok') continue
-    out.push({ id: nodeId('dossier', `${taskId}#0`), store: 'dossier', text: loaded.dossier.objective })
-    for (const j of await space.dossiers.readJournalTail(taskId, 100)) {
-      const body = [j.did, ...(j.facts ?? [])].join('\n')
-      out.push({ id: nodeId('dossier', `${taskId}#${j.seg}`), store: 'dossier', text: body })
-    }
-  }
-
-  return out
 }
 
 // ---------------------------------------------------------------------------
@@ -335,7 +265,27 @@ export function memoryOnlyRecall(space: IntegrationSpace): IntegratedRecall {
  * 存在」的实现迟早会不一致,而不一致的那一天,夹具卫生检查会说黄金 id 有效、
  * 召回却永远拿不到它——一条静默得 0 分的用例比一条红的用例坏得多。
  */
-export async function resolveNode(space: IntegrationSpace, id: string): Promise<IntegrationNode | null> {
-  const nodes = await enumerateNodes(space)
+export async function resolveNode(space: IntegrationSpace, id: string): Promise<MemoryNode | null> {
+  const nodes = await enumerateMemoryNodes(space)
   return nodes.find((n) => n.id === id) ?? null
 }
+
+// ---------------------------------------------------------------------------
+// M2b 被测件:跨店召回
+// ---------------------------------------------------------------------------
+
+/**
+ * 生产的跨店召回,包成这把尺子认的形状。
+ *
+ * 网**建一次**、六个用例共用:那正是生产里的样子(建网是每 tick 一次的派生,
+ * 不是每次提问一次)。若每例重建,量到的就成了「建网 + 召回」的合计,而不是
+ * 召回本身。
+ */
+export function netRecall(space: IntegrationSpace, opts: NetRecallOptions = {}): IntegratedRecallFactory {
+  return async () => {
+    const net = await buildMemoryNet(space)
+    return async (q) => crossStoreRecall(net, q.text, { ...opts, k: q.k })
+  }
+}
+
+export type NetRecallOptions = Omit<Parameters<typeof crossStoreRecall>[2] & object, 'k'>
