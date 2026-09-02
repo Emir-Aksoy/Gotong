@@ -41,6 +41,7 @@
 - [`ATONG-LONG-RUN.md`](ATONG-LONG-RUN.md) — **阿同长任务执行（LONG track）**：分段长跑 M0 计划（诊断 = 差距在长循环骨架非工具面；三原则 = 分段持久化地板 × 按工种派档 × 压缩值得强模型；Codex thread-store/goal 驱动一手侦察 + 自家零件盘点 + dossier/段/接力设计 + 岔口）
 - [`STORAGE-STEWARD.md`](STORAGE-STEWARD.md) — **存储管家（STOR track）**：VPS 存储空间的自动整理与删除（「策略人定一次，执行自动跑」；四类数据规矩表 + 2026-08-29 生产普查 + 已建成盘点 = 类②轮转三族早已建成只差开箱；M1 空间账本 → M2 死物清 → M3 retention.json + governed `set_retention` 阶梯 → M4 提案卡）
 - [`MEMORY-WRITE-EVAL.md`](MEMORY-WRITE-EVAL.md) — **记忆写侧评测（M-EVAL track）**：把「整理质量」做成可测件（bitemporal close 正确率 / 原子事实自包含率 / 遗忘-投影同步；③ 已被既有门盖死不再立分；两档 = CI 零 key 锁尺子 + 真档用户门，不立标准数字只与自己比）
+- [`MEMORY-ECONOMY.md`](MEMORY-ECONOMY.md) — **记忆经济（MEMORY-ECONOMY track）**：一网一账一门一钟（联想网只存指针与边、删了可重建；记忆账把休眠的显著性经济通电，四级阶梯合并→压缩→降温→遗忘；写侧零 LLM 新颖门；沿用既有 6h 固化链）——目标是**热区常量有界、跨店一次召回、用则存不用则忘**
 
 ## ③ 动手用 / 建（能力 how-to）
 
