@@ -237,3 +237,28 @@ export {
   type OpenObsidianProjectorOptions,
   type MemoryProjectionPlan,
 } from './obsidian-projection.js'
+
+// 记忆经济 M1 的尺子(整合召回)。住 src 而不是 tests,理由与 personal-memory 的
+// benchmark.ts 同:M2 的真件、将来的真档 runner 都要 import 它,而 tests/ 不进 dist。
+export {
+  openIntegrationSpace,
+  enumerateNodes,
+  resolveNode,
+  scoreIntegration,
+  formatIntegrationResult,
+  memoryOnlyRecall,
+  nodeId,
+  parseNodeId,
+  INTEGRATION_STORES,
+  type IntegrationStore,
+  type IntegrationSpace,
+  type IntegrationSpaceSeed,
+  type OpenIntegrationSpaceOptions,
+  type IntegrationNode,
+  type IntegratedRecall,
+  type IntegratedRecallFactory,
+  type IntegrationCategory,
+  type IntegrationCase,
+  type IntegrationCaseScore,
+  type IntegrationBenchResult,
+} from './memory-integration-benchmark.js'

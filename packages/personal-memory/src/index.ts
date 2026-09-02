@@ -52,6 +52,12 @@ export {
 export {
   scoreRetriever,
   formatBenchResult,
+  scoreRankedIds,
+  aggregateRankedScores,
+  formatRankedResult,
+  type RankedScore,
+  type RankedCaseScore,
+  type RankedAggregate,
   type RecallCase,
   type RecallCategory,
   type RetrieverFactory,

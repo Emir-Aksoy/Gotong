@@ -66,38 +66,53 @@ export interface BenchResult {
   byCategory: Record<string, { recallAtK: number; mrr: number; n: number }>
 }
 
-/**
- * Score a retriever factory over the cases. For each case: build the retriever
- * from the corpus, run the query at `k`, then compute recall@k + reciprocal
- * rank against the gold ids. Pure aside from the retriever's own async I/O.
- */
-export async function scoreRetriever(
-  make: RetrieverFactory,
-  cases: readonly RecallCase[],
-  k = 5,
-): Promise<BenchResult> {
-  const perCase: CaseScore[] = []
-  for (const c of cases) {
-    const retriever = make(c.corpus)
-    const gold = new Set(c.relevantIds)
-    const page = await retriever.retrieve({
-      text: c.query.text,
-      ...(c.query.kinds ? { kinds: [...c.query.kinds] } : {}),
-      k: c.query.k ?? k,
-    })
-    const topK = page.slice(0, c.query.k ?? k)
-    const foundInTopK = topK.filter((e) => gold.has(e.id)).length
-    const recallAtK = gold.size === 0 ? 0 : foundInTopK / gold.size
-    let reciprocalRank = 0
-    for (let i = 0; i < page.length; i++) {
-      if (gold.has(page[i]!.id)) {
-        reciprocalRank = 1 / (i + 1)
-        break
-      }
-    }
-    perCase.push({ name: c.name, category: c.category, recallAtK, reciprocalRank, hit: foundInTopK > 0 })
-  }
+/** One case's ranking outcome, independent of what the ids point at. */
+export interface RankedScore {
+  /** |gold ∩ top-k| / |gold| (0 when the case declares no gold). */
+  recallAtK: number
+  /** 1 / (1-based rank of the first gold hit) over the WHOLE page, or 0. */
+  reciprocalRank: number
+  hit: boolean
+}
 
+/**
+ * The per-case ranking arithmetic, shared by every recall ruler in the repo.
+ *
+ * Extracted so a second ruler cannot quietly measure with a second formula:
+ * two rulers whose numbers are compared must come from ONE implementation, or
+ * a lift is indistinguishable from an arithmetic difference. `recall@k` counts
+ * only the first `k`; the reciprocal rank deliberately scans the FULL page
+ * (a gold hit at rank 7 is worth 1/7, not 0) — that asymmetry is the existing
+ * behaviour and is preserved verbatim.
+ */
+export function scoreRankedIds(rankedIds: readonly string[], gold: ReadonlySet<string>, k: number): RankedScore {
+  const foundInTopK = rankedIds.slice(0, k).filter((id) => gold.has(id)).length
+  const recallAtK = gold.size === 0 ? 0 : foundInTopK / gold.size
+  let reciprocalRank = 0
+  for (let i = 0; i < rankedIds.length; i++) {
+    if (gold.has(rankedIds[i]!)) {
+      reciprocalRank = 1 / (i + 1)
+      break
+    }
+  }
+  return { recallAtK, reciprocalRank, hit: foundInTopK > 0 }
+}
+
+/** The minimum a case must carry to be aggregated (category is a free string
+ *  so a second ruler can bring its own axes). */
+export interface RankedCaseScore extends RankedScore {
+  category: string
+}
+
+export interface RankedAggregate {
+  recallAtK: number
+  mrr: number
+  hitRate: number
+  byCategory: Record<string, { recallAtK: number; mrr: number; n: number }>
+}
+
+/** Mean recall / MRR / hit-rate overall and per category. Accumulate-then-divide. */
+export function aggregateRankedScores(perCase: readonly RankedCaseScore[]): RankedAggregate {
   const n = perCase.length || 1
   const recallAtK = perCase.reduce((s, c) => s + c.recallAtK, 0) / n
   const mrr = perCase.reduce((s, c) => s + c.reciprocalRank, 0) / n
@@ -114,18 +129,49 @@ export async function scoreRetriever(
     g.recallAtK /= g.n
     g.mrr /= g.n
   }
+  return { recallAtK, mrr, hitRate, byCategory }
+}
 
-  return { k, recallAtK, mrr, hitRate, perCase, byCategory }
+/**
+ * Score a retriever factory over the cases. For each case: build the retriever
+ * from the corpus, run the query at `k`, then compute recall@k + reciprocal
+ * rank against the gold ids. Pure aside from the retriever's own async I/O.
+ */
+export async function scoreRetriever(
+  make: RetrieverFactory,
+  cases: readonly RecallCase[],
+  k = 5,
+): Promise<BenchResult> {
+  const perCase: CaseScore[] = []
+  for (const c of cases) {
+    const retriever = make(c.corpus)
+    const caseK = c.query.k ?? k
+    const page = await retriever.retrieve({
+      text: c.query.text,
+      ...(c.query.kinds ? { kinds: [...c.query.kinds] } : {}),
+      k: caseK,
+    })
+    const score = scoreRankedIds(
+      page.map((e) => e.id),
+      new Set(c.relevantIds),
+      caseK,
+    )
+    perCase.push({ name: c.name, category: c.category, ...score })
+  }
+
+  return { k, ...aggregateRankedScores(perCase), perCase }
 }
 
 /** One-line-per-category human summary (for the gate's console output). */
-export function formatBenchResult(label: string, r: BenchResult): string {
+export function formatRankedResult(label: string, k: number, r: RankedAggregate): string {
   const pct = (x: number): string => `${(x * 100).toFixed(1)}%`
-  const lines = [
-    `【${label}】recall@${r.k}=${pct(r.recallAtK)}  MRR=${r.mrr.toFixed(3)}  命中率=${pct(r.hitRate)}`,
-  ]
+  const lines = [`【${label}】recall@${k}=${pct(r.recallAtK)}  MRR=${r.mrr.toFixed(3)}  命中率=${pct(r.hitRate)}`]
   for (const [cat, g] of Object.entries(r.byCategory).sort()) {
-    lines.push(`  · ${cat.padEnd(13)} recall@${r.k}=${pct(g.recallAtK)}  MRR=${g.mrr.toFixed(3)}  (${g.n} 例)`)
+    lines.push(`  · ${cat.padEnd(13)} recall@${k}=${pct(g.recallAtK)}  MRR=${g.mrr.toFixed(3)}  (${g.n} 例)`)
   }
   return lines.join('\n')
+}
+
+export function formatBenchResult(label: string, r: BenchResult): string {
+  return formatRankedResult(label, r.k, r)
 }
