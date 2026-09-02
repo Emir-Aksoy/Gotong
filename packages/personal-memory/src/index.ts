@@ -42,7 +42,13 @@ export {
   type EmbeddingRetrieverOptions,
 } from './embedding-retriever.js'
 export { localBigramEmbedder } from './local-embedder.js'
-export { fusedRetriever, type FusionRetrieverOptions } from './fusion-retriever.js'
+export {
+  fusedRetriever,
+  fuseArms,
+  type FusionRetrieverOptions,
+  type FusableItem,
+  type FuseArmsOptions,
+} from './fusion-retriever.js'
 export {
   InvertedIndex,
   buildInvertedIndex,
@@ -64,6 +70,33 @@ export {
   type CaseScore,
   type BenchResult,
 } from './benchmark.js'
+
+// 联想网 (memory economy M2) — the derived associative layer over every store.
+// Pure: pointers in, ranked pointers out. Nothing here writes or deletes.
+export {
+  deriveEdges,
+  diffuse,
+  applyStoreQuota,
+  renderMemorySheet,
+  DEFAULT_EDGE_TOP_K,
+  DEFAULT_NODE_SALIENCE,
+  EDGE_KIND_WEIGHT,
+  DEFAULT_TEMPORAL_WINDOW_MS,
+  DEFAULT_COOCCUR_MIN,
+  DEFAULT_HOPS,
+  DEFAULT_HOP_DECAY,
+  DEFAULT_MAX_ACTIVATED,
+  DEFAULT_SHEET_BYTES,
+  DEFAULT_SHEET_LINES,
+  type AssocStore,
+  type AssocNode,
+  type AssocEdge,
+  type AssocEdgeKind,
+  type AssocActivation,
+  type DeriveEdgesOptions,
+  type DiffuseOptions,
+  type MemorySheetOptions,
+} from './assoc-net.js'
 export {
   scoreCloseDecisions,
   scoreSelfContainment,

@@ -99,33 +99,15 @@ export function fusedRetriever(index: InvertedIndex, opts?: FusionRetrieverOptio
       const scoped = filterActive(applyScope(pool, query), opts)
       if (scoped.length === 0) return []
 
-      // KEYWORD arm.
-      const rel = new Map<string, number>()
-      for (const e of scoped) rel.set(e.id, relevanceScore(q, e.text))
-
-      // SEMANTIC arm — one batch embed of [query, ...candidates]. Fail-soft: a
-      // bad embedder collapses the semantic arm to 0 (pure keyword ranking).
-      const cos = new Map<string, number>()
-      try {
-        const vectors = await embed([q, ...scoped.map((e) => e.text)])
-        if (Array.isArray(vectors) && Array.isArray(vectors[0])) {
-          const qv = vectors[0]!
-          scoped.forEach((e, i) => cos.set(e.id, cosineSimilarity(qv, vectors[i + 1] ?? [])))
-        }
-      } catch {
-        /* semantic arm stays empty → fused ranking is pure keyword */
-      }
-
-      // Drop candidates with NO signal on either arm (recency-window noise). For
-      // the local embedder cos>0 ⇔ rel>0, so this leaves the keyword candidate
-      // set unchanged (fusion only reorders); a real embedder keeps its synonyms.
-      const live = scoped.filter((e) => (rel.get(e.id) ?? 0) > 0 || (cos.get(e.id) ?? 0) > 0)
+      // The two arms and the fusion arithmetic live in `fuseArms` (MEM-M2) — ONE
+      // implementation, so the 联想网's cross-store seeder cannot quietly fuse with a
+      // second formula. Same reason M1 pulled `scoreRankedIds` out: two numbers
+      // that get compared must come from one piece of arithmetic.
+      const fused = await fuseArms(q, scoped, { embed, keywordWeight: kw, semanticWeight: sem })
+      // Candidates with NO signal on either arm are absent from the map (see
+      // `fuseArms`); dropping them here preserves `scoped` order exactly.
+      const live = scoped.filter((e) => fused.has(e.id))
       if (live.length === 0) return []
-
-      const relN = minMax(live.map((e) => rel.get(e.id) ?? 0))
-      const cosN = minMax(live.map((e) => cos.get(e.id) ?? 0))
-      const fused = new Map<string, number>()
-      live.forEach((e, i) => fused.set(e.id, kw * relN[i]! + sem * cosN[i]!))
 
       const ranked = [...live].sort((a, b) => {
         const fa = fused.get(a.id)!
@@ -135,6 +117,85 @@ export function fusedRetriever(index: InvertedIndex, opts?: FusionRetrieverOptio
       return k ? ranked.slice(0, k) : ranked
     },
   }
+}
+
+// ---------------------------------------------------------------------------
+// the fusion arithmetic — shared by every fused ranker in the repo (MEM-M2)
+// ---------------------------------------------------------------------------
+
+/** The minimum shape {@link fuseArms} needs: something to key by, and text to score. */
+export interface FusableItem {
+  readonly id: string
+  readonly text: string
+}
+
+export interface FuseArmsOptions {
+  /** Text→vector. Default {@link localBigramEmbedder}. */
+  embed?: Embedder
+  /** Weight of the keyword (coverage) arm. Default 0.5. */
+  keywordWeight?: number
+  /** Weight of the semantic (cosine) arm. Default 0.5. */
+  semanticWeight?: number
+}
+
+/**
+ * Score `items` against `query` by fusing the keyword arm (`relevanceScore`
+ * coverage) with the semantic arm (cosine over embeddings), each min-max
+ * normalized over the surviving candidates and combined by weight.
+ *
+ * Returns `id → fused score` for items with signal on AT LEAST ONE arm; items
+ * with no signal on either are ABSENT from the map (that is the caller's drop
+ * list, and it is why the map is returned rather than an array — the caller
+ * keeps its own ordering and its own tie-break).
+ *
+ * Extracted from {@link fusedRetriever} so a second ranker — the 联想网's
+ * cross-store seeder, which ranks nodes that are NOT `MemoryEntry` — fuses with
+ * the SAME arithmetic. Two rankers whose numbers get compared must come from one
+ * implementation, or a lift is indistinguishable from a formula difference.
+ *
+ * Fail-soft: a throwing / malformed embedder collapses the semantic arm to zero
+ * and the ranking degrades to pure keyword. Pure apart from the injected embed.
+ */
+export async function fuseArms(
+  query: string,
+  items: readonly FusableItem[],
+  opts?: FuseArmsOptions,
+): Promise<Map<string, number>> {
+  const out = new Map<string, number>()
+  const q = query.trim()
+  if (!q || items.length === 0) return out
+
+  const embed = opts?.embed ?? localBigramEmbedder()
+  const kw = opts?.keywordWeight ?? 0.5
+  const sem = opts?.semanticWeight ?? 0.5
+
+  // KEYWORD arm.
+  const rel = new Map<string, number>()
+  for (const e of items) rel.set(e.id, relevanceScore(q, e.text))
+
+  // SEMANTIC arm — one batch embed of [query, ...candidates]. Fail-soft: a bad
+  // embedder collapses the semantic arm to 0 (pure keyword ranking).
+  const cos = new Map<string, number>()
+  try {
+    const vectors = await embed([q, ...items.map((e) => e.text)])
+    if (Array.isArray(vectors) && Array.isArray(vectors[0])) {
+      const qv = vectors[0]!
+      items.forEach((e, i) => cos.set(e.id, cosineSimilarity(qv, vectors[i + 1] ?? [])))
+    }
+  } catch {
+    /* semantic arm stays empty → fused ranking is pure keyword */
+  }
+
+  // Drop candidates with NO signal on either arm (recency-window noise). For the
+  // local embedder cos>0 ⇔ rel>0, so this leaves the keyword candidate set
+  // unchanged (fusion only reorders); a real embedder keeps its synonyms.
+  const live = items.filter((e) => (rel.get(e.id) ?? 0) > 0 || (cos.get(e.id) ?? 0) > 0)
+  if (live.length === 0) return out
+
+  const relN = minMax(live.map((e) => rel.get(e.id) ?? 0))
+  const cosN = minMax(live.map((e) => cos.get(e.id) ?? 0))
+  live.forEach((e, i) => out.set(e.id, kw * relN[i]! + sem * cosN[i]!))
+  return out
 }
 
 // ---------------------------------------------------------------------------
