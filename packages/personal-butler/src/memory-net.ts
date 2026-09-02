@@ -100,16 +100,25 @@ export function parseNodeId(id: string): { store: MemoryStore; pointer: string }
 // ---------------------------------------------------------------------------
 
 /** 一个成员的五个店。列举只读它们的公开读接口,不碰盘。 */
+/**
+ * 要接进网里的那些面。
+ *
+ * 除 `entries` 外**每一个店都是可选的**,因为生产里它们并不在同一个作用域:管家
+ * 工厂手上有记忆 / 知识库 / 任务本 / 长任务档案,而会话窗住在 IM 桥的接线里。
+ * 一个只接得到四个面的调用方应当能**如实**说出「我只有这四个」,而不是被类型
+ * 逼着塞一个假的第五个进来 —— 缺席比编造诚实,与 `AssocNode.ts` 缺席同一条理由。
+ * 少接一个店的代价是那个店召不回来,不是别的店算错。
+ */
 export interface MemorySpace {
   readonly userId: string
   /** 已取回的 personal-memory 条目(调用方决定取多少)。 */
   readonly entries: readonly MemoryEntry[]
-  readonly knowledge: KnowledgeLibrary
-  readonly notebook: TaskNotebook
-  readonly sessions: ButlerSessionWindow
-  readonly dossiers: LongRunDossierStore
+  readonly knowledge?: KnowledgeLibrary
+  readonly notebook?: TaskNotebook
+  readonly sessions?: ButlerSessionWindow
+  readonly dossiers?: LongRunDossierStore
   /** 要列举的长任务档案。档案店按 taskId 寻址,没有「列出全部」。 */
-  readonly dossierIds: readonly string[]
+  readonly dossierIds?: readonly string[]
 }
 
 /** 网里的一个节点:{@link AssocNode} 收窄到本层的店名。 */
@@ -160,19 +169,21 @@ export async function enumerateMemoryNodes(space: MemorySpace): Promise<MemoryNo
     })
   }
 
-  const listing = await space.knowledge.list()
-  for (const f of listing.files) {
-    const doc = await space.knowledge.read(f.path)
-    // ts 缺席:知识库的读接口今天不吐时间戳(见模块顶注)。
-    out.push({
-      id: nodeId('knowledge', f.path),
-      store: 'knowledge',
-      text: doc.text,
-      salience: NON_MEMORY_SALIENCE,
-    })
+  if (space.knowledge) {
+    const listing = await space.knowledge.list()
+    for (const f of listing.files) {
+      const doc = await space.knowledge.read(f.path)
+      // ts 缺席:知识库的读接口今天不吐时间戳(见模块顶注)。
+      out.push({
+        id: nodeId('knowledge', f.path),
+        store: 'knowledge',
+        text: doc.text,
+        salience: NON_MEMORY_SALIENCE,
+      })
+    }
   }
 
-  for (const t of await space.notebook.list()) {
+  for (const t of space.notebook ? await space.notebook.list() : []) {
     const body = [t.title, ...t.steps.map((s) => s.text), t.note ?? ''].filter(Boolean).join('\n')
     out.push({
       id: nodeId('task', t.id),
@@ -183,7 +194,7 @@ export async function enumerateMemoryNodes(space: MemorySpace): Promise<MemoryNo
     })
   }
 
-  const history = await space.sessions.history(space.userId)
+  const history = space.sessions ? await space.sessions.history(space.userId) : []
   history.forEach((m, i) => {
     // ts 缺席:渲染视图已经把盘上那个 `at` 合并掉了(见模块顶注)。
     out.push({
@@ -194,8 +205,9 @@ export async function enumerateMemoryNodes(space: MemorySpace): Promise<MemoryNo
     })
   })
 
-  for (const taskId of space.dossierIds) {
-    const loaded = await space.dossiers.load(taskId)
+  const dossiers = space.dossiers
+  for (const taskId of dossiers ? (space.dossierIds ?? []) : []) {
+    const loaded = await dossiers!.load(taskId)
     if (loaded.kind !== 'ok') continue
     out.push({
       id: nodeId('dossier', `${taskId}#0`),
@@ -203,7 +215,7 @@ export async function enumerateMemoryNodes(space: MemorySpace): Promise<MemoryNo
       text: loaded.dossier.objective,
       salience: NON_MEMORY_SALIENCE,
     })
-    for (const j of await space.dossiers.readJournalTail(taskId, DOSSIER_JOURNAL_TAIL)) {
+    for (const j of await dossiers!.readJournalTail(taskId, DOSSIER_JOURNAL_TAIL)) {
       out.push({
         id: nodeId('dossier', `${taskId}#${j.seg}`),
         store: 'dossier',

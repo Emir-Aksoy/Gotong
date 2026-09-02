@@ -34,6 +34,7 @@ import {
   buildButlerClockLabel,
   buildButlerClockProbe,
   buildButlerSessionHintProbe,
+  buildMemorySheetProbe,
   composeContextProbes,
   createKnowledgeLibraryToolset,
   createTaskNotebookToolset,
@@ -92,6 +93,7 @@ import {
   buildButlerLanguageToolset,
 } from './personal-butler-language.js'
 import { buildButlerLastSeenProbe, readLastSeen } from './personal-butler-last-seen.js'
+import { buildButlerMemoryNetProvider } from './personal-butler-memory-net.js'
 import { buildButlerSourceProbe } from './personal-butler-source.js'
 import { buildButlerPendingProbe, type ButlerPendingSource } from './personal-butler-pending.js'
 import { buildButlerPeersToolset, type ButlerPeerSurface } from './personal-butler-peers.js'
@@ -930,6 +932,22 @@ export function buildButlerFactory(deps: ButlerFactoryDeps): ButlerFactory {
                 })
               : undefined,
             () => taskNotebook.digest(),
+            // M2c 记忆经济 —— 记忆单:按这一问跨四个店联想,每行带出处。骑的是
+            // 这条易变尾巴而不是 stableContext,因为它随**问题**变(问什么召回
+            // 什么),塞进稳定段等于每轮打碎前缀缓存;冻结块与人设因此逐字节不动。
+            // 召不到 / 建网失败 ⇒ null ⇒ 提示词字节不变。会话窗不在这个作用域
+            // (住 im-bridge-wiring),少那一面的代价见 personal-butler-memory-net.ts。
+            buildMemorySheetProbe({
+              net: buildButlerMemoryNetProvider({
+                userId,
+                recallIndex,
+                knowledge: knowledgeLibrary,
+                notebook: taskNotebook,
+                dossiers: longRunStore,
+                logger: log,
+              }),
+              logger: log,
+            }),
           ),
           // LIB-M3 — the INDEX card rides the STABLE segment (fork 1a): state,
           // not advice, so it refreshes on resume too and caches at 0.1× while

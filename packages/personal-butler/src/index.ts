@@ -238,6 +238,15 @@ export {
   type MemoryProjectionPlan,
 } from './obsidian-projection.js'
 
+// 记忆经济 M2c:把跨店召回折成记忆单,骑 CARE-M4 的 contextProbe 易变尾巴。
+// 召不到 / 出错 ⇒ null ⇒ 提示词逐字节不变,冻结块与人设不动。
+export {
+  buildMemorySheetProbe,
+  MEMORY_SHEET_HEADER,
+  DEFAULT_SHEET_K,
+  type MemorySheetProbeOptions,
+} from './memory-sheet-probe.js'
+
 // 记忆经济 M2b 的真件:跨店记忆网(枚举 → 建网 → 一次跨店召回 → 记忆单)。
 // 只读,不发新 id,零模型调用 —— 网里没有一个字节是孤本。
 export {

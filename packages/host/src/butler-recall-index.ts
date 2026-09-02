@@ -164,6 +164,20 @@ export class FileBackedInvertedIndex {
   }
 
   /**
+   * M2c — every entry, for building the cross-store 联想网.
+   *
+   * Rides THIS index's watermark freshness rather than opening a second read
+   * path: the net is a derived view of the same jsonl the index already tracks,
+   * and two enumeration paths would eventually disagree about what exists. The
+   * index is already holding these objects, so this is a copy of the array, not
+   * a re-read of the file.
+   */
+  async allEntries(): Promise<MemoryEntry[]> {
+    await this.ensureFresh()
+    return this.index.entries()
+  }
+
+  /**
    * M-GRAPH — resolve entries by id for one-hop recall link expansion. Ensures the
    * index is fresh, then returns the full entries the {@link InvertedIndex} already
    * holds by id — whole-store coverage with no extra jsonl read and no `list` 500
