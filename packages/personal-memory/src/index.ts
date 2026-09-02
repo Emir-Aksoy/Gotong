@@ -59,6 +59,30 @@ export {
   type BenchResult,
 } from './benchmark.js'
 export {
+  scoreCloseDecisions,
+  scoreSelfContainment,
+  gradeSelfContainment,
+  hasDanglingPronounLead,
+  formatWriteBenchResult,
+  WRITE_BENCH_NOW,
+  FORGET_PROJECTION_SYNC_LINE,
+  type CloseCategory,
+  type CloseSeed,
+  type CloseExpectation,
+  type CloseCase,
+  type CloseCheck,
+  type CloseCaseScore,
+  type CloseBenchResult,
+  type CloseBenchOptions,
+  type WriteBenchMemory,
+  type WriteBenchMemoryFactory,
+  type WriteBenchDeciderFactory,
+  type ContainmentSpec,
+  type ContainmentVerdict,
+  type ContainmentFactCase,
+  type ContainmentBenchResult,
+} from './write-benchmark.js'
+export {
   MemoryAugmentedAgent,
   type MemoryAugmentedAgentOptions,
 } from './agent.js'

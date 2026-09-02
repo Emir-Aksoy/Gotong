@@ -162,9 +162,9 @@ EXCH-M5 gotong-client 包 = 域 C(协作) × 法「形态兼容」;EFF 效果回
 
 - **写侧评测**(差异化面,STRATEGY-2026-08 §三点名的业界空白):把「整理质量」
   做成可测件——bitemporal close 正确率 / 原子事实自包含率 / 遗忘-投影同步;
-  M1 recall 承重门是先例,写侧照这个形状立尺。**M-EVAL M0 计划已落档
-  (2026-08-29:③ 判定为已被既有门盖死不再立分,①② 立新尺;两档=CI 零 key
-  锁尺子 + 真档用户门)** — [`MEMORY-WRITE-EVAL.md`](MEMORY-WRITE-EVAL.md)
+  M1 recall 承重门是先例,写侧照这个形状立尺。**M-EVAL M0 计划落档(2026-08-29)→
+  M1 立尺完(2026-09-01:③ 判定为已被既有门盖死不再立分,①② 立新尺进 CI 门
+  `check:memory-write` 35 例零 key;M2 真档跑分=用户门要 key)** — [`MEMORY-WRITE-EVAL.md`](MEMORY-WRITE-EVAL.md)
 - embedder 生产开启〔用户门;semantic 本地 0% 是已接受状态,不当缺口催〕
 - 记忆节律随档调节(弱档更勤复述/更小蒸馏批?)——归 RES 扩展语义,等效果数据
 - LONG track 的 M 半边(任务档案 dossier = 任务级工作记忆 / journal 追加不重写 /

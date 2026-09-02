@@ -1,6 +1,6 @@
 # 记忆写侧评测(M-EVAL)——把「整理质量」做成可测件
 
-> 状态:**M0 计划落档(2026-08-29)。下一步 M1 立尺。**
+> 状态:**M0 计划落档(2026-08-29)→ M1 立尺落地(2026-09-01,CI 门 `pnpm check:memory-write` 35 例零 key)。下一步 M2 真档跑分〔用户门:要 key〕。**
 > 方向: M(记忆管理能力;见 [`DIRECTIONS.md`](DIRECTIONS.md) M 路线第一项「写侧评测」)。
 >
 > 一句话:读侧已有尺(MU-M1 recall 承重门 + 棘轮地板),写侧只有二值机械门没有分数;
@@ -162,11 +162,63 @@ ops 原文会把等价解法误判成错;判店况天然两收。`supersedes` �
 ## 五、里程碑
 
 - **M0 本文档** ✅(纯 docs)。
-- **M1 立尺**:harness + fixtures + 校准门 + `check:memory-write`(CI 零 key);地板从
-  scripted oracle 满分与校准精确性起步。
+- **M1 立尺** ✅(2026-09-01):harness + fixtures + 校准门 + `check:memory-write`(CI 零 key,
+  35 例);地板从 scripted oracle 满分与校准精确性起步——落地记见本节末。
 - **M2 真档跑分**〔用户门:要 key〕:`scripts/memory-write-real.mjs` 出首份基线报告。
   备注:可与 EFF-M4 真实档矩阵同一批 key 同一次跑(都是「烧真 token 出基线」的活),
   是否合批由用户定,不阻塞 M1。
+
+### M1 落地记(2026-09-01)
+
+落点与 §3.5 一字不差:`packages/personal-memory/src/write-benchmark.ts`(纯核住 src=真档 runner 可
+import 的复用件,镜像 `benchmark.ts`)+ `tests/fixtures/write-cases.ts`(`CLOSE_CASES` 9 场景:update 3
+[各带 `supersedesBonus`] / delete 2 / add 2 / noop 2;`CONTAINMENT_FACTS` 17 条双语手标=7 对 10 错;
+固定钟 `WRITE_BENCH_NOW`,分数字节稳定)+ `tests/memory-write-bench.test.ts`(**35 例**四组:② 判分器
+校准 / ① 管道贯通 / 夹具卫生 / 报告)+ root `pnpm check:memory-write`(刻意不并进 `check:memory-recall`,
+谁红一眼看清是哪侧)。零新旋钮(114 冻结),被测提示词一字未动。
+
+承重判断:
+- **判分器结构上看不见 `oracleOps`。** `scoreCloseDecisions` 只收 `{cases, makeMemory, makeDecider}`,
+  决策者是一只 `MemorySummarizer` 工厂(真档 M2 换真模型走同一缝零分叉);oracle 的 ops 只属于夹具里
+  的脚本决策者,判分函数签名里没有它——「照抄 ops 形状打分」做不到。
+- **UPDATE ≡ DELETE+ADD 是测出来的。** `deleteAddDecider` 把 oracle 的每条 UPDATE 机械改写成
+  DELETE+ADD,两者 closeScore 都必须恰为 1;差别只落在 `supersedesRate`(UPDATE 路径独有的回链),
+  它在主分算完**之后**单独算,永不进 `checks`。
+- **harness 持有 seeding 并核两件事**:店面必须是空的(`makeMemory` 返回的店 `list` 非空即抛——脏店
+  上跑判的不是这个场景)、`remember` 必须保真返回调用方给的 id(检查按 id 找旧事实,店面改写 id=
+  整个后置条件族失效,同样抛)。检查族逐场景从 `expect` 派生:`closed:<id>`(validTo 翻篇且
+  `isActive` 为假,**不是硬删**)/ `new-active:<片段>`(文本在、活跃、带 validFrom)/ `untouched:<id>`
+  (旁观者原文原样仍活跃)/ `no-new-entries`(NOOP 场景条数不变);声明零检查的场景 harness 抛错
+  (不许零除零得满分)。
+- **错决策者从场景派生,不是手写第二套夹具**(新夹具无法悄悄豁免):`lazyNoop`(全场景 `noop`)/
+  `vandal`(把 seed 全 DELETE=漏翻新事实+误伤旁观者)/ `wrongTarget`(拿候选文本 UPDATE 旁观者=翻错
+  对象)。追踪出的聚合分:oracle 1.0 / DELETE+ADD 1.0(supersedesRate 0)/ lazy 0.5 / vandal ≈0.296 /
+  wrongTarget ≈0.315;门钉 `ORACLE_CLOSE_FLOOR = 1`、`WRONG_DECIDER_CEILING = 0.75`(且 >0),头注写死
+  「never lower a floor (or raise a ceiling) to make it pass」。**光有聚合门不够**:变异②(见下)之后
+  lazy 仍 ≈0.722、wrongTarget ≈0.537,都还在 0.75 之下,聚合门一例没红;真正咬住的是 `move-city-zh`
+  上的 per-check 钉子——每个错决策者恰好红它的错误所预测的那几项检查(vandal:`closed:s1` 真、
+  `new-active:槟城` 假、`untouched:s2` 假)。
+- **自包含率判分器先被判过**:17 条手标每条单独钉判定,三个子旗(类别词在 / 具体值在 / 无裸指代
+  开头)各自可见,聚合率钉死 `7/17`(41.2%)。悬空指代判定刻意窄:只看去空白后的**首个码点/首词**,
+  中文集 {他,她,它,这,那}(该/其/此 刻意不进——「其实…」会误伤),英文正则带 `\b` 且大小写不敏感
+  (「Theyre」不算、「they」算);已知粗边=「这周…」类时间短语开头照标(主语该在前,刻意保留)。
+- **③ 只引路径**:`FORGET_PROJECTION_SYNC_LINE` 固定引 `packages/host/tests/butler-obsidian-wiring.test.ts`,
+  测试断言该文件真实存在且含 `forgetAll`——引一条已不存在的门比不引更坏。
+
+**三道变异三次全红且只红该红那些**(复原一律 python 精确替换 + `shasum -a 256 -c` 对拍基线逐字节同):
+① 摘悬空指代判定(两处 `return` 改 false)⇒ **恰 7 例**(三条 pronoun-only 手标 + 子旗钉 + 直测
+`hasDanglingPronounLead` + 聚合 `7/17` + 报告里的 `41.2%`;其余 28 例含 ① 管道全绿);② 神经化 `closed`
+检查(`ok: true`)⇒ **恰 1 例**(per-check 钉子;聚合 <0.75 两例照绿=钉子才是牙);③ 把 `supersedes`
+折进主分当一项检查 ⇒ **恰 2 例**(DELETE+ADD 等价那例 closeScore 掉到 <1 + per-check 钉子多出一个键)。
+**排错记**:变异③的复原被自家 `mut.py` 的「新串已存在」守卫误拦——删除型复原的新串是旧锚点的子串,
+守卫在原文里找到的正是锚点自己,`shasum` 当场 FAILED 而文件仍是变异态;改用只带 `count==1` 守卫
+的一次性替换才复原成功。与 HANDS-M5「删除型变异新串为空」是同一教训的镜像:新串 ⊂ 旧串时,「已存在」
+守卫要在 `src.replace(old, '', 1)` 上算;**任何变异复原都以 `shasum` 对拍为准,不以「替换成功」为准**。
+
+验收:新门 **35/35**、personal-memory 全套 **455**(37 文件)、dist 重建后全仓 `pnpm -r typecheck` RC=0、
+四门 PASS(旋钮 **114 零新增**;main.ts 2775/2790 等六热文件零触碰)。§3.2 留给 M1 的「精确评分细则」
+就此定型:每场景分 = 通过检查数 / 检查数(等权),类别分与总分 = 场景分的算术平均,`supersedesRate`
+= 带加分项的场景里回链在场的比例,单列不入主分。
 
 ## 六、显式不做
 
