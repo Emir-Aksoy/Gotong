@@ -365,3 +365,18 @@ export {
   type UmbrellaReviewerOptions,
 } from './skills.js'
 export { PersonalMemoryError, type PersonalMemoryErrorCode } from './errors.js'
+
+// 记忆经济 M3a:记忆账纯核。只算账不动东西 —— 零 I/O、零模型、零删除。
+export {
+  readLedger,
+  rungFor,
+  formatLedger,
+  RUNG_OPEN_AT,
+  RUNG_HYSTERESIS,
+  RUNG_LABELS,
+  type LedgerLine,
+  type LedgerStoreReading,
+  type LedgerReading,
+  type LedgerRung,
+} from './memory-ledger.js'
+
