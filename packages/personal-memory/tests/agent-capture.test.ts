@@ -119,3 +119,47 @@ describe('MemoryAugmentedAgent turn capture (M2)', () => {
     expect(res.kind === 'ok' && (res.output as { text: string }).text).toBe('still answered')
   })
 })
+
+describe('MemoryAugmentedAgent 写侧新颖门 (M4)', () => {
+  /** 同一轮跑三遍 —— 生产默认下盘上该只有一条。 */
+  const runThrice = async (foldRestatements?: boolean) => {
+    const mem = makeFakeMemory()
+    const agent = new MemoryAugmentedAgent({
+      id: 'butler',
+      provider: new TextProvider('改到明天下午 4 点,在三号会议室。'),
+      memory: mem,
+      system: 'base',
+      ...(foldRestatements !== undefined ? { foldRestatements } : {}),
+    })
+    for (let i = 0; i < 3; i++) {
+      const res = await agent.onTask(task({ prompt: '明天下午的会议改到几点了?' }, `t${i}`))
+      expect(res.kind).toBe('ok')
+    }
+    return mem
+  }
+
+  it('默认开着:同一轮问三遍,盘上只留一条', async () => {
+    const mem = await runThrice()
+    const captured = turns(mem)
+    expect(captured).toHaveLength(1)
+    // 折叠留下了审计痕迹 —— 否则「只有一条」分不清是折叠还是根本没写。
+    expect(captured[0]!.meta).toMatchObject({ restatedCount: 2, recallCount: 2 })
+  })
+
+  it('foldRestatements: false ⇒ 回到今天的行为(三条)', async () => {
+    expect(turns(await runThrice(false))).toHaveLength(3)
+  })
+
+  it('不同的轮次照常各写各的', async () => {
+    const mem = makeFakeMemory()
+    const agent = new MemoryAugmentedAgent({
+      id: 'butler',
+      provider: new TextProvider('好的,已经安排上了。'),
+      memory: mem,
+      system: 'base',
+    })
+    await agent.onTask(task({ prompt: '帮我订周五飞吉隆坡的机票' }, 'a'))
+    await agent.onTask(task({ prompt: '那台服务器磁盘还剩多少' }, 'b'))
+    expect(turns(mem)).toHaveLength(2)
+  })
+})

@@ -125,6 +125,34 @@ export {
   MemoryAugmentedAgent,
   type MemoryAugmentedAgentOptions,
 } from './agent.js'
+// 记忆经济 M4:写侧新颖门 —— 复述在写下的那一刻就折进既有条。它只判「像不像」,
+// 永远不判「对不对」;而且一个字节都不删 —— 折叠 = 不写,不是写了再删。
+export {
+  DEFAULT_NOVELTY_WINDOW,
+  META_RESTATED,
+  judgeNovelty,
+  mutualCoverage,
+  rememberNovel,
+  restatedCountOf,
+  type JudgeNoveltyOptions,
+  type NoveltyGateOptions,
+  type NoveltyOutcome,
+  type NoveltyVerdict,
+} from './novelty.js'
+
+// M4 的尺子(写侧折叠)。住 src 而不是 tests —— CI 门与将来的真档 runner 跑同一份。
+export {
+  NOVELTY_BENCH_NOW,
+  formatNoveltyResult,
+  scoreNovelty,
+  type NoveltyBenchResult,
+  type NoveltyCase,
+  type NoveltyCaseScore,
+  type NoveltyMemoryFactory,
+  type NoveltyTurn,
+  type NoveltyWriter,
+} from './novelty-benchmark.js'
+
 export {
   buildTurnCapture,
   extractUserText,

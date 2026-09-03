@@ -100,7 +100,7 @@
     "effect:matrix": "node scripts/effect-matrix.mjs",
     "check:templates": "pnpm -C packages/web exec vitest run tests/all-templates-parse.test.ts",
     "check:memory-recall": "pnpm -C packages/personal-memory exec vitest run tests/memory-recall-bench.test.ts tests/memory-consolidation.test.ts --disable-console-intercept",
-    "check:memory-write": "pnpm -C packages/personal-memory exec vitest run tests/memory-write-bench.test.ts --disable-console-intercept",
+    "check:memory-write": "pnpm -C packages/personal-memory exec vitest run tests/memory-write-bench.test.ts tests/novelty-bench.test.ts tests/agent-capture.test.ts --disable-console-intercept",
     "check:memory-integration": "pnpm -C packages/personal-butler exec vitest run tests/memory-integration-bench.test.ts --disable-console-intercept",
     "check:memory-eviction": "pnpm -C packages/personal-memory exec vitest run tests/eviction-bench.test.ts tests/cooling-bench.test.ts --disable-console-intercept && pnpm -C packages/personal-butler exec vitest run tests/knowledge-cooling.test.ts --disable-console-intercept && pnpm -C packages/host exec vitest run tests/butler-salience-charged.test.ts tests/butler-cooling-chain.test.ts --disable-console-intercept",
     "report:atong-toolface": "pnpm -C packages/host exec vitest run tests/butler-toolface-report.test.ts",

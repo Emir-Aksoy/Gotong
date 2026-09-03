@@ -42,6 +42,7 @@ import {
   isHeartbeatPayload,
 } from './capture.js'
 import { PersonalMemoryError } from './errors.js'
+import { rememberNovel } from './novelty.js'
 import type { MemoryRetriever } from './retriever.js'
 import { MemorySession } from './session.js'
 import type { TierConfig } from './tiers.js'
@@ -125,6 +126,15 @@ export interface MemoryAugmentedAgentOptions extends LlmAgentOptions {
    * frozen block / capture are otherwise per-agent.
    */
   captureMeta?: Record<string, unknown>
+  /**
+   * M4 记忆经济 —— 写侧新颖门:这一轮与同店最近若干条近重复时,**不写新条**,改成强化
+   * 既有那条(`recallCount+1` / `restatedCount+1`)+ 一条时序边。默认 `true`。
+   *
+   * 默认开着而不是 opt-in,是因为 M3b 的教训:一个默认关掉的经济学等于没通电。它的
+   * 安全侧由写侧折叠尺(`check:memory-write`)守着 —— 「该留的一条没少」地板是 1.0,
+   * 任何回归当场红。任何一步出岔都 fail-**open**(照常写),见 `novelty.ts` 顶注。
+   */
+  foldRestatements?: boolean
 }
 
 export class MemoryAugmentedAgent extends LlmAgent {
@@ -135,6 +145,7 @@ export class MemoryAugmentedAgent extends LlmAgent {
   private readonly captureTurns: boolean
   private readonly captureMaxChars: number | undefined
   private readonly captureMeta: Record<string, unknown> | undefined
+  private readonly foldRestatements: boolean
   /** Re-recall the frozen block per task (always-on butler) vs once per session. */
   private readonly frozenRefreshPerTask: boolean
 
@@ -171,6 +182,7 @@ export class MemoryAugmentedAgent extends LlmAgent {
     this.memory = memory
     this.memoryToolset = memoryToolset
     this.captureTurns = opts.captureTurns ?? true
+    this.foldRestatements = opts.foldRestatements ?? true
     this.captureMaxChars = opts.captureMaxChars
     this.captureMeta = opts.captureMeta
     this.frozenRefreshPerTask = opts.frozenRefreshPerTask ?? false
@@ -241,6 +253,11 @@ export class MemoryAugmentedAgent extends LlmAgent {
    * parked (threw `SuspendTaskError`), `super.handleTask` rethrew above and we
    * never reach here; the eventual resume captures instead. Heartbeat ticks
    * are skipped (episodic is the conversation log, not a maintenance record).
+   *
+   * M4 记忆经济 —— 写入过一道**新颖门**:与同店最近若干条近重复的一轮不落新条,改成
+   * 强化既有那条。折叠只发生在这一处(每轮一条、无界增长的唯一热路径写入);为什么
+   * 刻意不挂在 profile/digest、atomic-facts、模型自己的 `remember` 上,见
+   * `novelty.ts` 顶注。
    */
   private async captureTurn(task: Task, output: unknown): Promise<void> {
     if (!this.captureTurns) return
@@ -254,7 +271,9 @@ export class MemoryAugmentedAgent extends LlmAgent {
         ...(this.captureMeta !== undefined ? { meta: this.captureMeta } : {}),
         ...(this.captureMaxChars !== undefined ? { maxChars: this.captureMaxChars } : {}),
       })
-      if (entry) await this.memory.remember(entry)
+      if (!entry) return
+      if (this.foldRestatements) await rememberNovel(entry, { memory: this.memory })
+      else await this.memory.remember(entry)
     } catch (err) {
       // eslint-disable-next-line no-console
       console.error(`[personal-memory] turn capture failed for '${this.id}'`, err)
