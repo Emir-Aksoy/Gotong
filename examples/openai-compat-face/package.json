@@ -1,0 +1,17 @@
+{
+  "name": "@gotong/example-openai-compat-face",
+  "version": "0.0.0",
+  "type": "module",
+  "private": true,
+  "description": "OpenAI 兼容入站面 capstone —— 一个未改一字节的 openai SDK 客户端把 hub 里的 agent 当模型调:列模型、问答、SSE 流式(delta 累加逐字节等于非流式)、以及一张「哪些一致 / 哪些故意不同」的清单。确定性、零 API key。",
+  "scripts": {
+    "start": "tsx src/index.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@gotong/core": "workspace:*",
+    "@gotong/identity": "workspace:*",
+    "@gotong/web": "workspace:*",
+    "openai": "^6.48.0"
+  }
+}

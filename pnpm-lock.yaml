@@ -636,6 +636,21 @@ importers:
         specifier: workspace:*
         version: link:../../packages/web
 
+  examples/openai-compat-face:
+    dependencies:
+      '@gotong/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      '@gotong/identity':
+        specifier: workspace:*
+        version: link:../../packages/identity
+      '@gotong/web':
+        specifier: workspace:*
+        version: link:../../packages/web
+      openai:
+        specifier: ^6.48.0
+        version: 6.48.0(ws@8.21.1)(zod@4.4.3)
+
   examples/persist-and-resume:
     dependencies:
       '@gotong/core':

@@ -48,6 +48,7 @@ pnpm demo                          # = hello-collab（官方第一步，见 QUIC
 | [`butler-task-notebook`](../../examples/butler-task-notebook) | 弱模型跨轮办完 5 步事：故意失忆的模型每轮只靠注入的笔记本摘要「做一步勾一步」，敏感步照 park（笔记本≠授权） | 零 |
 | [`memory-upgrade`](../../examples/memory-upgrade) | MU capstone：同一份管家记忆用同一把尺子（MU-M1）量，召回逐里程碑变好——M2 融合把聚焦金标提到第 1（MRR↑）、M3 抽取把同义词 recall 0→100%；真 MU 代码零重写，框架跑 0 个模型 | 零 |
 | [`atong-memory-economy`](../../examples/atong-memory-economy) | 记忆经济 capstone：一万轮合成对话（六成复述）跑两条路——写入放大 5 倍、盘上零重复、召回名额 9→13 件；今天的沉淀把「我对什么过敏」挤出前五（单店召回 100%→0%），经济的没有；两条同等重要的事实两个月后只有被用过的活下来。真 M1~M4 代码零重写，框架跑 0 个模型 | 零 |
+| [`openai-compat-face`](../../examples/openai-compat-face) | OPENAI capstone：一个**未改一字节**的 `openai` SDK 客户端（只 import `openai`、全文零处产品名）把 hub 里的 agent 当模型调——列模型、问答、SSE 流式（delta 累加**逐字节**等于非流式），再打出一张「4 项一致 / 6 项故意不同」的清单，十项行为逐个钉死（`tools` 静默忽略会当场红） | 零 |
 | [`reallife-oauth`](../../examples/reallife-oauth) | 用 Google 登录接日历：授权 URL → 换码进 vault（明文不落盘）→ `${OAUTH_ACCESS_TOKEN}` 注入 MCP 头 → 到期自动刷，同一条缝永远新鲜 | 零（假令牌端点） |
 | [`model-routing`](../../examples/model-routing) | MR capstone：主 provider 首-token-前挂 → `RoutingProvider` **顺序** failover 到备用，连续失败熔断快速跳过，健康投影上面板黄条，主自愈探针弹回；真 provider 只 stub 两个 | 零（无网络无 key） |
 | [`model-ensemble`](../../examples/model-ensemble) | LSA capstone：同一问题 **并行** fan-out 到 N 个模型（routing 只调一个）→ 综合器收全 N 份草稿折成一份 → 成本诚实 ×N → 挂一个照跑 → 要调工具就透传；真 `EnsembleProvider` 只 stub 几个成员 | 零（无网络无 key） |
@@ -133,6 +134,7 @@ pnpm demo                          # = hello-collab（官方第一步，见 QUIC
 - **人在环 / HITL** → `hello-collab` · `cli-human` · `cafe-ops` · `bar-ops` · `personal-butler` · `cross-org-rfp`
 - **工作流** → `workflow-architect` · `workflow-assistant` · `cross-hub-workflow` · `tea-supply-link` · `tea-chain-hq`
 - **记忆 / 管家** → `personal-butler` · `butler-task-notebook` · `butler-vector-recall` · `memory-upgrade` · `atong-memory-economy` · `butler-cross-hub`（更多能力细节见 [`ledger/MEMORY-ADVANCED-FINAL.md`](ledger/MEMORY-ADVANCED-FINAL.md)）
+- **被别的工具当模型调** → `openai-compat-face`（入站 OpenAI 兼容面，契约看 [`OPENAI-COMPAT-API.md`](OPENAI-COMPAT-API.md)）
 - **MCP / 知识库** → `mcp-tools-quickstart` · `mcp-tools-llm-agent` · `rag-mcp` · `elasticsearch-kb` · `obsidian-kb` · `cross-hub-mcp`
 - **跨 hub / 联邦** → 见 ④；真网络看 `cross-hub-federation`
 - **桥接外部 agent** → 见 ⑤；契约看 [`AGENT-ADAPTER-CONTRACT.md`](AGENT-ADAPTER-CONTRACT.md)

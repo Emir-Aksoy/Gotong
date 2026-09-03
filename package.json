@@ -34,6 +34,7 @@
     "demo:butler-vector-recall": "pnpm --filter @gotong/example-butler-vector-recall start",
     "demo:memory-upgrade": "pnpm --filter @gotong/example-memory-upgrade start",
     "demo:memory-economy": "pnpm --filter @gotong/example-atong-memory-economy start",
+    "demo:openai-compat": "pnpm --filter @gotong/example-openai-compat-face start",
     "demo:model-routing": "pnpm --filter @gotong/example-model-routing start",
     "demo:model-ensemble": "pnpm --filter @gotong/example-model-ensemble start",
     "demo:atong-recovery": "pnpm --filter @gotong/example-atong-recovery start",

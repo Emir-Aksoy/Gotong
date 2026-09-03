@@ -3,7 +3,7 @@
 > **方向: C+T**（C agent 间协作框架 · T 工具调用能力；方法论层 = **形态兼容**——
 > 到对方已经在的地方，用他们已有的形态）
 >
-> Status: **M0 计划完（2026-08-26）** · **M1 完（真 `openai@6` SDK 打通）** · **M2 完（2026-09-02，SSE）** · M3 待做
+> Status: **M0 → M3 全部收口（2026-09-03）**　M0 计划 · M1 非流式 · M2 SSE · M3 capstone
 
 ---
 
@@ -21,6 +21,49 @@
 
 补上它，"Gotong 里的一个 agent" 就变成了任何 OpenAI 生态工具眼里的一个
 model id——**对方零改动**。这正是形态兼容的判据（EXCH track 同一条）。
+
+---
+
+## 一·五、怎么接（三步）
+
+跑一遍就懂：`pnpm demo:openai-compat`
+（[`examples/openai-compat-face`](../../examples/openai-compat-face)，零 key、确定性）。
+
+**① 拿一把 key。** `aipk_` 由管理员签发，**今天还没有按钮**——admin 面用 admin bearer
+打一次端点（这是个已知的粗糙边，不装作有 UI）：
+
+```bash
+curl -X POST "$HUB/api/admin/identity/users/$USER_ID/api-key" \
+  -H "authorization: Bearer $ADMIN_TOKEN" \
+  -H 'content-type: application/json' \
+  -d '{"label":"my-openai-client"}'
+```
+
+返回体里的 `key` **只出现这一次**，当场存好。
+
+**② base URL 填 `<你的 hub>/v1`。** 就这一处改动；其余照你原来的写法。
+
+**③ `model` 填 agent id。** `GET /v1/models` 列出这把 key 能调的那些
+（列出来的集合 ≡ 能调的集合，没列出来的和不存在的同一个 404）。
+
+```python
+from openai import OpenAI
+client = OpenAI(api_key="aipk_...", base_url="https://hub.example/v1")
+
+print([m.id for m in client.models.list().data])          # 我能调哪些 agent
+r = client.chat.completions.create(                        # 非流式
+    model="note-writer", messages=[{"role": "user", "content": "帮我写句话"}])
+for chunk in client.chat.completions.create(               # SSE
+    model="note-writer", messages=[...], stream=True):
+    print(chunk.choices[0].delta.content or "", end="")
+```
+
+任何只会说 `POST /v1/chat/completions` 的东西同理——LangChain 的
+`ChatOpenAI(base_url=..., api_key=...)`、Dify / Open WebUI 的「OpenAI 兼容」
+provider、Cursor 的自定义 base URL，都只填这两格。
+
+**接之前先读 §二和 §七**：这条面有 6 处**故意**与 OpenAI 不同（`tools` 一律 400、
+没有 `usage`、`system` 不生效……）。它们是立场不是缺口，capstone 会把这张表打出来。
 
 ---
 
@@ -252,7 +295,14 @@ data: [DONE]
 |---|---|---|
 | **M1** ✅ | 非流式 `POST /v1/chat/completions` + `GET /v1/models` + 鉴权 + 参数校验 + **park 语义（岔口 a）** | **真 `openai@6` SDK**（未改一字节）打通问答/列模型/park 不抛/越权 404；`tools`、`n>1`、`stream:true`、多模态块一律 400 |
 | **M2** ✅ | SSE 流式（§4.6 形状） | **真 `openai@6.48.0` SDK** `stream=True` 收到 3 帧 + `[DONE]`，累加逐字节等于非流式答案；仓内 8 组样本三方对拍（含 `\n\n`、正文里伪造的 `[DONE]`、前后空白、4K 长文）；先验证后开流四例；变异十三发十二发首轮红 |
-| **M3** | 文档 + capstone + 收口 | `examples/` 一个零 key 的确定性 demo；四门 PASS |
+| **M3** ✅ | 文档 + capstone + 收口 | [`examples/openai-compat-face`](../../examples/openai-compat-face)（`pnpm demo:openai-compat`，零 key 确定性）：客户端源码自证零改动 → M2 判据用真 SDK 常驻 → 十项行为逐个钉死的差异清单；打生产代码的变异五发全红；四门 PASS |
+
+**OPENAI track M0 → M3 全部收口。** 四条边界（闸零绕过 / 无状态 / 零新旋钮 / 内核零改动）
+一条没破：旋钮仍是 **114**，`packages/core` 一行没动，整条面是 `packages/web` 里的一个路由
+文件加一份鸭子 surface。两把尺——M2 的「delta 累加逐字节等于非流式」和 M3 的「十项行为
+逐个钉死」——各自在变异下咬得动（M2 十三发十二发首轮红；M3 打生产代码五发全红）。
+两处首轮没红的都是真漏洞、都当场补了：M2 那次是夹具八例无一前后带空白，M3 那次是
+判据钉在表的形状上而不是标签上，导致「静默收下 `tools` 却不用」这条最危险的回归照样绿。
 
 ---
 
