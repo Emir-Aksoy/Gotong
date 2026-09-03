@@ -1,7 +1,7 @@
 /**
- * openai-compat-routes.ts — OPENAI-M1. The inbound OpenAI-compatible face.
+ * openai-compat-routes.ts — OPENAI-M1/M2. The inbound OpenAI-compatible face.
  *
- *   POST /v1/chat/completions   非流式；`model` = agent id
+ *   POST /v1/chat/completions   非流式 + SSE 流式（M2）；`model` = agent id
  *   GET  /v1/models             这条 bearer 能调的 agent（≡ 上面接受的 model 集）
  *
  * 为什么存在：出站早就是 OpenAI 形状了（`llm-openai` 的 provider 就叫
@@ -25,6 +25,18 @@
  *     同理 `model`/`temperature`/`max_tokens` 一类 per-task 覆盖也不透传：那些是
  *     agent 的主人配的，一个调用方不该能改别人 agent 的行为方式。
  *  ④ **零新旋钮**（116 冻结）。surface 接不接就是开关。
+ *
+ * **M2 流式的形状，以及它诚实在哪**（§4.6）：SSE 连接**立即建立并保持**（客户端不会
+ * 干等到超时），但**内容 delta 只在最终结果定稿后发**，而且**只发一帧**。原因是带工具
+ * 的 agent 会重放多轮，只有最后一轮的文本才是回复；把中间轮当 delta 发出去，累加起来
+ * 就不等于最终答案——而 OpenAI 的 SSE 语义里**没有「整体替换」这个动作**。所以这里
+ * 不假装分片：代价是首 token 延迟一点没改善，收益是**delta 累加永远逐字节等于非流式
+ * 的那个答案**（`openai-compat-stream.test.ts` 拿这条当尺）。
+ *
+ * 由此带出一个必须写下来的取舍:**先验证、后开流**。所有形状类错误（400/404）都在开流
+ * 之前发生，于是它们仍然是**真的 HTTP 状态码**；只有派发期的失败（agent 掉线、超时、
+ * 上游炸）落在流里——那时 200 已经写出去了，改不了，只能发一帧 `error` 然后**收掉连接
+ * 且不发 `[DONE]`**。不补 `[DONE]` 是刻意的：那会让客户端把一次截断当成正常收尾。
  *
  * 鉴权：既有 `aipk_` / `adm_` bearer（`resolveV4Auth`）—— OpenAI SDK 天生就发
  * `Authorization: Bearer …`，调用方什么都不用改，也不新开签发口。挂载点在
@@ -245,6 +257,21 @@ function rejectUnsupported(body: Record<string, unknown>): void {
   if (body.logprobs || body.logit_bias !== undefined || body.top_logprobs !== undefined) {
     throw new BadRequest('logprobs / logit_bias 这条路给不出：hub 不跑模型，拿不到那些数。', 'unsupported_parameter')
   }
+  // `stream_options.include_usage` 是「请把 usage 发给我」。这条路**结构上**没有 usage
+  // （非流式那边整个字段都缺席，理由同：报 0 会被读成免费）。收下再不发就是撒谎，
+  // 所以响亮拒——与 §4.7 那条「忽略了就等于撒谎的一律拒」同一把尺。
+  const so = body.stream_options
+  if (so !== undefined && so !== null) {
+    if (typeof so !== 'object' || Array.isArray(so)) {
+      throw new BadRequest('stream_options 必须是对象', 'invalid_request_error')
+    }
+    if ((so as { include_usage?: unknown }).include_usage === true) {
+      throw new BadRequest(
+        'stream_options.include_usage 这条路给不出：TaskResult 不带 token 数（真账在 hub 的用量账本里）。',
+        'unsupported_parameter',
+      )
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -401,19 +428,14 @@ async function handleChatCompletion(
     sendOpenAiError(res, 404, `没有这个 model: ${clipText(model, 32)}`, 'invalid_request_error', 'model_not_found')
     return
   }
-  if (body.stream === true) {
-    // M2 会补上（SSE，但内容 delta 只在结果定稿后发——带工具的 agent 会重放
-    // 多轮，把中间轮当 delta 发出去，累加起来就不等于最终答案）。在那之前
-    // 响亮拒，绝不静默降级成非流式：客户端会一直等一个永远不来的 [DONE]。
-    sendOpenAiError(
-      res,
-      400,
-      'stream 暂未支持（OPENAI-M2）。先用 stream=false。',
-      'invalid_request_error',
-      'unsupported_parameter',
-    )
+  // M2:`stream` 只认布尔。别的类型响亮拒——一个 `stream:"true"` 静默按非流式走,
+  // 客户端会一直等一个永远不来的 `[DONE]`。
+  if (body.stream !== undefined && typeof body.stream !== 'boolean') {
+    // code 留空：与本文件其它「一般性形状错」同一套（M1 的 BadRequest 也是）。
+    sendOpenAiError(res, 400, 'stream 必须是布尔值：true 走 SSE，false / 缺省走一次性 JSON', 'invalid_request_error')
     return
   }
+  const wantStream = body.stream === true
   let parsed: ParsedChat
   try {
     rejectUnsupported(body)
@@ -431,6 +453,62 @@ async function handleChatCompletion(
     return
   }
 
+  const id = 'chatcmpl-' + randomUUID().replace(/-/g, '')
+  const created = Math.floor(Date.now() / 1000)
+
+  // 非流式:等结果,一次性发。
+  if (!wantStream) {
+    const out = await runCompletion(ctx, userId, model, parsed)
+    if (!out.ok) {
+      sendOpenAiError(res, out.status, out.message, out.type, out.code)
+      return
+    }
+    sendJson(res, {
+      id,
+      object: 'chat.completion',
+      created,
+      model,
+      choices: [{ index: 0, message: { role: 'assistant', content: out.content }, finish_reason: 'stop' }],
+      // `usage` 整个字段缺席是刻意的：TaskResult 不带 token 数（用量走
+      // `usageSink` 进账本），报 0 会被读成「这次调用免费」。真账在用量面板。
+    })
+    return
+  }
+
+  // 流式:**先开流再派发**。到这一行为止所有形状类错误都已经用真 HTTP 状态码发过了;
+  // 从这一行起 200 已经写出去,改不了。
+  const stream = beginStream(res, { id, created, model })
+  const out = await runCompletion(ctx, userId, model, parsed)
+  if (!out.ok) {
+    stream.fail(out)
+    return
+  }
+  stream.finish(out.content)
+}
+
+/** 一次 completion 的结果：要么一段正文，要么一个「本该是什么 HTTP 错误」的描述。 */
+type CompletionOutcome =
+  | { readonly ok: true; readonly content: string }
+  | {
+      readonly ok: false
+      readonly status: number
+      readonly message: string
+      readonly type: string
+      readonly code?: string
+    }
+
+/**
+ * 派发一次并把 `TaskResult` 归一成正文。
+ *
+ * 两条路（流式 / 非流式）**共用这一处**。分成两份实现就等于让「delta 累加 === 非流式
+ * 答案」那条判据去比两个各自演化的东西——那条尺当天就废了。
+ */
+async function runCompletion(
+  ctx: OpenAiCompatCtx,
+  userId: string,
+  model: string,
+  parsed: ParsedChat,
+): Promise<CompletionOutcome> {
   let result: unknown
   try {
     result = await Promise.race([
@@ -447,37 +525,117 @@ async function handleChatCompletion(
       ),
     ])
   } catch (err) {
-    sendOpenAiError(res, 504, err instanceof Error ? err.message : String(err), 'api_error', 'timeout')
-    return
+    return {
+      ok: false,
+      status: 504,
+      message: err instanceof Error ? err.message : String(err),
+      type: 'api_error',
+      code: 'timeout',
+    }
   }
 
   const r = result as { kind?: string; taskId?: string; output?: unknown; error?: string; reason?: string }
-  let content: string
   switch (r.kind) {
     case 'ok':
-      content = extractText(r.output)
-      break
+      return { ok: true, content: extractText(r.output) }
     case 'suspended':
-      content = await parkMessage(ctx, userId, typeof r.taskId === 'string' ? r.taskId : '')
-      break
+      return { ok: true, content: await parkMessage(ctx, userId, typeof r.taskId === 'string' ? r.taskId : '') }
     case 'no_participant':
-      sendOpenAiError(res, 503, `「${model}」现在不在线：${r.reason ?? 'no participant'}`, 'api_error', 'model_offline')
-      return
+      return {
+        ok: false,
+        status: 503,
+        message: `「${model}」现在不在线：${r.reason ?? 'no participant'}`,
+        type: 'api_error',
+        code: 'model_offline',
+      }
     case 'cancelled':
-      sendOpenAiError(res, 502, `这次派发被取消：${r.reason ?? 'cancelled'}`, 'api_error', 'cancelled')
-      return
+      return {
+        ok: false,
+        status: 502,
+        message: `这次派发被取消：${r.reason ?? 'cancelled'}`,
+        type: 'api_error',
+        code: 'cancelled',
+      }
     default:
-      sendOpenAiError(res, 502, r.error ?? '派发失败', 'api_error', 'upstream_error')
-      return
+      return { ok: false, status: 502, message: r.error ?? '派发失败', type: 'api_error', code: 'upstream_error' }
+  }
+}
+
+/**
+ * SSE 心跳间隔。派发可能要等到 {@link COMPLETION_TIMEOUT_MS}（两分钟），中间隔着反代
+ * 与客户端各自的空闲超时；心跳走 SSE 注释行，按规范被解析器忽略，只用来说「还活着」。
+ */
+const STREAM_HEARTBEAT_MS = 15_000
+
+interface StreamHandle {
+  /** 结果定稿：内容一帧 + 收尾帧 + `[DONE]`。 */
+  finish(content: string): void
+  /** 派发失败：一帧 `error` 然后收掉连接（**不发 `[DONE]`**）。 */
+  fail(out: Extract<CompletionOutcome, { ok: false }>): void
+}
+
+/**
+ * 开一条 SSE，并**立刻**把首帧（角色 delta）发出去。
+ *
+ * 首帧不是装饰：它让连接当场建立，客户端不会干等到自己超时——这正是 §4.6 选择
+ * 「先开流、后派发」的理由，代价是从这一刻起 HTTP 状态码就锁死在 200 了。
+ */
+function beginStream(
+  res: ServerResponse,
+  head: { readonly id: string; readonly created: number; readonly model: string },
+): StreamHandle {
+  res.writeHead(200, {
+    'content-type': 'text/event-stream; charset=utf-8',
+    'cache-control': 'no-cache, no-transform',
+    connection: 'keep-alive',
+    // nginx 一类反代默认缓冲 proxy_pass 的响应体；缓冲了就等于没有流。
+    'x-accel-buffering': 'no',
+  })
+
+  const chunk = (choice: Record<string, unknown>): void => {
+    const frame = {
+      id: head.id,
+      object: 'chat.completion.chunk',
+      created: head.created,
+      model: head.model,
+      choices: [{ index: 0, ...choice }],
+    }
+    res.write(`data: ${JSON.stringify(frame)}\n\n`)
   }
 
-  sendJson(res, {
-    id: 'chatcmpl-' + randomUUID().replace(/-/g, ''),
-    object: 'chat.completion',
-    created: Math.floor(Date.now() / 1000),
-    model,
-    choices: [{ index: 0, message: { role: 'assistant', content }, finish_reason: 'stop' }],
-    // `usage` 整个字段缺席是刻意的：TaskResult 不带 token 数（用量走
-    // `usageSink` 进账本），报 0 会被读成「这次调用免费」。真账在用量面板。
-  })
+  chunk({ delta: { role: 'assistant' }, finish_reason: null })
+
+  const beat = setInterval(() => res.write(': keep-alive\n\n'), STREAM_HEARTBEAT_MS)
+  // 心跳不该把进程钉住（尤其是测试里）。
+  beat.unref()
+  let stopped = false
+  const stop = (): void => {
+    if (stopped) return
+    stopped = true
+    clearInterval(beat)
+  }
+  // 客户端半路挂断也要把定时器收掉。
+  res.on('close', stop)
+
+  return {
+    finish(content: string): void {
+      stop()
+      // 内容**只发一帧** —— 不假装分片（见顶注）。空正文时一帧都不发，累加仍然等于 ''。
+      if (content.length > 0) chunk({ delta: { content }, finish_reason: null })
+      chunk({ delta: {}, finish_reason: 'stop' })
+      res.write('data: [DONE]\n\n')
+      res.end()
+    },
+    fail(out): void {
+      stop()
+      // 200 已经写出去了，改不了。`status` 这个键不是 OpenAI 标准的，放它是因为
+      // 「这本该是个 503 还是 504」在流里**结构上无处可说**，丢掉就真的丢了；
+      // 多一个键对任何解析器都是无害的。
+      const frame = {
+        error: { message: out.message, type: out.type, code: out.code ?? null, param: null, status: out.status },
+      }
+      res.write(`data: ${JSON.stringify(frame)}\n\n`)
+      res.end()
+    },
+  }
 }
