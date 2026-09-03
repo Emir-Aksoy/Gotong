@@ -52,8 +52,13 @@ export function benchEntry(opts: {
   recallCount?: number
   /** 双时态:已翻篇的事实在这个时间点之后失效。 */
   validToDaysAgo?: number
+  /** 层级(M3c):`episodic` 才量得出「降温把回收从流水挪到冷事实」。默认 `semantic`。 */
+  kind?: MemoryEntry['kind']
+  /** 标成 profile(M3c):逐出序里最受保护的那一层,用来钉住降温不许碰它。 */
+  profile?: boolean
 }): MemoryEntry {
   const meta: Record<string, unknown> = { importance: opts.importance ?? 3 }
+  if (opts.profile) meta['profile'] = true
   if (opts.recalledDaysAgo !== undefined) {
     meta['lastRecalledTs'] = EVICTION_BENCH_NOW - opts.recalledDaysAgo * DAY
   }
@@ -63,7 +68,7 @@ export function benchEntry(opts: {
   }
   return {
     id: opts.id,
-    kind: 'semantic',
+    kind: opts.kind ?? 'semantic',
     text: opts.text,
     ts: EVICTION_BENCH_NOW - opts.writtenDaysAgo * DAY,
     meta,
@@ -107,15 +112,33 @@ export interface EvictionBenchResult {
 }
 
 /**
+ * 执法之前先跑一趟的那一段流水线(M3c 加的口子)。
+ *
+ * 尺子量的是**一条流水线**的后果,而流水线由调用方组装:M3b 什么都不放(基线),
+ * M3c 放降温。这样两次跑的是同一把尺、同一份判据,差别只在被测件——这是从 MU-M1
+ * 一路守到现在的同一条纪律。
+ */
+export type EvictionPrePass = (
+  memory: MemoryHandle,
+  now: number,
+  budgetBytes: number,
+) => Promise<void>
+
+/**
  * 跑一遍夹具:每条用例都真的驱动 `enforceBudget`,按最终存活打分。
  *
  * 预算 = `shouldKeep` 那些条目的字节之和,所以**完美的策略恰好一条不多一条不少**。
  * 这一点让分数有绝对意义:1.0 就是满分,不是「比另一个高一点」。
+ *
+ * 注意预算是按**原始语料**算的,`beforeEnforce` 改 meta 会让字节微微变大(翻篇多一个
+ * `validTo` 键),那部分算在超额里 —— 这正是诚实的:降温确实不减字节,它只是换了
+ * 谁去被回收。
  */
 export async function scoreEviction(
   make: BenchMemoryFactory,
   cases: readonly EvictionCase[],
   policy: EvictionPolicy = {},
+  beforeEnforce?: EvictionPrePass,
 ): Promise<EvictionBenchResult> {
   const perCase: EvictionCaseScore[] = []
 
@@ -126,6 +149,9 @@ export async function scoreEviction(
       .reduce((sum, e) => sum + entryBytes(e), 0)
 
     const memory = await make(c.corpus)
+    // 预算也交给前置段:生产里降温与执法**共用同一个 `budgetBytes`**,尺子上分成
+    // 两个数就会量出一个生产里不存在的形状。
+    if (beforeEnforce) await beforeEnforce(memory, EVICTION_BENCH_NOW, budgetBytes)
     const result = await enforceBudget({
       memory,
       budgetBytes,

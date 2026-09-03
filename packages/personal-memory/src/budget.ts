@@ -247,8 +247,16 @@ export function budgetReviewer(
 // internals
 // ---------------------------------------------------------------------------
 
-/** Keep-value rank: lower = evicted first. */
-function levelRank(e: MemoryEntry, _config: TierConfig): number {
+/**
+ * Keep-value rank: lower = evicted first.
+ *
+ * Exported (M3c) for the SAME reason `entryBytes` was: 降温 must decide "is this
+ * an ad-hoc semantic fact?" and the eviction order already answers that question.
+ * A second copy of the predicate would let the two drift, and the drift would be
+ * silent — 降温 closing something the budget ranks as a profile would invert the
+ * tier protection (a closed entry leads the eviction queue) with nothing to catch it.
+ */
+export function levelRank(e: MemoryEntry, _config: TierConfig): number {
   if (e.kind === 'episodic') return 0
   if (isClusterProfile(e) || isFlatProfile(e)) return 3
   if (isDigest(e)) return 2

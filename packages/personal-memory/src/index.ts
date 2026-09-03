@@ -206,6 +206,7 @@ export {
   enforceBudget,
   budgetReviewer,
   entryBytes,
+  levelRank,
   BUDGET_SCAN_LIMIT,
   DEFAULT_PROTECT_RECENT_EPISODIC,
   type EnforceBudgetOptions,
@@ -366,6 +367,21 @@ export {
   type UmbrellaReviewerOptions,
 } from './skills.js'
 export { PersonalMemoryError, type PersonalMemoryErrorCode } from './errors.js'
+
+// 记忆经济 M3c:阶梯第 ③ 级降温。只盖 `validTo` 与剪死链,没有一行 `forget`。
+export {
+  selectForCooling,
+  pruneDeadLinks,
+  coolingReviewer,
+  AD_HOC_LEVEL_RANK,
+  COOLING_RUNG,
+  DEFAULT_PROTECT_RECENT,
+  DEFAULT_MAX_COOL_PER_TICK,
+  type CoolingSelection,
+  type CoolingSkipped,
+  type SelectForCoolingOptions,
+  type CoolingReviewerOptions,
+} from './cooling.js'
 
 // 记忆经济 M3a:记忆账纯核。只算账不动东西 —— 零 I/O、零模型、零删除。
 export {

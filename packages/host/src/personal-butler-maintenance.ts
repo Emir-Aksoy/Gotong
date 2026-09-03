@@ -75,6 +75,7 @@ import {
   atomicFactsReviewer,
   closedMeta,
   composeReviewers,
+  coolingReviewer,
   DEFAULT_REINFORCE_WEIGHT,
   DEFAULT_SALIENCE_HALF_LIFE_MS,
   isActive,
@@ -287,6 +288,21 @@ export function buildButlerMaintenanceReviewer(
     // Both are 6h background calls; the per-turn hot path stays zero-LLM. Runs
     // AFTER tiered so its dedup sees the fresh cluster profiles too.
     inner: composeReviewers(
+      // M3c 记忆经济 —— 降温排在**最前面**,理由是因果链而不是口味:它只盖
+      // `validTo`(一行 `forget` 都没有),被它翻篇的事实要等下面 `tieredReviewer`
+      // 末尾那次 `enforceBudget` 才真的被回收 —— 而回收先逐过期带正是上面刚接上的
+      // `evictExpiredFirst`。顺序反过来的话,这一 tick 翻的篇要等下一 tick(6 小时后)
+      // 才有人收,「降温」就变成了纯粹的延迟。
+      //
+      // 用同一个 `budgetBytes`:两处要是各算各的分母,「压力到了第 ③ 级」和「真的
+      // 超预算了」会指向不同的时刻,谁也解释不清为什么翻了篇却没人逐。
+      coolingReviewer({
+        budgetBytes: opts.budgetBytes ?? DEFAULT_BUTLER_MEMORY_BUDGET_BYTES,
+        salience: {
+          halfLifeMs: DEFAULT_SALIENCE_HALF_LIFE_MS,
+          reinforceWeight: DEFAULT_REINFORCE_WEIGHT,
+        },
+      }),
       tieredReviewer({
         summarize: opts.summarize,
         ...(opts.tierConfig ? { config: opts.tierConfig } : {}),
