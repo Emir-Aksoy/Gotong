@@ -205,6 +205,7 @@ export {
 export {
   enforceBudget,
   budgetReviewer,
+  entryBytes,
   BUDGET_SCAN_LIMIT,
   DEFAULT_PROTECT_RECENT_EPISODIC,
   type EnforceBudgetOptions,

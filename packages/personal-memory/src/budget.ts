@@ -259,8 +259,16 @@ function isFlatProfile(e: MemoryEntry): boolean {
   return (e.meta as { profile?: unknown } | undefined)?.profile === true
 }
 
-/** UTF-8 bytes of an entry's payload (text + meta) — the on-disk-ish footprint. */
-function entryBytes(e: MemoryEntry): number {
+/**
+ * UTF-8 bytes of an entry's payload (text + meta) — the on-disk-ish footprint.
+ *
+ * Exported (M3b) because the eviction RULER has to set a budget that forces a
+ * known number of evictions, and it must measure with the same function the
+ * policy measures with. Two implementations of "how big is this entry" would
+ * make a scored lift indistinguishable from a rounding difference — the same
+ * reason `scoreRankedIds` and `fuseArms` are each shared by their two callers.
+ */
+export function entryBytes(e: MemoryEntry): number {
   return Buffer.byteLength(e.text ?? '', 'utf8') + Buffer.byteLength(safeMetaJson(e.meta), 'utf8')
 }
 

@@ -75,6 +75,8 @@ import {
   atomicFactsReviewer,
   closedMeta,
   composeReviewers,
+  DEFAULT_REINFORCE_WEIGHT,
+  DEFAULT_SALIENCE_HALF_LIFE_MS,
   isActive,
   isClusterProfile,
   isDigest,
@@ -293,6 +295,22 @@ export function buildButlerMaintenanceReviewer(
         // otherwise the generous default backstop applies. Eviction is
         // importance-aware, so the curated profile outlives the disposable tail.
         budgetBytes: opts.budgetBytes ?? DEFAULT_BUTLER_MEMORY_BUDGET_BYTES,
+        // M3b 记忆经济 —— 显著性通电。这两个数字 `personal-memory` 里早就写好
+        // 了(半衰期 30 天 / 强化权重 0.5),M3b 之前**没有任何一个调用方把它们
+        // 传下来**:`grep -rn 'halfLifeMs|reinforceWeight|evictExpiredFirst'
+        // packages/host/src` 零命中 —— 逐出至今只看重要度与新旧,不看「你到底
+        // 用没用过它」。接上之后,一条三个月前写下、昨天还在用的事实,不再输给
+        // 一条两个月前写下、从没被翻过的。抬升由 `check:memory-eviction` 量:
+        // 该留的留住 0% → 100%。
+        //
+        // 不加旋钮(M0 钉的 114 冻结):它们是常量,要改就改代码、跑门、留 commit。
+        salience: {
+          halfLifeMs: DEFAULT_SALIENCE_HALF_LIFE_MS,
+          reinforceWeight: DEFAULT_REINFORCE_WEIGHT,
+        },
+        // 翻篇留下的死历史先于任何活着的条目被逐 —— 否则「降温用翻篇不用硬删」
+        // 只是把字节从一处挪到另一处,没有人来收尾。
+        evictExpiredFirst: true,
       }),
       atomicFactsReviewer({ summarize: opts.summarize }),
       // M-RECON — reconcile AFTER extraction (so its dedup sees the fresh atomic facts

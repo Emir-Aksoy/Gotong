@@ -30,6 +30,7 @@
  */
 
 import { enforceBudget, type MemoryUsageMeasure } from './budget.js'
+import type { SalienceOptions } from './salience.js'
 import {
   DEFAULT_CONSOLIDATE_KEEP_RECENT,
   DEFAULT_PROFILE_HARD_CAP,
@@ -301,6 +302,23 @@ export interface TieredReviewerOptions
   measureBytes?: MemoryUsageMeasure
   /** Recent episodic entries the budget never evicts. */
   protectRecentEpisodic?: number
+  /**
+   * M3b 显著性通电 —— 透传给 `enforceBudget` 的衰减 / 强化。
+   *
+   * 不传 = 逐出的 keep-value 就是重要度整数(与通电前逐字节相同的顺序)。传了,
+   * 「久不用的」才会沉到「新写下的」下面去。这两个数字包里早就写好了
+   * (`DEFAULT_SALIENCE_HALF_LIFE_MS` / `DEFAULT_REINFORCE_WEIGHT`),M3b 之前
+   * **没有任何一个调用方把它们传下来** —— 那正是「显著性经济写好了但从没通电」
+   * 这句诊断的可执行形式。
+   */
+  salience?: SalienceOptions
+  /**
+   * M3b —— 透传给 `enforceBudget`:已经翻篇的死历史先于任何活着的条目被逐。
+   *
+   * 不传 = 关(逐出顺序与通电前逐字节相同)。开了才谈得上「降温用翻篇不用硬删」
+   * 那条设计:翻篇留下的死历史得有人来收,否则翻篇只是把字节从一处挪到另一处。
+   */
+  evictExpiredFirst?: boolean
 }
 
 /**
@@ -347,6 +365,8 @@ export function tieredReviewer(opts: TieredReviewerOptions): MemoryReviewer {
         ...(opts.protectRecentEpisodic !== undefined
           ? { protectRecentEpisodic: opts.protectRecentEpisodic }
           : {}),
+        ...(opts.salience ? { salience: opts.salience } : {}),
+        ...(opts.evictExpiredFirst ? { evictExpiredFirst: true } : {}),
         now: () => ctx.now,
       })
       if (b) {
