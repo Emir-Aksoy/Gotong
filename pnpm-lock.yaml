@@ -143,6 +143,18 @@ importers:
         specifier: workspace:*
         version: link:../../packages/services-sdk
 
+  examples/atong-memory-economy:
+    dependencies:
+      '@gotong/personal-butler':
+        specifier: workspace:*
+        version: link:../../packages/personal-butler
+      '@gotong/personal-memory':
+        specifier: workspace:*
+        version: link:../../packages/personal-memory
+      '@gotong/services-sdk':
+        specifier: workspace:*
+        version: link:../../packages/services-sdk
+
   examples/atong-recovery:
     dependencies:
       '@gotong/cli':

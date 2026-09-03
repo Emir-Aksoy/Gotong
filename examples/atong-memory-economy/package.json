@@ -1,0 +1,16 @@
+{
+  "name": "@gotong/example-atong-memory-economy",
+  "version": "0.0.0",
+  "type": "module",
+  "private": true,
+  "description": "记忆经济 capstone —— 一万轮合成对话推进后,用 M1~M4 真代码证明三件事:万轮不膨胀(写侧新颖门把复述折在写下的那一刻)、跨店召回不被洪水冲垮、用则存不用则忘(显著性经济真的通了电)。确定性、零 API key。",
+  "scripts": {
+    "start": "tsx src/index.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@gotong/personal-butler": "workspace:*",
+    "@gotong/personal-memory": "workspace:*",
+    "@gotong/services-sdk": "workspace:*"
+  }
+}
