@@ -59,6 +59,15 @@ export interface KnowledgeFileInfo {
   path: string
   bytes: number
   archived: boolean
+  /**
+   * 最后一次**写**的时间(ms)。M3d 的冷度信号。
+   *
+   * 走 `stat` 本来就返回的 `mtimeMs` —— walk 一直在 stat,只是把它丢了,所以这个
+   * 字段一次额外系统调用都不要。**它跟踪的是写不是读**:一份天天被 `read` 却从不
+   * 改的参考件在这里看着是冷的。之所以还敢用它,是因为用错的代价只是**多一个
+   * `archive/` 前缀**——文件还在、还能读、还在 list 里——而不是数据没了。
+   */
+  mtimeMs: number
 }
 
 export interface KnowledgeListing {
@@ -141,6 +150,8 @@ export function validateKnowledgePath(raw: unknown, limits: KnowledgeLibraryLimi
 interface WalkedFile {
   rel: string
   bytes: number
+  /** 最后写入时间。`stat` 本来就带,以前被丢掉了(M3d 要它当冷度信号)。 */
+  mtimeMs: number
 }
 
 export function openKnowledgeLibrary(opts: OpenKnowledgeLibraryOptions): KnowledgeLibrary {
@@ -172,7 +183,8 @@ export function openKnowledgeLibrary(opts: OpenKnowledgeLibraryOptions): Knowled
         out.push(...(await walk(rel, strays)))
       } else if (e.isFile() && e.name.endsWith('.md') && !e.name.startsWith('.')) {
         try {
-          out.push({ rel, bytes: (await stat(join(opts.dir, rel))).size })
+          const st = await stat(join(opts.dir, rel))
+          out.push({ rel, bytes: st.size, mtimeMs: st.mtimeMs })
         } catch {
           strays.count++ // 列目录和 stat 之间消失了——按杂物计,不炸整个 list
         }
@@ -206,8 +218,12 @@ export function openKnowledgeLibrary(opts: OpenKnowledgeLibraryOptions): Knowled
         const byPath = (a: WalkedFile, b: WalkedFile) => (a.rel < b.rel ? -1 : a.rel > b.rel ? 1 : 0)
         return {
           files: [
-            ...[...s.active].sort(byPath).map((f) => ({ path: f.rel, bytes: f.bytes, archived: false })),
-            ...[...s.archived].sort(byPath).map((f) => ({ path: f.rel, bytes: f.bytes, archived: true })),
+            ...[...s.active]
+              .sort(byPath)
+              .map((f) => ({ path: f.rel, bytes: f.bytes, archived: false, mtimeMs: f.mtimeMs })),
+            ...[...s.archived]
+              .sort(byPath)
+              .map((f) => ({ path: f.rel, bytes: f.bytes, archived: true, mtimeMs: f.mtimeMs })),
           ],
           activeCount: s.active.length,
           activeBytes: s.activeBytes,

@@ -86,6 +86,21 @@ export {
   type KnowledgeLibraryLimits,
 } from './knowledge-library.js'
 
+// 记忆经济 M3d:货架满了自动归档最冷的几份。归档是 rename,不删 —— 字节那一面
+// 只报不动(见模块顶注)。
+export {
+  selectForArchive,
+  restingActiveCount,
+  knowledgeCoolingReviewer,
+  KNOWLEDGE_COOLING_RUNG,
+  DEFAULT_PROTECT_RECENT_FILES,
+  DEFAULT_MAX_ARCHIVE_PER_TICK,
+  type KnowledgeCoolingSelection,
+  type KnowledgeCoolingSkipped,
+  type SelectForArchiveOptions,
+  type KnowledgeCoolingReviewerOptions,
+} from './knowledge-cooling.js'
+
 export {
   ButlerSessionWindow,
   SESSION_IDLE_MS,

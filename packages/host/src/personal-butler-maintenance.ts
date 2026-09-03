@@ -90,6 +90,7 @@ import {
   type TierConfig,
 } from '@gotong/personal-memory'
 import {
+  knowledgeCoolingReviewer,
   knowledgeLibrarianReviewer,
   META_PROMOTED_TO,
   openKnowledgeLibrary,
@@ -188,6 +189,15 @@ export interface ButlerMaintenanceReviewerOptions {
    * (default) ⇒ not composed ⇒ knowledge/ is never written by maintenance.
    */
   librarian?: KnowledgeLibrary
+  /**
+   * M3d 记忆经济 —— 知识库这一面的降温(零 LLM,**始终接**,与 opt-in 的
+   * {@link librarian} 是两件事:那一步用模型往货架上放东西,这一步不用模型,只在
+   * 货架九成满时把最久没维护的几份挪进 `archive/`)。
+   *
+   * 缺席 ⇒ 不组合 ⇒ 一份都不动。压力不到第 ③ 级同样一份都不动,所以一个不到 180
+   * 份文件的知识库逐字节看不出这一层存在。
+   */
+  knowledge?: KnowledgeLibrary
 }
 
 /**
@@ -341,6 +351,10 @@ export function buildButlerMaintenanceReviewer(
       ...(opts.librarian
         ? [butlerKnowledgeLibrarianMaintenanceReviewer(opts.summarize, opts.librarian)]
         : []),
+      // M3d — 货架降温排在**图书馆员之后**:先上架再看货架满不满,量到的才是这一 tick
+      // 结束时的真实份数;反过来的话刚归完档就被新上架的顶回九成满,白跑一趟。而且
+      // 刚上架的那几份 mtime 最新,天然落在保护期里,不会被自己上一步的产出误伤。
+      ...(opts.knowledge ? [knowledgeCoolingReviewer({ library: opts.knowledge })] : []),
       // M-GRAPH — link LAST so it links the atomic facts THIS tick just extracted.
       // Opt-in; off ⇒ not composed ⇒ no links written (frozen block byte-stable).
       ...(opts.links ? [butlerLinkMaintenanceReviewer()] : []),
@@ -409,6 +423,10 @@ export async function runButlerMaintenanceOnce(
     userId: opts.userId,
     logger: opts.logger,
   })
+  const knowledge = openKnowledgeLibrary({
+    dir: join(ownerDir(opts.rootDir, { kind: 'user', id: opts.userId }), 'knowledge'),
+    logger: opts.logger,
+  })
   const reviewer = buildButlerMaintenanceReviewer({
     summarize: opts.summarize,
     statusFile,
@@ -420,14 +438,11 @@ export async function runButlerMaintenanceOnce(
     // butler factory hands the agent's toolset (`ownerDir(root,{user,id})/knowledge`),
     // so the 6h pass and the conversational tools shelve into one tree. Fresh handle
     // per tick, mirroring how this function opens memory + STATUS.
-    ...(opts.librarian
-      ? {
-          librarian: openKnowledgeLibrary({
-            dir: join(ownerDir(opts.rootDir, { kind: 'user', id: opts.userId }), 'knowledge'),
-            logger: opts.logger,
-          }),
-        }
-      : {}),
+    //
+    // M3d — 上架(opt-in)与货架降温(始终接)共用**同一个** handle:一个 handle 就是
+    // 一条串行链,两个 pass 因此永远不会在同一棵树上打架;两处各开一个才会。
+    knowledge,
+    ...(opts.librarian ? { librarian: knowledge } : {}),
   })
   const episodic = await memory.recall({ kinds: ['episodic'], k: opts.recallK ?? DEFAULT_RECALL_K })
   const out = await reviewer({ memory, episodic, now: now() })

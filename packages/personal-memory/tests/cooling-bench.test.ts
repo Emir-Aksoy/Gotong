@@ -78,8 +78,10 @@ const COOLING_SRC = readFileSync(fileURLToPath(new URL('../src/cooling.ts', impo
 
 describe('① 红线:这一层不删东西', () => {
   it('源码里没有一行 forget / unlink / rm', () => {
-    // 记忆经济全程两条红线之一:**全仓恰好一把剪刀,不在这里**。降温写的是 meta,
-    // 回收发生在 `enforceBudget`。这条承诺没有尺子量得了,只能读源码钉死。
+    // 记忆经济全程两条红线之一:**这一层不新增删除执法点**。降温写的是 meta,
+    // 压力驱动的回收只在 `enforceBudget` 那一处发生(全仓另有十几处 `forget`,各有
+    // 各的理由——模型的 forget 工具、reconcile 取代、蒸馏收尾……——但没有一处是
+    // 记忆经济加的)。这条承诺没有尺子量得了,只能读源码钉死。
     const body = COOLING_SRC.split('*/').slice(1).join('*/') // 掐掉顶注,顶注里会提到这些词
     expect(body).not.toMatch(/\bforget\s*\(/)
     expect(body).not.toMatch(/\bunlink\b/)
