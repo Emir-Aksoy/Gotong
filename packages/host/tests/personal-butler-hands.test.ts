@@ -467,11 +467,28 @@ describe('HANDS-M2 ① jailShapeFor(假探针)', () => {
     }
   }
 
+
+  /**
+   * `hiddenFiles` 的判据:探针说存在的两条都盖住了,探针说不存在的一条都没混进来。
+   *
+   * 刻意**不**用精确数组。`variants()` 在真实文件系统上做一次 `realpathSync`,而假
+   * 探针管不到它:装了 Docker Desktop 的 mac 上 `/var/run/docker.sock` 是指向
+   * `$HOME/.docker/run/docker.sock` 的符号链接,于是那条真路径也会被(正确地)盖住。
+   * 生产行为没错——符号链接和它的目标本来就都该藏;错的是把「一共几条」也当成判据,
+   * 那会让这台机器上有没有跑过 Docker 决定这个测试红不红。
+   */
+  function expectHiddenFiles(hiddenFiles: readonly string[]): void {
+    expect(hiddenFiles).toEqual(expect.arrayContaining(['/etc/gotong.env', '/var/run/docker.sock']))
+    for (const absent of ['/run/docker.sock', '/run/podman/podman.sock', '/var/run/podman/podman.sock']) {
+      expect(hiddenFiles).not.toContain(absent)
+    }
+  }
+
   it('默认藏 <space>+HOME+/home;点名文件存在才盖;node 前缀落在 HOME 里就再放开只读', () => {
     const s = jailShapeFor('/srv/space', DEFAULT_CFG, probe())
     expect(s.hiddenDirs).toEqual(expect.arrayContaining(['/srv/space', home, '/home']))
     expect(s.hiddenDirs).not.toContain('/root') // 探针说不存在
-    expect(s.hiddenFiles).toEqual(['/etc/gotong.env', '/var/run/docker.sock'])
+    expectHiddenFiles(s.hiddenFiles)
     expect(s.readOnlyRoots).toEqual([nodePrefix])
     expect(s.skipped).toEqual([])
   })
@@ -488,7 +505,7 @@ describe('HANDS-M2 ① jailShapeFor(假探针)', () => {
       probe(),
     )
     expect(s.hiddenDirs).toContain('/opt/tools')
-    expect(s.hiddenFiles).toEqual(['/etc/gotong.env', '/var/run/docker.sock'])
+    expectHiddenFiles(s.hiddenFiles)
     expect(s.skipped).toEqual(['/nope', '/nope2'])
     // /opt/tools 同时被藏又要放开只读 → 只读赢(在藏起来的目录里),.cargo 亦然
     expect(s.readOnlyRoots).toEqual(expect.arrayContaining([nodePrefix, `${home}/.cargo`, '/opt/tools']))
