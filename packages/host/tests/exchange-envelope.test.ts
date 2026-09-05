@@ -22,6 +22,7 @@ import { readFile } from 'node:fs/promises'
 import { generateKeyPairSync } from 'node:crypto'
 import { describe, expect, it } from 'vitest'
 import { ecThumbprint, es256Sign, type AgentCardSigner } from '@gotong/a2a'
+import { DeliveryEvidenceError, verifyDeliveryEvidence } from '../src/delivery-evidence.js'
 
 import {
   ENVELOPE_CAPABILITY_RE,
@@ -104,6 +105,19 @@ function parseErrs(raw: string): string[] {
 }
 
 describe('parseExchangeEnvelope', () => {
+  it('rejects lone surrogates in payload values and keys at the envelope boundary', () => {
+    for (const payload of [{ value: '\ud800' }, { '\udc00': 'value' }]) {
+      expect(parseErrs(ser({ ...baseRequest(), payload })).join(' ')).toContain('surrogate')
+    }
+  })
+
+  it.each(['1e309', '-1e309'])('rejects JSON numeric overflow (%s) before dispatch or verification', (number) => {
+    for (const envelope of [baseRequest(), baseResult()]) {
+      const raw = ser(envelope).replace('"payload":{', `"payload":{"overflow":${number},`)
+      expect(parseErrs(raw).join(' ')).toContain('non-finite')
+    }
+  })
+
   it('accepts the doc §3.4 request shape and echoes every field', () => {
     const env = parseOk(ser(baseRequest()))
     expect(env.id).toBe(REQ_ID)
@@ -240,6 +254,14 @@ describe('parseExchangeEnvelope', () => {
 })
 
 describe('sign / verify', () => {
+  it('signs nested __proto__ data and rejects tampering with it', () => {
+    const env = parseOk(ser({ ...baseResult(), payload: { ok: true, output: JSON.parse('{"__proto__":{"value":"original"}}') } }))
+    const signed = parseOk(ser(signExchangeEnvelope(env, makeSigner())))
+    expect(verifyExchangeEnvelope(signed).state).toBe('valid')
+    ;(signed.payload.output as { __proto__: { value: string } }).__proto__.value = 'tampered'
+    expect(verifyExchangeEnvelope(signed).state).toBe('invalid')
+  })
+
   it('sign → serialize → parse → verify round-trips, kid recomputed from the jwk', () => {
     const signer = makeSigner()
     const signed = signExchangeEnvelope(parseOk(ser(baseRequest())), signer)
@@ -292,6 +314,58 @@ describe('sign / verify', () => {
 })
 
 describe('result assembly', () => {
+  it('checks the serialized output and returns detached deliverable JSON', () => {
+    const date = new Date('2026-09-04T00:00:00Z')
+    const request = parseOk(ser({ ...baseRequest(), acceptance: [
+      { id: 'missing', path: '/text', op: 'exists' },
+      { id: 'date', path: '/date', op: 'equals', expected: date.toISOString() },
+      { id: 'array', path: '/items/0', op: 'equals', expected: null },
+    ] }))
+    const output = { text: undefined, date, items: [undefined] }
+    const env = buildResultEnvelope({ request, ok: true, output, fromName: 'hub', provenance: { taskId: 't1', by: 'atong' } })
+    expect(env.payload.output).toEqual({ date: date.toISOString(), items: [null] })
+    expect(env.evidence?.results.map(r => r.status)).toEqual(['failed', 'passed', 'passed'])
+    date.setUTCFullYear(2000)
+    const wire = parseOk(ser(signExchangeEnvelope(env, makeSigner())))
+    expect(verifyExchangeEnvelope(wire).state).toBe('valid')
+    expect(verifyDeliveryEvidence(wire.evidence, wire.payload, request)).toMatchObject({ consistent: true, failed: 1, passed: 2 })
+  })
+
+  it('fits the JSON representation of toJSON output before computing evidence', () => {
+    const request = parseOk(ser({ ...baseRequest(), acceptance: [{ id: 'end', path: '/text', op: 'contains', expected: 'THE_END' }] }))
+    const output = { toJSON: () => ({ text: 'x'.repeat(ENVELOPE_MAX_PAYLOAD_BYTES) + 'THE_END' }) }
+    const env = buildResultEnvelope({ request, ok: true, output, fromName: 'hub', provenance: { taskId: 't1', by: 'atong' } })
+    expect((env.payload.output as { text: string }).text).toContain('[truncated')
+    expect(env.evidence?.results).toEqual([{ id: 'end', status: 'failed' }])
+    const wire = parseOk(ser(env))
+    expect(verifyDeliveryEvidence(wire.evidence, wire.payload, request).consistent).toBe(true)
+  })
+
+  it('rejects acceptance without task provenance instead of silently dropping evidence', () => {
+    const request = parseOk(ser({ ...baseRequest(), acceptance: [{ id: 'a', op: 'exists', path: '' }] }))
+    expect(() => buildResultEnvelope({ request, ok: true, output: {}, fromName: 'hub' })).toThrow(DeliveryEvidenceError)
+  })
+
+  it('carries acceptance evidence computed over the fitted output and signs it', () => {
+    const request = parseOk(ser({ ...baseRequest(), acceptance: [
+      { id: 'ending', path: '/text', op: 'contains', expected: 'THE_END' },
+    ] }))
+    const env = buildResultEnvelope({
+      request, ok: true, output: { text: 'x'.repeat(ENVELOPE_MAX_PAYLOAD_BYTES) + 'THE_END' },
+      fromName: 'hub', provenance: { taskId: 't1', by: 'atong' },
+    })
+    expect(env.evidence?.results).toEqual([{ id: 'ending', status: 'failed' }])
+    const signed = signExchangeEnvelope(env, makeSigner())
+    expect(verifyExchangeEnvelope(parseOk(ser(signed))).state).toBe('valid')
+    signed.evidence!.results[0]!.status = 'passed'
+    expect(verifyExchangeEnvelope(signed).state).toBe('invalid')
+  })
+
+  it('rejects evidence on requests and acceptance on results', () => {
+    expect(parseExchangeEnvelope(ser({ ...baseRequest(), evidence: {} })).ok).toBe(false)
+    expect(parseExchangeEnvelope(ser({ ...baseResult(), acceptance: [{ id: 'a', op: 'human', description: 'Review' }] })).ok).toBe(false)
+  })
+
   it('generateExchangeId matches the id grammar', () => {
     for (let i = 0; i < 20; i++) expect(generateExchangeId()).toMatch(ENVELOPE_ID_RE)
   })
@@ -375,7 +449,7 @@ describe('schema.json pinning (cross-pack truth source)', () => {
     expect(schema.description).toContain(String(ENVELOPE_MAX_PAYLOAD_BYTES))
     // Top-level key set: the schema's properties ARE the validator's TOP_KEYS.
     expect(Object.keys(schema.properties).sort()).toEqual(
-      ['schema', 'id', 'kind', 'replyTo', 'createdAt', 'from', 'to', 'capability', 'title', 'payload', 'sig'].sort(),
+      ['schema', 'id', 'kind', 'replyTo', 'createdAt', 'from', 'to', 'capability', 'title', 'payload', 'acceptance', 'evidence', 'sig'].sort(),
     )
   })
 

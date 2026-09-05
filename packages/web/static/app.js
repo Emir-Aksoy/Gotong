@@ -1068,6 +1068,7 @@
     bindOnce(document.getElementById('me-devices'), 'click', onDevicesClick)
     // EXCH-M1 — deliverable-envelope import: preview on pick, confirmed import.
     bindOnce(document.getElementById('me-exchange-file'), 'change', onExchangeFilePicked)
+    bindOnce(document.getElementById('me-exchange-original'), 'change', () => onExchangeFilePicked({ target: document.getElementById('me-exchange-file') }))
     bindOnce(document.getElementById('me-exchange-import-btn'), 'click', submitExchangeImport)
     // PUSH-M3 — browser notification card (Web Push subscribe/unsubscribe).
     bindOnce(document.getElementById('me-push-btn'), 'click', onPushToggle)
@@ -1371,6 +1372,7 @@
   // without re-posting the file.
   let __exchange = null // { raw, view } after a preview
   let __exchangeImport = null // { id, view } after a confirmed import
+  let __exchangePreviewEpoch = 0
 
   async function loadMeExchange() {
     const card = document.getElementById('me-exchange-card')
@@ -1390,28 +1392,39 @@
   }
 
   async function onExchangeFilePicked(ev) {
+    const epoch = ++__exchangePreviewEpoch
     const file = ev.target?.files?.[0]
     const status = document.getElementById('me-exchange-status')
-    if (!file) return
     __exchange = null
     __exchangeImport = null
+    const preview = document.getElementById('me-exchange-preview')
+    if (preview) preview.textContent = ''
+    const targets = document.getElementById('me-exchange-targets')
+    if (targets) targets.hidden = true
     const resultBox = document.getElementById('me-exchange-result')
     if (resultBox) resultBox.textContent = ''
+    if (!file) { if (status) status.textContent = ''; return }
     if (status) status.textContent = t('meExchangePreviewing')
-    let raw
+    let raw, requestRaw
     try {
+      const original = document.getElementById('me-exchange-original')?.files?.[0]
+      if (file.size > 262144 || (original && original.size > 262144)) throw new Error('File exceeds 256 KiB')
       raw = await file.text()
+      if (original) requestRaw = await original.text()
     } catch {
+      if (epoch !== __exchangePreviewEpoch) return
       if (status) status.textContent = t('meExchangeReadFailed')
       return
     }
+    if (epoch !== __exchangePreviewEpoch) return
     try {
       const r = await fetch('/api/me/exchange/preview', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ raw }),
+        body: JSON.stringify({ raw, ...(requestRaw === undefined ? {} : { requestRaw }) }),
       })
       const j = await r.json().catch(() => null)
+      if (epoch !== __exchangePreviewEpoch) return
       if (!r.ok || !j) {
         if (status) status.textContent = t('meExchangeFailed', j?.error || `HTTP ${r.status}`)
         return
@@ -1420,6 +1433,7 @@
       __exchange = { raw, view: j }
       renderExchangePreview(__exchange)
     } catch (err) {
+      if (epoch !== __exchangePreviewEpoch) return
       if (status) status.textContent = t('meExchangeFailed', err?.message || err)
     }
   }
@@ -1467,6 +1481,14 @@
         : sv.state === 'invalid' ? t('meExchangeSigInvalid', sv.reason || '')
           : t('meExchangeSigUnsigned')
     box.appendChild(sig)
+    if (v.evidence) {
+      const row = document.createElement('div')
+      const e = v.evidence
+      row.textContent = t('meExchangeEvidence', e.passed, e.failed, e.untested) + ' · ' +
+        t(e.consistent ? 'meExchangeEvidenceConsistent' : 'meExchangeEvidenceInconsistent') + ' · ' +
+        t(e.requestMatch === 'matched' ? 'meExchangeRequestMatched' : e.requestMatch === 'mismatch' ? 'meExchangeRequestMismatch' : 'meExchangeRequestMissing')
+      box.appendChild(row)
+    }
     if (v.replay?.imported) {
       // Already imported — no second import offer (the archive is the truth).
       const row = document.createElement('div')

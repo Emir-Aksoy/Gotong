@@ -96,6 +96,202 @@
       "type": "object",
       "description": "kind=request: task input (free-form JSON object). kind=result: exactly { ok: boolean, output?: any, error?: string }."
     },
+    "acceptance": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 32,
+      "description": "At most 16384 serialized UTF-8 bytes; ids must be unique. JSON pointers select fields within payload.output. No executable checks.",
+      "items": {
+        "oneOf": [
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "op",
+              "description"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64,
+                "pattern": "^[^\\u0000-\\u001f\\u007f\\u202a-\\u202e\\u2066-\\u2069]+$"
+              },
+              "op": {
+                "const": "human"
+              },
+              "description": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 500,
+                "pattern": "^[^\\u0000-\\u001f\\u007f\\u202a-\\u202e\\u2066-\\u2069]+$"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "op",
+              "path"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64,
+                "pattern": "^[^\\u0000-\\u001f\\u007f\\u202a-\\u202e\\u2066-\\u2069]+$"
+              },
+              "op": {
+                "const": "exists"
+              },
+              "path": {
+                "type": "string",
+                "maxLength": 500,
+                "pattern": "^(?:|/(?:[^~]|~[01])*)$"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "op",
+              "path",
+              "expected"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64,
+                "pattern": "^[^\\u0000-\\u001f\\u007f\\u202a-\\u202e\\u2066-\\u2069]+$"
+              },
+              "op": {
+                "const": "equals"
+              },
+              "path": {
+                "type": "string",
+                "maxLength": 500,
+                "pattern": "^(?:|/(?:[^~]|~[01])*)$"
+              },
+              "expected": {}
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "op",
+              "path",
+              "expected"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64,
+                "pattern": "^[^\\u0000-\\u001f\\u007f\\u202a-\\u202e\\u2066-\\u2069]+$"
+              },
+              "op": {
+                "const": "contains"
+              },
+              "path": {
+                "type": "string",
+                "maxLength": 500,
+                "pattern": "^(?:|/(?:[^~]|~[01])*)$"
+              },
+              "expected": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
+        ]
+      }
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema",
+        "requestDigest",
+        "payloadDigest",
+        "checks",
+        "results",
+        "provenance"
+      ],
+      "properties": {
+        "schema": {
+          "const": "gotong.evidence/v1"
+        },
+        "requestDigest": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "payloadDigest": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "checks": {
+          "$ref": "#/properties/acceptance"
+        },
+        "results": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 32,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "status"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64,
+                "pattern": "^[^\\u0000-\\u001f\\u007f\\u202a-\\u202e\\u2066-\\u2069]+$"
+              },
+              "status": {
+                "enum": [
+                  "passed",
+                  "failed",
+                  "untested"
+                ]
+              }
+            }
+          }
+        },
+        "provenance": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "taskId",
+            "by"
+          ],
+          "properties": {
+            "taskId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200,
+              "pattern": "^[^\\u0000-\\u001f\\u007f\\u202a-\\u202e\\u2066-\\u2069]+$"
+            },
+            "by": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200,
+              "pattern": "^[^\\u0000-\\u001f\\u007f\\u202a-\\u202e\\u2066-\\u2069]+$"
+            }
+          }
+        }
+      }
+    },
     "sig": {
       "type": "object",
       "additionalProperties": false,
@@ -163,6 +359,7 @@
         "required": [
           "replyTo"
         ],
+        "not": { "required": ["acceptance"] },
         "properties": {
           "payload": {
             "type": "object",
@@ -183,6 +380,7 @@
         }
       },
       "else": {
+        "allOf": [{ "not": { "required": ["evidence"] } }],
         "not": {
           "required": [
             "replyTo"

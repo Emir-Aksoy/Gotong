@@ -20,11 +20,12 @@ import { readJsonBody, sendJson } from './http-helpers.js'
 
 /** Duck view of the host's MeExchangeService (no host import — surface pattern). */
 export interface MeExchangeSurface {
-  preview(userId: string, raw: string): Promise<{
+  preview(userId: string, raw: string, requestRaw?: string): Promise<{
     valid: boolean
     errors?: string[]
     summary?: { id: string; kind: string; title: string; capability?: string; [k: string]: unknown }
     signature?: unknown
+    evidence?: unknown
     replay?: { imported: true; mine: boolean; status?: string }
     dispatchable: boolean
   }>
@@ -98,13 +99,17 @@ export async function handleMeExchangeRoute(
       sendJson(res, { error: '操作太频繁了,过一会儿再试。', code: 'rate_limited' }, 429)
       return true
     }
-    const body = (await readJsonBody(req).catch(() => null)) as { raw?: unknown } | null
+    const body = (await readJsonBody(req).catch(() => null)) as { raw?: unknown; requestRaw?: unknown } | null
     const raw = body?.raw
     if (typeof raw !== 'string' || raw.length === 0) {
       sendJson(res, { error: 'raw (the envelope file text) is required', code: 'bad_request' }, 400)
       return true
     }
-    const view = await deps.exchange.preview(userId, raw)
+    if (body?.requestRaw !== undefined && typeof body.requestRaw !== 'string') {
+      sendJson(res, { error: 'requestRaw must be a string', code: 'bad_request' }, 400)
+      return true
+    }
+    const view = await deps.exchange.preview(userId, raw, body?.requestRaw as string | undefined)
     // Eligible import targets: workflows this member can run, narrowed to the
     // envelope's capability when it names one. Only id + label go out.
     let targets: Array<{ workflowId: string; label: string }> = []

@@ -281,6 +281,7 @@ describe('EXCH-M4 workbuddy pack anti-drift gate', () => {
       from_name: '老陈 (WorkBuddy @ 台式机)',
       payload: { question: 'CLI 走一遍' },
       capability: 'market.analysis',
+      acceptance: [{ id: 'answer', op: 'exists', path: '/text' }],
     })
     const res = runCli(tmp, ['emit'], draft)
     expect(res.status).toBe(0)
@@ -289,7 +290,10 @@ describe('EXCH-M4 workbuddy pack anti-drift gate', () => {
     const raw = readFileSync(join(tmp, 'gotong-out', `${m![1]}.json`), 'utf8')
     const hub = parseExchangeEnvelope(raw)
     expect(hub.ok).toBe(true)
-    if (hub.ok) expect(hub.envelope.capability).toBe('market.analysis')
+    if (hub.ok) {
+      expect(hub.envelope.capability).toBe('market.analysis')
+      expect(hub.envelope.acceptance).toEqual([{ id: 'answer', op: 'exists', path: '/text' }])
+    }
 
     // Same id twice = refused (id is the idempotency key).
     const again = runCli(tmp, ['emit'], draft)
@@ -379,7 +383,7 @@ describe('EXCH-M4 workbuddy pack anti-drift gate', () => {
   // ── pack hygiene ───────────────────────────────────────────────────────────
   it('the script stays stdlib-only — a plain copy is a complete install (no pip)', async () => {
     const src = await readFile(scriptPath, 'utf8')
-    const allowed = new Set(['hashlib', 'json', 'os', 're', 'secrets', 'sys', 'base64', 'datetime'])
+    const allowed = new Set(['hashlib', 'json', 'math', 'os', 're', 'secrets', 'sys', 'base64', 'datetime'])
     for (const line of src.split('\n')) {
       const m = /^(?:import|from)\s+([a-zA-Z_][a-zA-Z0-9_.]*)/.exec(line.trim())
       if (!m) continue

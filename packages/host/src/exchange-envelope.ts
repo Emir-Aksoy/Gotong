@@ -26,6 +26,7 @@
 
 import { createPublicKey, randomBytes, verify as cryptoVerify } from 'node:crypto'
 import { ecThumbprint, jcsCanonicalize, type AgentCardSigner } from '@gotong/a2a'
+import { DeliveryEvidenceError, buildDeliveryEvidence, parseAcceptance, parseDeliveryEvidence, type AcceptanceCheck, type DeliveryEvidence } from './delivery-evidence.js'
 
 // ─── Wire shapes ─────────────────────────────────────────────────────────────
 
@@ -66,6 +67,8 @@ export interface ExchangeEnvelope {
   capability?: string
   title: string
   payload: Record<string, unknown>
+  acceptance?: AcceptanceCheck[]
+  evidence?: DeliveryEvidence
   sig?: EnvelopeSig
 }
 
@@ -96,7 +99,7 @@ export const ENVELOPE_MAX_HUB_CHARS = 200
 /** Collected-error ceiling — one round of feedback, not a firehose. */
 export const EXCHANGE_MAX_ERRORS = 20
 
-const TOP_KEYS = new Set(['schema', 'id', 'kind', 'replyTo', 'createdAt', 'from', 'to', 'capability', 'title', 'payload', 'sig'])
+const TOP_KEYS = new Set(['schema', 'id', 'kind', 'replyTo', 'createdAt', 'from', 'to', 'capability', 'title', 'payload', 'acceptance', 'evidence', 'sig'])
 const FROM_KEYS = new Set(['name', 'hub', 'kid'])
 const TO_KEYS = new Set(['name'])
 const SIG_KEYS = new Set(['alg', 'kid', 'jwk', 'signature'])
@@ -175,6 +178,13 @@ export function parseExchangeEnvelope(raw: string): EnvelopeParseResult {
   }
   if (!isPlainObject(parsed)) {
     return { ok: false, errors: ['file: top level must be a JSON object'] }
+  }
+  // JSON.parse accepts numeric overflow and lone surrogates; reject them before
+  // an import can dispatch and only later discover that evidence cannot be built.
+  try {
+    jcsCanonicalize(parsed)
+  } catch (err) {
+    return { ok: false, errors: [`file: not valid JCS input (${err instanceof Error ? err.message : String(err)})`] }
   }
 
   const errors: string[] = []
@@ -301,6 +311,15 @@ export function parseExchangeEnvelope(raw: string): EnvelopeParseResult {
     }
   }
 
+  if (parsed.acceptance !== undefined) {
+    if (kind !== 'request') fail('acceptance: only requests carry acceptance checks')
+    try { parseAcceptance(parsed.acceptance) } catch (err) { fail(`acceptance: ${err instanceof Error ? err.message : String(err)}`) }
+  }
+  if (parsed.evidence !== undefined) {
+    if (kind !== 'result') fail('evidence: only results carry evidence')
+    try { parseDeliveryEvidence(parsed.evidence) } catch (err) { fail(`evidence: ${err instanceof Error ? err.message : String(err)}`) }
+  }
+
   const sig = parsed.sig
   if (sig !== undefined) {
     if (!isPlainObject(sig)) {
@@ -421,7 +440,8 @@ export function generateExchangeId(): string {
 }
 
 export interface BuildResultOpts {
-  request: Pick<ExchangeEnvelope, 'id' | 'title'>
+  request: Pick<ExchangeEnvelope, 'id' | 'title'> & Partial<ExchangeEnvelope>
+  provenance?: DeliveryEvidence['provenance']
   ok: boolean
   output?: unknown
   error?: string
@@ -439,9 +459,15 @@ export interface BuildResultOpts {
  * never a silently truncated JSON body).
  */
 export function buildResultEnvelope(opts: BuildResultOpts): ExchangeEnvelope {
+  if (opts.request.acceptance !== undefined && opts.provenance === undefined) {
+    throw new DeliveryEvidenceError('acceptance requires task provenance')
+  }
   const payload: Record<string, unknown> = { ok: opts.ok }
   if (opts.output !== undefined) payload.output = opts.output
   if (opts.error !== undefined) payload.error = clipText(opts.error, 2000)
+  // Materialize toJSON/Date/undefined exactly once, before fitting or checking;
+  // evidence and signing must see the same detached JSON that the receiver gets.
+  const fitted = fitResultPayload(JSON.parse(JSON.stringify(payload)) as Record<string, unknown>)
   return {
     schema: ENVELOPE_SCHEMA_V1,
     id: opts.id ?? generateExchangeId(),
@@ -450,7 +476,10 @@ export function buildResultEnvelope(opts: BuildResultOpts): ExchangeEnvelope {
     createdAt: (opts.now ?? new Date()).toISOString(),
     from: { name: clipText(opts.fromName, ENVELOPE_MAX_NAME_CHARS) },
     title: clipText(`Re: ${opts.request.title}`, ENVELOPE_MAX_TITLE_CHARS),
-    payload: fitResultPayload(payload),
+    payload: fitted,
+    // Check the bytes actually delivered, never the pre-truncation output.
+    ...(opts.request.acceptance !== undefined
+      ? { evidence: buildDeliveryEvidence(opts.request, fitted, opts.provenance!) } : {}),
   }
 }
 

@@ -57,15 +57,15 @@ const VALID_PREVIEW: PreviewView = {
 
 /** Records the SERVER-pinned userId + exactly what the route forwarded. */
 class StubExchange implements MeExchangeSurface {
-  readonly previews: Array<{ userId: string; raw: string }> = []
+  readonly previews: Array<{ userId: string; raw: string; requestRaw?: string }> = []
   readonly imports: Array<{ userId: string; args: Record<string, unknown> }> = []
   readonly resultAsks: Array<{ userId: string; id: string }> = []
   previewView: PreviewView = VALID_PREVIEW
   importError: Error | undefined
   resultView: ResultView = { status: 'not_found' }
 
-  async preview(userId: string, raw: string) {
-    this.previews.push({ userId, raw })
+  async preview(userId: string, raw: string, requestRaw?: string) {
+    this.previews.push({ userId, raw, ...(requestRaw === undefined ? {} : { requestRaw }) })
     return this.previewView
   }
 
@@ -288,6 +288,17 @@ describe('/api/me/exchange — envelope import/export (EXCH-M1)', () => {
       { workflowId: 'wf-analysis', label: '行情分析' },
       { workflowId: 'wf-garden', label: '浇水' },
     ])
+  })
+
+  it('forwards the supplied original request for independent evidence verification', async () => {
+    b = await boot()
+    b.stub!.previewView = { ...VALID_PREVIEW, evidence: { consistent: true, requestMatch: 'matched' } }
+    const r = await req('POST', '/api/me/exchange/preview', { body: { raw: 'result', requestRaw: 'original' } })
+    expect(r.status).toBe(200)
+    expect(b.stub!.previews).toEqual([{ userId: b.memberUserId, raw: 'result', requestRaw: 'original' }])
+    expect(r.json.evidence.requestMatch).toBe('matched')
+    expect((await req('POST', '/api/me/exchange/preview', { body: { raw: 'result', requestRaw: {} } })).status).toBe(400)
+    expect(b.stub!.previews).toHaveLength(1)
   })
 
   it('preview of an invalid envelope carries the errors and NO targets', async () => {

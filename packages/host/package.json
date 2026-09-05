@@ -18,6 +18,10 @@
     "gotong-host": "./bin/gotong-host.js"
   },
   "exports": {
+    "./exchange": {
+      "types": "./dist/exchange.d.ts",
+      "import": "./dist/exchange.js"
+    },
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"

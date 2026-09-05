@@ -25,6 +25,8 @@
 import { createHash, createPublicKey, randomBytes, verify as cryptoVerify } from 'node:crypto'
 import { mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { basename, join } from 'node:path'
+import { jcsCanonicalize, parseAcceptance, parseDeliveryEvidence, verifyDeliveryEvidence, type AcceptanceCheck, type DeliveryEvidence, type DeliveryVerification } from './delivery-evidence.mjs'
+export { jcsCanonicalize } from './delivery-evidence.mjs'
 
 // ─── Wire shapes ─────────────────────────────────────────────────────────────
 
@@ -54,6 +56,8 @@ export interface ExchangeEnvelope {
   capability?: string
   title: string
   payload: Record<string, unknown>
+  acceptance?: AcceptanceCheck[]
+  evidence?: DeliveryEvidence
   sig?: EnvelopeSig
 }
 
@@ -79,7 +83,7 @@ export const OUT_DIR = 'gotong-out'
  * No watcher, no daemon — parse when asked (不要求电脑常开). */
 export const IN_DIR = 'gotong-in'
 
-const TOP_KEYS = new Set(['schema', 'id', 'kind', 'replyTo', 'createdAt', 'from', 'to', 'capability', 'title', 'payload', 'sig'])
+const TOP_KEYS = new Set(['schema', 'id', 'kind', 'replyTo', 'createdAt', 'from', 'to', 'capability', 'title', 'payload', 'acceptance', 'evidence', 'sig'])
 const FROM_KEYS = new Set(['name', 'hub', 'kid'])
 const TO_KEYS = new Set(['name'])
 const SIG_KEYS = new Set(['alg', 'kid', 'jwk', 'signature'])
@@ -141,6 +145,9 @@ export function parseEnvelopeText(raw: string): EnvelopeParseResult {
   }
   if (!isPlainObject(parsed)) {
     return { ok: false, errors: ['file: top level must be a JSON object'] }
+  }
+  try { jcsCanonicalize(parsed) } catch (err) {
+    return { ok: false, errors: [`file: not valid JCS input (${err instanceof Error ? err.message : String(err)})`] }
   }
 
   const errors: string[] = []
@@ -262,6 +269,14 @@ export function parseEnvelopeText(raw: string): EnvelopeParseResult {
     }
   }
 
+  if (parsed.acceptance !== undefined) {
+    if (kind !== 'request') fail('acceptance: only requests carry acceptance checks')
+    try { parseAcceptance(parsed.acceptance) } catch (err) { fail(`acceptance: ${err instanceof Error ? err.message : String(err)}`) }
+  }
+  if (parsed.evidence !== undefined) {
+    if (kind !== 'result') fail('evidence: only results carry evidence')
+    try { parseDeliveryEvidence(parsed.evidence) } catch (err) { fail(`evidence: ${err instanceof Error ? err.message : String(err)}`) }
+  }
   const sig = parsed.sig
   if (sig !== undefined) {
     if (!isPlainObject(sig)) {
@@ -304,35 +319,6 @@ export function parseEnvelopeText(raw: string): EnvelopeParseResult {
 }
 
 // ─── JCS (RFC 8785) + RFC 7638 thumbprint + verify ───────────────────────────
-
-function deepCanonicalize(value: unknown): unknown {
-  if (value === null) return null
-  const t = typeof value
-  if (t === 'number') {
-    if (!Number.isFinite(value as number)) {
-      throw new Error('envelope JCS: non-finite number cannot be canonicalized')
-    }
-    return value
-  }
-  if (t === 'string' || t === 'boolean') return value
-  if (Array.isArray(value)) return value.map(deepCanonicalize)
-  if (t === 'object') {
-    const obj = value as Record<string, unknown>
-    const out: Record<string, unknown> = {}
-    for (const key of Object.keys(obj).sort()) {
-      const v = obj[key]
-      if (v === undefined) continue
-      out[key] = deepCanonicalize(v)
-    }
-    return out
-  }
-  throw new Error(`envelope JCS: unsupported value of type ${t}`)
-}
-
-/** RFC 8785 canonical JSON string (envelope shape only). */
-export function jcsCanonicalize(value: unknown): string {
-  return JSON.stringify(deepCanonicalize(value))
-}
 
 /** RFC 7638 thumbprint of an EC public JWK (required members, lexical order). */
 export function ecThumbprint(jwk: { crv: string; kty: string; x: string; y: string }): string {
@@ -389,6 +375,7 @@ export function generateExchangeId(): string {
 }
 
 export interface ComposeRequestOpts {
+  acceptance?: AcceptanceCheck[]
   kind: 'request'
   title: string
   payload: unknown
@@ -436,6 +423,7 @@ export function composeEnvelope(opts: ComposeOpts, now?: Date): ExchangeEnvelope
       kind: 'request',
       ...(opts.capability !== undefined && opts.capability !== '' ? { capability: opts.capability } : {}),
       payload: opts.payload,
+      ...(opts.acceptance === undefined ? {} : { acceptance: parseAcceptance(opts.acceptance) }),
     }
   } else {
     const payload: Record<string, unknown> = { ok: opts.ok }
@@ -532,6 +520,7 @@ export function listInbox(baseDir: string): InboxRow[] {
 }
 
 export interface IngestOk {
+  evidence?: DeliveryVerification
   ok: true
   envelope: ExchangeEnvelope
   bytes: number
@@ -570,6 +559,7 @@ export function readInboxFile(baseDir: string, name: string): IngestResult {
     envelope: env,
     bytes: parsed.bytes,
     sigVerdict: verifyEnvelopeSig(env),
+    ...(env.evidence ? { evidence: verifyDeliveryEvidence(env.evidence, env.payload) } : {}),
     ...(name !== `${env.id}.json` ? { nameMismatch: name } : {}),
   }
 }

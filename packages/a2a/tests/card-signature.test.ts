@@ -64,9 +64,42 @@ describe('jcsCanonicalize (RFC 8785, card shape)', () => {
   it('throws on a non-finite number rather than silently signing null', () => {
     expect(() => jcsCanonicalize({ n: Infinity })).toThrow(/non-finite/)
   })
+
+  it('preserves prototype-named JSON fields at every depth as ordinary data', () => {
+    const raw = '{"__proto__":{"x":1},"constructor":{"prototype":{"y":2}},"items":[{"__proto__":null}]}'
+    expect(jcsCanonicalize(JSON.parse(raw))).toBe(raw)
+    expect(jcsCanonicalize(JSON.parse('{"__proto__":{"x":2}}')))
+      .not.toBe(jcsCanonicalize(JSON.parse('{"__proto__":{"x":1}}')))
+  })
+
+  it('sorts integer-like keys lexically rather than letting JSON.stringify reorder them', () => {
+    expect(jcsCanonicalize({ '2': 'two', '10': 'ten', nested: [{ '3': 3, '11': 11 }] }))
+      .toBe('{"10":"ten","2":"two","nested":[{"11":11,"3":3}]}')
+  })
+
+  it('uses UTF-16 key ordering and preserves paired surrogates without normalizing text', () => {
+    expect(jcsCanonicalize({ '\ue000': 1, '\ud83d\ude00': 2, text: 'e\u0301' }))
+      .toBe('{"text":"e\u0301","\ud83d\ude00":2,"\ue000":1}')
+  })
+
+  it.each(['\ud800', '\udfff', '\ud800x', 'x\udc00', '\ud800\ud800', '\udc00\udc00'])(
+    'rejects lone Unicode surrogates in values and keys (%j)', (invalid) => {
+      expect(() => jcsCanonicalize({ value: invalid })).toThrow(/surrogate/)
+      expect(() => jcsCanonicalize({ [invalid]: 'value' })).toThrow(/surrogate/)
+    },
+  )
 })
 
 describe('sign + verify round-trip', () => {
+  it('detects tampering of a nested JSON __proto__ field after signing', () => {
+    const signer = makeSigner()
+    const card = attachSignature({ ...sampleCard(), data: JSON.parse('{"__proto__":{"value":"original"}}') }, signer)
+    const wire = JSON.parse(JSON.stringify(card))
+    expect(verifyAgentCardSignature(wire, buildJwks(signer)).ok).toBe(true)
+    wire.data.__proto__.value = 'tampered'
+    expect(verifyAgentCardSignature(wire, buildJwks(signer)).ok).toBe(false)
+  })
+
   it('our verifier accepts a freshly signed card', () => {
     const signer = makeSigner()
     const card = attachSignature(sampleCard(), signer, { jku: 'https://hub.example.com/.well-known/jwks.json' })

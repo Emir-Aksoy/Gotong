@@ -21,13 +21,15 @@ import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { generateKeyPairSync } from 'node:crypto'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { TaskResult } from '@gotong/core'
 import { ecThumbprint, es256Sign, type AgentCardSigner } from '@gotong/a2a'
 
 import {
   ENVELOPE_SCHEMA_V1,
+  buildResultEnvelope,
   parseExchangeEnvelope,
+  signExchangeEnvelope,
   verifyExchangeEnvelope,
 } from '../src/exchange-envelope.js'
 import {
@@ -127,10 +129,57 @@ beforeEach(async () => {
   dir = await mkdtemp(join(tmpdir(), 'gotong-exch-'))
 })
 afterEach(async () => {
+  vi.restoreAllMocks()
   await rm(dir, { recursive: true, force: true })
 })
 
 describe('preview', () => {
+  it.each([false, true])('rejects replyTo mismatching the supplied request (signed=%s)', async (signed) => {
+    const signer = makeSigner()
+    const svc = buildMeExchange({ spaceRoot: dir, hub: makeHub(okResult({})), signerFactory: () => signer })
+    const raw = requestRaw({ acceptance: [{ id: 'a', op: 'exists', path: '' }] })
+    const request = parseExchangeEnvelope(raw)
+    if (!request.ok) throw new Error('invalid fixture')
+    let envelope = buildResultEnvelope({ request: request.envelope, ok: true, output: {}, fromName: 'hub', provenance: { taskId: 't1', by: 'agent' } })
+    expect((await svc.preview(USER, JSON.stringify(envelope), raw)).evidence?.accepted).toBe(true)
+    envelope.replyTo = 'exg-otherrequest0001'
+    if (signed) envelope = signExchangeEnvelope(envelope, signer)
+    const view = await svc.preview(USER, JSON.stringify(envelope), raw)
+    expect(view).toMatchObject({ valid: false, dispatchable: false })
+    expect(view.errors?.join(' ')).toContain('replyTo')
+    expect(view.evidence?.accepted).not.toBe(true)
+  })
+
+  it('rejects a non-canonicalizable original request without throwing during preview', async () => {
+    const svc = buildMeExchange({ spaceRoot: dir, hub: makeHub(okResult({})), signerFactory: makeSigner })
+    const raw = requestRaw({ acceptance: [{ id: 'a', op: 'exists', path: '' }] })
+    const request = parseExchangeEnvelope(raw)
+    if (!request.ok) throw new Error('invalid fixture')
+    const envelope = buildResultEnvelope({ request: request.envelope, ok: true, output: {}, fromName: 'hub', provenance: { taskId: 't1', by: 'agent' } })
+    const invalid = raw.replace('"payload": {', '"payload": {"overflow":1e309,')
+    await expect(svc.preview(USER, JSON.stringify(envelope), invalid)).resolves.toMatchObject({ valid: false, dispatchable: false })
+  })
+
+  it('persists signed evidence and independently rechecks it against the original request after restart', async () => {
+    const hub = makeHub(okResult({ text: 'verified result' }))
+    const svc = buildMeExchange({ spaceRoot: dir, hub, signerFactory: makeSigner })
+    const raw = requestRaw({ acceptance: [{ id: 'content', path: '/text', op: 'equals', expected: 'verified result' }] })
+    const { id } = await svc.importRequest(USER, importArgs(raw))
+    const done = await untilDone(svc, USER, id)
+    const restarted = buildMeExchange({ spaceRoot: dir, hub, signerFactory: makeSigner })
+    expect(await restarted.result(OTHER, id)).toEqual({ status: 'not_found' })
+    const view = await restarted.preview(USER, done.envelope, raw)
+    expect(view.signature?.state).toBe('valid')
+    expect(view.evidence).toMatchObject({ consistent: true, requestMatch: 'matched', accepted: true, passed: 1 })
+    expect((await restarted.preview(USER, done.envelope)).evidence?.accepted).toBe(false)
+    expect((await restarted.preview(USER, done.envelope, requestRaw())).evidence?.requestMatch).toBe('mismatch')
+    const tampered = JSON.parse(done.envelope)
+    tampered.payload.output.text = 'changed'
+    expect((await restarted.preview(USER, JSON.stringify(tampered), raw)).evidence?.consistent).toBe(false)
+    expect(hub.calls).toHaveLength(1)
+    expect(hub.calls[0]!.payload).not.toHaveProperty('acceptance')
+  })
+
   it('is zero side-effect and reports summary + signature + dispatchable', async () => {
     const hub = makeHub(okResult({ text: 'x' }))
     const svc = buildMeExchange({ spaceRoot: dir, hub, signerFactory: makeSigner })
@@ -156,6 +205,17 @@ describe('preview', () => {
 })
 
 describe('importRequest', () => {
+  it('rejects numeric overflow before archiving or dispatching a request with acceptance', async () => {
+    const hub = makeHub(okResult({}))
+    const svc = buildMeExchange({ spaceRoot: dir, hub, signerFactory: makeSigner })
+    const raw = requestRaw({ acceptance: [{ id: 'a', op: 'exists', path: '' }] })
+      .replace('"payload": {', '"payload": {"overflow":1e309,')
+    await expect(svc.preview(USER, raw)).resolves.toMatchObject({ valid: false, dispatchable: false })
+    await expect(svc.importRequest(USER, importArgs(raw))).rejects.toMatchObject({ name: 'ExchangeError', code: 'invalid' })
+    expect(hub.calls).toHaveLength(0)
+    await expect(readdir(join(dir, 'exchange'))).rejects.toThrow()
+  })
+
   it('archives the EXACT raw bytes and dispatches as the importing member with a whitelisted payload', async () => {
     const hub = makeHub(okResult({ text: '分析结果' }))
     const svc = buildMeExchange({ spaceRoot: dir, hub, signerFactory: makeSigner })
@@ -176,6 +236,7 @@ describe('importRequest', () => {
     expect(call.strategy).toEqual({ kind: 'capability', capabilities: ['market.analysis'] })
     expect(call.payload).toEqual({ question: '恒指今天怎么看?', requester_id: USER })
     expect(call.title).toBe(`行情分析 — ${USER}`)
+    await untilDone(svc, USER, id)
   })
 
   it('settles into a SIGNED result envelope, result-file durable when meta says done', async () => {
@@ -249,6 +310,80 @@ describe('importRequest', () => {
 })
 
 describe('settle honesty', () => {
+  const privateDetail = 'test-only-private-output-do-not-echo'
+
+  async function expectMinimalFailure(svc: MeExchangeService, raw: string) {
+    const { id } = await svc.importRequest(USER, importArgs(raw))
+    const done = await untilDone(svc, USER, id)
+    const parsed = parseExchangeEnvelope(done.envelope)
+    expect(parsed.ok).toBe(true)
+    if (!parsed.ok) throw new Error('invalid fallback envelope')
+    expect(parsed.envelope.replyTo).toBe(id)
+    expect(parsed.envelope.id).toBe(done.resultId)
+    expect(parsed.envelope.payload).toEqual({ ok: false, error: 'internal: result could not be assembled' })
+    expect(parsed.envelope.sig).toBeUndefined()
+    expect(parsed.envelope.evidence).toBeUndefined()
+    expect(done.envelope).not.toContain(privateDetail)
+    const meta = await until(async () => {
+      const saved = JSON.parse(await readFile(join(dir, 'exchange', `${id}.meta.json`), 'utf8'))
+      return saved.status === 'done' ? saved : null
+    }, 'minimal failure metadata to settle')
+    expect(meta).toMatchObject({ status: 'done', resultId: done.resultId })
+    expect((await svc.preview(USER, done.envelope, raw)).evidence?.accepted).not.toBe(true)
+  }
+
+  it.each([
+    ['lone surrogate', () => ({ text: `${privateDetail}\ud800` })],
+    ['bigint', () => ({ text: privateDetail, value: 1n })],
+    ['cycle', () => { const output: Record<string, unknown> = { text: privateDetail }; output.self = output; return output }],
+    ['throwing toJSON', () => ({ toJSON() { throw new Error(privateDetail) } })],
+  ] as const)('settles %s output with acceptance into a private-detail-free failure', async (_name, output) => {
+    const svc = buildMeExchange({ spaceRoot: dir, hub: makeHub(okResult(output())), signerFactory: makeSigner })
+    await expectMinimalFailure(svc, requestRaw({ acceptance: [{ id: 'a', op: 'exists', path: '/text' }] }))
+  })
+
+  it('settles a signing exception into a minimal failure without retrying the signer', async () => {
+    const sign = vi.fn(() => { throw new Error(privateDetail) })
+    const signer = { ...makeSigner(), sign }
+    const svc = buildMeExchange({ spaceRoot: dir, hub: makeHub(okResult({ text: privateDetail })), signerFactory: () => signer })
+    await expectMinimalFailure(svc, requestRaw({ acceptance: [{ id: 'a', op: 'exists', path: '/text' }] }))
+    expect(sign).toHaveBeenCalledTimes(1)
+  })
+
+  it('settles a serialization exception after signing without leaking the exception or output', async () => {
+    const stringify = JSON.stringify
+    let injected = false
+    vi.spyOn(JSON, 'stringify').mockImplementation((...args: Parameters<typeof JSON.stringify>) => {
+      const value = args[0] as { kind?: string; sig?: unknown } | undefined
+      if (!injected && value?.kind === 'result' && value.sig) {
+        injected = true
+        throw new Error(privateDetail)
+      }
+      return stringify(...args)
+    })
+    const svc = buildMeExchange({ spaceRoot: dir, hub: makeHub(okResult({ text: privateDetail })), signerFactory: makeSigner })
+    await expectMinimalFailure(svc, requestRaw({ acceptance: [{ id: 'a', op: 'exists', path: '/text' }] }))
+    expect(injected).toBe(true)
+  })
+
+  it('does not reuse an invalid configured sender name in the minimal failure', async () => {
+    const svc = buildMeExchange({ spaceRoot: dir, hub: makeHub(okResult({ text: privateDetail })), signerFactory: makeSigner, fromName: `bad\n${privateDetail}` })
+    await expectMinimalFailure(svc, requestRaw({ acceptance: [{ id: 'a', op: 'exists', path: '/text' }] }))
+  })
+
+  it('persists evidence for the serialized task output, not its undefined properties', async () => {
+    const svc = buildMeExchange({ spaceRoot: dir, hub: makeHub(okResult({ text: undefined })), signerFactory: makeSigner })
+    const raw = requestRaw({ acceptance: [{ id: 'a', op: 'exists', path: '/text' }] })
+    const { id } = await svc.importRequest(USER, importArgs(raw))
+    const done = await untilDone(svc, USER, id)
+    const envelope = JSON.parse(done.envelope)
+    expect(envelope.payload.output).toEqual({})
+    expect(envelope.evidence.results).toEqual([{ id: 'a', status: 'failed' }])
+    const view = await svc.preview(USER, done.envelope, raw)
+    expect(view.signature?.state).toBe('valid')
+    expect(view.evidence).toMatchObject({ consistent: true, accepted: false, failed: 1 })
+  })
+
   it('a suspended dispatch stays suspended — no fabricated result envelope', async () => {
     const suspended: TaskResult = { kind: 'suspended', taskId: 't1', by: 'agent-1', resumeAt: 9_999_999_999_000, ts: 1 }
     const svc = buildMeExchange({ spaceRoot: dir, hub: makeHub(suspended), signerFactory: makeSigner })
@@ -276,21 +411,15 @@ describe('settle honesty', () => {
     expect(String(parsed.envelope.payload.error)).toContain('provider exploded')
   })
 
-  it('a broken signing key warns and ships the result UNSIGNED — never blocks, never regenerates', async () => {
+  it('a broken signing key settles as an unsigned minimal failure without disclosing details', async () => {
     const svc = buildMeExchange({
       spaceRoot: dir,
       hub: makeHub(okResult({ text: 'x' })),
       signerFactory: () => {
-        throw new Error('corrupt key file')
+        throw new Error(privateDetail)
       },
     })
-    await svc.importRequest(USER, importArgs(requestRaw()))
-    const done = await untilDone(svc, USER, REQ_ID)
-    const parsed = parseExchangeEnvelope(done.envelope)
-    expect(parsed.ok).toBe(true)
-    if (!parsed.ok) return
-    expect(parsed.envelope.sig).toBeUndefined()
-    expect(verifyExchangeEnvelope(parsed.envelope)).toEqual({ state: 'unsigned' })
+    await expectMinimalFailure(svc, requestRaw())
   })
 })
 

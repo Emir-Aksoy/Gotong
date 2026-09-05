@@ -383,6 +383,9 @@
         <h2 data-i18n="meExchangeTitle">导入交付物文件</h2>
         <p class="me-meta" data-i18n="meExchangeHint">朋友的本机 AI(pi / WorkBuddy 等)按标准生成的交付物 .json 文件,聊天里收到后在这里导入:先预览核对,再选一个工作流处理。处理完把结果文件下载下来,聊天里发回给对方就算送达。</p>
         <input id="me-exchange-file" type="file" accept="application/json,.json" />
+        <label><span data-i18n="meExchangeOriginal">原始请求（核验结果时选填）</span>
+          <input id="me-exchange-original" type="file" accept="application/json,.json" />
+        </label>
         <div id="me-exchange-preview" class="me-meta"></div>
         <div id="me-exchange-targets" hidden>
           <label><span data-i18n="meExchangeTarget">用哪个工作流处理</span>

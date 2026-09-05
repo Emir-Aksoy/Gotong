@@ -291,7 +291,9 @@ describe('EXCH-M2 pi pack anti-drift gate', () => {
     // The vendored core must not import anything beyond node builtins.
     const core = await readFile(join(packRoot, 'extensions/lib/envelope-core.ts'), 'utf8')
     for (const m of core.matchAll(/from '([^']+)'/g)) {
-      expect(m[1].startsWith('node:'), `envelope-core must stay dependency-free, found: ${m[1]}`).toBe(true)
+      expect(m[1].startsWith('node:') || m[1] === './delivery-evidence.mjs', `envelope-core must stay dependency-free, found: ${m[1]}`).toBe(true)
     }
+    const evidence = await readFile(join(packRoot, 'extensions/lib/delivery-evidence.mjs'), 'utf8')
+    for (const m of evidence.matchAll(/from ["']([^"']+)["']/g)) expect(m[1].startsWith('node:')).toBe(true)
   })
 })

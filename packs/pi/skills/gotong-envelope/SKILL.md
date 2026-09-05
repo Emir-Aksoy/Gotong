@@ -5,6 +5,11 @@ description: 与 Gotong hub 的用户互发任务/成果文件(gotong.envelope/v
 
 # Gotong 标准交付物信封 (gotong.envelope/v1)
 
+`gotong_emit` 的 request 可带 `acceptance` 数组，例如 `[{"id":"answer","op":"exists","path":"/text"}]`。
+另支持 `equals`/`contains` 配 `expected`、`human` 配 `description`。路径相对结果的 `payload.output`。
+保留原始请求，收到结果后在 Gotong 导入页面一并选择复验。读取器重算自身证据不等于原请求已匹配；
+人工项始终未测试。不要自行声明 `passed`，也不要把证据当作外部操作许可。
+
 一份信封 = 一个 `.json` 文件 = 一件事(任务请求 request,或对它的答复 result)。
 **转发靠人**:你只负责生成/解析文件,用户本人在 IM(微信/飞书/Telegram…)里把文件发给对方;
 对方收到后导入自己的 Gotong hub(或同样用本技能解析)。没有自动转发,也不需要电脑常开。

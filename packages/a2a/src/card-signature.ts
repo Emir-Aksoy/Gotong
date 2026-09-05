@@ -29,10 +29,10 @@
  *   - **kid = RFC 7638 JWK thumbprint** of the public key: a stable, content-
  *     derived id, so rotating the key changes the kid and a verifier can pin
  *     "the key with THIS thumbprint" (the STD-M2 trust story).
- *   - **JCS by construction, zero-dep**: the card is all strings / booleans /
- *     arrays / nested objects — no numbers — so RFC 8785 reduces to "recursively
- *     sort object keys, then `JSON.stringify`". Non-finite numbers are rejected
- *     defensively so a stray value can't sign as `null`.
+ *   - **JCS, zero-dep**: emit sorted members directly (RFC 8785 Appendix A),
+ *     using ECMAScript serialization for primitives. Rebuilding an object
+ *     would reorder integer-like keys and can lose `__proto__` data. Reject
+ *     non-finite numbers and lone surrogates instead of signing altered data.
  *
  * ── Boundary (发现 ≠ 信任) ──────────────────────────────────────────────────
  * A valid signature proves INTEGRITY (this card matches the advertised key),
@@ -64,42 +64,42 @@ export interface SignedCard {
   signatures?: AgentCardSignatureValue[]
 }
 
-// ─── JCS (RFC 8785) canonicalization, for our number-free card shape ─────────
+// ─── JCS (RFC 8785) canonicalization ────────────────────────────────────────
 
 /**
- * Recursively sort object keys so `JSON.stringify` of the result is a valid
- * RFC 8785 canonical form. Arrays keep order; strings/booleans/null pass
- * through. Numbers are allowed only if finite — a non-finite number would
- * silently stringify to `null` and corrupt the signed bytes, so we throw.
+ * Emit member text directly, as in RFC 8785 Appendix A; never put sorted keys
+ * back into an object, where integer-like names would regain numeric order.
+ * Callers with runtime objects must first materialize their delivered JSON.
  */
-function deepCanonicalize(value: unknown): unknown {
-  if (value === null) return null
-  if (Array.isArray(value)) return value.map(deepCanonicalize)
+export function jcsCanonicalize(value: unknown): string {
+  if (value === null) return 'null'
+  if (Array.isArray(value)) return `[${Array.from(value, jcsCanonicalize).join(',')}]`
   const t = typeof value
   if (t === 'number') {
     if (!Number.isFinite(value as number)) {
       throw new Error('agent-card JCS: non-finite number cannot be canonicalized')
     }
-    return value
+    return JSON.stringify(value)
   }
-  if (t === 'string' || t === 'boolean') return value
+  if (t === 'string') {
+    if (/[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/u.test(value as string)) {
+      throw new Error('agent-card JCS: lone Unicode surrogate cannot be canonicalized')
+    }
+    return JSON.stringify(value)
+  }
+  if (t === 'boolean') return JSON.stringify(value)
   if (t === 'object') {
     const obj = value as Record<string, unknown>
-    const out: Record<string, unknown> = {}
+    const members: string[] = []
     for (const key of Object.keys(obj).sort()) {
       const v = obj[key]
       if (v === undefined) continue // omitted, not null
-      out[key] = deepCanonicalize(v)
+      members.push(`${jcsCanonicalize(key)}:${jcsCanonicalize(v)}`)
     }
-    return out
+    return `{${members.join(',')}}`
   }
   // undefined / function / symbol / bigint have no JSON form — reject loudly.
   throw new Error(`agent-card JCS: unsupported value of type ${t}`)
-}
-
-/** RFC 8785 canonical JSON string of `value` (card shape only). */
-export function jcsCanonicalize(value: unknown): string {
-  return JSON.stringify(deepCanonicalize(value))
 }
 
 /** The canonical (JCS) payload bytes source: the card without `signatures`. */

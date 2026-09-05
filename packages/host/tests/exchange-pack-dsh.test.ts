@@ -264,6 +264,7 @@ describe('EXCH-M3 dsh pack anti-drift gate', () => {
         from_name: '老陈 (dsh @ MacBook)',
         payload: { question: 'CLI 走一遍' },
         capability: 'market.analysis',
+        acceptance: [{ id: 'answer', op: 'exists', path: '/text' }],
       })
       const res = runCli(cliTmp, ['emit'], draft)
       expect(res.status).toBe(0)
@@ -272,7 +273,10 @@ describe('EXCH-M3 dsh pack anti-drift gate', () => {
       const raw = readFileSync(join(cliTmp, 'gotong-out', `${m![1]}.json`), 'utf8')
       const hub = parseExchangeEnvelope(raw)
       expect(hub.ok).toBe(true)
-      if (hub.ok) expect(hub.envelope.capability).toBe('market.analysis')
+      if (hub.ok) {
+        expect(hub.envelope.capability).toBe('market.analysis')
+        expect(hub.envelope.acceptance).toEqual([{ id: 'answer', op: 'exists', path: '/text' }])
+      }
 
       // Human hop: same file lands in gotong-in/, list + read via the CLI.
       mkdirSync(join(cliTmp, 'gotong-in'), { recursive: true })
@@ -332,8 +336,10 @@ describe('EXCH-M3 dsh pack anti-drift gate', () => {
   it('the script stays dependency-free (node builtins only) — a plain copy is a complete install', async () => {
     const src = await readFile(scriptPath, 'utf8')
     for (const m of src.matchAll(/from '([^']+)'/g)) {
-      expect(m[1].startsWith('node:'), `envelope.mjs must stay dependency-free, found: ${m[1]}`).toBe(true)
+      expect(m[1].startsWith('node:') || m[1] === './delivery-evidence.mjs', `envelope.mjs must stay dependency-free, found: ${m[1]}`).toBe(true)
     }
+    const evidence = await readFile(new URL('../../../packs/dsh/skills/gotong-envelope/scripts/delivery-evidence.mjs', import.meta.url), 'utf8')
+    for (const m of evidence.matchAll(/from ["']([^"']+)["']/g)) expect(m[1].startsWith('node:')).toBe(true)
   })
 
   it('SKILL.md carries name + description frontmatter and routes through the real script', async () => {

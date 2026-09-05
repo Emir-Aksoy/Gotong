@@ -28,10 +28,9 @@
  *
  * Result signing reuses the STD-M1 hub identity key LAZILY — the key file is
  * only loaded/created on the first result assembly, so a hub that never
- * exchanges never grows the file. A corrupt key warns loudly and the result
- * ships unsigned (the signature is advisory; the member's result must not be
- * hostage to it) — but the key is NEVER silently regenerated (peers may pin
- * the kid).
+ * exchanges never grows the file. A corrupt key warns and settles to an
+ * unsigned minimal error result, never leaving an in-flight result behind.
+ * The key is NEVER silently regenerated (peers may pin the kid).
  *
  * Honest M1 residuals (documented, not hidden): a dispatch that suspends for
  * human approval resolves this promise as 'suspended' — the run continues
@@ -46,6 +45,7 @@ import { join } from 'node:path'
 import { createLogger, writeFileAtomic, writeJsonAtomic, type TaskResult } from '@gotong/core'
 import type { AgentCardSigner } from '@gotong/a2a'
 import { FileAgentCardSigner } from './agent-card-signing.js'
+import { verifyDeliveryEvidence, type DeliveryVerification } from './delivery-evidence.js'
 import {
   ENVELOPE_ID_RE,
   ENVELOPE_MAX_FILE_BYTES,
@@ -106,6 +106,7 @@ export interface ExchangePreviewView {
     payloadBytes: number
   }
   signature?: EnvelopeSigVerdict
+  evidence?: DeliveryVerification
   /** Present when this id was already imported here (idempotency). Status is
    * only disclosed to the member who imported it. */
   replay?: { imported: true; mine: boolean; status?: string }
@@ -145,7 +146,7 @@ interface ExchangeMeta {
 }
 
 export interface MeExchangeService {
-  preview(userId: string, raw: string): Promise<ExchangePreviewView>
+  preview(userId: string, raw: string, requestRaw?: string): Promise<ExchangePreviewView>
   importRequest(userId: string, args: ExchangeImportArgs): Promise<{ id: string }>
   result(userId: string, id: string): Promise<ExchangeResultView>
 }
@@ -168,8 +169,8 @@ export function buildMeExchange(opts: BuildMeExchangeOpts): MeExchangeService {
       signer = opts.signerFactory
         ? opts.signerFactory()
         : new FileAgentCardSigner(join(opts.spaceRoot, 'agent-card-signing.key'))
-    } catch (err) {
-      log.warn('exchange: signing key unusable — results will ship UNSIGNED (key is never silently regenerated)', { err })
+    } catch {
+      log.warn('exchange: signing key unusable; results will be minimal failures (key is never silently regenerated)')
       signer = null
     }
     return signer
@@ -204,63 +205,76 @@ export function buildMeExchange(opts: BuildMeExchangeOpts): MeExchangeService {
       await writeJsonAtomic(metaPath(id), meta)
       return
     }
-    const outcome =
-      result.kind === 'ok'
-        ? { ok: true as const, output: result.output }
-        : {
-            ok: false as const,
-            error:
-              result.kind === 'failed'
-                ? result.error
-                : result.kind === 'cancelled'
-                  ? `cancelled: ${result.reason}`
-                  : `no participant took the task: ${result.reason}`,
-          }
-    let envelope = buildResultEnvelope({
-      request: { id: meta.envelopeId, title: meta.title },
-      ...outcome,
-      fromName,
-      now: now(),
-    })
-    const s = getSigner()
-    if (s) {
-      try {
-        envelope = signExchangeEnvelope(envelope, s)
-      } catch (err) {
-        log.warn('exchange: signing failed — result ships unsigned', { id, err })
+    let envelope: ExchangeEnvelope
+    let raw: string
+    try {
+      const outcome =
+        result.kind === 'ok'
+          ? { ok: true as const, output: result.output }
+          : {
+              ok: false as const,
+              error:
+                result.kind === 'failed'
+                  ? result.error
+                  : result.kind === 'cancelled'
+                    ? `cancelled: ${result.reason}`
+                    : `no participant took the task: ${result.reason}`,
+            }
+      const archivedRequest = parseExchangeEnvelope(await readFile(requestPath(id), 'utf8'))
+      if (!archivedRequest.ok) throw new ExchangeError('invalid', 'archived request is invalid')
+      envelope = buildResultEnvelope({
+        request: archivedRequest.envelope,
+        provenance: { taskId: result.taskId, by: 'by' in result ? result.by : 'scheduler' },
+        ...outcome,
+        fromName,
+        now: now(),
+      })
+      const s = getSigner()
+      if (!s) throw new ExchangeError('invalid', 'result signer unavailable')
+      envelope = signExchangeEnvelope(envelope, s)
+      raw = serializeUnderCap(envelope)
+      if (!parseExchangeEnvelope(raw).ok) {
+        throw new ExchangeError('invalid', 'assembled result failed validation')
       }
-    }
-    // We never emit an envelope we would refuse to read: validate our own
-    // bytes; a failure here is a bug, downgraded to a minimal error result
-    // rather than an unreadable archive.
-    let raw = serializeUnderCap(envelope)
-    if (!parseExchangeEnvelope(raw).ok) {
-      log.error('exchange: assembled result failed own validation — falling back to minimal error envelope', { id })
-      raw = serializeUnderCap(
-        buildResultEnvelope({
-          request: { id: meta.envelopeId, title: meta.title },
-          ok: false,
-          error: 'internal: result assembly produced an invalid envelope',
-          fromName,
-          now: now(),
-          id: envelope.id,
-        }),
-      )
+    } catch {
+      // Do not reuse failed output, exception text, signing, or injected display
+      // fields/clock. Any of those may have caused the failure or contain secrets.
+      log.error('exchange: result assembly failed; returning a minimal error envelope', { id })
+      envelope = buildResultEnvelope({
+        request: { id, title: 'Result unavailable' },
+        ok: false,
+        error: 'internal: result could not be assembled',
+        fromName: 'Gotong hub',
+      })
+      raw = serializeUnderCap(envelope)
     }
     // Result bytes first, meta second: 'done' in the meta implies the result
     // file is durable.
     await writeFileAtomic(resultPath(id), raw)
     meta.status = 'done'
-    meta.settledAt = now().toISOString()
+    meta.settledAt = envelope.createdAt
     meta.resultId = envelope.id
     await writeJsonAtomic(metaPath(id), meta)
   }
 
   return {
-    async preview(userId, raw) {
+    async preview(userId, raw, requestRaw) {
       const parsed = parseExchangeEnvelope(raw)
       if (!parsed.ok) return { valid: false, errors: parsed.errors, dispatchable: false }
       const env = parsed.envelope
+      let originalRequest: ExchangeEnvelope | undefined
+      if (requestRaw !== undefined) {
+        const original = parseExchangeEnvelope(requestRaw)
+        if (!original.ok || original.envelope.kind !== 'request') {
+          return { valid: false, errors: ['requestRaw: a valid original request is required'], dispatchable: false }
+        }
+        originalRequest = original.envelope
+        // The evidence-only verifier cannot see the enclosing replyTo. Bind
+        // that envelope relationship here, regardless of signature presence.
+        if (env.kind === 'result' && env.replyTo !== originalRequest.id) {
+          return { valid: false, errors: ['replyTo: does not match the supplied original request'], dispatchable: false }
+        }
+      }
       const view: ExchangePreviewView = {
         valid: true,
         summary: {
@@ -277,6 +291,7 @@ export function buildMeExchange(opts: BuildMeExchangeOpts): MeExchangeService {
         },
         signature: verifyExchangeEnvelope(env),
         dispatchable: env.kind === 'request',
+        ...(env.evidence ? { evidence: verifyDeliveryEvidence(env.evidence, env.payload, originalRequest) } : {}),
       }
       if (await fileExists(requestPath(env.id))) {
         const meta = await readMeta(env.id)
