@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import { renderFrozenBlock } from '../src/index.js'
-import { entry } from './fake-memory.js'
+import { entry, publishedFixture } from './fake-memory.js'
 
 describe('renderFrozenBlock', () => {
   it('emits a stable empty block with markers when there are no entries', () => {
@@ -140,7 +140,7 @@ describe('renderFrozenBlock', () => {
 
   describe('showProcedures (G-M2) — opt-in, byte-stable', () => {
     const proc = (id: string, name: string, ts: number, steps: string[], imp?: number) =>
-      entry(id, 'semantic', name, ts, { form: 'procedure', steps, ...(imp ? { importance: imp } : {}) })
+      publishedFixture(id, name, ts, steps, imp ? { importance: imp } : {})
 
     it('is byte-identical on/off when there are no procedures present', () => {
       const facts = [
@@ -150,8 +150,8 @@ describe('renderFrozenBlock', () => {
       expect(renderFrozenBlock(facts, { showProcedures: true })).toBe(renderFrozenBlock(facts))
     })
 
-    it('lifts procedures into a dedicated section with steps, out of the fact bullets', () => {
-      const entries = [entry('f1', 'semantic', 'likes tea', 200), proc('p1', 'brew tea', 150, ['boil', 'steep'])]
+    it('lifts published procedures into a dedicated section with steps, out of the fact bullets', async () => {
+      const entries = [entry('f1', 'semantic', 'likes tea', 200), await proc('p1', 'brew tea', 150, ['boil', 'steep'])]
 
       const off = renderFrozenBlock(entries)
       expect(off).toContain('- [p1] brew tea') // off: procedure is just a fact bullet
@@ -166,31 +166,31 @@ describe('renderFrozenBlock', () => {
       expect(factPart).not.toContain('[p1]')
     })
 
-    it('is a pure function of the set under showProcedures (order does not matter)', () => {
+    it('is a pure function of the set under showProcedures (order does not matter)', async () => {
       const f1 = entry('f1', 'semantic', 'likes tea', 200)
-      const p1 = proc('p1', 'brew tea', 150, ['boil', 'steep'])
-      const p2 = proc('p2', 'pour coffee', 100, ['grind', 'pour'])
+      const p1 = await proc('p1', 'brew tea', 150, ['boil', 'steep'])
+      const p2 = await proc('p2', 'pour coffee', 100, ['grind', 'pour'])
       expect(renderFrozenBlock([f1, p1, p2], { showProcedures: true })).toBe(
         renderFrozenBlock([p2, f1, p1], { showProcedures: true }),
       )
     })
 
-    it('caps the section at maxProcedures and notes the remainder', () => {
-      const procs = Array.from({ length: 5 }, (_, i) => proc(`p${i}`, `task ${i}`, 100 + i, ['x']))
+    it('caps the section at maxProcedures and notes the remainder', async () => {
+      const procs = await Promise.all(Array.from({ length: 5 }, (_, i) => proc(`p${i}`, `task ${i}`, 100 + i, ['x'])))
       const block = renderFrozenBlock(procs, { showProcedures: true, maxProcedures: 2 })
       expect(block).toMatch(/3 more procedures omitted/)
       const shown = block.split('\n').filter((l) => l.startsWith('- [p')).length
       expect(shown).toBe(2)
     })
 
-    it('treats a procedure with no steps as an ordinary fact (nothing to show)', () => {
+    it('does not smuggle incomplete unverified procedures into fact bullets', () => {
       const entries = [
         entry('p0', 'semantic', 'incomplete proc', 100, { form: 'procedure' }), // no steps
         entry('f0', 'semantic', 'a fact', 200),
       ]
       const on = renderFrozenBlock(entries, { showProcedures: true })
       expect(on).not.toContain('Things I know how to do')
-      expect(on).toContain('- [p0] incomplete proc') // stayed a fact bullet
+      expect(on).not.toContain('- [p0] incomplete proc')
       expect(on).toBe(renderFrozenBlock(entries)) // byte-identical: nothing was lifted
     })
   })

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import { DEFAULT_TIERS, renderClusteredFrozenBlock } from '../src/index.js'
-import { entry } from './fake-memory.js'
+import { entry, publishedFixture } from './fake-memory.js'
 
 const tiered = (id: string, tier: string, text: string, ts: number, importance?: number) =>
   entry(id, 'semantic', text, ts, {
@@ -90,14 +90,10 @@ describe('renderClusteredFrozenBlock', () => {
     expect(out).toContain('omitted to fit the memory budget')
   })
 
-  it('lifts procedures out of clusters into the G-M2 section (opt-in)', () => {
+  it('lifts published procedures out of clusters into the G-M2 section (opt-in)', async () => {
     const entries = [
       tiered('p1', 'persona', 'likes tea', 100, 4),
-      entry('proc1', 'semantic', 'brew tea', 90, {
-        tier: 'projects',
-        form: 'procedure',
-        steps: ['boil', 'steep'],
-      }),
+      await publishedFixture('proc1', 'brew tea', 90, ['boil', 'steep'], { tier: 'projects' }),
     ]
     // off: the procedure sits in its cluster as a plain bullet
     const off = renderClusteredFrozenBlock(entries)

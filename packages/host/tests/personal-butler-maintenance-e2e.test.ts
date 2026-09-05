@@ -65,7 +65,7 @@ function buildMaintenance(opts: {
   const inner = composeReviewers(
     // ① 复盘技能 — fold near-duplicate skills into one umbrella (close, not delete).
     umbrellaReviewer({
-      merge: async () => ({ name: '手冲咖啡(合并)', steps: ['烧水', '磨豆', '注水'] }),
+      merge: async () => ({ name: '手冲咖啡(合并)', steps: ['烧水', '磨豆', '注水'], conditions: ['手冲咖啡'], counterexamples: ['不适用浓缩咖啡机'] }),
       minSimilarity: 0.3,
       minCluster: 2,
     }),

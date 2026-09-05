@@ -31,6 +31,7 @@ import { isActive } from './bitemporal.js'
 import { compareByImportanceThenRecency } from './importance.js'
 import { linksOf } from './links.js'
 import { formatProcedureSteps, isProcedure, stepsOf } from './procedure.js'
+import { publishedProcedure } from './verified-skills.js'
 import { DEFAULT_TIERS, normalizeTier, tierOf, type TierConfig } from './tiers.js'
 
 export interface RenderFrozenBlockOptions {
@@ -133,10 +134,6 @@ export function renderFrozenBlock(
   // no procedures present the partition removes nothing, so the bytes are the
   // same whether or not this is set.
   const { facts, procedures } = partitionProcedures(visible, opts.showProcedures)
-  const procSection = renderProceduresSection(
-    procedures,
-    clampPositive(opts.maxProcedures, DEFAULT_PROCEDURE_SECTION_MAX),
-  )
 
   // Pure ordering: importance first, then recency, ties broken by id so the
   // output never depends on the order recall() happened to return rows in.
@@ -151,7 +148,7 @@ export function renderFrozenBlock(
     const line = `- ${formatEntry(sorted[i]!, inBlock)}`
     // Always take the first (highest-priority) line; after that, stop once the
     // body budget would be exceeded. `+ 1` accounts for the joining newline.
-    if (lines.length > 0 && used + line.length + 1 > maxChars) {
+    if ((lines.length > 0 || isProcedure(sorted[i]!)) && used + line.length + 1 > maxChars) {
       omitted = sorted.length - i
       break
     }
@@ -164,6 +161,8 @@ export function renderFrozenBlock(
     )
   }
 
+  const procSection = renderProceduresSection(procedures,
+    clampPositive(opts.maxProcedures, DEFAULT_PROCEDURE_SECTION_MAX), maxChars - used)
   return [OPEN_MARKER, heading, '', PREAMBLE, '', ...lines, ...procSection, CLOSE_MARKER].join('\n')
 }
 
@@ -216,10 +215,6 @@ export function renderClusteredFrozenBlock(
   // G-M2: lift procedures into their own section (default off; byte-identical
   // to off when no procedures are present).
   const { facts, procedures } = partitionProcedures(visible, opts.showProcedures)
-  const procSection = renderProceduresSection(
-    procedures,
-    clampPositive(opts.maxProcedures, DEFAULT_PROCEDURE_SECTION_MAX),
-  )
 
   // Bucket every FACT entry into a KNOWN cluster (unknown / missing tier →
   // default), so a stray meta.tier can never produce an out-of-catalog section.
@@ -239,6 +234,7 @@ export function renderClusteredFrozenBlock(
 
   const sections: string[] = []
   let carry = 0
+  let totalUsed = 0
   for (const t of present) {
     const group = [...byTier.get(t.id)!].sort(compareByImportanceThenRecency)
     const budget = share + carry
@@ -247,7 +243,7 @@ export function renderClusteredFrozenBlock(
     let omitted = 0
     for (let i = 0; i < group.length; i++) {
       const line = `- ${formatEntry(group[i]!, inBlock)}`
-      if (lines.length > 0 && used + line.length + 1 > budget) {
+      if ((lines.length > 0 || isProcedure(group[i]!)) && used + line.length + 1 > budget) {
         omitted = group.length - i
         break
       }
@@ -260,11 +256,14 @@ export function renderClusteredFrozenBlock(
       )
     }
     carry = budget - used > 0 ? budget - used : 0
+    totalUsed += used
     const clusterLabel = t.label && t.label.length > 0 ? t.label : t.id
     sections.push(`## ${clusterLabel}`, ...lines, '')
   }
   if (sections[sections.length - 1] === '') sections.pop() // drop trailing blank
 
+  const procSection = renderProceduresSection(procedures,
+    clampPositive(opts.maxProcedures, DEFAULT_PROCEDURE_SECTION_MAX), maxChars - totalUsed)
   return [OPEN_MARKER, heading, '', PREAMBLE, '', ...sections, ...procSection, CLOSE_MARKER].join(
     '\n',
   )
@@ -282,7 +281,9 @@ export function renderClusteredFrozenBlock(
  */
 function formatEntry(e: MemoryEntry, inBlock?: ReadonlySet<string>): string {
   const text = e.text.replace(/\s*\n\s*/g, ' ').trim()
-  const base = `[${e.id}] ${text}`
+  const base = `[${e.id}] ${text}` + (isProcedure(e)
+    ? ` — ${formatProcedureSteps(stepsOf(e))}; conditions: ${JSON.stringify(e.meta?.conditions)}; counterexamples: ${JSON.stringify(e.meta?.counterexamples)}; sandbox-output-only`
+    : '')
   if (!inBlock) return base
   const related = linksOf(e).filter((id) => inBlock.has(id))
   return related.length > 0 ? `${base} (related: ${related.join(', ')})` : base
@@ -315,12 +316,15 @@ function partitionProcedures(
   entries: readonly MemoryEntry[],
   show: boolean | undefined,
 ): { facts: readonly MemoryEntry[]; procedures: MemoryEntry[] } {
-  if (!show) return { facts: entries, procedures: [] }
   const facts: MemoryEntry[] = []
   const procedures: MemoryEntry[] = []
   for (const e of entries) {
-    if (isProcedure(e) && stepsOf(e).length > 0) procedures.push(e)
-    else facts.push(e)
+    if (!isProcedure(e)) { facts.push(e); continue }
+    const published = publishedProcedure(e)
+    if (published) {
+      if (show) procedures.push(published)
+      else facts.push(published)
+    }
   }
   return { facts, procedures }
 }
@@ -335,15 +339,20 @@ function partitionProcedures(
 function renderProceduresSection(
   procedures: readonly MemoryEntry[],
   maxProcedures: number,
+  maxChars: number,
 ): string[] {
   if (procedures.length === 0) return []
   const sorted = [...procedures].sort(compareByImportanceThenRecency)
-  const shown = sorted.slice(0, maxProcedures)
-  const lines = shown.map(
-    (e) =>
-      `- [${e.id}] ${e.text.replace(/\s*\n\s*/g, ' ').trim()} — ${formatProcedureSteps(stepsOf(e))}`,
-  )
-  const omitted = sorted.length - shown.length
+  const lines: string[] = []
+  let used = 0
+  for (const e of sorted.slice(0, maxProcedures)) {
+    const line = `- ${formatEntry(e)}`
+    // Applicability and counterexamples are indivisible from executable steps.
+    if (used + line.length + 1 > maxChars) break
+    lines.push(line)
+    used += line.length + 1
+  }
+  const omitted = sorted.length - lines.length
   if (omitted > 0) {
     lines.push(`- _(${omitted} more ${omitted === 1 ? 'procedure' : 'procedures'} omitted)_`)
   }

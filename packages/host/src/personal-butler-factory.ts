@@ -27,7 +27,8 @@ import { dirname, join } from 'node:path'
 
 import type { Hub, Logger } from '@gotong/core'
 import { TwoTierToolset, type LlmProvider } from '@gotong/llm'
-import type { Embedder } from '@gotong/personal-memory'
+import { VerifiedSkills, type Embedder } from '@gotong/personal-memory'
+import { buildSkillSandboxRunner, buildSkillTestApproval, skillEvaluationTask } from './personal-butler-verified-skills.js'
 import {
   BUTLER_MAX_TOOL_ROUNDS,
   PersonalButlerAgent,
@@ -358,6 +359,12 @@ export function buildButlerFactory(deps: ButlerFactoryDeps): ButlerFactory {
         // those tools still run inline; the governed gates below are the only path
         // that can park the task for a /me approval.
         const memory = openButlerMemory({ rootDir: memoryRoot, userId, logger: log })
+        const verifiedSkills = new VerifiedSkills({ memory, userId,
+          lookup: (ids) => recallIndex.lookupByIds(ids), runner: buildSkillSandboxRunner({
+          buildProvider: async () => base.provider, hooks: base,
+          task: () => skillEvaluationTask(base.id, userId),
+        }) })
+        const skillTestsGov = deps.governedOn ? buildSkillTestApproval({ skills: verifiedSkills, userId }) : undefined
         // MU-M2 — recall fuses the keyword arm with a focus-aware local embedder
         // (dependency-free, no network / key / data movement), so the on-demand
         // `recall` tool surfaces the on-topic fact FIRST instead of the newest
@@ -827,6 +834,7 @@ export function buildButlerFactory(deps: ButlerFactoryDeps): ButlerFactory {
         // disjoint (steward verbs vs `create_workflow` vs `<server>__<tool>`), and
         // the agent gates each call via whichever toolset governs that name.
         const governed = [
+          ...(skillTestsGov ? [skillTestsGov] : []),
           ...(steward ? [steward] : []),
           ...(workflowCreateGov ? [workflowCreateGov] : []),
           ...(askPeerGov ? [askPeerGov] : []),
@@ -855,6 +863,7 @@ export function buildButlerFactory(deps: ButlerFactoryDeps): ButlerFactory {
           // for why the butler needs more headroom than the generic default of 8.
           maxToolRounds: BUTLER_MAX_TOOL_ROUNDS,
           memory,
+          verifiedSkills,
           memoryRetriever: recallIndex.retriever({ activeOnly: true }),
           // M-GRAPH — graph mode on ⇒ recall expands one hop along links the 6h
           // sweep wrote (by-id lookup over the whole-store recall index). Off ⇒

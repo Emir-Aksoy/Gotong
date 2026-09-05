@@ -58,6 +58,7 @@ import {
 } from './mcp-config.js'
 import type { ServerSecretSource } from './oauth-secret-source.js'
 import { buildButlerMcpToolsets } from './personal-butler-mcp.js'
+import { withSkillEvaluation, skillEvaluationTarget } from './personal-butler-verified-skills.js'
 import { declineElicitations } from './mcp-elicitation.js'
 import { mergeButlerBonusMcpSpecs } from './butler-web-search.js'
 import { buildButlerLongRunSlotResolver, type ButlerLongRunSlotResolver } from './butler-longrun-slots.js'
@@ -1182,7 +1183,8 @@ export class LocalAgentPool implements ManagedAgentLifecycle {
     const agentOpts = {
       id: record.id,
       capabilities: record.allowedCapabilities,
-      provider,
+      provider: withSkillEvaluation(provider, () => skillEvaluationTarget(record.managed!,
+        () => withCallWatchdog(this.providerFactory(record.managed!, apiKey, undefined)))),
       system: record.managed.system,
       model: record.managed.model,
       services: ctxWithDispatch,
@@ -1667,33 +1669,18 @@ export class LocalAgentPool implements ManagedAgentLifecycle {
    * honestly rather than throwing on the interval.
    */
   async buildButlerProvider(): Promise<LlmProvider | null> {
-    let rows: readonly AgentRecord[]
     try {
-      rows = await this.space.agents()
-    } catch {
-      // A corrupt agents.json throws here (readJson → JSON.parse). This runs on
-      // the 6h maintenance timer via a fire-and-forget `void runOnce()`, so an
-      // unguarded throw becomes an unhandledRejection that would crash the host.
-      // Skip the tick instead — same posture as `resolveLlmProbeTarget` below.
-      return null
-    }
-    const row = rows.find((r) => this.butlerEnabledFor(r))
-    if (!row?.managed) return null
-    let resolution: LlmApiKeyResolution | undefined
-    try {
-      resolution = await this.resolveApiKey(row.id, row.managed.provider, row.managed.apiKeyEnv)
-    } catch {
-      return null // a key source threw (e.g. vault locked) — skip this tick
-    }
-    // mock needs no key; every real provider must resolve one (spawn's rule).
-    if (row.managed.provider !== 'mock' && !resolution?.apiKey) return null
-    try {
+      const row = (await this.space.agents()).find((r) => this.butlerEnabledFor(r))
+      if (!row?.managed) return null
+      const resolution = await this.resolveApiKey(row.id, row.managed.provider, row.managed.apiKeyEnv)
+      if (row.managed.provider !== 'mock' && !resolution?.apiKey) return null
       // MR-M2 — same routing as spawn: single provider unless `fallbacks` declared.
-      return await this.buildRoutedProvider(row.managed, resolution?.apiKey, row.id, this.artifactResolver)
+      const provider = await this.buildRoutedProvider(row.managed, resolution?.apiKey, row.id, this.artifactResolver)
+      return withSkillEvaluation(provider, () => skillEvaluationTarget(row.managed!,
+        () => withCallWatchdog(this.providerFactory(row.managed!, resolution?.apiKey, undefined))))
     } catch {
-      // buildProvider throws on a misconfigured row (openai-compatible with no
-      // baseURL, etc.) — that fault already surfaces at spawn; the sweep just
-      // skips rather than crash the maintenance interval.
+      // Corrupt config, locked vault or invalid provider: skip maintenance rather
+      // than letting a fire-and-forget timer reject and crash the host.
       return null
     }
   }

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import { MemorySession } from '../src/index.js'
-import { entry, makeFakeMemory } from './fake-memory.js'
+import { entry, makeFakeMemory, publishedFixture } from './fake-memory.js'
 
 describe('MemorySession', () => {
   it('frozenBlockSync is empty until ensureFrozenBlock resolves', async () => {
@@ -94,7 +94,7 @@ describe('MemorySession', () => {
   it('showProcedures lifts how-tos into their own section (G)', async () => {
     const mem = makeFakeMemory([
       entry('fact', 'semantic', '主人爱喝奶茶', 200),
-      entry('how', 'semantic', '给加班费定金额', 100, { form: 'procedure', steps: ['查日别倍率', '乘工时'] }),
+      await publishedFixture('how', '给加班费定金额', 100, ['查日别倍率', '乘工时']),
     ])
     const block = await new MemorySession({ memory: mem, showProcedures: true }).ensureFrozenBlock()
     expect(block).toContain('Things I know how to do')

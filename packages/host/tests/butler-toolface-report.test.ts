@@ -538,11 +538,12 @@ describe('AFR-M1 baseline — the real butler tool face', () => {
       expect(r.estTokens).toBeGreaterThan(0)
     }
 
-    // The agent-internal memory set is the 5 known tools.
+    // The memory face includes the complete candidate/evidence/publication lifecycle.
     expect(report.rows.filter((r) => r.module === 'memory').map((r) => r.name)).toEqual([
       'remember',
       'remember_procedure',
       'refine_procedure',
+      'inspect_procedure', 'verify_procedure', 'publish_procedure', 'rollback_procedure',
       'recall',
       'forget',
     ])

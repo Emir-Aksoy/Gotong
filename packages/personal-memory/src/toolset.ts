@@ -46,12 +46,10 @@ import {
   formOf,
   isProcedure,
   stepsOf,
-  FORM_PROCEDURE,
-  META_FORM,
-  META_STEPS,
 } from './procedure.js'
 import { lexicalRetriever, type MemoryRetriever } from './retriever.js'
 import { tierOf } from './tiers.js'
+import { VerifiedSkills, skillStatus, skillState } from './verified-skills.js'
 
 /**
  * Opt-in (decision F-M3): reinforce the entries a recall returned — bump
@@ -79,6 +77,8 @@ export type MemoryLinkLookup = (
 ) => readonly MemoryEntry[] | Promise<readonly MemoryEntry[]>
 
 export interface MemoryToolsetOptions {
+  /** Owner-scoped trusted evaluation service; approval is NOT a memory tool. */
+  skills?: VerifiedSkills
   /** The (already per-owner-scoped) memory handle the tools act on. */
   memory: MemoryHandle
   /** Kinds the `remember` tool may write. Default `['episodic', 'semantic']`. */
@@ -128,14 +128,6 @@ const DEFAULT_WRITABLE_KINDS: readonly MemoryKind[] = ['episodic', 'semantic']
 const DEFAULT_RECALL_K = 12
 const RECALL_HARD_CAP = 50
 
-/**
- * Cap on entries scanned to resolve a procedure by id for {@link MemoryToolset}'s
- * `refine_procedure`. The handle has no get-by-id, so refine lists semantic
- * entries and finds the target; this bounds that scan (skills are few — a butler
- * accumulates dozens, not thousands — so this never truncates a real target).
- */
-const PROCEDURE_SCAN = 200
-
 export class MemoryToolset implements LlmAgentToolset {
   private readonly memory: MemoryHandle
   private readonly retriever: MemoryRetriever
@@ -146,9 +138,11 @@ export class MemoryToolset implements LlmAgentToolset {
   private readonly linkLookup: MemoryLinkLookup | undefined
   private readonly expandK: number
   private readonly now: () => number
+  private readonly skills: VerifiedSkills
 
   constructor(opts: MemoryToolsetOptions) {
     this.memory = opts.memory
+    this.skills = opts.skills ?? new VerifiedSkills({ memory: opts.memory })
     // Recall goes through the retriever (default = Chinese-aware lexical rank);
     // writes always hit the handle directly.
     this.retriever = opts.retriever ?? lexicalRetriever(opts.memory)
@@ -208,8 +202,8 @@ export class MemoryToolset implements LlmAgentToolset {
         description:
           'Record HOW you accomplished a multi-step task — the ordered sequence ' +
           'of actions that worked — so you can repeat it next time. Use this for ' +
-          'reusable know-how ("how I got an overtime claim approved"), not one-off ' +
-          'facts (use `remember` for those). Stored as a lasting semantic memory.',
+          'reusable know-how, not one-off facts. Creates an UNTESTED candidate, ' +
+          'never a published skill. Cite source memory ids, conditions and counterexamples.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -217,6 +211,9 @@ export class MemoryToolset implements LlmAgentToolset {
               type: 'string',
               description: 'Short name or goal of the procedure. One line.',
             },
+            sources: { type: 'array', items: { type: 'string' }, description: 'Source memory entry ids (successes or failures).' },
+            conditions: { type: 'array', items: { type: 'string' } },
+            counterexamples: { type: 'array', items: { type: 'string' } },
             steps: {
               type: 'array',
               items: { type: 'string' },
@@ -233,15 +230,14 @@ export class MemoryToolset implements LlmAgentToolset {
                 'view and protects it from auto-drop under space pressure.',
             },
           },
-          required: ['name', 'steps'],
+          required: ['name', 'steps', 'sources', 'conditions', 'counterexamples'],
         },
       },
       {
         name: REFINE_PROCEDURE,
         description:
-          'Revise the steps of a procedure you already recorded, in place, as you ' +
-          'find a better way to do it — its name and id stay the same (so it keeps ' +
-          'its place in memory). Use `steps` to REPLACE the whole sequence, or ' +
+          'Append an immutable UNTESTED version of a recorded procedure. Its id ' +
+          'stays the same; old versions and publication remain unchanged. New steps never inherit verification. Use `steps` to REPLACE the sequence, or ' +
           '`appendSteps` to ADD steps to the end. Get the id from `recall` (search ' +
           'form "procedure"). For a brand-new skill use `remember_procedure` instead.',
         inputSchema: {
@@ -261,10 +257,22 @@ export class MemoryToolset implements LlmAgentToolset {
               items: { type: 'string' },
               description: 'Ordered steps to ADD to the end of the existing sequence. Non-empty.',
             },
+            sources: { type: 'array', items: { type: 'string' } },
+            conditions: { type: 'array', items: { type: 'string' } },
+            counterexamples: { type: 'array', items: { type: 'string' } },
           },
           required: ['id'],
         },
       },
+      ...['inspect_procedure', 'verify_procedure', 'publish_procedure', 'rollback_procedure'].map((name) => ({
+        name,
+        description: name === 'verify_procedure'
+          ? 'Evaluate current candidate and published baseline against user-approved held-out tests. May incur model cost. Sandbox output acceptance only, no real side effects. Tests must first be approved via approve_procedure_tests.'
+          : name === 'publish_procedure' ? 'Publish only the current independently tested, passed version.'
+          : name === 'rollback_procedure' ? 'Restore the previous passed publication of this personal skill.'
+          : 'Read personal skill version ids, status and sandbox evidence. Does not expose held-out expected values.',
+        inputSchema: { type: 'object', properties: { id: { type: 'string' } }, required: ['id'], additionalProperties: false },
+      })),
       {
         name: RECALL,
         description:
@@ -330,6 +338,20 @@ export class MemoryToolset implements LlmAgentToolset {
   }
 
   async callTool(name: string, args: Record<string, unknown>): Promise<LlmToolCallResult> {
+    if (['inspect_procedure', 'verify_procedure', 'publish_procedure', 'rollback_procedure'].includes(name)) {
+      if (typeof args.id !== 'string' || Object.keys(args).some((k) => k !== 'id')) return errorResult('Only id is accepted; evaluation and approval cannot be self-reported.')
+      if (name !== 'inspect_procedure' && !this.writableKinds.has('semantic')) return errorResult('Semantic memory is not writable.')
+      try {
+        if (name === 'verify_procedure') return okResult(JSON.stringify(await this.skills.verify(args.id)))
+        if (name === 'publish_procedure') await this.skills.publish(args.id)
+        if (name === 'rollback_procedure') await this.skills.rollback(args.id)
+        const e = await this.skills.get(args.id)
+        const state = skillState(e)
+        return okResult(JSON.stringify({ id: e.id, status: skillStatus(e), scope: 'personal; sandbox-output-only, not a real-world side-effect guarantee',
+          versions: state?.versions, publications: state?.publications,
+          evidence: state?.evidence, approvedTestSuiteIds: state?.suites.map((s) => s.id) }))
+      } catch (err) { return errorResult(errMsg(err)) }
+    }
     switch (name) {
       case REMEMBER:
         return this.doRemember(args)
@@ -398,27 +420,20 @@ export class MemoryToolset implements LlmAgentToolset {
       args.importance === undefined ? undefined : clampImportance(args.importance)
 
     try {
-      const meta: Record<string, unknown> = {
-        [META_FORM]: FORM_PROCEDURE,
-        [META_STEPS]: steps,
-        ...(importance !== undefined ? { [META_IMPORTANCE]: importance } : {}),
-      }
-      const entry = await this.memory.remember({ kind: 'semantic', text: name, meta })
-      return okResult(`Remembered procedure ${entry.id} (${steps.length} step(s)).`)
+      const entry = await this.skills.create({ name, steps, sources: cleanSteps(args.sources),
+        conditions: cleanSteps(args.conditions), counterexamples: cleanSteps(args.counterexamples) },
+        importance !== undefined ? { [META_IMPORTANCE]: importance } : {})
+      return okResult(`Remembered procedure ${entry.id} (${steps.length} step(s), untested candidate).`)
     } catch (err) {
       return errorResult(`remember_procedure failed: ${errMsg(err)}`)
     }
   }
 
   /**
-   * Self-improve (MR3 ②): revise a recorded procedure's steps IN PLACE. Only the
-   * `steps` change — keeping the id/name/ts means the entry stays put (a renamed
-   * skill would mint a new id and move its frozen-block position, which is what
-   * the Umbrella merge is for, not a casual revision). Amends `meta.steps` via the
-   * handle's `patchMeta` (feature-detected); replace with `steps`, or append with
-   * `appendSteps` (exactly one).
+   * Keep the memory id stable but append an immutable, untested version.
    */
   private async doRefineProcedure(args: Record<string, unknown>): Promise<LlmToolCallResult> {
+    if (!this.writableKinds.has('semantic')) return errorResult('Semantic memory is not writable.')
     if (typeof this.memory.patchMeta !== 'function') {
       return errorResult('This memory backend cannot revise entries in place.')
     }
@@ -435,16 +450,11 @@ export class MemoryToolset implements LlmAgentToolset {
     }
 
     try {
-      // No get-by-id on the handle — list semantic entries and find the target.
-      const semantic = await this.memory.list({ kind: 'semantic', limit: PROCEDURE_SCAN })
-      const target = semantic.find((e) => e.id === id)
-      if (!target) return errorResult(`No procedure with id ${id}.`)
-      if (!isProcedure(target)) return errorResult(`${id} is not a procedure (no steps to revise).`)
-
-      const next = hasReplace ? replace : [...stepsOf(target), ...append]
-      const ok = await this.memory.patchMeta(id, { [META_STEPS]: next })
-      if (!ok) return errorResult(`No procedure with id ${id}.`)
-      return okResult(`Refined procedure ${id} (${next.length} step(s)).`)
+      const hasProvenance = ['sources', 'conditions', 'counterexamples'].some((k) => args[k] !== undefined)
+      await this.skills.revise(id, hasReplace ? replace : append,
+        hasProvenance ? { sources: cleanSteps(args.sources), conditions: cleanSteps(args.conditions), counterexamples: cleanSteps(args.counterexamples) } : undefined, hasAppend)
+      const next = stepsOf(await this.skills.get(id))
+      return okResult(`Refined procedure ${id} (${next.length} step(s), new untested version).`)
     } catch (err) {
       return errorResult(`refine_procedure failed: ${errMsg(err)}`)
     }
@@ -500,7 +510,7 @@ export class MemoryToolset implements LlmAgentToolset {
         // A recalled procedure is useless without its steps — show them inline
         // (recall output is the on-demand path, not the byte-stable frozen block).
         const steps = isProcedure(e) ? stepsOf(e) : []
-        const suffix = steps.length > 0 ? ` — steps: ${formatProcedureSteps(steps)}` : ''
+        const suffix = steps.length > 0 ? ` — [${skillStatus(e)} candidate; not a real-world guarantee] steps: ${formatProcedureSteps(steps)}` : ''
         return `${prefix}[${e.id}] (${tag}, p${importanceOf(e)}, ${new Date(e.ts).toISOString()}) ${e.text}${suffix}`
       })
       // F-M3: reinforce what the query MATCHED (the seeds), opt-in. Best-effort

@@ -20,6 +20,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import type { Logger } from '@gotong/core'
 import type { MemoryEntry } from '@gotong/services-sdk'
+import { VerifiedSkills } from '@gotong/personal-memory'
 
 import { HostButlerMemoryService } from '../src/butler-memory-service.js'
 import { openButlerMemory } from '../src/personal-butler-memory.js'
@@ -63,6 +64,7 @@ describe('projectButlerSkills', () => {
     expect(u.umbrella).toBe(true)
     expect(u.stepCount).toBe(3)
     expect(u.name).toBe('加班费总流程')
+    expect(u.verification).toBe('unverified')
   })
 })
 
@@ -70,6 +72,27 @@ describe('butler skill file (SKILL.md)', () => {
   let tmp: string
   beforeEach(() => { tmp = mkdtempSync(join(tmpdir(), 'butler-skills-')) })
   afterEach(() => { rmSync(tmp, { recursive: true, force: true }) })
+
+  it('writes complete published steps and applicability, never the revised draft boundaries', async () => {
+    const memory = openButlerMemory({ rootDir: tmp, userId: 'alice', logger: silentLogger })
+    const source = await memory.remember({ kind: 'episodic', text: 'source' })
+    const skills = new VerifiedSkills({ memory, userId: 'alice', runner: async () => ({ output: 'OK', model: 'test' }) })
+    const steps = ['Read ' + 'x'.repeat(220) + ' ONLY when permitted']
+    const conditions = ['Only sandbox text tasks']
+    const counterexamples = ['Never send mail or change files']
+    const c = await skills.create({ name: 'bounded skill', sources: [source.id], steps, conditions, counterexamples })
+    await skills.approveTests(c.id, [{ input: 'say OK', expected: 'OK' }])
+    await skills.verify(c.id)
+    await skills.publish(c.id)
+    await skills.revise(c.id, ['DRAFT'], { sources: [source.id], conditions: ['DRAFT CONDITIONS'], counterexamples })
+    const file = openButlerSkillFile({ rootDir: tmp, userId: 'alice', logger: silentLogger })
+    await file.write([await skills.get(c.id)], NOW)
+    const md = await readFile(join(tmp, 'user', 'alice', 'SKILL.md'), 'utf8')
+    expect(md).toContain(steps[0])
+    expect(md).toContain(conditions[0])
+    expect(md).toContain(counterexamples[0])
+    expect(md).not.toContain('DRAFT CONDITIONS')
+  })
 
   it('writes a human-readable snapshot; read parses the marker; closed excluded', async () => {
     const file = openButlerSkillFile({ rootDir: tmp, userId: 'alice', logger: silentLogger })
@@ -95,7 +118,8 @@ describe('butler skill file (SKILL.md)', () => {
     expect(byId.closed).toBeUndefined()
 
     const md = await readFile(join(tmp, 'user', 'alice', 'SKILL.md'), 'utf8')
-    expect(md).toContain('# 我会做的事')
+    expect(md).toContain('# 个人技能记录')
+    expect(md).toContain('未验证')
     expect(md).toContain('## 加班费总流程 （合并）') // umbrella badge
     expect(md).toContain('## 申请加班费')
     expect(md).toContain('1. 起草')

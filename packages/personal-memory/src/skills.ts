@@ -9,12 +9,12 @@
  *
  *   ① 自创 (self-author): notice that the SAME multi-step pattern recurs across
  *      episodic memory and turn it into a named skill — without being told to.
- *   ② 自改 (self-improve): amend an existing skill's steps in place as it learns a
- *      better way (`refine_procedure`, in `toolset.ts` — patchMeta, no new id).
+ *   ② 自改 (self-improve): append an immutable candidate version as it learns a
+ *      better way (`refine_procedure`, same memory id, fresh untested version).
  *   ③ Umbrella 合并 (consolidate): periodically sweep the active skills, find
  *      REDUNDANT clusters (several micro-procedures that are really one), and merge
- *      each cluster into a single master "umbrella" skill — the rest are CLOSED
- *      (bitemporal, reversible) and back-linked to the umbrella.
+ *      each cluster into an untested "umbrella" candidate. Only unpublished
+ *      originals are closed; published originals remain available.
  *
  * This module is the deterministic + aux-LLM machinery for ① and ③ (the heartbeat
  * passes). ② is a plain tool. The host projects the surviving active skills into a
@@ -25,12 +25,11 @@
  *   - Clustering reuses `defaultLinkScorer` (E's symmetric term-overlap over the
  *     SAME `extractTerms` tokenizer recall ranks with) — one tokenizer, no drift.
  *   - A self-authored / umbrella skill is just an ordinary `form:'procedure'`
- *     entry (G); merging CLOSES the originals via `closedMeta` + `supersedes` (D,
+ *     entry (G); merging closes unpublished originals via `closedMeta` (D,
  *     reversible — beats Hermes' destructive archive) and links them to the
  *     umbrella (E). NO parallel "skill" subsystem, NO new `MemoryKind`.
- *   - Recall / the frozen "things I know how to do" section already filter to
- *     `isActive`, so once the originals are closed they DROP OUT automatically and
- *     only the umbrella shows — the "SQLite repoint" comes free from D.
+ *   - Frozen prompts require explicit publication backed by user-approved
+ *     sandbox evidence; automatic authoring/merging never publishes a skill.
  *
  * # Governance (anti-unbounded-autonomy — the North Star)
  *
@@ -47,15 +46,13 @@ import type { MemoryEntry } from '@gotong/services-sdk'
 import { closedMeta, isActive, META_SUPERSEDES } from './bitemporal.js'
 import { defaultLinkScorer, linksOf, mergeLinks, META_LINKS } from './links.js'
 import {
-  FORM_PROCEDURE,
-  META_FORM,
-  META_STEPS,
   cleanSteps,
   isProcedure,
   stepsOf,
 } from './procedure.js'
 import { extractTerms } from './relevance.js'
 import type { MemoryReviewer, ReviewContext, ReviewOutcome } from './review.js'
+import { candidateSkillMeta, publishedProcedure } from './verified-skills.js'
 
 /** Meta key stamped on an episodic entry once a skill was authored FROM it (idempotency). */
 export const META_PROCEDURIZED = 'procedurized'
@@ -83,6 +80,8 @@ export const DEFAULT_SKILLS_MAX_CANDIDATES = 50
  * deterministic stand-in), exactly like `MemorySummarizer` for dreaming.
  */
 export interface DraftedProcedure {
+  readonly conditions?: readonly string[]
+  readonly counterexamples?: readonly string[]
   /** Short name / goal of the skill (one line). */
   readonly name: string
   /** Ordered action steps. */
@@ -223,7 +222,8 @@ export const DEFAULT_AUTHOR_SYSTEM =
   'You are a skill librarian. You are shown several past episodes that follow the ' +
   'SAME repeated procedure. Extract the reusable how-to: a short one-line NAME for ' +
   'the skill, and the ordered STEPS (each a short imperative action). Generalize ' +
-  'away one-off specifics; keep only what repeats. Output the name and steps.'
+  'away one-off specifics; keep only what repeats. Output name, steps, applicability ' +
+  'conditions and counterexamples. Do not claim verification or invent test expectations.'
 
 /**
  * Self-authoring as a {@link MemoryReviewer} (heartbeat pass). Each sweep:
@@ -260,12 +260,14 @@ export function procedureAuthoringReviewer(opts: ProcedureAuthoringReviewerOptio
       }
       const name = (drafted.name ?? '').trim()
       const steps = cleanSteps(drafted.steps)
-      if (!name || steps.length === 0) continue // unusable draft → skip, author nothing empty
+      const conditions = cleanSteps(drafted.conditions)
+      const counterexamples = cleanSteps(drafted.counterexamples)
+      if (!name || !steps.length || !conditions.length || !counterexamples.length) continue
 
       const meta: Record<string, unknown> = {
         ...(opts.procedureMeta ?? {}),
-        [META_FORM]: FORM_PROCEDURE,
-        [META_STEPS]: steps,
+        ...candidateSkillMeta({ name, steps, sources: cand.members.map((m) => m.id),
+          conditions, counterexamples }),
         authored: true,
         authoredAt: ctx.now,
       }
@@ -303,7 +305,7 @@ export const DEFAULT_MERGE_SYSTEM =
   '— they accomplish the SAME goal in slightly different ways. Merge them into ONE ' +
   'master skill: a single clear one-line NAME and the unified ordered STEPS ' +
   '(deduplicate, keep the best ordering, cover what all of them did). Output the ' +
-  'merged name and steps.'
+  'merged name, steps, applicability conditions and counterexamples. Never claim verification.'
 
 /**
  * The active skills the butler "knows how to do" right now — `form:'procedure'`
@@ -364,7 +366,7 @@ export function umbrellaReviewer(opts: UmbrellaReviewerOptions): MemoryReviewer 
     const maxScan = Math.max(1, Math.floor(numOr(opts.maxScan, DEFAULT_SKILLS_SCAN)))
     const semantic = await ctx.memory.recall({ kinds: ['semantic'], k: maxScan })
     const active = activeProcedures(semantic, ctx.now)
-    const procs = opts.filter ? active.filter(opts.filter) : active
+    const procs = (opts.filter ? active.filter(opts.filter) : active).filter((e) => !e.meta?.umbrellaProposed)
 
     const clusters = clusterBySimilarity(procs, {
       ...(opts.minSimilarity !== undefined ? { minSimilarity: opts.minSimilarity } : {}),
@@ -386,12 +388,14 @@ export function umbrellaReviewer(opts: UmbrellaReviewerOptions): MemoryReviewer 
       }
       const name = (drafted.name ?? '').trim()
       const steps = cleanSteps(drafted.steps)
-      if (!name || steps.length === 0) continue // unusable merge → leave the cluster intact
+      const conditions = cleanSteps(drafted.conditions)
+      const counterexamples = cleanSteps(drafted.counterexamples)
+      if (!name || !steps.length || !conditions.length || !counterexamples.length) continue
 
       const meta: Record<string, unknown> = {
         ...(opts.procedureMeta ?? {}),
-        [META_FORM]: FORM_PROCEDURE,
-        [META_STEPS]: steps,
+        ...candidateSkillMeta({ name, steps, sources: cluster.map((m) => m.id),
+          conditions, counterexamples }),
         [META_UMBRELLA]: true,
         mergedAt: ctx.now,
       }
@@ -400,7 +404,9 @@ export function umbrellaReviewer(opts: UmbrellaReviewerOptions): MemoryReviewer 
       for (const orig of cluster) {
         try {
           await ctx.memory.patchMeta!(orig.id, {
-            ...closedMeta(orig.meta, ctx.now),
+            // An untested umbrella may retire drafts, never a published skill.
+            ...(publishedProcedure(orig) ? {} : closedMeta(orig.meta, ctx.now)),
+            umbrellaProposed: umbrella.id,
             [META_SUPERSEDES]: umbrella.id,
             [META_LINKS]: mergeLinks(linksOf(orig), [umbrella.id], orig.id),
           })

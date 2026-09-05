@@ -51,6 +51,7 @@ import {
   budgetReviewer,
   MemoryReviewParticipant,
   MemoryToolset,
+  VerifiedSkills,
   META_LINKS,
   queryDiversityOf,
   procedureAuthoringReviewer,
@@ -421,22 +422,33 @@ async function main(): Promise<void> {
   )
   console.log("  [4d'] D-M3 预算: 过期的「吉隆坡」史料先被驱逐, 在岗的低优先级事实反而留下 ✓")
 
-  // ── [4e] G — the frozen block lifts how-tos into their own section ──
+  // ── [4e] G — only verified publications reach the how-to section ──
   const gMem = inMemoryHandle()
-  await gMem.remember({ kind: 'semantic', text: '主人的身高体重', meta: { importance: 2 } })
+  const source = await gMem.remember({ kind: 'semantic', text: '只对英文缩写做大写转换', meta: { importance: 2 } })
   await gMem.remember({
     kind: 'semantic',
-    text: '怎么给加班费定金额',
-    meta: { importance: 3, form: 'procedure', steps: ['查当日倍率', '按时薪×倍率×时长', '报店长确认'] },
+    text: '旧的未经验证技能',
+    meta: { form: 'procedure', steps: ['未经验证的步骤'] },
   })
+  assert(!renderFrozenBlock(await gMem.list({ limit: 50 }), { showProcedures: true }).includes('未经验证的步骤'),
+    '[4e] legacy procedures cannot masquerade as verified publications')
+  // Deterministic executor and explicit user fixture prove the gate, NOT model quality.
+  const verified = new VerifiedSkills({ memory: gMem, userId: 'demo-owner',
+    runner: async ({ input, steps }) => ({ output: steps.includes('转换为大写') ? input.toUpperCase() : input, model: 'deterministic-demo' }) })
+  const skill = await verified.create({ name: '英文缩写大写转换', steps: ['转换为大写'],
+    sources: [source.id], conditions: ['英文缩写'], counterexamples: ['不要改变区分大小写的标识符'] })
+  await verified.approveTests(skill.id, [{ input: 'api', expected: 'API' }, { input: 'sdk', expected: 'SDK' }])
+  assert((await verified.verify(skill.id)).status === 'passed', '[4e] actual sandbox outputs must meet the held-out fixture')
+  assert(!renderFrozenBlock(await gMem.list({ limit: 50 }), { showProcedures: true }).includes('转换为大写'),
+    '[4e] passing evidence is not automatic publication')
+  await verified.publish(skill.id)
   const gBlock = renderFrozenBlock(await gMem.recall({ kinds: ['semantic'], k: 50 }), { showProcedures: true })
   assert(
     gBlock.includes('Things I know how to do') &&
-      gBlock.includes('怎么给加班费定金额') &&
-      gBlock.includes('查当日倍率'),
-    '[4e] G: the frozen block must lift procedures into a how-to section with their steps',
+      gBlock.includes('英文缩写大写转换') && gBlock.includes('转换为大写'),
+    '[4e] G: the frozen block must lift only the published skill into a how-to section',
   )
-  console.log('  [4e] G 程序记忆: 冻结块把「怎么给加班费定金额」连步骤抽进「会做的事」小节 ✓\n')
+  console.log('  [4e] G 程序记忆: 候选经过明确测试标准、实际输出核验与发布后,才进入冻结块(确定性演示,不代表真实模型效果)\n')
 
   // ── [4f] MR1 — the default recall index spans the WHOLE store ──
   // The prior default (lexicalRetriever) ranks only the newest ~wideK entries, so
@@ -518,7 +530,7 @@ async function main(): Promise<void> {
   // ── [4h] MR3 — the butler AUTHORS a skill, REFINES it, then MERGES redundant ones ──
   // The Hermes-style skill loop, bounded + reversible: (1) a recurring multi-step
   // episode is detected and AUTHORED into a `form:'procedure'` skill by the aux
-  // model; (2) the butler SELF-IMPROVES it in place via the `refine_procedure` tool
+  // model; (2) the butler appends an UNTESTED revision via `refine_procedure`
   // (same id, so the frozen block never moves); (3) a near-duplicate skill is MERGED
   // into one master "umbrella", CLOSING (not deleting) the originals and back-linking
   // them — so recall + SKILL.md show one clean skill while the history stays auditable
@@ -557,7 +569,7 @@ async function main(): Promise<void> {
   const refined = (await skMem.list({ kind: 'semantic', limit: 50 })).find((e) => e.id === authored!.id)!
   assert(
     stepsOf(refined).length === 4 && stepsOf(refined).includes('出杯'),
-    '[4h] MR3 ②: refine_procedure must grow the steps in place (same id)',
+    '[4h] MR3 ②: refine_procedure must grow the candidate steps under the same memory id',
   )
 
   // (3) UMBRELLA MERGE — a near-duplicate skill recorded earlier; merge the two.
@@ -583,7 +595,7 @@ async function main(): Promise<void> {
   )
   // The host projects exactly `activeProcedures` into SKILL.md — so SKILL.md would
   // show this one umbrella, the closed originals dropping out for free.
-  console.log('  [4h] MR3 技能自创+合并: 3 次重复操作写成「手冲咖啡」技能, 工具就地补一步, 再与近似技能合并成 1 个 umbrella (原始 2 个封存可回溯) ✓\n')
+  console.log('  [4h] MR3 技能自创+合并: 3 次重复操作写成「手冲咖啡」候选, 工具追加未测试版本, 再与近似技能合并成 1 个候选 umbrella (原始 2 个封存可回溯) ✓\n')
 
   // ── [5] MR4 — the 6h maintenance heartbeat: ONE composed tick does all the upkeep ──
   // The OpenClaw / Hermes "every few hours, tidy yourself" pass, as ONE composed
@@ -671,7 +683,7 @@ async function main(): Promise<void> {
   console.log('   [4] 长期记忆: 中文召回(C) · 衰减强化(F) · 关联(E) · 程序(G) · 双时态(D) 全接通')
   console.log('   [MR1] 默认召回索引跨整个 store, 翻出窗口外的旧记忆')
   console.log('   [MR2] 后台复盘把被问起的记忆升进画像、把没人问的闲聊封存')
-  console.log('   [MR3] 重复操作自创技能、工具就地自改、近似技能合并成 umbrella(原始封存可回溯)')
+  console.log('   [MR3] 重复操作自创候选、工具追加版本、近似技能合并成候选 umbrella(原始封存可回溯,不自动发布)')
   console.log('   [MR4] 6h 维护心跳一拍组合复盘技能/清输出/合并记忆, 合并 summary→STATUS.md、活技能→SKILL.md')
   console.log(`   (剩余 agent: ${[...registry].join(', ')})`)
 }

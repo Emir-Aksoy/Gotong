@@ -11,6 +11,18 @@ import type {
   MemoryQuery,
   NewMemoryEntry,
 } from '@gotong/services-sdk'
+import { VerifiedSkills } from '../src/verified-skills.js'
+
+/** Rendering fixtures use the actual lifecycle, not hand-forged passed metadata. */
+export async function publishedFixture(id: string, name: string, ts: number, steps: string[], meta: Record<string, unknown> = {}): Promise<MemoryEntry> {
+  const memory = makeFakeMemory([entry('source', 'episodic', 'source episode', 0)])
+  const skills = new VerifiedSkills({ memory, userId: 'fixture-owner', runner: async () => ({ output: 'fixture', model: 'fixture-v1' }) })
+  const c = await skills.create({ name, steps, sources: ['source'], conditions: ['fixture tasks'], counterexamples: ['other tasks'] }, meta)
+  await skills.approveTests(c.id, [{ input: 'fixture input', expected: 'fixture' }])
+  await skills.verify(c.id)
+  await skills.publish(c.id)
+  return { ...await skills.get(c.id), id, ts }
+}
 
 export interface FakeMemory extends MemoryHandle {
   /** Live view of stored entries. */

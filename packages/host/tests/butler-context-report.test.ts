@@ -430,7 +430,8 @@ describe('LIB-M1 上下文段级基线', () => {
   it('冻结块满态:4000 字预算真的咬住(量的是设计上限,不是注水数)', () => {
     expect(frozenFull).toContain('omitted to fit the memory budget')
     expect(frozenFull.length).toBeGreaterThan(3500)
-    expect(frozenFull).toContain('Things I know how to do') // 程序区在样本里有代表
+    // These historical procedure fixtures have no evidence; never imply a pass.
+    expect(frozenFull).not.toContain('Things I know how to do')
     expect(frozenEmpty).toContain('_(no memories yet)_')
   })
 

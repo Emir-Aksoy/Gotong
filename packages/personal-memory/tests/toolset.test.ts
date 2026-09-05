@@ -6,6 +6,8 @@ import { entry, makeFakeMemory } from './fake-memory.js'
 function textOf(result: { content: ReadonlyArray<unknown> }): string {
   return (result.content[0] as { text: string }).text
 }
+const provenance = { sources: ['source'], conditions: ['matching task'], counterexamples: ['other tasks'] }
+function procedureMemory() { return makeFakeMemory([entry('source', 'episodic', 'source example', 1, {})]) }
 
 describe('MemoryToolset', () => {
   it('advertises remember/remember_procedure/recall/forget with LLM-safe names', () => {
@@ -15,6 +17,7 @@ describe('MemoryToolset', () => {
       'remember',
       'remember_procedure',
       'refine_procedure',
+      'inspect_procedure', 'verify_procedure', 'publish_procedure', 'rollback_procedure',
       'recall',
       'forget',
     ])
@@ -191,11 +194,12 @@ describe('MemoryToolset', () => {
 
   describe('procedural memory (G-M1)', () => {
     it('stores form+steps as a semantic entry; recall form="procedure" shows steps inline', async () => {
-      const mem = makeFakeMemory()
+      const mem = procedureMemory()
       const ts = new MemoryToolset({ memory: mem })
 
       const r = await ts.callTool('remember_procedure', {
         name: 'get an overtime claim approved',
+        ...provenance,
         steps: ['draft the claim', 'check the policy', 'route to the manager'],
       })
       expect(r.isError).toBeFalsy()
@@ -221,13 +225,13 @@ describe('MemoryToolset', () => {
     })
 
     it('a procedure also surfaces in an unfiltered recall, carrying its steps', async () => {
-      const mem = makeFakeMemory()
+      const mem = procedureMemory()
       const ts = new MemoryToolset({ memory: mem })
-      await ts.callTool('remember_procedure', { name: 'brew tea', steps: ['boil', 'steep'] })
+      await ts.callTool('remember_procedure', { name: 'brew tea', steps: ['boil', 'steep'], ...provenance })
       await ts.callTool('remember', { text: 'likes oat milk' })
 
       const out = textOf(await ts.callTool('recall', { query: '' }))
-      expect(out).toContain('brew tea — steps: 1. boil; 2. steep')
+      expect(out).toContain('[untested candidate; not a real-world guarantee] steps: 1. boil; 2. steep')
       expect(out).toContain('oat milk') // a plain fact has no steps suffix
       expect(out).not.toMatch(/oat milk[^\n]*steps:/)
     })
@@ -252,9 +256,9 @@ describe('MemoryToolset', () => {
 
   describe('refine_procedure (MR3 ② self-improve)', () => {
     async function seedProcedure(): Promise<{ mem: ReturnType<typeof makeFakeMemory>; ts: MemoryToolset; id: string }> {
-      const mem = makeFakeMemory()
+      const mem = procedureMemory()
       const ts = new MemoryToolset({ memory: mem })
-      await ts.callTool('remember_procedure', { name: 'brew tea', steps: ['boil', 'steep'] })
+      await ts.callTool('remember_procedure', { name: 'brew tea', steps: ['boil', 'steep'], ...provenance })
       const id = mem.entries.find((e) => (e.meta as { form?: string }).form === 'procedure')!.id
       return { mem, ts, id }
     }

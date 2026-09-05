@@ -47,8 +47,10 @@ import type { MemoryRetriever } from './retriever.js'
 import { MemorySession } from './session.js'
 import type { TierConfig } from './tiers.js'
 import { MemoryToolset, type MemoryLinkLookup } from './toolset.js'
+import type { VerifiedSkills } from './verified-skills.js'
 
 export interface MemoryAugmentedAgentOptions extends LlmAgentOptions {
+  verifiedSkills?: VerifiedSkills
   /**
    * Memory handle. Falls back to `services.memory` when omitted. A
    * memory-augmented agent with neither is a misconfiguration (throws).
@@ -161,6 +163,7 @@ export class MemoryAugmentedAgent extends LlmAgent {
 
     const memoryToolset = new MemoryToolset({
       memory,
+      skills: opts.verifiedSkills,
       ...(opts.writableMemoryKinds !== undefined
         ? { writableKinds: opts.writableMemoryKinds }
         : {}),

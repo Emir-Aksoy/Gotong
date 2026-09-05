@@ -15,6 +15,7 @@
  * See `docs/zh/PERSONAL-BUTLER-DESIGN.md` (milestones M1–M3).
  */
 
+export * from './verified-skills.js'
 export {
   renderFrozenBlock,
   renderClusteredFrozenBlock,
@@ -424,4 +425,3 @@ export {
   type LedgerReading,
   type LedgerRung,
 } from './memory-ledger.js'
-

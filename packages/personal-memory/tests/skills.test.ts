@@ -95,7 +95,7 @@ describe('procedureAuthoringReviewer', () => {
   const NOW = 5_000_000
 
   function drafter(d: DraftedProcedure): ProcedureDrafter {
-    return async () => d
+    return async () => ({ conditions: ['Overtime claims'], counterexamples: ['Not travel expenses'], ...d })
   }
 
   it('authors a skill from a recurring pattern and stamps the sources', async () => {
@@ -194,7 +194,7 @@ function proc(
 }
 
 function merger(d: DraftedProcedure): ProcedureDrafter {
-  return async () => d
+  return async () => ({ conditions: ['Overtime claims'], counterexamples: ['Not travel expenses'], ...d })
 }
 
 describe('activeProcedures', () => {

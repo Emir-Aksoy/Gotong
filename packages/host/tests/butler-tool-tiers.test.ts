@@ -228,6 +228,7 @@ function buildButler(provider: LlmProvider, root: string, singleTier?: boolean, 
 }
 
 const GOVERNED_TOOLS = [
+  'approve_procedure_tests',
   'create_agent',
   'edit_agent',
   'delete_agent',
@@ -247,7 +248,7 @@ const GOVERNED_TOOLS = [
   // (key 是 3 键闭集 enum,值有界 30-3650,零自由文本)⇒ 同在 IM 可批名单上。
   'set_retention',
 ] as const
-const MEMORY_TOOLS = ['remember', 'remember_procedure', 'refine_procedure', 'recall', 'forget'] as const
+const MEMORY_TOOLS = ['remember', 'remember_procedure', 'refine_procedure', 'inspect_procedure', 'verify_procedure', 'publish_procedure', 'rollback_procedure', 'recall', 'forget'] as const
 
 let root: string
 
@@ -353,6 +354,7 @@ describe('AFR-M3 — 工具面分层名单防腐门(真工厂)', () => {
     const WEB_ONLY_TOOLS = [
       'ask_peer', // 跨 hub 出网
       'pack_backup', // 身份档含 hub 签名钥 = 凭证级
+      'approve_procedure_tests', // 完整的输入与 expected 必须在网页里逐项确认。
       'hands_run', // 五件手部动作:一行 IM 读不全(argv/stdin 远超 80 码点预算)
       'hands_write',
       'hands_read',

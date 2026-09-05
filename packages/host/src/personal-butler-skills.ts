@@ -41,6 +41,8 @@ import {
   activeProcedures,
   isUmbrella,
   stepsOf,
+  publishedProcedure,
+  skillStatus,
   type MemoryReviewer,
   type ReviewContext,
   type ReviewOutcome,
@@ -61,6 +63,8 @@ const DEFAULT_SCAN = 200
 
 /** One skill in the SKILL.md snapshot — content-free reference for the `/me` view. */
 export interface ButlerSkillRef {
+  readonly verification: ReturnType<typeof skillStatus>
+  readonly published: boolean
   readonly id: string
   readonly name: string
   readonly stepCount: number
@@ -103,6 +107,8 @@ export function projectButlerSkills(
   now: number,
 ): ButlerSkillRef[] {
   return activeProcedures(entries, now).map((p) => ({
+    verification: skillStatus(p),
+    published: publishedProcedure(p) !== null,
     id: p.id,
     name: p.text,
     stepCount: stepsOf(p).length,
@@ -182,7 +188,7 @@ function renderSkillFile(procedures: readonly MemoryEntry[], now: number): strin
   const summary: ButlerSkillSummary = { writtenAt: now, count: refs.length, skills: refs }
   const lines: string[] = [
     `${MARKER_PREFIX}${JSON.stringify(summary)}${MARKER_SUFFIX}`,
-    '# 我会做的事（技能）',
+    '# 个人技能记录',
     '',
     `_${refs.length} 个技能 · 更新于 ${new Date(now).toISOString()}_`,
     '',
@@ -192,8 +198,14 @@ function renderSkillFile(procedures: readonly MemoryEntry[], now: number): strin
   for (const p of active) {
     const badge = isUmbrella(p) ? ' （合并）' : ''
     lines.push(`## ${p.text}${badge}`)
-    const steps = stepsOf(p)
-    for (let i = 0; i < steps.length; i++) lines.push(`${i + 1}. ${clip(steps[i] ?? '')}`)
+    const published = publishedProcedure(p)
+    lines.push(published ? '已发布;仅通过无副作用沙箱输出验收,不保证现实执行效果。' : `未发布 / ${skillStatus(p) === 'unverified' ? '未验证' : skillStatus(p)}。`)
+    const steps = stepsOf(published ?? p)
+    for (let i = 0; i < steps.length; i++) lines.push(`${i + 1}. ${published ? steps[i] : clip(steps[i] ?? '')}`)
+    if (published) {
+      lines.push(`适用条件: ${JSON.stringify(published.meta?.conditions)}`,
+        `反例/不适用: ${JSON.stringify(published.meta?.counterexamples)}`)
+    }
     lines.push('')
   }
   if (active.length === 0) lines.push('_（还没有记录任何技能）_', '')
