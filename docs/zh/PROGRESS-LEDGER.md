@@ -578,3 +578,15 @@ fail-open。账本是 `audit_log` 同构的观测层, 配额闸是其上的执�
   验收：cli 226 / host 1799 / web 1266 / workflow 259 全绿，四门 PASS（main 3040/3040 零松弛）。
   **PUB-M3 真发布待用户**：npm org `gotong` + PyPI 账号 + 发布时刻 OTP 在场，照 runbook 走；
   npm 形态 update 真测发布日补。
+
+## 2026-09-04 可验证技能与交付证据
+
+- **第 5 项，方向: M+T**：Atong 个人经验以候选版本进入现有程序性记忆，用户在真实
+  收件箱确认完整保留标准；同模型双臂无工具评测复用配额/用量账，通过后显式发布，
+  支持恢复先前发布。旧技能可读但未验证，条件与反例不可在提示词裁剪中丢失。
+  细节与使用入口：[`VERIFIED-SKILLS.md`](VERIFIED-SKILLS.md)。
+- **第 6 项，方向: C**：Gotong 交付物信封携声明式检查、请求/实际交付 JSON 指纹和来源；
+  接收端携原请求重算，签名与质量判定分离。修正公共 JCS 特殊键，三套接入包同步；
+  Python 不支持的密码学复验诚实标为未验证。入口：[`DELIVERY-EVIDENCE.md`](DELIVERY-EVIDENCE.md)。
+- 本轮恢复范围、测试证据、功能提交与服务器状态以
+  [`2026-09-04 发布记录`](releases/2026-09-04-verified-skills-delivery-evidence.md) 为准。
