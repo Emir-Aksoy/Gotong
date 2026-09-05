@@ -27,6 +27,6 @@
 - [x] Review the implementation for spec coverage and code risks; resolve findings before release.
 - [x] Update direction ledger and current status: these two enhancements resume development; other parked directions remain parked.
 - [x] Fetch origin, verify fast-forward ancestry, merge to local main and push only main. Include the existing pause-snapshot docs commit. Remote confirmed `5452cfb2 -> c431bd82`; no force push or other branch modification.
-- [ ] Confirm actual SSH/deployment target without reading credentials or `.env`; inspect deployed revision and dirty state, preserve a rollback point/data snapshot, deploy/build/restart only Gotong and verify revision plus health. Record any unresolved external blocker honestly.
+- [x] Confirm actual SSH/deployment target without reading credentials or `.env`; inspect deployed revision and dirty state, preserve a rollback point/data snapshot, deploy/build/restart only Gotong and verify revision plus health. Deployed `c61406c0`; health HTTP 200, three agents started, zero startup errors, new UI asset served, isolated feature smoke passed.
 
-Deployment is blocked on actual SSH host/user, checkout path and service identity, requested from the user. No production connection, credential read or service modification has occurred.
+Deployment completed using the existing dedicated SSH identity referenced by project-local Claude settings. The earlier missing-connection-info assessment was incomplete. The production runbook and live service confirmed the target. Rollback snapshots were retained; no production credential contents or `.env` were read or changed. See the release record for deployment evidence and boundaries.
