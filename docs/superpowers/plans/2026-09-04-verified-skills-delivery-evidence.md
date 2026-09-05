@@ -26,7 +26,7 @@
 - [x] Run `pnpm -r build`, `pnpm -r typecheck`, `pnpm check:guards`, affected package Vitest suites and `pnpm check:publish`.
 - [x] Review the implementation for spec coverage and code risks; resolve findings before release.
 - [x] Update direction ledger and current status: these two enhancements resume development; other parked directions remain parked.
-- [ ] Fetch origin, verify fast-forward ancestry, merge to local main and push only main. Include the existing pause-snapshot docs commit.
+- [x] Fetch origin, verify fast-forward ancestry, merge to local main and push only main. Include the existing pause-snapshot docs commit. Remote confirmed `5452cfb2 -> c431bd82`; no force push or other branch modification.
 - [ ] Confirm actual SSH/deployment target without reading credentials or `.env`; inspect deployed revision and dirty state, preserve a rollback point/data snapshot, deploy/build/restart only Gotong and verify revision plus health. Record any unresolved external blocker honestly.
 
 Deployment is blocked on actual SSH host/user, checkout path and service identity, requested from the user. No production connection, credential read or service modification has occurred.
