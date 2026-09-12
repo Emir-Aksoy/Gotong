@@ -30,6 +30,7 @@
  */
 
 import { enforceBudget, type MemoryUsageMeasure } from './budget.js'
+import { assertEvidenceSaved, hasEvidenceBoundary, prepareEvidenceCompaction } from './evidence.js'
 import type { SalienceOptions } from './salience.js'
 import {
   DEFAULT_CONSOLIDATE_KEEP_RECENT,
@@ -139,6 +140,26 @@ export async function consolidateTiered(
   const episodic = (await pullEpisodic(opts.memory, opts.filter)).sort((a, b) => a.ts - b.ts)
   if (episodic.length <= keepRecent) return null
   const toFold = episodic.slice(0, episodic.length - keepRecent)
+  if (toFold.some(hasEvidenceBoundary)) {
+    const digests: TieredDigest[] = []
+    let consolidatedCount = 0
+    // Exact quotes use the existing deterministic topic router, never lossy LLM fallback.
+    for (const spec of config.tiers) {
+      const candidates = toFold.filter(e => hasEvidenceBoundary(e) && routeFallback(config, e) === spec.id)
+      const importance = profileImportance(candidates, [])
+      const prepared = prepareEvidenceCompaction(candidates,
+        clampPositive(opts.digestHardCap, DEFAULT_DIGEST_HARD_CAP), {
+          ...opts.entryMeta, [META_TIER]: spec.id, [META_LEVEL]: 'digest',
+          [META_IMPORTANCE]: importance, [META_CONSOLIDATED_AT]: now,
+        })
+      if (!prepared) continue
+      const entry = await opts.memory.remember(prepared.entry)
+      assertEvidenceSaved(prepared.entry, entry)
+      consolidatedCount += await forgetAll(opts.memory, prepared.consumed)
+      digests.push({ tier: spec.id, entry, importance })
+    }
+    return digests.length ? { consolidatedCount, digests, routedByFallback: false } : null
+  }
 
   // Existing cluster profiles ride along as read-only background so each digest
   // captures only what is NEW (promoteCluster owns the profiles, not this pass).
@@ -248,6 +269,22 @@ export async function promoteCluster(
     .sort((a, b) => a.ts - b.ts)
 
   const now = (opts.now ?? ((): number => Date.now()))()
+
+  if ([...digests, ...priorProfiles].some(hasEvidenceBoundary)) {
+    const protectedProfiles = priorProfiles.filter(hasEvidenceBoundary)
+    // Importance is not permission to discard a source that lacks a replacement.
+    const prepared = prepareEvidenceCompaction(digests.filter(hasEvidenceBoundary),
+      clampPositive(opts.profileHardCap, DEFAULT_PROFILE_HARD_CAP), {
+        ...opts.entryMeta, [META_TIER]: tier, [META_LEVEL]: 'profile', [META_PROFILE]: true,
+        [META_IMPORTANCE]: profileImportance(digests, protectedProfiles), [META_CONSOLIDATED_AT]: now,
+      }, protectedProfiles)
+    if (!prepared) return null
+    const profile = await opts.memory.remember(prepared.entry)
+    assertEvidenceSaved(prepared.entry, profile)
+    const foldedDigests = await forgetAll(opts.memory, prepared.consumed)
+    const absorbedProfiles = await forgetAll(opts.memory, protectedProfiles)
+    return { tier, profile, foldedDigests, droppedDigests: 0, absorbedProfiles, bytes: profile.text.length }
+  }
 
   // Everything trivial and nothing durable yet → just drop the trivial digests
   // to reclaim space; do not synthesize an empty profile.

@@ -7,6 +7,8 @@
  */
 
 export type PersonalMemoryErrorCode =
+  | 'evidence_source_conflict'
+  | 'evidence_write_mismatch'
   | 'invalid_turn_time'
   | 'skill_invalid'
   /** A memory-augmented agent was constructed with no memory handle —

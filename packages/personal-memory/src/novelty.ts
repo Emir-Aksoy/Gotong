@@ -44,7 +44,7 @@ import { DEFAULT_FACT_DEDUP_THRESHOLD } from './atomic-facts.js'
 import { linksOf, mergeLinks, META_LINKS } from './links.js'
 import { relevanceScore } from './relevance.js'
 import { reinforcedMeta } from './salience.js'
-import { temporalOf } from './temporal.js'
+import { hasEvidenceBoundary } from './evidence.js'
 
 /**
  * 回看窗:只比同 kind 最近这么多条。
@@ -164,7 +164,7 @@ export async function rememberNovel(
   }
 
   // Lexical similarity cannot prove two timed occurrences are the same event.
-  if (temporalOf(entry)) return append(0)
+  if (hasEvidenceBoundary(entry)) return append(0)
   // 没有改 meta 的手 ⇒ 折叠无处落账(强化、边、审计痕迹都写不下)⇒ 照常写。
   const patch = opts.memory.patchMeta?.bind(opts.memory)
   if (!patch) return append(0)
@@ -179,7 +179,7 @@ export async function rememberNovel(
 
   const verdict = judgeNovelty(
     entry.text,
-    recent.filter(e => !temporalOf(e)),
+    recent.filter(e => !hasEvidenceBoundary(e)),
     opts.threshold !== undefined ? { threshold: opts.threshold } : {},
   )
   if (verdict.novel || verdict.foldInto === undefined) return append(verdict.score)

@@ -57,11 +57,17 @@ export interface TurnCaptureInput {
  */
 export function buildTurnCapture(input: TurnCaptureInput): NewMemoryEntry | null {
   const max = clampMax(input.maxChars)
-  const text = renderTurn(collapse(input.userText), collapse(input.replyText), max)
+  // User evidence must retain layout too: collapsing lines can change a dated list's meaning.
+  const userText = input.userText.trim() ? input.userText : ''
+  const { text, userLength } = renderTurn(userText, collapse(input.replyText), max)
   if (text.length === 0) return null
   const meta: Record<string, unknown> = { turn: true, ...(input.meta ?? {}) }
   // Static/custom metadata cannot supply the clock, especially on resume.
   delete meta.temporal
+  delete meta.userSpan
+  delete meta.evidence
+  if (userLength > 0) meta.userSpan = { v: 1, start: 6, end: 6 + userLength,
+    ...(userLength < userText.length ? { complete: false } : {}) }
   const temporal = temporalOf({ meta: { temporal: input.temporal } })
   if (temporal) meta.temporal = temporal
   if (input.taskId !== undefined) meta.taskId = input.taskId
@@ -139,7 +145,7 @@ function lastUserMessageText(messages: unknown[]): string {
   return ''
 }
 
-function renderTurn(user: string, reply: string, max: number): string {
+function renderTurn(user: string, reply: string, max: number): { text: string; userLength: number } {
   // Split the budget so a giant prompt can't crowd out the reply (and vice
   // versa). Each side keeps roughly half; tiny entries stay whole.
   const half = Math.max(1, Math.floor(max / 2))
@@ -148,7 +154,7 @@ function renderTurn(user: string, reply: string, max: number): string {
   const r = truncate(reply, half)
   if (u.length > 0) parts.push(`User: ${u}`)
   if (r.length > 0) parts.push(`Butler: ${r}`)
-  return parts.join('\n')
+  return { text: parts.join('\n'), userLength: u.length }
 }
 
 function collapse(text: string): string {

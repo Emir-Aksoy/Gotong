@@ -56,7 +56,7 @@ describe('forward-only turn time', () => {
     const input = { userText: 'today I ate barbecue', replyText: 'ok', meta: { temporal: { ...anchor, observedAt: 0 }, owner: 'alice' } }
     expect(buildTurnCapture({ ...input, temporal: anchor })!.meta).toMatchObject({ temporal: anchor, owner: 'alice' })
     expect(buildTurnCapture(input)!.meta).not.toHaveProperty('temporal')
-    expect(buildTurnCapture({ userText: 'hi', replyText: 'ok' })!.meta).toEqual({ turn: true })
+    expect(buildTurnCapture({ userText: 'hi', replyText: 'ok' })!.meta).toEqual({ turn: true, userSpan: { v: 1, start: 6, end: 8 } })
   })
 
   it('makes identical words spoken on different dates distinguishable in frozen context', () => {

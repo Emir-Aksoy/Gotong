@@ -38,6 +38,7 @@ import type { MemoryEntry, MemoryHandle, MemoryKind, NewMemoryEntry } from '@got
 
 import { openedMeta, type MemoryValidityWriter } from './bitemporal.js'
 import { isProfile, type MemorySummarizer } from './consolidate.js'
+import { hasEvidenceBoundary } from './evidence.js'
 import { clampImportance, importanceOf, META_IMPORTANCE, type Importance } from './importance.js'
 import type { MemoryReviewer, ReviewContext, ReviewOutcome } from './review.js'
 import { isClusterProfile, isDigest } from './tiers.js'
@@ -254,7 +255,8 @@ async function pullExisting(
   const all = await opts.memory.recall({ kinds: [kind], k })
   const scoped = opts.filter ? all.filter((e) => opts.filter!(e)) : all
   const eligible = opts.existingFilter ?? defaultExistingFilter(kind)
-  return scoped.filter(eligible).sort((a, b) => a.ts - b.ts)
+  // Legacy free-form UPDATE/DELETE has no evidence-preserving replacement contract.
+  return scoped.filter(e => !hasEvidenceBoundary(e)).filter(eligible).sort((a, b) => a.ts - b.ts)
 }
 
 /** Default eligibility: for `semantic`, ad-hoc facts only (skip tiered digest/

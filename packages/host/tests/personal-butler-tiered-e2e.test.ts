@@ -5,14 +5,15 @@
  * The unit suites prove each piece in isolation: `consolidate-tiered` routes /
  * folds / importance-gates, `clustered-frozen-block` groups + importance-orders,
  * `butler-memory-service` projects tier/level/importance. This drives them
- * COMPOSED through the production wiring, end to end, and pins three claims:
+ * COMPOSED through the production wiring. Legacy fixtures retain the original
+ * model-curation coverage; a separate live-capture case pins protected evidence.
  *
- *   1. TIERED CURATION THROUGH THE HEARTBEAT — a live butler captures turns
- *      across topics → the `tieredReviewer` (the heartbeat job, Stream D) routes
+ *   1. LEGACY TIERED CURATION THROUGH THE HEARTBEAT — legacy turns across
+ *      topics → the `tieredReviewer` (the heartbeat job, Stream D) routes
  *      the episodic backlog into per-cluster DIGESTS with importance (③×⑤), and
  *      the member's `/me` privacy view (HostButlerMemoryService) shows WHICH
  *      cluster and HOW important — end to end, no unit shims.
- *   2. IMPORTANCE-GRADED PROMOTION IN ONE TICK — the same heartbeat tick folds a
+ *   2. LEGACY IMPORTANCE-GRADED PROMOTION IN ONE TICK — the same heartbeat tick folds a
  *      high-importance cluster into a stable PROFILE while DROPPING a trivial
  *      cluster's digest (importance < gate, no prior profile) — visible in the
  *      `/me` view as a `level:'profile'` entry, with the trivia simply gone.
@@ -20,6 +21,8 @@
  *      memory) sends a CLUSTERED, IMPORTANCE-ORDERED frozen block to the model:
  *      `## 画像` / `## 项目` headings in catalog order, and a p5 fact ahead of a
  *      newer p2 one in the same cluster (salience beats recency, in the live block).
+ *   4. NEW CAPTURES KEEP EVIDENCE — exact user statements and turn times survive
+ *      deterministic routing and promotion, without model paraphrases or inferred ratings.
  *
  * The LLM is a deterministic provider (no API key): it acks turns (so capture
  * runs), routes the curator's batch by keyword into cluster JSON, writes cluster
@@ -32,7 +35,7 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { Hub, InMemoryStorage, type Logger } from '@gotong/core'
 import {
@@ -100,15 +103,16 @@ class RecordingProvider implements LlmProvider {
 async function curate(args: { system: string; user: string }): Promise<string> {
   const { system, user } = args
   if (system.includes('JSON') && system.includes('cluster')) {
-    // ROUTE: pick clusters by keyword across the whole batch, with importance.
+    // Catalog labels are instructions, not evidence that the user has a project.
+    const batch = user.match(/\[\d+ recent conversation entries to route \(oldest first\)\]\n([\s\S]*)/)?.[1] ?? ''
     const clusters: Record<string, { digest: string; importance: number }> = {}
-    if (/阿明|过敏|花生|名叫|我叫/.test(user)) {
+    if (/阿明|过敏|花生|名叫|我叫/.test(batch)) {
       clusters.persona = { digest: '主人名叫阿明;对花生严重过敏(关键安全信息)。', importance: 5 }
     }
-    if (/奶茶店|项目|创业/.test(user)) {
+    if (/奶茶店|项目|创业/.test(batch)) {
       clusters.projects = { digest: '在做一个奶茶店创业项目。', importance: 3 }
     }
-    if (/天气|闲聊|随便|无聊/.test(user)) {
+    if (/天气|闲聊|随便|无聊/.test(batch)) {
       clusters.misc = { digest: '一些无关紧要的闲聊。', importance: 1 }
     }
     return JSON.stringify({ clusters })
@@ -186,12 +190,12 @@ describe('personal-butler-tiered-e2e — tiered + importance memory (③×⑤)',
   /**
    * The heartbeat job main.ts wires: one tiered reviewer over the user's memory.
    * `keepRecent: 1` folds every topic turn but leaves the single most-recent
-   * (a content-free filler each claim dispatches last) — 0 isn't usable, the
+   * (a content-free filler each claim supplies last) — 0 isn't usable, the
    * tiered path clamps a non-positive keepRecent back to its default (8).
    */
-  function reviewerFor(promoteAfterDigests: number): MemoryReviewer {
+  function reviewerFor(promoteAfterDigests: number, summarize: typeof curate = curate): MemoryReviewer {
     return tieredReviewer({
-      summarize: curate,
+      summarize,
       config: DEFAULT_TIERS,
       force: true,
       keepRecent: 1,
@@ -200,24 +204,27 @@ describe('personal-butler-tiered-e2e — tiered + importance memory (③×⑤)',
     })
   }
 
-  it('claim 1 — heartbeat routes captures into cluster digests with importance; /me shows cluster + salience', async () => {
-    const mem = memFor('alice')
-    const b = butlerFor('butler:alice:s1', mem)
-    hub.register(b)
+  /** Old records had no user spans or turn clocks; do not downgrade new captures to simulate them. */
+  async function seedLegacyTurns(userId: string, texts: string[]): Promise<void> {
+    let clock = 1_000
+    const memory = openButlerMemory({ rootDir: memRoot, userId, logger: silentLogger, now: () => clock++ })
+    for (const text of texts) await memory.remember({ kind: 'episodic', text: `User: ${text}\nButler: 好的,我记下了。` })
+  }
 
-    // Three topic turns + a trailing filler (the kept-recent) — captured to
-    // episodic by the live agent.
-    expect((await dispatchTo('butler:alice:s1', 'alice', '记住,我叫阿明,我对花生过敏。')).kind).toBe('ok')
-    expect((await dispatchTo('butler:alice:s1', 'alice', '我在做一个奶茶店创业项目。')).kind).toBe('ok')
-    expect((await dispatchTo('butler:alice:s1', 'alice', '今天天气不错,随便聊聊。')).kind).toBe('ok')
-    expect((await dispatchTo('butler:alice:s1', 'alice', '好的,谢谢你。')).kind).toBe('ok')
-    hub.unregister('butler:alice:s1')
-    expect((await mem.recall({ kinds: ['episodic'], k: 50 })).length).toBeGreaterThanOrEqual(4)
+  it('claim 1 — heartbeat routes legacy fixtures into cluster digests with importance; /me shows cluster + salience', async () => {
+    const mem = memFor('alice')
+    await seedLegacyTurns('alice', [
+      '记住,我叫阿明,我对花生过敏。', '我在做一个奶茶店创业项目。',
+      '今天天气不错,随便聊聊。', '好的,谢谢你。',
+    ])
+    expect(await mem.recall({ kinds: ['episodic'], k: 50 })).toHaveLength(4)
 
     // One heartbeat tick. promoteAfter high so this tick ONLY consolidates
     // (each cluster has a single digest) — promotion is claim 2.
-    const outcome = await reviewerFor(99)({ memory: mem, now: 3_000_000 })
+    const summarize = vi.fn(curate)
+    const outcome = await reviewerFor(99, summarize)({ memory: mem, now: 3_000_000 })
     expect(outcome.summary ?? '').toContain('tiered')
+    expect(summarize).toHaveBeenCalledOnce()
 
     // Topic turns folded into digests; only the filler kept-recent remains.
     const remaining = await mem.recall({ kinds: ['episodic'], k: 50 })
@@ -240,24 +247,23 @@ describe('personal-butler-tiered-e2e — tiered + importance memory (③×⑤)',
     expect(misc.importance).toBe(1) // trivial chatter rated lowest (drops on promote)
   })
 
-  it('claim 2 — one tick promotes a high-importance cluster to a profile and drops a trivial one (/me view)', async () => {
+  it('claim 2 — legacy promotion keeps a high-importance profile and drops a trivial digest (/me view)', async () => {
     const mem = memFor('bob')
-    const b = butlerFor('butler:bob:s1', mem)
-    hub.register(b)
 
     // A safety-critical persona fact (p5), trivial chatter (p1), + a filler
     // (the kept-recent) so both topic turns fold this tick.
-    expect((await dispatchTo('butler:bob:s1', 'bob', '我叫阿明,对花生过敏,这点很重要。')).kind).toBe('ok')
-    expect((await dispatchTo('butler:bob:s1', 'bob', '今天天气不错,随便聊聊。')).kind).toBe('ok')
-    expect((await dispatchTo('butler:bob:s1', 'bob', '好的,谢谢你。')).kind).toBe('ok')
-    hub.unregister('butler:bob:s1')
+    await seedLegacyTurns('bob', [
+      '我叫阿明,对花生过敏,这点很重要。', '今天天气不错,随便聊聊。', '好的,谢谢你。',
+    ])
 
     // promoteAfter=1 → this single tick BOTH consolidates AND promotes every
     // cluster: persona (p5 ≥ gate) → stable profile; misc (p1 < gate, no prior
     // profile) → its digest is dropped, no empty profile synthesized.
-    const outcome = await reviewerFor(1)({ memory: mem, now: 4_000_000 })
+    const summarize = vi.fn(curate)
+    const outcome = await reviewerFor(1, summarize)({ memory: mem, now: 4_000_000 })
     expect(outcome.summary ?? '').toMatch(/promoted/)
     expect(outcome.summary ?? '').toMatch(/dropped/)
+    expect(summarize).toHaveBeenCalledTimes(2) // Routing + nontrivial profile; trivia never reaches promotion.
 
     const all = await view.export('bob')
     const persona = all.find((e) => e.tier === 'persona')!
@@ -267,6 +273,69 @@ describe('personal-butler-tiered-e2e — tiered + importance memory (③×⑤)',
 
     // The trivial cluster left nothing durable — no misc entry at any level.
     expect(all.some((e) => e.tier === 'misc')).toBe(false)
+    expect(all.some((e) => e.tier === 'projects')).toBe(false)
+  })
+
+  it('claim 4 — live captures retain exact user sources through conservative routing and promotion', async () => {
+    const mem = memFor('dana')
+    const b = butlerFor('butler:dana:s1', mem)
+    hub.register(b)
+    const users = ['记住,我叫阿明,我对花生过敏。', '我在做一个奶茶店创业项目。', '今天天气不错,随便聊聊。']
+    for (const user of [...users, '好的,谢谢你。']) {
+      expect((await dispatchTo('butler:dana:s1', 'dana', user)).kind).toBe('ok')
+    }
+    hub.unregister('butler:dana:s1')
+    const captures = await mem.recall({ kinds: ['episodic'], k: 50 })
+    expect(captures).toHaveLength(4)
+    const sources = users.map(user => {
+      const capture = captures.find(e => e.text.startsWith(`User: ${user}\n`))!
+      expect(capture.meta?.userSpan).toEqual({ v: 1, start: 6, end: 6 + user.length })
+      expect(capture.meta?.temporal).toMatchObject({ v: 1, basis: 'turn-start' })
+      return { sourceId: capture.id, speaker: 'user', temporal: capture.meta!.temporal }
+    })
+    async function assertQuoteBindings(): Promise<void> {
+      const entries = await mem.list({ kind: 'semantic', limit: 50 })
+      const actual = entries.flatMap(entry => {
+        const evidence = entry.meta?.evidence as { sources: { sourceId: string; start: number; end: number }[] }
+        return evidence.sources.map(s => ({ sourceId: s.sourceId, text: entry.text.slice(s.start, s.end) }))
+      }).sort((a, b) => a.sourceId.localeCompare(b.sourceId))
+      expect(actual).toEqual(sources.map((s, i) => ({ sourceId: s.sourceId, text: users[i] }))
+        .sort((a, b) => a.sourceId.localeCompare(b.sourceId)))
+    }
+    const summarize = vi.fn(curate)
+    const digest = await reviewerFor(99, summarize)({ memory: mem, now: 5_000_000 })
+    expect(digest.consolidated).toBe(3)
+    expect(summarize).not.toHaveBeenCalled()
+    await assertQuoteBindings()
+    const remaining = await mem.recall({ kinds: ['episodic'], k: 50 })
+    expect(remaining).toHaveLength(1)
+    expect(remaining[0]!.text).toContain('谢谢')
+
+    // The keyword router does not infer persona from an allergy statement or
+    // assign the model's invented p5/p1 scores; sources keep their default p3.
+    const all = await view.export('dana')
+    const digests = all.filter(e => e.level === 'digest')
+    expect(digests).toHaveLength(2)
+    expect(digests.find(e => e.tier === 'misc')).toMatchObject({ text: `${users[0]}\n${users[2]}`, importance: 3 })
+    expect(digests.find(e => e.tier === 'projects')).toMatchObject({ text: users[1], importance: 3 })
+    expect(digests.some(e => e.tier === 'persona')).toBe(false)
+
+    const promotion = await reviewerFor(1, summarize)({ memory: mem, now: 5_000_001 })
+    expect(promotion.summary).toContain('promoted 2 cluster(s)')
+    expect(promotion.summary).not.toContain('dropped')
+    expect(summarize).not.toHaveBeenCalled()
+    const profiles = await mem.list({ kind: 'semantic', limit: 50 })
+    expect(profiles).toHaveLength(2)
+    expect(profiles.every(e => e.meta?.level === 'profile')).toBe(true)
+    await assertQuoteBindings()
+    expect(profiles.find(e => e.meta?.tier === 'misc')?.meta).toMatchObject({
+      evidence: { v: 1, sources: [sources[0], sources[2]] },
+    })
+    expect(profiles.find(e => e.meta?.tier === 'projects')?.meta).toMatchObject({
+      evidence: { v: 1, sources: [sources[1]] },
+    })
+    expect(profiles.map(e => e.text).sort()).toEqual([`${users[0]}\n${users[2]}`, users[1]].sort())
+    expect(profiles.every(e => !e.text.includes('好的,我记下了') && !e.text.includes('严重'))).toBe(true)
   })
 
   it('claim 3 — a fresh session sends a clustered, importance-ordered frozen block to the model', async () => {

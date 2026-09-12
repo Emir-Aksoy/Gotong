@@ -50,6 +50,7 @@ import {
 import { lexicalRetriever, type MemoryRetriever } from './retriever.js'
 import { tierOf } from './tiers.js'
 import { formatTurnTime, temporalOf } from './temporal.js'
+import { renderEvidence } from './evidence.js'
 import { VerifiedSkills, skillStatus, skillState } from './verified-skills.js'
 
 /**
@@ -514,7 +515,7 @@ export class MemoryToolset implements LlmAgentToolset {
         const suffix = steps.length > 0 ? ` — [${skillStatus(e)} candidate; not a real-world guarantee] steps: ${formatProcedureSteps(steps)}` : ''
         const temporal = temporalOf(e)
         const observed = temporal ? `; ${formatTurnTime(temporal)}` : ''
-        return `${prefix}[${e.id}] (${tag}, p${importanceOf(e)}, recorded: ${new Date(e.ts).toISOString()}${observed}) ${e.text}${suffix}`
+        return `${prefix}[${e.id}] (${tag}, p${importanceOf(e)}, recorded: ${new Date(e.ts).toISOString()}${observed}) ${renderEvidence(e) ?? e.text}${suffix}`
       })
       // F-M3: reinforce what the query MATCHED (the seeds), opt-in. Best-effort
       // and AFTER the result is built — a failed reinforce must not turn a good

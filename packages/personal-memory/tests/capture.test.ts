@@ -32,9 +32,9 @@ describe('buildTurnCapture', () => {
     expect(e!.meta).toMatchObject({ turn: true, taskId: 't9', from: 'user:alice' })
   })
 
-  it('collapses newlines so the entry text stays one tidy block', () => {
+  it('preserves user newlines while compacting assistant display text', () => {
     const e = buildTurnCapture({ userText: 'line one\n  line two', replyText: 'a\nb' })
-    expect(e!.text).toBe('User: line one line two\nButler: a b')
+    expect(e!.text).toBe('User: line one\n  line two\nButler: a b')
   })
 
   it('returns null when there is nothing to record (both sides empty)', () => {

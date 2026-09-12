@@ -31,7 +31,7 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { Hub, InMemoryStorage, type Logger } from '@gotong/core'
 import { openIdentityStore, type IdentityStore } from '@gotong/identity'
@@ -84,8 +84,10 @@ function lastUserMessage(req: LlmRequest): LlmMessage | undefined {
 
 class ButlerE2eProvider implements LlmProvider {
   readonly name = 'butler-e2e'
+  lastSystem = ''
 
   async *stream(req: LlmRequest): AsyncIterable<LlmStreamChunk> {
+    this.lastSystem = req.system ?? ''
     const last = lastUserMessage(req)
     const content = last?.content
 
@@ -273,23 +275,48 @@ describe('personal-butler-e2e — §七 acceptance gate (4 claims)', () => {
     expect(r1.kind).toBe('ok')
     const r2 = await dispatchTo('butler:alice:s1', 'alice', '另外,我最近在忙一个奶茶店的创业。')
     expect(r2.kind).toBe('ok')
-    hub.unregister('butler:alice:s1')
 
     const episodic = await aliceMem.recall({ kinds: ['episodic'], k: 50 })
-    expect(episodic.length).toBeGreaterThanOrEqual(2)
+    expect(episodic).toHaveLength(2)
+    const nameCapture = episodic.find(e => e.text.includes('记住:我叫阿明。'))!
+    const projectCapture = episodic.find(e => e.text.includes('另外,我最近在忙一个奶茶店的创业。'))!
 
-    // Consolidate (M3): the heartbeat reviewer's job — distill episodic into a
-    // durable semantic profile. Summarizer is the LLM call; deterministic here.
+    // The newest project remains episodic. A summarizer must not invent a copy
+    // of that retained turn while consolidating only the older name statement.
+    const summarize = vi.fn(async () => '主人名叫阿明;正在做一个奶茶店创业项目。')
     const result = await consolidate({
       memory: aliceMem,
       force: true,
       keepRecent: 1,
       now: () => 2_000_000,
-      summarize: async () => '主人名叫阿明;正在做一个奶茶店创业项目。',
+      summarize,
     })
     expect(result).not.toBeNull()
+    expect(result!.consolidatedCount).toBe(1)
+    expect(result!.profile.text).toBe('记住:我叫阿明。')
+    expect(result!.profile.meta).toMatchObject({ evidence: { v: 1, sources: [
+      { sourceId: nameCapture.id, speaker: 'user', temporal: nameCapture.meta!.temporal, start: 0, end: '记住:我叫阿明。'.length },
+    ] } })
+    expect(await aliceMem.recall({ kinds: ['episodic'], k: 50 })).toEqual([projectCapture])
+    expect(summarize).not.toHaveBeenCalled()
+
+    // A real trailing turn makes the project eligible for the next pass, without
+    // changing keepRecent or stripping capture metadata to regain the old path.
+    expect((await dispatchTo('butler:alice:s1', 'alice', '好的,谢谢。')).kind).toBe('ok')
+    hub.unregister('butler:alice:s1')
+    const next = await consolidate({ memory: aliceMem, force: true, keepRecent: 1, summarize, now: () => 2_000_001 })
+    expect(next?.consolidatedCount).toBe(1)
+    expect(next?.absorbedProfiles).toBe(1)
+    expect(next?.profile.text).toBe('记住:我叫阿明。\n另外,我最近在忙一个奶茶店的创业。')
+    expect(next?.profile.meta).toMatchObject({ evidence: { v: 1, sources: [
+      { sourceId: nameCapture.id, speaker: 'user', temporal: nameCapture.meta!.temporal, start: 0, end: '记住:我叫阿明。'.length },
+      { sourceId: projectCapture.id, speaker: 'user', temporal: projectCapture.meta!.temporal,
+        start: '记住:我叫阿明。\n'.length, end: next!.profile.text.length },
+    ] } })
+    expect(summarize).not.toHaveBeenCalled()
     const semantic = await aliceMem.recall({ kinds: ['semantic'], k: 50 })
-    expect(semantic.some((p) => p.text.includes('奶茶店'))).toBe(true)
+    expect(semantic).toHaveLength(1)
+    expect(semantic[0]!.text).toBe(next!.profile.text)
 
     // Session 2: a BRAND-NEW butler instance, same per-user memory. Its frozen
     // block carries the profile; the recall comes back from a fresh session.
@@ -299,6 +326,9 @@ describe('personal-butler-e2e — §七 acceptance gate (4 claims)', () => {
     expect(res.kind).toBe('ok')
     if (res.kind !== 'ok') throw new Error('unreachable')
     expect((res.output as { text: string }).text).toContain('奶茶店')
+    expect(provider.lastSystem).toContain(projectCapture.id)
+    expect(provider.lastSystem).toContain('user quote')
+    expect(provider.lastSystem).toContain('另外,我最近在忙一个奶茶店的创业。')
   })
 
   it('claim 2 — a benign flexible invocation runs inline (no suspend)', async () => {

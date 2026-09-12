@@ -41,6 +41,7 @@
 import type { MemoryEntry, MemoryHandle, NewMemoryEntry } from '@gotong/services-sdk'
 
 import { PersonalMemoryError } from './errors.js'
+import { assertEvidenceSaved, hasEvidenceBoundary, prepareEvidenceCompaction } from './evidence.js'
 import type { MemoryReviewer, ReviewContext, ReviewOutcome } from './review.js'
 
 // Trigger defaults — mirror personal-growth's COMPACT_TRIGGER_*.
@@ -160,23 +161,30 @@ export async function consolidate(opts: ConsolidateOptions): Promise<Consolidate
   const episodic = (await pullEpisodic(opts)).sort((a, b) => a.ts - b.ts)
   if (episodic.length <= keepRecent) return null
 
-  const toFold = episodic.slice(0, episodic.length - keepRecent)
-  const priorProfiles = (await pullProfiles(opts)).sort((a, b) => a.ts - b.ts)
-
-  const system = opts.system ?? DEFAULT_CONSOLIDATE_SYSTEM
-  const user = buildConsolidateUserPrompt({ priorProfiles, toFold, keptCount: keepRecent })
-
+  let toFold = episodic.slice(0, episodic.length - keepRecent)
+  let priorProfiles = (await pullProfiles(opts)).sort((a, b) => a.ts - b.ts)
   const hardCap = clamp(opts.profileHardCap ?? DEFAULT_PROFILE_HARD_CAP, 200, 200_000)
-  const profileText = await distillWithinCap(opts.summarize, { system, user }, hardCap)
-
-  // Write new BEFORE deleting old → an interrupted pass leaves more, not less.
   const meta: Record<string, unknown> = {
     ...(opts.profileMeta ?? {}),
     [META_PROFILE]: true,
     [META_CONSOLIDATED_AT]: now,
   }
-  const entry: NewMemoryEntry = { kind: 'semantic', text: profileText, meta }
+  const protectedInput = [...toFold, ...priorProfiles].some(hasEvidenceBoundary)
+  let entry: NewMemoryEntry
+  if (protectedInput) {
+    priorProfiles = priorProfiles.filter(hasEvidenceBoundary)
+    const prepared = prepareEvidenceCompaction(toFold.filter(hasEvidenceBoundary), hardCap, meta, priorProfiles)
+    if (!prepared) return null
+    entry = prepared.entry
+    toFold = prepared.consumed
+  } else {
+    const system = opts.system ?? DEFAULT_CONSOLIDATE_SYSTEM
+    const user = buildConsolidateUserPrompt({ priorProfiles, toFold, keptCount: keepRecent })
+    entry = { kind: 'semantic', text: await distillWithinCap(opts.summarize, { system, user }, hardCap), meta }
+  }
+  // Write new BEFORE deleting old → an interrupted pass leaves more, not less.
   const profile = await opts.memory.remember(entry)
+  if (protectedInput) assertEvidenceSaved(entry, profile)
 
   let consolidatedCount = 0
   for (const e of toFold) {
@@ -198,7 +206,7 @@ export async function consolidate(opts: ConsolidateOptions): Promise<Consolidate
     }
   }
 
-  return { consolidatedCount, absorbedProfiles, profile, bytes: profileText.length }
+  return { consolidatedCount, absorbedProfiles, profile, bytes: entry.text.length }
 }
 
 /**
