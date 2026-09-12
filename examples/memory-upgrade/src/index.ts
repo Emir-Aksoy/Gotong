@@ -1,10 +1,8 @@
 /**
- * MU capstone — "the same memory, the same ruler, progressively better recall".
+ * MU capstone — measured retrieval ranking and evidence-grounded memory.
  *
- * The Memory Upgrade track has ONE falsifiable headline: the butler's recall got
- * measurably better. This demo proves it end-to-end, composing the REAL exported
- * MU code (nothing reimplemented) over one person's butler memory, and measuring
- * with the very ruler MU-M1 shipped (`scoreRetriever`). Two acts:
+ * Composes the real exported MU code over synthetic personal memory. Act 1
+ * measures ranking with MU-M1's scoreRetriever; Act 2 checks exact-source recall.
  *
  *   Act 1 — MU-M2 fusion reranks. The SAME corpus, scored by the SAME cases:
  *           keyword baseline vs the fused retriever. recall@5 is already fine on
@@ -13,12 +11,10 @@
  *           (MRR jumps). A `direct` control pins the easy cases so fusion can't
  *           silently regress them.
  *
- *   Act 2 — MU-M3 closes the synonym gap. A category query 「饮料」 shares NO term
- *           with its answer 「珍珠奶茶」 — keyword AND the local-fusion embedder
- *           both score 0 by construction (the honest ceiling M2 can't lift). The
- *           real `atomicFactsReviewer` (the 6h maintenance extractor) writes a
- *           self-contained bridge fact 「用户最爱的饮料是珍珠奶茶」, and the same
- *           query now hits it: recall 0 → 1.
+ *   Act 2 — MU-M3 selects durable user statements by source ID and retains exact
+ *           quotes, speaker and turn time. Literal recall stays 100%; no invented
+ *           synonym bridge or favorite inferred from one purchase. This checks
+ *           storage/recall, not a real model's judgment of statement durability.
  *
  * Then a closing ledger places MU-M4 (external Mem0 provider) and MU-M5 (git
  * snapshot) — the two OPT-IN facets that deliberately don't move the recall
@@ -27,7 +23,7 @@
  * is the butler's own model, on the 6h BACKGROUND maintenance sweep, never the
  * per-turn hot path. No API key, fully reproducible.
  *
- *   pnpm demo:memory-upgrade      # exits 0 iff every lift holds, 1 otherwise
+ *   pnpm demo:memory-upgrade      # exits 0 iff every check holds, 1 otherwise
  */
 
 import {
@@ -141,47 +137,37 @@ async function act1(): Promise<void> {
 }
 
 // ───────────────────────────────────────────────────────────────────────────
-// Act 2 — MU-M3 atomic-fact extraction closes the synonym gap (recall 0 → 1)
+// Act 2 — MU-M3 retains exact user evidence without invented synonym bridges
 // ───────────────────────────────────────────────────────────────────────────
 
-/** A synonym case: the ANSWER lives only in a raw episodic mention (no category
- *  word), the category query shares no term with it, and query-word decoys fill
- *  the page. `fact` is the self-contained bridge the 6h extraction should write. */
-interface SynCase {
+interface EvidenceCase {
+  id: string
   q: string
+  synonym: string
   answer: string
-  episodic: string
-  decoys: string[]
-  fact: string
+  user: string
 }
-const SYN_CASES: SynCase[] = [
+const EVIDENCE_CASES: EvidenceCase[] = [
   {
-    q: '饮料',
-    answer: '珍珠奶茶',
-    episodic: '小美上周在城里点了一杯珍珠奶茶,说很好喝',
-    decoys: ['冰箱里常备一些饮料', '便利店买了两瓶饮料', '这个饮料太甜了', '饮料喝多了对身体不好', '办公室有饮料贩卖机'],
-    fact: '小美最爱的饮料是珍珠奶茶',
+    id: 'pet',
+    q: '金毛',
+    synonym: '宠物',
+    answer: '大黄',
+    user: '我养了只金毛叫大黄',
   },
   {
-    q: 'electric vehicle',
-    answer: 'Tesla',
-    episodic: 'Mira drives a Tesla Model 3 to work',
-    decoys: [
-      'her vehicle registration expired',
-      'the electric bill was high this month',
-      'a vehicle is blocking the driveway',
-      'electric scooters are everywhere now',
-      'vehicle insurance is due for renewal',
-    ],
-    fact: "Mira's vehicle is an electric Tesla Model 3",
+    id: 'car',
+    q: 'Tesla',
+    synonym: 'electric vehicle',
+    answer: 'Model 3',
+    user: 'I drive a Tesla Model 3',
   },
 ]
 
 /**
  * A tiny in-memory `MemoryHandle` — substring recall, newest-first, per-kind
  * filter — mirroring the file backend closely enough to drive the REAL
- * `atomicFactsReviewer`, without touching disk. (The reviewer only calls
- * `recall` + `remember`; the rest satisfy the interface.)
+ * `atomicFactsReviewer`, without touching disk. The reviewer uses list + remember.
  */
 function inMemory(seed: readonly MemoryEntry[]): MemoryHandle {
   const entries: MemoryEntry[] = [...seed]
@@ -217,83 +203,87 @@ function inMemory(seed: readonly MemoryEntry[]): MemoryHandle {
   }
 }
 
-/** Fraction of synonym cases whose category query surfaces the ANSWER in top-5,
- *  over the given corpus-per-case — the text-based lift measure MU-M3 uses (the
- *  bridging fact carries the answer, so answer-in-page = the gap closed).
- *
- *  Held at the BASELINE keyword retriever on purpose: Act 1 changed the retriever
- *  (isolating M2); Act 2 changes only what's in the STORE (isolating M3), so the
- *  retriever is the control. This is the exact isolation the shipped MU-M3
- *  consolidation gate uses — a synonym M2's fusion still can't bridge (the bench's
- *  `semantic` category stays 0 under fusion) becomes findable because the store
- *  now holds a category+specific fact the baseline retriever CAN reach. */
-async function answerRecall(corpusFor: (c: SynCase) => MemoryEntry[]): Promise<number> {
+/** Literal and synonym recall are measured separately, with the same retriever. */
+async function answerRecall(corpus: readonly MemoryEntry[], synonym = false): Promise<number> {
+  const retriever = invertedIndexRetriever(buildInvertedIndex(corpus))
   let hits = 0
-  for (const c of SYN_CASES) {
-    const page = await invertedIndexRetriever(buildInvertedIndex(corpusFor(c))).retrieve({ text: c.q, k: 5 })
-    if (page.some((x) => x.text.includes(c.answer))) hits++
+  for (const c of EVIDENCE_CASES) {
+    const page = await retriever.retrieve({ text: synonym ? c.synonym : c.q, k: 5 })
+    if (page.some(x => x.text.includes(c.answer))) hits++
   }
-  return hits / SYN_CASES.length
+  return hits / EVIDENCE_CASES.length
 }
 
 async function act2(): Promise<void> {
-  console.log('\n═══ Act 2 — MU-M3 原子事实抽取把检索器够不到的同义词,蒸馏成够得到的事实(recall 0 → 1) ═══\n')
+  console.log('\n═══ Act 2 — MU-M3 保留用户原句证据,不把一次购买变成最爱 ═══\n')
 
-  // BEFORE — a true synonym neither keyword nor M2's fusion can bridge (the
-  // bench's `semantic` category stays 0 under both): raw episodic holds the
-  // answer but shares no term with the query; category-word decoys fill the page.
-  const before = await answerRecall((c) => [
-    { id: `${c.q}-ep`, kind: 'episodic', text: c.episodic, ts: T0 + 60_000 },
-    ...c.decoys.map((d, i): MemoryEntry => e(`${c.q}-d${i}`, d, 10 + i)),
-  ])
-
-  // Run the REAL 6h extractor ONCE over all episodic. The summarizer is a
-  // DETERMINISTIC stand-in for the butler's model (so the demo is key-free +
-  // reproducible) — in production this is the model reading the transcript on
-  // the 6h background sweep. Two benign fillers clear the extraction trigger (4).
-  const episodic: MemoryEntry[] = [
-    ...SYN_CASES.map((c, i): MemoryEntry => ({ id: `ep-${i}`, kind: 'episodic', text: c.episodic, ts: T0 + (10 + i) * 60_000 })),
-    { id: 'ep-f1', kind: 'episodic', text: '小美今天心情不错,和管家聊了会儿天', ts: T0 + 20 * 60_000 },
-    { id: 'ep-f2', kind: 'episodic', text: '外面在下雨,小美说想早点回家', ts: T0 + 21 * 60_000 },
+  // Synthetic structured captures, not a migration of ambiguous legacy transcripts.
+  const users = [
+    ...EVIDENCE_CASES,
+    { id: 'purchase', user: '上周点了一杯珍珠奶茶很好喝' },
+    { id: 'filler', user: '今天天气不错' },
   ]
+  const episodic: MemoryEntry[] = users.map(({ id, user }, i) => ({
+    id, kind: 'episodic', text: `User: ${user} / Butler: 用户最爱的饮料是珍珠奶茶`,
+    ts: T0 + i * 60_000,
+    meta: {
+      userSpan: { v: 1, start: 6, end: 6 + user.length },
+      temporal: { v: 1, observedAt: T0 + i * 60_000, timeZone: 'UTC', basis: 'turn-start' },
+    },
+  }))
+  const before = await answerRecall(episodic)
+  const synonymBefore = await answerRecall(episodic, true)
   const memory = inMemory(episodic)
-  const summarize: MemorySummarizer = async () => SYN_CASES.map((c) => c.fact).join('\n')
+  const summarize: MemorySummarizer = async ({ user }) => {
+    const supplied = JSON.parse(user) as { sources: { sourceId: string; text: string }[] }
+    check('模型输入仅含用户原句,不含助手猜测',
+      !user.includes('最爱') && supplied.sources.length === users.length &&
+      supplied.sources.every(s => users.some(u => u.id === s.sourceId && u.user === s.text)))
+    return JSON.stringify({ sources: EVIDENCE_CASES.map(c => c.id) })
+  }
   const out = await atomicFactsReviewer({ summarize })({ memory, episodic, now: T0 + 100 * 60_000 })
-
   const facts = (await memory.recall({ kinds: ['semantic'], k: 50 })).filter(isAtomicFact)
+  const after = await answerRecall(facts)
+  const synonymAfter = await answerRecall(facts, true)
 
-  // AFTER — the same corpus + the extracted self-contained facts. The category
-  // query now hits the bridge fact, which carries the specific answer.
-  const after = await answerRecall((c) => [
-    { id: `${c.q}-ep`, kind: 'episodic', text: c.episodic, ts: T0 + 60_000 },
-    ...c.decoys.map((d, i): MemoryEntry => e(`${c.q}-d${i}`, d, 10 + i)),
-    ...facts.map((f, i): MemoryEntry => e(`${c.q}-f${i}`, f.text, 50 + i)),
-  ])
-
-  console.log(`  抽取的桥接事实(真 atomicFactsReviewer 写入,带 provenance 标记):`)
+  console.log('  保存的用户原句:')
   for (const f of facts) console.log(`    · ${f.text}`)
-  console.log(`\n  semantic 同义词类 answer-recall@5:  ${(before * 100).toFixed(0)}%  →  ${(after * 100).toFixed(0)}%\n`)
+  console.log(`\n  原词 answer-recall@5: ${before * 100}% → ${after * 100}%`)
+  console.log(`  同义词 answer-recall@5: ${synonymBefore * 100}% → ${synonymAfter * 100}%(不声称抬升)\n`)
 
-  check(`抽取写入 ${SYN_CASES.length} 条事实,且都带 atomicFact 出处标记`, out.consolidated === SYN_CASES.length && facts.length === SYN_CASES.length)
-  check('诚实天花板:抽取前 answer-recall = 0(同义词零共享词,keyword 与 M2 融合皆桥不了)', before === 0)
-  check('MU-M3 抬升:抽取后 answer-recall = 100%(桥接事实让类别 query 命中具体答案)', after === 1)
-  check('累积:after > before(库里有了可召回的桥接事实)', after > before)
+  check('写入两条带 atomicFact 标记的原句', out.consolidated === 2 && facts.length === 2)
+  check('每条写入逐字等于用户原话', EVIDENCE_CASES.every(c => facts.some(f => f.text === c.user)))
+  check('来源 ID、user 说话人和时间保留', facts.every(f => {
+    const evidence = f.meta?.evidence as {
+      v?: number
+      sources?: { sourceId: string; speaker: string; start: number; end: number; temporal?: unknown }[]
+    } | undefined
+    const source = evidence?.sources?.[0]
+    const original = episodic.find(e => e.id === source?.sourceId)
+    return evidence?.v === 1 && evidence.sources?.length === 1 && source?.speaker === 'user' &&
+      source.start === 0 && source.end === f.text.length && original !== undefined &&
+      JSON.stringify(source.temporal) === JSON.stringify(original.meta?.temporal)
+  }))
+  check('未将一次奶茶购买或助手猜测升级成最爱', !facts.some(f => /最爱|favorite|珍珠奶茶/.test(f.text)))
+  check('原词召回保持 100%,不是虚构的 0→100% 提升', before === 1 && after === 1)
+  check('不添加类别词制造同义词桥接', synonymBefore === 0 && synonymAfter === 0)
+  console.log('  边界:确定性来源选择验证保存与召回,不证明真实模型的长期价值判断。')
 }
 
 // ───────────────────────────────────────────────────────────────────────────
 
 async function main(): Promise<void> {
   console.log('╔══════════════════════════════════════════════════════════════════════╗')
-  console.log('║  MU capstone — 同一份管家记忆,同一把尺子,召回逐里程碑变好              ║')
+  console.log('║  MU capstone — 检索重排与用户证据保真                                ║')
   console.log('╚══════════════════════════════════════════════════════════════════════╝')
 
   await act1()
   await act2()
 
   console.log('\n═══ 收尾账本 — 五项里程碑各归其位 ═══\n')
-  console.log('  MU-M1 尺子  : scoreRetriever(recall@k / MRR)—— 本 demo 两幕都用它量,「变好」可证伪。')
+  console.log('  MU-M1 尺子  : scoreRetriever(recall@k / MRR)—— Act 1 用它量检索重排。')
   console.log('  MU-M2 融合  : fusedRetriever + 本地 embedder —— Act 1 把聚焦金标从被埋提到第 1(MRR↑)。')
-  console.log('  MU-M3 抽取  : atomicFactsReviewer —— Act 2 把同义词 recall 从 0 抬到 100%(改库不改检索器)。')
+  console.log('  MU-M3 抽取  : atomicFactsReviewer —— Act 2 保留用户原句、来源和时间,不虚构偏好或同义词抬升。')
   console.log('  MU-M4 外部  : opt-in Mem0 托管云连接器 + dataLeavesBox 披露 —— 记忆可存云端,不改本地召回数;')
   console.log('               装上≠授权同步出去(见 builtin-mcp-connectors 防腐测试)。')
   console.log('  MU-M5 快照  : opt-in GOTONG_BUTLER_MEMORY_GIT —— 6h 维护里给记忆树 per-user git commit,')
@@ -306,7 +296,7 @@ async function main(): Promise<void> {
     for (const f of failures) console.error(`    · ${f}`)
     process.exit(1)
   }
-  console.log('✓ MU capstone 全数通过:M1 尺子量得 M2 重排(MRR↑)+ M3 补召回(0→100%),累积升级成立。')
+  console.log('✓ MU capstone 全数通过:M2 重排(MRR↑),M3 用户证据保真且原词召回不降。')
 }
 
 main().catch((err) => {

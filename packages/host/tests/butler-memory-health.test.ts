@@ -7,8 +7,8 @@
  * 把「一句道歉」读成「干了活」,最后落一行 `level:"info"` `sweep complete`。
  *
  * 所以这道门的承重断言不是「台账写对了」,是**那条 warn 真的会出现,而那条
- * info 真的不会**——把 bug 本身钉在原地:真 tmp 命名空间、真 40 条 episodic、
- * 一个 `stream()` 一定抛的 provider,走生产那条 `runOnce()`。
+ * info 真的不会**——把 bug 本身钉在原地:真 tmp 命名空间、40 条有用户来源的 episodic、
+ * 一个原子来源选择实际调用且 `stream()` 一定抛的 provider,走生产那条 `runOnce()`。
  *
  * 四组:
  *   A 纯折叠(`foldMaintenanceSweep`)—— 高水位 / 连败计数 / 样本上限;
@@ -22,7 +22,7 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { Logger } from '@gotong/core'
 import type { LlmProvider, LlmStreamChunk } from '@gotong/llm'
@@ -83,13 +83,16 @@ function health(over: Partial<ButlerMemoryHealth> = {}): ButlerMemoryHealth {
 }
 
 /** 往一个成员的管家命名空间里种 `count` 条 episodic(40 条越过 32 的触发线)。 */
-async function seedEpisodic(rootDir: string, userId: string, count: number): Promise<void> {
+async function seedEpisodic(rootDir: string, userId: string, count: number, structured = false): Promise<void> {
   let clock = 1000
   const mem: MemoryHandle = openButlerMemory({
     rootDir, userId, logger: silentLogger, now: () => clock++,
   })
   for (let i = 0; i < count; i++) {
-    await mem.remember({ kind: 'episodic', text: `主人在聊第 ${i} 件事：奶茶店的事情`, meta: { importance: 2 } })
+    const text = `主人在聊第 ${i} 件事：奶茶店的事情`
+    await mem.remember({ kind: 'episodic', text,
+      meta: { importance: 2, ...(structured ? { userSpan: { v: 1, start: 0, end: text.length } } : {}) },
+    })
   }
 }
 
@@ -260,10 +263,16 @@ describe('M-HEALTH D — 扫描三分:抛错的 pass 不算 active', () => {
     memRoot = join(root, 'butler', 'memory')
     healthFile = join(root, 'butler', 'memory-health.json')
   })
-  afterEach(async () => { await rm(root, { recursive: true, force: true }) })
+  afterEach(async () => {
+    vi.restoreAllMocks()
+    await rm(root, { recursive: true, force: true })
+  })
 
-  it('承重 — provider 抛 ⇒ warn 出现、info「sweep complete」不出现、台账记 failed', async () => {
-    await seedEpisodic(memRoot, 'alice', 40)
+  it('承重 — 原子来源选择的 provider 抛 ⇒ warn 出现、info「sweep complete」不出现、台账记 failed', async () => {
+    // Legacy routing has a fallback, and atomic extraction no longer reads legacy
+    // mixed text. Real structured sources ensure this reviewer actually calls the provider.
+    await seedEpisodic(memRoot, 'alice', 40, true)
+    const stream = vi.spyOn(boomProvider, 'stream')
     const { logger, lines } = capturingLogger()
     await new ButlerMaintenanceSweeper({
       rootDir: memRoot,
@@ -272,6 +281,7 @@ describe('M-HEALTH D — 扫描三分:抛错的 pass 不算 active', () => {
       now: () => NOW,
       healthFile,
     }).runOnce()
+    expect(stream).toHaveBeenCalledTimes(1)
 
     // 这两条就是那两周里本该出现 / 本不该出现的东西。
     const warned = lines.find((l) => l.level === 'warn' && l.msg === 'butler maintenance: sweep completed with failures')
@@ -292,6 +302,7 @@ describe('M-HEALTH D — 扫描三分:抛错的 pass 不算 active', () => {
       rootDir: memRoot, buildProvider: async () => boomProvider,
       logger: silentLogger, now: () => NOW + 6 * HOUR, healthFile,
     }).runOnce()
+    expect(stream).toHaveBeenCalledTimes(2)
     const card = memoryMaintenanceCard(await readButlerMemoryHealth(healthFile), NOW + 6 * HOUR)
     expect(card?.id).toBe(MEMORY_MAINTENANCE_CARD_ID)
   })

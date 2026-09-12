@@ -42,7 +42,7 @@ const silentLogger: Logger = {
 }
 
 /** Seed `count` episodic entries into one member's butler namespace. */
-async function seedEpisodic(rootDir: string, userId: string, count: number): Promise<void> {
+async function seedEpisodic(rootDir: string, userId: string, count: number, structured = false): Promise<void> {
   let clock = 1000
   const mem: MemoryHandle = openButlerMemory({
     rootDir,
@@ -51,10 +51,11 @@ async function seedEpisodic(rootDir: string, userId: string, count: number): Pro
     now: () => clock++,
   })
   for (let i = 0; i < count; i++) {
+    const text = `主人在聊第 ${i} 件事：奶茶店的事情`
     await mem.remember({
       kind: 'episodic',
-      text: `主人在聊第 ${i} 件事：奶茶店的事情`,
-      meta: { importance: 2 },
+      text,
+      meta: { importance: 2, ...(structured ? { userSpan: { v: 1, start: 0, end: text.length } } : {}) },
     })
   }
 }
@@ -152,17 +153,22 @@ describe('S2-M2 — butler on-demand "整理一下记忆" tool', () => {
     // 同一个谎的第三处,而且是最坏的一处:成员刚亲口让我去整理,我答「整理好了」
     // 而底下一条都没整理成。`composeReviewers` 把抛错的 pass 折成一句
     // `review error: …` 摘要(那是对的),旧代码照单拼进报喜文案后面。
-    await seedEpisodic(memRoot, 'alice', 40)
+    // Legacy routing catches provider errors and falls back; atomic extraction
+    // correctly skips legacy text now. Structured sources exercise a real failing reviewer.
+    await seedEpisodic(memRoot, 'alice', 40, true)
+    let calls = 0
     const boom: LlmProvider = {
       name: 'boom',
       // eslint-disable-next-line require-yield
       async *stream() {
+        calls++
         throw new Error('MiMo 502 upstream')
       },
     }
     const ts = toolset('alice', async () => boom)
 
     const res = await ts.callTool('consolidate_my_memory', {})
+    expect(calls).toBe(1) // Protected consolidation is local; atomic source selection calls the model.
     expect(res.isError).toBe(true)
     expect(resultText(res)).toContain('记忆没能整理完')
     expect(resultText(res)).toContain('MiMo 502 upstream')

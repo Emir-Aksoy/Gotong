@@ -37,6 +37,15 @@ Files: `atomic-facts.ts`, `tests/atomic-facts.test.ts`, `tests/memory-consolidat
 - [x] Change model response to `{"sources":["source-id"]}`; the model selects durable source statements, while stored text comes only from exact validated user evidence. No free-form model fact text is promoted.
 - [x] Deduplicate against existing evidence source IDs so a maintenance repeat cannot multiply the same fact. Distinct dated occurrences are not merged by lexical similarity.
 - [x] Adjust synthetic benchmarks: remove unsupported inference from one milk-tea purchase to a favorite drink; never retain obsolete recall-lift claims after narrowing the source contract.
-- [ ] Run full package suites, workspace typechecks, affected builds, guards and independent review. Update docs/ledger with measured results and remaining M2 calendar/M3 scope. Commit locally only, no push/deploy.
+- [x] Run full package suites, workspace typechecks, affected builds, guards and independent review. Update docs/ledger with measured results and remaining M2 calendar/M3 scope. Commit locally only, no push/deploy.
 
 Commands: `pnpm -C packages/personal-memory test`, `pnpm -C packages/personal-butler test`, `pnpm -r typecheck`, `pnpm check:guards`, `pnpm check:memory-write`, `pnpm check:memory-recall`. All tests use synthetic memories, no production credentials or user history.
+
+## Verification Record
+
+- Task 1 local commit: `c6bcb1e3`; Task 2 follows in the same local branch, no push/deploy.
+- Full suites: personal-memory 663, personal-butler 418, host 3510 passed; 5 existing host skips.
+- Workspace typecheck, affected builds, four architecture guards, write/recall gates and deterministic demo passed.
+- Independent reviews closed scope-alias disagreement, existing-source conflict and source-to-quote binding test gaps.
+- Host failure fixtures now prove atomic selection actually calls a throwing provider. Legacy routing/importance tests remain separate from new live-capture evidence tests.
+- No calendar inference, correction resolution, shared token budget or live-model accuracy claim. Those remain the following tasks.
