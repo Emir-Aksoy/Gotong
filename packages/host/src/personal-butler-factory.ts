@@ -25,7 +25,7 @@
 
 import { dirname, join } from 'node:path'
 
-import type { Hub, Logger } from '@gotong/core'
+import type { Hub, Logger, Participant } from '@gotong/core'
 import { TwoTierToolset, type LlmProvider } from '@gotong/llm'
 import { VerifiedSkills, type Embedder } from '@gotong/personal-memory'
 import { buildSkillSandboxRunner, buildSkillTestApproval, skillEvaluationTask } from './personal-butler-verified-skills.js'
@@ -49,8 +49,9 @@ import { butlerLongRunRoot } from './butler-space-dirs.js'
 
 import type { AdminHealthSurface } from './admin-health.js'
 import { createButlerRouter } from './butler-router.js'
+import { ButlerUserActivity } from './butler-user-activity.js'
 import type { HostButlerMemoryService } from './butler-memory-service.js'
-import { openButlerRecallIndex } from './butler-recall-index.js'
+import { openButlerRecallIndex, type FileBackedInvertedIndex } from './butler-recall-index.js'
 import { openButlerObsidianProjector } from './butler-obsidian.js'
 import type { FailureLang } from './failure-translator.js'
 import type { ButlerFactory } from './local-agent-pool.js'
@@ -195,6 +196,8 @@ export interface ButlerFactoryDeps {
   logger: Logger
   /** Butler memory root (`<space>/butler/memory`) — per-user namespaces live under it. */
   memoryRoot: string
+  /** Shared with every router and the maintenance sweeper for this memory root. */
+  userActivity?: ButlerUserActivity
   /** BF-M7 governed master switch (`GOTONG_BUTLER_GOVERNED`). */
   governedOn: boolean
   /** BF-M8 maintenance switch — gates the on-demand consolidate tool too. */
@@ -310,8 +313,20 @@ export interface ButlerFactoryDeps {
   storageProposals?: () => Promise<string>
 }
 
+/**
+ * Keep this closure outside the factory: stopped routers/agents/providers/indexes
+ * must not be retained by the process-lifetime disk cleanup responsibility.
+ * Caches never registered in this process still need the future durable coordinator.
+ */
+function diskCacheRetirement(rootDir: string, userId: string, logger: Logger): () => Promise<void> {
+  return async () => { await openButlerRecallIndex({ rootDir, userId, logger }).retire() }
+}
+
 export function buildButlerFactory(deps: ButlerFactoryDeps): ButlerFactory {
   const { hub, logger: log, memoryRoot } = deps
+  const userActivity = deps.userActivity ?? new ButlerUserActivity()
+  const indexes = new WeakMap<Participant, FileBackedInvertedIndex>()
+  const cacheUsers = new Set<string>()
   // SEN-M5 — 成员 roster 无 per-user 态,工厂级构造一次全员共享。
   const membersSurface = deps.members ? buildButlerMemberSurface(deps.members) : undefined
   // M-HEALTH — 提到局部 const 才窄得住:闭包里读 `deps.x` 拿不到窄化结果。
@@ -349,6 +364,15 @@ export function buildButlerFactory(deps: ButlerFactoryDeps): ButlerFactory {
       // the optional `LlmAgentOptions.capabilities` type.
       capabilities: base.capabilities ?? [],
       logger: log,
+      userActivity,
+      retireForUser: (_userId, participant) => indexes.get(participant)!.retire(),
+      onUserCreated: userId => {
+        if (cacheUsers.has(userId)) return
+        // Survives normal instance disposal without retaining the instance. The
+        // finalizer phase waits for every shutdown retry that might recreate caches.
+        userActivity.registerFinalizer(userId, diskCacheRetirement(memoryRoot, userId, log))
+        cacheUsers.add(userId)
+      },
       createForUser: (userId) => {
         // Late-bound surfaces, read NOW (first task of this member, post-boot).
         const refs = deps.refs()
@@ -855,7 +879,7 @@ export function buildButlerFactory(deps: ButlerFactoryDeps): ButlerFactory {
           return lists.flat().map((t) => t.name)
         }
 
-        return new PersonalButlerAgent({
+        const participant = new PersonalButlerAgent({
           ...rest,
           // AFTER the spread on purpose: `rest` comes from the pool's spec-derived
           // options, and `ManagedAgentSpec` carries no round cap — so this can't be
@@ -963,6 +987,8 @@ export function buildButlerFactory(deps: ButlerFactoryDeps): ButlerFactory {
           // unchanged. No INDEX.md ⇒ null ⇒ byte-identical prompt.
           stableContext: buildButlerKnowledgeIndexCard({ library: knowledgeLibrary, logger: log }),
         })
+        indexes.set(participant, recallIndex)
+        return participant
       },
     })
   }

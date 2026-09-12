@@ -100,6 +100,7 @@ import { ownerDir } from '@gotong/service-memory-file'
 import type { MemoryHandle } from '@gotong/services-sdk'
 
 import { recordMaintenanceSweep } from './butler-memory-health.js'
+import { ButlerUserActivity } from './butler-user-activity.js'
 import { snapshotMemoryTree, type GitRunner } from './butler-memory-git.js'
 import { projectButlerVault } from './butler-obsidian.js'
 import { butlerMemoryWriters } from './personal-butler-writers.js'
@@ -459,6 +460,8 @@ export async function runButlerMaintenanceOnce(
 }
 
 export interface ButlerMaintenanceSweeperOptions {
+  /** Shared with the routers; covers the whole per-user pass, not just the LLM. */
+  userActivity?: ButlerUserActivity
   /** Butler memory root (`<space>/butler/memory`) — the same one the factory + /me view use. */
   rootDir: string
   /**
@@ -547,6 +550,7 @@ export interface ButlerMaintenanceSweeperOptions {
  * after {@link start}.
  */
 export class ButlerMaintenanceSweeper {
+  private readonly userActivity: ButlerUserActivity
   private readonly rootDir: string
   private readonly buildProvider: () => Promise<LlmProvider | null>
   private readonly log: Logger
@@ -570,6 +574,7 @@ export class ButlerMaintenanceSweeper {
   private running = false
 
   constructor(opts: ButlerMaintenanceSweeperOptions) {
+    this.userActivity = opts.userActivity ?? new ButlerUserActivity()
     this.rootDir = opts.rootDir
     this.buildProvider = opts.buildProvider
     this.log = opts.logger
@@ -688,7 +693,7 @@ export class ButlerMaintenanceSweeper {
       const errors: string[] = []
       for (const userId of userIds) {
         try {
-          const res = await this.maintainOne(userId, summarize)
+          const res = await this.userActivity.run(userId, () => this.maintainOne(userId, summarize))
           if (res.errors.length > 0) {
             failed++
             errors.push(...res.errors)
@@ -733,13 +738,13 @@ export class ButlerMaintenanceSweeper {
   private async projectOnly(userIds: readonly string[]): Promise<void> {
     for (const userId of userIds) {
       try {
-        await projectButlerVault({
+        await this.userActivity.run(userId, () => projectButlerVault({
           rootDir: this.rootDir,
           userId,
           logger: this.log,
           now: this.now(),
           ...(this.tierConfig ? { tierConfig: this.tierConfig } : {}),
-        })
+        }))
       } catch (err) {
         this.log.warn('butler maintenance: projection-only tick failed', {
           userId,

@@ -58,6 +58,7 @@ import {
 } from './mcp-config.js'
 import type { ServerSecretSource } from './oauth-secret-source.js'
 import { buildButlerMcpToolsets } from './personal-butler-mcp.js'
+import { shutdownButlerRouter } from './butler-router.js'
 import { withSkillEvaluation, skillEvaluationTarget } from './personal-butler-verified-skills.js'
 import { declineElicitations } from './mcp-elicitation.js'
 import { mergeButlerBonusMcpSpecs } from './butler-web-search.js'
@@ -605,7 +606,9 @@ export class LocalAgentPool implements ManagedAgentLifecycle {
   async stop(id: ParticipantId): Promise<void> {
     const live = this.running.get(id)
     if (live) this.running.delete(id)
-    if (this.hub.participant(id)) this.hub.unregister(id)
+    const participant = this.hub.unregister(id)
+    // A task may stop itself: close admission now, but never await its own drain.
+    void shutdownButlerRouter(participant).catch(() => log.warn('butler router shutdown failed during stop'))
     // Best-effort service detach. We swallow errors here because
     // tearing down a participant on shutdown is the wrong moment to
     // fail loudly — the plugin's own next attach will reinitialise.
@@ -855,7 +858,8 @@ export class LocalAgentPool implements ManagedAgentLifecycle {
           log.warn('respawn detach failed', { id: record.id, err }),
         )
       }
-      this.hub.unregister(record.id)
+      const participant = this.hub.unregister(record.id)
+      void shutdownButlerRouter(participant).catch(() => log.warn('butler router shutdown failed during respawn'))
     }
     this.running.delete(record.id)
     this.serviceOwnerForAgent.delete(record.id)
