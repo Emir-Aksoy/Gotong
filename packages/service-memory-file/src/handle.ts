@@ -41,7 +41,7 @@ import type {
 import type { MemoryFileConfig } from './config.js'
 import { generateEntryId } from './id.js'
 import { kindFile, ownerDir, ownerLabel } from './paths.js'
-import { MemoryFileSnapshotError, inspectScope, readMemoryFileSnapshot, regularFileExists, type MemoryFileSnapshot } from './snapshot.js'
+import { MemoryFileSnapshotError, inspectScope, readMemoryFileSnapshot, readMemoryFileWatermark, regularFileExists, type MemoryFileSnapshot } from './snapshot.js'
 import { applyMutation, copyMutation, recoverMutation, type MemoryFileSnapshotMutation } from './mutation.js'
 import { MemoryFileMutationError, assertNoPending, fail, readGeneration } from './mutation-io.js'
 
@@ -173,6 +173,11 @@ export class MemoryFileHandle implements MemoryHandle {
    */
   async snapshot(): Promise<MemoryFileSnapshot> {
     return this.serializeWrite(() => readMemoryFileSnapshot(this.rootDir, this.owner, this.config.kinds, this.generation ?? null))
+  }
+
+  /** Guarded stat fingerprint for derived caches; not a full-content CAS revision. */
+  async watermark(): Promise<string> {
+    return this.serializeWrite(() => readMemoryFileWatermark(this.rootDir, this.owner, this.config.kinds, this.generation ?? null))
   }
 
   /** File-only host API. Does not update derived indexes or cached snapshots. */

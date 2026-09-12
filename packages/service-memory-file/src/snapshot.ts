@@ -41,6 +41,35 @@ export async function readMemoryFileSnapshot(
   return (await readMemoryFileState(rootDir, owner, configuredKinds, generation)).snapshot
 }
 
+/** Cheap derived-cache freshness only; never use this instead of the mutation CAS. */
+export async function readMemoryFileWatermark(
+  rootDir: string, owner: Owner, configuredKinds: ReadonlyArray<MemoryKind>, generation: string | null,
+): Promise<string> {
+  const { kinds, exists } = await inspectScope(rootDir, owner, configuredKinds)
+  try {
+    const hash = createHash('sha256').update('memory-file-watermark:v1\n')
+      .update(JSON.stringify([ownerKey(owner), generation]) + '\n')
+    for (const kind of kinds) {
+      let attributes: string[] | null = null
+      if (exists) {
+        try {
+          const s = await lstat(kindFile(rootDir, owner, kind), { bigint: true })
+          if (s.isSymbolicLink()) throw new MemoryFileSnapshotError('SNAPSHOT_INVALID_SCOPE')
+          if (!s.isFile()) throw new MemoryFileSnapshotError('SNAPSHOT_IO_ERROR')
+          attributes = [s.dev, s.ino, s.size, s.mtimeNs, s.ctimeNs].map(String)
+        } catch (error) {
+          if (!isMissing(error)) throw error
+        }
+      }
+      hash.update(JSON.stringify([kind, attributes]) + '\n')
+    }
+    return hash.digest('hex')
+  } catch (error) {
+    if (error instanceof MemoryFileSnapshotError) throw error
+    throw new MemoryFileSnapshotError('SNAPSHOT_IO_ERROR')
+  }
+}
+
 /** Internal only: raw bytes never escape through the public snapshot. */
 export async function readMemoryFileState(
   rootDir: string, owner: Owner, configuredKinds: ReadonlyArray<MemoryKind>, generation: string | null,
