@@ -11,8 +11,8 @@
  * 暂时联想不到——而它仍然在冻结块和 `recall` 工具里，一条都不会丢。反过来每轮重建
  * 的代价是每条消息都把知识库整棵树读一遍，那才是真的贵。
  *
- * 记忆那一面**没有 TTL 的问题**：它走 `FileBackedInvertedIndex.allEntries()`，那条路本来
- * 就按 jsonl 的 watermark 判新鲜，改了就重建。TTL 只兜另外三个店。
+ * 整张网都受 TTL 约束；重建时 memory 面走索引的 watermark。每次使用网之前仍须
+ * 检查索引可用性，纠正屏障或代际失效不能被 TTL 和旧网回退绕过。
  *
  * # 生产里只有四个面，如实说
  *
@@ -27,7 +27,8 @@
  *
  * # 失败姿态
  *
- * 建网出错一律吞掉返 `null`，探针据此静默 ⇒ 提示词字节不变。网是顾问，不是依赖。
+ * 访问屏障失败清缓存并返 `null`；普通辅助库失败只在来源仍可用时回退旧网。
+ * 没有可用网时探针静默，提示词字节不变。网是顾问，不是依赖。
  */
 
 import type { Logger } from '@gotong/core'
@@ -39,7 +40,7 @@ import {
   type TaskNotebook,
 } from '@gotong/personal-butler'
 
-import type { FileBackedInvertedIndex } from './butler-recall-index.js'
+import { isRecallIndexAccessError, type FileBackedInvertedIndex } from './butler-recall-index.js'
 
 /**
  * 网的最长存活时间。
@@ -55,7 +56,7 @@ export const MEMORY_NET_MAX_DOSSIERS = 20
 
 export interface ButlerMemoryNetOptions {
   readonly userId: string
-  readonly recallIndex: Pick<FileBackedInvertedIndex, 'allEntries'>
+  readonly recallIndex: Pick<FileBackedInvertedIndex, 'allEntries' | 'assertUsable'>
   readonly knowledge?: KnowledgeLibrary
   readonly notebook?: TaskNotebook
   readonly dossiers?: LongRunDossierStore
@@ -84,6 +85,25 @@ export function buildButlerMemoryNetProvider(
   let cached: MemoryNet | null = null
   let builtAt = -Infinity
   let building: Promise<MemoryNet | null> | null = null
+  let epoch = 0
+
+  const invalidate = (): void => {
+    epoch++
+    cached = null
+    builtAt = -Infinity
+  }
+
+  const usable = async (): Promise<boolean> => {
+    try {
+      await opts.recallIndex.assertUsable()
+      return true
+    } catch {
+      // A barrier is not an ordinary rebuild failure. Discard both the cached
+      // view and any result still being built from its previous evidence.
+      invalidate()
+      return false
+    }
+  }
 
   const build = async (): Promise<MemoryNet | null> => {
     const entries = await opts.recallIndex.allEntries()
@@ -103,26 +123,32 @@ export function buildButlerMemoryNetProvider(
   }
 
   return async (): Promise<MemoryNet | null> => {
+    if (!await usable()) return null
+    const ticket = epoch
     if (cached && now() - builtAt < ttlMs) return cached
-    if (building) return building
-
-    building = build()
-      .then((net) => {
-        cached = net
-        builtAt = now()
-        return net
-      })
-      .catch((err: unknown) => {
-        // 顾问姿态:建网失败不改上一张网的命运 —— 有旧网就继续用旧的(它只是
-        // 旧,不是错),没有就返 null 让探针静默。
-        opts.logger?.warn('butler memory net: build failed', {
-          err: err instanceof Error ? err.message : String(err),
+    if (!building) {
+      building = build()
+        .then(async (net) => {
+          if (!await usable() || ticket !== epoch) return null
+          cached = net
+          builtAt = now()
+          return net
         })
-        return cached
-      })
-      .finally(() => {
-        building = null
-      })
-    return building
+        .catch(async (error: unknown) => {
+          if (isRecallIndexAccessError(error)) {
+            invalidate()
+            return null
+          }
+          if (!await usable() || ticket !== epoch) return null
+          // Ordinary auxiliary-store failure may use the prior view only while
+          // its memory source is still usable. Do not log private source text.
+          opts.logger?.warn('butler memory net: build failed')
+          return cached
+        })
+        .finally(() => { building = null })
+    }
+    const result = await building
+    if (!await usable() || ticket !== epoch) return null
+    return result
   }
 }

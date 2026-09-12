@@ -12,9 +12,16 @@
  */
 
 import { describe, expect, it } from 'vitest'
+import { mkdtemp, readFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { createLogger } from '@gotong/core'
+import { MemoryFileMutationError, MemoryFileSnapshotError } from '@gotong/service-memory-file'
 import type { MemoryEntry } from '@gotong/services-sdk'
 
 import { buildButlerMemoryNetProvider } from '../src/personal-butler-memory-net.js'
+import { FileBackedInvertedIndex, RecallIndexError, openButlerRecallIndex } from '../src/butler-recall-index.js'
+import { openButlerMemory } from '../src/personal-butler-memory.js'
 
 const T0 = 1_700_000_000_000
 
@@ -23,9 +30,10 @@ function entry(id: string, text: string): MemoryEntry {
 }
 
 /** 一个只会数自己被叫了几次的记忆面。 */
-function countingIndex(entries: MemoryEntry[]): { allEntries: () => Promise<MemoryEntry[]>; calls: () => number } {
+function countingIndex(entries: MemoryEntry[]): { assertUsable: () => Promise<void>; allEntries: () => Promise<MemoryEntry[]>; calls: () => number } {
   let n = 0
   return {
+    assertUsable: async () => {},
     allEntries: async () => {
       n += 1
       return entries
@@ -79,6 +87,7 @@ describe('② 并发合流', () => {
     const net = buildButlerMemoryNetProvider({
       userId: 'u',
       recallIndex: {
+        assertUsable: async () => {},
         allEntries: async () => {
           n += 1
           await gate
@@ -102,6 +111,7 @@ describe('③ 失败姿态', () => {
     const net = buildButlerMemoryNetProvider({
       userId: 'u',
       recallIndex: {
+        assertUsable: async () => {},
         allEntries: async () => {
           throw new Error('盘炸了')
         },
@@ -119,6 +129,7 @@ describe('③ 失败姿态', () => {
     const net = buildButlerMemoryNetProvider({
       userId: 'u',
       recallIndex: {
+        assertUsable: async () => {},
         allEntries: async () => {
           if (boom) throw new Error('盘炸了')
           return [entry('m1', '我对花生过敏')]
@@ -137,6 +148,175 @@ describe('③ 失败姿态', () => {
     const second = await net()
     // 旧网只是旧,不是错 —— 返 null 会让管家在一次读盘抖动里当场失忆。
     expect(second).toBe(first)
+  })
+})
+
+describe('correction barriers', () => {
+  it.each([
+    new MemoryFileMutationError('MUTATION_PENDING'),
+    new MemoryFileMutationError('MUTATION_STALE_HANDLE'),
+    new MemoryFileSnapshotError('SNAPSHOT_IO_ERROR'),
+    new RecallIndexError('RECALL_INDEX_RETIRED'),
+  ])('discards a propagated $code even when later usability checks succeed', async (error) => {
+    let failOnce = false
+    let ordinaryFailure = false
+    let rows = [entry('old', 'synthetic-old')]
+    const index = new FileBackedInvertedIndex({
+      assertUsable: async () => {},
+      watermark: async () => {
+        if (failOnce) { failOnce = false; throw error }
+        return rows[0]!.id
+      },
+      loadAll: async () => {
+        if (ordinaryFailure) throw new Error('synthetic ordinary read failure')
+        return rows
+      },
+    })
+    const net = buildButlerMemoryNetProvider({ userId: 'u', recallIndex: index, ttlMs: 0, now: () => T0 })
+    expect((await net())?.nodes.map((n) => n.id)).toEqual(['memory:old'])
+    rows = [entry('new', 'synthetic-new')]
+    failOnce = true
+    expect(await net()).toBeNull()
+    ordinaryFailure = true
+    expect(await net()).toBeNull()
+    ordinaryFailure = false
+    expect((await net())?.nodes.map((n) => n.id)).toEqual(['memory:new'])
+  })
+
+  it('blocks an already built result waiting at its final guard after a later propagated failure', async () => {
+    let release!: () => void
+    let entered!: () => void
+    const gate = new Promise<void>((resolve) => { release = resolve })
+    const waiting = new Promise<void>((resolve) => { entered = resolve })
+    let checks = 0
+    let reads = 0
+    const net = buildButlerMemoryNetProvider({
+      userId: 'u', ttlMs: 0, now: () => T0,
+      recallIndex: {
+        assertUsable: async () => { if (++checks === 3) { entered(); await gate } },
+        allEntries: async () => {
+          if (++reads === 2) throw new MemoryFileMutationError('MUTATION_PENDING')
+          return [entry(reads === 1 ? 'old' : 'new', 'synthetic')]
+        },
+      },
+    })
+    const late = net()
+    await waiting
+    expect(await net()).toBeNull()
+    release()
+    expect(await late).toBeNull()
+    expect((await net())?.nodes.map((n) => n.id)).toEqual(['memory:new'])
+  })
+
+  it('retires the real index and TTL view before file correction and builds a fresh view afterwards', async () => {
+    const rootDir = await mkdtemp(join(tmpdir(), 'gotong-net-retirement-'))
+    const logger = createLogger('net-retirement', { disabled: true })
+    const opts = { rootDir, userId: 'alice', logger }
+    const mem = openButlerMemory(opts)
+    await mem.remember({ id: 'old', kind: 'semantic', text: 'synthetic-old' })
+    const index = openButlerRecallIndex(opts)
+    const net = buildButlerMemoryNetProvider({ userId: 'alice', recallIndex: index })
+    expect((await net())?.nodes.map((n) => n.id)).toEqual(['memory:old'])
+    await index.retire()
+    expect(await net()).toBeNull()
+    await expect(readFile(join(rootDir, 'user', 'alice', 'recall-index.json')))
+      .rejects.toMatchObject({ code: 'ENOENT' })
+    await mem.applySnapshotMutation({ expectedRevision: (await mem.snapshot()).revision,
+      remove: [{ id: 'old', kind: 'semantic' }], rewrite: [],
+      append: [{ id: 'new', kind: 'semantic', text: 'synthetic-new' }], maxEntryBytes: 1000 })
+    const fresh = buildButlerMemoryNetProvider({ userId: 'alice', recallIndex: openButlerRecallIndex(opts) })
+    expect((await fresh())?.nodes.map((n) => n.id)).toEqual(['memory:new'])
+    expect(await net()).toBeNull()
+  })
+
+  it('checks usability on TTL hits and discards the cache after a failed check', async () => {
+    let blocked = false
+    let reads = 0
+    const net = buildButlerMemoryNetProvider({
+      userId: 'u', now: () => T0,
+      recallIndex: {
+        assertUsable: async () => { if (blocked) throw new Error('retired') },
+        allEntries: async () => [entry(String(++reads), `synthetic-${reads}`)],
+      },
+    })
+    const first = await net()
+    expect(await net()).toBe(first)
+    expect(reads).toBe(1)
+    blocked = true
+    expect(await net()).toBeNull()
+    blocked = false
+    const fresh = await net()
+    expect(fresh).not.toBe(first)
+    expect(reads).toBe(2)
+  })
+
+  it('does not publish a build that finishes after retirement', async () => {
+    let blocked = false
+    let release!: () => void
+    let entered!: () => void
+    const gate = new Promise<void>((resolve) => { release = resolve })
+    const started = new Promise<void>((resolve) => { entered = resolve })
+    const net = buildButlerMemoryNetProvider({
+      userId: 'u', now: () => T0,
+      recallIndex: {
+        assertUsable: async () => { if (blocked) throw new Error('retired') },
+        allEntries: async () => { entered(); await gate; return [entry('old', 'synthetic-old')] },
+      },
+    })
+    const a = net()
+    const b = net()
+    await started
+    blocked = true
+    release()
+    expect(await a).toBeNull()
+    expect(await b).toBeNull()
+    expect(await net()).toBeNull()
+  })
+
+  it('does not fall back to the old net if a build failure also closes access', async () => {
+    let blocked = false
+    let failBuild = false
+    const net = buildButlerMemoryNetProvider({
+      userId: 'u', ttlMs: 0, now: () => T0,
+      recallIndex: {
+        assertUsable: async () => { if (blocked) throw new Error('pending') },
+        allEntries: async () => {
+          if (failBuild) { blocked = true; throw new Error('build failed') }
+          return [entry('old', 'synthetic-old')]
+        },
+      },
+    })
+    expect((await net())?.nodes).toHaveLength(1)
+    failBuild = true
+    expect(await net()).toBeNull()
+  })
+
+  it('does not revive an invalidated in-flight build after a transient barrier clears', async () => {
+    let blocked = false
+    let release!: () => void
+    let entered!: () => void
+    const gate = new Promise<void>((resolve) => { release = resolve })
+    const started = new Promise<void>((resolve) => { entered = resolve })
+    let reads = 0
+    const net = buildButlerMemoryNetProvider({
+      userId: 'u', now: () => T0,
+      recallIndex: {
+        assertUsable: async () => { if (blocked) throw new Error('pending') },
+        allEntries: async () => {
+          const n = ++reads
+          if (n === 1) { entered(); await gate }
+          return [entry(String(n), `synthetic-${n}`)]
+        },
+      },
+    })
+    const old = net()
+    await started
+    blocked = true
+    expect(await net()).toBeNull()
+    blocked = false
+    release()
+    expect(await old).toBeNull()
+    expect((await net())?.nodes.map((n) => n.id)).toEqual(['memory:2'])
   })
 })
 

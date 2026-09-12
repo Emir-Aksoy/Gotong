@@ -12,7 +12,7 @@
  * # jsonl is truth; the index is a rebuildable cache (北极星: file-first)
  *
  * Correctness rests on a cheap WATERMARK, not on bookkeeping every write: the
- * fingerprint is each kind file's `size:mtime`. Any write (remember, forget,
+ * fingerprint binds owner, kinds, generation and each kind file's stats. Any write (remember, forget,
  * patchMeta from the F/E/D writers, a consolidation rewrite, forgetAll) changes a
  * file's stats → the watermark drifts → the next `ensureFresh` rebuilds from the
  * jsonl. So the index can never silently diverge from the source of truth — at
@@ -23,20 +23,16 @@
  * file actually changed, and the butler's store is kept bounded by the budget
  * reviewer).
  *
- * # Why read the jsonl directly instead of `handle.list`
+ * # Why use a strict snapshot instead of `handle.list`
  *
  * `MemoryHandle.list` caps at 500 and `recall` at 200 — neither can return "the
  * whole store", which is exactly the coverage the index exists to provide. So the
- * factory reads the jsonl files straight (reusing `service-memory-file`'s path
- * helpers — the one place that knows the layout and asserts owner-id safety). I/O
+ * factory uses `MemoryFileHandle.snapshot()` for complete, guarded reads. I/O
  * is injected as {@link RecallIndexIo} so the index logic is unit-testable with a
  * fake, and the real-filesystem wiring lives in {@link openButlerRecallIndex}.
  */
 
-import { readFile, stat } from 'node:fs/promises'
-import { join } from 'node:path'
-
-import { writeFileAtomic, type Logger } from '@gotong/core'
+import type { Logger } from '@gotong/core'
 import {
   InvertedIndex,
   buildInvertedIndex,
@@ -47,10 +43,10 @@ import {
   type MemoryRetriever,
   type RetrieverOptions,
 } from '@gotong/personal-memory'
-import { kindFile, ownerDir } from '@gotong/service-memory-file'
-import type { MemoryEntry, MemoryKind, Owner } from '@gotong/services-sdk'
+import { MemoryFileMutationError, MemoryFileSnapshotError } from '@gotong/service-memory-file'
+import type { MemoryEntry, MemoryKind } from '@gotong/services-sdk'
 
-import { BUTLER_MEMORY_KINDS } from './personal-butler-memory.js'
+import { createRecallIndexIo } from './butler-recall-index-io.js'
 
 /**
  * Enable multi-signal fusion recall (MU-M2). The PRESENCE of this config turns
@@ -80,14 +76,33 @@ export interface PersistedRecallIndex {
  * filesystem, so the freshness logic can be unit-tested with an in-memory fake.
  */
 export interface RecallIndexIo {
+  /** Authoritative owner/generation barrier, including for warm in-memory hits. */
+  assertUsable?(): Promise<void>
   /** Read EVERY entry across the butler's kinds (whole store, no `list` 500 cap). */
   loadAll(): Promise<MemoryEntry[]>
   /** Cheap freshness fingerprint (e.g. `size:mtime` per kind file). Drift ⇒ rebuild. */
   watermark(): Promise<string>
   /** Warm-start: a previously persisted snapshot+watermark, or null if none/corrupt. */
   loadPersisted?(): Promise<PersistedRecallIndex | null>
-  /** Persist snapshot+watermark next to the jsonl (best-effort; a throw is swallowed). */
+  /** Best-effort cache write; authoritative guard failures must still propagate. */
   persist?(data: PersistedRecallIndex): Promise<void>
+  /** Strict purge, required for retirement when either persistence method exists. */
+  removePersisted?(): Promise<void>
+}
+
+export type RecallIndexErrorCode = 'RECALL_INDEX_RETIRED' | 'RECALL_INDEX_CLEANUP_FAILED'
+  | 'RECALL_INDEX_RETIRE_UNSUPPORTED' | 'RECALL_INDEX_INVALID_SCOPE'
+
+const messages: Record<RecallIndexErrorCode, string> = {
+  RECALL_INDEX_RETIRED: 'Recall index is retired; open a fresh index.',
+  RECALL_INDEX_CLEANUP_FAILED: 'Recall index cleanup failed; retirement may be retried.',
+  RECALL_INDEX_RETIRE_UNSUPPORTED: 'Recall index persistence does not support strict cleanup.',
+  RECALL_INDEX_INVALID_SCOPE: 'Recall index requires a valid scope and a non-empty userId.',
+}
+
+/** Never retains source contents, paths, or an underlying cause. */
+export class RecallIndexError extends Error {
+  constructor(readonly code: RecallIndexErrorCode) { super(messages[code]) }
 }
 
 /**
@@ -105,6 +120,10 @@ export class FileBackedInvertedIndex {
   /** Warm-start from disk is attempted exactly once, lazily. */
   private warmed = false
   private refreshing: Promise<void> | null = null
+  private retired = false
+  private retirement: Promise<void> | null = null
+  private epoch = 0
+  private publishedEpoch = -1
 
   constructor(
     private readonly io: RecallIndexIo,
@@ -118,29 +137,95 @@ export class FileBackedInvertedIndex {
     return this.index.size
   }
 
+  async assertUsable(): Promise<void> {
+    this.assertNotRetired()
+    try { await this.io.assertUsable?.() } finally { this.assertNotRetired() }
+  }
+
+  private assertNotRetired(): void {
+    if (this.retired) throw new RecallIndexError('RECALL_INDEX_RETIRED')
+  }
+
+  /**
+   * INSTANCE-only barrier: the coordinator must retire all instances and stop
+   * new factories before correcting files. Independent instances share no lock.
+   * The old object never reopens, even when cleanup fails and is retried.
+   */
+  retire(): Promise<void> {
+    if (!this.retired) {
+      this.retired = true
+      this.clear()
+    }
+    if (this.retirement) return this.retirement
+    const active = this.refreshing
+    this.retirement = Promise.resolve().then(async () => {
+      await active?.catch(() => undefined)
+      if (!this.io.removePersisted && (this.io.persist || this.io.loadPersisted)) {
+        throw new RecallIndexError('RECALL_INDEX_RETIRE_UNSUPPORTED')
+      }
+      try { await this.io.removePersisted?.() } catch {
+        throw new RecallIndexError('RECALL_INDEX_CLEANUP_FAILED')
+      }
+    }).catch((error: unknown) => {
+      this.retirement = null
+      throw error
+    })
+    return this.retirement
+  }
+
   /**
    * Rebuild the index if (and only if) the jsonl changed since it was last built.
    * Concurrent calls share one in-flight rebuild (a recall storm rebuilds once).
    */
   async ensureFresh(): Promise<void> {
-    if (this.refreshing) return this.refreshing
-    this.refreshing = this.doRefresh().finally(() => {
-      this.refreshing = null
-    })
-    return this.refreshing
+    const requestedEpoch = this.epoch
+    for (;;) {
+      this.assertNotRetired()
+      if (!this.refreshing) {
+        this.refreshing = this.doRefresh(this.epoch).finally(() => {
+          this.refreshing = null
+        })
+      }
+      await this.refreshing
+      await this.assertUsable()
+      this.assertNotRetired()
+      // A pre-clear refresh can finish without publishing. New callers must
+      // refresh their epoch; callers interrupted by another clear may give up.
+      if (requestedEpoch !== this.epoch || this.publishedEpoch === this.epoch) return
+    }
   }
 
-  private async doRefresh(): Promise<void> {
+  private async doRefresh(epoch: number): Promise<void> {
+    await this.assertUsable()
+    if (epoch !== this.epoch) return
+    let candidate = this.index
+    let builtAt = this.builtAt
     if (!this.warmed) {
       this.warmed = true
-      await this.tryWarmStart()
+      const persisted = await this.tryWarmStart()
+      await this.assertUsable()
+      if (epoch !== this.epoch) return
+      if (persisted) {
+        candidate = persisted.index
+        builtAt = persisted.watermark
+      }
     }
     const wm = await this.io.watermark()
-    if (this.builtAt !== '' && wm === this.builtAt) return // fresh — nothing changed
-    const all = await this.io.loadAll()
-    this.index = buildInvertedIndex(all)
+    await this.assertUsable()
+    if (epoch !== this.epoch) return
+    if (builtAt === '' || wm !== builtAt) {
+      const all = await this.io.loadAll()
+      await this.assertUsable()
+      if (epoch !== this.epoch) return
+      candidate = buildInvertedIndex(all)
+      await this.tryPersist({ snapshot: candidate.serialize(), watermark: wm })
+      await this.assertUsable()
+      if (epoch !== this.epoch) return
+    }
+    // Publish only after all async work has crossed the guard and local epoch.
+    this.index = candidate
     this.builtAt = wm
-    await this.tryPersist(wm)
+    this.publishedEpoch = epoch
   }
 
   /**
@@ -153,12 +238,16 @@ export class FileBackedInvertedIndex {
     return {
       retrieve: async (query) => {
         await this.ensureFresh()
+        await this.assertUsable()
+        const epoch = this.epoch
         // Fusion when configured (MU-M2), else the keyword-only ranking. Both read
         // the freshly-rebuilt `this.index`, so the caller's retriever never goes stale.
         const backend = fusion
           ? fusedRetriever(this.index, { ...opts, embed: fusion.embed })
           : invertedIndexRetriever(this.index, opts)
-        return backend.retrieve(query)
+        const hits = await backend.retrieve(query)
+        await this.assertUsable()
+        return epoch === this.epoch ? hits : []
       },
     }
   }
@@ -174,6 +263,7 @@ export class FileBackedInvertedIndex {
    */
   async allEntries(): Promise<MemoryEntry[]> {
     await this.ensureFresh()
+    await this.assertUsable()
     return this.index.entries()
   }
 
@@ -186,6 +276,7 @@ export class FileBackedInvertedIndex {
    */
   async lookupByIds(ids: readonly string[]): Promise<MemoryEntry[]> {
     await this.ensureFresh()
+    await this.assertUsable()
     const out: MemoryEntry[] = []
     for (const id of ids) {
       const e = this.index.get(id)
@@ -201,34 +292,41 @@ export class FileBackedInvertedIndex {
    * `warmed` stays true so a stale snapshot is never reloaded after an explicit clear.
    */
   clear(): void {
+    this.epoch++
     this.index = new InvertedIndex()
     this.builtAt = ''
     this.warmed = true
   }
 
-  private async tryWarmStart(): Promise<void> {
-    if (!this.io.loadPersisted) return
+  private async tryWarmStart(): Promise<{ index: InvertedIndex; watermark: string } | null> {
+    if (!this.io.loadPersisted) return null
     try {
       const persisted = await this.io.loadPersisted()
+      await this.assertUsable()
       if (persisted) {
-        this.index = InvertedIndex.load(persisted.snapshot)
-        this.builtAt = persisted.watermark
+        return { index: InvertedIndex.load(persisted.snapshot), watermark: persisted.watermark }
       }
     } catch (err) {
+      if (isRecallIndexAccessError(err)) throw err
+      await this.assertUsable()
       // A corrupt cache is never fatal — fall through to a cold rebuild.
       this.logger?.warn('butler recall index: warm-start failed, will rebuild', {
-        err: errMsg(err),
+        cacheFailure: true,
       })
     }
+    return null
   }
 
-  private async tryPersist(watermark: string): Promise<void> {
+  private async tryPersist(data: PersistedRecallIndex): Promise<void> {
     if (!this.io.persist) return
     try {
-      await this.io.persist({ snapshot: this.index.serialize(), watermark })
+      await this.io.persist(data)
+      await this.assertUsable()
     } catch (err) {
+      if (isRecallIndexAccessError(err)) throw err
+      await this.assertUsable()
       // Persistence is an optimization; a failure just means a cold rebuild next boot.
-      this.logger?.warn('butler recall index: persist failed', { err: errMsg(err) })
+      this.logger?.warn('butler recall index: persist failed', { cacheFailure: true })
     }
   }
 }
@@ -245,9 +343,6 @@ export interface OpenButlerRecallIndexOptions {
   fusion?: ButlerRecallFusion
 }
 
-/** Filename of the persisted index cache, written inside the user's memory dir. */
-const RECALL_INDEX_FILE = 'recall-index.json'
-
 /**
  * Open a recall index scoped to one user, wired to the real filesystem.
  *
@@ -261,75 +356,17 @@ export function openButlerRecallIndex(
   opts: OpenButlerRecallIndexOptions,
 ): FileBackedInvertedIndex {
   if (typeof opts.userId !== 'string' || opts.userId.length === 0) {
-    throw new Error('openButlerRecallIndex: a non-empty userId is required (per-user namespace)')
+    throw new RecallIndexError('RECALL_INDEX_INVALID_SCOPE')
   }
-  const owner: Owner = { kind: 'user', id: opts.userId }
-  const kinds = opts.kinds ?? BUTLER_MEMORY_KINDS
-  const files = kinds.map((k) => kindFile(opts.rootDir, owner, k))
-  const indexPath = join(ownerDir(opts.rootDir, owner), RECALL_INDEX_FILE)
-
-  const io: RecallIndexIo = {
-    async loadAll() {
-      const out: MemoryEntry[] = []
-      for (const path of files) out.push(...await readJsonlEntries(path))
-      return out
-    },
-    async watermark() {
-      const parts: string[] = []
-      for (const path of files) {
-        try {
-          const s = await stat(path)
-          parts.push(`${path}:${s.size}:${s.mtimeMs}`)
-        } catch {
-          parts.push(`${path}:absent`) // missing file is a valid state, fingerprint it
-        }
-      }
-      return parts.join('|')
-    },
-    async loadPersisted() {
-      try {
-        const raw = await readFile(indexPath, 'utf8')
-        const parsed = JSON.parse(raw) as PersistedRecallIndex
-        if (parsed && typeof parsed.watermark === 'string' && parsed.snapshot) return parsed
-        return null
-      } catch {
-        return null // absent or corrupt — cold rebuild
-      }
-    },
-    async persist(data) {
-      // atomic swap so a reader never sees a half file
-      await writeFileAtomic(indexPath, JSON.stringify(data))
-    },
-  }
-
-  return new FileBackedInvertedIndex(io, opts.logger, opts.fusion)
+  return new FileBackedInvertedIndex(createRecallIndexIo(opts), opts.logger, opts.fusion)
 }
 
 // ---------------------------------------------------------------------------
 // internals
 // ---------------------------------------------------------------------------
 
-/** Read one jsonl file into entries, tolerating a half-written tail / corrupt lines. */
-async function readJsonlEntries(path: string): Promise<MemoryEntry[]> {
-  let raw: string
-  try {
-    raw = await readFile(path, 'utf8')
-  } catch {
-    return [] // absent file = no entries of this kind yet
-  }
-  const out: MemoryEntry[] = []
-  for (const line of raw.split('\n')) {
-    if (!line) continue
-    try {
-      const e = JSON.parse(line) as MemoryEntry
-      if (typeof e.id === 'string' && typeof e.text === 'string') out.push(e)
-    } catch {
-      // skip a corrupt / half-written line (same tolerance as the file backend)
-    }
-  }
-  return out
-}
-
-function errMsg(err: unknown): string {
-  return err instanceof Error ? err.message : String(err)
+/** Shared with derived views: a later healthy check cannot undo this failure. */
+export function isRecallIndexAccessError(error: unknown): boolean {
+  return error instanceof MemoryFileMutationError || error instanceof MemoryFileSnapshotError
+    || error instanceof RecallIndexError
 }
