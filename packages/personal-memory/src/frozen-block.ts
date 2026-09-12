@@ -283,9 +283,10 @@ export function renderClusteredFrozenBlock(
  * fixed, deduped order for a fixed set), so the tail stays byte-stable.
  */
 function formatEntry(e: MemoryEntry, inBlock?: ReadonlySet<string>): string {
-  const text = renderEvidence(e) ?? e.text.replace(/\s*\n\s*/g, ' ').trim()
+  const evidence = renderEvidence(e)
+  const text = evidence ?? e.text.replace(/\s*\n\s*/g, ' ').trim()
   const temporal = temporalOf(e)
-  const timeLabel = temporal ? `(${formatTurnTime(temporal)}) ` : ''
+  const timeLabel = temporal && evidence === undefined ? `(${formatTurnTime(temporal)}) ` : ''
   const base = `[${e.id}] ${timeLabel}${text}` + (isProcedure(e)
     ? ` — ${formatProcedureSteps(stepsOf(e))}; conditions: ${JSON.stringify(e.meta?.conditions)}; counterexamples: ${JSON.stringify(e.meta?.counterexamples)}; sandbox-output-only`
     : '')

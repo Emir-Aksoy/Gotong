@@ -514,8 +514,9 @@ export class MemoryToolset implements LlmAgentToolset {
         const steps = isProcedure(e) ? stepsOf(e) : []
         const suffix = steps.length > 0 ? ` — [${skillStatus(e)} candidate; not a real-world guarantee] steps: ${formatProcedureSteps(steps)}` : ''
         const temporal = temporalOf(e)
-        const observed = temporal ? `; ${formatTurnTime(temporal)}` : ''
-        return `${prefix}[${e.id}] (${tag}, p${importanceOf(e)}, recorded: ${new Date(e.ts).toISOString()}${observed}) ${renderEvidence(e) ?? e.text}${suffix}`
+        const evidence = renderEvidence(e)
+        const observed = temporal && evidence === undefined ? `; ${formatTurnTime(temporal)}` : ''
+        return `${prefix}[${e.id}] (${tag}, p${importanceOf(e)}, recorded: ${new Date(e.ts).toISOString()}${observed}) ${evidence ?? e.text}${suffix}`
       })
       // F-M3: reinforce what the query MATCHED (the seeds), opt-in. Best-effort
       // and AFTER the result is built — a failed reinforce must not turn a good

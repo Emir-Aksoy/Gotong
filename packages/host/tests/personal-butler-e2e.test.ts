@@ -331,6 +331,28 @@ describe('personal-butler-e2e — §七 acceptance gate (4 claims)', () => {
     expect(provider.lastSystem).toContain('另外,我最近在忙一个奶茶店的创业。')
   })
 
+  it('keeps the original week-before-last range in a later session after compaction', async () => {
+    const mem = memFor('alice')
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(Date.parse('2026-09-11T12:00:00Z'))
+    try {
+      hub.register(butlerFor('butler:alice:calendar1', mem))
+      expect((await dispatchTo('butler:alice:calendar1', 'alice', '我上上周吃过烤肉。')).kind).toBe('ok')
+      clock.mockReturnValue(Date.parse('2026-09-11T12:01:00Z'))
+      expect((await dispatchTo('butler:alice:calendar1', 'alice', '好的，谢谢。')).kind).toBe('ok')
+    } finally { clock.mockRestore() }
+    hub.unregister('butler:alice:calendar1')
+    const summarize = vi.fn(async () => '昨天吃了烤肉')
+    const result = await consolidate({ memory: mem, force: true, keepRecent: 1, summarize })
+    expect(result?.profile.text).toBe('我上上周吃过烤肉。')
+    expect(summarize).not.toHaveBeenCalled()
+    hub.register(butlerFor('butler:alice:calendar2', mem))
+    // The model is a stub: this asserts its actual prompt, not answer accuracy.
+    expect((await dispatchTo('butler:alice:calendar2', 'alice', '之前什么时候吃过烤肉？')).kind).toBe('ok')
+    expect(provider.lastSystem).toContain('[2026-08-24, 2026-08-31) week')
+    expect(provider.lastSystem).toContain('not event claims')
+    expect(provider.lastSystem).not.toContain('昨天吃了烤肉')
+  })
+
   it('claim 2 — a benign flexible invocation runs inline (no suspend)', async () => {
     const m = memFor('alice')
     const b = butlerFor('butler:alice', m)

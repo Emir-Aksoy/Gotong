@@ -28,6 +28,7 @@
 import type { Task } from '@gotong/core'
 import type { NewMemoryEntry } from '@gotong/services-sdk'
 import { temporalOf, type TurnTime } from './temporal.js'
+import { captureCalendar } from './calendar.js'
 
 /** Default soft cap on a single capture entry's text. */
 export const DEFAULT_CAPTURE_MAX_CHARS = 2_000
@@ -66,10 +67,13 @@ export function buildTurnCapture(input: TurnCaptureInput): NewMemoryEntry | null
   delete meta.temporal
   delete meta.userSpan
   delete meta.evidence
+  delete meta.calendar
   if (userLength > 0) meta.userSpan = { v: 1, start: 6, end: 6 + userLength,
     ...(userLength < userText.length ? { complete: false } : {}) }
   const temporal = temporalOf({ meta: { temporal: input.temporal } })
   if (temporal) meta.temporal = temporal
+  const calendar = userLength === userText.length ? captureCalendar(userText, temporal) : undefined
+  if (calendar) meta.calendar = calendar
   if (input.taskId !== undefined) meta.taskId = input.taskId
   if (input.from !== undefined) meta.from = input.from
   return { kind: 'episodic', text, meta }

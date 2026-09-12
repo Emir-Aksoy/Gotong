@@ -1,11 +1,13 @@
 import type { MemoryEntry, NewMemoryEntry } from '@gotong/services-sdk'
 import { formatTurnTime, temporalOf, type TurnTime } from './temporal.js'
 import { PersonalMemoryError } from './errors.js'
+import { calendarOf, formatCalendar, type CalendarReferences } from './calendar.js'
 
 export interface UserEvidence {
   sourceId: string
   text: string
   temporal?: TurnTime
+  calendar?: CalendarReferences
   scope?: string
 }
 
@@ -30,7 +32,7 @@ function quoteAt(text: string, raw: Record<string, unknown>): string | undefined
 
 /** Marked-but-invalid evidence is protected too: never feed it to a lossy fallback. */
 export function hasEvidenceBoundary(e: Pick<MemoryEntry, 'meta'>): boolean {
-  return ['temporal', 'userSpan', 'evidence'].some(key => Object.hasOwn(e.meta ?? {}, key))
+  return ['temporal', 'userSpan', 'evidence', 'calendar'].some(key => Object.hasOwn(e.meta ?? {}, key))
 }
 
 /** Spans are produced at capture/packing time, never inferred from textual role labels. */
@@ -48,7 +50,9 @@ export function evidenceSources(e: MemoryEntry): UserEvidence[] {
       if (!text) return []
       const temporal = temporalOf({ meta: { temporal: s.temporal } })
       if (s.temporal !== undefined && !temporal) return []
-      out.push({ sourceId: s.sourceId, text, ...(temporal ? { temporal } : {}), ...(scope !== undefined ? { scope } : {}) })
+      const calendar = calendarOf(s.calendar, text, temporal)
+      if (Object.hasOwn(s, 'calendar') && !calendar) return []
+      out.push({ sourceId: s.sourceId, text, ...(temporal ? { temporal } : {}), ...(calendar ? { calendar } : {}), ...(scope !== undefined ? { scope } : {}) })
     }
     return uniqueSources(out) ?? []
   }
@@ -58,7 +62,9 @@ export function evidenceSources(e: MemoryEntry): UserEvidence[] {
   if (!text) return []
   const temporal = temporalOf(e)
   if (e.meta?.temporal !== undefined && !temporal) return []
-  return [{ sourceId: e.id, text, ...(temporal ? { temporal } : {}), ...(scope !== undefined ? { scope } : {}) }]
+  const calendar = calendarOf(e.meta?.calendar, text, temporal)
+  if (Object.hasOwn(e.meta ?? {}, 'calendar') && !calendar) return []
+  return [{ sourceId: e.id, text, ...(temporal ? { temporal } : {}), ...(calendar ? { calendar } : {}), ...(scope !== undefined ? { scope } : {}) }]
 }
 
 function uniqueSources(sources: readonly UserEvidence[]): UserEvidence[] | undefined {
@@ -83,15 +89,17 @@ export function packEvidence(sources: readonly UserEvidence[], cap: number, extr
   const spans: Record<string, unknown>[] = []
   for (const source of unique) {
     if (source.temporal && !temporalOf({ meta: { temporal: source.temporal } })) return undefined
+    if (Object.hasOwn(source, 'calendar') && !calendarOf(source.calendar, source.text, source.temporal)) return undefined
     if (text) text += '\n'
     const start = text.length
     text += source.text
     spans.push({ sourceId: source.sourceId, speaker: 'user', start, end: text.length,
-      ...(source.temporal ? { temporal: source.temporal } : {}) })
+      ...(source.temporal ? { temporal: source.temporal } : {}), ...(source.calendar ? { calendar: source.calendar } : {}) })
   }
   const meta = { ...extra }
   delete meta.temporal
   delete meta.userSpan
+  delete meta.calendar
   if (scope !== undefined && scopeOf(meta) === undefined) meta.userId = scope
   meta.evidence = { v: 1, sources: spans }
   const packed: NewMemoryEntry = { kind: 'semantic', text, meta }
@@ -99,10 +107,10 @@ export function packEvidence(sources: readonly UserEvidence[], cap: number, extr
 }
 
 export function renderEvidence(e: MemoryEntry): string | undefined {
-  if (!Object.hasOwn(e.meta ?? {}, 'evidence')) return undefined
+  if (!Object.hasOwn(e.meta ?? {}, 'evidence') && !Object.hasOwn(e.meta ?? {}, 'calendar')) return undefined
   const sources = evidenceSources(e)
   if (!sources.length) return '[invalid evidence; not a verified user fact]'
-  return sources.map(s => `[source ${JSON.stringify(s.sourceId)}; user quote; ${s.temporal ? formatTurnTime(s.temporal) : 'turn-time: unknown'}] ${JSON.stringify(s.text)}`).join(' ')
+  return sources.map(s => `[source ${JSON.stringify(s.sourceId)}; user quote; ${s.temporal ? formatTurnTime(s.temporal) : 'turn-time: unknown'}${s.calendar ? `; ${formatCalendar(s.calendar, s.text)}` : ''}] ${JSON.stringify(s.text)}`).join(' ')
 }
 
 export function prepareEvidenceCompaction(

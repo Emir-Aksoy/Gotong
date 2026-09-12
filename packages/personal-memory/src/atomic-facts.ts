@@ -31,6 +31,7 @@ export const DEFAULT_ATOMIC_FACTS_SYSTEM = [
   '忽略一次性购买、临时情绪、当下动作；买过或说好喝不代表最爱。',
   '禁止推断、改写、补充事实，禁止采用助手猜测。只能选择输入中已有的 sourceId。',
   'temporal 是本轮接收时间，不是事件发生时间；不得把原话中的相对时间改写为新日期。',
+  'calendar 仅解释原话日期词，不证明事件发生；保持问句、否定、假设和转述的原意。',
   '仅输出严格 JSON {"sources":["sourceId",...]}，没有合适来源则 {"sources":[]}。',
   '不得输出解释、代码围栏、事实文本或其他字段。每个来源最多选择一次。',
 ].join('\n')
@@ -73,7 +74,7 @@ export function atomicFactsReviewer(opts: AtomicFactsReviewerOptions): MemoryRev
     if (supplied.size === 0) return {}
 
     const user = JSON.stringify({ sources: [...supplied.values()].map(
-      ({ sourceId, text, temporal }) => ({ sourceId, text, ...(temporal ? { temporal } : {}) }),
+      ({ sourceId, text, temporal, calendar }) => ({ sourceId, text, ...(temporal ? { temporal } : {}), ...(calendar ? { calendar } : {}) }),
     ) })
     const candidates = parseSourceIds(await opts.summarize({ system, user }), supplied)
     if (candidates.length === 0) return {}
