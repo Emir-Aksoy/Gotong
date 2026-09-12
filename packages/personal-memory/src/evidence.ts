@@ -57,7 +57,7 @@ export function evidenceSources(e: MemoryEntry): UserEvidence[] {
     return uniqueSources(out) ?? []
   }
   const span = record(e.meta?.userSpan)
-  if (span?.v !== 1 || span.complete === false) return []
+  if (span?.v !== 1 || (Object.hasOwn(span, 'complete') && span.complete !== true)) return []
   const text = quoteAt(e.text, span)
   if (!text) return []
   const temporal = temporalOf(e)

@@ -7,6 +7,7 @@
  */
 
 export type PersonalMemoryErrorCode =
+  | 'correction_invalid'
   | 'evidence_source_conflict'
   | 'evidence_write_mismatch'
   | 'invalid_turn_time'

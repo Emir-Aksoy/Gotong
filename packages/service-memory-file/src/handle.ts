@@ -13,7 +13,7 @@
  * silent memory loss (audit P1). Sharing the chain by owner makes every writer
  * to a given member serialize. `fs.appendFile` on POSIX is atomic up to PIPE_BUF
  * (~4096 bytes) but a `MemoryEntry` can exceed that, so the chain also makes
- * "two concurrent remembers" safe. Reads are unsynchronised; with tmp+rename
+ * "two concurrent remembers" safe. List/recall reads are unsynchronised; with tmp+rename
  * rewrites they never observe a half-written file (parsing still skips bad lines
  * from a legacy tail).
  */
@@ -42,6 +42,7 @@ import type {
 import type { MemoryFileConfig } from './config.js'
 import { generateEntryId } from './id.js'
 import { kindFile, ownerDir, ownerLabel } from './paths.js'
+import { readMemoryFileSnapshot, type MemoryFileSnapshot } from './snapshot.js'
 
 const RECALL_DEFAULT_K = 20
 const RECALL_MAX_K = 200
@@ -89,9 +90,10 @@ export class MemoryFileHandle implements MemoryHandle {
 
   constructor(opts: MemoryFileHandleOpts) {
     this.rootDir = opts.rootDir
-    this.owner = opts.owner
+    // Caller mutations must not move file paths away from the fixed owner queue.
+    this.owner = { kind: opts.owner.kind, id: opts.owner.id }
     this.config = opts.config
-    this.logger = opts.logger.child({ owner: ownerLabel(opts.owner) })
+    this.logger = opts.logger.child({ owner: ownerLabel(this.owner) })
     this.now = opts.now ?? Date.now
     this.chainKey = resolve(ownerDir(this.rootDir, this.owner))
   }
@@ -153,6 +155,15 @@ export class MemoryFileHandle implements MemoryHandle {
       all.push(...await this.readAll(kind))
     }
     return all.sort((a, b) => b.ts - a.ts).slice(0, limit)
+  }
+
+  /**
+   * Complete strict read serialized with this owner's writes across handles in
+   * this process only, NOT a cross-process transaction. Entries are for planning;
+   * a future write must compare the revision again while holding the same queue.
+   */
+  async snapshot(): Promise<MemoryFileSnapshot> {
+    return this.serializeWrite(() => readMemoryFileSnapshot(this.rootDir, this.owner, this.config.kinds))
   }
 
   async forget(id: string): Promise<void> {

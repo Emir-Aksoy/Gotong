@@ -21,7 +21,7 @@
 
 import type { Logger } from '@gotong/core'
 import { MemoryFileHandle, type MemoryFileConfig } from '@gotong/service-memory-file'
-import type { MemoryHandle, Owner } from '@gotong/services-sdk'
+import type { Owner } from '@gotong/services-sdk'
 
 /** Default memory kinds for a butler: captured turns + the distilled profile. */
 export const BUTLER_MEMORY_KINDS: MemoryFileConfig['kinds'] = ['episodic', 'semantic']
@@ -43,7 +43,7 @@ export interface OpenButlerMemoryOptions {
  * a butler with no member to scope by is a wiring bug, fail visible rather than
  * silently sharing one tree (the no-leak invariant must not depend on luck).
  */
-export function openButlerMemory(opts: OpenButlerMemoryOptions): MemoryHandle {
+export function openButlerMemory(opts: OpenButlerMemoryOptions): MemoryFileHandle {
   if (typeof opts.userId !== 'string' || opts.userId.length === 0) {
     throw new Error('openButlerMemory: a non-empty userId is required (per-user namespace)')
   }

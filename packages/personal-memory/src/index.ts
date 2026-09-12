@@ -17,6 +17,11 @@
 
 export * from './verified-skills.js'
 export {
+  prepareEvidenceCorrection,
+  type EvidenceCorrectionOptions,
+  type EvidenceCorrectionPlan,
+} from './correction.js'
+export {
   renderFrozenBlock,
   renderClusteredFrozenBlock,
   DEFAULT_PROCEDURE_SECTION_MAX,

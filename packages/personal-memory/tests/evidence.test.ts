@@ -57,6 +57,12 @@ describe('exact user evidence', () => {
   it('does not promote truncated user text as complete evidence', () => {
     expect(evidenceSources(captured('x'.repeat(1001)))).toEqual([])
   })
+  it.each([null, 0, 'false', {}])('rejects a corrupt completeness marker: %j', complete => {
+    const e = captured('short quote')
+    const span = e.meta!.userSpan as Record<string, unknown>
+    span.complete = complete
+    expect(evidenceSources(e)).toEqual([])
+  })
   it.each([{ userId: 'alice', user: 'bob' }, { userId: 'alice', user: 42 }])('rejects conflicting or malformed scope aliases %j', aliases => {
     const raw = captured()
     expect(evidenceSources({ ...raw, meta: { ...raw.meta, ...aliases } })).toEqual([])
