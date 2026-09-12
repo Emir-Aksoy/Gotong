@@ -74,6 +74,8 @@ interface SessionTurnRecord {
   role: SessionRole
   text: string
   at: number
+  /** Absent on legacy turns: never infer or backfill their zone. */
+  timeZone?: string
 }
 
 interface SessionFileShape {
@@ -128,12 +130,15 @@ export interface ButlerSessionWindowOptions {
   rootDir: string
   /** Injectable clock (tests). */
   now?: () => number
+  /** Tests may override the server IANA zone; resolution failures use UTC. */
+  timeZone?: string
   logger?: SessionWindowLogger
 }
 
 export class ButlerSessionWindow {
   private readonly rootDir: string
   private readonly now: () => number
+  private readonly timeZone: string | undefined
   private readonly logger: SessionWindowLogger | undefined
   /** Per-user write serialization — same discipline as TaskNotebook. */
   private readonly chains = new Map<string, Promise<void>>()
@@ -141,6 +146,7 @@ export class ButlerSessionWindow {
   constructor(opts: ButlerSessionWindowOptions) {
     this.rootDir = opts.rootDir
     this.now = opts.now ?? Date.now
+    this.timeZone = opts.timeZone
     this.logger = opts.logger
   }
 
@@ -185,7 +191,7 @@ export class ButlerSessionWindow {
         const rendered = render(live)
         const clipped = clip(text)
         if (clipped.length > 0) {
-          live.push({ role: 'user', text: clipped, at: this.now() })
+          live.push({ role: 'user', text: clipped, at: this.now(), timeZone: resolveTimeZone(this.timeZone) })
           const trimmed = live.slice(-SESSION_MAX_TURNS)
           await mkdir(this.rootDir, { recursive: true })
           const shape: SessionFileShape = { v: 1, turns: trimmed }
@@ -224,7 +230,7 @@ export class ButlerSessionWindow {
         const turns = await this.readTurns(userId)
         const at = this.now()
         const live = this.isStale(turns) ? [] : turns
-        live.push({ role, text: clipped, at })
+        live.push({ role, text: clipped, at, timeZone: resolveTimeZone(this.timeZone) })
         const trimmed = live.slice(-SESSION_MAX_TURNS)
         await mkdir(this.rootDir, { recursive: true })
         const shape: SessionFileShape = { v: 1, turns: trimmed }
@@ -282,10 +288,53 @@ export class ButlerSessionWindow {
   }
 }
 
-function clip(text: string): string {
+function clip(text: string, maxChars = SESSION_TURN_MAX_CHARS): string {
   const t = text.trim()
-  if (t.length <= SESSION_TURN_MAX_CHARS) return t
-  return t.slice(0, SESSION_TURN_MAX_CHARS - 1) + '…'
+  if (maxChars <= 0) return ''
+  if (t.length <= maxChars) return t
+  return t.slice(0, maxChars - 1) + '…'
+}
+
+function resolveTimeZone(timeZone?: string): string {
+  try {
+    return new Intl.DateTimeFormat('en-US', { timeZone }).resolvedOptions().timeZone || 'UTC'
+  } catch {
+    return 'UTC'
+  }
+}
+
+function timeLabel(turn: SessionTurnRecord): string {
+  if (typeof turn.timeZone !== 'string') return ''
+  const date = new Date(turn.at)
+  // Persisted numeric values can exceed Date's range; preserve text without inventing time.
+  if (!Number.isFinite(date.getTime())) return ''
+  try {
+    const parts = new Intl.DateTimeFormat('en-US', {
+      timeZone: turn.timeZone,
+      calendar: 'gregory',
+      numberingSystem: 'latn',
+      year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+    }).formatToParts(turn.at)
+    const values = Object.fromEntries(parts.map((p) => [p.type, p.value]))
+    return `[${values.year}-${values.month}-${values.day} ${values.hour}:${values.minute} ${turn.timeZone}] `
+  } catch {
+    // A missing Intl implementation must not hide the turn or mislabel UTC as local time.
+    const utc = date.toISOString().slice(0, 16).replace('T', ' ')
+    return `[${utc} UTC] `
+  }
+}
+
+function renderParts(turns: SessionTurnRecord[]): string {
+  const parts = turns.map((turn) => ({ label: timeLabel(turn), text: turn.text }))
+  const full = parts.map((part) => part.label + part.text).join('\n\n')
+  // Preserve legacy-only rendering byte-for-byte, including its merging behavior.
+  if (parts.every((part) => !part.label) || full.length <= SESSION_TURN_MAX_CHARS) return full
+  // Reserve every label and separator before sharing the remaining body budget.
+  // Clipping the joined message would erase later turns' time evidence.
+  const overhead = parts.reduce((sum, part) => sum + part.label.length, 2 * (parts.length - 1))
+  const bodyBudget = Math.floor((SESSION_TURN_MAX_CHARS - overhead) / parts.length)
+  return parts.map((part) => part.label + clip(part.text, bodyBudget)).join('\n\n')
 }
 
 /**
@@ -299,12 +348,13 @@ function clip(text: string): string {
  */
 function render(turns: SessionTurnRecord[]): SessionMessage[] {
   if (turns.length === 0) return []
-  const merged: { role: SessionRole; parts: string[] }[] = []
-  for (const t of turns) {
+  const merged: { role: SessionRole; parts: SessionTurnRecord[] }[] = []
+  // Files not written by append may exceed the window; labels need a bounded budget too.
+  for (const t of turns.slice(-SESSION_MAX_TURNS)) {
     const last = merged[merged.length - 1]
-    if (last && last.role === t.role) last.parts.push(t.text)
-    else merged.push({ role: t.role, parts: [t.text] })
+    if (last && last.role === t.role) last.parts.push(t)
+    else merged.push({ role: t.role, parts: [t] })
   }
   if (merged.length > 0 && merged[merged.length - 1]!.role === 'user') merged.pop()
-  return merged.map((m) => ({ role: m.role, content: m.parts.join('\n\n') }))
+  return merged.map((m) => ({ role: m.role, content: renderParts(m.parts) }))
 }

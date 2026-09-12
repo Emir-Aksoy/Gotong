@@ -27,6 +27,7 @@
 
 import type { Task } from '@gotong/core'
 import type { NewMemoryEntry } from '@gotong/services-sdk'
+import { temporalOf, type TurnTime } from './temporal.js'
 
 /** Default soft cap on a single capture entry's text. */
 export const DEFAULT_CAPTURE_MAX_CHARS = 2_000
@@ -42,6 +43,8 @@ export interface TurnCaptureInput {
   from?: string
   /** Extra meta merged into the entry (e.g. a per-user namespace key). */
   meta?: Record<string, unknown>
+  /** Trusted local observation captured before the new turn starts. */
+  temporal?: TurnTime
   /** Soft cap on the rendered text. Default {@link DEFAULT_CAPTURE_MAX_CHARS}. */
   maxChars?: number
 }
@@ -57,6 +60,10 @@ export function buildTurnCapture(input: TurnCaptureInput): NewMemoryEntry | null
   const text = renderTurn(collapse(input.userText), collapse(input.replyText), max)
   if (text.length === 0) return null
   const meta: Record<string, unknown> = { turn: true, ...(input.meta ?? {}) }
+  // Static/custom metadata cannot supply the clock, especially on resume.
+  delete meta.temporal
+  const temporal = temporalOf({ meta: { temporal: input.temporal } })
+  if (temporal) meta.temporal = temporal
   if (input.taskId !== undefined) meta.taskId = input.taskId
   if (input.from !== undefined) meta.from = input.from
   return { kind: 'episodic', text, meta }

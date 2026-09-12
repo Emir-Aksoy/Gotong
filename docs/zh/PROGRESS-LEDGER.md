@@ -590,3 +590,11 @@ fail-open。账本是 `audit_log` 同构的观测层, 配额闸是其上的执�
   Python 不支持的密码学复验诚实标为未验证。入口：[`DELIVERY-EVIDENCE.md`](DELIVERY-EVIDENCE.md)。
 - 本轮恢复范围、测试证据、功能提交与服务器状态以
   [`2026-09-04 发布记录`](releases/2026-09-04-verified-skills-delivery-evidence.md) 为准。
+
+## 2026-09-11 时间记忆 M1
+
+- **方向: M**：新任务固定服务器时区与本地开始时间；会话窗、冻结记忆块、召回保留并区分
+  时间含义。新时间证据不按字面相似度合并，标签不扩大冻结块/会话窗正文预算。
+- 不回填、不恢复丢失记忆。恢复任务缺少原始时间时不猜测；原整理链的时间/来源保真和统一
+  token 预算仍属后续 M2/M3。只在本地实现，未推送或部署。
+- 实现范围与限制：[`ATONG-TEMPORAL-MEMORY.md`](ATONG-TEMPORAL-MEMORY.md)。

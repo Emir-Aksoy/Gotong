@@ -49,6 +49,7 @@ import {
 } from './procedure.js'
 import { lexicalRetriever, type MemoryRetriever } from './retriever.js'
 import { tierOf } from './tiers.js'
+import { formatTurnTime, temporalOf } from './temporal.js'
 import { VerifiedSkills, skillStatus, skillState } from './verified-skills.js'
 
 /**
@@ -511,7 +512,9 @@ export class MemoryToolset implements LlmAgentToolset {
         // (recall output is the on-demand path, not the byte-stable frozen block).
         const steps = isProcedure(e) ? stepsOf(e) : []
         const suffix = steps.length > 0 ? ` — [${skillStatus(e)} candidate; not a real-world guarantee] steps: ${formatProcedureSteps(steps)}` : ''
-        return `${prefix}[${e.id}] (${tag}, p${importanceOf(e)}, ${new Date(e.ts).toISOString()}) ${e.text}${suffix}`
+        const temporal = temporalOf(e)
+        const observed = temporal ? `; ${formatTurnTime(temporal)}` : ''
+        return `${prefix}[${e.id}] (${tag}, p${importanceOf(e)}, recorded: ${new Date(e.ts).toISOString()}${observed}) ${e.text}${suffix}`
       })
       // F-M3: reinforce what the query MATCHED (the seeds), opt-in. Best-effort
       // and AFTER the result is built — a failed reinforce must not turn a good

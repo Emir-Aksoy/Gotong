@@ -7,6 +7,7 @@
  */
 
 export type PersonalMemoryErrorCode =
+  | 'invalid_turn_time'
   | 'skill_invalid'
   /** A memory-augmented agent was constructed with no memory handle —
    *  neither an explicit `memory` option nor a `services.memory`. */

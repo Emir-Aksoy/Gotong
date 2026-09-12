@@ -30,6 +30,7 @@ import type { MemoryEntry } from '@gotong/services-sdk'
 import { isActive } from './bitemporal.js'
 import { compareByImportanceThenRecency } from './importance.js'
 import { linksOf } from './links.js'
+import { formatTurnTime, temporalOf } from './temporal.js'
 import { formatProcedureSteps, isProcedure, stepsOf } from './procedure.js'
 import { publishedProcedure } from './verified-skills.js'
 import { DEFAULT_TIERS, normalizeTier, tierOf, type TierConfig } from './tiers.js'
@@ -42,7 +43,8 @@ export interface RenderFrozenBlockOptions {
    * priority order (importance, then recency) until the next one would
    * exceed the budget; the remainder are dropped with a deterministic
    * "(N lower-priority … omitted)" note. The highest-priority entry is
-   * always included even if it alone is over budget. Mirrors Hermes'
+   * included even if it alone is over budget, except for timed evidence and
+   * procedures, which must fit whole (including labels/steps). Mirrors Hermes'
    * bounded MEMORY.md. Default 4000.
    */
   maxChars?: number
@@ -148,7 +150,7 @@ export function renderFrozenBlock(
     const line = `- ${formatEntry(sorted[i]!, inBlock)}`
     // Always take the first (highest-priority) line; after that, stop once the
     // body budget would be exceeded. `+ 1` accounts for the joining newline.
-    if ((lines.length > 0 || isProcedure(sorted[i]!)) && used + line.length + 1 > maxChars) {
+    if ((lines.length > 0 || isProcedure(sorted[i]!) || temporalOf(sorted[i]!)) && used + line.length + 1 > maxChars) {
       omitted = sorted.length - i
       break
     }
@@ -243,7 +245,7 @@ export function renderClusteredFrozenBlock(
     let omitted = 0
     for (let i = 0; i < group.length; i++) {
       const line = `- ${formatEntry(group[i]!, inBlock)}`
-      if ((lines.length > 0 || isProcedure(group[i]!)) && used + line.length + 1 > budget) {
+      if ((lines.length > 0 || isProcedure(group[i]!) || temporalOf(group[i]!)) && used + line.length + 1 > budget) {
         omitted = group.length - i
         break
       }
@@ -281,7 +283,9 @@ export function renderClusteredFrozenBlock(
  */
 function formatEntry(e: MemoryEntry, inBlock?: ReadonlySet<string>): string {
   const text = e.text.replace(/\s*\n\s*/g, ' ').trim()
-  const base = `[${e.id}] ${text}` + (isProcedure(e)
+  const temporal = temporalOf(e)
+  const timeLabel = temporal ? `(${formatTurnTime(temporal)}) ` : ''
+  const base = `[${e.id}] ${timeLabel}${text}` + (isProcedure(e)
     ? ` — ${formatProcedureSteps(stepsOf(e))}; conditions: ${JSON.stringify(e.meta?.conditions)}; counterexamples: ${JSON.stringify(e.meta?.counterexamples)}; sandbox-output-only`
     : '')
   if (!inBlock) return base

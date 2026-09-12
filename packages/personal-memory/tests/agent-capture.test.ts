@@ -121,7 +121,7 @@ describe('MemoryAugmentedAgent turn capture (M2)', () => {
 })
 
 describe('MemoryAugmentedAgent 写侧新颖门 (M4)', () => {
-  /** 同一轮跑三遍 —— 生产默认下盘上该只有一条。 */
+  /** 不同任务即使字面相同,也不能抹掉各自的时间证据。 */
   const runThrice = async (foldRestatements?: boolean) => {
     const mem = makeFakeMemory()
     const agent = new MemoryAugmentedAgent({
@@ -138,15 +138,18 @@ describe('MemoryAugmentedAgent 写侧新颖门 (M4)', () => {
     return mem
   }
 
-  it('默认开着:同一轮问三遍,盘上只留一条', async () => {
+  it('时间锚优先:同一句问三遍,保留三个任务的证据', async () => {
     const mem = await runThrice()
     const captured = turns(mem)
-    expect(captured).toHaveLength(1)
-    // 折叠留下了审计痕迹 —— 否则「只有一条」分不清是折叠还是根本没写。
-    expect(captured[0]!.meta).toMatchObject({ restatedCount: 2, recallCount: 2 })
+    expect(captured).toHaveLength(3)
+    expect(captured.map(e => e.meta?.taskId)).toEqual(['t0', 't1', 't2'])
+    for (const e of captured) {
+      expect(e.meta?.temporal).toMatchObject({ v: 1, basis: 'turn-start' })
+      expect(e.meta).not.toHaveProperty('restatedCount')
+    }
   })
 
-  it('foldRestatements: false ⇒ 回到今天的行为(三条)', async () => {
+  it('foldRestatements: false 同样保留三条', async () => {
     expect(turns(await runThrice(false))).toHaveLength(3)
   })
 

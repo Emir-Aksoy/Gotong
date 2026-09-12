@@ -25,6 +25,7 @@
  * misconfiguration and throws at construction.
  */
 
+import { AsyncLocalStorage } from 'node:async_hooks'
 import type { Task } from '@gotong/core'
 import {
   ComposedToolset,
@@ -45,6 +46,7 @@ import { PersonalMemoryError } from './errors.js'
 import { rememberNovel } from './novelty.js'
 import type { MemoryRetriever } from './retriever.js'
 import { MemorySession } from './session.js'
+import { observeTurnTime, type TurnTime } from './temporal.js'
 import type { TierConfig } from './tiers.js'
 import { MemoryToolset, type MemoryLinkLookup } from './toolset.js'
 import type { VerifiedSkills } from './verified-skills.js'
@@ -128,9 +130,13 @@ export interface MemoryAugmentedAgentOptions extends LlmAgentOptions {
    * frozen block / capture are otherwise per-agent.
    */
   captureMeta?: Record<string, unknown>
+  /** Local clock overrides for deterministic embedding/tests; default is server time. */
+  captureNow?: () => number
+  captureTimeZone?: string
   /**
    * M4 记忆经济 —— 写侧新颖门:这一轮与同店最近若干条近重复时,**不写新条**,改成强化
    * 既有那条(`recallCount+1` / `restatedCount+1`)+ 一条时序边。默认 `true`。
+   * 新时间锚优先:新任务捕获不按文本折叠;此选项只影响没有时间锚的调用。
    *
    * 默认开着而不是 opt-in,是因为 M3b 的教训:一个默认关掉的经济学等于没通电。它的
    * 安全侧由写侧折叠尺(`check:memory-write`)守着 —— 「该留的一条没少」地板是 1.0,
@@ -140,6 +146,7 @@ export interface MemoryAugmentedAgentOptions extends LlmAgentOptions {
 }
 
 export class MemoryAugmentedAgent extends LlmAgent {
+  private readonly resumingTask = new AsyncLocalStorage<Task>()
   private readonly session: MemorySession
   protected readonly memoryToolset: MemoryToolset
   /** The resolved memory handle — also the capture target (M2). */
@@ -147,6 +154,8 @@ export class MemoryAugmentedAgent extends LlmAgent {
   private readonly captureTurns: boolean
   private readonly captureMaxChars: number | undefined
   private readonly captureMeta: Record<string, unknown> | undefined
+  private readonly captureNow: () => number
+  private readonly captureTimeZone: string | undefined
   private readonly foldRestatements: boolean
   /** Re-recall the frozen block per task (always-on butler) vs once per session. */
   private readonly frozenRefreshPerTask: boolean
@@ -188,6 +197,8 @@ export class MemoryAugmentedAgent extends LlmAgent {
     this.foldRestatements = opts.foldRestatements ?? true
     this.captureMaxChars = opts.captureMaxChars
     this.captureMeta = opts.captureMeta
+    this.captureNow = opts.captureNow ?? Date.now
+    this.captureTimeZone = opts.captureTimeZone
     this.frozenRefreshPerTask = opts.frozenRefreshPerTask ?? false
     this.session = new MemorySession({
       memory,
@@ -219,12 +230,15 @@ export class MemoryAugmentedAgent extends LlmAgent {
    * Memoized inside the session — cheap on every subsequent task.
    */
   protected override async handleTask(task: Task): Promise<unknown> {
+    // LlmAgent may restart its loop on resume. That is not a new user turn.
+    if (this.resumingTask.getStore() === task) return super.handleTask(task)
+    const temporal = observeTurnTime(this.captureNow(), this.captureTimeZone)
     // An always-on butler re-recalls per task so it sees what it just captured;
     // the default keeps the once-per-session cache (a stable prompt prefix).
     if (this.frozenRefreshPerTask) this.session.refresh()
     await this.session.ensureFrozenBlock()
     const out = await super.handleTask(task)
-    await this.captureTurn(task, out)
+    await this.captureTurn(task, out, temporal)
     return out
   }
 
@@ -232,7 +246,7 @@ export class MemoryAugmentedAgent extends LlmAgent {
   protected override async handleResume(task: Task, state: unknown): Promise<unknown> {
     if (this.frozenRefreshPerTask) this.session.refresh()
     await this.session.ensureFrozenBlock()
-    const out = await this.resumeBody(task, state)
+    const out = await this.resumingTask.run(task, () => this.resumeBody(task, state))
     await this.captureTurn(task, out)
     return out
   }
@@ -257,12 +271,12 @@ export class MemoryAugmentedAgent extends LlmAgent {
    * never reach here; the eventual resume captures instead. Heartbeat ticks
    * are skipped (episodic is the conversation log, not a maintenance record).
    *
-   * M4 记忆经济 —— 写入过一道**新颖门**:与同店最近若干条近重复的一轮不落新条,改成
-   * 强化既有那条。折叠只发生在这一处(每轮一条、无界增长的唯一热路径写入);为什么
+   * M4 记忆经济 —— 无时间锚的旧调用仍过新颖门;新轮次必须保留时间证据,不按文本折叠。
+   * 折叠只发生在这一处;为什么
    * 刻意不挂在 profile/digest、atomic-facts、模型自己的 `remember` 上,见
    * `novelty.ts` 顶注。
    */
-  private async captureTurn(task: Task, output: unknown): Promise<void> {
+  private async captureTurn(task: Task, output: unknown, temporal?: TurnTime): Promise<void> {
     if (!this.captureTurns) return
     if (isHeartbeatPayload(task)) return
     try {
@@ -271,6 +285,7 @@ export class MemoryAugmentedAgent extends LlmAgent {
         replyText: extractReplyText(output),
         taskId: task.id,
         from: task.from,
+        ...(temporal !== undefined ? { temporal } : {}),
         ...(this.captureMeta !== undefined ? { meta: this.captureMeta } : {}),
         ...(this.captureMaxChars !== undefined ? { maxChars: this.captureMaxChars } : {}),
       })

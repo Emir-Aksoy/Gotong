@@ -90,6 +90,7 @@ describe('session window × IM bridge (free case + push-back seam)', () => {
   let aliceId: string
   let bindCode: string
   const prevToken = process.env.GOTONG_TELEGRAM_BOT_TOKEN
+  const sessionClock = { now: () => Date.parse('2026-09-11T06:59:00Z'), timeZone: 'America/Los_Angeles' }
 
   const delay = (ms: number) => new Promise((r) => setTimeout(r, ms))
   const ALICE: ImUser = { platform: 'telegram', platformUserId: '3001', displayName: 'Alice' }
@@ -108,7 +109,7 @@ describe('session window × IM bridge (free case + push-back seam)', () => {
     process.env.GOTONG_TELEGRAM_BOT_TOKEN = 'test-token-session-window'
     fake = new FakeBridge()
     sessions = new RecordingSessions(
-      new ButlerSessionWindow({ rootDir: join(dir, 'butler', 'sessions'), logger: { warn: () => {} } }),
+      new ButlerSessionWindow({ rootDir: join(dir, 'butler', 'sessions'), ...sessionClock, logger: { warn: () => {} } }),
     )
   })
 
@@ -180,8 +181,8 @@ describe('session window × IM bridge (free case + push-back seam)', () => {
     expect(second.prompt).toBe('查一下')
     // The model now SEES its own question — the "查一下 → 查什么?" fix.
     expect(second.history).toEqual([
-      { role: 'user', content: '明天天气如何?' },
-      { role: 'assistant', content: 'echo: 明天天气如何?' },
+      { role: 'user', content: '[2026-09-10 23:59 America/Los_Angeles] 明天天气如何?' },
+      { role: 'assistant', content: '[2026-09-10 23:59 America/Los_Angeles] echo: 明天天气如何?' },
     ])
     // And the current sentence is NOT inside history (buildRequest appends it).
     expect(second.history!.some((m) => m.content === '查一下')).toBe(false)
@@ -248,8 +249,8 @@ describe('session window × IM bridge (free case + push-back seam)', () => {
     }
     expect(bobPayload.prompt).toBe('Bob: 要不火锅?')
     expect(bobPayload.history).toEqual([
-      { role: 'user', content: 'Alice: 今晚聚餐哪家好?' },
-      { role: 'assistant', content: 'echo: Alice: 今晚聚餐哪家好?' },
+      { role: 'user', content: '[2026-09-10 23:59 America/Los_Angeles] Alice: 今晚聚餐哪家好?' },
+      { role: 'assistant', content: '[2026-09-10 23:59 America/Los_Angeles] echo: Alice: 今晚聚餐哪家好?' },
     ])
     // Replies went to the group chat, not a DM.
     expect(fake.outbound.every((o) => o.chatId === GROUP_CHAT)).toBe(true)
@@ -315,6 +316,7 @@ describe('session window × IM bridge (free case + push-back seam)', () => {
     // this test covers the branch production actually runs.
     const raw = new ButlerSessionWindow({
       rootDir: join(dir, 'butler', 'sessions-raw'),
+      ...sessionClock,
       logger: { warn: () => {} },
     })
     await startAndBind({ sessions: raw })
@@ -327,8 +329,8 @@ describe('session window × IM bridge (free case + push-back seam)', () => {
     }
     expect(second.prompt).toBe('提醒我一下')
     expect(second.history).toEqual([
-      { role: 'user', content: '明天有什么安排?' },
-      { role: 'assistant', content: 'echo: 明天有什么安排?' },
+      { role: 'user', content: '[2026-09-10 23:59 America/Los_Angeles] 明天有什么安排?' },
+      { role: 'assistant', content: '[2026-09-10 23:59 America/Los_Angeles] echo: 明天有什么安排?' },
     ])
   })
 

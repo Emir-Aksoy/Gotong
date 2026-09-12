@@ -13,7 +13,7 @@
  * restarts empty, append never throws.
  */
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { existsSync, mkdtempSync, readdirSync, readFileSync, writeFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -33,7 +33,9 @@ let dir: string
 let clock: number
 
 const makeWindow = () =>
-  new ButlerSessionWindow({ rootDir: dir, now: () => clock, logger: { warn: () => {} } })
+  new ButlerSessionWindow({ rootDir: dir, now: () => clock, timeZone: 'UTC', logger: { warn: () => {} } })
+
+const tagged = (text: string, time = '1970-01-01 00:16') => `[${time} UTC] ${text}`
 
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), 'gotong-session-window-'))
@@ -41,6 +43,7 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  vi.restoreAllMocks()
   rmSync(dir, { recursive: true, force: true })
 })
 
@@ -55,8 +58,8 @@ describe('ButlerSessionWindow', () => {
     // A FRESH instance over the same rootDir sees the same conversation.
     const w2 = makeWindow()
     expect(await w2.history('u1')).toEqual([
-      { role: 'user', content: '帮我查一下明天吉隆坡的天气' },
-      { role: 'assistant', content: '要不要我顺便查后天的?' },
+      { role: 'user', content: tagged('帮我查一下明天吉隆坡的天气') },
+      { role: 'assistant', content: tagged('要不要我顺便查后天的?') },
     ])
   })
 
@@ -67,7 +70,7 @@ describe('ButlerSessionWindow', () => {
     await w.append('u2', 'user', 'gamma')
     expect(await w.history('u2')).toEqual([]) // trailing user dropped → empty
     const h1 = await w.history('u1')
-    expect(h1.map((m) => m.content)).toEqual(['alpha', 'beta'])
+    expect(h1.map((m) => m.content)).toEqual([tagged('alpha'), tagged('beta')])
   })
 
   it('rolls over after the idle gap: stale history reads empty', async () => {
@@ -86,8 +89,8 @@ describe('ButlerSessionWindow', () => {
     await w.append('u1', 'user', '今天的新话')
     await w.append('u1', 'assistant', '今天的回复')
     expect(await w.history('u1')).toEqual([
-      { role: 'user', content: '今天的新话' },
-      { role: 'assistant', content: '今天的回复' },
+      { role: 'user', content: tagged('今天的新话', '1970-01-01 01:16') },
+      { role: 'assistant', content: tagged('今天的回复', '1970-01-01 01:16') },
     ])
   })
 
@@ -108,8 +111,8 @@ describe('ButlerSessionWindow', () => {
     await w.append('u1', 'assistant', '「专家」办完了你转派的事:报告在此')
     const h = await w.history('u1')
     expect(h).toEqual([
-      { role: 'user', content: '你好' },
-      { role: 'assistant', content: '结果出来了:一切正常\n\n「专家」办完了你转派的事:报告在此' },
+      { role: 'user', content: tagged('你好') },
+      { role: 'assistant', content: `${tagged('结果出来了:一切正常')}\n\n${tagged('「专家」办完了你转派的事:报告在此')}` },
     ])
   })
 
@@ -119,7 +122,7 @@ describe('ButlerSessionWindow', () => {
     await w.append('u1', 'assistant', '第一答')
     await w.append('u1', 'user', '模型崩了没回复的那句')
     const h = await w.history('u1')
-    expect(h[h.length - 1]).toEqual({ role: 'assistant', content: '第一答' })
+    expect(h[h.length - 1]).toEqual({ role: 'assistant', content: tagged('第一答') })
   })
 
   it('trims to the last SESSION_MAX_TURNS entries, oldest first', async () => {
@@ -164,7 +167,7 @@ describe('ButlerSessionWindow', () => {
     // And the window keeps working after quarantine.
     await w.append('u1', 'user', 'after')
     await w.append('u1', 'assistant', 'reply')
-    expect((await w.history('u1')).map((m) => m.content)).toEqual(['after', 'reply'])
+    expect((await w.history('u1')).map((m) => m.content)).toEqual([tagged('after'), tagged('reply')])
   })
 
   it('append never throws even when rootDir is unwritable', async () => {
@@ -198,8 +201,8 @@ describe('ButlerSessionWindow', () => {
     const history = await w.beginTurn('u1', '帮我订位')
     // Returned history = the state BEFORE this turn (buildRequest appends it).
     expect(history).toEqual([
-      { role: 'user', content: '早' },
-      { role: 'assistant', content: '早上好' },
+      { role: 'user', content: tagged('早') },
+      { role: 'assistant', content: tagged('早上好') },
     ])
     // …and the turn IS recorded (visible to the next reader).
     const raw = JSON.parse(
@@ -283,6 +286,182 @@ describe('ButlerSessionWindow', () => {
     expect(files.length).toBe(1)
     expect(files[0]!.includes('..%2F')).toBe(true)
     expect((await w.history('../../evil')).length).toBe(2)
+  })
+})
+
+describe('session time evidence', () => {
+  const file = () => join(dir, 'u1.json')
+  const stored = () => JSON.parse(readFileSync(file(), 'utf8')) as {
+    turns: { role: string; text: string; at: number; timeZone?: string }[]
+  }
+
+  it('persists the injected time and zone through both writing paths, without changing text', async () => {
+    clock = Date.parse('2026-09-11T06:59:00Z')
+    const w = new ButlerSessionWindow({ rootDir: dir, now: () => clock, timeZone: 'America/Los_Angeles' })
+    await w.beginTurn('u1', '今天')
+    clock += 60_000
+    await w.append('u1', 'assistant', '明天')
+    expect(stored().turns).toEqual([
+      { role: 'user', text: '今天', at: Date.parse('2026-09-11T06:59:00Z'), timeZone: 'America/Los_Angeles' },
+      { role: 'assistant', text: '明天', at: clock, timeZone: 'America/Los_Angeles' },
+    ])
+
+    // Reading later in another server zone must not reinterpret saved turns.
+    clock += 60_000
+    const restarted = new ButlerSessionWindow({ rootDir: dir, now: () => clock, timeZone: 'Asia/Tokyo' })
+    const expected = [
+      { role: 'user', content: '[2026-09-10 23:59 America/Los_Angeles] 今天' },
+      { role: 'assistant', content: '[2026-09-11 00:00 America/Los_Angeles] 明天' },
+    ]
+    expect(await restarted.history('u1')).toEqual(expected)
+    expect(await restarted.beginTurn('u1', '下一句')).toEqual(expected)
+    expect(stored().turns[2]).toMatchObject({ at: clock, timeZone: 'Asia/Tokyo' })
+  })
+
+  it('resolves the default server zone for each new turn', async () => {
+    const w = new ButlerSessionWindow({ rootDir: dir, now: () => clock })
+    const resolved = new Intl.DateTimeFormat().resolvedOptions()
+    const spy = vi.spyOn(Intl.DateTimeFormat.prototype, 'resolvedOptions')
+      .mockReturnValueOnce({ ...resolved, timeZone: 'Asia/Tokyo' })
+      .mockReturnValueOnce({ ...resolved, timeZone: 'UTC' })
+    await w.append('u1', 'user', 'a')
+    await w.append('u1', 'assistant', 'b')
+    spy.mockRestore()
+    expect(stored().turns.map((t) => t.timeZone)).toEqual(['Asia/Tokyo', 'UTC'])
+  })
+
+  it('uses the actual Intl server zone when no override is supplied', async () => {
+    const w = new ButlerSessionWindow({ rootDir: dir, now: () => clock })
+    await w.beginTurn('u1', 'hello')
+    expect(stored().turns[0]!.timeZone).toBe(new Intl.DateTimeFormat().resolvedOptions().timeZone)
+  })
+
+  it.each(['throws', 'empty'] as const)('explicitly saves UTC when server zone resolution %s', async (failure) => {
+    const w = new ButlerSessionWindow({ rootDir: dir, now: () => clock })
+    const resolved = new Intl.DateTimeFormat().resolvedOptions()
+    const spy = vi.spyOn(Intl.DateTimeFormat.prototype, 'resolvedOptions')
+    if (failure === 'throws') spy.mockImplementation(() => { throw new RangeError('Intl unavailable') })
+    else spy.mockReturnValue({ ...resolved, timeZone: '' })
+    await w.beginTurn('u1', 'a')
+    await w.append('u1', 'assistant', 'b')
+    spy.mockRestore()
+    expect(stored().turns.map((t) => t.timeZone)).toEqual(['UTC', 'UTC'])
+    expect(await w.history('u1')).toEqual([
+      { role: 'user', content: tagged('a') },
+      { role: 'assistant', content: tagged('b') },
+    ])
+  })
+
+  it.each(['not/a-zone', ''])('falls back to UTC for invalid override %j', async (timeZone) => {
+    const w = new ButlerSessionWindow({ rootDir: dir, now: () => clock, timeZone })
+    await w.append('u1', 'assistant', 'hello')
+    expect(stored().turns[0]!.timeZone).toBe('UTC')
+    expect(await w.history('u1')).toEqual([{ role: 'assistant', content: tagged('hello') }])
+  })
+
+  it('still saves and renders explicit UTC if Intl itself is unavailable', async () => {
+    const w = new ButlerSessionWindow({ rootDir: dir, now: () => clock })
+    vi.spyOn(Intl, 'DateTimeFormat').mockImplementation(() => { throw new RangeError('Intl unavailable') })
+    await w.beginTurn('u1', 'a')
+    await w.append('u1', 'assistant', 'b')
+    expect(stored().turns.map((t) => t.timeZone)).toEqual(['UTC', 'UTC'])
+    expect(await w.history('u1')).toEqual([
+      { role: 'user', content: tagged('a') },
+      { role: 'assistant', content: tagged('b') },
+    ])
+  })
+
+  it('uses the saved instant across the daylight-saving jump', async () => {
+    clock = Date.parse('2026-03-08T09:59:00Z')
+    const w = new ButlerSessionWindow({ rootDir: dir, now: () => clock, timeZone: 'America/Los_Angeles' })
+    await w.beginTurn('u1', 'before')
+    clock += 60_000
+    await w.append('u1', 'assistant', 'after')
+    expect(await w.history('u1')).toEqual([
+      { role: 'user', content: '[2026-03-08 01:59 America/Los_Angeles] before' },
+      { role: 'assistant', content: '[2026-03-08 03:00 America/Los_Angeles] after' },
+    ])
+  })
+
+  it('leaves old records and their rendering untouched, including after a new append', async () => {
+    const turns = [
+      { role: 'user', text: 'legacy question', at: clock },
+      { role: 'assistant', text: 'legacy reply', at: clock },
+      { role: 'assistant', text: 'legacy follow-up', at: clock },
+    ]
+    const bytes = JSON.stringify({ v: 1, turns })
+    writeFileSync(file(), bytes)
+    const w = makeWindow()
+    expect(await w.history('u1')).toEqual([
+      { role: 'user', content: 'legacy question' },
+      { role: 'assistant', content: 'legacy reply\n\nlegacy follow-up' },
+    ])
+    expect(readFileSync(file(), 'utf8')).toBe(bytes)
+    await w.append('u1', 'assistant', 'new reply')
+    expect(stored().turns.slice(0, 3)).toEqual(turns)
+    expect(await w.history('u1')).toEqual([
+      { role: 'user', content: 'legacy question' },
+      { role: 'assistant', content: `legacy reply\n\nlegacy follow-up\n\n${tagged('new reply')}` },
+    ])
+  })
+
+  it('counts the label against the single-message cap on the beginTurn path', async () => {
+    const w = makeWindow()
+    await w.beginTurn('u1', 'x'.repeat(SESSION_TURN_MAX_CHARS))
+    await w.append('u1', 'assistant', 'ok')
+    const [message] = await w.history('u1')
+    const prefix = tagged('')
+    expect(message!.content).toBe(prefix + 'x'.repeat(SESSION_TURN_MAX_CHARS - prefix.length - 1) + '…')
+  })
+
+  describe.each(['history', 'beginTurn'] as const)('%s with malformed persisted turns', (method) => {
+    it.each(['1e20', '-1e20', '1e400', '-1e400'])('keeps text without inventing a label for date %s', async (at) => {
+      // JSON exponent overflow is accepted as Infinity; JSON.stringify would replace it with null.
+      const bytes = `{"v":1,"turns":[{"role":"user","text":"unknown time","at":${at},"timeZone":"UTC"},{"role":"assistant","text":"valid reply","at":${clock},"timeZone":"UTC"}]}`
+      writeFileSync(file(), bytes)
+      const w = makeWindow()
+      const history = method === 'history'
+        ? await w.history('u1')
+        : await w.beginTurn('u1', 'next question')
+      expect(history).toEqual([
+        { role: 'user', content: 'unknown time' },
+        { role: 'assistant', content: tagged('valid reply') },
+      ])
+      if (method === 'history') expect(readFileSync(file(), 'utf8')).toBe(bytes)
+      else expect(stored().turns.at(-1)).toMatchObject({ text: 'next question', at: clock, timeZone: 'UTC' })
+    })
+
+    it('bounds an oversized same-role file to the newest turns before formatting', async () => {
+      const turns = Array.from({ length: 1000 }, (_, i) => ({
+        role: 'assistant', text: `turn-${i}`, at: clock, timeZone: 'UTC',
+      }))
+      const bytes = JSON.stringify({ v: 1, turns })
+      writeFileSync(file(), bytes)
+      const w = makeWindow()
+      const history = method === 'history'
+        ? await w.history('u1')
+        : await w.beginTurn('u1', '')
+      expect(history).toHaveLength(1)
+      expect(history[0]!.content.length).toBeLessThanOrEqual(SESSION_TURN_MAX_CHARS)
+      expect(history[0]!.content).toBe(turns.slice(-SESSION_MAX_TURNS).map((t) => tagged(t.text)).join('\n\n'))
+      expect(readFileSync(file(), 'utf8')).toBe(bytes)
+    })
+  })
+
+  it('caps merged messages without losing any constituent time label', async () => {
+    const w = makeWindow()
+    for (let i = 0; i < SESSION_MAX_TURNS; i++) {
+      await w.append('u1', 'assistant', String.fromCharCode(65 + i).repeat(SESSION_TURN_MAX_CHARS))
+      clock += 60_000
+    }
+    const history = await w.history('u1')
+    expect(history).toHaveLength(1)
+    expect(history[0]!.content.length).toBeLessThanOrEqual(SESSION_TURN_MAX_CHARS)
+    const parts = history[0]!.content.split('\n\n')
+    expect(parts).toHaveLength(SESSION_MAX_TURNS)
+    for (let i = 0; i < SESSION_MAX_TURNS; i++) {
+      expect(parts[i]).toMatch(new RegExp(`^\\[1970-01-01 00:${16 + i} UTC\\] ${String.fromCharCode(65 + i)}+…$`))
+    }
   })
 })
 
