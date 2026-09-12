@@ -9,7 +9,7 @@ import { kindFile, ownerDir } from './paths.js'
 export interface MemoryFileSnapshot {
   /** Complete configured-kind contents, newest first; detached for planning. */
   entries: MemoryEntry[]
-  /** Opaque SHA256 of configured kinds and full raw file bytes, never mtime. */
+  /** Opaque SHA256 bound to owner, generation, kinds and full raw bytes. */
   revision: string
 }
 
@@ -36,7 +36,37 @@ export async function readMemoryFileSnapshot(
   rootDir: string,
   owner: Owner,
   configuredKinds: ReadonlyArray<MemoryKind>,
+  generation: string | null = null,
 ): Promise<MemoryFileSnapshot> {
+  return (await readMemoryFileState(rootDir, owner, configuredKinds, generation)).snapshot
+}
+
+/** Internal only: raw bytes never escape through the public snapshot. */
+export async function readMemoryFileState(
+  rootDir: string, owner: Owner, configuredKinds: ReadonlyArray<MemoryKind>, generation: string | null,
+): Promise<{ snapshot: MemoryFileSnapshot; files: Map<MemoryKind, Buffer | undefined> }> {
+  const { kinds, exists } = await inspectScope(rootDir, owner, configuredKinds)
+  try {
+    const hash = createHash('sha256').update('memory-file-snapshot:v2\n')
+      .update(JSON.stringify([ownerKey(owner), generation]) + '\n')
+    const entries: MemoryEntry[] = []
+    const files = new Map<MemoryKind, Buffer | undefined>()
+    for (const kind of kinds) {
+      const raw = exists ? await readKind(kindFile(rootDir, owner, kind)) : undefined
+      files.set(kind, raw)
+      hash.update(JSON.stringify([kind, raw?.byteLength ?? null]) + '\n')
+      if (raw === undefined) continue
+      hash.update(raw)
+      for (const entry of parseEntries(raw, kind)) entries.push(entry)
+    }
+    return { files, snapshot: { entries: entries.sort((a, b) => b.ts - a.ts), revision: hash.digest('hex') } }
+  } catch (error) {
+    if (error instanceof MemoryFileSnapshotError) throw error
+    throw new MemoryFileSnapshotError('SNAPSHOT_IO_ERROR')
+  }
+}
+
+export async function inspectScope(rootDir: string, owner: Owner, configuredKinds: ReadonlyArray<MemoryKind>) {
   let dir: string
   let kinds: MemoryKind[]
   try {
@@ -53,21 +83,10 @@ export async function readMemoryFileSnapshot(
   }
 
   try {
-    const hash = createHash('sha256').update('memory-file-snapshot:v1\n')
-    const entries: MemoryEntry[] = []
     // rootDir is caller-configured; reject existing descendant symlink redirects.
     // Directory checks are not protection against hostile cross-process replacement.
-    const exists = kinds.length > 0 && await directoryExists(dirname(dir)) && await directoryExists(dir)
-    for (const kind of kinds) {
-      const raw = exists ? await readKind(kindFile(rootDir, owner, kind)) : undefined
-      // Length framing prevents ambiguous kind/file boundaries. Missing and empty
-      // files both have no entries, but remain distinct physical revisions.
-      hash.update(JSON.stringify([kind, raw?.byteLength ?? null]) + '\n')
-      if (raw === undefined) continue
-      hash.update(raw)
-      for (const entry of parseEntries(raw, kind)) entries.push(entry)
-    }
-    return { entries: entries.sort((a, b) => b.ts - a.ts), revision: hash.digest('hex') }
+    const exists = await directoryExists(dirname(dir)) && await directoryExists(dir)
+    return { kinds, exists }
   } catch (error) {
     if (error instanceof MemoryFileSnapshotError) throw error
     throw new MemoryFileSnapshotError('SNAPSHOT_IO_ERROR')
@@ -86,11 +105,21 @@ async function directoryExists(path: string): Promise<boolean> {
   }
 }
 
-async function readKind(path: string): Promise<Buffer | undefined> {
+export async function regularFileExists(path: string): Promise<boolean> {
   try {
     const info = await lstat(path)
     if (info.isSymbolicLink()) throw new MemoryFileSnapshotError('SNAPSHOT_INVALID_SCOPE')
     if (!info.isFile()) throw new MemoryFileSnapshotError('SNAPSHOT_IO_ERROR')
+    return true
+  } catch (error) {
+    if (isMissing(error)) return false
+    throw error
+  }
+}
+
+export async function readKind(path: string): Promise<Buffer | undefined> {
+  try {
+    if (!await regularFileExists(path)) return undefined
     const file = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK)
     try {
       if (!(await file.stat()).isFile()) throw new MemoryFileSnapshotError('SNAPSHOT_IO_ERROR')
@@ -104,7 +133,7 @@ async function readKind(path: string): Promise<Buffer | undefined> {
   }
 }
 
-function parseEntries(raw: Buffer, kind: MemoryKind): MemoryEntry[] {
+export function parseEntries(raw: Buffer, kind: MemoryKind): MemoryEntry[] {
   const entries: MemoryEntry[] = []
   let text: string
   try {

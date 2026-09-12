@@ -40,6 +40,15 @@ async function expectFailure(promise: Promise<unknown>, code: string) {
 }
 
 describe('MemoryFileHandle.snapshot', () => {
+  it('reads 150000 legal rows without exceeding the JavaScript argument limit', async () => {
+    const rows = Array.from({ length: 150000 }, (_, i) => ({ id: String(i), kind: 'working', text: 'x', ts: i }))
+    await seed(rows.map((e) => JSON.stringify(e)).join('\n') + '\n', 'working')
+    const snapshot = await handle().snapshot()
+    expect(snapshot.entries).toHaveLength(150000)
+    expect(snapshot.entries[0]).toEqual(rows.at(-1))
+    expect(snapshot.entries.at(-1)).toEqual(rows[0])
+  })
+
   it('returns every entry beyond 10000 newest first without changing list/recall caps', async () => {
     const entries = Array.from({ length: 10_037 }, (_, i) => entry(`row-${i}`, i))
     await seed(entries.map((value) => JSON.stringify(value)).join('\n') + '\n')

@@ -13,9 +13,8 @@
  * silent memory loss (audit P1). Sharing the chain by owner makes every writer
  * to a given member serialize. `fs.appendFile` on POSIX is atomic up to PIPE_BUF
  * (~4096 bytes) but a `MemoryEntry` can exceed that, so the chain also makes
- * "two concurrent remembers" safe. List/recall reads are unsynchronised; with tmp+rename
- * rewrites they never observe a half-written file (parsing still skips bad lines
- * from a legacy tail).
+ * "two concurrent remembers" safe. Reads share the queue and mutation generation
+ * barrier too; legacy list/recall parsing still skips bad lines.
  */
 
 import {
@@ -42,7 +41,9 @@ import type {
 import type { MemoryFileConfig } from './config.js'
 import { generateEntryId } from './id.js'
 import { kindFile, ownerDir, ownerLabel } from './paths.js'
-import { readMemoryFileSnapshot, type MemoryFileSnapshot } from './snapshot.js'
+import { MemoryFileSnapshotError, inspectScope, readMemoryFileSnapshot, regularFileExists, type MemoryFileSnapshot } from './snapshot.js'
+import { applyMutation, copyMutation, recoverMutation, type MemoryFileSnapshotMutation } from './mutation.js'
+import { MemoryFileMutationError, assertNoPending, fail, readGeneration } from './mutation-io.js'
 
 const RECALL_DEFAULT_K = 20
 const RECALL_MAX_K = 200
@@ -87,47 +88,52 @@ export class MemoryFileHandle implements MemoryHandle {
   private readonly now: () => number
   /** Stable key into {@link ownerWriteChains} — resolved so spellings agree. */
   private readonly chainKey: string
+  private generation: string | null | undefined
 
   constructor(opts: MemoryFileHandleOpts) {
-    this.rootDir = opts.rootDir
+    this.rootDir = resolve(opts.rootDir)
     // Caller mutations must not move file paths away from the fixed owner queue.
-    this.owner = { kind: opts.owner.kind, id: opts.owner.id }
-    this.config = opts.config
+    this.owner = Object.freeze({ kind: opts.owner.kind, id: opts.owner.id })
+    this.config = Object.freeze({ ...opts.config, kinds: Object.freeze([...opts.config.kinds]) })
     this.logger = opts.logger.child({ owner: ownerLabel(this.owner) })
     this.now = opts.now ?? Date.now
     this.chainKey = resolve(ownerDir(this.rootDir, this.owner))
   }
 
   async recall(query: MemoryQuery): Promise<MemoryEntry[]> {
-    const allowedKinds = query.kinds && query.kinds.length > 0
-      ? query.kinds.filter((k) => this.config.kinds.includes(k))
-      : this.config.kinds
-    const k = clamp(query.k ?? RECALL_DEFAULT_K, 1, RECALL_MAX_K)
-    const text = query.text ? query.text.toLowerCase() : undefined
-    const since = query.since ?? 0
+    query = structuredClone(query)
+    return this.serializeWrite(async () => {
+      const allowedKinds = query.kinds && query.kinds.length > 0
+        ? query.kinds.filter((k) => this.config.kinds.includes(k))
+        : this.config.kinds
+      const k = clamp(query.k ?? RECALL_DEFAULT_K, 1, RECALL_MAX_K)
+      const text = query.text ? query.text.toLowerCase() : undefined
+      const since = query.since ?? 0
 
-    const all: MemoryEntry[] = []
-    for (const kind of allowedKinds) {
-      all.push(...await this.readAll(kind))
-    }
-    return all
-      .filter((e) => e.ts >= since)
-      .filter((e) => !text || e.text.toLowerCase().includes(text))
-      .sort((a, b) => b.ts - a.ts)
-      .slice(0, k)
+      const all: MemoryEntry[] = []
+      for (const kind of allowedKinds) {
+        all.push(...await this.readAll(kind))
+      }
+      return all
+        .filter((e) => e.ts >= since)
+        .filter((e) => !text || e.text.toLowerCase().includes(text))
+        .sort((a, b) => b.ts - a.ts)
+        .slice(0, k)
+    })
   }
 
   async remember(entry: NewMemoryEntry): Promise<MemoryEntry> {
-    if (!this.config.kinds.includes(entry.kind)) {
-      throw new Error(
-        `kind '${entry.kind}' not allowed for this owner ` +
-        `(configured: ${this.config.kinds.join(', ')})`,
-      )
-    }
-    if (typeof entry.text !== 'string' || entry.text.length === 0) {
-      throw new Error('memory entry text must be a non-empty string')
-    }
+    entry = structuredClone(entry)
     return this.serializeWrite(async () => {
+      if (!this.config.kinds.includes(entry.kind)) {
+        throw new Error(
+          `kind '${entry.kind}' not allowed for this owner ` +
+          `(configured: ${this.config.kinds.join(', ')})`,
+        )
+      }
+      if (typeof entry.text !== 'string' || entry.text.length === 0) {
+        throw new Error('memory entry text must be a non-empty string')
+      }
       const ts = this.now()
       const id = entry.id ?? generateEntryId(ts)
       const persisted: MemoryEntry = {
@@ -147,14 +153,17 @@ export class MemoryFileHandle implements MemoryHandle {
   }
 
   async list(opts: { kind?: MemoryKind; limit?: number } = {}): Promise<MemoryEntry[]> {
-    const limit = clamp(opts.limit ?? LIST_DEFAULT_LIMIT, 1, LIST_MAX_LIMIT)
-    const kinds = opts.kind ? [opts.kind] : this.config.kinds
-    const all: MemoryEntry[] = []
-    for (const kind of kinds) {
-      if (!this.config.kinds.includes(kind)) continue
-      all.push(...await this.readAll(kind))
-    }
-    return all.sort((a, b) => b.ts - a.ts).slice(0, limit)
+    opts = { ...opts }
+    return this.serializeWrite(async () => {
+      const limit = clamp(opts.limit ?? LIST_DEFAULT_LIMIT, 1, LIST_MAX_LIMIT)
+      const kinds = opts.kind ? [opts.kind] : this.config.kinds
+      const all: MemoryEntry[] = []
+      for (const kind of kinds) {
+        if (!this.config.kinds.includes(kind)) continue
+        all.push(...await this.readAll(kind))
+      }
+      return all.sort((a, b) => b.ts - a.ts).slice(0, limit)
+    })
   }
 
   /**
@@ -163,7 +172,26 @@ export class MemoryFileHandle implements MemoryHandle {
    * a future write must compare the revision again while holding the same queue.
    */
   async snapshot(): Promise<MemoryFileSnapshot> {
-    return this.serializeWrite(() => readMemoryFileSnapshot(this.rootDir, this.owner, this.config.kinds))
+    return this.serializeWrite(() => readMemoryFileSnapshot(this.rootDir, this.owner, this.config.kinds, this.generation ?? null))
+  }
+
+  /** File-only host API. Does not update derived indexes or cached snapshots. */
+  async applySnapshotMutation(input: MemoryFileSnapshotMutation): Promise<MemoryFileSnapshot> {
+    const detached = copyMutation(input)
+    return this.serializeWrite(async () => {
+      const result = await applyMutation(this.mutationScope(), detached, this.generation ?? null, this.now)
+      this.generation = result.generation
+      return result.snapshot
+    })
+  }
+
+  /** Explicit trusted-host recovery may rebind this handle to the current generation. */
+  async recoverMutation(): Promise<MemoryFileSnapshot> {
+    return this.serializeWrite(async () => {
+      const result = await recoverMutation(this.mutationScope())
+      this.generation = result.generation
+      return result.snapshot
+    }, false)
   }
 
   async forget(id: string): Promise<void> {
@@ -205,6 +233,7 @@ export class MemoryFileHandle implements MemoryHandle {
    * rewritten verbatim, including corrupt ones, so patching never drops data).
    */
   async patchMeta(id: string, patch: Record<string, unknown>): Promise<boolean> {
+    patch = structuredClone(patch)
     return this.serializeWrite(async () => {
       for (const kind of this.config.kinds) {
         const path = kindFile(this.rootDir, this.owner, kind)
@@ -251,11 +280,37 @@ export class MemoryFileHandle implements MemoryHandle {
    * `fn`, then chain the next. Shared across handles so concurrent subsystems
    * never clobber each other's file rewrites.
    */
-  private serializeWrite<T>(fn: () => Promise<T>): Promise<T> {
+  private serializeWrite<T>(fn: () => Promise<T>, normal = true): Promise<T> {
     const prev = ownerWriteChains.get(this.chainKey) ?? Promise.resolve()
-    const next = prev.then(fn, fn)
+    const guarded = async () => {
+      if (normal) {
+        try { await this.checkGeneration() } catch (error) {
+          if (error instanceof MemoryFileMutationError || error instanceof MemoryFileSnapshotError) throw error
+          fail('MUTATION_IO_ERROR')
+        }
+      }
+      return fn()
+    }
+    const next = prev.then(guarded, guarded)
     ownerWriteChains.set(this.chainKey, next.then(noop, noop))
     return next
+  }
+
+  private mutationScope() {
+    return { rootDir: this.rootDir, owner: this.owner, config: this.config }
+  }
+
+  private async checkGeneration(): Promise<void> {
+    // Scope must be checked BEFORE any state path: runtime owners/kinds are untrusted.
+    const { exists, kinds } = await inspectScope(this.rootDir, this.owner, this.config.kinds)
+    let current: string | null = null
+    if (exists) {
+      await assertNoPending(this.chainKey)
+      current = await readGeneration(this.chainKey)
+      for (const kind of kinds) await regularFileExists(kindFile(this.rootDir, this.owner, kind))
+    }
+    if (this.generation === undefined) this.generation = current
+    else if (this.generation !== current) fail('MUTATION_STALE_HANDLE')
   }
 
   private async ensureOwnerDir(): Promise<void> {
