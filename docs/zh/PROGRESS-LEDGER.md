@@ -737,3 +737,10 @@ fail-open。账本是 `audit_log` 同构的观测层, 配额闸是其上的执�
 - 只证明受控路径删除，不证明 Git 独占所有权：不解析 config/core.worktree 或发现外部反向引用，后者可能失效。
   外部克隆/备份、其他进程写者与恶意并发换路径不在承诺内。Markdown/知识投影、会话、可恢复协调和可信纠正仍待接；
   M3 不自动算完，边界见 [`ATONG-TEMPORAL-MEMORY.md`](ATONG-TEMPORAL-MEMORY.md)。
+
+## 2026-09-12 时间记忆源码收口
+
+- **方向: M**；用户要求停止继续扩展，整理并推送已完成改动到 GitHub/main；本轮不部署服务器。
+- 保留已有时间链及内部安全底座，未完成的纠正入口保持关闭；不再把完整硬删除作为基础时间记忆交付前置。
+- 推送前宿主回归 3759 通过、5 原有跳过，框架门通过；交付边界与状态见
+  [`2026-09-12-temporal-memory-source-release.md`](releases/2026-09-12-temporal-memory-source-release.md)。
