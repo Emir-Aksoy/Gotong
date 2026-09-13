@@ -365,6 +365,8 @@ export function buildButlerMaintenanceReviewer(
 }
 
 export interface RunButlerMaintenanceOnceOptions {
+  /** Share the host registry to drain standalone calls with tasks and services. */
+  userActivity?: ButlerUserActivity
   /** Butler memory root (`<space>/butler/memory`). */
   rootDir: string
   /** The member whose namespace to maintain. */
@@ -413,6 +415,12 @@ export interface ButlerMaintenanceResult {
 export async function runButlerMaintenanceOnce(
   opts: RunButlerMaintenanceOnceOptions,
 ): Promise<ButlerMaintenanceResult> {
+  const activity = opts.userActivity ?? new ButlerUserActivity(new FileButlerUserIsolation(opts.rootDir))
+  return activity.run(opts.userId, () => maintainButlerMemory(opts))
+}
+
+/** The sweeper already admits the full pass AND its subsequent Git snapshot. */
+async function maintainButlerMemory(opts: RunButlerMaintenanceOnceOptions): Promise<ButlerMaintenanceResult> {
   const now = opts.now ?? Date.now
   const memory: MemoryHandle = openButlerMemory({
     rootDir: opts.rootDir,
@@ -760,7 +768,7 @@ export class ButlerMaintenanceSweeper {
     userId: string,
     summarize: MemorySummarizer,
   ): Promise<ButlerMaintenanceResult> {
-    const res = await runButlerMaintenanceOnce({
+    const res = await maintainButlerMemory({
       rootDir: this.rootDir,
       userId,
       summarize,

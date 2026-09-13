@@ -1,25 +1,20 @@
 /**
  * HostButlerMemoryService — Personal Butler M6c. Backs `/api/me/butler/memory`
- * so a member can SEE what their butler remembers about them, FORGET one entry
- * or everything (right to be forgotten / 被遗忘权), and EXPORT the lot (data
- * portability). The privacy view is front-loaded to the UI to reassure users:
- * the butler keeps long-term memory, so the member must be able to inspect and
- * erase it at any time.
+ * so a member can inspect current butler memory, forget entries and the existing
+ * derived projections, and export a bounded payload. This is not a complete
+ * hard-delete of Git history, sessions, or other copies.
  *
- * The no-leak boundary is the per-user memory NAMESPACE, not an access check:
+ * The namespace boundary is per user:
  * every op opens the handle through `openButlerMemory({ rootDir, userId })`,
  * where the userId is the SESSION userId the route forces server-side — never a
  * client-supplied value. `Owner{kind:'user', id:userId}` resolves to
  * `<rootDir>/user/<userId>/`, and `assertSafeOwnerId` blocks traversal, so a
  * member can only ever read / erase their OWN butler's memory. The butler agent
- * (capture + frozen block) and this view open the SAME handle through the same
- * factory, so "what the butler remembers" and "what the member can see / erase"
- * are the exact same bytes — one source of truth.
+ * and this view open separate handles onto the same per-user files.
  *
- * Read-only over the framework: this service needs only a memory rootDir, NOT a
- * registered butler agent. It is safe to wire before the butler agent is folded
- * into main.ts (deferred per design §八) — until something writes through the
- * same per-user handle, the view is simply empty.
+ * Every complete public operation joins user activity, including projections.
+ * Standalone services check durable isolation; cross-entry drain requires the
+ * host's shared registry. User caches retire only after admitted work settles.
  */
 
 import type { Logger } from '@gotong/core'
@@ -41,6 +36,8 @@ import type { MemoryEntry, MemoryHandle } from '@gotong/services-sdk'
 import type { WebServerOptions } from '@gotong/web'
 
 import { openButlerObsidianProjector, projectButlerMemoryVault } from './butler-obsidian.js'
+import { ButlerUserActivity } from './butler-user-activity.js'
+import { FileButlerUserIsolation } from './butler-user-isolation.js'
 import { openButlerDreamDiary, type ButlerDreamDiary } from './personal-butler-dreams.js'
 import { openButlerMemory } from './personal-butler-memory.js'
 import { openButlerSkillFile, type ButlerSkillFile } from './personal-butler-skills.js'
@@ -63,23 +60,20 @@ export interface HostButlerMemoryServiceOpts {
   logger: Logger
   /** Injectable clock (deterministic tests); forwarded to the memory backend. */
   now?: () => number
+  /** Share with other entry points to drain their work together for this root. */
+  userActivity?: ButlerUserActivity
 }
 
 export class HostButlerMemoryService implements ButlerMemorySurface {
   private readonly rootDir: string
   private readonly logger: Logger
   private readonly now: (() => number) | undefined
+  private readonly userActivity: ButlerUserActivity
+  private readonly registeredUsers = new Set<string>()
   /**
-   * One handle per userId, shared across this service's ops. A `MemoryFileHandle`
-   * serializes its writes through a PER-INSTANCE chain, so minting a fresh handle
-   * per request would defeat it: two concurrent `/me` mutations for the same user
-   * (e.g. forget(id1) ‖ forget(id2)) would each read-modify-write the same jsonl
-   * on independent chains and the last writer would clobber the other's delete.
-   * Caching by userId routes every op for a member through ONE chain. rootDir and
-   * `now` are fixed per service instance, so userId is a complete key. (The
-   * deeper unification — sharing this handle with the butler AGENT's writers once
-   * that is folded into main.ts — belongs to that deferred fold-in; today only
-   * this service writes through here.)
+   * Reuse per-user handles until retirement. Backend owner-scoped coordination
+   * also covers separate handles; this cache is not the write-serialization
+   * boundary. rootDir and `now` are fixed, so userId is a complete cache key.
    */
   private readonly handles = new Map<string, MemoryHandle>()
   /** Per-user dream diary (DREAMS.md) — read for the "上次复盘" line, removed on forget-all. */
@@ -93,38 +87,77 @@ export class HostButlerMemoryService implements ButlerMemorySurface {
     this.rootDir = opts.rootDir
     this.logger = opts.logger
     this.now = opts.now
+    this.userActivity = opts.userActivity ?? new ButlerUserActivity(new FileButlerUserIsolation(opts.rootDir))
   }
 
   async read(userId: string): Promise<ButlerMemorySnapshot> {
+    return this.run(userId, () => this.readUnguarded(userId))
+  }
+
+  async export(userId: string): Promise<ButlerMemoryView[]> {
+    return this.run(userId, () => this.exportUnguarded(userId))
+  }
+
+  async forget(userId: string, id: string): Promise<boolean> {
+    return this.run(userId, () => this.forgetUnguarded(userId, id))
+  }
+
+  async forgetAll(userId: string): Promise<void> {
+    return this.run(userId, () => this.forgetAllUnguarded(userId))
+  }
+
+  private run<T>(userId: string, work: () => Promise<T>): Promise<T> {
+    return this.userActivity.run(userId, () => {
+      if (!this.registeredUsers.has(userId)) {
+        this.userActivity.register(userId, () => {
+          this.handles.delete(userId)
+          this.diaries.delete(userId)
+          this.skillFiles.delete(userId)
+          this.statusFiles.delete(userId)
+          this.registeredUsers.delete(userId)
+        })
+        this.registeredUsers.add(userId)
+      }
+      return work()
+    })
+  }
+
+  private async readUnguarded(userId: string): Promise<ButlerMemorySnapshot> {
     const mem = this.open(userId)
     // Semantic = the distilled profile ("what the butler knows about me");
     // episodic = recently captured turns. Both newest-first, content only.
     // The dream diary's latest sweep rides along — read-only "上次复盘" reassurance;
     // the 6h maintenance status (MR4) rides along too — "上次维护" liveness.
-    const [profile, recent, lastDream, lastStatus] = await Promise.all([
-      mem.recall({ kinds: ['semantic'], k: 200 }),
-      mem.recall({ kinds: ['episodic'], k: RECENT_CAPTURE_LIMIT }),
-      this.diary(userId).readLatest(),
-      this.statusFile(userId).read(),
+    // A rejected branch must not let drain overtake other reads. Defer each
+    // invocation too, so a synchronous throw cannot abandon an earlier branch.
+    const [profile, recent, lastDream, lastStatus] = await Promise.allSettled([
+      Promise.resolve().then(() => mem.recall({ kinds: ['semantic'], k: 200 })),
+      Promise.resolve().then(() => mem.recall({ kinds: ['episodic'], k: RECENT_CAPTURE_LIMIT })),
+      Promise.resolve().then(() => this.diary(userId).readLatest()),
+      Promise.resolve().then(() => this.statusFile(userId).read()),
     ])
+    if (profile.status === 'rejected') throw profile.reason
+    if (recent.status === 'rejected') throw recent.reason
+    if (lastDream.status === 'rejected') throw lastDream.reason
+    if (lastStatus.status === 'rejected') throw lastStatus.reason
     // One `now` per call so each entry's bitemporal `active` flag is consistent.
     const now = this.clock()
     return {
-      profile: profile.map((e) => projectEntry(e, now)),
-      recent: recent.map((e) => projectEntry(e, now)),
-      ...(lastDream ? { lastDream } : {}),
-      ...(lastStatus ? { lastStatus } : {}),
+      profile: profile.value.map((e) => projectEntry(e, now)),
+      recent: recent.value.map((e) => projectEntry(e, now)),
+      ...(lastDream.value ? { lastDream: lastDream.value } : {}),
+      ...(lastStatus.value ? { lastStatus: lastStatus.value } : {}),
     }
   }
 
-  async export(userId: string): Promise<ButlerMemoryView[]> {
+  private async exportUnguarded(userId: string): Promise<ButlerMemoryView[]> {
     // Raw list across all kinds for data portability — bounded payload.
     const all = await this.open(userId).list({ limit: EXPORT_LIMIT })
     const now = this.clock()
     return all.map((e) => projectEntry(e, now))
   }
 
-  async forget(userId: string, id: string): Promise<boolean> {
+  private async forgetUnguarded(userId: string, id: string): Promise<boolean> {
     const mem = this.open(userId)
     // `forget` is a no-op if the id isn't there; report whether it WAS, without
     // leaking other ids — list this user's own entries and check membership.
@@ -148,8 +181,8 @@ export class HostButlerMemoryService implements ButlerMemorySurface {
     return existed
   }
 
-  async forgetAll(userId: string): Promise<void> {
-    // Right to be forgotten — clear every kind for this member's butler AND the
+  private async forgetAllUnguarded(userId: string): Promise<void> {
+    // Clear every configured kind for this member's butler AND the existing
     // derived files (§八: forget-all also wipes the per-user dream diary, the
     // master skill index AND the maintenance status — all rebuildable projections
     // of the now-empty jsonl).

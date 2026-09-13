@@ -716,6 +716,7 @@ export function buildButlerFactory(deps: ButlerFactoryDeps): ButlerFactory {
         const consolidateToolset =
           deps.maintenanceOn && refs.providerBuilder
             ? buildButlerConsolidateToolset({
+                userActivity,
                 userId,
                 rootDir: memoryRoot,
                 buildProvider: refs.providerBuilder,

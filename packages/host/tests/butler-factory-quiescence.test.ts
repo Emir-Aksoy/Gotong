@@ -264,9 +264,11 @@ describe('factory user quiescence wiring', () => {
     await expect(readFile(cache, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
   })
 
-  it('on-demand maintenance stays inside its admitted task instead of re-entering a closed activity', async () => {
+  it('refuses a newly requested maintenance pass after its outer task has been closed', async () => {
     const activity = new ButlerUserActivity()
     const run = vi.spyOn(activity, 'run')
+    const projection = vi.spyOn(obsidian, 'projectButlerVault')
+    const maintenanceStream = vi.spyOn(provider, 'stream')
     const gate = deferred()
     const entered = deferred()
     const buildProvider = vi.fn(async () => provider)
@@ -301,8 +303,10 @@ describe('factory user quiescence wiring', () => {
     expect(await pending).toMatchObject({ code: 'BUTLER_USER_QUIESCED' })
     await closed
     expect(buildProvider).toHaveBeenCalledTimes(1)
-    expect(run).toHaveBeenCalledTimes(1)
-    expect(existsSync(join(root, 'user', 'alice', 'STATUS.md'))).toBe(true)
+    expect(run).toHaveBeenCalledTimes(2)
+    expect(projection).not.toHaveBeenCalled()
+    expect(maintenanceStream).not.toHaveBeenCalled()
+    expect(existsSync(join(root, 'user', 'alice', 'STATUS.md'))).toBe(false)
   })
 
   it('one shared activity drains a real factory task and a sweeper projection together', async () => {

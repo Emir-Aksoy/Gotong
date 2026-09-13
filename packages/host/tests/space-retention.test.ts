@@ -101,7 +101,7 @@ async function writeDossier(
   updatedAt: number,
   extraFiles: readonly string[] = ['journal.jsonl'],
 ): Promise<string> {
-  const dir = join(space, 'butler', 'longrun', uid, taskId)
+  const dir = join(space, 'butler', 'longrun', 'user', uid, taskId)
   await mkdir(dir, { recursive: true })
   await writeFile(join(dir, 'dossier.json'), JSON.stringify({ taskId, status, updatedAt }), 'utf8')
   for (const f of extraFiles) {
@@ -484,7 +484,7 @@ describe('retentionLadderOnce — longrun', () => {
 
   it('dossier.json 是坏档 ⇒ 读不出判定就不动(证据原地留)', async () => {
     const space = await makeSpace()
-    const dir = join(space, 'butler', 'longrun', 'u1', 't1')
+    const dir = join(space, 'butler', 'longrun', 'user', 'u1', 't1')
     await mkdir(dir, { recursive: true })
     await writeFile(join(dir, 'dossier.json'), '{nope', 'utf8')
     await writeBackupFact(space, NOW)

@@ -18,7 +18,7 @@
  * 三类阶梯对象(全部只认「翻篇的」,活跃内容结构性不产生候选):
  *   - memory-archive: <space>/butler/memory/user/<uid>/knowledge/archive/**
  *     (LIB 归档层=挪走不真删的那一层;活书架 knowledge/ 本体不进视野)
- *   - longrun: <space>/butler/longrun/<uid>/<taskId>/(dossier status done|cancelled
+ *   - longrun: <space>/butler/longrun/user/<uid>/<taskId>/(dossier status done|cancelled
  *     才算翻篇;blocked/active 结构性保护——那是还在等人的活)
  *   - sessions: <space>/butler/sessions/<uid>.json(仅**离场**成员=不在 identity
  *     名册里的;在册成员的窗静默期再长也不碰——SESS 60min 自然开新对话,旧窗无害)
@@ -28,8 +28,12 @@ import { mkdir, readFile, readdir, lstat, rmdir, unlink } from 'node:fs/promises
 import { dirname, join } from 'node:path'
 import { writeFileAtomic, type Logger } from '@gotong/core'
 import { parseLastBackupFact, LAST_BACKUP_FACT_NAME } from '@gotong/cli'
+import { ownerDir } from '@gotong/service-memory-file'
 import { execFileGitRunner, type GitRunner } from './butler-memory-git.js'
 import { makeAuditAppender, SPACE_ACTIONS_FILE, type SpaceActionEntry } from './space-sweeper.js'
+import { ButlerUserActivity } from './butler-user-activity.js'
+import { FileButlerUserIsolation } from './butler-user-isolation.js'
+import { butlerLongRunRoot } from './butler-space-dirs.js'
 
 // ---------------------------------------------------------------------------
 // 策略文件(file-first,岔口② 拍板不走 env——旋钮 114 冻结零新增)
@@ -304,10 +308,12 @@ export interface RetentionLadderResult {
   /** 过期但没进安全网被跳过的删除单元数(dossier 目录=1 个单元,归档/会话文件各=1)。 */
   readonly skippedNoNet: number
   readonly blockedAudit: number
+  /** Delete failures plus user/category operations refused or interrupted by isolation. */
   readonly failed: number
 }
 
 export interface RetentionLadderOptions {
+  readonly userActivity?: ButlerUserActivity
   readonly spaceDir: string
   readonly actionsFile: string
   readonly policy: RetentionPolicy
@@ -356,6 +362,8 @@ export async function readRetentionState(spaceDir: string): Promise<RetentionSta
  * 跑一轮成员内容阶梯。每类各自按策略键武装(键缺席=该类零动作);全程永不抛。
  */
 export async function retentionLadderOnce(opts: RetentionLadderOptions): Promise<RetentionLadderResult> {
+  const memoryRoot = join(opts.spaceDir, 'butler', 'memory')
+  const activity = opts.userActivity ?? new ButlerUserActivity(new FileButlerUserIsolation(memoryRoot))
   const now = opts.now ? opts.now() : Date.now()
   const git = opts.git ?? execFileGitRunner
   const appendAudit = makeAuditAppender(opts.actionsFile, opts.logger, 'retention')
@@ -365,6 +373,15 @@ export async function retentionLadderOnce(opts: RetentionLadderOptions): Promise
   let skippedNoNet = 0
   let blockedAudit = 0
   let failed = 0
+
+  const forUser = async (uid: string, work: () => Promise<void>): Promise<void> => {
+    try {
+      await activity.run(uid, work)
+    } catch {
+      failed++
+      opts.logger?.warn('retention: user operation blocked or failed')
+    }
+  }
 
   /** 边界③ 执法件:账落下才 unlink;ENOENT=已删;其余失败补 delete_failed 行。 */
   const deleteWithLedger = async (scope: string, file: CandidateFile): Promise<boolean> => {
@@ -402,20 +419,22 @@ export async function retentionLadderOnce(opts: RetentionLadderOptions): Promise
     const cutoff = now - archiveDays * 86_400_000
     const memRoot = join(opts.spaceDir, 'butler', 'memory', 'user')
     for (const uid of await listDirNames(memRoot)) {
-      const userDir = join(memRoot, uid)
-      const archiveDir = join(userDir, 'knowledge', 'archive')
-      const files = await collectArchiveFiles(archiveDir, join(uid, 'knowledge', 'archive'), 0)
-      const expired = files.filter((f) => f.mtimeMs < cutoff)
-      if (expired.length === 0) continue
-      const gitAt = await gitHeadEpochMs(userDir, git)
-      const netAt = Math.max(fullBackupAt ?? Number.NEGATIVE_INFINITY, gitAt ?? Number.NEGATIVE_INFINITY)
-      for (const f of expired) {
-        if (!(f.mtimeMs <= netAt)) {
-          skippedNoNet++
-          continue
+      await forUser(uid, async () => {
+        const userDir = join(memRoot, uid)
+        const archiveDir = join(userDir, 'knowledge', 'archive')
+        const files = await collectArchiveFiles(archiveDir, join(uid, 'knowledge', 'archive'), 0)
+        const expired = files.filter((f) => f.mtimeMs < cutoff)
+        if (expired.length === 0) return
+        const gitAt = await gitHeadEpochMs(userDir, git)
+        const netAt = Math.max(fullBackupAt ?? Number.NEGATIVE_INFINITY, gitAt ?? Number.NEGATIVE_INFINITY)
+        for (const f of expired) {
+          if (!(f.mtimeMs <= netAt)) {
+            skippedNoNet++
+            continue
+          }
+          await deleteWithLedger('memory-archive', f)
         }
-        await deleteWithLedger('memory-archive', f)
-      }
+      })
     }
   }
 
@@ -423,30 +442,32 @@ export async function retentionLadderOnce(opts: RetentionLadderOptions): Promise
   const dossierDays = opts.policy.dossier_days
   if (dossierDays !== undefined) {
     const cutoff = now - dossierDays * 86_400_000
-    const longrunRoot = join(opts.spaceDir, 'butler', 'longrun')
-    for (const uid of await listDirNames(longrunRoot)) {
-      const userDir = join(longrunRoot, uid)
-      for (const taskId of await listDirNames(userDir)) {
-        const taskDir = join(userDir, taskId)
-        const verdict = await readDossierVerdict(join(taskDir, 'dossier.json'))
-        if (!verdict || !verdict.closed || !(verdict.updatedAtMs < cutoff)) continue
-        if (fullBackupAt === null || !(verdict.updatedAtMs <= fullBackupAt)) {
-          skippedNoNet++
-          continue
-        }
-        const files = await listFilesShallow(taskDir, join(uid, taskId))
-        let allGone = true
-        for (const f of files) {
-          if (!(await deleteWithLedger('longrun', f))) allGone = false
-        }
-        if (allGone) {
-          try {
-            await rmdir(taskDir)
-          } catch {
-            // 目录非空(有子目录/新文件)=留着,无害
+    const longrunRoot = butlerLongRunRoot(memoryRoot)
+    for (const uid of await listDirNames(join(longrunRoot, 'user'))) {
+      await forUser(uid, async () => {
+        const userDir = ownerDir(longrunRoot, { kind: 'user', id: uid })
+        for (const taskId of await listDirNames(userDir)) {
+          const taskDir = join(userDir, taskId)
+          const verdict = await readDossierVerdict(join(taskDir, 'dossier.json'))
+          if (!verdict || !verdict.closed || !(verdict.updatedAtMs < cutoff)) continue
+          if (fullBackupAt === null || !(verdict.updatedAtMs <= fullBackupAt)) {
+            skippedNoNet++
+            continue
+          }
+          const files = await listFilesShallow(taskDir, join(uid, taskId))
+          let allGone = true
+          for (const f of files) {
+            if (!(await deleteWithLedger('longrun', f))) allGone = false
+          }
+          if (allGone) {
+            try {
+              await rmdir(taskDir)
+            } catch {
+              // 目录非空(有子目录/新文件)=留着,无害
+            }
           }
         }
-      }
+      })
     }
   }
 
@@ -467,12 +488,14 @@ export async function retentionLadderOnce(opts: RetentionLadderOptions): Promise
           continue
         }
         if (opts.liveUserIds.has(uid)) continue
-        if (!(f.mtimeMs < cutoff)) continue
-        if (fullBackupAt === null || !(f.mtimeMs <= fullBackupAt)) {
-          skippedNoNet++
-          continue
-        }
-        await deleteWithLedger('sessions', f)
+        await forUser(uid, async () => {
+          if (!(f.mtimeMs < cutoff)) return
+          if (fullBackupAt === null || !(f.mtimeMs <= fullBackupAt)) {
+            skippedNoNet++
+            return
+          }
+          await deleteWithLedger('sessions', f)
+        })
       }
     }
   }
@@ -495,6 +518,7 @@ export async function retentionLadderOnce(opts: RetentionLadderOptions): Promise
 // ---------------------------------------------------------------------------
 
 export interface RetentionLadderDeps {
+  readonly userActivity?: ButlerUserActivity
   readonly spaceDir: string
   /** 在册成员 id 清单;抛错 ⇒ 离场会话类跳过(读不动 ≠ 全员离场)。 */
   readonly listUserIds?: () => string[]
@@ -508,6 +532,7 @@ export interface RetentionLadderDeps {
  */
 export function buildRetentionLadder(deps: RetentionLadderDeps): () => Promise<RetentionLadderResult | null> {
   const actionsFile = join(deps.spaceDir, 'runtime', SPACE_ACTIONS_FILE)
+  const userActivity = deps.userActivity ?? new ButlerUserActivity(new FileButlerUserIsolation(join(deps.spaceDir, 'butler', 'memory')))
   return async () => {
     const policy = await loadRetentionPolicy(deps.spaceDir, deps.logger)
     if (!policy || !RETENTION_KEYS.some((k) => policy[k] !== undefined)) return null
@@ -520,6 +545,7 @@ export function buildRetentionLadder(deps: RetentionLadderDeps): () => Promise<R
       }
     }
     return retentionLadderOnce({
+      userActivity,
       spaceDir: deps.spaceDir,
       actionsFile,
       policy,

@@ -1103,10 +1103,12 @@ async function main(): Promise<void> {
   // M-HEALTH — 维护健康台账:维护扫描写,巡检与 my_status 读。一条路径三处引用
   // ——分开写会漂,而漂了之后「没出牌」与「没在跑」从外面看一模一样。
   const butlerMemoryHealthFile = join(space.root, 'butler', 'memory-health.json')
+  const butlerUserActivity = new ButlerUserActivity(new FileButlerUserIsolation(butlerMemoryRoot))
   // STOR-M1/M2/M3 — 空间维护:清死物→(可选)成员内容阶梯→丈量,骑既有 6h 节律零新定时器。
   // 阶梯 thunk 每次新读 retention.json(set_retention 批准后下一轮生效);策略缺席=零字节。
   const spaceUpkeep = spaceUpkeepAt(space.root, log, {
     ladder: buildRetentionLadder({
+      userActivity: butlerUserActivity,
       spaceDir: space.root,
       ...(identityForBackup ? { listUserIds: () => identityForBackup.listUsers().map((u) => u.id) } : {}),
       logger: log,
@@ -1116,7 +1118,6 @@ async function main(): Promise<void> {
   void spaceUpkeep.run()
   // Per-user butler assembly lives in personal-butler-factory.ts (GUARD
   // extraction); refs() reads the forward-declared refs at butler-build time.
-  const butlerUserActivity = new ButlerUserActivity(new FileButlerUserIsolation(butlerMemoryRoot))
   const butlerFactory: ButlerFactory = buildButlerFactory({
     hub,
     logger: log,
@@ -1895,6 +1896,7 @@ async function main(): Promise<void> {
   // the same bytes. The per-user namespace (openButlerMemory) is the no-leak
   // boundary — the route forces the session userId, never a client value.
   const butlerMemory = new HostButlerMemoryService({
+    userActivity: butlerUserActivity,
     rootDir: join(space.root, 'butler', 'memory'),
     logger: log,
   })

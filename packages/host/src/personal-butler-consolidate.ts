@@ -32,8 +32,11 @@ import type {
 } from '@gotong/llm'
 
 import { butlerSummarizer, runButlerMaintenanceOnce } from './personal-butler-maintenance.js'
+import type { ButlerUserActivity } from './butler-user-activity.js'
 
 export interface ButlerConsolidateDeps {
+  /** Shared with the host's tasks, memory service and scheduled maintenance. */
+  userActivity?: ButlerUserActivity
   /** The member this butler serves — the namespace this pass maintains. */
   userId: string
   /** Butler memory root (`<space>/butler/memory`) — the tree the factory + /me use. */
@@ -88,6 +91,7 @@ class ButlerConsolidateToolset implements LlmAgentToolset {
     })
     try {
       const res = await runButlerMaintenanceOnce({
+        userActivity: this.deps.userActivity,
         rootDir: this.deps.rootDir,
         userId: this.deps.userId,
         summarize,

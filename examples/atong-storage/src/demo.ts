@@ -186,7 +186,7 @@ async function main(): Promise<void> {
   const a3 = join(root, 'a3')
   seed(join(a3, 'butler', 'memory', 'user', 'u1', 'knowledge', 'archive', 'old.md'), 'old', T - 40 * DAY)
   seed(
-    join(a3, 'butler', 'longrun', 'u1', 't1', 'dossier.json'),
+    join(a3, 'butler', 'longrun', 'user', 'u1', 't1', 'dossier.json'),
     JSON.stringify({ taskId: 't1', status: 'done', updatedAt: T - 40 * DAY }),
   )
   seed(join(a3, 'butler', 'sessions', 'gone.json'), '{}', T - 40 * DAY)
@@ -195,7 +195,7 @@ async function main(): Promise<void> {
   assert(ladderVerdict === null, 'retention.json 缺席 ⇒ 阶梯 thunk 返回 null(零模型零删除)')
   assert(
     existsSync(join(a3, 'butler', 'memory', 'user', 'u1', 'knowledge', 'archive', 'old.md')) &&
-      existsSync(join(a3, 'butler', 'longrun', 'u1', 't1', 'dossier.json')) &&
+      existsSync(join(a3, 'butler', 'longrun', 'user', 'u1', 't1', 'dossier.json')) &&
       existsSync(join(a3, 'butler', 'sessions', 'gone.json')),
     '过期候选一件不少(策略人没定,执行就不跑)',
   )
@@ -214,12 +214,12 @@ async function main(): Promise<void> {
   seed(join(a4, 'butler', 'memory', 'user', 'u-live', 'knowledge', 'archive', 'notes', 'deep.md'), 'deep', T - 40 * DAY)
   seed(join(a4, 'butler', 'memory', 'user', 'u-live', 'knowledge', 'archive', 'fresh.md'), 'fresh', T - 1 * DAY)
   seed(
-    join(a4, 'butler', 'longrun', 'u-live', 't-done', 'dossier.json'),
+    join(a4, 'butler', 'longrun', 'user', 'u-live', 't-done', 'dossier.json'),
     JSON.stringify({ taskId: 't-done', status: 'done', updatedAt: T - 40 * DAY }),
   )
-  seed(join(a4, 'butler', 'longrun', 'u-live', 't-done', 'journal.jsonl'), '{}\n')
+  seed(join(a4, 'butler', 'longrun', 'user', 'u-live', 't-done', 'journal.jsonl'), '{}\n')
   seed(
-    join(a4, 'butler', 'longrun', 'u-live', 't-live', 'dossier.json'),
+    join(a4, 'butler', 'longrun', 'user', 'u-live', 't-live', 'dossier.json'),
     JSON.stringify({ taskId: 't-live', status: 'active', updatedAt: T - 40 * DAY }),
   )
   seed(join(a4, 'butler', 'sessions', 'u-gone.json'), '{}', T - 40 * DAY)
@@ -241,7 +241,7 @@ async function main(): Promise<void> {
   assert(r1.skippedNoNet === 3 && r1.deleted === 0, '备份缺席 ⇒ 三个删除单元(归档件/翻篇档案/离场窗)全部跳过,零删除')
   assert(
     existsSync(join(a4, 'butler', 'memory', 'user', 'u-live', 'knowledge', 'archive', 'notes', 'deep.md')) &&
-      existsSync(join(a4, 'butler', 'longrun', 'u-live', 't-done', 'dossier.json')) &&
+      existsSync(join(a4, 'butler', 'longrun', 'user', 'u-live', 't-done', 'dossier.json')) &&
       existsSync(join(a4, 'butler', 'sessions', 'u-gone.json')),
     '跳过=真没动手:过期候选一个字节没少',
   )
@@ -263,13 +263,13 @@ async function main(): Promise<void> {
   assert((await readFullBackupAt(a4)) === T - DAY && r2.deleted === 4 && r2.skippedNoNet === 0, '备份落地 ⇒ 4 件真删(归档 1 + 档案 2 文件 + 会话窗 1),零跳过')
   assert(
     !existsSync(join(a4, 'butler', 'memory', 'user', 'u-live', 'knowledge', 'archive', 'notes', 'deep.md')) &&
-      !existsSync(join(a4, 'butler', 'longrun', 'u-live', 't-done')) &&
+      !existsSync(join(a4, 'butler', 'longrun', 'user', 'u-live', 't-done')) &&
       !existsSync(join(a4, 'butler', 'sessions', 'u-gone.json')),
     '删除侧:过期归档件没了,翻篇档案连目录一起收走,离场窗没了',
   )
   assert(
     existsSync(join(a4, 'butler', 'memory', 'user', 'u-live', 'knowledge', 'archive', 'fresh.md')) &&
-      existsSync(join(a4, 'butler', 'longrun', 'u-live', 't-live', 'dossier.json')) &&
+      existsSync(join(a4, 'butler', 'longrun', 'user', 'u-live', 't-live', 'dossier.json')) &&
       existsSync(join(a4, 'butler', 'sessions', 'u-live.json')) &&
       readFileSync(join(a4, 'identity.sqlite'), 'utf8') === sentinels.identity,
     '幸存侧:没过期的、还活跃的、在住成员的、类④凭证全部原样',
