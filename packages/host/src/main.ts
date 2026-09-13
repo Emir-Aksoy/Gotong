@@ -277,6 +277,7 @@ import { buildButlerConfigOps } from './personal-butler-config.js'
 import { buildButlerRetentionOps } from './personal-butler-retention.js'
 import { buildButlerFactory } from './personal-butler-factory.js'
 import { ButlerUserActivity } from './butler-user-activity.js'
+import { FileButlerUserIsolation } from './butler-user-isolation.js'
 import { armButlerCoder } from './personal-butler-coder.js'
 import { armButlerHands } from './personal-butler-hands.js'
 import { buildButlerPanelContentToolset } from './personal-butler-panel.js'
@@ -1115,7 +1116,7 @@ async function main(): Promise<void> {
   void spaceUpkeep.run()
   // Per-user butler assembly lives in personal-butler-factory.ts (GUARD
   // extraction); refs() reads the forward-declared refs at butler-build time.
-  const butlerUserActivity = new ButlerUserActivity()
+  const butlerUserActivity = new ButlerUserActivity(new FileButlerUserIsolation(butlerMemoryRoot))
   const butlerFactory: ButlerFactory = buildButlerFactory({
     hub,
     logger: log,

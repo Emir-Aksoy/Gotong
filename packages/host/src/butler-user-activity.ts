@@ -1,11 +1,18 @@
-export type ButlerUserActivityErrorCode = 'BUTLER_USER_QUIESCED' | 'BUTLER_USER_RETIRE_FAILED'
+export type ButlerUserActivityErrorCode = 'BUTLER_USER_QUIESCED' | 'BUTLER_USER_RETIRE_FAILED' | 'BUTLER_USER_ISOLATION_FAILED'
+
+export interface ButlerUserIsolation {
+  assertOpen(userId: string): Promise<void>
+  close(userId: string): Promise<void>
+}
 
 /** Fixed diagnostics only: never retain user content, paths, state, or cause. */
 export class ButlerUserActivityError extends Error {
   constructor(readonly code: ButlerUserActivityErrorCode) {
     super(code === 'BUTLER_USER_QUIESCED'
       ? 'Butler user is quiesced.'
-      : 'Butler user retirement failed; retry retirement.')
+      : code === 'BUTLER_USER_ISOLATION_FAILED'
+        ? 'Butler user isolation could not be persisted; retry isolation.'
+        : 'Butler user retirement failed; retry retirement.')
     this.name = 'ButlerUserActivityError'
   }
 }
@@ -20,12 +27,23 @@ interface UserActivity {
 }
 
 /**
- * Process/instance-local only. The host must share this object for a memory root.
- * No disk barrier or reopen: a future durable coordinator must cover restarts
- * and writers outside these registered entry points before correcting files.
+ * The host shares one registry per memory root. An optional durable barrier
+ * protects restarted admissions, not other processes' already-running work.
+ * No reopen; writers outside registered entry points still need coordination.
  */
 export class ButlerUserActivity {
   private readonly users = new Map<string, UserActivity>()
+
+  constructor(private readonly isolation?: ButlerUserIsolation) {}
+
+  private async checkOpen(userId: string, user: UserActivity): Promise<void> {
+    try {
+      await this.isolation!.assertOpen(userId)
+    } catch {
+      user.closed = true
+    }
+    if (user.closed) throw new ButlerUserActivityError('BUTLER_USER_QUIESCED')
+  }
 
   private user(userId: string): UserActivity {
     let user = this.users.get(userId)
@@ -45,10 +63,16 @@ export class ButlerUserActivity {
     const settled = new Promise<void>(resolve => { release = resolve })
     user.active.add(settled)
     try {
+      // Admission IO itself is tracked: closure cannot overtake a pending check
+      // and then let its callback start after resources have been retired.
+      if (this.isolation) await this.checkOpen(userId, user)
+      if (user.closed) throw new ButlerUserActivityError('BUTLER_USER_QUIESCED')
       const result = await work()
+      if (this.isolation) await this.checkOpen(userId, user)
       if (user.closed) throw new ButlerUserActivityError('BUTLER_USER_QUIESCED')
       return result
     } catch (error) {
+      if (this.isolation && !user.closed) await this.checkOpen(userId, user)
       if (user.closed) throw new ButlerUserActivityError('BUTLER_USER_QUIESCED')
       throw error
     } finally {
@@ -85,6 +109,11 @@ export class ButlerUserActivity {
     if (user.retirement) return user.retirement
     const active = [...user.active]
     user.retirement = Promise.resolve().then(async () => {
+      try {
+        await this.isolation?.close(userId)
+      } catch {
+        throw new ButlerUserActivityError('BUTLER_USER_ISOLATION_FAILED')
+      }
       await Promise.all(active)
       // A failed shutdown may recreate shared caches when retried. Finalizers
       // must remain untouched until ALL resources succeed, regardless of order.

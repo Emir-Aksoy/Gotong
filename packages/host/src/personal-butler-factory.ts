@@ -50,6 +50,7 @@ import { butlerLongRunRoot } from './butler-space-dirs.js'
 import type { AdminHealthSurface } from './admin-health.js'
 import { createButlerRouter } from './butler-router.js'
 import { ButlerUserActivity } from './butler-user-activity.js'
+import { FileButlerUserIsolation } from './butler-user-isolation.js'
 import type { HostButlerMemoryService } from './butler-memory-service.js'
 import { openButlerRecallIndex, type FileBackedInvertedIndex } from './butler-recall-index.js'
 import { openButlerObsidianProjector } from './butler-obsidian.js'
@@ -324,7 +325,7 @@ function diskCacheRetirement(rootDir: string, userId: string, logger: Logger): (
 
 export function buildButlerFactory(deps: ButlerFactoryDeps): ButlerFactory {
   const { hub, logger: log, memoryRoot } = deps
-  const userActivity = deps.userActivity ?? new ButlerUserActivity()
+  const userActivity = deps.userActivity ?? new ButlerUserActivity(new FileButlerUserIsolation(memoryRoot))
   const indexes = new WeakMap<Participant, FileBackedInvertedIndex>()
   const cacheUsers = new Set<string>()
   // SEN-M5 — 成员 roster 无 per-user 态,工厂级构造一次全员共享。

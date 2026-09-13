@@ -101,6 +101,7 @@ import type { MemoryHandle } from '@gotong/services-sdk'
 
 import { recordMaintenanceSweep } from './butler-memory-health.js'
 import { ButlerUserActivity } from './butler-user-activity.js'
+import { FileButlerUserIsolation } from './butler-user-isolation.js'
 import { snapshotMemoryTree, type GitRunner } from './butler-memory-git.js'
 import { projectButlerVault } from './butler-obsidian.js'
 import { butlerMemoryWriters } from './personal-butler-writers.js'
@@ -574,7 +575,7 @@ export class ButlerMaintenanceSweeper {
   private running = false
 
   constructor(opts: ButlerMaintenanceSweeperOptions) {
-    this.userActivity = opts.userActivity ?? new ButlerUserActivity()
+    this.userActivity = opts.userActivity ?? new ButlerUserActivity(new FileButlerUserIsolation(opts.rootDir))
     this.rootDir = opts.rootDir
     this.buildProvider = opts.buildProvider
     this.log = opts.logger

@@ -1,4 +1,6 @@
 import { existsSync, mkdtempSync } from 'node:fs'
+import { mkdir } from 'node:fs/promises'
+import { createHash } from 'node:crypto'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { Logger } from '@gotong/core'
@@ -36,6 +38,23 @@ describe('maintenance user quiescence wiring', () => {
       meta: { importance: 2, tier: 'persona' },
     })
   }
+
+  it.each([false, true])('a new default sweeper honors persisted isolation; model available = %s', async withModel => {
+    await seed('alice')
+    await seed('bob')
+    await mkdir(join(root, '.user-isolation', createHash('sha256').update('alice').digest('hex')), { recursive: true })
+    const projection = vi.spyOn(obsidian, 'projectButlerVault')
+    const gitUsers: string[] = []
+    const sweeper = new ButlerMaintenanceSweeper({
+      rootDir: root, logger, buildProvider: async () => withModel ? provider : null,
+      gitSnapshot: true, git: async (_args, cwd) => { gitUsers.push(cwd); return { code: 0, stdout: '', stderr: '' } },
+    })
+    await sweeper.runOnce()
+    expect(projection.mock.calls.map(([opts]) => opts.userId)).toEqual(['bob'])
+    expect(gitUsers).not.toContain(join(root, 'user', 'alice'))
+    expect(existsSync(join(root, 'user', 'alice', 'memory', 'persona.md'))).toBe(false)
+    expect(existsSync(join(root, 'user', 'bob', 'memory', 'persona.md'))).toBe(true)
+  })
 
   it('drains the real maintenance pass and its later Git work before retirement', async () => {
     await seed('alice', 40)

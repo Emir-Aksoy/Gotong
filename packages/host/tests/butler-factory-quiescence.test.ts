@@ -1,5 +1,6 @@
 import { existsSync, mkdtempSync } from 'node:fs'
-import { readFile, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { createHash } from 'node:crypto'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { Hub, Logger, Participant, Task } from '@gotong/core'
@@ -48,6 +49,20 @@ describe('factory user quiescence wiring', () => {
     hub: { dispatch: async () => ({ kind: 'ok' }) } as unknown as Hub,
     logger, memoryRoot, userActivity, refs: () => refs,
     governedOn: false, maintenanceOn: false, proactiveOn: false, runBroadcastOn: false,
+  })
+
+  it('a new default factory rejects a persisted isolation before opening memory or calling the model', async () => {
+    await mkdir(join(root, '.user-isolation', createHash('sha256').update('alice').digest('hex')), { recursive: true })
+    const opened = vi.spyOn(recall, 'openButlerRecallIndex')
+    const stream = vi.spyOn(provider, 'stream')
+    const router = factory(root)({ id: 'restarted', capabilities: ['chat'], provider })
+    await expect(router.onTask!(task())).rejects.toMatchObject({ code: 'BUTLER_USER_QUIESCED' })
+    await expect(router.onResume!(task(), {})).rejects.toMatchObject({ code: 'BUTLER_USER_QUIESCED' })
+    expect(opened).not.toHaveBeenCalled()
+    expect(stream).not.toHaveBeenCalled()
+    expect(existsSync(join(root, 'user', 'alice'))).toBe(false)
+    await expect(router.onTask!(task('bob'))).resolves.toMatchObject({ kind: 'ok' })
+    await router.onShutdown!()
   })
 
   it('shares one injected activity across agents, drains their tasks, and retires their real indexes', async () => {
@@ -108,6 +123,10 @@ describe('factory user quiescence wiring', () => {
     await shared.quiesce('alice')
     await expect(one.onTask!(task())).rejects.toMatchObject({ code: 'BUTLER_USER_QUIESCED' })
     await expect(two.onTask!(task())).rejects.toMatchObject({ code: 'BUTLER_USER_QUIESCED' })
+    const restarted = factory(root)({ id: 'new-process', capabilities: ['chat'], provider })
+    await expect(restarted.onTask!(task())).rejects.toMatchObject({ code: 'BUTLER_USER_QUIESCED' })
+    await expect(restarted.onTask!(task('bob'))).resolves.toMatchObject({ kind: 'ok' })
+    await restarted.onShutdown!()
   })
 
   it('normal shutdown preserves caches and later quiescence cleans them without retaining the old index', async () => {
