@@ -744,3 +744,4 @@ fail-open。账本是 `audit_log` 同构的观测层, 配额闸是其上的执�
 - 保留已有时间链及内部安全底座，未完成的纠正入口保持关闭；不再把完整硬删除作为基础时间记忆交付前置。
 - 推送前宿主回归 3759 通过、5 原有跳过，框架门通过；交付边界与状态见
   [`2026-09-12-temporal-memory-source-release.md`](releases/2026-09-12-temporal-memory-source-release.md)。
+- 已从 `0b92bce1` 正常快进推送至 `6def862d`，没有强推；服务器未部署。GitHub 回执的 22 项依赖告警只记录，未扩展处理。
