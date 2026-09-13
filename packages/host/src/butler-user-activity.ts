@@ -1,3 +1,5 @@
+import { FileButlerUserIsolation } from './butler-user-isolation.js'
+
 export type ButlerUserActivityErrorCode = 'BUTLER_USER_QUIESCED' | 'BUTLER_USER_RETIRE_FAILED' | 'BUTLER_USER_ISOLATION_FAILED'
 
 export interface ButlerUserIsolation {
@@ -95,6 +97,17 @@ export class ButlerUserActivity {
     if (user.closed) throw new ButlerUserActivityError('BUTLER_USER_QUIESCED')
     user.finalizers.add(cleanup)
     return () => !user.closed && user.finalizers.delete(cleanup)
+  }
+
+  /** Destructive disk maintenance needs a real barrier bound to the same configured root. */
+  async quiesceMemoryRoot(rootDir: string, userId: string): Promise<void> {
+    if (!(this.isolation instanceof FileButlerUserIsolation) || !this.isolation.isForRoot(rootDir)) {
+      throw new ButlerUserActivityError('BUTLER_USER_ISOLATION_FAILED')
+    }
+    await this.quiesce(userId)
+    // quiesce can return its cached success. Re-establish durability on every
+    // disk-cleanup attempt, even after a previous cleanup or sync failure.
+    await this.isolation.close(userId)
   }
 
   /**

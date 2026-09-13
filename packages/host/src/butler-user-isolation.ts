@@ -89,6 +89,11 @@ export class FileButlerUserIsolation {
     this.rootDir = resolve(rootDir)
   }
 
+  /** Exact configured-root binding; filesystem aliases are not interchangeable contexts. */
+  isForRoot(rootDir: string): boolean {
+    return typeof rootDir === 'string' && !!rootDir.trim() && !rootDir.includes('\0') && resolve(rootDir) === this.rootDir
+  }
+
   async assertOpen(userId: string): Promise<void> {
     const hash = userHash(userId)
     if (this.closed.has(hash)) throw new ButlerUserIsolationError('BUTLER_USER_QUIESCED')
