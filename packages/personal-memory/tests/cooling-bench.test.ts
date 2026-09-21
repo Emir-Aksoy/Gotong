@@ -88,7 +88,7 @@ describe('① 红线:这一层不删东西', () => {
     expect(body).not.toMatch(/\brmdir\b|\brm\s+-/)
   })
 
-  it('翻篇写的确实是 validTo,而且条目还在盘上', async () => {
+  it('降温只改变存储优先级，不改变事实有效期', async () => {
     const corpus = [
       ...Array.from({ length: 10 }, (_, i) =>
         benchEntry({ id: `p${i}`, text: `保护期里的第 ${i} 条`, writtenDaysAgo: 1 + i }),
@@ -105,7 +105,8 @@ describe('① 红线:这一层不删东西', () => {
     const after = await memory.list({ limit: 100 })
     expect(after.length).toBe(corpus.length) // 一条都没少
     const cold = after.find((e) => e.id === 'cold')!
-    expect(validToOf(cold)).toBe(EVICTION_BENCH_NOW)
+    expect(validToOf(cold)).toBeUndefined()
+    expect(cold.meta?.cooledAt).toBe(EVICTION_BENCH_NOW)
   })
 })
 
@@ -301,7 +302,7 @@ describe('⑤ 闸门', () => {
       ),
     ])
     expect((await warm({ memory: bulk, episodic: [], now: EVICTION_BENCH_NOW })).summary).toMatch(
-      /降温翻篇/,
+      /存储降温/,
     )
     const banded = makeFakeMemory(corpus)
     const out = await warm({ memory: banded, episodic: [], now: EVICTION_BENCH_NOW })

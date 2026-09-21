@@ -3,7 +3,8 @@
 ## 2026-09-21 证据优先记忆升级（方向: M；开发分支，未部署）
 
 - 第 1 项：自动记忆单保留来源 ID、原始证据时间，落盘日期明确为 recorded；当前有效性在种子截断前过滤。recall 的 tier/form/importance/validity 在内置检索器排序前统一处理，关联展开也遵守筛选；新增历史查询并标出有效区间。
-- 验证：personal-memory 756 项通过，跨库记忆/探针定向 19 项通过。全量扫描、降温语义及渐进读取继续按 `docs/superpowers/plans/2026-09-21-memory-evidence-retrieval.md` 实施。
+- 第 2 项：文件后端显式 `scan()` 复用严格快照，容量/降温/原子事实去重/临时输出整理及完整导出不再依赖 500 条 UI 页。缺少 scan 能力时拒绝维护，不把半页当全库。降温写 `cooledAt`，仅影响压力逐出优先级，不写事实的 `validTo`；历史数据不自动改写。验证：memory 752、file 191、host 定向 19 项通过；原 recallWindow 边界形状用例替换为完整扫描/缺能力拒绝/500 条外去重行为测试。
+- 验证：personal-memory 756 项通过，跨库记忆/探针定向 19 项通过。全量扫描、降温语义及渐进读取继续按 `docs/zh/ATONG-MEMORY-UPGRADE-PLAN.md` 实施。
 
 > 这里逐字保留 Gotong 从 v1.x 到今天每一个 Phase / Stream / 里程碑的落地记录
 > （commit、关键设计决策、验收门、显式推迟）。**它是从 `CLAUDE.md` 第二节整体

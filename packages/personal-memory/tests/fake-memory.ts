@@ -83,6 +83,9 @@ export function makeFakeMemory(seed: readonly MemoryEntry[] = []): FakeMemory {
         .sort((a, b) => b.ts - a.ts)
         .slice(0, opts.limit ?? 100)
     },
+    async scan(): Promise<MemoryEntry[]> {
+      return [...entries].sort((a, b) => b.ts - a.ts)
+    },
     async forget(id: string): Promise<void> {
       const i = entries.findIndex((e) => e.id === id)
       if (i >= 0) entries.splice(i, 1)

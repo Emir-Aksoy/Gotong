@@ -47,6 +47,7 @@
 import type { MemoryEntry, MemoryHandle } from '@gotong/services-sdk'
 
 import { isExpired } from './bitemporal.js'
+import { scanMemory } from './scan.js'
 import type { MemoryReviewer, ReviewContext, ReviewOutcome } from './review.js'
 import { effectiveSalience, type SalienceOptions } from './salience.js'
 import { DEFAULT_TIERS, isClusterProfile, isDigest, type TierConfig } from './tiers.js'
@@ -145,7 +146,7 @@ export async function enforceBudget(
   const measure = opts.measure ?? defaultMeasure
   const protectRecent = clampNonNeg(opts.protectRecentEpisodic, DEFAULT_PROTECT_RECENT_EPISODIC)
 
-  const raw = await opts.memory.list({ limit: BUDGET_SCAN_LIMIT })
+  const raw = await scanMemory(opts.memory)
   const scoped = opts.filter ? raw.filter((e) => opts.filter!(e)) : raw
 
   const startBytes = await measure(scoped)
@@ -172,7 +173,9 @@ export async function enforceBudget(
   const nowMs = opts.now?.()
   const evictExpiredFirst = opts.evictExpiredFirst === true && nowMs !== undefined
   const expiredRank = (e: MemoryEntry): number =>
-    evictExpiredFirst && isExpired(e, nowMs!) ? 0 : 1
+    evictExpiredFirst && (isExpired(e, nowMs!) ||
+      (levelRank(e, config) === 1 && typeof e.meta?.cooledAt === 'number' &&
+        Number.isFinite(e.meta.cooledAt) && e.meta.cooledAt <= nowMs!)) ? 0 : 1
   const salienceOf = (e: MemoryEntry): number => effectiveSalience(e, nowMs, opts.salience)
   const candidates = scoped
     .filter((e) => !protectedIds.has(e.id))

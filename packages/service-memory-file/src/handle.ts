@@ -175,6 +175,10 @@ export class MemoryFileHandle implements MemoryHandle {
     return this.serializeWrite(() => readMemoryFileSnapshot(this.rootDir, this.owner, this.config.kinds, this.generation ?? null))
   }
 
+  async scan(): Promise<MemoryEntry[]> {
+    return [...(await this.snapshot()).entries].sort((a, b) => b.ts - a.ts)
+  }
+
   /** Guarded stat fingerprint for derived caches; not a full-content CAS revision. */
   async watermark(): Promise<string> {
     return this.serializeWrite(() => readMemoryFileWatermark(this.rootDir, this.owner, this.config.kinds, this.generation ?? null))

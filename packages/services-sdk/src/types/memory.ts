@@ -54,6 +54,10 @@ export interface MemoryHandle {
    */
   list(opts?: { kind?: MemoryKind; limit?: number }): Promise<MemoryEntry[]>
 
+  /** Complete owner-scoped read for maintenance/export. No interactive list cap.
+   * Backends must fail rather than return a partial scan. Not a write transaction. */
+  scan?(): Promise<MemoryEntry[]>
+
   /** Remove one entry by id. No-op if not found. */
   forget(id: string): Promise<void>
 

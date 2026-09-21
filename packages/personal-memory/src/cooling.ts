@@ -67,7 +67,8 @@
  * 免得一次压力尖峰把半个库翻篇。
  */
 
-import { closedMeta, isClosed, validFromOf } from './bitemporal.js'
+import { isClosed, validFromOf } from './bitemporal.js'
+import { scanMemory } from './scan.js'
 import { entryBytes, levelRank } from './budget.js'
 import { PIN_IMPORTANCE, importanceOf } from './importance.js'
 import { linksOf, META_LINKS } from './links.js'
@@ -250,7 +251,7 @@ export function coolingReviewer(opts: CoolingReviewerOptions): MemoryReviewer {
   let priorRung: LedgerRung = 0
 
   return async (ctx: ReviewContext): Promise<ReviewOutcome> => {
-    const entries = await ctx.memory.list({ limit: 10_000 })
+    const entries = await scanMemory(ctx.memory)
     if (entries.length === 0) return {}
 
     const used = entries.reduce((sum, e) => sum + entryBytes(e), 0)
@@ -279,7 +280,7 @@ export function coolingReviewer(opts: CoolingReviewerOptions): MemoryReviewer {
 
     let closed = 0
     for (const id of sel.close) {
-      if (await patch(id, closedMeta(undefined, ctx.now))) closed += 1
+      if (await patch(id, { cooledAt: ctx.now })) closed += 1
     }
 
     // 剪死链也守在这一级下面,不是随手放宽:死链是**逐出造出来的**(被链向的条目
@@ -292,7 +293,7 @@ export function coolingReviewer(opts: CoolingReviewerOptions): MemoryReviewer {
 
     if (closed === 0 && pruned === 0) return {}
     const parts: string[] = []
-    if (closed > 0) parts.push(`降温翻篇 ${closed} 条(${sel.bytes} 字节转为可回收)`)
+    if (closed > 0) parts.push(`存储降温 ${closed} 条(${sel.bytes} 字节，事实有效期不变)`)
     if (pruned > 0) parts.push(`剪死链 ${pruned} 条`)
     return { summary: parts.join(';') }
   }

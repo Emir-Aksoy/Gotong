@@ -6,6 +6,7 @@
  */
 
 import type { MemoryEntry } from '@gotong/services-sdk'
+import { scanMemory } from './scan.js'
 
 import type { MemorySummarizer } from './consolidate.js'
 import { PersonalMemoryError } from './errors.js'
@@ -45,7 +46,7 @@ export interface AtomicFactsReviewerOptions {
   dedupThreshold?: number
   /** Maximum writes per pass, bounded to 0..12. */
   maxFacts?: number
-  /** Existing semantic entries scanned for source IDs, bounded to 0..10_000. */
+  /** Legacy hint retained in the public type; full source deduplication ignores it. */
   recallWindow?: number
 }
 
@@ -59,7 +60,6 @@ export function atomicFactsReviewer(opts: AtomicFactsReviewerOptions): MemoryRev
   const system = opts.system ?? DEFAULT_ATOMIC_FACTS_SYSTEM
   const trigger = opts.triggerEntries ?? DEFAULT_ATOMIC_FACTS_TRIGGER_ENTRIES
   const maxFacts = boundedCount(opts.maxFacts, DEFAULT_MAX_FACTS_PER_PASS)
-  const recallWindow = boundedCount(opts.recallWindow, ATOMIC_FACTS_RECALL_WINDOW)
 
   return async (ctx: ReviewContext): Promise<ReviewOutcome> => {
     if (ctx.episodic.length < trigger || maxFacts === 0) return {}
@@ -79,7 +79,7 @@ export function atomicFactsReviewer(opts: AtomicFactsReviewerOptions): MemoryRev
     const candidates = parseSourceIds(await opts.summarize({ system, user }), supplied)
     if (candidates.length === 0) return {}
 
-    const existing = await ctx.memory.list({ kind: 'semantic', limit: recallWindow })
+    const existing = (await scanMemory(ctx.memory)).filter(e => e.kind === 'semantic')
     const known = new Set<string>()
     const selected = new Set(candidates)
     // Preflight every selected source before writing even the first non-conflicting one.

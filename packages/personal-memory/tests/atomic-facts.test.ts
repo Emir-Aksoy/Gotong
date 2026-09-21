@@ -202,13 +202,26 @@ describe('atomicFactsReviewer evidence selection', () => {
     expect(memory.entries.filter(isAtomicFact)).toHaveLength(0)
   })
 
-  it('bounds the semantic scan by recallWindow without unbounded recall', async () => {
+  it('refuses consolidation without a complete scan instead of trusting a capped page', async () => {
     const episodic = episodicTurns()
     const memory = makeFakeMemory(episodic)
     const list = vi.spyOn(memory, 'list')
-    await atomicFactsReviewer({ summarize: select('e3'), recallWindow: 7 })({ memory, episodic, now: T })
-    expect(list).toHaveBeenCalledWith({ kind: 'semantic', limit: 7 })
+    await expect(atomicFactsReviewer({ summarize: select('e3') })({
+      memory: { ...memory, scan: undefined }, episodic, now: T,
+    })).rejects.toMatchObject({ code: 'scan_unavailable' })
+    expect(list).not.toHaveBeenCalled()
     expect(memory.recallCount).toBe(0)
+  })
+
+  it('deduplicates an original source beyond 500 newer semantic entries', async () => {
+    const episodic = episodicTurns()
+    const saved = packEvidence(evidenceSources(episodic[1]!), 4000)!
+    const memory = makeFakeMemory([
+      ...episodic, { ...saved, id: 'old-fact', ts: 0 },
+      ...Array.from({ length: 501 }, (_, i) => entry(`noise-${i}`, 'semantic', 'unrelated', T + i)),
+    ])
+    expect(await atomicFactsReviewer({ summarize: select('e3') })({ memory, episodic, now: T })).toEqual({})
+    expect(memory.entries.filter(e => e.text === saved.text)).toHaveLength(1)
   })
 
   it.each([undefined, Number.NaN, Number.POSITIVE_INFINITY, 100_000])('keeps maxFacts=%s bounded to 12 writes', async maxFacts => {
@@ -221,15 +234,14 @@ describe('atomicFactsReviewer evidence selection', () => {
     expect(memory.entries.filter(isAtomicFact)).toHaveLength(12)
   })
 
-  it.each([
-    [Number.NaN, 10_000], [Number.POSITIVE_INFINITY, 10_000], [100_000, 10_000],
-    [7.9, 7], [-1, 0], [0, 0],
-  ])('bounds recallWindow=%s to %s', async (recallWindow, limit) => {
+  it('uses a complete inventory even when a legacy recallWindow is supplied', async () => {
     const episodic = episodicTurns()
     const memory = makeFakeMemory(episodic)
     const list = vi.spyOn(memory, 'list')
-    await atomicFactsReviewer({ summarize: select('e3'), recallWindow })({ memory, episodic, now: T })
-    expect(list).toHaveBeenCalledWith({ kind: 'semantic', limit })
+    const scan = vi.spyOn(memory, 'scan')
+    await atomicFactsReviewer({ summarize: select('e3'), recallWindow: 0 })({ memory, episodic, now: T })
+    expect(scan).toHaveBeenCalledOnce()
+    expect(list).not.toHaveBeenCalled()
   })
 
   it.each([0, -1])('does no work for nonpositive maxFacts=%s', async maxFacts => {

@@ -7,6 +7,7 @@
  */
 
 export type PersonalMemoryErrorCode =
+  | 'scan_unavailable'
   | 'correction_invalid'
   | 'evidence_source_conflict'
   | 'evidence_write_mismatch'

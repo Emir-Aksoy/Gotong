@@ -16,6 +16,7 @@
  */
 
 export * from './verified-skills.js'
+export { scanMemory } from './scan.js'
 export { renderEvidence, evidenceSources } from './evidence.js'
 export { formatTurnTime, temporalOf } from './temporal.js'
 export { filterRecall, type RecallQuery } from './recall-query.js'

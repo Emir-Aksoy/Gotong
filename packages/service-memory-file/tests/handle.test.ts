@@ -27,6 +27,15 @@ function newHandle(cfg: MemoryFileConfig = allKinds): MemoryFileHandle {
 }
 
 describe('remember / list / recall', () => {
+  it('explicit scan sees all entries while interactive list stays capped', async () => {
+    const h = newHandle()
+    await h.remember({ kind: 'semantic', text: 'create scoped directory' })
+    const entries = Array.from({ length: 501 }, (_, i) => ({ id: `e${i}`, kind: 'semantic', text: `fact ${i}`, ts: i }))
+    await writeFile(kindFile(rootDir, owner, 'semantic'), entries.map(e => JSON.stringify(e)).join('\n') + '\n')
+    expect(await h.list({ limit: 10_000 })).toHaveLength(500)
+    expect(await h.scan()).toHaveLength(501)
+    expect((await h.scan())[500]!.id).toBe('e0')
+  })
   it('remember returns the entry with id + ts filled', async () => {
     const h = newHandle()
     const e = await h.remember({ kind: 'episodic', text: 'asked about coffee' })

@@ -20,6 +20,7 @@
 import type { Logger } from '@gotong/core'
 import {
   formOf,
+  scanMemory,
   importanceOf,
   isActive,
   isProcedure,
@@ -152,7 +153,7 @@ export class HostButlerMemoryService implements ButlerMemorySurface {
 
   private async exportUnguarded(userId: string): Promise<ButlerMemoryView[]> {
     // Raw list across all kinds for data portability — bounded payload.
-    const all = await this.open(userId).list({ limit: EXPORT_LIMIT })
+    const all = await scanMemory(this.open(userId))
     const now = this.clock()
     return all.map((e) => projectEntry(e, now))
   }
@@ -161,7 +162,7 @@ export class HostButlerMemoryService implements ButlerMemorySurface {
     const mem = this.open(userId)
     // `forget` is a no-op if the id isn't there; report whether it WAS, without
     // leaking other ids — list this user's own entries and check membership.
-    const existed = (await mem.list({ limit: EXPORT_LIMIT })).some((e) => e.id === id)
+    const existed = (await scanMemory(mem)).some((e) => e.id === id)
     await mem.forget(id)
     this.logger.info('member forgot a butler memory', { userId, id, existed })
     // HANDS-M5 补课(Codex 轮 C H2):md 投影是这份 jsonl 的派生物,忘掉一条而不

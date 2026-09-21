@@ -29,6 +29,7 @@
  */
 
 import type { MemoryEntry, MemoryHandle, MemoryKind } from '@gotong/services-sdk'
+import { scanMemory } from './scan.js'
 
 import type { MemoryReviewer, ReviewContext, ReviewOutcome } from './review.js'
 
@@ -80,8 +81,9 @@ export async function cleanOutputs(opts: CleanOutputsOptions): Promise<CleanOutp
 
   let scanned = 0
   let pruned = 0
+  const all = await scanMemory(opts.memory)
   for (const kind of kinds) {
-    const raw = await opts.memory.list({ kind, limit: CLEAN_SCAN_LIMIT })
+    const raw = all.filter(e => e.kind === kind)
     const scoped = opts.filter ? raw.filter((e) => opts.filter!(e)) : raw
     scanned += scoped.length
     // Oldest first so a `max` cap drops the stalest scratch, keeping the freshest.
