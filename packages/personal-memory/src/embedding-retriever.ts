@@ -26,7 +26,8 @@
  * query-dependent, so it never enters the prompt-cache prefix).
  */
 
-import type { MemoryEntry, MemoryHandle, MemoryQuery } from '@gotong/services-sdk'
+import type { MemoryEntry, MemoryHandle } from '@gotong/services-sdk'
+import { filterRecall, type RecallQuery } from './recall-query.js'
 
 import { compareByImportanceThenRecency } from './importance.js'
 import type { MemoryRetriever } from './retriever.js'
@@ -88,10 +89,10 @@ export function embeddingRetriever(opts: EmbeddingRetrieverOptions): MemoryRetri
   const wideK = Math.max(1, Math.floor(opts.wideK ?? 200))
   const minScore = opts.minScore ?? 0
   return {
-    async retrieve(query: MemoryQuery): Promise<MemoryEntry[]> {
+    async retrieve(query: RecallQuery): Promise<MemoryEntry[]> {
       const k = query.k
       const { text, ...rest } = query
-      const page = await opts.memory.recall({ ...rest, k: wideK })
+      const page = filterRecall(await opts.memory.recall({ ...rest, k: wideK }), query)
 
       const q = text?.trim()
       if (!q || page.length === 0) {

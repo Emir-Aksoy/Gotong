@@ -51,6 +51,8 @@ import { lexicalRetriever, type MemoryRetriever } from './retriever.js'
 import { tierOf } from './tiers.js'
 import { formatTurnTime, temporalOf } from './temporal.js'
 import { renderEvidence } from './evidence.js'
+import { filterRecall, type RecallQuery } from './recall-query.js'
+import { validFromOf, validToOf } from './bitemporal.js'
 import { VerifiedSkills, skillStatus, skillState } from './verified-skills.js'
 
 /**
@@ -320,6 +322,8 @@ export class MemoryToolset implements LlmAgentToolset {
                 'Restrict to one memory form. Use "procedure" to surface only ' +
                 'recorded how-to step sequences. Omit to search every form.',
             },
+            history: { type: 'boolean', description: 'Include superseded facts for historical questions. Default false.' },
+            asOf: { type: 'number', description: 'Filter fact validity at this epoch millisecond; not an event-date filter.' },
           },
         },
       },
@@ -481,20 +485,21 @@ export class MemoryToolset implements LlmAgentToolset {
       typeof args.form === 'string' && args.form.trim().length > 0 ? args.form.trim() : undefined
 
     try {
-      const retrieved = await this.retriever.retrieve({
+      const recallQuery: RecallQuery = {
         ...(query !== undefined ? { text: query } : {}),
         ...(kinds && kinds.length > 0 ? { kinds } : {}),
         k,
-      })
+        ...(minImportance === undefined ? {} : { minImportance }),
+        ...(tier === undefined ? {} : { tier }),
+        ...(form === undefined ? {} : { form }),
+        ...(args.history === true ? { history: true } : { asOf: this.now() }),
+        ...(typeof args.asOf === 'number' && Number.isFinite(args.asOf) ? { asOf: args.asOf } : {}),
+      }
+      const retrieved = await this.retriever.retrieve(recallQuery)
       // Importance ranking lives in the default retriever; a custom (vector)
       // retriever owns its own order. `minImportance` / `tier` are universal
       // post-filters — narrowing the result is safe regardless of how it ranked.
-      const entries = retrieved.filter(
-        (e) =>
-          (minImportance === undefined || importanceOf(e) >= minImportance) &&
-          (tier === undefined || tierOf(e, '') === tier) &&
-          (form === undefined || formOf(e, '') === form),
-      )
+      const entries = filterRecall(retrieved, recallQuery).slice(0, k)
       if (entries.length === 0) return okResult('No matching memories.')
 
       // E-M3: optionally expand one hop along links (opt-in). The seeds are the
@@ -503,7 +508,7 @@ export class MemoryToolset implements LlmAgentToolset {
       // minImportance/tier — an explicit association can be exactly the relevant
       // context even if it is low-importance or in another cluster.
       const seedIds = new Set(entries.map((e) => e.id))
-      const result = await this.expand(entries, seedIds)
+      const result = filterRecall(await this.expand(entries, seedIds), recallQuery)
 
       const lines = result.map((e) => {
         const t = tierOf(e, '')
@@ -516,7 +521,9 @@ export class MemoryToolset implements LlmAgentToolset {
         const temporal = temporalOf(e)
         const evidence = renderEvidence(e)
         const observed = temporal && evidence === undefined ? `; ${formatTurnTime(temporal)}` : ''
-        return `${prefix}[${e.id}] (${tag}, p${importanceOf(e)}, recorded: ${new Date(e.ts).toISOString()}${observed}) ${evidence ?? e.text}${suffix}`
+        const validity = recallQuery.history || args.asOf !== undefined
+          ? `; validity: [${validFromOf(e) ?? 'unknown'}, ${validToOf(e) ?? 'open'})` : ''
+        return `${prefix}[${e.id}] (${tag}, p${importanceOf(e)}, recorded: ${new Date(e.ts).toISOString()}${observed}${validity}) ${evidence ?? e.text}${suffix}`
       })
       // F-M3: reinforce what the query MATCHED (the seeds), opt-in. Best-effort
       // and AFTER the result is built — a failed reinforce must not turn a good

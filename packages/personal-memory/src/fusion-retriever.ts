@@ -51,6 +51,7 @@ import type { InvertedIndex } from './inverted-index.js'
 import { localBigramEmbedder } from './local-embedder.js'
 import { relevanceScore } from './relevance.js'
 import type { MemoryRetriever, RetrieverOptions } from './retriever.js'
+import { filterRecall, type RecallQuery } from './recall-query.js'
 
 export interface FusionRetrieverOptions extends RetrieverOptions {
   /** Text→vector. Default {@link localBigramEmbedder} (dependency-free). */
@@ -79,15 +80,14 @@ export function fusedRetriever(index: InvertedIndex, opts?: FusionRetrieverOptio
   const wideK = Math.max(1, Math.floor(opts?.wideK ?? 200))
 
   return {
-    async retrieve(query: MemoryQuery): Promise<MemoryEntry[]> {
+    async retrieve(query: RecallQuery): Promise<MemoryEntry[]> {
       const k = query.k
       const q = query.text?.trim()
 
       // Empty query → importance-then-recency over the whole index (identical
       // contract to the other retrievers for callers that pass no text).
       if (!q) {
-        let all = applyScope(index.entries(), query)
-        all = filterActive(all, opts)
+        const all = filterRecall(index.entries(), query, opts)
         all.sort(compareByImportanceThenRecency)
         return k ? all.slice(0, k) : all
       }
@@ -95,8 +95,10 @@ export function fusedRetriever(index: InvertedIndex, opts?: FusionRetrieverOptio
       // Candidate pool = keyword postings (whole-store coverage) ∪ an
       // importance-recency window (where a real embedder can reach a synonym the
       // keyword arm never surfaced). Deduped, then scope + activeOnly narrowed.
-      const pool = dedupById([...index.query(q), ...topByImportance(index.entries(), wideK)])
-      const scoped = filterActive(applyScope(pool, query), opts)
+      const scoped = dedupById([
+        ...filterRecall(index.query(q), query, opts),
+        ...topByImportance(filterRecall(index.entries(), query, opts), wideK),
+      ])
       if (scoped.length === 0) return []
 
       // The two arms and the fusion arithmetic live in `fuseArms` (MEM-M2) — ONE

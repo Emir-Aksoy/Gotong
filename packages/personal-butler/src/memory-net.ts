@@ -35,6 +35,9 @@ import {
   diffuse,
   applyStoreQuota,
   renderMemorySheet,
+  renderEvidence,
+  temporalOf,
+  formatTurnTime,
   fuseArms,
   effectiveSalience,
   importanceOf,
@@ -124,6 +127,8 @@ export interface MemorySpace {
 /** 网里的一个节点:{@link AssocNode} 收窄到本层的店名。 */
 export interface MemoryNode extends AssocNode {
   readonly store: MemoryStore
+  /** Search text stays clean; display preserves source evidence and temporal labels. */
+  readonly evidenceText?: string
 }
 
 /**
@@ -159,6 +164,7 @@ export async function enumerateMemoryNodes(space: MemorySpace): Promise<MemoryNo
       id: nodeId('memory', e.id),
       store: 'memory',
       text: e.text,
+      evidenceText: renderEvidence(e) ?? `${temporalOf(e) ? formatTurnTime(temporalOf(e)!) : 'event-time: unknown'}; ${e.text}`,
       ts: e.ts,
       // 无选项的 effectiveSalience 就是 importanceOf(1..5) —— 衰减与强化归 M3
       // 通电,这一刀不动它,免得「跨店抬升」和「显著性经济上线」混在一个数字里。
@@ -314,7 +320,9 @@ export async function crossStoreRecall(
   const seedK = Math.max(1, Math.floor(opts.seedK ?? DEFAULT_SEED_K))
   const quota = opts.quota ?? DEFAULT_STORE_QUOTA
 
-  const scored = await fuseArms(query, net.nodes)
+  const eligible = net.nodes.filter(n => opts.now === undefined ||
+    ((n.validFrom === undefined || n.validFrom <= opts.now) && (n.validTo === undefined || opts.now < n.validTo)))
+  const scored = await fuseArms(query, eligible)
   if (scored.size === 0) return []
   const seeds = new Map(
     [...scored.entries()]
@@ -347,7 +355,8 @@ export function renderNetSheet(
   const rows: MemoryNode[] = []
   for (const id of ids) {
     const n = byId.get(id)
-    if (n) rows.push(n)
+    if (n) rows.push({ ...n, ts: undefined,
+      text: `[${n.id}; recorded: ${n.ts === undefined ? 'unknown' : new Date(n.ts).toISOString()}] ${n.evidenceText ?? n.text}` })
   }
   return renderMemorySheet(rows, opts)
 }

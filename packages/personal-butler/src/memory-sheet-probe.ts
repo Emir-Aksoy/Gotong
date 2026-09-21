@@ -117,7 +117,7 @@ export function buildMemorySheetProbe(opts: MemorySheetProbeOptions): ButlerCont
 
       const ids = await crossStoreRecall(net, query, {
         k,
-        ...(opts.now ? { now: opts.now() } : {}),
+        now: (opts.now ?? Date.now)(),
       })
       if (ids.length === 0) return null
 

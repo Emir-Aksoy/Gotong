@@ -46,6 +46,7 @@ import { isActive } from './bitemporal.js'
 import { compareByImportanceThenRecency } from './importance.js'
 import { extractRecallTerms, relevanceScore } from './relevance.js'
 import type { MemoryRetriever, RetrieverOptions } from './retriever.js'
+import { filterRecall, type RecallQuery } from './recall-query.js'
 
 /**
  * A serialized index. We persist the ENTRIES (postings are rebuilt from them on
@@ -194,13 +195,12 @@ export function invertedIndexRetriever(
   opts?: RetrieverOptions,
 ): MemoryRetriever {
   return {
-    async retrieve(query: MemoryQuery): Promise<MemoryEntry[]> {
+    async retrieve(query: RecallQuery): Promise<MemoryEntry[]> {
       const k = query.k
       const q = query.text?.trim()
 
       let candidates = q ? index.query(q) : index.entries()
-      candidates = applyScope(candidates, query)
-      candidates = filterActive(candidates, opts)
+      candidates = filterRecall(candidates, query, opts)
 
       if (!q) {
         candidates.sort(compareByImportanceThenRecency)

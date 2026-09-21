@@ -21,9 +21,9 @@
  * `recall` tool in place; an MCP tool adds a separate, explicitly-named search.
  */
 
-import type { MemoryEntry, MemoryHandle, MemoryQuery } from '@gotong/services-sdk'
+import type { MemoryEntry, MemoryHandle } from '@gotong/services-sdk'
+import { filterRecall, type RecallQuery } from './recall-query.js'
 
-import { isActive } from './bitemporal.js'
 import { compareByImportanceThenRecency } from './importance.js'
 import { relevanceScore } from './relevance.js'
 
@@ -34,7 +34,7 @@ export interface MemoryRetriever {
    * that ignores a field (e.g. a pure vector store with no `since`) just returns
    * its best ranking — the tool layer already clamps `k`.
    */
-  retrieve(query: MemoryQuery): Promise<MemoryEntry[]>
+  retrieve(query: RecallQuery): Promise<MemoryEntry[]>
 }
 
 /** Options shared by the built-in retrievers. */
@@ -53,17 +53,6 @@ export interface RetrieverOptions {
 }
 
 /**
- * Filter a freshly-pulled page to the active slice when `activeOnly` is set.
- * Returns the page unchanged otherwise — so the default path is allocation-free
- * and byte-for-byte the pre-D behaviour.
- */
-function filterActive(page: MemoryEntry[], opts?: RetrieverOptions): MemoryEntry[] {
-  if (!opts?.activeOnly) return page
-  const now = (opts.now ?? ((): number => Date.now()))()
-  return page.filter((e) => isActive(e, now))
-}
-
-/**
  * The default retriever: the memory handle's own `recall`, re-ranked by
  * importance. It pulls a wider recency window from the handle, then orders by
  * importance-then-recency (a pure comparator) and clamps back to `k` — so a
@@ -76,12 +65,12 @@ function filterActive(page: MemoryEntry[], opts?: RetrieverOptions): MemoryEntry
  */
 export function handleRetriever(memory: MemoryHandle, opts?: RetrieverOptions): MemoryRetriever {
   return {
-    async retrieve(query: MemoryQuery): Promise<MemoryEntry[]> {
+    async retrieve(query: RecallQuery): Promise<MemoryEntry[]> {
       const k = query.k
       // Pull a wider recency window so importance can outrank pure recency
       // within the page; a vector backend would not need this.
       const wideK = k ? Math.min(k * 4, 200) : 200
-      const page = filterActive(await memory.recall({ ...query, k: wideK }), opts)
+      const page = filterRecall(await memory.recall({ ...query, k: wideK }), query, opts)
       page.sort(compareByImportanceThenRecency)
       return k ? page.slice(0, k) : page
     },
@@ -110,14 +99,14 @@ export function handleRetriever(memory: MemoryHandle, opts?: RetrieverOptions): 
  */
 export function lexicalRetriever(memory: MemoryHandle, opts?: RetrieverOptions): MemoryRetriever {
   return {
-    async retrieve(query: MemoryQuery): Promise<MemoryEntry[]> {
+    async retrieve(query: RecallQuery): Promise<MemoryEntry[]> {
       const k = query.k
       const wideK = k ? Math.min(k * 8, 200) : 200
       // Drop `text` from the backend query — its substring filter would discard
       // the very non-contiguous CJK matches this retriever exists to rank. We
       // pull by recency (honoring kinds / since) and rank `text` ourselves.
       const { text, ...rest } = query
-      const page = filterActive(await memory.recall({ ...rest, k: wideK }), opts)
+      const page = filterRecall(await memory.recall({ ...rest, k: wideK }), query, opts)
 
       const q = text?.trim()
       if (!q) {
