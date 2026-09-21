@@ -248,6 +248,7 @@ export class PersonalButlerAgent extends MemoryAugmentedAgent {
   private readonly governedGates: readonly GovernedActionToolset[]
   /** CARE-M4 — per-turn context probe (see the option's doc). */
   private readonly contextProbe: ((task: Task) => Promise<string | null>) | undefined
+  private readonly dynamicMemoryBudget: PersonalButlerAgentOptions['memoryReadBudget']
   /** The current turn's probe result; null between turns / on resume. */
   private turnContext: string | null = null
   /** LIB-M3 — stable-segment card provider (see the option's doc). */
@@ -308,6 +309,7 @@ export class PersonalButlerAgent extends MemoryAugmentedAgent {
     })
     this.governedGates = governedList
     this.contextProbe = opts.contextProbe
+    this.dynamicMemoryBudget = opts.memoryReadBudget
     this.stableContext = opts.stableContext
     this.longRun = opts.longRun
   }
@@ -329,6 +331,12 @@ export class PersonalButlerAgent extends MemoryAugmentedAgent {
    * degrades to "no injection" — chat must survive a sick probe.
    */
   protected override async handleTask(task: Task): Promise<unknown> {
+    return this.dynamicMemoryBudget
+      ? this.dynamicMemoryBudget.runForTask(task, () => this.handleTaskInMemoryScope(task))
+      : this.handleTaskInMemoryScope(task)
+  }
+
+  private async handleTaskInMemoryScope(task: Task): Promise<unknown> {
     // LONG-M2 — a segment-marked task takes the driver lane and DELIBERATELY
     // bypasses `super.handleTask`: no episodic capture (the machine-rendered
     // relay prompt would pollute the conversation log every segment) and no
@@ -359,6 +367,12 @@ export class PersonalButlerAgent extends MemoryAugmentedAgent {
    *  STABLE card is the opposite: it re-reads (state reflects now — the frozen
    *  block after a restart behaves the same way). */
   protected override async handleResume(task: Task, state: unknown): Promise<unknown> {
+    return this.dynamicMemoryBudget
+      ? this.dynamicMemoryBudget.runForTask(task, () => this.handleResumeInMemoryScope(task, state))
+      : this.handleResumeInMemoryScope(task, state)
+  }
+
+  private async handleResumeInMemoryScope(task: Task, state: unknown): Promise<unknown> {
     // LONG-M2 — detection order is load-bearing. (1) A RELAY suspend carries
     // only the long-run taskId (cold start between segments — relay ≠ replay);
     // it wins first because its state matches nothing else. (2) A segment task

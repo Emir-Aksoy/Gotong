@@ -54,6 +54,7 @@ import { DEFAULT_TIERS, isClusterProfile, isDigest, type TierConfig } from './ti
 
 /** How many entries a budget scan pulls. Generous — a consolidated butler holds
  *  far fewer; an over-this namespace is itself the problem the budget bounds. */
+/** Legacy exported value; complete maintenance scans no longer truncate at it. */
 export const BUDGET_SCAN_LIMIT = 10_000
 
 /** Recent episodic entries never evicted (the live working context). */

@@ -30,7 +30,8 @@ import type {
   LlmToolCallResult,
   LlmToolDefinition,
 } from '@gotong/llm'
-import type { MemoryEntry, MemoryHandle, MemoryKind } from '@gotong/services-sdk'
+import { AsyncLocalStorage } from 'node:async_hooks'
+import type { MemoryEntry, MemoryHandle, MemoryKind, NewMemoryEntry } from '@gotong/services-sdk'
 
 import { queryFingerprint, type MemoryQueryHitWriter } from './dreaming.js'
 import {
@@ -50,7 +51,8 @@ import {
 import { lexicalRetriever, type MemoryRetriever } from './retriever.js'
 import { tierOf } from './tiers.js'
 import { formatTurnTime, temporalOf } from './temporal.js'
-import { renderEvidence } from './evidence.js'
+import { renderEvidence, evidenceSources, packEvidence, type UserEvidence } from './evidence.js'
+import { MemoryReadBudget, MEMORY_READ_PAGE_BYTES } from './read-budget.js'
 import { filterRecall, type RecallQuery } from './recall-query.js'
 import { validFromOf, validToOf } from './bitemporal.js'
 import { VerifiedSkills, skillStatus, skillState } from './verified-skills.js'
@@ -81,6 +83,9 @@ export type MemoryLinkLookup = (
 ) => readonly MemoryEntry[] | Promise<readonly MemoryEntry[]>
 
 export interface MemoryToolsetOptions {
+  requireUserEvidence?: boolean
+  evidenceLookup?: MemoryLinkLookup
+  readBudget?: MemoryReadBudget
   /** Owner-scoped trusted evaluation service; approval is NOT a memory tool. */
   skills?: VerifiedSkills
   /** The (already per-owner-scoped) memory handle the tools act on. */
@@ -133,6 +138,10 @@ const DEFAULT_RECALL_K = 12
 const RECALL_HARD_CAP = 50
 
 export class MemoryToolset implements LlmAgentToolset {
+  private readonly userEvidence = new AsyncLocalStorage<readonly UserEvidence[]>()
+  private readonly requireUserEvidence: boolean
+  private readonly evidenceLookup: MemoryLinkLookup | undefined
+  private readonly readBudget: MemoryReadBudget | undefined
   private readonly memory: MemoryHandle
   private readonly retriever: MemoryRetriever
   private readonly writableKinds: ReadonlySet<MemoryKind>
@@ -145,6 +154,9 @@ export class MemoryToolset implements LlmAgentToolset {
   private readonly skills: VerifiedSkills
 
   constructor(opts: MemoryToolsetOptions) {
+    this.requireUserEvidence = opts.requireUserEvidence ?? false
+    this.evidenceLookup = opts.evidenceLookup
+    this.readBudget = opts.readBudget
     this.memory = opts.memory
     this.skills = opts.skills ?? new VerifiedSkills({ memory: opts.memory })
     // Recall goes through the retriever (default = Chinese-aware lexical rank);
@@ -163,6 +175,14 @@ export class MemoryToolset implements LlmAgentToolset {
     this.now = opts.now ?? Date.now
   }
 
+  runForTask<T>(task: { id: string; from: string }, fn: () => Promise<T>): Promise<T> {
+    return this.readBudget ? this.readBudget.runForTask(task, fn) : fn()
+  }
+
+  withUserEvidence<T>(sources: readonly UserEvidence[], fn: () => Promise<T>): Promise<T> {
+    return this.userEvidence.run(sources, fn)
+  }
+
   listTools(): LlmToolDefinition[] {
     const writable = [...this.writableKinds]
     return [
@@ -173,10 +193,12 @@ export class MemoryToolset implements LlmAgentToolset {
           'for a lasting fact about the user or a decision — it appears in ' +
           'future sessions automatically. Use `episodic` for a note about ' +
           'what just happened. Only record things that will still matter ' +
-          'later; do not log every message.',
+          'later; do not log every message.' + (this.requireUserEvidence
+            ? ' Only verbatim whole user quotes are accepted. Use the current user message, or cite sources from recall. Assistant replies and self-declared confirmation are not user evidence.' : ''),
         inputSchema: {
           type: 'object',
           properties: {
+            sources: { type: 'array', items: { type: 'string' }, description: 'Optional source memory entry IDs. Stored evidence must exactly equal text; no paraphrases.' },
             text: {
               type: 'string',
               description: 'The fact or note to remember. One self-contained sentence is ideal.',
@@ -377,8 +399,8 @@ export class MemoryToolset implements LlmAgentToolset {
   // --- tool bodies ------------------------------------------------------
 
   private async doRemember(args: Record<string, unknown>): Promise<LlmToolCallResult> {
-    const text = typeof args.text === 'string' ? args.text.trim() : ''
-    if (!text) return errorResult('`text` is required and must be a non-empty string.')
+    const text = typeof args.text === 'string' ? (this.requireUserEvidence ? args.text : args.text.trim()) : ''
+    if (!text.trim()) return errorResult('`text` is required and must be a non-empty string.')
 
     let kind: MemoryKind = this.writableKinds.has('semantic')
       ? 'semantic'
@@ -397,7 +419,23 @@ export class MemoryToolset implements LlmAgentToolset {
 
     try {
       const meta = importance === undefined ? undefined : { [META_IMPORTANCE]: importance }
-      const entry = await this.memory.remember({ kind, text, ...(meta ? { meta } : {}) })
+      let input: NewMemoryEntry = { kind, text, ...(meta ? { meta } : {}) }
+      if (this.requireUserEvidence) {
+        let sources = [...(this.userEvidence.getStore() ?? [])].filter(s => s.text === text)
+        if (args.sources !== undefined) {
+          if (!Array.isArray(args.sources) || args.sources.length === 0 || args.sources.length > 8 ||
+            args.sources.some(id => typeof id !== 'string') || !this.evidenceLookup) return errorResult('Valid source memory IDs are required.')
+          const ids = args.sources as string[]
+          const entries = filterRecall(await this.evidenceLookup(ids), { asOf: this.now() })
+          if (ids.some(id => !entries.some(e => e.id === id))) return errorResult('Source memory is unavailable.')
+          if (entries.some(e => ids.includes(e.id) && evidenceSources(e).length === 0)) return errorResult('Source memory has no trusted user evidence.')
+          sources = entries.filter(e => ids.includes(e.id)).flatMap(evidenceSources)
+        }
+        const packed = packEvidence(sources, 6000, meta)
+        if (!packed || packed.text !== text) return errorResult('No exact trusted user evidence. Use the whole original user quote; assistant text or claimed confirmation cannot create a fact.')
+        input = { ...packed, kind }
+      }
+      const entry = await this.memory.remember(input)
       return okResult(
         `Remembered as ${entry.id} (${entry.kind}${
           importance !== undefined ? `, importance ${importance}` : ''
@@ -510,7 +548,11 @@ export class MemoryToolset implements LlmAgentToolset {
       const seedIds = new Set(entries.map((e) => e.id))
       const result = filterRecall(await this.expand(entries, seedIds), recallQuery)
 
-      const lines = result.map((e) => {
+      const shown: MemoryEntry[] = []
+      const lines: string[] = []
+      const cap = this.readBudget ? Math.min(MEMORY_READ_PAGE_BYTES, this.readBudget.remaining()) : Infinity
+      for (const e of result) {
+        if (this.readBudget?.seen(`recall:${e.id}`)) continue
         const t = tierOf(e, '')
         const tag = t ? `${e.kind}/${t}` : e.kind
         const prefix = seedIds.has(e.id) ? '' : '↪ '
@@ -523,20 +565,27 @@ export class MemoryToolset implements LlmAgentToolset {
         const observed = temporal && evidence === undefined ? `; ${formatTurnTime(temporal)}` : ''
         const validity = recallQuery.history || args.asOf !== undefined
           ? `; validity: [${validFromOf(e) ?? 'unknown'}, ${validToOf(e) ?? 'open'})` : ''
-        return `${prefix}[${e.id}] (${tag}, p${importanceOf(e)}, recorded: ${new Date(e.ts).toISOString()}${observed}${validity}) ${evidence ?? e.text}${suffix}`
-      })
+        const line = `${prefix}[${e.id}] (${tag}, p${importanceOf(e)}, recorded: ${new Date(e.ts).toISOString()}${observed}${validity}) ${evidence ?? e.text}${suffix}`
+        if (Buffer.byteLength([...lines, line].join('\n'), 'utf8') > cap - 100) continue
+        lines.push(line)
+        shown.push(e)
+      }
+      if (shown.length < result.length) lines.push('[Some evidence omitted or already returned; narrow the query or use search_memory/read_memory.]')
+      const rendered = lines.join('\n')
+      if (this.readBudget && !this.readBudget.consume(rendered)) return okResult('Memory read budget exhausted; no more evidence loaded.')
+      for (const e of shown) this.readBudget?.consume('', `recall:${e.id}`)
       // F-M3: reinforce what the query MATCHED (the seeds), opt-in. Best-effort
       // and AFTER the result is built — a failed reinforce must not turn a good
       // recall into an error, and it never alters the returned text. Expansion
       // neighbors are surfaced-by-association, not matched, so they're not
       // reinforced (that would flatten salience across whole neighborhoods).
-      await this.reinforceEntries(entries)
+      await this.reinforceEntries(shown.filter(e => seedIds.has(e.id)))
       // MR2: also stamp THIS query's fingerprint on the matched seeds, so the
       // dreaming sweep can tell a fact that gets asked about in many different
       // ways (high query-diversity) from one merely re-read often. Same
       // best-effort / seeds-only / post-build discipline as reinforce.
-      await this.recordQueryHits(query, entries)
-      return okResult(lines.join('\n'))
+      await this.recordQueryHits(query, shown.filter(e => seedIds.has(e.id)))
+      return okResult(rendered)
     } catch (err) {
       return errorResult(`recall failed: ${errMsg(err)}`)
     }

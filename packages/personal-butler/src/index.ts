@@ -310,3 +310,4 @@ export {
   type IntegrationBenchResult,
   type NetRecallOptions,
 } from './memory-integration-benchmark.js'
+export { MemoryAccessToolset, type MemoryAccessOptions } from './memory-access.js'

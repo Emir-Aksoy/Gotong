@@ -4,6 +4,7 @@
 
 - 第 1 项：自动记忆单保留来源 ID、原始证据时间，落盘日期明确为 recorded；当前有效性在种子截断前过滤。recall 的 tier/form/importance/validity 在内置检索器排序前统一处理，关联展开也遵守筛选；新增历史查询并标出有效区间。
 - 第 2 项：文件后端显式 `scan()` 复用严格快照，容量/降温/原子事实去重/临时输出整理及完整导出不再依赖 500 条 UI 页。缺少 scan 能力时拒绝维护，不把半页当全库。降温写 `cooledAt`，仅影响压力逐出优先级，不写事实的 `validTo`；历史数据不自动改写。验证：memory 752、file 191、host 定向 19 项通过；原 recallWindow 边界形状用例替换为完整扫描/缺能力拒绝/500 条外去重行为测试。
+- 第 3 项：原生 Atong 接入 `search_memory` / `read_memory`，与自动记忆单及 recall 共用每次执行 6000 字节预算、单页 2000 字节；显式读取重新校验来源内容版本，失败不回退旧缓存。remember 只保留可信用户原话，旧失效来源不得被重新包装为当前事实；审批恢复保留绑定原任务与成员的原时间锚。独立审查的缓存恢复和审批证据两项 P2 均经红绿回归及复核关闭。具体能力与限制见 `ATONG-MEMORY-RETRIEVAL.md`。
 - 验证：personal-memory 756 项通过，跨库记忆/探针定向 19 项通过。全量扫描、降温语义及渐进读取继续按 `docs/zh/ATONG-MEMORY-UPGRADE-PLAN.md` 实施。
 
 > 这里逐字保留 Gotong 从 v1.x 到今天每一个 Phase / Stream / 里程碑的落地记录

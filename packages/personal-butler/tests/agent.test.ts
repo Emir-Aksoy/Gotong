@@ -18,6 +18,7 @@ import type {
 } from '@gotong/llm'
 import type { MemoryEntry, MemoryHandle, MemoryKind, MemoryQuery, NewMemoryEntry } from '@gotong/services-sdk'
 import { describe, expect, it } from 'vitest'
+import { MemoryReadBudget, evidenceSources } from '@gotong/personal-memory'
 
 import {
   GovernedActionToolset,
@@ -117,6 +118,23 @@ function okText(res: { kind: string; output?: unknown }): string {
 // ── tests ────────────────────────────────────────────────────────────────
 
 describe('PersonalButlerAgent — benign tools run inline', () => {
+  it('shares the automatic clue budget with nested memory tool scopes', async () => {
+    const budget = new MemoryReadBudget()
+    const remaining: number[] = []
+    const provider = new ScriptProvider([
+      toolTurn({ id: 'check', name: 'inspect_budget', input: {} }), textTurn('done'),
+    ])
+    const agent = new PersonalButlerAgent({ id: 'butler', provider, memory: emptyMemory(), memoryReadBudget: budget,
+      contextProbe: async () => { expect(budget.consume('x'.repeat(1000))).toBe(true); return 'memory clues' },
+      benign: {
+        listTools: () => [{ name: 'inspect_budget', description: 'test', inputSchema: { type: 'object' } }],
+        callTool: async () => { remaining.push(budget.remaining()); return { content: [{ type: 'text', text: 'ok' }] } },
+        runForTask: (t, fn) => budget.runForTask(t, fn),
+      },
+    })
+    expect((await agent.onTask(task('budget-task', 'test'))).kind).toBe('ok')
+    expect(remaining).toEqual([5000])
+  })
   it('executes a benign tool and finishes without suspending', async () => {
     const log: string[] = []
     const exec: string[] = []
@@ -295,6 +313,37 @@ describe('PersonalButlerAgent — governed tool parks for approval', () => {
 })
 
 describe('PersonalButlerAgent — resume injects the decision', () => {
+  it('restores original user evidence and time after approval and agent reconstruction', async () => {
+    const quote = '我上上周吃过烤肉'
+    const writes: MemoryEntry[] = []
+    const memory = emptyMemory()
+    memory.remember = async input => {
+      const saved = { ...input, id: `m${writes.length}`, ts: Date.now() }
+      writes.push(saved)
+      return saved
+    }
+    const originalTime = Date.parse('2026-09-12T10:00:00Z')
+    let clock = originalTime
+    const provider = new ScriptProvider([
+      toolTurn({ id: 'approval', name: 'delete_agent', input: { handle: 'mailer' } }),
+      toolTurn({ id: 'save', name: 'remember', input: { text: quote } }), textTurn('done'),
+    ])
+    const makeAgent = () => new PersonalButlerAgent({ id: 'butler', provider, memory,
+      requireUserEvidence: true, captureNow: () => clock, captureTimeZone: 'UTC', captureMeta: { userId: 'alice' },
+      governed: governedToolset([], async () => ({ decision: 'approve', reason: 'test' })),
+    })
+    const t = task('original', quote)
+    let state: unknown
+    try { await makeAgent().onTask(t) } catch (err) {
+      if (!(err instanceof SuspendTaskError)) throw err
+      state = JSON.parse(JSON.stringify(err.state))
+    }
+    clock += 7 * 86400_000
+    expect((await makeAgent().onResume(t, { ...(state as object), answer: { approved: true } })).kind).toBe('ok')
+    const evidence = writes.filter(e => e.kind === 'semantic').flatMap(evidenceSources)
+    expect(evidence).toHaveLength(1)
+    expect(evidence[0]).toMatchObject({ text: quote, temporal: { observedAt: originalTime }, scope: 'alice' })
+  })
   function parkedThenScript(extraTurns: LlmStreamChunk[][]): {
     agent: PersonalButlerAgent
     exec: string[]

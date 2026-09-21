@@ -43,6 +43,14 @@ describe('HostButlerMemoryService', () => {
   })
 
   // Seed a member's butler memory through the SAME factory the service uses.
+  it('exports all 501 records without leaking another owner', async () => {
+    const m = openButlerMemory({ rootDir: tmp, userId: 'alice', logger: silentLogger })
+    for (let i = 0; i < 501; i++) await m.remember({ kind: 'semantic', text: `fact ${i}` })
+    await seed('bob')
+    expect(await svc.export('alice')).toHaveLength(501)
+    expect(await svc.export('bob')).toHaveLength(3)
+  })
+
   async function seed(userId: string): Promise<void> {
     const m = openButlerMemory({ rootDir: tmp, userId, logger: silentLogger })
     await m.remember({ kind: 'semantic', text: '主人叫阿明,在做奶茶店项目' })

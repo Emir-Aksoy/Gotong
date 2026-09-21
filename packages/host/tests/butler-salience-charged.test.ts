@@ -44,6 +44,9 @@ function memoryOf(seed: MemoryEntry[]) {
   let entries = [...seed]
   return {
     handle: {
+      async scan() {
+        return [...entries]
+      },
       async list() {
         return [...entries]
       },

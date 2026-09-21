@@ -40,9 +40,8 @@
  * seam.
  */
 
-import type { MemoryEntry, MemoryQuery } from '@gotong/services-sdk'
+import type { MemoryEntry } from '@gotong/services-sdk'
 
-import { isActive } from './bitemporal.js'
 import { compareByImportanceThenRecency } from './importance.js'
 import { extractRecallTerms, relevanceScore } from './relevance.js'
 import type { MemoryRetriever, RetrieverOptions } from './retriever.js'
@@ -215,27 +214,4 @@ export function invertedIndexRetriever(
       return k ? ranked.slice(0, k) : ranked
     },
   }
-}
-
-// ---------------------------------------------------------------------------
-// internals
-// ---------------------------------------------------------------------------
-
-/** Apply the query's `kinds` / `since` narrowing (the index itself is kind-agnostic). */
-function applyScope(page: MemoryEntry[], query: MemoryQuery): MemoryEntry[] {
-  const kinds = query.kinds && query.kinds.length > 0 ? new Set(query.kinds) : undefined
-  const since = query.since ?? 0
-  if (!kinds && since <= 0) return page
-  return page.filter((e) => (!kinds || kinds.has(e.kind)) && e.ts >= since)
-}
-
-/**
- * Drop closed / not-yet-valid facts when `activeOnly` is set (mirrors
- * `retriever.ts`'s identically-named private helper — same D semantics; an entry
- * with no validity meta is always active, so legacy data is unaffected).
- */
-function filterActive(page: MemoryEntry[], opts?: RetrieverOptions): MemoryEntry[] {
-  if (!opts?.activeOnly) return page
-  const now = (opts.now ?? ((): number => Date.now()))()
-  return page.filter((e) => isActive(e, now))
 }

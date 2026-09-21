@@ -11,6 +11,7 @@ import { describe, expect, it } from 'vitest'
 
 import { DEFAULT_TIERS, MemoryAugmentedAgent, PersonalMemoryError } from '../src/index.js'
 import { entry, makeFakeMemory } from './fake-memory.js'
+import { evidenceSources } from '../src/evidence.js'
 
 /** Minimal capturing provider — plain text, no tools. Records every request. */
 class CaptureProvider implements LlmProvider {
@@ -42,6 +43,22 @@ function task(id: string, prompt: string, to = 'butler'): Task {
 }
 
 describe('MemoryAugmentedAgent', () => {
+  it('binds remember evidence to the actual turn, original clock and owner', async () => {
+    const memory = makeFakeMemory()
+    const quote = '我上上周吃过烤肉'
+    const now = Date.parse('2026-09-12T10:00:00Z')
+    const provider = new ScriptProvider([
+      [{ type: 'tool_use', toolUse: { type: 'tool_use', id: 'tu1', name: 'remember', input: { text: quote } } }, { type: 'end', stopReason: 'tool_use' }],
+      [{ type: 'text', text: 'noted' }, { type: 'end', stopReason: 'end_turn' }],
+    ])
+    const agent = new MemoryAugmentedAgent({ id: 'butler', provider, memory,
+      requireUserEvidence: true, captureNow: () => now, captureTimeZone: 'UTC', captureMeta: { userId: 'alice' } })
+    expect((await agent.onTask(task('original', quote))).kind).toBe('ok')
+    const sources = memory.entries.filter(e => e.kind === 'semantic').flatMap(evidenceSources)
+    expect(sources).toHaveLength(1)
+    expect(sources[0]).toMatchObject({ sourceId: 'turn:original', text: quote, scope: 'alice', temporal: { observedAt: now, timeZone: 'UTC' } })
+    expect(sources[0]!.calendar).toBeDefined()
+  })
   it('throws PersonalMemoryError when constructed with no memory handle', () => {
     expect(() => new MemoryAugmentedAgent({ id: 'butler', provider: new CaptureProvider() })).toThrow(
       PersonalMemoryError,

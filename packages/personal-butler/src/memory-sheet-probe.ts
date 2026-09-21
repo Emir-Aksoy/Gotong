@@ -34,7 +34,7 @@
  */
 
 import type { Task } from '@gotong/core'
-import { DEFAULT_SHEET_BYTES, DEFAULT_SHEET_LINES } from '@gotong/personal-memory'
+import { DEFAULT_SHEET_BYTES, DEFAULT_SHEET_LINES, type MemoryReadBudget } from '@gotong/personal-memory'
 
 import { crossStoreRecall, renderNetSheet, type MemoryNet } from './memory-net.js'
 import type { ButlerContextProbe } from './task-notebook.js'
@@ -42,7 +42,7 @@ import type { ButlerContextProbe } from './task-notebook.js'
 /** 记忆单在提示词里的抬头。每行的出处由 `renderNetSheet` 自己带。 */
 export const MEMORY_SHEET_HEADER =
   '【记忆单】下面是按这一问从你的记忆、知识库、任务本、长任务档案里联想到的片段,' +
-  '每行方括号里是日期与出处。它们是**线索不是结论**:要引用就按出处去核,' +
+  '每行带来源 id/revision，recorded 仅为记录日期。它们是**线索不是结论**:需要详情时用 read_memory 核对原文；跨库搜索用 search_memory。' +
   '核不到就如实说记不清,不要凭印象编。'
 
 /** 一张记忆单最多放几条。比 `crossStoreRecall` 的默认宽一点没有意义——尾巴越长,
@@ -50,6 +50,7 @@ export const MEMORY_SHEET_HEADER =
 export const DEFAULT_SHEET_K = 6
 
 export interface MemorySheetProbeOptions {
+  readonly budget?: MemoryReadBudget
   /**
    * 取当前的网。**每轮调用**,由调用方决定是重建还是复用缓存。
    * 返回 `null`(还没建好 / 空空间 / 调用方主动关掉)⇒ 探针静默。
@@ -121,12 +122,16 @@ export function buildMemorySheetProbe(opts: MemorySheetProbeOptions): ButlerCont
       })
       if (ids.length === 0) return null
 
-      const sheet = renderNetSheet(net, ids, { maxBytes, maxLines })
+      const headerBytes = Buffer.byteLength(`${MEMORY_SHEET_HEADER}\n`, 'utf8')
+      const available = opts.budget ? Math.min(maxBytes, opts.budget.remaining()) - headerBytes : maxBytes
+      if (available <= 0) return null
+      const sheet = renderNetSheet(net, ids, { maxBytes: available, maxLines })
       // 预算被抬头之外的东西吃光时 `sheet` 会是空串 —— 那就还是「没料」,
       // 不要只贴一个抬头下去:一行内容都没有的抬头是纯噪声。
       if (!sheet) return null
 
-      return `${MEMORY_SHEET_HEADER}\n${sheet}`
+      const rendered = `${MEMORY_SHEET_HEADER}\n${sheet}`
+      return !opts.budget || opts.budget.consume(rendered) ? rendered : null
     } catch (err) {
       // 顾问姿态:建网/读盘失败一律吞掉,正常聊天照走。
       opts.logger?.warn('memory sheet probe failed, injecting nothing', {

@@ -26,7 +26,7 @@
  */
 
 import { AsyncLocalStorage } from 'node:async_hooks'
-import type { Task } from '@gotong/core'
+import { SuspendTaskError, isSuspendTaskError, type Task } from '@gotong/core'
 import {
   ComposedToolset,
   LlmAgent,
@@ -50,8 +50,14 @@ import { observeTurnTime, type TurnTime } from './temporal.js'
 import type { TierConfig } from './tiers.js'
 import { MemoryToolset, type MemoryLinkLookup } from './toolset.js'
 import type { VerifiedSkills } from './verified-skills.js'
+import { evidenceSources } from './evidence.js'
+import type { MemoryReadBudget } from './read-budget.js'
+import { loadTurnTime, saveTurnTime } from './turn-evidence-state.js'
 
 export interface MemoryAugmentedAgentOptions extends LlmAgentOptions {
+  requireUserEvidence?: boolean
+  memoryEvidenceLookup?: MemoryLinkLookup
+  memoryReadBudget?: MemoryReadBudget
   verifiedSkills?: VerifiedSkills
   /**
    * Memory handle. Falls back to `services.memory` when omitted. A
@@ -156,6 +162,7 @@ export class MemoryAugmentedAgent extends LlmAgent {
   private readonly captureMeta: Record<string, unknown> | undefined
   private readonly captureNow: () => number
   private readonly captureTimeZone: string | undefined
+  private readonly requireUserEvidence: boolean
   private readonly foldRestatements: boolean
   /** Re-recall the frozen block per task (always-on butler) vs once per session. */
   private readonly frozenRefreshPerTask: boolean
@@ -172,6 +179,9 @@ export class MemoryAugmentedAgent extends LlmAgent {
 
     const memoryToolset = new MemoryToolset({
       memory,
+      requireUserEvidence: opts.requireUserEvidence,
+      evidenceLookup: opts.memoryEvidenceLookup,
+      readBudget: opts.memoryReadBudget,
       skills: opts.verifiedSkills,
       ...(opts.writableMemoryKinds !== undefined
         ? { writableKinds: opts.writableMemoryKinds }
@@ -199,6 +209,7 @@ export class MemoryAugmentedAgent extends LlmAgent {
     this.captureMeta = opts.captureMeta
     this.captureNow = opts.captureNow ?? Date.now
     this.captureTimeZone = opts.captureTimeZone
+    this.requireUserEvidence = opts.requireUserEvidence ?? false
     this.frozenRefreshPerTask = opts.frozenRefreshPerTask ?? false
     this.session = new MemorySession({
       memory,
@@ -237,7 +248,7 @@ export class MemoryAugmentedAgent extends LlmAgent {
     // the default keeps the once-per-session cache (a stable prompt prefix).
     if (this.frozenRefreshPerTask) this.session.refresh()
     await this.session.ensureFrozenBlock()
-    const out = await super.handleTask(task)
+    const out = await this.withTurnEvidence(task, temporal, () => super.handleTask(task))
     await this.captureTurn(task, out, temporal)
     return out
   }
@@ -246,9 +257,28 @@ export class MemoryAugmentedAgent extends LlmAgent {
   protected override async handleResume(task: Task, state: unknown): Promise<unknown> {
     if (this.frozenRefreshPerTask) this.session.refresh()
     await this.session.ensureFrozenBlock()
-    const out = await this.resumingTask.run(task, () => this.resumeBody(task, state))
-    await this.captureTurn(task, out)
+    const temporal = loadTurnTime(state, task, this.id, this.captureMeta)
+    const out = await this.withTurnEvidence(task, temporal,
+      () => this.resumingTask.run(task, () => this.resumeBody(task, state)))
+    await this.captureTurn(task, out, temporal)
     return out
+  }
+
+  private async withTurnEvidence<T>(task: Task, temporal: TurnTime | undefined, work: () => Promise<T>): Promise<T> {
+    const captured = !temporal || isHeartbeatPayload(task) ? null : buildTurnCapture({
+      userText: extractUserText(task), replyText: '', taskId: task.id, from: task.from,
+      temporal, meta: this.captureMeta, maxChars: this.captureMaxChars,
+    })
+    const sources = captured ? evidenceSources({ ...captured, id: `turn:${task.id}`, ts: temporal!.observedAt }) : []
+    try { return await this.memoryToolset.withUserEvidence(sources, work) }
+    catch (error) {
+      if (this.requireUserEvidence && temporal && isSuspendTaskError(error) &&
+        error.state && typeof error.state === 'object' && !Array.isArray(error.state)) {
+        throw new SuspendTaskError({ resumeAt: error.resumeAt,
+          state: saveTurnTime(error.state as Record<string, unknown>, task, this.id, this.captureMeta, temporal) })
+      }
+      throw error
+    }
   }
 
   /**

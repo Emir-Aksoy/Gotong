@@ -17,6 +17,7 @@
 
 export * from './verified-skills.js'
 export { scanMemory } from './scan.js'
+export { MemoryReadBudget, MEMORY_READ_BYTES, MEMORY_READ_PAGE_BYTES, utf8Prefix } from './read-budget.js'
 export { renderEvidence, evidenceSources } from './evidence.js'
 export { formatTurnTime, temporalOf } from './temporal.js'
 export { filterRecall, type RecallQuery } from './recall-query.js'

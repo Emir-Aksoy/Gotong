@@ -27,11 +27,12 @@ import { dirname, join } from 'node:path'
 
 import type { Hub, Logger, Participant } from '@gotong/core'
 import { TwoTierToolset, type LlmProvider } from '@gotong/llm'
-import { VerifiedSkills, type Embedder } from '@gotong/personal-memory'
+import { VerifiedSkills, MemoryReadBudget, type Embedder } from '@gotong/personal-memory'
 import { buildSkillSandboxRunner, buildSkillTestApproval, skillEvaluationTask } from './personal-butler-verified-skills.js'
 import {
   BUTLER_MAX_TOOL_ROUNDS,
   PersonalButlerAgent,
+  MemoryAccessToolset,
   buildButlerClockLabel,
   buildButlerClockProbe,
   buildButlerSessionHintProbe,
@@ -780,6 +781,12 @@ export function buildButlerFactory(deps: ButlerFactoryDeps): ButlerFactory {
         // AFR-M4 — 随身向导+医生:一个 gotong_guide 工具按 topic 取策展知识卡
         // (纯常量渲染零依赖);进目录长尾 —— 说明书型低频,正是长尾的第一租户。
         const guideToolset = buildButlerGuideToolset()
+        const memoryReadBudget = new MemoryReadBudget()
+        const memoryNet = buildButlerMemoryNetProvider({
+          userId, recallIndex, knowledge: knowledgeLibrary, notebook: taskNotebook,
+          dossiers: longRunStore, logger: log,
+        })
+        const memoryAccess = new MemoryAccessToolset({ net: memoryNet, budget: memoryReadBudget })
         // AFR-M3 — 工具面两层化。benignFlat 保持今天的平铺全集(B1 能力清单的
         // 来源:两层化只改「schema 怎么呈现」,不改「能干什么」);上脸的 benign
         // 按 butler-tool-tiers.ts 名单把低频长尾折进 TwoTierToolset,经
@@ -787,6 +794,7 @@ export function buildButlerFactory(deps: ButlerFactoryDeps): ButlerFactory {
         // MCP read)与被一等描述点名的工具永远留一等(名单文件逐条记了理由);
         // governed / memory 不碰 —— 风险面必须保留一等 schema。
         const benignFlat = [
+          memoryAccess,
           ...(tools ? [tools] : []),
           // S1-M2 — the READ half of the row's MCP servers (search notes, list
           // events, …) runs inline; the WRITE half goes into `governed` below.
@@ -889,6 +897,9 @@ export function buildButlerFactory(deps: ButlerFactoryDeps): ButlerFactory {
           // for why the butler needs more headroom than the generic default of 8.
           maxToolRounds: BUTLER_MAX_TOOL_ROUNDS,
           memory,
+          requireUserEvidence: true,
+          memoryEvidenceLookup: (ids: readonly string[]) => recallIndex.lookupByIds(ids),
+          memoryReadBudget,
           verifiedSkills,
           memoryRetriever: recallIndex.retriever({ activeOnly: true }),
           // M-GRAPH — graph mode on ⇒ recall expands one hop along links the 6h
@@ -973,14 +984,8 @@ export function buildButlerFactory(deps: ButlerFactoryDeps): ButlerFactory {
             // 召不到 / 建网失败 ⇒ null ⇒ 提示词字节不变。会话窗不在这个作用域
             // (住 im-bridge-wiring),少那一面的代价见 personal-butler-memory-net.ts。
             buildMemorySheetProbe({
-              net: buildButlerMemoryNetProvider({
-                userId,
-                recallIndex,
-                knowledge: knowledgeLibrary,
-                notebook: taskNotebook,
-                dossiers: longRunStore,
-                logger: log,
-              }),
+              net: memoryNet,
+              budget: memoryReadBudget,
               logger: log,
             }),
           ),

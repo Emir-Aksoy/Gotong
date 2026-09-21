@@ -43,6 +43,20 @@ function countingIndex(entries: MemoryEntry[]): { assertUsable: () => Promise<vo
 }
 
 describe('① TTL', () => {
+  it('explicit evidence reads bypass TTL and never fall back to cached data after a failed read', async () => {
+    let entries = [entry('old', 'old coffee recipe')]
+    let failed = false
+    const net = buildButlerMemoryNetProvider({ userId: 'u', recallIndex: {
+      assertUsable: async () => {}, allEntries: async () => { if (failed) throw new Error('unavailable'); return entries },
+    }, now: () => T0 })
+    expect((await net())!.nodes[0]!.id).toBe('memory:old')
+    entries = [entry('new', 'new coffee recipe')]
+    expect((await net())!.nodes[0]!.id).toBe('memory:old')
+    expect((await net(true))!.nodes[0]!.id).toBe('memory:new')
+    expect((await net())!.nodes[0]!.id).toBe('memory:new')
+    failed = true
+    expect(await net(true)).toBeNull()
+  })
   it('TTL 内复用同一张网,过期后重建', async () => {
     const idx = countingIndex([entry('m1', '我对花生过敏')])
     let clock = T0

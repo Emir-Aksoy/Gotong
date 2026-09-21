@@ -142,11 +142,11 @@ describe('HostButlerMemoryService user isolation', () => {
           return recall(opts)
         })
       } else {
-        const list = handle.list.bind(handle)
-        vi.spyOn(handle, 'list').mockImplementationOnce(async opts => {
+        const scan = handle.scan!.bind(handle)
+        vi.spyOn(handle, 'scan').mockImplementationOnce(async () => {
           started.resolve()
           await release.promise
-          return list(opts)
+          return scan()
         })
       }
       const work = observe(service[op]('alice'))

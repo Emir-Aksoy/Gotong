@@ -27,6 +27,9 @@
 
 /** 一等 benign(高频核心 + 被点名钉住的):每轮直接在脸上。 */
 export const BUTLER_FIRST_CLASS_BENIGN = [
+  // Memory clues explicitly point to these bounded source-reading tools.
+  'search_memory',
+  'read_memory',
   // workflows — 日常动词:看流/跑流
   'list_my_workflows',
   'run_my_workflow',

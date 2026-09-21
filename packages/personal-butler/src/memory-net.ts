@@ -36,6 +36,7 @@ import {
   applyStoreQuota,
   renderMemorySheet,
   renderEvidence,
+  evidenceSources,
   temporalOf,
   formatTurnTime,
   fuseArms,
@@ -51,6 +52,7 @@ import {
   type MemorySheetOptions,
 } from '@gotong/personal-memory'
 import type { MemoryEntry } from '@gotong/services-sdk'
+import { createHash } from 'node:crypto'
 
 import type { KnowledgeLibrary } from './knowledge-library.js'
 import type { LongRunDossierStore } from './longrun-dossier.js'
@@ -129,6 +131,12 @@ export interface MemoryNode extends AssocNode {
   readonly store: MemoryStore
   /** Search text stays clean; display preserves source evidence and temporal labels. */
   readonly evidenceText?: string
+  readonly sourceIds?: readonly string[]
+}
+
+/** Content identity, not an authorization token; ownership comes from the scoped provider. */
+export function memoryNodeRevision(node: MemoryNode): string {
+  return createHash('sha256').update(JSON.stringify(node)).digest('hex')
 }
 
 /**
@@ -164,6 +172,7 @@ export async function enumerateMemoryNodes(space: MemorySpace): Promise<MemoryNo
       id: nodeId('memory', e.id),
       store: 'memory',
       text: e.text,
+      sourceIds: evidenceSources(e).map(s => s.sourceId),
       evidenceText: renderEvidence(e) ?? `${temporalOf(e) ? formatTurnTime(temporalOf(e)!) : 'event-time: unknown'}; ${e.text}`,
       ts: e.ts,
       // 无选项的 effectiveSalience 就是 importanceOf(1..5) —— 衰减与强化归 M3
@@ -353,10 +362,14 @@ export function renderNetSheet(
 ): string {
   const byId = new Map(net.nodes.map((n) => [n.id, n]))
   const rows: MemoryNode[] = []
+  const seen = new Set<string>()
   for (const id of ids) {
     const n = byId.get(id)
+    const sources = n?.sourceIds?.length ? n.sourceIds : [id]
+    if (sources.every(s => seen.has(s))) continue
+    for (const source of sources) seen.add(source)
     if (n) rows.push({ ...n, ts: undefined,
-      text: `[${n.id}; recorded: ${n.ts === undefined ? 'unknown' : new Date(n.ts).toISOString()}] ${n.evidenceText ?? n.text}` })
+      text: `[${n.id}; revision: ${memoryNodeRevision(n)}; recorded: ${n.ts === undefined ? 'unknown' : new Date(n.ts).toISOString()}] ${n.evidenceText ?? n.text}` })
   }
   return renderMemorySheet(rows, opts)
 }

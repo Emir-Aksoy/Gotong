@@ -21,6 +21,15 @@ import {
 import { entry, makeFakeMemory, type FakeMemory } from './fake-memory.js'
 
 const BODY = 'x'.repeat(1000) // 1000 bytes of ASCII
+
+it('budgets the complete store even if list returns only 500 newest entries', async () => {
+  const memory = makeFakeMemory(Array.from({ length: 501 }, (_, i) => entry(`e${i}`, 'semantic', BODY, i)))
+  memory.list = async () => memory.entries.slice(-500)
+  const result = await enforceBudget({ memory, budgetBytes: 500_000 })
+  expect(result?.startBytes).toBe(501_000)
+  expect(result?.evicted).toBe(1)
+  expect(memory.entries.some(e => e.id === 'e0')).toBe(false)
+})
 const idsOf = (mem: FakeMemory): string[] => mem.entries.map((e) => e.id).sort()
 const has = (mem: FakeMemory, id: string): boolean => mem.entries.some((e) => e.id === id)
 

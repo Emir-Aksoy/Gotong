@@ -42,9 +42,8 @@
  *     honest local ceiling MU-M3/M4 lift.
  */
 
-import type { MemoryEntry, MemoryQuery } from '@gotong/services-sdk'
+import type { MemoryEntry } from '@gotong/services-sdk'
 
-import { isActive } from './bitemporal.js'
 import { cosineSimilarity, type Embedder } from './embedding-retriever.js'
 import { compareByImportanceThenRecency } from './importance.js'
 import type { InvertedIndex } from './inverted-index.js'
@@ -233,19 +232,4 @@ function dedupById(entries: MemoryEntry[]): MemoryEntry[] {
 /** Top-N entries by importance-then-recency (the semantic arm's reach window). */
 function topByImportance(entries: MemoryEntry[], n: number): MemoryEntry[] {
   return [...entries].sort(compareByImportanceThenRecency).slice(0, n)
-}
-
-/** Apply the query's `kinds` / `since` narrowing (mirrors inverted-index). */
-function applyScope(page: MemoryEntry[], query: MemoryQuery): MemoryEntry[] {
-  const kinds = query.kinds && query.kinds.length > 0 ? new Set(query.kinds) : undefined
-  const since = query.since ?? 0
-  if (!kinds && since <= 0) return page
-  return page.filter((e) => (!kinds || kinds.has(e.kind)) && e.ts >= since)
-}
-
-/** Drop closed / not-yet-valid facts when `activeOnly` (mirrors inverted-index). */
-function filterActive(page: MemoryEntry[], opts?: RetrieverOptions): MemoryEntry[] {
-  if (!opts?.activeOnly) return page
-  const now = (opts.now ?? ((): number => Date.now()))()
-  return page.filter((e) => isActive(e, now))
 }

@@ -39,7 +39,7 @@ export const DEFAULT_CLEAN_KINDS: readonly MemoryKind[] = ['working']
 /** Default staleness before scratch is pruned — one maintenance cadence (6h). */
 export const DEFAULT_CLEAN_STALE_MS = 6 * 60 * 60 * 1000
 
-/** How many entries per target kind a clean scan pulls (generous; scratch is small). */
+/** Legacy exported value; complete maintenance scans no longer truncate at it. */
 export const CLEAN_SCAN_LIMIT = 10_000
 
 export interface CleanOutputsOptions {

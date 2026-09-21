@@ -18,6 +18,7 @@ import { join } from 'node:path'
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import type { Task } from '@gotong/core'
+import { MemoryReadBudget } from '@gotong/personal-memory'
 
 import { openIntegrationSpace, type IntegrationSpace } from '../src/memory-integration-benchmark.js'
 import { buildMemoryNet, type MemoryNet } from '../src/memory-net.js'
@@ -57,6 +58,17 @@ function task(payload: unknown): Task {
 const liveNet = async (): Promise<MemoryNet> => net
 
 describe('① 静默契约', () => {
+  it('charges the complete automatic sheet to the shared dynamic memory budget', async () => {
+    const budget = new MemoryReadBudget()
+    const probe = buildMemorySheetProbe({ net: liveNet, budget })
+    await budget.runForTask({ id: 'sheet' }, async () => {
+      const sheet = await probe(task('我对什么过敏'))
+      expect(sheet).toContain('花生')
+      const bytes = Buffer.byteLength(sheet!, 'utf8')
+      expect(bytes).toBeLessThanOrEqual(2000)
+      expect(budget.remaining()).toBe(6000 - bytes)
+    })
+  })
   it('取不出问题 ⇒ null', async () => {
     const probe = buildMemorySheetProbe({ net: liveNet })
     for (const p of [undefined, null, 42, '', '   ', {}, { prompt: '  ' }, { messages: [] }]) {

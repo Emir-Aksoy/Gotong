@@ -53,7 +53,6 @@ type ButlerMemoryView = Awaited<ReturnType<ButlerMemorySurface['export']>>[numbe
 /** How many recent episodic captures the privacy panel shows by default. */
 const RECENT_CAPTURE_LIMIT = 30
 /** Hard cap on an export payload — large enough for a personal butler, bounded. */
-const EXPORT_LIMIT = 1000
 
 export interface HostButlerMemoryServiceOpts {
   /** Memory root dir — the SAME tree the butler agent reads/writes per user. */
@@ -152,7 +151,7 @@ export class HostButlerMemoryService implements ButlerMemorySurface {
   }
 
   private async exportUnguarded(userId: string): Promise<ButlerMemoryView[]> {
-    // Raw list across all kinds for data portability — bounded payload.
+    // Export is a complete inventory, unlike the bounded interactive timeline.
     const all = await scanMemory(this.open(userId))
     const now = this.clock()
     return all.map((e) => projectEntry(e, now))

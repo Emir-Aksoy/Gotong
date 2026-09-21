@@ -40,11 +40,11 @@ it('one shared registry drains service, standalone maintenance and retention bef
   const open = memory.openButlerMemory
   vi.spyOn(memory, 'openButlerMemory').mockImplementationOnce(opts => {
     const result = open(opts)
-    const list = result.list.bind(result)
-    vi.spyOn(result, 'list').mockImplementation(async opts => {
+    const scan = result.scan!.bind(result)
+    vi.spyOn(result, 'scan').mockImplementation(async () => {
       serviceEntered.resolve()
       await serviceGate.promise
-      return list(opts)
+      return scan()
     })
     return result
   })

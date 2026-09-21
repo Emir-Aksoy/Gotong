@@ -77,7 +77,7 @@ export interface ButlerMemoryNetOptions {
  */
 export function buildButlerMemoryNetProvider(
   opts: ButlerMemoryNetOptions,
-): () => Promise<MemoryNet | null> {
+): (fresh?: boolean) => Promise<MemoryNet | null> {
   const ttlMs = Math.max(0, Math.floor(opts.ttlMs ?? MEMORY_NET_TTL_MS))
   const maxDossiers = Math.max(0, Math.floor(opts.maxDossiers ?? MEMORY_NET_MAX_DOSSIERS))
   const now = opts.now ?? ((): number => Date.now())
@@ -122,9 +122,21 @@ export function buildButlerMemoryNetProvider(
     })
   }
 
-  return async (): Promise<MemoryNet | null> => {
+  return async (fresh = false): Promise<MemoryNet | null> => {
     if (!await usable()) return null
+    // A validated fresh read replaces the search view; an older in-flight build
+    // must not publish its stale revision over that replacement.
+    if (fresh) invalidate()
     const ticket = epoch
+    if (fresh) {
+      try {
+        const net = await build()
+        if (!await usable() || ticket !== epoch) return null
+        cached = net
+        builtAt = now()
+        return net
+      } catch { return null }
+    }
     if (cached && now() - builtAt < ttlMs) return cached
     if (!building) {
       building = build()

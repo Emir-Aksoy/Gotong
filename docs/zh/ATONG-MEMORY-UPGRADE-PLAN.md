@@ -24,7 +24,7 @@ Development plan, 2026-09-21. Kept in the tracked documentation tree.
 
 - [x] 1. Repair retrieval consistency: original evidence/time in memory sheets, current validity by default, filtering before top-k including neighbors. Regressions in personal-butler and personal-memory tests.
 - [x] 2. Add explicit complete scans for the file backend and maintenance/export callers; separate storage cooling from semantic validity. Test >500 records and cold-but-still-true facts.
-- [ ] 3. Add scoped cross-store search and version-checked source reading with fixed byte budgets, source IDs and deduplication; wire into the native Atong agent. Protect semantic writes with trusted user evidence rather than model-declared provenance.
+- [x] 3. Add scoped cross-store search and version-checked source reading with fixed byte budgets, source IDs and deduplication; wire into the native Atong agent. Protect semantic writes with trusted user evidence rather than model-declared provenance.
 - [ ] 4. Run focused and package regressions, type checks and architecture guards; document delivered behavior and remaining limitations. Commit each independently verified increment with direction M.
 
 ## Acceptance
