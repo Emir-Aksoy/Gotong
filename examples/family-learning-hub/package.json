@@ -26,8 +26,8 @@
     "@gotong/llm-openai": "workspace:*",
     "@gotong/mcp-client": "workspace:*",
     "@gotong/transport-ws": "workspace:*",
-    "ws": "^8.21.1",
-    "yaml": "^2.6.0"
+    "ws": "^8.21.3",
+    "yaml": "^2.9.1"
   },
   "devDependencies": {
     "@types/ws": "^8.5.13"
