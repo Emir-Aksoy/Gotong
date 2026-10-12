@@ -43,11 +43,11 @@
     "@gotong/core": "workspace:*",
     "@gotong/protocol": "workspace:*",
     "@gotong/workflow": "workspace:*",
-    "yaml": "^2.6.0"
+    "yaml": "^2.9.1"
   },
   "devDependencies": {
     "@gotong/identity": "workspace:*",
-    "esbuild": "^0.28.1",
+    "esbuild": "^0.28.2",
     "qrcode-terminal": "^0.12.0",
     "vitest": "^4.1.10"
   }

@@ -33,9 +33,9 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "@xmldom/xmldom": "^0.8.10",
-    "xml-crypto": "^6.0.0",
-    "xpath": "^0.0.34"
+    "@xmldom/xmldom": "^0.8.15",
+    "xml-crypto": "^6.3.3",
+    "xpath": "^0.0.35"
   },
   "devDependencies": {
     "vitest": "^4.1.10"
