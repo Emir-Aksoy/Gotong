@@ -901,10 +901,7 @@ export class PersonalButlerAgent extends MemoryAugmentedAgent {
         return this.runToolLoop(task, this.buildRequest(task))
       }
       if (this.toolset?.runForTask) {
-        return await this.toolset.runForTask(
-          { id: task.id, from: task.from, ancestry: task.ancestry },
-          work,
-        )
+        return await this.toolset.runForTask(task, work)
       }
       return await work()
     } finally {
@@ -950,10 +947,7 @@ export class PersonalButlerAgent extends MemoryAugmentedAgent {
         return this.finishLongRunSegment(task, lrTaskId, out, startMs)
       }
       if (this.toolset?.runForTask) {
-        return await this.toolset.runForTask(
-          { id: task.id, from: task.from, ancestry: task.ancestry },
-          work,
-        )
+        return await this.toolset.runForTask(task, work)
       }
       return await work()
     } finally {

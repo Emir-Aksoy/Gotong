@@ -604,7 +604,9 @@ export class LlmAgent extends AgentParticipant {
     // scope so DispatchToolset (and other ancestry/state-aware
     // toolsets) can inject AsyncLocalStorage context for the
     // duration of this task only. Legacy toolsets without
-    // `runForTask` get the unwrapped path.
+    // `runForTask` get the unwrapped path. The WHOLE task goes in: a toolset
+    // that gates on the member's own words (LIFE's user_quote) reads
+    // `payload`; a fresh `{id, from, ancestry}` would silently strip it.
     const work = async (): Promise<unknown> => {
       if (!this.toolset) {
         // No toolset attached — same code path as v0.2.
@@ -616,10 +618,7 @@ export class LlmAgent extends AgentParticipant {
       return this.handleTaskWithTools(task)
     }
     if (this.toolset?.runForTask) {
-      return this.toolset.runForTask(
-        { id: task.id, from: task.from, ancestry: task.ancestry },
-        work,
-      )
+      return this.toolset.runForTask(task, work)
     }
     return work()
   }
@@ -679,10 +678,7 @@ export class LlmAgent extends AgentParticipant {
     // blinding the cycle gate across the suspend/resume boundary.
     // `this.toolset` is non-null here (early-returned above).
     if (this.toolset.runForTask) {
-      return this.toolset.runForTask(
-        { id: task.id, from: task.from, ancestry: task.ancestry },
-        work,
-      )
+      return this.toolset.runForTask(task, work)
     }
     return work()
   }

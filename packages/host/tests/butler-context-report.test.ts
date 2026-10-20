@@ -27,8 +27,11 @@ import {
   buildButlerClockProbe,
   buildButlerSessionHintProbe,
   composeContextProbes,
+  LIFE_COCKPIT_MAX_BYTES,
   openKnowledgeLibrary,
+  openLifeArchive,
   openTaskNotebook,
+  renderLifeCockpit,
   type ButlerContextProbe,
 } from '@gotong/personal-butler'
 import { DEFAULT_TIERS, renderClusteredFrozenBlock } from '@gotong/personal-memory'
@@ -49,6 +52,7 @@ import {
   KNOWLEDGE_INDEX_CARD_BUDGET_TOKENS,
   buildButlerKnowledgeIndexCard,
 } from '../src/butler-knowledge-index.js'
+import { buildButlerLifeCockpitCard } from '../src/butler-life.js'
 import { buildButlerHubSenseProbe } from '../src/personal-butler-hub-sense.js'
 import { buildButlerLanguageProbe, writeReplyLanguage } from '../src/personal-butler-language.js'
 import { buildButlerLastSeenProbe, writeLastSeen } from '../src/personal-butler-last-seen.js'
@@ -167,6 +171,8 @@ let frozenEmpty: string
 let frozenFull: string
 let indexSample: string // LIB-M3 索引卡样本(真 builder 真库)
 let indexTruncated: string // LIB-M3 索引卡截断顶(胖索引 → ≤500tk)
+let lifeSample: string // LIFE 驾驶舱卡样本(真 builder 真档案)
+let lifeFull: string // LIFE 驾驶舱卡字节顶(提醒堆满 → ≤LIFE_COCKPIT_MAX_BYTES)
 let report: ContextReport
 let emptyProbes: ButlerContextProbe[] // 空态探针组(compose 胶水断言用)
 let historyRows: ContextCardEntry[] // SESS 会话窗填充曲线(空窗/典型/满态)
@@ -376,6 +382,31 @@ beforeAll(async () => {
   )
   indexTruncated = (await buildButlerKnowledgeIndexCard({ library: kbFat })())!
 
+  // LIFE 驾驶舱卡:真档案(登记表 + 几条流水 + 一个待确认提议)走真 builder;
+  // 字节顶用同一渲染器喂堆满提醒的状态,量的是设计上限。
+  const lifeArchive = openLifeArchive({ dir: join(dir, 'life-sample', 'life'), timeZone: 'Asia/Kuala_Lumpur', now: () => NOW })
+  const lifeRegistry = await lifeArchive.ensureRegistry()
+  await lifeArchive.appendRecord({ stream: 'health.weight', fields: { kg: 72.4, condition: '晨起空腹' }, source: { kind: 'user' } })
+  await lifeArchive.appendRecord({ stream: 'mind.mood', fields: { mood: 6, stress: 7 }, source: { kind: 'user' } })
+  await lifeArchive.appendRecord({ stream: 'finance.tx', fields: { amount: 42, direction: '支出', category: '餐饮' }, source: { kind: 'user' } })
+  await lifeArchive.updateDossier('finance', 0, (d, nextId) => ({
+    dossier: { ...d, proposals: [{ id: nextId('p'), kind: 'goal', text: '餐饮每月不超过 2000', at: '2026-07-16', by: 'atong' }] },
+    log: 'propose',
+  }))
+  lifeSample = (await buildButlerLifeCockpitCard({ archive: lifeArchive })())!
+  const lifeState = await lifeArchive.recomputeState()
+  lifeFull = renderLifeCockpit(lifeRegistry, {
+    ...lifeState,
+    domains: {
+      ...lifeState.domains,
+      finance: {
+        records: 1,
+        openItems: 1,
+        alerts: Array.from({ length: 40 }, (_, i) => ({ id: `f${i}`, domain: 'finance', text: `固定支出「订阅服务第 ${i} 项」将于 07-2${i % 10} 扣款`, push: true })),
+      },
+    },
+  })!
+
   // ── history 段(SESS 会话窗)三个刻度 ─────────────────────────────────────
   // 真 ButlerSessionWindow 真读写:填充曲线必须来自真 append/history 的裁剪与
   // 合并规则(尾部 user 丢弃、同角色合并、SESSION_MAX_TURNS 截断),手抄样张
@@ -388,6 +419,8 @@ beforeAll(async () => {
     { segment: 'stable', card: 'frozen-block', state: '预算饱和', text: frozenFull },
     { segment: 'stable', card: 'knowledge-index', state: '样本(7 行)', text: indexSample },
     { segment: 'stable', card: 'knowledge-index', state: '截断顶(120 行)', text: indexTruncated },
+    { segment: 'stable', card: 'life-cockpit', state: '样本(五本,3 条流水)', text: lifeSample },
+    { segment: 'stable', card: 'life-cockpit', state: '字节顶(提醒堆满)', text: lifeFull },
     ...Object.entries(volatileFull).map(([card, text]): ContextCardEntry => {
       return { segment: 'volatile', card, state: card === 'clock' ? '恒在' : '满态', text }
     }),
@@ -446,13 +479,21 @@ describe('LIB-M1 上下文段级基线', () => {
     expect(indexTruncated).toContain('只显示前')
   })
 
-  it('度量:行数=5 stable + 9 volatile + 3 history,段小计与行和一致', () => {
-    expect(report.rows.length).toBe(17)
+  it('LIFE 驾驶舱卡:样本真点火,字节顶咬住且明说收缩', () => {
+    expect(lifeSample).toContain('【生活档案】')
+    expect(lifeSample).toContain('最近记录 07-16')
+    expect(lifeSample).toContain('待处理 1')
+    expect(Buffer.byteLength(lifeFull, 'utf8')).toBeLessThanOrEqual(LIFE_COCKPIT_MAX_BYTES)
+    expect(lifeFull).toMatch(/另有 \d+ 条提醒/)
+  })
+
+  it('度量:行数=7 stable + 9 volatile + 3 history,段小计与行和一致', () => {
+    expect(report.rows.length).toBe(19)
     const vol = report.segments.find((s) => s.segment === 'volatile')!
     const sta = report.segments.find((s) => s.segment === 'stable')!
     const his = report.segments.find((s) => s.segment === 'history')!
     expect(vol.cards).toBe(9)
-    expect(sta.cards).toBe(5)
+    expect(sta.cards).toBe(7)
     expect(his.cards).toBe(3)
     const sum = (rows: readonly { estTokens: number }[]) => rows.reduce((a, r) => a + r.estTokens, 0)
     expect(vol.estTokens).toBe(sum(report.rows.filter((r) => r.segment === 'volatile')))
@@ -533,6 +574,7 @@ describe('LIB-M1 上下文段级基线', () => {
     const personaRow = report.rows.find((r) => r.card === 'persona')!
     const frozenRows = report.rows.filter((r) => r.card === 'frozen-block')
     const indexRows = report.rows.filter((r) => r.card === 'knowledge-index')
+    const lifeRows = report.rows.filter((r) => r.card === 'life-cockpit')
     const his = report.rows.filter((r) => r.segment === 'history')
     const rendered = renderContextReport(report, [
       '---- 场景 ----',
@@ -540,8 +582,9 @@ describe('LIB-M1 上下文段级基线', () => {
       `volatile 满配(九探针齐发): ~${vol.estTokens} tokens`,
       `stable 段(人设样本+冻结块): 空记忆 ~${personaRow.estTokens + frozenRows[0]!.estTokens} → 预算饱和 ~${personaRow.estTokens + frozenRows[1]!.estTokens} tokens`,
       `stable 增量(LIB-M3 索引卡): 样本 ~${indexRows[0]!.estTokens} → 截断顶 ~${indexRows[1]!.estTokens} tokens(预算 ${KNOWLEDGE_INDEX_CARD_BUDGET_TOKENS})`,
+      `stable 增量(LIFE 驾驶舱卡): 样本 ~${lifeRows[0]!.estTokens} → 字节顶 ~${lifeRows[1]!.estTokens} tokens(上限 ${LIFE_COCKPIT_MAX_BYTES} 字节)`,
       `history 段(SESS 会话窗): 空窗 ${his[0]!.estTokens} → 典型 ~${his[1]!.estTokens} → 满态 ~${his[2]!.estTokens} tokens(窗留 ${SESSION_MAX_TURNS} 条 × ${SESSION_TURN_MAX_CHARS} 字,派发先读窗后记当前句、尾条是上轮 assistant 一条不丢 ⇒ 送模型上界 ${SESSION_MAX_TURNS} 条)`,
-      `→ 每轮上下文合计:典型对话 ~${personaRow.estTokens + frozenRows[1]!.estTokens + indexRows[0]!.estTokens + vol.estTokens + his[1]!.estTokens} → 最坏 ~${personaRow.estTokens + frozenRows[1]!.estTokens + indexRows[1]!.estTokens + vol.estTokens + his[2]!.estTokens} tokens(不含工具面)`,
+      `→ 每轮上下文合计:典型对话 ~${personaRow.estTokens + frozenRows[1]!.estTokens + indexRows[0]!.estTokens + lifeRows[0]!.estTokens + vol.estTokens + his[1]!.estTokens} → 最坏 ~${personaRow.estTokens + frozenRows[1]!.estTokens + indexRows[1]!.estTokens + lifeRows[1]!.estTokens + vol.estTokens + his[2]!.estTokens} tokens(不含工具面)`,
     ])
     expect(rendered).toContain('合计')
     expect(rendered).toContain('每轮必付底价')

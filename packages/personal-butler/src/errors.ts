@@ -28,6 +28,14 @@ export type ButlerErrorCode =
   | 'longrun_not_found'
   /** Long-run dossier (LONG-M1): an explicit cap refused the op (no silent caps). */
   | 'longrun_limit'
+  /** Life dossiers (LIFE-M1): bad stream / field / section / evidence. */
+  | 'life_invalid'
+  /** Life dossiers (LIFE-M1): the referenced domain / record / item doesn't exist. */
+  | 'life_not_found'
+  /** Life dossiers (LIFE-M1): an explicit cap or read budget refused the op. */
+  | 'life_limit'
+  /** Life dossiers (LIFE-M1): dossier revision moved since it was read. */
+  | 'life_conflict'
 
 export class ButlerError extends Error {
   readonly code: ButlerErrorCode

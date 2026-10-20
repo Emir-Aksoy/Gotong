@@ -473,6 +473,9 @@ export function buildButlerBriefComposer(
 export type ButlerBriefPush = (
   userId: string,
   text: string,
+  /** LIFE 免打扰闸用。`dropIfDeferred`:此刻发不了就丢弃而不是暂存(过时即无意义的消息,
+   *  如心境签到);`capExempt`:只守免打扰、不占也不受每日上限(成员自己订阅的运行播报)。 */
+  opts?: { dropIfDeferred?: boolean; capExempt?: boolean },
 ) => Promise<{ delivered: boolean; reason?: string } | void>
 
 export interface ButlerProactiveSweeperOptions {

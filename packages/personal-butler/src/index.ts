@@ -311,3 +311,69 @@ export {
   type NetRecallOptions,
 } from './memory-integration-benchmark.js'
 export { MemoryAccessToolset, type MemoryAccessOptions } from './memory-access.js'
+
+// LIFE:预置生活档案(健康/心境/财务/事业/决策)。结构属模板、内容属阿同、规程属成员;
+// 数由代码算,判断由模型做。磁盘上有 `life/registry.json` 才启用。
+export {
+  LIFE_TEMPLATE_VERSION,
+  LIFE_DOMAIN_TEMPLATES,
+  findLifeDomain,
+  findLifeStream,
+  allLifeStreamRefs,
+  type LifeFieldSpec,
+  type LifeStreamSpec,
+  type LifeStatusMetric,
+  type LifeStatusAgg,
+  type LifeAlertRule,
+  type LifeProtocol,
+  type LifeDomainTemplate,
+} from './life-templates.js'
+export {
+  localDate as lifeLocalDate,
+  localHour as lifeLocalHour,
+  localTime as lifeLocalTime,
+  addDays as lifeAddDays,
+  isoWeekLabel as lifeIsoWeekLabel,
+  weekStart as lifeWeekStart,
+  queryLifeRecords,
+  resolveActive as resolveActiveLifeRecords,
+  evaluateLifeAlerts,
+  type LifeRecord,
+  type LifeRecordSource,
+  type LifeAlert,
+  type LifeGoalMetric,
+  type LifeQueryAgg,
+  type LifeQueryResult,
+} from './life-records.js'
+export {
+  openLifeArchive,
+  LIFE_LIMITS,
+  DEFAULT_LIFE_REGISTRY,
+  EMPTY_DOSSIER,
+  type LifeArchive,
+  type LifeRegistry,
+  type LifeDossier,
+  type LifeState,
+  type LifeDomainSnapshot,
+  type OpenLifeArchiveOptions,
+} from './life-store.js'
+export {
+  renderLifeCockpit,
+  renderLifeDossierCard,
+  renderLifeQueryResult,
+  renderLifeRecordPage,
+  renderLifeView,
+  LIFE_COCKPIT_MARKER,
+  LIFE_COCKPIT_MAX_BYTES,
+  LIFE_DOSSIER_CARD_MAX_BYTES,
+  type LifeCheckinState,
+} from './life-render.js'
+export {
+  createLifeToolsets,
+  lifeTurnText,
+  LIFE_READ_BYTES,
+  LIFE_READ_PAGE_BYTES,
+  type LifeReadBudget,
+  type LifeToolsetOptions,
+  type LifeTaskLike,
+} from './life-toolset.js'

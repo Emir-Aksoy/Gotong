@@ -70,6 +70,14 @@ export const BUTLER_FIRST_CLASS_BENIGN = [
   // 「此刻没事可做」一个正当收法,而折目录 = 模型在最该用它的那一刻看不见它,
   // 只剩下编造进展或去打扰成员两条路。
   'standby_longrun_task',
+  // LIFE 生活档案 4 件 — 健康/心境/财务/事业/决策的日常动词(记一笔、问趋势、
+  // 打开档案、改一个分区),理由①;且被驾驶舱卡(稳定段)逐字点名,理由②。
+  // 只整理成员自己的档案(任务笔记本同款 benign 论证),档案里提到的对外动作
+  // 执行时照样各走各闸。
+  'open_dossier',
+  'log_record',
+  'query_records',
+  'update_dossier',
 ] as const
 
 /** 目录 benign 长尾(一次性配置 / 低频自省 / 按需诊断):经 use_tool 取用。 */
@@ -136,6 +144,9 @@ export const BUTLER_DIRECTORY_BENIGN = [
   // 快满了」);同域 hub_health / my_status 一族。只读 6h 节律落盘的账本,
   // 不丈量不删除;描述零工具点名(M3 的 set_retention 落地前更没得点)。
   'space_report',
+  // LIFE 原始记录分页 — 低频核对(找要更正那条的 id);档案卡正文指路时
+  // 明说「在工具目录里,经 use_tool 调用」,一等四件的描述不点名它。
+  'read_records',
 ] as const
 
 export type ButlerFirstClassBenign = (typeof BUTLER_FIRST_CLASS_BENIGN)[number]

@@ -1766,6 +1766,7 @@ async function main(): Promise<void> {
     taskNudge: { on: butlerDefaultOn },
     // AFR-M7 — 备份陈旧提醒(同意面镜像巡检=开了播报的 owner/admin 才收)。
     ...(butlerBackupOps ? { backupNudge: { on: butlerDefaultOn, ops: butlerBackupOps } } : {}),
+    life: { on: butlerDefaultOn }, // LIFE — 生活档案签到/提醒/周回顾(零模型;无登记表=不动)
   })
   let patrolHealthRef: AdminHealthSurface | undefined
 

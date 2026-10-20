@@ -39,8 +39,12 @@ import {
   buildMemorySheetProbe,
   composeContextProbes,
   createKnowledgeLibraryToolset,
+  createLifeToolsets,
   createTaskNotebookToolset,
+  LIFE_READ_BYTES,
+  LIFE_READ_PAGE_BYTES,
   openKnowledgeLibrary,
+  openLifeArchive,
   openLongRunDossierStore,
   openTaskNotebook,
 } from '@gotong/personal-butler'
@@ -59,6 +63,7 @@ import type { FailureLang } from './failure-translator.js'
 import type { ButlerFactory } from './local-agent-pool.js'
 import type { StewardAgentDirectory, StewardWorkflowEditor } from './hub-steward-service.js'
 import { buildButlerKnowledgeIndexCard } from './butler-knowledge-index.js'
+import { buildButlerLifeCockpitCard, composeStableCards } from './butler-life.js'
 import { buildButlerAskAgentToolset, type ButlerAskRosterSource } from './personal-butler-ask-agent.js'
 import { buildButlerEscalateToolset, type ButlerEscalatePush } from './personal-butler-escalate.js'
 import {
@@ -433,6 +438,19 @@ export function buildButlerFactory(deps: ButlerFactoryDeps): ButlerFactory {
           logger: log,
         })
         const knowledgeToolset = createKnowledgeLibraryToolset(knowledgeLibrary)
+        // LIFE — 预置生活档案(健康/心境/财务/事业/决策):同一 ownerDir 下的 `life/`。
+        // benign 同任务笔记本(只整理成员自己的档案)。一等四件上脸(日常动词 +
+        // 驾驶舱卡点名),原始记录核对折进目录;读取预算独立于记忆预算,两条读路
+        // 互不挤占。目标/规程只认成员当轮原话(工具内校验)。
+        const lifeArchive = openLifeArchive({
+          dir: join(ownerDir(memoryRoot, { kind: 'user', id: userId }), 'life'),
+          logger: log,
+        })
+        const life = createLifeToolsets({
+          archive: lifeArchive,
+          budget: new MemoryReadBudget(LIFE_READ_BYTES, LIFE_READ_PAGE_BYTES),
+          logger: log,
+        })
         // A2 — per-user 上次见面 timestamp for the 时段问候/间隔 card. Lives in a
         // `presence/` sibling of the memory tree (NOT under it) so the opt-in
         // memory git snapshot (MU-M5) isn't churned by a per-turn write.
@@ -822,6 +840,8 @@ export function buildButlerFactory(deps: ButlerFactoryDeps): ButlerFactory {
           remindersToolset,
           taskNotebookToolset,
           knowledgeToolset,
+          life.core,
+          life.archive,
           languageToolset,
           capabilitiesToolset,
           llmCatalogToolset,
@@ -847,6 +867,7 @@ export function buildButlerFactory(deps: ButlerFactoryDeps): ButlerFactory {
           selfStatusToolset,
           environmentToolset,
           knowledgeToolset,
+          life.archive,
           ...(consolidateToolset ? [consolidateToolset] : []),
           languageToolset,
           llmCatalogToolset,
@@ -997,7 +1018,13 @@ export function buildButlerFactory(deps: ButlerFactoryDeps): ButlerFactory {
           // LIB-M3 — the INDEX card rides the STABLE segment (fork 1a): state,
           // not advice, so it refreshes on resume too and caches at 0.1× while
           // unchanged. No INDEX.md ⇒ null ⇒ byte-identical prompt.
-          stableContext: buildButlerKnowledgeIndexCard({ library: knowledgeLibrary, logger: log }),
+          // LIFE — the cockpit card follows it: deterministic bytes (absolute dates,
+          // no clock), changes only when a dossier is written or the day rolls over.
+          // No `life/registry.json` ⇒ null ⇒ byte-identical prompt.
+          stableContext: composeStableCards(
+            buildButlerKnowledgeIndexCard({ library: knowledgeLibrary, logger: log }),
+            buildButlerLifeCockpitCard({ archive: lifeArchive, logger: log }),
+          ),
         })
         indexes.set(participant, recallIndex)
         return participant

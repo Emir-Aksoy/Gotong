@@ -7,6 +7,10 @@
  * approve runs the deferred action, deny / no-decision fails closed.
  */
 
+import { mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+
 import { SuspendTaskError, type Task } from '@gotong/core'
 import type {
   LlmAgentToolset,
@@ -24,6 +28,8 @@ import {
   GovernedActionToolset,
   PersonalButlerAgent,
   buildButlerClockProbe,
+  createLifeToolsets,
+  openLifeArchive,
   readButlerGateState,
   type GovernedClassifier,
 } from '../src/index.js'
@@ -135,6 +141,32 @@ describe('PersonalButlerAgent — benign tools run inline', () => {
     expect((await agent.onTask(task('budget-task', 'test'))).kind).toBe('ok')
     expect(remaining).toEqual([5000])
   })
+  it('LIFE 证据门在真实任务路径上拿得到成员原话(runForTask 收到完整任务)', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'gotong-butler-life-'))
+    try {
+      const archive = openLifeArchive({ dir: join(dir, 'life') })
+      const said = '以后体重只记晨起空腹的'
+      const provider = new ScriptProvider([
+        toolTurn({
+          id: 'p',
+          name: 'update_dossier',
+          input: { domain: 'health', revision: 0, section: 'protocol', op: 'set', text: '体重只记晨起空腹', user_quote: said },
+        }),
+        textTurn('记下了'),
+      ])
+      const agent = new PersonalButlerAgent({
+        id: 'butler',
+        provider,
+        memory: emptyMemory(),
+        benign: createLifeToolsets({ archive }).core,
+      })
+      expect(okText(await agent.onTask(task('life-turn', said)))).toBe('记下了')
+      expect((await archive.readDossier('health')).protocolAdditions.map((a) => a.quote)).toEqual([said])
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
   it('executes a benign tool and finishes without suspending', async () => {
     const log: string[] = []
     const exec: string[] = []

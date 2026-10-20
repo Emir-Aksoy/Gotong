@@ -107,6 +107,8 @@ export const INLINE_PROBE_MARKERS: Readonly<Record<string, RegExp>> = {
  */
 export const STABLE_CARD_REGISTRY: Readonly<Record<string, string>> = {
   'knowledge-index': 'buildButlerKnowledgeIndexCard',
+  // LIFE — 生活档案驾驶舱卡,经 composeStableCards 与索引卡同一注入点。
+  'life-cockpit': 'buildButlerLifeCockpitCard',
 }
 
 /**

@@ -624,13 +624,15 @@ export interface LlmAgentToolset {
    *
    * The task shape is kept permissive to avoid pulling
    * `@gotong/core` into this contract; concrete consumers cast /
-   * pick fields they need.
+   * pick fields they need. Callers pass the whole task, so `payload`
+   * (the member's message) is there for toolsets that gate on it.
    */
   runForTask?<T>(
     task: {
       readonly id: string
       readonly from: string
       readonly ancestry?: ReadonlyArray<{ taskId: string; by: string }>
+      readonly payload?: unknown
     },
     fn: () => Promise<T>,
   ): Promise<T>

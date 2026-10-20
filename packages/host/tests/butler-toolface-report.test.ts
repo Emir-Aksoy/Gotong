@@ -25,8 +25,10 @@ import { describe, expect, it } from 'vitest'
 import { MemoryToolset } from '@gotong/personal-memory'
 import {
   createKnowledgeLibraryToolset,
+  createLifeToolsets,
   createTaskNotebookToolset,
   openKnowledgeLibrary,
+  openLifeArchive,
   openLongRunDossierStore,
   openTaskNotebook,
 } from '@gotong/personal-butler'
@@ -112,6 +114,9 @@ const MEASURED_BUILDERS: Record<string, string> = {
   reminders: 'buildButlerRemindersToolset',
   'task-notebook': 'createTaskNotebookToolset',
   knowledge: 'createKnowledgeLibraryToolset',
+  // LIFE 一个构造器出两份 toolset:一等四件 + 目录里的 read_records。
+  life: 'createLifeToolsets',
+  'life-archive': 'createLifeToolsets',
   language: 'buildButlerLanguageToolset',
   capabilities: 'buildButlerCapabilitiesToolset',
   'llm-catalog': 'buildButlerLlmCatalogToolset',
@@ -149,6 +154,7 @@ const EXCLUDED_BUILDERS = new Set(['buildButlerMcpToolsets'])
 function buildFullFace(): ToolFaceEntry[] {
   const tmp = mkdtempSync(join(tmpdir(), 'afr-toolface-'))
   const notebook = openTaskNotebook({ file: join(tmp, 'tasks.json'), logger: stub() })
+  const lifeSets = createLifeToolsets({ archive: openLifeArchive({ dir: join(tmp, 'life') }) })
   return [
     // Agent-internal (PersonalButlerAgent always composes a MemoryToolset).
     { module: 'memory', kind: 'memory', toolset: new MemoryToolset({ memory: stub() }) },
@@ -251,6 +257,8 @@ function buildFullFace(): ToolFaceEntry[] {
       kind: 'benign',
       toolset: createKnowledgeLibraryToolset(openKnowledgeLibrary({ dir: join(tmp, 'knowledge') })),
     },
+    { module: 'life', kind: 'benign', toolset: lifeSets.core },
+    { module: 'life-archive', kind: 'benign', toolset: lifeSets.archive },
     {
       module: 'language',
       kind: 'benign',
@@ -498,7 +506,7 @@ describe('AFR-M1 baseline — the real butler tool face', () => {
     const found = new Set(
       [
         ...src.matchAll(
-          /\b(buildButler[A-Za-z]+Toolsets?|createTaskNotebookToolset|createKnowledgeLibraryToolset)\b(?=\()/g,
+          /\b(buildButler[A-Za-z]+Toolsets?|createTaskNotebookToolset|createKnowledgeLibraryToolset|createLifeToolsets)\b(?=\()/g,
         ),
       ].map((m) => m[1]),
     )

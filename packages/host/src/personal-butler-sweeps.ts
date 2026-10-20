@@ -1,6 +1,6 @@
 /**
- * personal-butler-sweeps.ts — assembly helper that arms the butler's two
- * background delivery sweeps in one call:
+ * personal-butler-sweeps.ts — assembly helper that arms the butler's
+ * background delivery sweeps in one call (all behind the LIFE push gate):
  *
  *   S3-M2 proactive daily brief  — {@link ButlerProactiveSweeper} + brief composer
  *   BE-M5 run-result broadcast   — {@link ButlerRunBroadcastSweeper}
@@ -19,10 +19,14 @@
  * sweeper modules themselves.
  */
 
+import { dirname, join } from 'node:path'
+
 import type { Logger } from '@gotong/core'
 import type { LlmAgentToolset } from '@gotong/llm'
 
 import type { AdminHealthSurface } from './admin-health.js'
+import { ButlerLifeSweeper } from './butler-life.js'
+import { ButlerPushGate } from './butler-push-gate.js'
 import { ButlerBackupNudgeSweeper, type ButlerBackupOps } from './personal-butler-backup.js'
 import type { ButlerRunSurface } from './personal-butler-observe.js'
 import { ButlerPatrolSweeper } from './personal-butler-patrol.js'
@@ -86,6 +90,9 @@ export interface ButlerSweepsOptions {
   /** AFR-M7 — 备份陈旧提醒(镜像 TN-M2;同意面同巡检=开了播报才收,再叠
    *  owner/admin 过滤——只提醒能按下打包的人)。缺省 ⇒ 不构造。 */
   backupNudge?: { on: boolean; ops: Pick<ButlerBackupOps, 'lastBackup' | 'newPeersSince' | 'privileged'>; intervalMs?: number }
+  /** LIFE — 生活档案扫描(签到/提醒/周回顾;零模型)。成员没有 `life/registry.json`
+   *  就什么都不做。缺省 ⇒ 不构造。 */
+  life?: { on: boolean; intervalMs?: number }
 }
 
 export interface ButlerSweepsHandle {
@@ -93,7 +100,17 @@ export interface ButlerSweepsHandle {
   stop(): void
 }
 
-export function armButlerSweeps(opts: ButlerSweepsOptions): ButlerSweepsHandle {
+export function armButlerSweeps(callerOpts: ButlerSweepsOptions): ButlerSweepsHandle {
+  // LIFE — 下面每个扫描器的推送都是**主动**推送,一律过免打扰闸(22:00–07:00 暂存到
+  // 早上合并发出)与每日上限。成员在等的回音(提醒/审批回推/转派结果/长任务通知)
+  // 不走这里,也就不受闸。设计见 butler-push-gate.ts。
+  const gate = new ButlerPushGate({
+    dir: join(dirname(callerOpts.memoryRoot), 'push-gate'),
+    push: callerOpts.push,
+    logger: callerOpts.logger,
+  })
+  gate.start()
+  const opts: ButlerSweepsOptions = { ...callerOpts, push: gate.push }
   let proactive: ButlerProactiveSweeper | undefined
   if (opts.proactive.on) {
     proactive = new ButlerProactiveSweeper({
@@ -116,7 +133,8 @@ export function armButlerSweeps(opts: ButlerSweepsOptions): ButlerSweepsHandle {
     runBroadcast = new ButlerRunBroadcastSweeper({
       rootDir: opts.memoryRoot,
       runs: opts.runBroadcast.runs,
-      push: opts.push,
+      // 成员订阅的运行结果:只守免打扰,不占每日上限(见 butler-push-gate.ts)。
+      push: (userId, text) => gate.push(userId, text, { capExempt: true }),
       logger: opts.logger,
       intervalMs: opts.runBroadcast.intervalMs,
     })
@@ -159,8 +177,21 @@ export function armButlerSweeps(opts: ButlerSweepsOptions): ButlerSweepsHandle {
     })
     patrol.start()
   }
+  let life: ButlerLifeSweeper | undefined
+  if (opts.life?.on) {
+    life = new ButlerLifeSweeper({
+      memoryRoot: opts.memoryRoot,
+      push: opts.push,
+      memberClock: (ms) => gate.memberClock(ms),
+      logger: opts.logger,
+      ...(opts.life.intervalMs !== undefined ? { intervalMs: opts.life.intervalMs } : {}),
+    })
+    life.start()
+  }
   return {
     stop() {
+      gate.stop()
+      life?.stop()
       proactive?.stop()
       runBroadcast?.stop()
       taskNudge?.stop()
