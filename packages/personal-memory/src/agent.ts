@@ -4,11 +4,12 @@
  * Two hooks onto the base agent, nothing else:
  *
  *   1. **Frozen-block injection.** `buildRequest` prepends a byte-stable
- *      memory block to the system prompt. The block is computed once per
- *      session (see {@link MemorySession}) so the system-prompt prefix stays
- *      identical across every turn — preserving prompt caching. It goes at
- *      the FRONT so the stable bytes form the cache prefix; the agent's own
- *      (also stable) system prompt follows.
+ *      memory block to the system prompt. The block is memoized (see
+ *      {@link MemorySession}) so the system-prompt prefix stays identical
+ *      between memory refreshes — preserving prompt caching. It goes at the
+ *      FRONT so the stable bytes form the cache prefix; the agent's own (also
+ *      stable) system prompt follows. Opt-in `frozenVolatileKinds` moves
+ *      per-turn kinds into a separate recent block on `req.systemVolatile`.
  *
  *   2. **Memory tools.** A {@link MemoryToolset} (`remember` / `recall` /
  *      `forget`) is composed into the agent's `tools` slot alongside whatever
@@ -84,6 +85,17 @@ export interface MemoryAugmentedAgentOptions extends LlmAgentOptions {
   memoryExpandK?: number
   /** Kinds that seed the frozen block. Default `['semantic']`. */
   frozenMemoryKinds?: readonly MemoryKind[]
+  /**
+   * Opt-in: kinds rendered into a separate RECENT block that rides
+   * `req.systemVolatile` (ahead of any existing volatile tail) instead of the
+   * stable frozen block. Pair with {@link frozenRefreshPerTask} for a kind
+   * written every turn (`episodic`): the recent block still updates every
+   * message, but the stable `system` prefix stops changing with it. Default
+   * omitted ⇒ no recent block, request byte-identical to before.
+   */
+  frozenVolatileKinds?: readonly MemoryKind[]
+  /** Soft char cap for the recent block body. Default 1500. */
+  frozenVolatileMaxChars?: number
   /** Max entries pulled for the frozen block. Default 100. */
   frozenMemoryK?: number
   /** Soft char cap for the frozen block body. Default 4000. */
@@ -116,9 +128,11 @@ export interface MemoryAugmentedAgentOptions extends LlmAgentOptions {
    * in-context history and the block stays a stable prefix. An ALWAYS-ON butler
    * (one memoized instance serving many independent, history-less IM messages)
    * sets this `true` so each message sees memories captured since the last one —
-   * the difference between "remembers across sessions" and not. Trades prefix-cache
-   * stability for freshness; for stateless per-message dispatch there's little
-   * cross-message prefix to cache anyway.
+   * the difference between "remembers across sessions" and not. Re-reading alone
+   * does not break the prompt cache (the block's bytes only move when its contents
+   * do), but a frozen kind written EVERY turn (episodic captures) moves them every
+   * message — and with them the whole cached system prefix behind the block
+   * (persona, stable cards). Route such kinds through {@link frozenVolatileKinds}.
    */
   frozenRefreshPerTask?: boolean
   /**
@@ -215,6 +229,10 @@ export class MemoryAugmentedAgent extends LlmAgent {
       memory,
       label: opts.id,
       ...(opts.frozenMemoryKinds !== undefined ? { frozenKinds: opts.frozenMemoryKinds } : {}),
+      ...(opts.frozenVolatileKinds !== undefined ? { volatileKinds: opts.frozenVolatileKinds } : {}),
+      ...(opts.frozenVolatileMaxChars !== undefined
+        ? { volatileMaxChars: opts.frozenVolatileMaxChars }
+        : {}),
       ...(opts.frozenMemoryK !== undefined ? { frozenK: opts.frozenMemoryK } : {}),
       ...(opts.frozenMemoryMaxChars !== undefined
         ? { frozenMaxChars: opts.frozenMemoryMaxChars }
@@ -333,12 +351,25 @@ export class MemoryAugmentedAgent extends LlmAgent {
    * the stable bytes lead the prefix; the agent's own system prompt follows.
    * Reads the memoized block synchronously (already warmed by `handleTask`);
    * `''` before warm-up means "no injection" — a safe degradation.
+   *
+   * The opt-in recent block goes to `req.systemVolatile` instead, AHEAD of any
+   * volatile tail already there. It carries its own `\n\n` separator (the
+   * volatile convention: providers concatenate `system + systemVolatile`
+   * verbatim), so subclasses appending per-turn cards keep it in front.
    */
   protected override buildRequest(task: Task): LlmRequest {
     const req = super.buildRequest(task)
     const block = this.session.frozenBlockSync()
     if (block) {
       req.system = req.system ? `${block}\n\n${req.system}` : block
+    }
+    const recent = this.session.volatileBlockSync()
+    if (recent) {
+      const lead = req.system ? `\n\n${recent}` : recent
+      const tail = req.systemVolatile
+      req.systemVolatile = tail
+        ? `${lead}${tail.startsWith('\n\n') ? tail : `\n\n${tail}`}`
+        : lead
     }
     return req
   }

@@ -908,7 +908,7 @@ export function buildButlerFactory(deps: ButlerFactoryDeps): ButlerFactory {
           ...(deps.memoryLinks
             ? { memoryLinkLookup: (ids: readonly string[]) => recallIndex.lookupByIds(ids) }
             : {}),
-          // Keep BOTH kinds in the frozen block even though BF-M8 now runs
+          // Keep BOTH kinds in view (episodic now rides the recent block, below) even though BF-M8 runs
           // consolidation (episodic→semantic) in the background: the curated
           // `semantic` profile gives durable long-term facts, but a member's
           // MOST RECENT captures (since the last 6h maintenance tick) only live
@@ -916,6 +916,11 @@ export function buildButlerFactory(deps: ButlerFactoryDeps): ButlerFactory {
           // heard minutes ago without waiting on the next sweep. Consolidation
           // ADDS the distilled profile on top; it doesn't replace fresh recall.
           frozenMemoryKinds: ['semantic', 'episodic'],
+          // Episodic is captured EVERY turn: left in the stable block it would change
+          // the frozen block — and the cached persona + INDEX behind it — on every
+          // message. Render it into the recent block on systemVolatile instead (still
+          // refreshed per task, so BF-M4 recall is unchanged). See MemorySession.
+          frozenVolatileKinds: ['episodic'],
           // An always-on butler instance serves many independent, history-less IM
           // messages — re-recall per message so it remembers what it just captured
           // (without this the block freezes at the first message's contents and the

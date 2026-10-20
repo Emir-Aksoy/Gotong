@@ -1,28 +1,36 @@
 /**
- * `MemorySession` — the once-per-session frozen-block memoizer.
+ * `MemorySession` — the frozen-block memoizer.
  *
  * Pairs with {@link renderFrozenBlock} (the byte-stable renderer) to deliver
  * Hermes-style prefix-cache preservation:
  *
- *   - The frozen block is computed ON THE FIRST task of a session (a single
- *     `recall` of the curated `semantic` memory) and CACHED.
- *   - Every subsequent task in the same session reuses the exact same bytes.
- *   - New memories the butler writes mid-session (via the `remember` tool)
- *     land on disk but DO NOT mutate this cached block — they surface in the
- *     NEXT session's block, when a fresh `MemorySession` re-recalls.
+ *   - The frozen block is computed on the first task (a `list` of the frozen
+ *     kinds, default `semantic` only) and CACHED.
+ *   - Every later task reuses the exact same bytes until {@link refresh} drops
+ *     the cache — never, by default (one session == one stable prefix); before
+ *     every message for an always-on butler (`frozenRefreshPerTask`).
+ *   - Re-reading is not changing: the renderer is a pure function of the entry
+ *     SET, so a refreshed block only moves when its CONTENTS moved.
  *
- * That "stale on purpose" behaviour is the whole point: a system prompt whose
- * prefix shifts every turn defeats prompt caching. One session == one stable
- * prefix.
+ * That last point is why {@link MemorySessionOptions.volatileKinds} exists. A
+ * kind written every turn (episodic turn captures) changes the contents every
+ * message, so with per-message refresh it would shift the stable block — and
+ * every byte of system prompt after it — on each message. Opted-in kinds are
+ * kept OUT of the stable block and rendered into a separate RECENT block
+ * ({@link renderRecentMemoryBlock}), which the agent places in the volatile
+ * system tail. Default: no volatile kinds, behaviour byte-identical to before.
  *
- * The frozen block draws from `semantic` memory only (the curated profile /
- * MEMORY.md analog). Raw `episodic` history is recalled on demand via the
- * `recall` tool, not poured into every prompt.
+ * Raw `episodic` history not shown in either block stays reachable on demand
+ * via the `recall` tool.
  */
 
 import type { MemoryEntry, MemoryHandle, MemoryKind } from '@gotong/services-sdk'
 
-import { renderClusteredFrozenBlock, renderFrozenBlock } from './frozen-block.js'
+import {
+  renderClusteredFrozenBlock,
+  renderFrozenBlock,
+  renderRecentMemoryBlock,
+} from './frozen-block.js'
 import { compareByImportanceThenRecency } from './importance.js'
 import type { TierConfig } from './tiers.js'
 
@@ -33,6 +41,17 @@ export interface MemorySessionOptions {
   label?: string
   /** Kinds that seed the frozen block. Default `['semantic']`. */
   frozenKinds?: readonly MemoryKind[]
+  /**
+   * Opt-in: kinds rendered into a separate RECENT block (see
+   * {@link MemorySession.volatileBlockSync}) instead of the stable one — and
+   * removed from {@link frozenKinds} if listed there. Meant for kinds written
+   * every turn (`episodic`) under per-message {@link MemorySession.refresh}, so
+   * they stop invalidating the stable block's prompt cache. Default `[]`
+   * (no recent block; byte-identical to before).
+   */
+  volatileKinds?: readonly MemoryKind[]
+  /** Soft char cap for the recent block body. Default 1500 (`DEFAULT_RECENT_MAX_CHARS`). */
+  volatileMaxChars?: number
   /** Max entries KEPT in the block, chosen by (importance, recency). Default 100. */
   frozenK?: number
   /**
@@ -106,6 +125,8 @@ export class MemorySession {
   private readonly memory: MemoryHandle
   private readonly label: string | undefined
   private readonly frozenKinds: readonly MemoryKind[]
+  private readonly volatileKinds: readonly MemoryKind[]
+  private readonly volatileMaxChars: number | undefined
   private readonly frozenK: number
   private readonly frozenCandidateK: number
   private readonly frozenMaxChars: number | undefined
@@ -122,14 +143,22 @@ export class MemorySession {
 
   /** Memoized block — `null` until the first `ensureFrozenBlock()` resolves. */
   private frozen: string | null = null
+  /** Memoized recent block, built alongside `frozen` (`''` when no volatile kinds). */
+  private recent: string | null = null
   /** Guards against two concurrent first-tasks double-recalling. */
   private pending: Promise<string> | null = null
 
   constructor(opts: MemorySessionOptions) {
     this.memory = opts.memory
     this.label = opts.label
-    this.frozenKinds =
+    this.volatileKinds = [...new Set(opts.volatileKinds ?? [])]
+    const volatile = new Set(this.volatileKinds)
+    // A kind lives in exactly ONE block: listing it as volatile moves it out of
+    // the stable block (an emptied stable list still renders the empty shape).
+    this.frozenKinds = (
       opts.frozenKinds && opts.frozenKinds.length > 0 ? opts.frozenKinds : DEFAULT_FROZEN_KINDS
+    ).filter((k) => !volatile.has(k))
+    this.volatileMaxChars = opts.volatileMaxChars
     this.frozenK = opts.frozenK ?? DEFAULT_FROZEN_K
     this.frozenCandidateK = Math.max(
       this.frozenK,
@@ -163,15 +192,17 @@ export class MemorySession {
    */
   refresh(now?: number): void {
     this.frozen = null
+    this.recent = null
     this.pending = null
     if (now !== undefined) this.now = now
     else if (this.activeOnly && this.nowAutoSampled) this.now = Date.now()
   }
 
   /**
-   * Compute the frozen block once and cache it. Safe to call before every
-   * task — the recall happens exactly once per session even under
-   * concurrent first-tasks (the `pending` promise is shared).
+   * Compute the frozen block (and the recent block, when `volatileKinds` is
+   * set) once and cache it. Safe to call before every task — the recall
+   * happens exactly once per session even under concurrent first-tasks (the
+   * `pending` promise is shared).
    */
   async ensureFrozenBlock(): Promise<string> {
     if (this.frozen !== null) return this.frozen
@@ -199,10 +230,29 @@ export class MemorySession {
         ...(this.showProcedures ? { showProcedures: true } : {}),
         ...(this.maxProcedures !== undefined ? { maxProcedures: this.maxProcedures } : {}),
         ...(this.now !== undefined ? { now: this.now } : {}),
+        // Splitting per-turn kinds out means the block is re-read per refresh, not
+        // frozen per session — say so. Off ⇒ the original preamble, byte-identical.
+        ...(this.volatileKinds.length > 0 ? { refreshNote: true } : {}),
       }
       const block = this.tierConfig
         ? renderClusteredFrozenBlock(entries, { ...renderOpts, config: this.tierConfig })
         : renderFrozenBlock(entries, renderOpts)
+      // Volatile kinds: newest-first by construction (recency ordering in the
+      // renderer), same candidate window and same active-slice `now`.
+      let recent = ''
+      if (this.volatileKinds.length > 0) {
+        const recentCandidates: MemoryEntry[] = []
+        for (const kind of this.volatileKinds) {
+          recentCandidates.push(...(await this.memory.list({ kind, limit: this.frozenCandidateK })))
+        }
+        recent = renderRecentMemoryBlock(recentCandidates, {
+          ...(this.label !== undefined ? { label: this.label } : {}),
+          ...(this.volatileMaxChars !== undefined ? { maxChars: this.volatileMaxChars } : {}),
+          ...(this.activeOnly ? { activeOnly: true } : {}),
+          ...(this.now !== undefined ? { now: this.now } : {}),
+        })
+      }
+      this.recent = recent
       this.frozen = block
       this.pending = null
       return block
@@ -218,6 +268,16 @@ export class MemorySession {
    */
   frozenBlockSync(): string {
     return this.frozen ?? ''
+  }
+
+  /**
+   * Synchronous read of the memoized RECENT block (opt-in `volatileKinds`) —
+   * `''` before warm-up, when no volatile kinds are configured, or when those
+   * kinds hold nothing. Built by the same `ensureFrozenBlock()` call and dropped
+   * by the same {@link refresh}, so both blocks always reflect one read.
+   */
+  volatileBlockSync(): string {
+    return this.recent ?? ''
   }
 
   /** Whether the block has been computed yet. */

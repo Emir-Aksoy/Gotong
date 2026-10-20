@@ -186,4 +186,86 @@ describe('MemorySession', () => {
     expect(after).toContain('槟城')
     expect(after).not.toContain('吉隆坡')
   })
+
+  // ── volatileKinds: per-turn kinds leave the stable block ───────────────────
+  // With per-message refresh, an episodic capture landing every turn used to
+  // shift the stable block (and the whole cached system prefix behind it) on
+  // every message. Opted-in kinds render into a separate recent block instead.
+
+  it('volatileKinds: a new episodic + refresh leaves the stable block byte-identical', async () => {
+    const mem = makeFakeMemory([
+      entry('s', 'semantic', 'durable fact', 100),
+      entry('e1', 'episodic', 'first turn', 200),
+    ])
+    const s = new MemorySession({
+      memory: mem,
+      frozenKinds: ['semantic', 'episodic'],
+      volatileKinds: ['episodic'],
+    })
+    const stable1 = await s.ensureFrozenBlock()
+    const recent1 = s.volatileBlockSync()
+    expect(stable1).toContain('durable fact')
+    expect(stable1).not.toContain('first turn') // moved out of the stable block
+    expect(recent1.startsWith('<!-- gotong:recent-memory:begin -->')).toBe(true)
+    expect(recent1.endsWith('<!-- gotong:recent-memory:end -->')).toBe(true)
+    expect(recent1).toContain('first turn')
+    expect(recent1).not.toContain('durable fact')
+
+    await mem.remember({ kind: 'episodic', text: 'second turn' })
+    s.refresh()
+    const stable2 = await s.ensureFrozenBlock()
+    const recent2 = s.volatileBlockSync()
+    expect(stable2).toBe(stable1) // the cache-relevant bytes did not move
+    expect(recent2).not.toBe(recent1)
+    // Newest first: the just-captured turn leads.
+    expect(recent2.indexOf('second turn')).toBeLessThan(recent2.indexOf('first turn'))
+    expect(recent2.indexOf('first turn')).toBeGreaterThan(-1)
+  })
+
+  it('volatileKinds omitted: same blocks and fetch count as before, no recent block', async () => {
+    const seed = [entry('s', 'semantic', 'durable fact', 100), entry('e', 'episodic', 'a turn', 200)]
+    const mem = makeFakeMemory(seed)
+    const plain = new MemorySession({ memory: mem, frozenKinds: ['semantic', 'episodic'] })
+    const block = await plain.ensureFrozenBlock()
+    expect(block).toContain('a turn') // episodic stays in the stable block
+    expect(plain.volatileBlockSync()).toBe('')
+    expect(mem.listCount).toBe(2) // one fetch per frozen kind, nothing extra
+
+    const empty = new MemorySession({ memory: mem, frozenKinds: ['semantic', 'episodic'], volatileKinds: [] })
+    expect(await empty.ensureFrozenBlock()).toBe(block)
+    expect(empty.volatileBlockSync()).toBe('')
+    // 默认路径的说明文字逐字不变(所有未开选项的调用方提示词字节不变)
+    expect(block).toContain('Frozen for this session — anything I learn now surfaces next session.')
+  })
+
+  it('volatileKinds on: the stable block says it is refreshed, not frozen per session', async () => {
+    const mem = makeFakeMemory([entry('s', 'semantic', 'durable fact', 100)])
+    const s = new MemorySession({ memory: mem, frozenKinds: ['semantic', 'episodic'], volatileKinds: ['episodic'] })
+    const block = await s.ensureFrozenBlock()
+    expect(block).toContain('Kept stable between memory refreshes')
+    expect(block).not.toContain('Frozen for this session')
+  })
+
+  it('volatileBlockSync is empty before warm-up and when the volatile kinds hold nothing', async () => {
+    const mem = makeFakeMemory([entry('s', 'semantic', 'durable fact', 100)])
+    const s = new MemorySession({ memory: mem, frozenKinds: ['semantic', 'episodic'], volatileKinds: ['episodic'] })
+    expect(s.volatileBlockSync()).toBe('')
+    await s.ensureFrozenBlock()
+    expect(s.volatileBlockSync()).toBe('') // nothing to inject ⇒ no bytes
+    s.refresh()
+    expect(s.volatileBlockSync()).toBe('') // dropped together with the stable block
+  })
+
+  it('volatileMaxChars bounds the recent block but never drops the newest entry', async () => {
+    const long = 'x'.repeat(400)
+    const mem = makeFakeMemory(
+      Array.from({ length: 10 }, (_, i) => entry(`e${i}`, 'episodic', `turn ${i} ${long}`, 100 + i, { temporal: true })),
+    )
+    const s = new MemorySession({ memory: mem, volatileKinds: ['episodic'], volatileMaxChars: 100 })
+    await s.ensureFrozenBlock()
+    const recent = s.volatileBlockSync()
+    expect(recent).toContain('turn 9') // newest survives even over budget
+    expect(recent).not.toContain('turn 8')
+    expect(recent).toMatch(/9 older memories omitted to fit the recent-memory budget/)
+  })
 })

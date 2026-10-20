@@ -187,6 +187,94 @@ describe('PersonalButlerAgent — current-time awareness (clock probe → system
   })
 })
 
+/** Kind-aware in-memory handle: `list`/`recall` honour `kind`/`kinds`. The
+ *  stable/recent split reads each kind separately, which `emptyMemory` (it
+ *  ignores filters) cannot exercise. */
+function kindAwareMemory(): MemoryHandle {
+  const entries: MemoryEntry[] = []
+  let seq = 0
+  const newestFirst = (a: MemoryEntry, b: MemoryEntry) => b.ts - a.ts
+  return {
+    async recall(q: MemoryQuery): Promise<MemoryEntry[]> {
+      return entries.filter((e) => !q.kinds || q.kinds.includes(e.kind)).sort(newestFirst).slice(0, q.k ?? 20)
+    },
+    async remember(ne: NewMemoryEntry): Promise<MemoryEntry> {
+      seq++
+      const e: MemoryEntry = {
+        id: ne.id ?? `m${seq}`,
+        kind: ne.kind,
+        text: ne.text,
+        ts: 1000 + seq,
+        ...(ne.meta !== undefined ? { meta: ne.meta } : {}),
+      }
+      entries.push(e)
+      return e
+    },
+    async list(opts: { kind?: MemoryKind; limit?: number } = {}): Promise<MemoryEntry[]> {
+      return entries.filter((e) => !opts.kind || e.kind === opts.kind).sort(newestFirst).slice(0, opts.limit ?? 100)
+    },
+    async forget(): Promise<void> {},
+    async clear(_kind?: MemoryKind): Promise<void> {},
+  }
+}
+
+describe('PersonalButlerAgent — recent memory block rides systemVolatile ahead of the probe cards', () => {
+  const T0 = 1_751_985_240_000 // 2025-07-08 22:34 Asia/Kuala_Lumpur
+  const mkResident = (opts: { volatile: boolean }) => {
+    let clock = T0
+    const provider = new ScriptProvider([textTurn('好的,记下了')])
+    const agent = new PersonalButlerAgent({
+      id: 'butler',
+      provider,
+      memory: kindAwareMemory(),
+      system: 'base',
+      // Production shape: always-on instance, episodic in the block, per-message refresh.
+      frozenMemoryKinds: ['semantic', 'episodic'],
+      frozenRefreshPerTask: true,
+      ...(opts.volatile ? { frozenVolatileKinds: ['episodic'] as const } : {}),
+      contextProbe: buildButlerClockProbe({ now: () => clock, timeZone: 'Asia/Kuala_Lumpur' }),
+      stableContext: async () => '【知识库索引】\n- user/家人.md — 家人档案',
+    })
+    return { provider, agent, advance: (ms: number) => { clock += ms } }
+  }
+
+  it('orders the volatile tail: separator, recent block, probe cards, clock last', async () => {
+    const { provider, agent, advance } = mkResident({ volatile: true })
+    await agent.onTask(task('m1', '我开了一家奶茶店,叫快乐柠檬'))
+    advance(60_000)
+    await agent.onTask(task('m2', '我的店叫什么?'))
+    const vol = provider.requests[1]!.systemVolatile!
+    expect(vol.startsWith('\n\n<!-- gotong:recent-memory:begin -->')).toBe(true)
+    const recentEnd = vol.indexOf('<!-- gotong:recent-memory:end -->')
+    expect(recentEnd).toBeGreaterThan(vol.indexOf('快乐柠檬'))
+    expect(vol.indexOf('【当前时间】')).toBeGreaterThan(recentEnd)
+    expect(vol.trimEnd().endsWith('· UTC 2025-07-08T14:35Z')).toBe(true)
+  })
+
+  // Load-bearing: the cached prefix holds across a capture WITHOUT undoing BF-M4
+  // (an always-on butler remembers what it heard one message ago).
+  it('resident butler: req.system byte-identical across messages, msg1 capture visible in msg2', async () => {
+    const { provider, agent, advance } = mkResident({ volatile: true })
+    await agent.onTask(task('m1', '我开了一家奶茶店,叫快乐柠檬'))
+    advance(60_000)
+    await agent.onTask(task('m2', '我的店叫什么?'))
+    const [r1, r2] = provider.requests
+    expect(r1!.system).toContain('base\n\n【知识库索引】') // persona + stable card in the cached slice
+    expect(r2!.system).toBe(r1!.system)
+    expect(r1!.systemVolatile).not.toContain('快乐柠檬') // nothing captured before msg1
+    expect(r2!.systemVolatile).toContain('快乐柠檬')
+
+    // Control — same butler without the option: the capture lands in the
+    // stable block, so the whole cached system prefix moves with it.
+    const ctl = mkResident({ volatile: false })
+    await ctl.agent.onTask(task('m1', '我开了一家奶茶店,叫快乐柠檬'))
+    await ctl.agent.onTask(task('m2', '我的店叫什么?'))
+    const [c1, c2] = ctl.provider.requests
+    expect(c2!.system).not.toBe(c1!.system)
+    expect(c2!.system).toContain('快乐柠檬')
+  })
+})
+
 describe('PersonalButlerAgent — LIB-M3 stable card (stableContext → req.system tail)', () => {
   it('appends the card to the STABLE segment; volatile advice stays separate', async () => {
     const FIXED = 1_751_985_240_000 // 2025-07-08 22:34 Asia/Kuala_Lumpur

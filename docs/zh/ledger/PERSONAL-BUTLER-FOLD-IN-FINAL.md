@@ -102,7 +102,10 @@ in-context 历史上,冻结块是长期画像。
 
 **取舍诚实**:这拿前缀缓存稳定性换新鲜度。但对**无状态 per-message dispatch**本就没多少
 跨消息前缀可缓存(每条消息一个独立 task),所以代价很小,换来的是「跨会话记住」这件
-头号需求。`activeOnly` 自动采样的 `now` 也在 `refresh()` 时重采,让「此刻有效」跟着
+头号需求。**(更正)**「没多少前缀可缓存」不成立:人设、索引卡、semantic 画像跨消息
+都不变,本该命中;是 episodic 每轮捕获进块让冻结块每条消息都变,连带其后整段稳定
+system 失效。现由 opt-in `frozenVolatileKinds` 修正——episodic 改渲染为「最近记忆块」
+走 `systemVolatile`,稳定段字节跨消息不变,刷新语义(记得上一条)保持;阿同生产开启。`activeOnly` 自动采样的 `now` 也在 `refresh()` 时重采,让「此刻有效」跟着
 墙钟而非进程启动时刻。
 
 **为什么不靠蒸馏**:冻结块默认只读 `['semantic']`,而 episodic→semantic 蒸馏是 heartbeat

@@ -426,7 +426,16 @@ export class PersonalButlerAgent extends MemoryAugmentedAgent {
       req.system = req.system ? `${req.system}\n\n${this.stableCard}` : this.stableCard
     }
     if (this.turnContext) {
-      req.systemVolatile = req.system ? `\n\n${this.turnContext}` : this.turnContext
+      // APPEND, never overwrite: the parent may already have put the recent
+      // memory block here (`frozenVolatileKinds`). It stays in front, already
+      // carrying its separator; the probe cards follow so the tail still ends
+      // with the clock card.
+      const prior = req.systemVolatile
+      req.systemVolatile = prior
+        ? `${prior}\n\n${this.turnContext}`
+        : req.system
+          ? `\n\n${this.turnContext}`
+          : this.turnContext
     }
     // LONG-M4b — the role slot's model name rides the request at this ONE
     // place every segment / resume request is built (`resumeBody` rebuilds

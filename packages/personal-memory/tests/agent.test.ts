@@ -188,4 +188,77 @@ describe('MemoryAugmentedAgent', () => {
     expect(sys2).toContain('user prefers morning')
     expect(sys2).toContain('user likes tea')
   })
+
+  // ── frozenVolatileKinds: per-turn kinds ride systemVolatile ────────────────
+
+  it('frozenVolatileKinds: episodic goes to systemVolatile, stable system keeps semantic', async () => {
+    const mem = makeFakeMemory([
+      entry('s', 'semantic', 'user likes tea', 100),
+      entry('e', 'episodic', 'we talked about rain', 200),
+    ])
+    const provider = new CaptureProvider()
+    const agent = new MemoryAugmentedAgent({
+      id: 'butler',
+      provider,
+      memory: mem,
+      system: 'base',
+      frozenMemoryKinds: ['semantic', 'episodic'],
+      frozenVolatileKinds: ['episodic'],
+    })
+
+    await agent.onTask(task('t1', 'hi'))
+    const req = provider.requests[0]!
+    expect(req.system!.startsWith('<!-- gotong:memory:begin -->')).toBe(true)
+    expect(req.system).toContain('user likes tea')
+    expect(req.system!.endsWith('base')).toBe(true)
+    expect(req.system).not.toContain('we talked about rain')
+    // Recent block: own separator first (providers concatenate verbatim), own markers.
+    expect(req.systemVolatile!.startsWith('\n\n<!-- gotong:recent-memory:begin -->')).toBe(true)
+    expect(req.systemVolatile!.endsWith('<!-- gotong:recent-memory:end -->')).toBe(true)
+    expect(req.systemVolatile).toContain('we talked about rain')
+  })
+
+  it('frozenVolatileKinds omitted: the request is byte-identical to before', async () => {
+    const seed = [entry('s', 'semantic', 'user likes tea', 100), entry('e', 'episodic', 'we talked about rain', 200)]
+    const build = async (extra: Record<string, unknown>) => {
+      const provider = new CaptureProvider()
+      const agent = new MemoryAugmentedAgent({
+        id: 'butler',
+        provider,
+        memory: makeFakeMemory(seed),
+        system: 'base',
+        frozenMemoryKinds: ['semantic', 'episodic'],
+        captureTurns: false,
+        ...extra,
+      })
+      await agent.onTask(task('t1', 'hi'))
+      return provider.requests[0]!
+    }
+    const off = await build({})
+    const empty = await build({ frozenVolatileKinds: [] })
+    expect(off.systemVolatile).toBeUndefined()
+    expect(off.system).toContain('we talked about rain') // still in the stable block
+    expect(JSON.stringify(empty)).toBe(JSON.stringify(off))
+  })
+
+  it('frozenVolatileKinds + per-task refresh: system stable across messages, the capture shows in volatile', async () => {
+    const mem = makeFakeMemory([entry('s', 'semantic', 'user likes tea', 100)])
+    const provider = new CaptureProvider()
+    const agent = new MemoryAugmentedAgent({
+      id: 'butler',
+      provider,
+      memory: mem,
+      system: 'base',
+      frozenMemoryKinds: ['semantic', 'episodic'],
+      frozenVolatileKinds: ['episodic'],
+      frozenRefreshPerTask: true,
+    })
+
+    await agent.onTask(task('t1', 'my shop is called Happy Lemon'))
+    await agent.onTask(task('t2', 'what is my shop called?'))
+    const [r1, r2] = provider.requests
+    expect(r2!.system).toBe(r1!.system) // cached prefix survives the capture
+    expect(r1!.systemVolatile).toBeUndefined() // nothing captured before msg1
+    expect(r2!.systemVolatile).toContain('Happy Lemon') // msg1's capture is visible
+  })
 })

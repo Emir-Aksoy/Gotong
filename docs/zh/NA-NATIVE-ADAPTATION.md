@@ -131,8 +131,11 @@ M1 的 system 尾断点把整个 system 当**一块**挂标——但 UX track �
   `cache_control`,volatile 作第二个**不挂标**的 text 块(给每轮都变的块挂标=写了
   永不读,纯赔 1.25× 溢价)。
 - **personal-butler 接线**:`composeContextProbes` 的探针卡(时钟/A1 待办/A2 间隔/
-  A4 渠道/TN 复述)整体走 `systemVolatile`;人设+冻结块留 `system` 稳定段。管家每轮
-  的缓存断点从「恒失效」变「恒命中」。
+  A4 渠道/TN 复述)整体走 `systemVolatile`;人设+冻结块留 `system` 稳定段。原先写的
+  「恒命中」**不成立**:阿同冻结块含 episodic 且每条消息重召回,上一条消息的捕获每次
+  都进块,冻结块连同其后的人设/索引卡跨消息仍每条失效。现由 opt-in
+  `frozenVolatileKinds` 修正——episodic 改渲染为独立「最近记忆块」走 `systemVolatile`
+  (排在探针卡前),稳定段只随 semantic 变化;阿同生产开启。
 
 **会红的门**:anthropic 拆分形状/稳定块跨轮字节一致(volatile 变、稳定块不变)/
 promptCaching:false 回落拼接字符串且全 body 无 cache_control/无工具 auto-off 拼接/

@@ -7,8 +7,11 @@
  * NA-M3 之后,上下文在 wire 上分三段,经济学完全不同:
  *   - **stable 段** = `req.system`(冻结记忆块 + 成员人设):anthropic provider
  *     给它挂 cache_control,轮间命中按 0.1× 计价——这段"贵在变更,不贵在存在"。
- *   - **volatile 段** = `req.systemVolatile`(composeContextProbes 探针尾卡):
- *     每轮内容可变,永不进缓存,每轮全价。
+ *   - **volatile 段** = `req.systemVolatile`(最近记忆块 + composeContextProbes
+ *     探针尾卡):每轮内容可变,永不进缓存,每轮全价。最近记忆块只在
+ *     `frozenVolatileKinds` 开启时出现(把每轮都写的 episodic 挪出冻结块,免得
+ *     它拖着整段 stable 每条消息失效),体量由其字符预算约束(默认 1500 字;
+ *     最新一条恒在,可单条超出);本报告暂未单列它一行。
  *   - **history 段** = `req.messages` 的前缀(SESS 会话窗骑 `payload.history`):
  *     不是"卡",是**随对话深度增长的消息数组**。前两段量的是恒定成本,这段
  *     量的是**填充曲线**——空窗 → 典型 → 满态,因为它是三段里唯一会随一次
@@ -26,7 +29,7 @@
 import { estimateTokens } from './butler-toolface-report.js'
 
 /**
- * 段位:stable = req.system(缓存前缀);volatile = req.systemVolatile(每轮全价);
+ * 段位:stable = req.system(缓存前缀);volatile = req.systemVolatile(最近记忆块 + 探针尾卡,每轮全价);
  * history = req.messages 前缀(SESS 会话窗,随对话深度增长)。
  */
 export type ContextSegment = 'stable' | 'volatile' | 'history'
@@ -188,7 +191,7 @@ export function renderContextReport(report: ContextReport, notes: readonly strin
   )
   for (const n of notes) lines.push(n)
   lines.push(
-    '注:stable 段 = req.system(冻结块+人设,挂 cache_control,轮间命中 0.1×);volatile 段 = req.systemVolatile(探针尾卡,每轮全价)。',
+    '注:stable 段 = req.system(冻结块+人设+索引卡,挂 cache_control,轮间命中 0.1×);volatile 段 = req.systemVolatile(最近记忆块〔frozenVolatileKinds 开启时,默认上限 1500 字,未单列〕+ 探针尾卡,每轮全价)。',
   )
   lines.push(
     '注:history 段 = req.messages 前缀(SESS 会话窗)。前两段是恒定成本,这段随对话深度长——所以量的是填充曲线不是单一数,合计行按满态算(最坏情况)。',

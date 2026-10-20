@@ -29,10 +29,15 @@
  *   3. NO-LEAK — bob's butler (a different namespace) never sees alice's shop.
  *   4. /me VIEW PARITY — HostButlerMemoryService over the same rootDir reads
  *      alice's capture; bob's tree is separate.
+ *   5. CACHE-STABLE VARIANT — with `frozenVolatileKinds: ['episodic']` (the
+ *      production wiring) msg2 still recalls msg1's capture, now from the recent
+ *      block on `req.systemVolatile`, while `req.system` stays byte-identical
+ *      across the two messages (the cached prefix is no longer rewritten).
  *
- * The LLM is a deterministic provider (no API key): it reads the frozen block in
- * `req.system` and echoes the shop name when present. The router, the butler
- * loop, per-user memory, capture, and the per-task refresh are the real code.
+ * The LLM is a deterministic provider (no API key): it reads the system prompt
+ * exactly as providers send it (`system + systemVolatile`) and echoes the shop
+ * name when present. The router, the butler loop, per-user memory, capture, and
+ * the per-task refresh are the real code.
  */
 
 import { mkdtempSync, rmSync } from 'node:fs'
@@ -80,9 +85,13 @@ const SHOP = '快乐柠檬'
 // "remembers" is entirely a question of whether msg1's capture reached the block.
 class ButlerImProvider implements LlmProvider {
   readonly name = 'butler-im-e2e'
+  readonly requests: LlmRequest[] = []
 
   async *stream(req: LlmRequest): AsyncIterable<LlmStreamChunk> {
-    const sys = req.system ?? ''
+    this.requests.push(req)
+    // Every provider sends `system + systemVolatile` verbatim (NA-M3), so read
+    // that — the recent block (claim 5) lives in the volatile half.
+    const sys = (req.system ?? '') + (req.systemVolatile ?? '')
     if (sys.includes(SHOP)) {
       yield { type: 'text', text: `我记得,你的奶茶店叫${SHOP}。` }
     } else {
@@ -142,7 +151,12 @@ describe('butler-im-e2e — BF-M5 resident butler over the IM channel', () => {
   // Build ONE per-user butler EXACTLY as main.ts's `butlerFactory` does: the chat
   // agent's id, per-user memory + recall index, episodic in the frozen block, and
   // per-task refresh so an always-on instance re-recalls between messages.
-  function makeButler(id: string, userId: string, refresh: boolean): PersonalButlerAgent {
+  function makeButler(
+    id: string,
+    userId: string,
+    refresh: boolean,
+    volatileEpisodic = false,
+  ): PersonalButlerAgent {
     const memory = openButlerMemory({ rootDir: memRoot, userId, logger: silentLogger })
     const recallIndex = openButlerRecallIndex({ rootDir: memRoot, userId, logger: silentLogger })
     return new PersonalButlerAgent({
@@ -153,6 +167,7 @@ describe('butler-im-e2e — BF-M5 resident butler over the IM channel', () => {
       memoryRetriever: recallIndex.retriever({ activeOnly: true }),
       frozenMemoryKinds: ['semantic', 'episodic'],
       frozenRefreshPerTask: refresh,
+      ...(volatileEpisodic ? { frozenVolatileKinds: ['episodic'] as const } : {}),
       captureMeta: { userId },
       // No `benign`, no `governed` → a pure-memory butler that never parks.
     })
@@ -262,5 +277,25 @@ describe('butler-im-e2e — BF-M5 resident butler over the IM channel', () => {
     const bobView = await view.read('bob')
     expect(bobView.recent.some((e) => e.text.includes(SHOP))).toBe(false)
     expect(bobView.recent.length).toBeGreaterThan(0)
+  })
+
+  it('claim 5 — frozenVolatileKinds keeps req.system byte-identical and still recalls', async () => {
+    const butler = makeButler('cache-stable', 'dave', true, true)
+    hub.register(butler)
+
+    const d1 = await dispatchTo('cache-stable', 'dave', `我开了一家奶茶店,叫${SHOP},主打芋圆。`)
+    expect(d1.kind).toBe('ok')
+    if (d1.kind !== 'ok') throw new Error('unreachable')
+    expect((d1.output as { text: string }).text).not.toContain(SHOP)
+
+    const d2 = await dispatchTo('cache-stable', 'dave', '我的奶茶店叫什么名字?')
+    expect(d2.kind).toBe('ok')
+    if (d2.kind !== 'ok') throw new Error('unreachable')
+    expect((d2.output as { text: string }).text).toContain(SHOP) // BF-M4 holds
+
+    const [q1, q2] = provider.requests
+    expect(q2!.system).toBe(q1!.system) // stable slice untouched by msg1's capture
+    expect(q2!.system).not.toContain(SHOP)
+    expect(q2!.systemVolatile).toContain(SHOP) // recall came from the recent block
   })
 })

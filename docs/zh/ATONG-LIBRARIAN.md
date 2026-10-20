@@ -97,7 +97,11 @@ on-wire system = [冻结记忆块][persona 人设]      ← req.system,稳定段
   `llm-anthropic/provider.ts:404-431`（稳定切片挂标，volatile 尾作不挂标第二块）。
 - **冻结块每条消息重召回**（`frozenRefreshPerTask:true`，`factory.ts:605`）但
   渲染字节稳定（`frozen-block.ts:9-24` 纯序契约）——记忆没变 ⇒ 字节不变 ⇒
-  缓存照常命中。**「重算 ≠ 变更」是缓存经济学的关键。**
+  缓存照常命中。**「重算 ≠ 变更」是缓存经济学的关键。**但原先据此推出的「恒命中」
+  对阿同**不成立**：冻结块含 episodic，每条消息结束都捕获一条，下一条消息必然
+  「记忆变了」，冻结块及其后的人设/索引卡每条消息都失效。现由 opt-in
+  `frozenVolatileKinds:['episodic']` 修正（阿同生产开启）：episodic 改走
+  `systemVolatile` 里的「最近记忆块」（排在探针尾卡前），稳定段只随 semantic 变。
 - 探针 8 张（`factory.ts:619-642` 聚合）：时钟（永不 null）/A2 时段间隔/A3 语言
   /A4 渠道/A1 待批/SEN-M1 hub 红灯/开箱陪跑/任务笔记本 digest；
   **全 null ⇒ systemVolatile 不设 ⇒ 字节不变**（既有先例，新常驻卡必须沿用）。
