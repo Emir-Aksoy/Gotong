@@ -159,6 +159,7 @@ export class ButlerPushGate {
       )
     }, this.intervalMs)
     this.timer.unref?.()
+    this.log.info('butler push gate armed', { intervalMs: this.intervalMs, dir: this.dir, dailyCap: this.cap })
   }
 
   stop(): void {

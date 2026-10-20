@@ -211,6 +211,8 @@ export class ButlerLifeSweeper {
       )
     }, this.intervalMs)
     this.timer.unref?.()
+    // 与其余扫描器同一口径:启动日志是部署后确认它挂上的唯一凭据(签到要到晚上才看得见)。
+    this.opts.logger.info('butler life sweep armed', { intervalMs: this.intervalMs, rootDir: this.opts.memoryRoot })
   }
 
   stop(): void {
