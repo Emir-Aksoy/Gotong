@@ -225,6 +225,9 @@ export class OpenAIProvider implements LlmProvider {
     >()
     let usage: LlmUsage | undefined
     let stopReason: LlmStopReason = 'end_turn'
+    let emittedToolUse = false
+    let sawTerminal = false
+    const toolIds = new Set<string>()
 
     for await (const chunk of sdkStream) {
       // 1) Usage may arrive on its own terminal chunk (OpenAI's
@@ -266,6 +269,10 @@ export class OpenAIProvider implements LlmProvider {
       // 3) Tool-call fragments. Each tc has an `index`; we accumulate
       //    name + arguments under that index.
       if (delta?.tool_calls) {
+        if (sawTerminal && delta.tool_calls.length > 0) {
+          yield { type: 'error', code: 'invalid_tool_call', message: 'Tool data arrived after the terminal chunk.' }
+          return
+        }
         for (const tc of delta.tool_calls) {
           const idx = typeof tc.index === 'number' ? tc.index : 0
           let buf = toolBuffers.get(idx)
@@ -274,11 +281,19 @@ export class OpenAIProvider implements LlmProvider {
             toolBuffers.set(idx, buf)
           }
           if (typeof tc.id === 'string' && tc.id.length > 0) {
+            if (buf.id && buf.id !== tc.id) {
+              yield { type: 'error', code: 'invalid_tool_call', message: 'Tool call id changed within one stream index.' }
+              return
+            }
             buf.id = tc.id
           }
           const fn = tc.function
           if (fn) {
             if (typeof fn.name === 'string' && fn.name.length > 0) {
+              if (buf.name && buf.name !== fn.name) {
+                yield { type: 'error', code: 'invalid_tool_call', message: 'Tool call name changed within one stream index.' }
+                return
+              }
               buf.name = fn.name
             }
             if (typeof fn.arguments === 'string') {
@@ -298,19 +313,37 @@ export class OpenAIProvider implements LlmProvider {
       //    this never showed up on the default provider.) The usage +
       //    end pair is emitted after the loop.
       if (choice.finish_reason) {
-        stopReason = mapStopReason(choice.finish_reason)
+        sawTerminal = true
+        const nextStopReason = mapStopReason(choice.finish_reason)
+        // A gateway's trailing stop must not turn a refusal or truncation into success.
+        if (nextStopReason === 'error' || (stopReason !== 'error' && stopReason !== 'max_tokens')) {
+          stopReason = nextStopReason
+        }
         // Sort by index so multi-tool fan-outs come out in deterministic
         // order matching OpenAI's wire ordering.
         const indices = [...toolBuffers.keys()].sort((a, b) => a - b)
         for (const idx of indices) {
           const buf = toolBuffers.get(idx)!
+          // Approval verdicts are keyed by id; duplicates must never reach the loop.
+          if (!buf.id.trim() || !buf.name.trim() || toolIds.has(buf.id)) {
+            yield { type: 'error', code: 'invalid_tool_call', message: 'Tool call has a missing id/name or duplicate id.' }
+            return
+          }
+          toolIds.add(buf.id)
           let input: Record<string, unknown> = {}
           const raw = buf.argsJson.trim()
+          if (raw.length === 0) {
+            yield { type: 'error', code: 'malformed_tool_args', message: 'Tool arguments are missing; use an explicit JSON object.' }
+            return
+          }
           if (raw.length > 0) {
             try {
               const parsed = JSON.parse(raw)
               if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
                 input = parsed as Record<string, unknown>
+              } else {
+                yield { type: 'error', code: 'malformed_tool_args', message: 'Tool arguments must be a JSON object.' }
+                return
               }
             } catch {
               // Mirrors the legacy complete() behavior: surface the raw
@@ -334,6 +367,7 @@ export class OpenAIProvider implements LlmProvider {
               input,
             },
           }
+          emittedToolUse = true
         }
         // Consumed — a (buggy) repeated finish_reason must not re-emit.
         toolBuffers.clear()
@@ -342,6 +376,13 @@ export class OpenAIProvider implements LlmProvider {
     // Stream drained (or, defensively, ended without finish_reason) —
     // emit the terminal pair so consumers' iterators don't dangle.
     if (usage) yield { type: 'usage', usage }
+    if (toolBuffers.size > 0) {
+      yield { type: 'error', code: 'incomplete_tool_call', message: 'Tool stream ended before its terminal chunk.' }
+      return
+    }
+    // Complete tool calls are actionable even when an OpenAI-compatible gateway
+    // labels their terminal chunk (or a later usage chunk) as a plain stop.
+    if (emittedToolUse && stopReason === 'end_turn') stopReason = 'tool_use'
     yield { type: 'end', stopReason }
   }
 

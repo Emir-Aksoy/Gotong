@@ -712,13 +712,19 @@ export async function handleImMessage(
         return
       }
       const summary = summariseResult(result, config.approvals !== undefined)
+      if (summary === EMPTY_AGENT_REPLY) {
+        config.log.warn('im agent returned empty reply', { platform, taskId: result.taskId })
+      }
       // Whatever goes back — reply, failure line, suspend pointer — is what
       // the butler "said"; the next turn must know it (voice is rendering
       // only, the window records the text the clip was synthesized from).
       await config.sessions?.append(sessionKey, 'assistant', summary)
       // VOICE-M3 — only the assistant's OK reply speaks; failure / suspend
       // telemetry carries commands (/inbox 短码) that must stay copyable text.
-      await reply(bridge, msg, summary, result.kind === 'ok' ? await voiceClipFor(config, summary) : undefined)
+      await reply(
+        bridge, msg, summary,
+        result.kind === 'ok' && summary !== EMPTY_AGENT_REPLY ? await voiceClipFor(config, summary) : undefined,
+      )
       return
     }
 
@@ -1809,6 +1815,9 @@ function recordReachable(
   })
 }
 
+const EMPTY_AGENT_REPLY =
+  '这次没有生成可发送的回复。若刚才涉及外发、付款或修改，请先确认执行结果，避免重复操作。 / No reply was generated. Check action results before retrying.'
+
 function summariseResult(result: TaskResult, imApprovals = false): string {
   switch (result.kind) {
     case 'ok': {
@@ -1819,7 +1828,8 @@ function summariseResult(result: TaskResult, imApprovals = false): string {
         'text' in output &&
         typeof (output as { text: unknown }).text === 'string'
       ) {
-        return (output as { text: string }).text
+        const text = (output as { text: string }).text
+        return text.trim() ? text : EMPTY_AGENT_REPLY
       }
       try {
         return '```\n' + JSON.stringify(output, null, 2) + '\n```'

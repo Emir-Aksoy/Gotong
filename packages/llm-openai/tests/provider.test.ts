@@ -738,6 +738,67 @@ async function collect(
 }
 
 describe('OpenAIProvider — native streaming (Phase 8 M3)', () => {
+  const completeToolDelta = {
+    tool_calls: [{ index: 0, id: 'call_probe', function: { name: 'probe', arguments: '{"value":7}' } }],
+  }
+
+  it.each([
+    ['stop'],
+    ['tool_calls', 'stop'],
+    ['tool_calls', 'tool_calls', 'stop'],
+  ])('keeps complete tool requests actionable across finish markers %j', async (...reasons) => {
+    const { client } = makeFakeStreamingClient([
+      { choices: [{ delta: completeToolDelta }] },
+      ...reasons.map(finish_reason => ({ choices: [{ delta: {}, finish_reason }] })),
+      { choices: [], usage: { prompt_tokens: 20, completion_tokens: 8 } },
+    ])
+    const res = await drainStream(new OpenAIProvider({ client: client as any }).stream({ messages: [] }))
+    expect(res.stopReason).toBe('tool_use')
+    expect(res.toolUses).toEqual([{ type: 'tool_use', id: 'call_probe', name: 'probe', input: { value: 7 } }])
+    expect(res.usage?.outputTokens).toBe(8)
+  })
+
+  it.each(['length', 'content_filter', 'unexpected'])('does not promote %s into tool execution, even with a trailing stop', async reason => {
+    const { client } = makeFakeStreamingClient([
+      { choices: [{ delta: completeToolDelta }] },
+      { choices: [{ delta: {}, finish_reason: reason }] },
+      { choices: [{ delta: {}, finish_reason: 'stop' }] },
+    ])
+    const res = await drainStream(new OpenAIProvider({ client: client as any }).stream({ messages: [] }))
+    expect(res.stopReason).toBe(reason === 'length' ? 'max_tokens' : 'error')
+  })
+
+  it.each([
+    { id: '', name: 'probe', arguments: '{}' },
+    { id: 'call_probe', name: '', arguments: '{}' },
+    { id: 'call_probe', name: 'probe', arguments: '[]' },
+    { id: 'call_probe', name: 'probe', arguments: 'null' },
+    { id: 'call_probe', name: 'probe', arguments: '{' },
+    { id: 'call_probe', name: 'probe', arguments: '' },
+    { id: 'call_probe', name: 'probe', arguments: ' \n ' },
+    { id: 'call_probe', name: 'probe', arguments: undefined },
+  ])('rejects incomplete or invalid tool calls instead of treating them as a normal stop: %j', async call => {
+    const { client } = makeFakeStreamingClient([
+      { choices: [{ delta: { tool_calls: [{ index: 0, id: call.id, function: { name: call.name, arguments: call.arguments } }] } }] },
+      { choices: [{ delta: {}, finish_reason: 'stop' }] },
+    ])
+    const res = await drainStream(new OpenAIProvider({ client: client as any }).stream({ messages: [] }))
+    expect(res.stopReason).toBe('error')
+    expect(res.toolUses).toBeUndefined()
+  })
+
+  it.each([
+    [{ choices: [{ delta: { tool_calls: [completeToolDelta.tool_calls[0], { ...completeToolDelta.tool_calls[0], index: 1 }] }, finish_reason: 'stop' }] }],
+    [{ choices: [{ delta: completeToolDelta, finish_reason: 'tool_calls' }] }, { choices: [{ delta: completeToolDelta, finish_reason: 'stop' }] }],
+    [{ choices: [{ delta: completeToolDelta, finish_reason: 'tool_calls' }] }, { choices: [{ delta: { tool_calls: [{ index: 1, id: 'partial', function: { name: 'probe', arguments: '{' } }] } }] }],
+    [{ choices: [{ delta: completeToolDelta }] }],
+    [{ choices: [{ delta: completeToolDelta }] }, { choices: [{ delta: { tool_calls: [{ index: 0, id: 'another', function: { arguments: '}' } }] }, finish_reason: 'stop' }] }],
+  ].map(chunks => ({ chunks })))('fails closed on duplicate, replayed, conflicting or unterminated calls: %#', async ({ chunks }) => {
+    const { client } = makeFakeStreamingClient(chunks)
+    const res = await drainStream(new OpenAIProvider({ client: client as any }).stream({ messages: [] }))
+    expect(res.stopReason).toBe('error')
+  })
+
   it('translates text-only chunk sequence to text → usage → end', async () => {
     const { client } = makeFakeStreamingClient([
       // Chunk with first text fragment.
