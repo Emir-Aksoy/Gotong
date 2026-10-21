@@ -130,6 +130,6 @@
   "devDependencies": {
     "@gotong/sdk-node": "workspace:*",
     "@types/ws": "^8.5.13",
-    "vitest": "^4.1.10"
+    "vitest": "^4.1.12"
   }
 }

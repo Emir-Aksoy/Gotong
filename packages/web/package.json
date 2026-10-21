@@ -49,6 +49,6 @@
     "@gotong/identity": "workspace:*",
     "esbuild": "^0.28.1",
     "qrcode-terminal": "^0.12.0",
-    "vitest": "^4.1.10"
+    "vitest": "^4.1.12"
   }
 }
