@@ -48,5 +48,12 @@ typecheck RC=0；35 包测试全绿（host 3788 + 5 skip、web 1713）；四门 
 ## 后续
 
 - 已推 GitHub（`ae15fb07..2312d0c1`），35 条告警已被 GitHub 自动标为已修复。
-- 推送后新出 5 条（vite 3 条、qs 2 条），均只在开发链路或运行时不加载，待用户决定是否处理。
-- `shell/` 12 条按用户指令不动。
+- 推送后新出 5 条，2026-10-23 按用户指令「修掉那5条告警，测试后推送」补修（未部署）：
+  - vite 3 条（GHSA-698v-4r3x-3vcv / GHSA-587h-7wmj-h5pm / GHSA-r825-w8mm-5pxw，漏洞在 Windows 上的
+    launch-editor）：根 devDep `^8.1.5` → `^8.1.6`，锁解析到 8.3.5。只有 vitest 用到 vite，不起 vite
+    开发服务器。
+  - qs 2 条（GHSA-4mjr-xmp4-gh2g / GHSA-x5fp-wj9c-mxmx）：override 下限 `^6.15.2` → `^6.16.0`，锁里只剩
+    6.16.1。飞书 SDK 会在运行时加载 qs，但只调用 `qs.stringify` 拼出站请求参数，参数由我们的代码构造；
+    另一条引入路径（body-parser）在 MCP SDK 不加载的 HTTP server 子模块里。生产在下次部署前仍是 6.15.3。
+  - 验证：build / typecheck RC=0；35 包测试全绿（host 3788 + 5 skip、web 1713）；四门 PASS；发布就绪门 36 包通过。
+- `shell/` 独立锁的告警（推送后变为 13 条）按用户指令不动。
