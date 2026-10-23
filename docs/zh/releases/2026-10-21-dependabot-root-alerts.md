@@ -45,7 +45,8 @@ typecheck RC=0；35 包测试全绿（host 3788 + 5 skip、web 1713）；四门 
 **回滚**：停服务 → `git checkout ebcc9754` → `pnpm install --frozen-lockfile --prefer-offline` →
 重新构建 → 重启。本次不涉及数据结构和配置，快照只作保险。
 
-## 未完成
+## 后续
 
-- 未推 GitHub：GitHub 上的告警要等 `main` 推上去后才会自动关闭。
+- 已推 GitHub（`ae15fb07..2312d0c1`），35 条告警已被 GitHub 自动标为已修复。
+- 推送后新出 5 条（vite 3 条、qs 2 条），均只在开发链路或运行时不加载，待用户决定是否处理。
 - `shell/` 12 条按用户指令不动。

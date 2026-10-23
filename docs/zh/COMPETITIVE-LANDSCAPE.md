@@ -1,16 +1,22 @@
 # 竞品与生态对比：现实工作流嵌入 × 多人多智能体协作
 
-<!-- doc-version: 1.0 -->
-> **文档版本 1.0** · 中文译本 · 最后更新 2026-06-27 · 权威源：[English](../COMPETITIVE-LANDSCAPE.md)。如译文与英文版冲突，以英文版为准。
+<!-- doc-version: 1.1 -->
+> **文档版本 1.1** · 中文译本 · 最后更新 2026-10-23 · 权威源：[English](../COMPETITIVE-LANDSCAPE.md)。如译文与英文版冲突，以英文版为准。
 
 
-> 调研日期 2026-05-29。覆盖 30+ 项目/协议，分四赛道。给 agent 与人类读者共用。
+> 调研日期 2026-05-29（赛道 ⑤ 为 2026-10-23 增补）。覆盖 30+ 项目/协议，分五赛道。给 agent 与人类读者共用。
 > 一句话结论：**没有任何单一竞品同时具备 Gotong 的四根支柱**——哑 hub（决策在参与者）/
 > 人=agent 统一 `Participant` / 文件即状态 / 组织主权联邦。市场被切成四块，每块各占
 > 一两根、缺其余。
 >
 > 配套阅读：[`PRODUCT-MATRIX.md`](PRODUCT-MATRIX.md)（2026-06-21）——产品级同台矩阵（优势/劣势各一张）
 > + 「我们最适合哪类有需求但今天没被满足的用户」+ DeepSeek 降价如何解锁那个格子。本篇是赛道地图，那篇是产品级目标用户判断。
+>
+> **2026-10-23 增补**：新增赛道 ⑤「巨头常驻个人 agent」（ChatGPT dots / Meta Muse / Grok Bot）
+> 和「给 agent 配邮箱」的趋势，相应补了定位、护城河的适用边界、短板 8–9、增强方向 9（邮件桥，只记一笔）。
+> ⑤ 不占四根支柱的任何一根，它比的是另一条轴（个人助手体验），所以上面的一句话结论不变。
+> ①–④ 仍是 2026-05-29 的调研快照，未逐条复核；其中几条短板此后已有进展（SSO 的 OIDC/SAML、
+> A2A Agent Card、MCP 连接器目录），以 [`PROGRESS-LEDGER.md`](PROGRESS-LEDGER.md) 为准。
 
 ---
 
@@ -22,6 +28,7 @@
 | **② 智能体互操作协议** | MCP、A2A、(IBM ACP→并入 A2A)、AGNTCY/SLIM、NANDA、LMOS、Matrix、ANS/OIDC-A | 2025 下半年集体收编进 **Linux Foundation**，分层为"工具层(MCP)+智能体层(A2A)" | 已实现 MCP；联邦层是自研，应向 A2A 对齐 |
 | **③ AI 工作流自动化平台**（低代码/产品级） | n8n、Zapier Agents、Make、Activepieces、Windmill、Gumloop、Relay、Lindy、Sema4、Copilot Studio、Dify、Flowise | **LLM 焊进画布**当节点；**人是"暂停/等审批"节点** | runner 零 LLM（声明式）+ 人是收任务的 Participant |
 | **④ 自托管平台 / 持久化执行 / 聊天即 hub** | Dify、Flowise、Langflow、Rivet、LibreChat、Open WebUI、AnythingLLM；Temporal、Inngest、Restate、DBOS；Slack+Agentforce、Mattermost、Rocket.Chat、LangBot、Letta | 状态锁 DB/云；持久化引擎只是无 UI 后端；聊天 hub 无 suspend/resume | bridge+hub+agent+文件状态打包进一个自托管二进制 |
+| **⑤ 巨头常驻个人 agent**（2026-09 起，消费/团队级） | OpenAI ChatGPT dots、Meta Muse、xAI+Cursor Grok Bot；周边：AgentMail 等「agent 邮箱」服务 | **强模型 + 现成巨量入口（ChatGPT / WhatsApp / X）+ 常驻云电脑和数千连接器**；邮箱是触达「非 agent 世界」的附件，agent 互发邮件只是「有地址就能收发」的副作用，不是协议；治理做在单一厂商围墙之内 | 不争模型和入口；做跨厂商、跨组织的交互治理和数据主权——凭证、记忆、档案留在自己盘上 |
 
 ---
 
@@ -30,6 +37,10 @@
 > 别人要么「**框架即大脑**」(①)，要么「**LLM 焊进画布、人是审批节点**」(③)，要么
 > 「**只是后端引擎 / 只是消息桥**」(④)。Gotong 是「**哑 hub + 人即 participant +
 > 文件即状态 + 组织主权联邦**」——一个**协作底座**，不是又一个 in-process 编排器。
+>
+> ⑤ 比的是另一条轴：**个人助手体验**（模型、入口、连接器）。这条轴上，Gotong 的原生 agent
+> 阿同与它们正面重叠，而且没有性能优势。Gotong 作为网络的位置不在这条轴上，而在 ⑤ 各家的
+> 围墙之间：跨厂商、跨组织的任务语义、权限、审计、计费和身份核验，这些它们都没有。
 
 ---
 
@@ -56,6 +67,13 @@
    满足 A 组织发起的任务）连 A2A（150+ 组织标准）都没覆盖**——A2A 只有 `input-required`
    任务态，无跨组织人类参与者模型。
 
+**2026-10 适用边界修正**：⑤ 把单厂商内的治理做成了标配。dots 可按动作类别设放行/先问/禁止，
+发信前自动审查收件人和内容，有活动记录；Muse 有独立的 Sentinel agent 审核所有出网请求，
+支付走 Stripe 一次性卡号；Grok Bot 申领邮箱要用户批准、团队要管理员开启，本地命令默认审批。
+所以「有审批、有审计」本身已不是差异点。第 4、5 条只在两处成立：**跨边界**（跨厂商、跨组织）
+和**主权**（文件、记忆、凭证在自己盘上）。三家也都没公开怎么处理陌生 agent 的来信
+（发件人信任、白名单、注入隔离），这同样是空白。
+
 ---
 
 ## 四、短板（诚实清单）
@@ -75,6 +93,14 @@
    且 backend-agnostic。"6 桥"在原始广度上不是护城河——护城河是"带文件状态和参与者
    模型的 hub，它只是路由器"。
 7. **生态/心智份额**——对面 50k–110k star (CrewAI 52k、MetaGPT 68k、Dify 110k+)；我们早期。
+8. **个人助手层没有性能优势**（2026-10 增补）——阿同的个人助手部分与 ⑤ 正面重叠：模型、
+   入口规模（面向数十亿用户的现成 App）、连接器数量（4000+）、云端常驻执行都在对面。
+   阿同能拼的是主权（生活档案和记忆在自己盘上、可整目录搬走），拼不了聪明。
+9. **跨边界治理的需求还缺真实用户证据，邮件可能先占位**（2026-10 增补）——「跨厂商、跨组织」
+   是我们押注的空白，但还没有真实用户在用。与此同时，⑤ 正让邮箱成为 agent 事实上的互联方式
+   （Grok Bot 2026-10-09 起每个 bot 可申领独立地址，一手来源有限），可能绕过 A2A 等正式协议先占位。
+   邮件没有任务状态、能力声明和审批语义；SPF/DKIM 只能证明域名，证明不了「哪个 agent 代表谁」；
+   陌生来信本身就是注入入口。这些是我们的机会，也说明我们迟早要能接住邮件这条通道，不能只等 A2A。
 
 ---
 
@@ -136,10 +162,16 @@
    reputation" 的可验证未来版本，目前都未批准为标准，**别现在采纳**，要跟。
 8. **定位叙事**——对外讲清「**边缘 A2A/MCP-native，但带着 wire 协议故意不管的组织边界
    原语（vault / 配额 / 跨组织 HITL / origin provenance）**」。
+9. **邮件桥（2026-10-23 只记一笔：等真实需求，不设计、不排期；方向 C+T）**——让外部 agent
+   能用邮件联系阿同。要点只有三条：入站邮件一律按**不可信**处理（发件人信任分级、隔离区、
+   要回复先过审批）；阿同代用户回信走现有审批闸；起点是已有的 Gmail OAuth 连接器
+   （[`REAL-LIFE-CONNECTORS.md`](REAL-LIFE-CONNECTORS.md) C-M2），不自建邮件服务。
+   重新评估的信号：出现真实的「外部 agent 来信需要处理」的用户场景。
 
 **净结论**：别去和 Temporal/DBOS 比持久化、和 Dify/n8n 比集成广度。防御性楔子是**那个
 组合**：文件优先可移植 + 人即 participant + 多 IM 原生桥 + 够用 suspend/resume，全装进
 一个自托管 OSS 二进制。最该补的两块：**A2A 对齐**（拿生态可达性）+ **集成走 MCP 路线**。
+2026-10 补一句：也别和 ⑤ 比模型和入口——阿同拼主权，Gotong 守跨边界治理。
 
 ---
 
@@ -165,3 +197,10 @@
 - Windmill: windmill.dev/docs/core_concepts/variables_and_secrets ; Copilot Studio: learn.microsoft.com/microsoft-copilot-studio/flows-advanced-approvals
 - Temporal HITL: docs.temporal.io/ai-cookbook/human-in-the-loop-python ; DBOS: github.com/dbos-inc/dbos-transact-py
 - LangBot: github.com/langbot-app/LangBot ; Letta: github.com/letta-ai/letta
+
+**常驻个人 agent / agent 邮箱（2026-10 增补）**
+- ChatGPT dots: openai.com/index/introducing-dots/ ; siliconangle.com/2026/09/29/openai-launches-dots-always-on-ai-agents-in-chatgpt-with-their-own-cloud-computers/
+- Meta Muse: about.fb.com/news/2026/09/introducing-muse-personal-ai-agent/
+- Grok Bot: every.to/personal-agents-comparison ; Agent Email（未完全核实）: pasqualepillitteri.it/en/news/22755/grok-bot-email-address-mail-grokbot ; letsdatascience.com/news/grok-bot-adds-dedicated-email-addresses-7e47912d ; 此前走 AgentMail 插件: docs.agentmail.to/integrations/grokbot
+- AgentMail 种子轮（2026-03-10）: globenewswire.com/news-release/2026/03/10/3253159/0/en/AgentMail-Raises-6M-led-by-General-Catalyst-to-Build-the-First-Email-Provider-for-AI-Agents.html
+- IETF 个人草案（非标准）: datatracker.ietf.org/doc/draft-klrc-aiagent-auth/ ; datatracker.ietf.org/doc/html/draft-daniel-ai-agent-internet-architecture-00
