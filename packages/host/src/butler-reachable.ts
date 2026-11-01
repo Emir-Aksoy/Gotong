@@ -28,8 +28,10 @@
  * identity-schema change) and `load()` rehydrates the Map at boot. The truth is
  * the file; the Map is a warm cache.
  *
- * No-leak by construction: a route is keyed by the member's OWN userId and only
- * ever pushed to that member's own last chat — this module never fans out.
+ * No-leak: a route is keyed by the member's OWN userId and this module never fans
+ * out. That isn't enough on its own — the account behind a route can be unbound or
+ * rebound to someone else after we learned it — so every delivery re-checks
+ * `isBoundTo` first and treats a stale route as no route.
  */
 
 import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises'
@@ -79,7 +81,7 @@ export type ButlerFilePushResult =
   /** `detail` 是平台返回的错误,比如缺权限;如实转告才能让人去修。 */
   | { delivered: false; reason: 'send_failed'; detail: string }
 
-/** 给成员本人发文件的能力。签名里没有收件人以外的目标,路由只来自可达表。实现方要核对绑定,见 `startImBridges`。 */
+/** 给成员本人发文件的能力。签名里没有收件人以外的目标,路由只来自可达表。 */
 export interface ButlerMemberFiles {
   canPush(userId: string): ButlerFileReach
   push(userId: string, file: ImOutboundFile): Promise<ButlerFilePushResult>
@@ -95,6 +97,12 @@ export interface ButlerReachableOptions {
    */
   bridgeFor: (platform: string) => ImBridge | undefined
   logger: ImLogger
+  /**
+   * 这个账号现在还绑在这个成员名下吗。路由只在成员说话时更新,解绑和换绑都碰不到它,
+   * 重启后还会从盘上恢复。账号可能已经绑给别人,而消息和文件发出去收不回来,所以每次
+   * 投递前都要问。必填:漏接就等于把成员的私事发给账号的新主人。
+   */
+  isBoundTo: (userId: string, route: ReachableRoute) => boolean
   /** Injectable clock (deterministic tests). Default `Date.now`. */
   now?: () => number
 }
@@ -109,6 +117,7 @@ export class ButlerReachableRegistry {
   private readonly dir: string
   private readonly bridgeFor: (platform: string) => ImBridge | undefined
   private readonly log: ImLogger
+  private readonly isBoundTo: (userId: string, route: ReachableRoute) => boolean
   private readonly now: () => number
   /** In-flight write-through persists — awaited by `flush()` (graceful shutdown,
    *  and deterministic round-trip tests) so a route is on disk before a restart. */
@@ -118,6 +127,7 @@ export class ButlerReachableRegistry {
     this.dir = opts.dir
     this.bridgeFor = opts.bridgeFor
     this.log = opts.logger
+    this.isBoundTo = opts.isBoundTo
     this.now = opts.now ?? Date.now
   }
 
@@ -200,19 +210,38 @@ export class ButlerReachableRegistry {
     await Promise.all(this.pending)
   }
 
-  /** The current route for a member (undefined = never reached / not loaded). */
+  /** 记录的路由(undefined = 没说过话或还没加载)。不代表能投递,投递前要核对绑定。 */
   routeFor(userId: string): ReachableRoute | undefined {
     return this.routes.get(userId)
   }
 
+  /** 能投递的路由。账号已经不属于这个成员,或者查不出来,都当没有路由。 */
+  private deliverableRoute(userId: string): ReachableRoute | undefined {
+    const route = this.routes.get(userId)
+    if (!route) return undefined
+    try {
+      if (this.isBoundTo(userId, route)) return route
+      this.log.info('butler reachable: route is no longer bound to this member', {
+        userId,
+        platform: route.platform,
+      })
+    } catch (err) {
+      this.log.warn('butler reachable: binding lookup failed', {
+        userId,
+        err: err instanceof Error ? err.message : String(err),
+      })
+    }
+    return undefined
+  }
+
   /**
    * Push a line of text to a member's last chat. Returns a typed result so a
-   * caller (reminder / approval push-back) can distinguish "member never bound a
-   * chat" from "the bridge is down" from "send threw" — a reminder that can't be
+   * caller (reminder / approval push-back) can distinguish "member has no chat
+   * of their own" from "the bridge is down" from "send threw" — a reminder that can't be
    * delivered should be logged, not lost silently.
    */
   async push(userId: string, text: string): Promise<ButlerPushResult> {
-    const route = this.routes.get(userId)
+    const route = this.deliverableRoute(userId)
     if (!route) return { delivered: false, reason: 'unknown_member' }
     const bridge = this.bridgeFor(route.platform)
     if (!bridge) return { delivered: false, reason: 'no_bridge' }
@@ -236,7 +265,7 @@ export class ButlerReachableRegistry {
 
   /** 能力探测:路由和桥都在,而且这座桥实现了 `sendFile`。 */
   canPushFile(userId: string): ButlerFileReach {
-    const route = this.routes.get(userId)
+    const route = this.deliverableRoute(userId)
     if (!route) return { ok: false, reason: 'unknown_member' }
     const bridge = this.bridgeFor(route.platform)
     if (!bridge) return { ok: false, reason: 'no_bridge' }
@@ -245,12 +274,11 @@ export class ButlerReachableRegistry {
   }
 
   /**
-   * 把文件发到路由表记的账号。路由表只记私聊(GRP),所以在群里触发也不会发到群里。
-   * 这里不查绑定,解绑后路由还在;面向成员的入口是核对过绑定的 `memberFiles`。
+   * 把文件发到成员本人。路由表只记私聊(GRP),所以在群里触发也不会发到群里。
    * 不走 outbox:成员正等着这份文件,失败要当场说,而不是日后悄悄重投。
    */
   async pushFile(userId: string, file: ImOutboundFile): Promise<ButlerFilePushResult> {
-    const route = this.routes.get(userId)
+    const route = this.deliverableRoute(userId)
     if (!route) return { delivered: false, reason: 'unknown_member' }
     const bridge = this.bridgeFor(route.platform)
     if (!bridge) return { delivered: false, reason: 'no_bridge' }

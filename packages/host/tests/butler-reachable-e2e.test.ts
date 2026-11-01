@@ -152,6 +152,7 @@ describe('F1 — butler outbound-push foundation', () => {
   } {
     const bridge = new FakeBridge('telegram')
     const reg = new ButlerReachableRegistry({
+      isBoundTo: () => true,
       dir,
       bridgeFor: (p) => (p === bridge.platform ? bridge : undefined),
       logger: silentLogger,
@@ -206,6 +207,7 @@ describe('F1 — butler outbound-push foundation', () => {
 
     // Restart: a brand-new registry over the SAME dir rehydrates the route.
     const reg2 = new ButlerReachableRegistry({
+      isBoundTo: () => true,
       dir,
       bridgeFor: (p) => (p === bridge.platform ? bridge : undefined),
       logger: silentLogger,
@@ -228,6 +230,7 @@ describe('F1 — butler outbound-push foundation', () => {
     // A route exists, but no bridge is live for its platform (bridge crashed /
     // reconfigured) — the reminder can't be delivered right now, not lost.
     const reg = new ButlerReachableRegistry({
+      isBoundTo: () => true,
       dir,
       bridgeFor: () => undefined,
       logger: silentLogger,
@@ -281,6 +284,7 @@ describe('F1 — butler outbound-push foundation', () => {
     )
 
     const reg2 = new ButlerReachableRegistry({
+      isBoundTo: () => true,
       dir,
       bridgeFor: (p) => (p === bridge.platform ? bridge : undefined),
       logger: silentLogger,
@@ -302,6 +306,7 @@ describe('F1 — butler outbound-push foundation', () => {
     await reg.flush()
 
     const reg2 = new ButlerReachableRegistry({
+      isBoundTo: () => true,
       dir,
       bridgeFor: (p) => (p === bridge.platform ? bridge : undefined),
       logger: silentLogger,
@@ -319,6 +324,7 @@ describe('F1 — butler outbound-push foundation', () => {
     await writeFile(join(dir, 'bob.json'), '{ not valid json', 'utf8')
 
     const reg2 = new ButlerReachableRegistry({
+      isBoundTo: () => true,
       dir,
       bridgeFor: (p) => (p === bridge.platform ? bridge : undefined),
       logger: silentLogger,
@@ -343,6 +349,7 @@ describe('pushFile — 文件只到成员本人', () => {
 
   const registry = (bridge: ImBridge | undefined): ButlerReachableRegistry =>
     new ButlerReachableRegistry({
+      isBoundTo: () => true,
       dir: join(tmpdir(), `gotong-reach-file-${process.pid}-${Math.random().toString(36).slice(2)}`),
       bridgeFor: () => bridge,
       logger: silentLogger,

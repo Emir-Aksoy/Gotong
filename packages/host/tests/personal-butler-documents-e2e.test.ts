@@ -133,6 +133,7 @@ function buildAtong(provider: LlmProvider, memberFiles: () => ButlerFactoryRefs[
 
 function memberFilesOver(bridge: ImBridge | undefined): ButlerFactoryRefs['memberFiles'] {
   const registry = new ButlerReachableRegistry({
+    isBoundTo: () => true,
     dir: join(root, 'butler', 'reachable'),
     bridgeFor: () => bridge,
     logger: silentLogger,

@@ -41,7 +41,7 @@
 - **草稿**：原子写。最多 5 份未完成，超出时清掉最旧的并明说；7 天没改动就清掉。清理发生在该成员下次调用工具时，成员不再调用就一直留在盘上。
 - **成品不留盘**：只在内存里走一遍。发送成功后删除草稿，只留一个标记防止重复发送，标记里只有草稿 ID 和发送时间，没有标题和正文。
 - **不走推送闸门和 outbox**：这是成员当面要的文件，不是后台推送。
-- **发送前核对绑定**：可达表记的是成员上次从哪说话，解绑和换绑都不会更新它，重启后还在。文件发出去收不回来，所以探测和发送前都查一次这个账号现在绑给谁，对不上或查询失败都不发，按「还没绑定」处理。
+- **发送前核对绑定**：可达表记的是成员上次从哪说话，解绑和换绑都不会更新它，重启后还在。文件发出去收不回来，所以探测和发送前都查一次这个账号现在绑给谁，对不上或查询失败都不发，按「还没绑定」处理。后台文字推送共用这个核对。
 - **飞书**：`im/v1/files` 上传后发 `msg_type: file`。其他 IM 桥没有 `sendFile`，会如实报告不支持。
 
 ## 四、版面
@@ -134,7 +134,6 @@
 | `butler-document-layout.ts` | 纯版面规划器 |
 | `butler-document-render.ts` | 唯一 import 第三方库的模块 |
 | `butler-document-worker.ts` / `butler-document-runner.ts` | 子进程入口 / 启动和队列 |
-| `butler-reachable.ts` | `canPushFile` / `pushFile`，只走私聊路由，不查绑定 |
-| `im-bridge.ts` 的 `memberFiles` | 工具实际用的入口：先核对绑定，再调上面两个 |
+| `butler-reachable.ts` | `canPushFile` / `pushFile`，只走私聊路由，投递前核对绑定（文字推送共用） |
 
 飞书侧在 `packages/im-lark/src/bridge.ts`，接口是 `packages/im-adapter/src/types.ts` 里可选的 `ImBridge.sendFile`。

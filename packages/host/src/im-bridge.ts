@@ -1065,8 +1065,8 @@ export function foldSeeingDescriber(
 /**
  * PUSH-M3 — fold the Web Push tap under the IM push as the B1 补位腿 (fold
  * family: {@link foldHearingTranscriber}). STRICTLY gap-filling: only
- * `reason === 'unknown_member'` — "this member never bound an IM chat" — falls
- * through to the tap. Members WITH an IM route (delivered, or transient
+ * `reason === 'unknown_member'` — "this member has no IM chat of their own" (never
+ * bound, or the last account is no longer theirs) — falls through to the tap. Members WITH an IM route (delivered, or transient
  * no_bridge / send_failed) behave byte-for-byte as today, so IM stays the
  * primary channel and nobody is ever double-notified. The tap callback takes
  * NO text (low-info by shape); when it also fails, the ORIGINAL unknown_member
@@ -1187,10 +1187,10 @@ export interface StartImBridgesOptions {
    */
   outboxDir?: string
   /**
-   * PUSH-M3 — B1 补位腿:reachable 判定成员**从没绑过 IM**(unknown_member)
-   * 时,退而发一记低信息 Web Push tap 叫醒 /me(签名不收 text=正文结构性
-   * 上不了通知;正文已由 deliverToMember 记进会话窗)。绑了 IM 的成员一律
-   * 不经它(行为字节不变);缺省 → 回落链不存在,与今天逐字节一致。
+   * PUSH-M3 — B1 补位腿:reachable 判定成员**没有还属于本人的 IM 路线**(没绑过,或上次
+   * 说话的账号已解绑、换绑,unknown_member)时,退而发一记低信息 Web Push tap 叫醒 /me
+   * (签名不收 text=正文结构性上不了通知;正文已由 deliverToMember 记进会话窗)。路线
+   * 有效的成员一律不经它;缺省 → 回落链不存在。
    */
   webPushFallback?: (userId: string) => Promise<ButlerPushResult>
   /**
@@ -1415,6 +1415,8 @@ export async function startImBridges(
       dir: opts.reachableDir,
       bridgeFor: (platform) => bridges.find((b) => b.platform === platform),
       logger: opts.log,
+      isBoundTo: (userId, route) =>
+        opts.identity.getUserIdByImBinding(route.platform, route.platformUserId) === userId,
     })
     await reachable.load()
   }
@@ -1440,30 +1442,11 @@ export async function startImBridges(
     })
   }
 
-  // 可达表记的是成员上次从哪说话,解绑和换绑都不会更新它,重启后还在。这个账号可能
-  // 已经绑给别人,而文件发出去收不回来,所以每次都核对绑定;对不上或读不出来都不发。
-  const routeStillOwnedBy = (userId: string): boolean => {
-    const route = reachable?.routeFor(userId)
-    if (!route) return false
-    try {
-      return opts.identity.getUserIdByImBinding(route.platform, route.platformUserId) === userId
-    } catch (err) {
-      opts.log.warn('butler file route: binding lookup failed', {
-        userId,
-        err: err instanceof Error ? err.message : String(err),
-      })
-      return false
-    }
-  }
   const reachableFiles = reachable
   const memberFiles: ButlerMemberFiles | undefined = reachableFiles
     ? {
-        canPush: (userId) =>
-          routeStillOwnedBy(userId) ? reachableFiles.canPushFile(userId) : { ok: false, reason: 'unknown_member' },
-        push: async (userId, file) =>
-          routeStillOwnedBy(userId)
-            ? reachableFiles.pushFile(userId, file)
-            : { delivered: false, reason: 'unknown_member' },
+        canPush: (userId) => reachableFiles.canPushFile(userId),
+        push: (userId, file) => reachableFiles.pushFile(userId, file),
       }
     : undefined
 
