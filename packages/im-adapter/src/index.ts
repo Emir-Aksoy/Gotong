@@ -12,6 +12,7 @@ export type {
   ImUser,
   ImMessage,
   ImAttachment,
+  ImOutboundFile,
   ImCommand,
   ImBindingResolver,
   ClaimResult,

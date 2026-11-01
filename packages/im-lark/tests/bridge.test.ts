@@ -399,6 +399,84 @@ describe('LarkBridge', () => {
     expect((client.calls[0]!.options?.body as { msg_type: string }).msg_type).toBe('text')
   })
 
+  // -------- sendFile (generated documents) --------
+
+  it.each([
+    ['周报.pptx', 'ppt'],
+    ['周报.DOCX', 'doc'],
+    ['表.xlsx', 'xls'],
+    ['合同.pdf', 'pdf'],
+    ['无扩展名', 'stream'],
+  ])('sendFile uploads %s as file_type %s, then sends msg_type file', async (fileName, fileType) => {
+    const client = new FakeLarkClient()
+    const conn = fakeConnection()
+    bridge = makeBridge({ factory: conn.factory, client })
+    await bridge.sendFile(
+      { platform: 'lark', platformUserId: SENDER_OPEN_ID },
+      { bytes: new Uint8Array([1, 2, 3]), filename: fileName },
+    )
+    expect(client.uploads).toEqual([{ fileType, fileName, byteLength: 3 }])
+    expect(client.calls).toHaveLength(1)
+    expect(client.calls[0]?.path).toBe('/open-apis/im/v1/messages')
+    expect(client.calls[0]?.options?.query).toEqual({ receive_id_type: 'open_id' })
+    const body = client.calls[0]!.options?.body as { receive_id: string; msg_type: string; content: string }
+    expect(body.receive_id).toBe(SENDER_OPEN_ID)
+    expect(body.msg_type).toBe('file')
+    expect(JSON.parse(body.content)).toEqual({ file_key: 'file_key_test' })
+  })
+
+  it('sendFile prefers chatId when the route has one', async () => {
+    const client = new FakeLarkClient()
+    const conn = fakeConnection()
+    bridge = makeBridge({ factory: conn.factory, client })
+    await bridge.sendFile(
+      { platform: 'lark', platformUserId: SENDER_OPEN_ID },
+      { bytes: new Uint8Array([1]), filename: 'a.pptx' },
+      { chatId: CHAT_ID },
+    )
+    expect((client.calls[0]!.options?.body as { receive_id: string }).receive_id).toBe(CHAT_ID)
+    expect(client.calls[0]?.options?.query).toEqual({ receive_id_type: 'chat_id' })
+  })
+
+  it('sendFile throws when the upload fails and sends no message', async () => {
+    const client = new FakeLarkClient()
+    client.uploadError = new Error('im:resource permission missing')
+    const errors: unknown[] = []
+    const conn = fakeConnection()
+    bridge = makeBridge({ factory: conn.factory, client, onError: (e) => errors.push(e) })
+    await expect(
+      bridge.sendFile({ platform: 'lark', platformUserId: SENDER_OPEN_ID }, { bytes: new Uint8Array([1]), filename: 'a.docx' }),
+    ).rejects.toThrow('im:resource')
+    expect(client.calls).toHaveLength(0)
+    // The caller reports this failure; it must not also degrade to a text reply path.
+    expect(errors).toHaveLength(0)
+  })
+
+  it('sendFile throws when the file message itself fails', async () => {
+    const client = new FakeLarkClient()
+    client.call = async () => {
+      throw new Error('code=230002 bot not in chat')
+    }
+    const conn = fakeConnection()
+    bridge = makeBridge({ factory: conn.factory, client })
+    await expect(
+      bridge.sendFile({ platform: 'lark', platformUserId: SENDER_OPEN_ID }, { bytes: new Uint8Array([1]), filename: 'a.docx' }),
+    ).rejects.toThrow('230002')
+  })
+
+  it('sendFile refuses empty files, oversize files and a missing receiver', async () => {
+    const client = new FakeLarkClient()
+    const conn = fakeConnection()
+    bridge = makeBridge({ factory: conn.factory, client })
+    const to = { platform: 'lark', platformUserId: SENDER_OPEN_ID }
+    await expect(bridge.sendFile(to, { bytes: new Uint8Array(), filename: 'a.pptx' })).rejects.toThrow('empty')
+    await expect(bridge.sendFile(to, { bytes: new Uint8Array(30 * 1024 * 1024 + 1), filename: 'a.pptx' })).rejects.toThrow('limit')
+    await expect(
+      bridge.sendFile({ platform: 'lark', platformUserId: '' }, { bytes: new Uint8Array([1]), filename: 'a.pptx' }),
+    ).rejects.toThrow('receive_id')
+    expect(client.uploads).toHaveLength(0)
+  })
+
   // -------- sendMessage voice leg (VOICE-M2) --------
 
   /** Minimal ogg page: OggS(4) ver(1) type(1) granule(8 LE) + padding. */

@@ -41,6 +41,7 @@ interface CapabilityEntry {
 
 const CATALOG: readonly CapabilityEntry[] = [
   { signals: ['set_reminder'], line: '- 定时提醒 —— 「明天早上 8 点提醒我交周报」' },
+  { signals: ['write_document'], line: '- 做 PPT 和 Word —— 「帮我做个季度复盘 PPT」(做好发到你的飞书私聊)' },
   {
     signals: ['open_task_note', 'list_task_notes'],
     line: '- 多步任务盯办 —— 「记一下装修这三件事,帮我盯着一件件做完」',

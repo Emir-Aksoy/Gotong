@@ -20,7 +20,7 @@ const refs: ButlerFactoryRefs = {
   governedAgents: undefined, workflowEditor: undefined, workflowCreate: undefined,
   workflows: undefined, observeRuns: undefined, observeAgents: undefined,
   observeUsage: undefined, diagnoseOwned: undefined, diagnoseAdapt: undefined,
-  askRoster: undefined, memberPush: undefined, peerRoster: undefined, llmRoster: undefined,
+  askRoster: undefined, memberPush: undefined, memberFiles: undefined, peerRoster: undefined, llmRoster: undefined,
   schedules: undefined, pendingInbox: undefined, wizard: undefined,
   providerBuilder: undefined, memoryView: undefined,
 }

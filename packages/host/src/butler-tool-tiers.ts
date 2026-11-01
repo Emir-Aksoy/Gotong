@@ -48,6 +48,8 @@ export const BUTLER_FIRST_CLASS_BENIGN = [
   'plan_workflow',
   // 日常动词 + 被任务笔记本描述点名(理由②)
   'set_reminder',
+  // 做 PPT / Word — 日常动词。参数是一大块结构化内容,经 use_tool 转一跳容易走形
+  'write_document',
   // 任务笔记本 4 件 — 复述卡每轮陪跑的执行伴侣
   'open_task_note',
   'update_task_note',

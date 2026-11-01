@@ -76,6 +76,7 @@ import { buildButlerOnboardingToolset } from '../src/personal-butler-onboarding.
 import { buildButlerPanelToolset } from '../src/personal-butler-panel.js'
 import { buildButlerPeersToolset } from '../src/personal-butler-peers.js'
 import { buildButlerProfileToolset } from '../src/personal-butler-profile.js'
+import { buildButlerDocumentToolset } from '../src/personal-butler-documents.js'
 import { buildButlerRemindersToolset } from '../src/personal-butler-reminders.js'
 import { buildButlerRunBroadcastToolset } from '../src/personal-butler-run-broadcast.js'
 import { buildButlerWorkflowCreateToolset } from '../src/personal-butler-workflow-create.js'
@@ -112,6 +113,7 @@ const MEASURED_BUILDERS: Record<string, string> = {
   wizard: 'buildButlerWorkflowWizardToolset',
   consolidate: 'buildButlerConsolidateToolset',
   reminders: 'buildButlerRemindersToolset',
+  documents: 'buildButlerDocumentToolset',
   'task-notebook': 'createTaskNotebookToolset',
   knowledge: 'createKnowledgeLibraryToolset',
   // LIFE 一个构造器出两份 toolset:一等四件 + 目录里的 read_records。
@@ -250,6 +252,11 @@ function buildFullFace(): ToolFaceEntry[] {
       module: 'reminders',
       kind: 'benign',
       toolset: buildButlerRemindersToolset({ userId: U, hub: stub(), logger: stub() }),
+    },
+    {
+      module: 'documents',
+      kind: 'benign',
+      toolset: buildButlerDocumentToolset({ userId: U, root: join(tmp, 'documents'), files: () => undefined }),
     },
     { module: 'task-notebook', kind: 'benign', toolset: createTaskNotebookToolset(notebook) },
     {

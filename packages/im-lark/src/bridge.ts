@@ -40,7 +40,8 @@
  *     attachment carrying ogg/opus bytes is uploaded (`im/v1/files`)
  *     and sent as `msg_type: 'audio'` (VOICE-M2); anything else
  *     surfaces via `onError` and sends text only — same decision as
- *     Telegram / Matrix.
+ *     Telegram / Matrix. Generated documents go through `sendFile`, not
+ *     attachments.
  *   - Card / interactive messages on the reply side. Bot replies use
  *     the plain-text msg_type.
  *
@@ -62,6 +63,7 @@ import type {
   ImBridge,
   ImMessage,
   ImUser,
+  ImOutboundFile,
 } from '@gotong/im-adapter'
 
 import { opusDurationMs } from './audio.js'
@@ -70,7 +72,7 @@ import {
   type LarkClient,
   type LarkClientOptions,
 } from './client.js'
-import { larkToImMessage, parseLarkUri, pickLarkReceiveIdType } from './message.js'
+import { LARK_MAX_FILE_BYTES, larkToImMessage, parseLarkUri, pickLarkFileType, pickLarkReceiveIdType } from './message.js'
 import type {
   LarkMessageReceiveEvent,
   LarkSendMessageResponse,
@@ -375,6 +377,31 @@ export class LarkBridge implements ImBridge {
         },
       },
     )
+  }
+
+  async sendFile(to: ImUser, file: ImOutboundFile, options?: { chatId?: string }): Promise<void> {
+    const receiveId = options?.chatId ?? to.platformUserId
+    if (typeof receiveId !== 'string' || receiveId.length === 0) {
+      throw new Error('LarkBridge.sendFile: no chatId or platformUserId — Lark needs a receive_id')
+    }
+    // Lark refuses both of these; failing here gives a clearer error than its API code.
+    if (file.bytes.length === 0) throw new Error('LarkBridge.sendFile: file is empty')
+    if (file.bytes.length > LARK_MAX_FILE_BYTES) {
+      throw new Error(`LarkBridge.sendFile: file exceeds Lark's ${LARK_MAX_FILE_BYTES} byte limit`)
+    }
+    const fileKey = await this.client.uploadFile({
+      fileType: pickLarkFileType(file.filename),
+      fileName: file.filename,
+      bytes: file.bytes,
+    })
+    await this.client.call<LarkSendMessageResponse>('POST', '/open-apis/im/v1/messages', {
+      query: { receive_id_type: pickLarkReceiveIdType(receiveId) },
+      body: {
+        receive_id: receiveId,
+        msg_type: 'file',
+        content: JSON.stringify({ file_key: fileKey }),
+      },
+    })
   }
 
   onMessage(listener: Listener): () => void {

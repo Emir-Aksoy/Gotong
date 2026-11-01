@@ -1149,6 +1149,7 @@ async function main(): Promise<void> {
       memoryView: butlerMemoryViewRef,
       pendingInbox: butlerPendingInboxRef,
       memberPush: butlerPushRef, // DUO-M2 escalate result push-back (lazy IM ref)
+      memberFiles: butlerFilesRef,
     }),
     // CARE-M4 — 开箱陪跑: zero-LLM 现状卡 injection at the free-chat entry +
     // the read-only key 活体校验. Health rides the SAME lazy adminHealth ref
@@ -1684,6 +1685,7 @@ async function main(): Promise<void> {
   // expose `pushToMember` start ~500 lines below, so forward-declare it — the
   // resolve hook reads it lazily, assigned after `startImBridges` returns.
   let butlerPushRef: ImBridgesHandle['pushToMember']
+  let butlerFilesRef: ImBridgesHandle['memberFiles']
 
   let inboxService: HostInboxService | undefined
   if (identity && inboxStore) {
@@ -2334,6 +2336,7 @@ async function main(): Promise<void> {
     // `pushToMember` (undefined when no reachable dir / no bridge). The inbox
     // resolve hook declared above reads this lazily on each resolve.
     butlerPushRef = imBridges?.pushToMember
+    butlerFilesRef = imBridges?.memberFiles
   }
 
   const web = await serveWeb(hub, {

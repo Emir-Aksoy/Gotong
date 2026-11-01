@@ -68,6 +68,13 @@ export interface ImAttachment {
   filename?: string | null
 }
 
+/** A generated file to hand to a user (see `ImBridge.sendFile`). */
+export interface ImOutboundFile {
+  bytes: Buffer | Uint8Array
+  /** What the user sees, including the extension. */
+  filename: string
+}
+
 /**
  * One incoming message handed to the bridge from the IM platform.
  *
@@ -243,6 +250,17 @@ export interface ImBridge {
     text: string,
     options?: { attachments?: ImAttachment[]; chatId?: string },
   ): Promise<void>
+
+  /**
+   * Optional: deliver a generated file as a file message. Bridges that can't
+   * simply leave this out, so callers can detect the capability up front.
+   *
+   * Separate from `sendMessage` attachments on purpose: an attachment is an
+   * enhancement to a text reply and may degrade to text only, whereas here the
+   * file IS the message. Any failure MUST throw so the caller can report it
+   * honestly instead of claiming the file was sent.
+   */
+  sendFile?(to: ImUser, file: ImOutboundFile, options?: { chatId?: string }): Promise<void>
 
   /**
    * Subscribe to inbound messages. Bridges MUST guarantee delivery

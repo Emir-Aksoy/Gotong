@@ -16,3 +16,8 @@ import { dirname, join } from 'node:path'
 export function butlerLongRunRoot(memoryRoot: string): string {
   return join(dirname(memoryRoot), 'longrun')
 }
+
+/** `<space>/butler/documents` — 文档草稿,每成员一个子目录(由 `ownerDir` 再分)。 */
+export function butlerDocumentsRoot(memoryRoot: string): string {
+  return join(dirname(memoryRoot), 'documents')
+}

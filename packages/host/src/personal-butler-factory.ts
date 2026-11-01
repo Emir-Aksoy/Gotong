@@ -50,7 +50,10 @@ import {
 } from '@gotong/personal-butler'
 import { ownerDir } from '@gotong/service-memory-file'
 
-import { butlerLongRunRoot } from './butler-space-dirs.js'
+import { butlerDocumentsRoot, butlerLongRunRoot } from './butler-space-dirs.js'
+import type { DocumentSpec } from './butler-document-spec.js'
+import type { ButlerMemberFiles } from './butler-reachable.js'
+import { buildButlerDocumentToolset } from './personal-butler-documents.js'
 
 import type { AdminHealthSurface } from './admin-health.js'
 import { createButlerRouter } from './butler-router.js'
@@ -182,6 +185,8 @@ export interface ButlerFactoryRefs {
    * transcript / /me; the escalate tool still works, delivery is just passive.
    */
   memberPush: ButlerEscalatePush | undefined
+  /** 给成员本人发文件。缺席 = 没接聊天平台;`write_document` 仍在,调用时如实告知。 */
+  memberFiles: ButlerMemberFiles | undefined
   /** NET-M1 — sanitized mesh roster for the `list_peers` network eye. */
   peerRoster: ButlerPeerSurface | undefined
   /** LSA-M1 — sanitized model chain for the `list_my_llms` self-awareness eye. */
@@ -203,6 +208,8 @@ export interface ButlerFactoryDeps {
   logger: Logger
   /** Butler memory root (`<space>/butler/memory`) — per-user namespaces live under it. */
   memoryRoot: string
+  /** 测试缝:在 TS 源码上跑时没有构建好的 worker。生产走默认子进程。 */
+  documentRender?: (spec: DocumentSpec) => Promise<Uint8Array>
   /** Shared with every router and the maintenance sweeper for this memory root. */
   userActivity?: ButlerUserActivity
   /** BF-M7 governed master switch (`GOTONG_BUTLER_GOVERNED`). */
@@ -748,6 +755,15 @@ export function buildButlerFactory(deps: ButlerFactoryDeps): ButlerFactory {
         // fires it and pushes the text back to the member's IM. Only needs `hub`
         // (static broker capability), so no forward-ref — built unconditionally.
         const remindersToolset = buildButlerRemindersToolset({ userId, hub, logger: log })
+        // 文档工具总在脸上,缓存前缀才稳定;没有通道时第一次调用就如实告知。
+        // 通道现读:IM 可以在这个实例建好之后才热启动。
+        const documentToolset = buildButlerDocumentToolset({
+          userId,
+          root: butlerDocumentsRoot(memoryRoot),
+          files: () => deps.refs().memberFiles,
+          ...(deps.documentRender ? { render: deps.documentRender } : {}),
+          logger: log,
+        })
         // S3-M2 — benign "每天早上跟我说声早" tool. Writes THIS member's daily-brief
         // opt-in file; the ButlerProactiveSweeper polls it and sends. Gated on the
         // SAME `butlerProactiveOn` flag as the sweep — if the proactive feature is
@@ -838,6 +854,7 @@ export function buildButlerFactory(deps: ButlerFactoryDeps): ButlerFactory {
           ...(planWizardToolset ? [planWizardToolset] : []),
           ...(consolidateToolset ? [consolidateToolset] : []),
           remindersToolset,
+          documentToolset,
           taskNotebookToolset,
           knowledgeToolset,
           life.core,

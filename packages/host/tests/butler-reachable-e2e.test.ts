@@ -35,6 +35,7 @@ import type {
   ImBridge,
   ImMessage,
   ImUser,
+  ImOutboundFile,
 } from '@gotong/im-adapter'
 
 import {
@@ -325,5 +326,104 @@ describe('F1 — butler outbound-push foundation', () => {
     await reg2.load()
     expect(reg2.routeFor('alice')).toMatchObject({ platformUserId: 'tg-alice' })
     expect(reg2.routeFor('bob')).toBeUndefined()
+  })
+})
+
+describe('pushFile — 文件只到成员本人', () => {
+  const FILE = { bytes: new Uint8Array([1, 2, 3]), filename: '报告.pptx' }
+
+  class FileBridge extends FakeBridge {
+    readonly files: Array<{ to: ImUser; filename: string; chatId?: string }> = []
+    fail: Error | null = null
+    async sendFile(to: ImUser, file: ImOutboundFile, options?: { chatId?: string }): Promise<void> {
+      if (this.fail) throw this.fail
+      this.files.push({ to, filename: file.filename, ...(options?.chatId !== undefined ? { chatId: options.chatId } : {}) })
+    }
+  }
+
+  const registry = (bridge: ImBridge | undefined): ButlerReachableRegistry =>
+    new ButlerReachableRegistry({
+      dir: join(tmpdir(), `gotong-reach-file-${process.pid}-${Math.random().toString(36).slice(2)}`),
+      bridgeFor: () => bridge,
+      logger: silentLogger,
+    })
+
+  it('发到私聊路由', async () => {
+    const bridge = new FileBridge()
+    const reg = registry(bridge)
+    reg.record({ userId: 'alice', platform: 'telegram', platformUserId: 'tg_a', chatId: 'dm:alice' })
+    expect(reg.canPushFile('alice')).toEqual({ ok: true })
+    expect(await reg.pushFile('alice', FILE)).toEqual({ delivered: true })
+    expect(bridge.files).toEqual([
+      {
+        to: { platform: 'telegram', platformUserId: 'tg_a', displayName: null },
+        filename: '报告.pptx',
+        chatId: 'dm:alice',
+      },
+    ])
+    await reg.flush()
+  })
+
+  it('真实入站链路:成员在群里说话,文件仍然发到私聊,群 id 进不了路由', async () => {
+    const bridge = new FileBridge()
+    const reg = registry(bridge)
+    const bindings = new Map([['telegram:tg_a', 'alice']])
+    const config = configFor(reg, fakeResolver(bindings, new Map()))
+    await handleImMessage(
+      bridge,
+      { ...inbound('tg_a', '帮我做个 PPT', { chatId: 'group:oc_room_9' }), chatKind: 'group' },
+      config,
+    )
+    expect(reg.routeFor('alice')?.chatId).toBeUndefined()
+    await reg.pushFile('alice', FILE)
+    expect(bridge.files[0]?.to.platformUserId).toBe('tg_a')
+    expect(bridge.files[0]?.chatId).toBeUndefined()
+    await reg.flush()
+  })
+
+  it('没有路由、没有桥、桥不支持,探测和发送都如实区分', async () => {
+    const withBridge = registry(new FileBridge())
+    expect(withBridge.canPushFile('ghost')).toEqual({ ok: false, reason: 'unknown_member' })
+    expect(await withBridge.pushFile('ghost', FILE)).toEqual({ delivered: false, reason: 'unknown_member' })
+
+    const noBridge = registry(undefined)
+    noBridge.record({ userId: 'alice', platform: 'telegram', platformUserId: 'tg_a' })
+    expect(noBridge.canPushFile('alice')).toEqual({ ok: false, reason: 'no_bridge' })
+    expect(await noBridge.pushFile('alice', FILE)).toEqual({ delivered: false, reason: 'no_bridge' })
+    await noBridge.flush()
+
+    // FakeBridge 没实现 sendFile:其余平台都是这个形状。
+    const textOnly = new FakeBridge()
+    const unsupported = registry(textOnly)
+    unsupported.record({ userId: 'alice', platform: 'telegram', platformUserId: 'tg_a' })
+    expect(unsupported.canPushFile('alice')).toEqual({ ok: false, reason: 'unsupported' })
+    expect(await unsupported.pushFile('alice', FILE)).toEqual({ delivered: false, reason: 'unsupported' })
+    // 不支持时不能退化成发一句文字,否则成员以为收到了。
+    expect(textOnly.sent).toHaveLength(0)
+    await unsupported.flush()
+  })
+
+  it('发送失败带回平台错误,不抛', async () => {
+    const bridge = new FileBridge()
+    bridge.fail = new Error('code=99991672 缺少 im:resource 权限')
+    const reg = registry(bridge)
+    reg.record({ userId: 'alice', platform: 'telegram', platformUserId: 'tg_a' })
+    expect(await reg.pushFile('alice', FILE)).toEqual({
+      delivered: false,
+      reason: 'send_failed',
+      detail: 'code=99991672 缺少 im:resource 权限',
+    })
+    await reg.flush()
+  })
+
+  it('平台错误太长时截断:这段文字会进模型上下文', async () => {
+    const bridge = new FileBridge()
+    bridge.fail = new Error('错'.repeat(5000))
+    const reg = registry(bridge)
+    reg.record({ userId: 'alice', platform: 'telegram', platformUserId: 'tg_a' })
+    const result = await reg.pushFile('alice', FILE)
+    expect(result).toMatchObject({ delivered: false, reason: 'send_failed' })
+    expect((result as { detail: string }).detail).toHaveLength(300)
+    await reg.flush()
   })
 })

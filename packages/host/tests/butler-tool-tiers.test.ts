@@ -65,6 +65,7 @@ function fullRefs(): ButlerFactoryRefs {
     diagnoseAdapt: stub(),
     askRoster: stub(),
     memberPush: undefined, // push 是投递增强非注册条件 — 面测试无需它
+    memberFiles: undefined, // write_document 总在脸上,通道缺席时调用才报
     peerRoster: stub(),
     llmRoster: stub(),
     schedules: stub(),

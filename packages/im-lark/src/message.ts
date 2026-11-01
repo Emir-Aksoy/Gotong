@@ -34,6 +34,7 @@ import type {
   LarkStickerContent,
   LarkTextContent,
 } from './types.js'
+import type { LarkUploadFileInput } from './client.js'
 
 // ---------------------------------------------------------------------------
 // `lark-<kind>:<key>` URI helpers — analogous to `telegram-file:`
@@ -334,4 +335,17 @@ export function pickLarkReceiveIdType(id: string): string {
   if (id.startsWith('on_')) return 'union_id'
   if (id.includes('@')) return 'email'
   return 'user_id'
+}
+
+/** Lark's `im/v1/files` size limit. */
+export const LARK_MAX_FILE_BYTES = 30 * 1024 * 1024
+
+/** Map a filename to the `file_type` `im/v1/files` expects; unknown types go as a generic file. */
+export function pickLarkFileType(filename: string): LarkUploadFileInput['fileType'] {
+  const ext = filename.slice(filename.lastIndexOf('.') + 1).toLowerCase()
+  if (ext === 'pptx' || ext === 'ppt') return 'ppt'
+  if (ext === 'docx' || ext === 'doc') return 'doc'
+  if (ext === 'xlsx' || ext === 'xls') return 'xls'
+  if (ext === 'pdf') return 'pdf'
+  return 'stream'
 }

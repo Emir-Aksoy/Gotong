@@ -71,7 +71,7 @@ import type {
 import type { ButlerHearing } from './butler-hearing.js'
 import type { ButlerSeeing } from './butler-seeing.js'
 import { ButlerOutbox } from './butler-outbox.js'
-import { ButlerReachableRegistry, type ButlerPushResult } from './butler-reachable.js'
+import { ButlerReachableRegistry, type ButlerMemberFiles, type ButlerPushResult } from './butler-reachable.js'
 import type { ButlerVoice } from './butler-voice.js'
 import { translateLlmFailureKind, type FailureLang, type LlmFailureTranslation } from './failure-translator.js'
 import {
@@ -1251,6 +1251,8 @@ export interface ImBridgesHandle {
    * from "bridge down" from "send threw".
    */
   pushToMember?: (userId: string, text: string) => Promise<ButlerPushResult>
+  /** 给成员本人发文件。和 `pushToMember` 同一张可达表,没有可达表时不存在。 */
+  memberFiles?: ButlerMemberFiles
   /**
    * Session window — the SAME surface that was passed in via
    * `StartImBridgesOptions.sessions`, re-exposed so the caller (main.ts) can
@@ -1437,6 +1439,33 @@ export async function startImBridges(
       logger: opts.log,
     })
   }
+
+  // 可达表记的是成员上次从哪说话,解绑和换绑都不会更新它,重启后还在。这个账号可能
+  // 已经绑给别人,而文件发出去收不回来,所以每次都核对绑定;对不上或读不出来都不发。
+  const routeStillOwnedBy = (userId: string): boolean => {
+    const route = reachable?.routeFor(userId)
+    if (!route) return false
+    try {
+      return opts.identity.getUserIdByImBinding(route.platform, route.platformUserId) === userId
+    } catch (err) {
+      opts.log.warn('butler file route: binding lookup failed', {
+        userId,
+        err: err instanceof Error ? err.message : String(err),
+      })
+      return false
+    }
+  }
+  const reachableFiles = reachable
+  const memberFiles: ButlerMemberFiles | undefined = reachableFiles
+    ? {
+        canPush: (userId) =>
+          routeStillOwnedBy(userId) ? reachableFiles.canPushFile(userId) : { ok: false, reason: 'unknown_member' },
+        push: async (userId, file) =>
+          routeStillOwnedBy(userId)
+            ? reachableFiles.pushFile(userId, file)
+            : { delivered: false, reason: 'unknown_member' },
+      }
+    : undefined
 
   // 面向成员的统一投递原语:有 outbox 走持久重投,否则退回 raw best-effort push。
   // 一切成员向投递(pushToMember、断供 announce)都走它,重试语义一处、齐整。
@@ -1636,6 +1665,7 @@ export async function startImBridges(
         return { platform: b.platform, ...(source ? { source } : {}) }
       }),
     ...(deliverToMember ? { pushToMember: deliverToMember } : {}),
+    ...(memberFiles ? { memberFiles } : {}),
     ...(opts.sessions ? { sessions: opts.sessions } : {}),
     // HANDS-M3b — hand the caller the SAME credentials service, but only when
     // it can really serve a form. `linkAvailable()` is the one judge of that

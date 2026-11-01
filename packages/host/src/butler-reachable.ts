@@ -35,7 +35,7 @@
 import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
-import type { ImBridge, ImUser } from '@gotong/im-adapter'
+import type { ImBridge, ImOutboundFile, ImUser } from '@gotong/im-adapter'
 import { assertSafeOwnerId } from '@gotong/services-sdk'
 
 import type { ImLogger } from './im-bridge.js'
@@ -67,6 +67,23 @@ export interface ReachableRoute {
 export type ButlerPushResult =
   | { delivered: true }
   | { delivered: false; reason: 'unknown_member' | 'no_bridge' | 'send_failed' }
+
+/** 现在能不能把文件发给这个成员。写内容之前先问,免得白写。 */
+export type ButlerFileReach =
+  | { ok: true }
+  | { ok: false; reason: 'unknown_member' | 'no_bridge' | 'unsupported' }
+
+export type ButlerFilePushResult =
+  | { delivered: true }
+  | { delivered: false; reason: 'unknown_member' | 'no_bridge' | 'unsupported' }
+  /** `detail` 是平台返回的错误,比如缺权限;如实转告才能让人去修。 */
+  | { delivered: false; reason: 'send_failed'; detail: string }
+
+/** 给成员本人发文件的能力。签名里没有收件人以外的目标,路由只来自可达表。实现方要核对绑定,见 `startImBridges`。 */
+export interface ButlerMemberFiles {
+  canPush(userId: string): ButlerFileReach
+  push(userId: string, file: ImOutboundFile): Promise<ButlerFilePushResult>
+}
 
 export interface ButlerReachableOptions {
   /** `<space>/butler/reachable` — where per-user routes persist. */
@@ -214,6 +231,42 @@ export class ButlerReachableRegistry {
         err: err instanceof Error ? err.message : String(err),
       })
       return { delivered: false, reason: 'send_failed' }
+    }
+  }
+
+  /** 能力探测:路由和桥都在,而且这座桥实现了 `sendFile`。 */
+  canPushFile(userId: string): ButlerFileReach {
+    const route = this.routes.get(userId)
+    if (!route) return { ok: false, reason: 'unknown_member' }
+    const bridge = this.bridgeFor(route.platform)
+    if (!bridge) return { ok: false, reason: 'no_bridge' }
+    if (!bridge.sendFile) return { ok: false, reason: 'unsupported' }
+    return { ok: true }
+  }
+
+  /**
+   * 把文件发到路由表记的账号。路由表只记私聊(GRP),所以在群里触发也不会发到群里。
+   * 这里不查绑定,解绑后路由还在;面向成员的入口是核对过绑定的 `memberFiles`。
+   * 不走 outbox:成员正等着这份文件,失败要当场说,而不是日后悄悄重投。
+   */
+  async pushFile(userId: string, file: ImOutboundFile): Promise<ButlerFilePushResult> {
+    const route = this.routes.get(userId)
+    if (!route) return { delivered: false, reason: 'unknown_member' }
+    const bridge = this.bridgeFor(route.platform)
+    if (!bridge) return { delivered: false, reason: 'no_bridge' }
+    if (!bridge.sendFile) return { delivered: false, reason: 'unsupported' }
+    const to: ImUser = {
+      platform: route.platform,
+      platformUserId: route.platformUserId,
+      displayName: route.displayName ?? null,
+    }
+    try {
+      await bridge.sendFile(to, file, route.chatId !== undefined ? { chatId: route.chatId } : {})
+      return { delivered: true }
+    } catch (err) {
+      const detail = err instanceof Error ? err.message : String(err)
+      this.log.error('butler file push failed', { userId, platform: route.platform, err: detail })
+      return { delivered: false, reason: 'send_failed', detail: detail.slice(0, 300) }
     }
   }
 

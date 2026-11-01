@@ -125,11 +125,15 @@
     "@anthropic-ai/sdk": "^0.112.3",
     "openai": "^6.48.0",
     "better-sqlite3": "^12.11.1",
+    "docx": "^9.15.1",
+    "pptxgenjs": "^4.0.1",
     "ws": "^8.21.1"
   },
   "devDependencies": {
     "@gotong/sdk-node": "workspace:*",
+    "@xmldom/xmldom": "^0.8.15",
     "@types/ws": "^8.5.13",
+    "jszip": "^3.10.2",
     "vitest": "^4.1.12"
   }
 }
