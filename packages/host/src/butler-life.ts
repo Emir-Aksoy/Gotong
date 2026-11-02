@@ -323,11 +323,10 @@ export class ButlerLifeSweeper {
     // 今天已经记过心境,就不必再问
     if (state.domains.mind?.lastAt === state.today) return false
     // 签到过时即无意义:免打扰/当日上限下直接丢弃(dropped_*),不记「已发」,窗口内下一轮再试。
-    // 投递失败已由 outbox 排队待重投:记为今天已交出(不重推,否则重复),但标「未送达」,
+    // 已由 outbox 排队待重投:记为今天已交出(不重推,否则重复),但标「未送达」,
     // 驾驶舱卡不说「已发出」——成员没看到的签到,不能让阿同把之后的话当成回答。
     const res = await this.opts.push(userId, LIFE_CHECKIN_TEXT, { dropIfDeferred: true })
     if (!res || res.delivered) return 'sent'
-    if (res.reason?.startsWith('dropped_') || res.reason === 'defer_failed') return false
-    return 'queued'
+    return res.queued ? 'queued' : false
   }
 }

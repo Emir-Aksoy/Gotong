@@ -141,7 +141,7 @@ export function parseReminderPayload(
 export type ReminderPush = (
   userId: string,
   text: string,
-) => Promise<{ delivered: boolean; reason?: string } | void>
+) => Promise<{ delivered: boolean; reason?: string; queued?: boolean } | void>
 
 export interface ReminderParticipantOptions {
   /** Deliver a fired reminder to the member's IM. */
@@ -209,11 +209,13 @@ export class ReminderParticipant extends AgentParticipant {
       return { text: 'reminder dropped: malformed state' }
     }
     let delivered = false
+    let queued = false
     let reason: string | undefined
     try {
       const res = await this.push(userId, `【提醒】${text}`)
       if (res && typeof res === 'object') {
         delivered = res.delivered === true
+        queued = res.queued === true
         reason = res.reason
       }
     } catch (err) {
@@ -223,8 +225,8 @@ export class ReminderParticipant extends AgentParticipant {
       this.logger?.info?.('reminder fired', { userId, taskId: task.id })
     } else {
       // Best-effort: the reminder fired but couldn't reach the member. Settle
-      // anyway (the timer already elapsed) and log the miss.
-      this.logger?.warn?.('reminder fired but not delivered', { userId, taskId: task.id, reason })
+      // anyway (the timer already elapsed) and log the miss. `queued` = the outbox still holds it.
+      this.logger?.warn?.('reminder fired but not delivered', { userId, taskId: task.id, reason, queued })
     }
     return { text: 'reminder delivered', delivered }
   }

@@ -67,8 +67,12 @@ function fakeRuns(byUser: Record<string, ButlerRunView[]>): {
 }
 
 /** A push sink that records deliveries and can be scripted to fail on given texts. */
-function fakePush(opts?: { failWhen?: (text: string) => boolean; throwWhen?: (text: string) => boolean }): {
-  push: (userId: string, text: string) => Promise<{ delivered: boolean; reason?: string }>
+function fakePush(opts?: {
+  failWhen?: (text: string) => boolean
+  queueWhen?: (text: string) => boolean
+  throwWhen?: (text: string) => boolean
+}): {
+  push: (userId: string, text: string) => Promise<{ delivered: boolean; reason?: string; queued?: boolean }>
   sent: Array<{ userId: string; text: string }>
 } {
   const sent: Array<{ userId: string; text: string }> = []
@@ -78,6 +82,7 @@ function fakePush(opts?: { failWhen?: (text: string) => boolean; throwWhen?: (te
       if (opts?.throwWhen?.(text)) throw new Error('bridge exploded')
       sent.push({ userId, text })
       if (opts?.failWhen?.(text)) return { delivered: false, reason: 'no_bridge' }
+      if (opts?.queueWhen?.(text)) return { delivered: false, reason: 'no_bridge', queued: true }
       return { delivered: true }
     },
   }
@@ -265,6 +270,21 @@ describe('butler-run-broadcast — burst cap + best-effort delivery', () => {
     expect(second).toEqual({ announced: 2 })
     expect(push2.sent.map((s) => s.text.match(/\[run: (\w+)\]/)![1])).toEqual(['b', 'c'])
     expect((await readButlerRunBroadcastConfig(root, 'u1'))!.announcedMax).toBe(300)
+  })
+
+  it('已排队算交出:水位前进,下一轮不再发', async () => {
+    await writeButlerRunBroadcastConfig(root, 'u1', { enabled: true, announcedMax: 0 })
+    const runs = fakeRuns({
+      u1: [run({ runId: 'a', endedAt: 100, startedAt: 1 }), run({ runId: 'b', endedAt: 200, startedAt: 2 })],
+    })
+    const push = fakePush({ queueWhen: () => true })
+    const sw = new ButlerRunBroadcastSweeper({ rootDir: root, runs: runs.surface, push: push.push, logger: silentLogger })
+
+    expect(await sw.runOnceForMember('u1')).toEqual({ announced: 2 })
+    expect((await readButlerRunBroadcastConfig(root, 'u1'))!.announcedMax).toBe(200)
+
+    expect(await sw.runOnceForMember('u1')).toEqual({ announced: 0, reason: 'nothing-new' })
+    expect(push.sent).toHaveLength(2)
   })
 
   it('a push THROW is treated as a miss (no advance, no crash)', async () => {

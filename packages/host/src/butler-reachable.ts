@@ -68,7 +68,12 @@ export interface ReachableRoute {
 
 export type ButlerPushResult =
   | { delivered: true }
-  | { delivered: false; reason: 'unknown_member' | 'no_bridge' | 'send_failed' }
+  | {
+      delivered: false
+      reason: 'unknown_member' | 'no_bridge' | 'send_failed'
+      /** outbox 已把这条落盘,之后会补投。调用方按已交出处理,再发一次只会多排一份。 */
+      queued?: true
+    }
 
 /** 现在能不能把文件发给这个成员。写内容之前先问,免得白写。 */
 export type ButlerFileReach =

@@ -14,17 +14,20 @@
  * fire-and-forget,用有界轮询等它落地,不靠壁钟。
  */
 
-import { existsSync, mkdtempSync, rmSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { AgentParticipant, Hub, type Logger, type Task } from '@gotong/core'
 import { openIdentityStore, type IdentityStore } from '@gotong/identity'
 import type { ImAttachment, ImBridge, ImMessage, ImUser } from '@gotong/im-adapter'
 
+import { ButlerPushGate } from '../src/butler-push-gate.js'
 import { startImBridges } from '../src/im-bridge.js'
+import { ButlerProactiveSweeper, writeButlerProactiveConfig } from '../src/personal-butler-proactive.js'
+import { ButlerRunBroadcastSweeper, writeButlerRunBroadcastConfig } from '../src/personal-butler-run-broadcast.js'
 
 const silentLogger: Logger = { trace() {}, debug() {}, info() {}, warn() {}, error() {} }
 
@@ -121,7 +124,7 @@ describe('CARE-M8 — outbox 补投(startImBridges 真 onReachable 缝)', () => 
     // 桥断了(重连中):一次 out-of-band 推送失败 → pushToMember 报未投达,但落盘。
     fake.failSends = true
     const r = await handle!.pushToMember!(aliceId, '大脑坏了,我先按规则答你')
-    expect(r.delivered).toBe(false)
+    expect(r).toEqual({ delivered: false, reason: 'send_failed', queued: true })
     expect(existsSync(outboxFile)).toBe(true) // 入盘,没丢
 
     // 桥恢复 + 成员说话 → 真 onReachable → flush → 补投到同一个 chat。
@@ -147,5 +150,76 @@ describe('CARE-M8 — outbox 补投(startImBridges 真 onReachable 缝)', () => 
 
     // outbox 概念整块未接线 —— 目录都不该被创建。
     expect(existsSync(join(dir, 'butler', 'outbox'))).toBe(false)
+  })
+
+  describe('后台扫描遇到已排队', () => {
+    const FIFTEEN_MIN = 15 * 60 * 1000
+    const BRIEF = '早安,今天也照顾好自己。'
+    const memoryRoot = () => join(dir, 'butler', 'memory')
+
+    /** 和生产一样的装配:扫描器 → 免打扰闸 → pushToMember。时间固定在成员本地 09:00 起。 */
+    async function sweepers() {
+      let now = Date.UTC(2026, 6, 2, 1)
+      await writeButlerProactiveConfig(memoryRoot(), aliceId, { enabled: true, hour: 8, tzOffsetMinutes: 480 })
+      await writeButlerRunBroadcastConfig(memoryRoot(), aliceId, { enabled: true, announcedMax: 0 })
+      const gate = new ButlerPushGate({
+        dir: join(dir, 'butler', 'push-gate'),
+        logger: silentLogger,
+        now: () => now,
+        push: handle!.pushToMember!,
+      })
+      const compose = vi.fn(async () => BRIEF)
+      const brief = new ButlerProactiveSweeper({
+        rootDir: memoryRoot(),
+        composeBrief: compose,
+        push: gate.push,
+        logger: silentLogger,
+        now: () => now,
+      })
+      const broadcast = new ButlerRunBroadcastSweeper({
+        rootDir: memoryRoot(),
+        runs: {
+          listRunsByUser: async () => [{ runId: 'r1', workflowId: 'wf', status: 'done', startedAt: 0, endedAt: 100 }],
+        },
+        push: (userId, text) => gate.push(userId, text, { capExempt: true }),
+        logger: silentLogger,
+      })
+      const tick = async () => {
+        const outcomes = [await brief.runOnceForMember(aliceId), await broadcast.runOnceForMember(aliceId)]
+        now += FIFTEEN_MIN
+        return outcomes
+      }
+      return { compose, tick }
+    }
+
+    it('没有可用路线:每种消息只生成和排队一次,成员回来每种只收到一条', async () => {
+      await startAndBind({ outbox: true })
+      identity.removeImBinding('telegram', '2001')
+      const { compose, tick } = await sweepers()
+
+      for (let i = 0; i < 3; i++) await tick()
+
+      expect(compose).toHaveBeenCalledTimes(1)
+      const queue = JSON.parse(readFileSync(join(dir, 'butler', 'outbox', `${aliceId}.json`), 'utf8')) as Array<{ text: string }>
+      expect(queue.map((item) => item.text)).toEqual([BRIEF, expect.stringContaining('[run: r1]')])
+
+      await fake.inject(msgFrom(`/bind ${identity.issueImBindingCode({ userId: aliceId }).code}`))
+      const landed = (needle: string) => fake.outbound.filter((o) => o.text.includes(needle))
+      for (let i = 0; i < 100 && landed('[run: r1]').length === 0; i++) await delay(2)
+      expect(landed(BRIEF)).toHaveLength(1)
+      expect(landed('[run: r1]')).toHaveLength(1)
+    })
+
+    it('没有 outbox:不报已排队,晨报下一轮照旧重试', async () => {
+      await startAndBind({ outbox: false })
+      identity.removeImBinding('telegram', '2001')
+      const { compose, tick } = await sweepers()
+
+      expect(await handle!.pushToMember!(aliceId, 'x')).toEqual({ delivered: false, reason: 'unknown_member' })
+      await tick()
+      await tick()
+
+      expect(compose).toHaveBeenCalledTimes(2)
+    })
   })
 })

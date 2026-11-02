@@ -6,7 +6,7 @@
  *  - the sweeper writes ONLY its own fact file (`tasks-nudges.json`) and never
  *    touches `tasks.json` — even a corrupt notebook is skipped, not quarantined
  *    (quarantine belongs to the butler's own turn, the file's single writer);
- *  - marks land only on a DELIVERED nudge (a miss retries next tick);
+ *  - marks land only on a handed-off nudge: delivered or queued (a miss retries next tick);
  *  - one message lists at most `maxListed` tasks and only those get marked.
  */
 
@@ -60,11 +60,12 @@ interface PushRecord {
   text: string
 }
 
-function makeSweeper(opts: { now: number; deliver?: boolean; pushes: PushRecord[] }): ButlerTaskNudgeSweeper {
+function makeSweeper(opts: { now: number; deliver?: boolean; queued?: boolean; pushes: PushRecord[] }): ButlerTaskNudgeSweeper {
   return new ButlerTaskNudgeSweeper({
     rootDir: root,
     push: async (userId, text) => {
       opts.pushes.push({ userId, text })
+      if (opts.queued) return { delivered: false, reason: 'no_bridge', queued: true }
       return { delivered: opts.deliver !== false, ...(opts.deliver === false ? { reason: 'no_bridge' } : {}) }
     },
     logger: silentLogger,
@@ -110,6 +111,17 @@ describe('ButlerTaskNudgeSweeper (TN-M2)', () => {
     const up = makeSweeper({ now: T0 + 4 * DAY, pushes })
     expect(await up.runOnceForMember('u1')).toEqual({ nudged: true, count: 1 })
     expect(pushes).toHaveLength(2)
+  })
+
+  it('已排队算交出:写下标记,下一轮不再提醒', async () => {
+    await seedNote('u1', '筹备生日会', T0)
+    const pushes: PushRecord[] = []
+    const queued = makeSweeper({ now: T0 + 4 * DAY, queued: true, pushes })
+    expect(await queued.runOnceForMember('u1')).toEqual({ nudged: true, count: 1 })
+    expect(Object.keys(readMarks('u1'))).toHaveLength(1)
+
+    expect((await queued.runOnceForMember('u1')).nudged).toBe(false)
+    expect(pushes).toHaveLength(1)
   })
 
   it('fresh notes / no notebook stay silent', async () => {

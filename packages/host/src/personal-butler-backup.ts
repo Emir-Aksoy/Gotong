@@ -435,19 +435,19 @@ export class ButlerBackupNudgeSweeper {
     const newPeers = fact ? this.ops.newPeersSince(fact.at) : 0
     const text = formatBackupNudgeMessage(t.daysSince, newPeers)
 
-    let delivered = false
+    let handedOff = false
     let reason: string | undefined
     try {
       const res = await this.push(userId, text)
       if (res && typeof res === 'object') {
-        delivered = res.delivered === true
+        handedOff = res.delivered === true || res.queued === true
         reason = res.reason
       }
     } catch (err) {
       reason = err instanceof Error ? err.message : String(err)
     }
-    if (!delivered) {
-      // 不记标记——桥可能在修,下 tick 重试;备份若期间打了,分诊自然消。
+    if (!handedOff) {
+      // 不记标记——下 tick 重试;备份若期间打了,分诊自然消。已排队不算没交出:outbox 会补投。
       this.log.warn('butler backup-nudge: composed but not delivered', { userId, reason })
       return { nudged: false, reason: 'delivery-failed' }
     }

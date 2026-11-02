@@ -391,6 +391,7 @@ describe('AFR-M7 — 陈旧提醒 sweeper', () => {
     let clock = 100 * DAY
     const pushes: Array<{ userId: string; text: string }> = []
     let deliver = true
+    let queued = false
     const sweeper = new ButlerBackupNudgeSweeper({
       rootDir: root,
       ops: {
@@ -400,7 +401,7 @@ describe('AFR-M7 — 陈旧提醒 sweeper', () => {
       },
       push: async (userId, text) => {
         pushes.push({ userId, text })
-        return { delivered: deliver }
+        return { delivered: deliver, ...(queued ? { queued: true } : {}) }
       },
       logger: silentLogger,
       now: () => clock,
@@ -414,6 +415,9 @@ describe('AFR-M7 — 陈旧提醒 sweeper', () => {
       getClock: () => clock,
       setDeliver: (v: boolean) => {
         deliver = v
+      },
+      setQueued: (v: boolean) => {
+        queued = v
       },
     }
   }
@@ -462,6 +466,16 @@ describe('AFR-M7 — 陈旧提醒 sweeper', () => {
     // 桥好了 → 同一 tick 语义下重试成功(标记只在送达时写过 → 立刻 due)
     h.setDeliver(true)
     expect(await h.sweeper.runOnceForMember('alice')).toEqual({ nudged: true })
+  })
+
+  it('已排队算交出:写下标记,下一轮进冷却', async () => {
+    await member('alice', true)
+    const h = harness({ roles: { alice: 'owner' }, factAt: null })
+    h.setDeliver(false)
+    h.setQueued(true)
+    expect(await h.sweeper.runOnceForMember('alice')).toEqual({ nudged: true })
+    expect(await h.sweeper.runOnceForMember('alice')).toEqual({ nudged: false, reason: 'cooldown' })
+    expect(h.pushes).toHaveLength(1)
   })
 
   it('runOnce 扫全员:坏成员目录不连累别人', async () => {

@@ -249,7 +249,7 @@ describe('路由归属 — 不发给已经不属于成员的账号', () => {
       await bind(alice, account('2001'))
       identity.removeImBinding('telegram', '2001')
 
-      expect(await handle?.pushToMember?.(alice, SECRET)).toEqual(NOT_OWNED)
+      expect(await handle?.pushToMember?.(alice, SECRET)).toEqual({ ...NOT_OWNED, queued: true })
       expect(readFileSync(outboxFile(), 'utf8')).toContain(SECRET)
 
       // 新主人绑定时只冲自己的队列;巡检会冲所有人的,也不能把 alice 的发出去。

@@ -21,7 +21,7 @@ const at = (iso: string) => Date.parse(`${iso}+08:00`)
 let dir: string
 let clock: number
 let sent: Array<{ userId: string; text: string }>
-let result: { delivered: boolean; reason?: string }
+let result: { delivered: boolean; reason?: string; queued?: boolean }
 
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), 'gotong-push-gate-'))
@@ -156,6 +156,24 @@ describe('每日上限', () => {
     clock = at('2026-10-21T07:10:00')
     await g.flushDue()
     expect(sent.map((s) => s.text)).toEqual(['1', '2', '3'])
+  })
+
+  it('已排队的占额度,并把 queued 交回扫描器', async () => {
+    const g = gate(1)
+    clock = at('2026-10-20T10:00:00')
+    result = { delivered: false, reason: 'no_bridge', queued: true }
+    expect(await g.push('u1', 'a')).toEqual(result)
+    expect(await g.push('u1', 'b')).toEqual({ delivered: true, reason: 'deferred_cap' })
+    expect(sent).toHaveLength(1)
+  })
+
+  it('没接住的不占额度', async () => {
+    const g = gate(1)
+    clock = at('2026-10-20T10:00:00')
+    result = { delivered: false, reason: 'no_bridge' }
+    await g.push('u1', 'a')
+    await g.push('u1', 'b')
+    expect(sent).toHaveLength(2)
   })
 
   it('成员之间互不占用额度', async () => {

@@ -25,7 +25,7 @@
  * # Delivery posture (same as the proactive brief)
  *
  * Push rides the lazy F1 `pushToMember` (CARE-M8 outbox behind it). Marks are
- * written ONLY on a delivered nudge — a bridge-down miss retries next tick,
+ * written ONLY once a nudge is handed off (delivered, or queued in the outbox) — a real miss retries next tick,
  * and a member who resumes the task in the meantime resets the stall clock,
  * which cancels the nudge naturally.
  */
@@ -167,21 +167,19 @@ export class ButlerTaskNudgeSweeper {
     const listed = stalled.slice(0, TASK_NUDGE_DEFAULTS.maxListed)
     const text = formatTaskNudgeMessage(listed, stalled.length)
 
-    let delivered = false
+    let handedOff = false
     let reason: string | undefined
     try {
       const res = await this.push(userId, text)
       if (res && typeof res === 'object') {
-        delivered = res.delivered === true
+        handedOff = res.delivered === true || res.queued === true
         reason = res.reason
       }
     } catch (err) {
       reason = err instanceof Error ? err.message : String(err)
     }
-    if (!delivered) {
-      // No mark on a miss — retry next tick (bridge may be down; the outbox
-      // behind pushToMember may also have parked it, in which case `delivered`
-      // reflects the queue's own answer and the next triage re-decides).
+    if (!handedOff) {
+      // No mark on a miss — retry next tick. 已排队不算 miss:outbox 会补投,再发只会多排一份。
       this.log.warn('butler task-nudge: composed but not delivered', { userId, reason })
       return { nudged: false, reason: 'delivery-failed' }
     }

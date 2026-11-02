@@ -130,7 +130,8 @@ export class ButlerPushGate {
       const exempt = opts?.capExempt === true
       if (!quiet && (exempt || count < this.cap)) {
         const res = await this.inner(userId, text)
-        if (res && res.delivered && !exempt) await this.write(userId, { ...file, sentDate: date, sentCount: count + 1 })
+        // 已排队的之后也会到成员手里,同样占当日额度。
+        if (res && (res.delivered || res.queued) && !exempt) await this.write(userId, { ...file, sentDate: date, sentCount: count + 1 })
         return res
       }
       if (opts?.dropIfDeferred) {

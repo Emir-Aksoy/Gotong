@@ -182,7 +182,7 @@ export function runBroadcastMessage(r: ButlerRunView): string {
 export type ButlerRunBroadcastPush = (
   userId: string,
   text: string,
-) => Promise<{ delivered: boolean; reason?: string } | void>
+) => Promise<{ delivered: boolean; reason?: string; queued?: boolean } | void>
 
 export interface ButlerRunBroadcastSweeperOptions {
   /** Butler memory root (`<space>/butler/memory`) — the opt-in file lives per-user under it. */
@@ -286,9 +286,9 @@ export class ButlerRunBroadcastSweeper {
    * Run one broadcast tick for one member: skip unless opted-in; project their recent
    * runs; announce each run that is TERMINAL and finished past the high-water mark, in
    * FINISH order (oldest first), up to the per-tick cap. Advance the mark to the last
-   * DELIVERED run's `endedAt` — a delivery miss cuts the batch short (that run + all
-   * later ones retry next tick), so the mark only ever passes runs the member actually
-   * received. Exposed for the acceptance gate.
+   * HANDED-OFF run's `endedAt` (delivered, or queued in the outbox) — a real miss cuts
+   * the batch short (that run + all later ones retry next tick), so the mark only ever
+   * passes runs that can still reach the member. Exposed for the acceptance gate.
    */
   async runOnceForMember(userId: string): Promise<RunBroadcastTickOutcome> {
     const cfg = await readButlerRunBroadcastConfig(this.rootDir, userId)
@@ -319,24 +319,25 @@ export class ButlerRunBroadcastSweeper {
     let announced = 0
     let cutShort = false
     for (const r of fresh) {
-      let delivered = false
+      // 已排队也算交出:outbox 会补投,下一轮再发只会多排一份。
+      let handedOff = false
       let reason: string | undefined
       try {
         const res = await this.push(userId, runBroadcastMessage(r))
         if (res && typeof res === 'object') {
-          delivered = res.delivered === true
+          handedOff = res.delivered === true || res.queued === true
           reason = res.reason
         }
       } catch (err) {
         reason = err instanceof Error ? err.message : String(err)
       }
-      if (!delivered) {
+      if (!handedOff) {
         // Best-effort: stop here so this run + every later one retries next tick.
         this.log.warn('butler run-broadcast: notice not delivered, will retry', { userId, runId: r.runId, reason })
         cutShort = true
         break
       }
-      mark = r.endedAt // ascending order ⇒ monotonic advance over delivered runs
+      mark = r.endedAt // ascending order ⇒ monotonic advance over handed-off runs
       announced++
     }
 

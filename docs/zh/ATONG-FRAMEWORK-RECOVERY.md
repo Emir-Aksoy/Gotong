@@ -318,7 +318,7 @@
   节律、纯时间戳分诊零 LLM(14d 陈旧线+每人 14d 冷却;**从没备份过=首 tick
   即 due**,之后靠冷却限频),同意面=巡检先例「开了播报才收」**再叠 privileged
   过滤**(收提醒的人必须是能动手的人),只写自己的事实文件
-  `backup-nudges.json`、**送达才记标记**(投递失败下 tick 重试)。文案带自然
+  `backup-nudges.json`、**交出才记标记**(送达或已由 outbox 排队;都没有才下 tick 重试)。文案带自然
   请求短语「打一份身份档备份」+ M5 面包屑指 backup 卡,推送正文永不出现
   原始工具名。分层登记:backup_status 入 `BUTLER_DIRECTORY_BENIGN`(pack_backup
   是 governed 恒一等,其描述不点名目录工具——指路不指空双向核过);B1 能力

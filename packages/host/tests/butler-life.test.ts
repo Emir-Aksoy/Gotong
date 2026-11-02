@@ -41,7 +41,7 @@ afterEach(() => {
 const archiveFor = (userId = 'u1'): LifeArchive =>
   openLifeArchive({ dir: join(root, 'user', userId, 'life'), timeZone: TZ, now: () => clock })
 
-let pushResult: { delivered: boolean; reason?: string }
+let pushResult: { delivered: boolean; reason?: string; queued?: boolean }
 const sweeper = (extra: Partial<ConstructorParameters<typeof ButlerLifeSweeper>[0]> = {}) =>
   new ButlerLifeSweeper({
     memoryRoot: root,
@@ -113,7 +113,7 @@ describe('扫描器', () => {
     pushResult = { delivered: false, reason: 'dropped_cap' }
     await s.runOnce()
     expect(await buildButlerLifeCockpitCard({ archive: a })()).not.toContain('已发出心境签到')
-    pushResult = { delivered: false, reason: 'send_failed' } // outbox 已接手
+    pushResult = { delivered: false, reason: 'send_failed', queued: true } // outbox 已接手
     clock = at('2026-10-20T21:20:00')
     await s.runOnce()
     clock = at('2026-10-20T21:35:00')
@@ -168,6 +168,17 @@ describe('扫描器', () => {
     expect(sent[0]).not.toContain('训练') // health-no-workout 是非推送型
     await s.runOnce()
     expect(sent).toHaveLength(1)
+  })
+
+  it('签到没排上队(落盘失败):不记已发,窗口内下一轮再试', async () => {
+    clock = at('2026-10-20T21:05:00')
+    await archiveFor().ensureRegistry()
+    pushResult = { delivered: false, reason: 'send_failed' }
+    const s = sweeper()
+    await s.runOnce()
+    clock = at('2026-10-20T21:20:00')
+    await s.runOnce()
+    expect(sent).toEqual([LIFE_CHECKIN_TEXT, LIFE_CHECKIN_TEXT])
   })
 
   it('提醒投递失败也记为已交出(outbox 会重投),不每 15 分钟重推', async () => {

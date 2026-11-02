@@ -476,7 +476,7 @@ export type ButlerBriefPush = (
   /** LIFE 免打扰闸用。`dropIfDeferred`:此刻发不了就丢弃而不是暂存(过时即无意义的消息,
    *  如心境签到);`capExempt`:只守免打扰、不占也不受每日上限(成员自己订阅的运行播报)。 */
   opts?: { dropIfDeferred?: boolean; capExempt?: boolean },
-) => Promise<{ delivered: boolean; reason?: string } | void>
+) => Promise<{ delivered: boolean; reason?: string; queued?: boolean } | void>
 
 export interface ButlerProactiveSweeperOptions {
   /** Butler memory root (`<space>/butler/memory`) — the same one the factory + /me view use. */
@@ -582,8 +582,9 @@ export class ButlerProactiveSweeper {
   /**
    * Run one proactive tick for one member: skip unless opted-in + at/after their
    * local hour + not already sent today; compose (LLM at the edge) + push; mark the
-   * day on a delivered brief OR a nothing-to-say (one attempt/day), but NOT on a
-   * delivery miss (retry next tick). Exposed for the acceptance gate.
+   * day on a handed-off brief (delivered, or queued in the outbox) OR a nothing-to-say
+   * (one attempt/day), but NOT on a delivery miss (retry next tick). Exposed for the
+   * acceptance gate.
    */
   async runOnceForMember(userId: string): Promise<ProactiveTickOutcome> {
     const cfg = await readButlerProactiveConfig(this.rootDir, userId)
@@ -615,21 +616,22 @@ export class ButlerProactiveSweeper {
       return { fired: false, reason: 'nothing-to-say' }
     }
 
-    // Deliver. On success mark today; on a delivery MISS do NOT mark (retry next tick).
-    let delivered = false
+    // Deliver. Once it's handed off mark today; on a delivery MISS do NOT mark (retry next tick).
+    // 已排队也算交出:outbox 会补投,下一轮重新生成只会多花一次模型费、多排一份。
+    let handedOff = false
     let reason: string | undefined
     try {
       const res = await this.push(userId, text)
       if (res && typeof res === 'object') {
-        delivered = res.delivered === true
+        handedOff = res.delivered === true || res.queued === true
         reason = res.reason
       }
     } catch (err) {
       reason = err instanceof Error ? err.message : String(err)
     }
-    if (delivered) {
+    if (handedOff) {
       await this.mark(cfg, userId, date)
-      this.log.info('butler proactive: brief delivered', { userId })
+      this.log.info('butler proactive: brief handed off', { userId, reason })
       return { fired: true }
     }
     this.log.warn('butler proactive: brief composed but not delivered', { userId, reason })

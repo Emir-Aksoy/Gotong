@@ -87,12 +87,20 @@ describe('ButlerOutbox (CARE-M8)', () => {
 
     const r = await outbox.deliver(USER, 'the brain broke')
 
-    expect(r).toEqual({ delivered: false, reason: 'no_bridge' })
+    expect(r).toEqual({ delivered: false, reason: 'no_bridge', queued: true })
     expect(await outbox.pending(USER)).toBe(1)
     // and it really hit disk, not just memory
     const raw = JSON.parse(await readFile(join(dir, `${USER}.json`), 'utf8'))
     expect(raw).toHaveLength(1)
     expect(raw[0].text).toBe('the brain broke')
+  })
+
+  it('deliver: 落盘失败就不报已排队,调用方下一轮再交', async () => {
+    const occupied = join(dir, 'occupied')
+    await writeFile(occupied, '')
+    const outbox = new ButlerOutbox({ dir: occupied, push: new PushController().push, logger: new LoggerHolder().log })
+
+    expect(await outbox.deliver(USER, 'x')).toEqual({ delivered: false, reason: 'no_bridge' })
   })
 
   it('flush: member comes back → FIFO re-delivery, then file removed', async () => {

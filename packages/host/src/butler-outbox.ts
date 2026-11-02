@@ -79,14 +79,14 @@ export class ButlerOutbox {
 
   /**
    * 投一行给成员:先尝试真投。投达 → 原样返回。失败(任何 reason)→ 追加到该
-   * 成员的持久队列,仍返回原始失败结果(caller 照样看得到「没投达」,但这条已
-   * 落盘,会在成员可达时重投)。unknown_member 也入队:成员日后绑定 + 说话
-   * (record → flush)就补投,不是白排。
+   * 成员的持久队列,返回原始失败结果并带 `queued: true`(caller 看得到「没投达」,
+   * 也知道这条会在成员可达时重投,不必再发)。落盘失败就不带,caller 下一轮再交。
+   * unknown_member 也入队:成员日后绑定 + 说话(record → flush)就补投,不是白排。
    */
   async deliver(userId: string, text: string): Promise<ButlerPushResult> {
     const result = await this.push(userId, text)
     if (result.delivered) return result
-    await this.withLock(userId, async () => {
+    const queued = await this.withLock(userId, async () => {
       const queue = await this.read(userId)
       queue.push({ text, at: this.now() })
       const overflow = queue.length - this.maxQueue
@@ -94,9 +94,9 @@ export class ButlerOutbox {
         queue.splice(0, overflow) // 丢最旧
         this.log.warn('butler outbox: queue full, dropped oldest', { userId, dropped: overflow })
       }
-      await this.write(userId, queue)
+      return this.write(userId, queue)
     })
-    return result
+    return queued ? { ...result, queued: true } : result
   }
 
   /**
@@ -183,20 +183,22 @@ export class ButlerOutbox {
     }
   }
 
-  private async write(userId: string, queue: OutboxItem[]): Promise<void> {
+  private async write(userId: string, queue: OutboxItem[]): Promise<boolean> {
     try {
       if (queue.length === 0) {
         await rm(this.pathFor(userId), { force: true }) // 队列空了删文件,不留空壳
-        return
+        return true
       }
       await mkdir(this.dir, { recursive: true })
       await writeFile(this.pathFor(userId), JSON.stringify(queue), 'utf8')
+      return true
     } catch (err) {
       // 写失败不炸投递路径(内存里这次投达/失败已定);退化 = 重启后这条排队丢。
       this.log.warn('butler outbox: persist failed', {
         userId,
         err: err instanceof Error ? err.message : String(err),
       })
+      return false
     }
   }
 

@@ -176,6 +176,7 @@ describe('butler-proactive-e2e — opt-in → due → compose → push (acceptan
   let briefText: string | null
   let pushed: Array<{ userId: string; text: string }>
   let pushDelivered: boolean
+  let pushQueued: boolean
   let nowMs: number
 
   function makeSweeper(): ButlerProactiveSweeper {
@@ -187,7 +188,8 @@ describe('butler-proactive-e2e — opt-in → due → compose → push (acceptan
       },
       push: async (userId: string, text: string) => {
         pushed.push({ userId, text })
-        return pushDelivered ? { delivered: true } : { delivered: false, reason: 'no_bridge' }
+        if (pushDelivered) return { delivered: true }
+        return { delivered: false, reason: 'no_bridge', ...(pushQueued ? { queued: true } : {}) }
       },
       logger: silentLogger,
       now: () => nowMs,
@@ -200,6 +202,7 @@ describe('butler-proactive-e2e — opt-in → due → compose → push (acceptan
     briefText = '早安,今天也照顾好自己。'
     pushed = []
     pushDelivered = true
+    pushQueued = false
     // alice opts in for a brief at member-local 08:00; bob has a namespace but no opt-in.
     await buildButlerDailyBriefToolset({ userId: 'alice', rootDir: root }).callTool('set_daily_brief', {
       enabled: true,
@@ -273,6 +276,20 @@ describe('butler-proactive-e2e — opt-in → due → compose → push (acceptan
     expect(await sweeper.runOnceForMember('alice')).toEqual({ fired: true })
     expect(pushed).toHaveLength(2) // retried
     expect((await readButlerProactiveConfig(root, 'alice'))?.lastSentDate).toBe('2026-07-02') // now marked
+  })
+
+  it('已排队算交出:记下今天,下一轮不重新生成', async () => {
+    nowMs = utcForMemberLocal(2026, 6, 2, 9)
+    pushDelivered = false
+    pushQueued = true
+    const sweeper = makeSweeper()
+
+    expect(await sweeper.runOnceForMember('alice')).toEqual({ fired: true })
+    expect((await readButlerProactiveConfig(root, 'alice'))?.lastSentDate).toBe('2026-07-02')
+
+    expect(await sweeper.runOnceForMember('alice')).toEqual({ fired: false, reason: 'already-today' })
+    expect(composeCalls).toHaveLength(1)
+    expect(pushed).toHaveLength(1)
   })
 
   it('fires again on a NEW member-local day', async () => {
