@@ -35,6 +35,10 @@ import { readCardSignatureHeader, verifyAgentCardSignature, verifyCardKidMatches
 
 import { printHelp } from './help.js'
 
+// kid 是 SHA-256 指纹的 base64url,恒为 43 位,字母表含 `-`:约 1/64 的合法 kid 以 `-` 开头,
+// 不能一见 `-` 就当旗标。真旗标(`--help` / `-h` / `--expect-kid=…`)都凑不出这个形状。
+const KID_SHAPE = /^[A-Za-z0-9_-]{43}$/
+
 /** Injectable seams so tests drive the full command without real sockets. */
 export interface PeerCardDeps {
   fetchImpl?: typeof fetch
@@ -255,7 +259,7 @@ export async function peerCard(args: readonly string[], deps: PeerCardDeps = {})
     }
     if (a === '--expect-kid') {
       const v = args[i + 1]
-      if (v === undefined || v.startsWith('-')) {
+      if (v === undefined || (v.startsWith('-') && !KID_SHAPE.test(v))) {
         err('[peer-card] --expect-kid 需要一个 kid 值(带外记下的锚定公钥指纹)')
         return 2
       }

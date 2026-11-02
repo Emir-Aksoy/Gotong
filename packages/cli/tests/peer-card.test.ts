@@ -341,4 +341,56 @@ describe('peerCard signature verification (STD-M2a)', () => {
     expect(code).toBe(2)
     expect(errLines.join('\n')).toContain('--expect-kid 需要一个 kid 值')
   })
+
+  // base64url 字母表含 `-`,约 1/64 的真实 kid 以它开头,曾被当成缺值。
+  function makeSignerWithDashKid(): AgentCardSigner {
+    for (;;) {
+      const signer = makeSigner()
+      if (signer.kid().startsWith('-')) return signer
+    }
+  }
+
+  it.each([
+    ['space', (kid: string) => ['https://hub-b.example.com', '--expect-kid', kid]],
+    ['equals', (kid: string) => ['https://hub-b.example.com', `--expect-kid=${kid}`]],
+  ])('a real kid starting with `-` (%s form) → ✓ 一致, exit 0', async (_form, argsFor) => {
+    const signer = makeSignerWithDashKid()
+    const card = attachSignature({ name: 'Hub B', skills: [] }, signer, { jku: JWKS_URL })
+    const r = await runRouted(argsFor(signer.kid()), {
+      [CARD_URL]: () => Response.json(card),
+      [JWKS_URL]: () => new Response(buildJwks(signer)),
+    })
+    expect(r.code).toBe(0)
+    expect(r.stdout).toContain('与你锚定的公钥一致')
+  })
+
+  it('a pinned kid starting with `-` that does NOT match → ⚠ 不符, exit 3 (never a silent pass)', async () => {
+    const signer = makeSigner()
+    const card = attachSignature({ name: 'Hub B', skills: [] }, signer, { jku: JWKS_URL })
+    const r = await runRouted(['https://hub-b.example.com', '--expect-kid', `-${'A'.repeat(42)}`], {
+      [CARD_URL]: () => Response.json(card),
+      [JWKS_URL]: () => new Response(buildJwks(signer)),
+    })
+    expect(r.code).toBe(3)
+    expect(r.stdout).toContain('与锚定公钥不符')
+  })
+
+  it.each([
+    ['--help'],
+    ['-h'],
+    ['--expect-kid'],
+    ['--expect-kid=abc'],
+    [`-${'A'.repeat(41)}`], // 42 位:差一位
+    [`-${'A'.repeat(43)}`], // 44 位:多一位
+    [`-${'A'.repeat(41)}=`], // 43 位但含字母表外的字符
+  ])('--expect-kid followed by %s is not a kid → usage error, exit 2', async (value) => {
+    const errLines: string[] = []
+    const code = await peerCard(['https://hub-b.example.com', '--expect-kid', value], {
+      fetchImpl: (() => { throw new Error('fetch must not be called on usage errors') }) as unknown as typeof fetch,
+      out: () => {},
+      err: (l) => errLines.push(l),
+    })
+    expect(code).toBe(2)
+    expect(errLines.join('\n')).toContain('--expect-kid 需要一个 kid 值')
+  })
 })
