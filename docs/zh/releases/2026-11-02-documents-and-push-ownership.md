@@ -58,4 +58,4 @@
 
 - 成员有多个账号时，要从现有账号说一句话才恢复路由；这期间文件工具会提示「还没绑定飞书」。
 - 免打扰闸的早晨合并发送、生活档案的告警和周回顾不看投递结果，outbox 写盘也失败时这条消息会丢。
-- GitHub 上还有 20 条开放告警：根锁 5 条（`zod`、`body-parser`、`follow-redirects` 高危，`@hono/node-server`、`minimatch` 中危），`shell/` 15 条。这次没有处理。
+- 这次部署时 GitHub 上有 20 条开放告警，部署后另行修复，见 [`2026-11-02-dependabot-alerts.md`](2026-11-02-dependabot-alerts.md)。修复尚未部署。
